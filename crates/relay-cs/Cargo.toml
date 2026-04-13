@@ -1,5 +1,6 @@
 [package]
 name = "relay-cs"
+description = "Relay Checksum — integrity verification via CRC32 baseline comparison"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,7 +8,12 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lib]
+# Cargo tests use plain/ (verus-stripped). Verus verification uses src/ via Bazel.
+path = "plain/src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
 wit-bindgen = { workspace = true, default-features = false }
+
+# no_std + no alloc: WASM components run in bounded memory.
+# All allocation through Kiln capability system or static buffers.

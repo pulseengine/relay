@@ -1,5 +1,6 @@
 [package]
 name = "relay-sb"
+description = "Relay Software Bus — host-native message routing between components"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
