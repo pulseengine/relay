@@ -1,0 +1,14 @@
+[package]
+name = "relay-lc"
+description = "Relay Limit Checker — stream transformer: sensor readings → limit violations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { workspace = true, default-features = false }
