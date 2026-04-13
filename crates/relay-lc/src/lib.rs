@@ -12,4 +12,4 @@
 //!   └── lib.rs     ← P3 async wrapper (NOT verified, thin binding layer)
 //! ```
 
-pub mod core;
+pub mod engine;

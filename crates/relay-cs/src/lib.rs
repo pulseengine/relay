@@ -21,4 +21,4 @@
 //!   - wit-bindgen P3 async stream bindings
 //!   - Stream read/write glue (outside verification boundary)
 
-pub mod core;
+pub mod engine;

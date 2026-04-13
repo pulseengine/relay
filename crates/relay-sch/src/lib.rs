@@ -20,7 +20,7 @@
 //!   - wit-bindgen P3 async stream bindings
 //!   - Stream read/write glue (outside verification boundary)
 
-pub mod core;
+pub mod engine;
 
 // TODO: Enable when WIT interfaces are finalized and wit-bindgen P3
 // bindings are generated via rules_wasm_component:
