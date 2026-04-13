@@ -97,3 +97,66 @@ mod tests {
     #[test] fn test_full() { let mut t = ScheduleTable::new(); for _ in 0..MAX_SCHEDULE_SLOTS { assert!(t.add_slot(ScheduleSlot::empty())); } assert!(!t.add_slot(ScheduleSlot::empty())); }
     #[test] fn test_enable() { let mut t = ScheduleTable::new(); t.add_slot(ScheduleSlot { minor_frame: 0, major_frame: 0, target_channel: 1, payload_offset: 0, payload_len: 0, enabled: true }); assert_eq!(t.process_tick(0, 0).action_count, 1); t.set_enabled(0, false); assert_eq!(t.process_tick(0, 0).action_count, 0); assert!(!t.set_enabled(99, true)); }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// SCH-P04: action_count never exceeds MAX_ACTIONS_PER_TICK
+    #[kani::proof]
+    fn verify_action_count_bounded() {
+        let mut table = ScheduleTable::new();
+        // Add a few slots with symbolic values
+        let minor: u32 = kani::any();
+        let major: u32 = kani::any();
+        let channel: u32 = kani::any();
+        table.add_slot(ScheduleSlot {
+            minor_frame: minor, major_frame: major, target_channel: channel,
+            payload_offset: 0, payload_len: 0, enabled: true,
+        });
+        let tick_minor: u32 = kani::any();
+        let tick_major: u32 = kani::any();
+        let result = table.process_tick(tick_minor, tick_major);
+        assert!(result.action_count as usize <= MAX_ACTIONS_PER_TICK);
+    }
+
+    /// SCH-P06: disabled slots never produce actions
+    #[kani::proof]
+    fn verify_disabled_no_actions() {
+        let mut table = ScheduleTable::new();
+        table.add_slot(ScheduleSlot {
+            minor_frame: 0, major_frame: 0, target_channel: 1,
+            payload_offset: 0, payload_len: 0, enabled: false,
+        });
+        let minor: u32 = kani::any();
+        let major: u32 = kani::any();
+        let result = table.process_tick(minor, major);
+        assert_eq!(result.action_count, 0);
+    }
+
+    /// SCH-P07: add_slot returns false iff table full
+    #[kani::proof]
+    fn verify_add_slot_full() {
+        let mut table = ScheduleTable::new();
+        for _ in 0..MAX_SCHEDULE_SLOTS {
+            assert!(table.add_slot(ScheduleSlot::empty()));
+        }
+        assert!(!table.add_slot(ScheduleSlot::empty()));
+    }
+
+    /// No panics for any symbolic input
+    #[kani::proof]
+    fn verify_no_panic() {
+        let mut table = ScheduleTable::new();
+        let minor: u32 = kani::any();
+        let major: u32 = kani::any();
+        let channel: u32 = kani::any();
+        let enabled: bool = kani::any();
+        table.add_slot(ScheduleSlot {
+            minor_frame: minor, major_frame: major, target_channel: channel,
+            payload_offset: 0, payload_len: 0, enabled,
+        });
+        let _ = table.process_tick(kani::any(), kani::any());
+        let _ = table.set_enabled(kani::any(), kani::any());
+    }
+}

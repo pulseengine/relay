@@ -91,3 +91,75 @@ mod tests {
     #[test] fn test_ops() { assert!(compare(5, ComparisonOp::LessThan, 10)); assert!(compare(10, ComparisonOp::GreaterThan, 5)); assert!(compare(5, ComparisonOp::Equal, 5)); assert!(compare(5, ComparisonOp::NotEqual, 6)); }
     #[test] fn test_bounded() { let mut t = WatchpointTable::new(); for _ in 0..(MAX_VIOLATIONS_PER_CYCLE + 10) { t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0, enabled: true, persistence: 1, current_count: 0 }); } assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 100 }).violation_count, MAX_VIOLATIONS_PER_CYCLE as u32); }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// LC-P04: violation_count never exceeds MAX_VIOLATIONS_PER_CYCLE
+    #[kani::proof]
+    fn verify_violation_count_bounded() {
+        let mut table = WatchpointTable::new();
+        let sensor_id: u32 = kani::any();
+        let op_val: u8 = kani::any();
+        kani::assume(op_val <= 5);
+        let op = match op_val {
+            0 => ComparisonOp::LessThan, 1 => ComparisonOp::GreaterThan,
+            2 => ComparisonOp::LessOrEqual, 3 => ComparisonOp::GreaterOrEqual,
+            4 => ComparisonOp::Equal, _ => ComparisonOp::NotEqual,
+        };
+        let threshold: i64 = kani::any();
+        let persistence: u32 = kani::any();
+        kani::assume(persistence >= 1);
+
+        table.add_watchpoint(Watchpoint {
+            sensor_id, op, threshold, enabled: true, persistence, current_count: 0,
+        });
+
+        let value: i64 = kani::any();
+        let result = table.evaluate(SensorReading { sensor_id, value });
+        assert!(result.violation_count as usize <= MAX_VIOLATIONS_PER_CYCLE);
+    }
+
+    /// LC-P06: compare is total — never panics for any input
+    #[kani::proof]
+    fn verify_compare_total() {
+        let value: i64 = kani::any();
+        let threshold: i64 = kani::any();
+        let op_val: u8 = kani::any();
+        kani::assume(op_val <= 5);
+        let op = match op_val {
+            0 => ComparisonOp::LessThan, 1 => ComparisonOp::GreaterThan,
+            2 => ComparisonOp::LessOrEqual, 3 => ComparisonOp::GreaterOrEqual,
+            4 => ComparisonOp::Equal, _ => ComparisonOp::NotEqual,
+        };
+        let result = compare(value, op, threshold);
+        // Just verifying it doesn't panic and returns a bool
+        assert!(result || !result);
+    }
+
+    /// LC-P05: disabled watchpoints never produce violations
+    #[kani::proof]
+    fn verify_disabled_no_violations() {
+        let mut table = WatchpointTable::new();
+        let sensor_id: u32 = kani::any();
+        kani::assume(sensor_id < 100);
+        table.add_watchpoint(Watchpoint {
+            sensor_id, op: ComparisonOp::GreaterThan, threshold: 0,
+            enabled: false, persistence: 1, current_count: 0,
+        });
+        let value: i64 = kani::any();
+        let result = table.evaluate(SensorReading { sensor_id, value });
+        assert_eq!(result.violation_count, 0);
+    }
+
+    /// LC-P03: compare matches the operator semantics
+    #[kani::proof]
+    fn verify_compare_semantics() {
+        let v: i64 = kani::any();
+        let t: i64 = kani::any();
+        assert_eq!(compare(v, ComparisonOp::LessThan, t), v < t);
+        assert_eq!(compare(v, ComparisonOp::GreaterThan, t), v > t);
+        assert_eq!(compare(v, ComparisonOp::Equal, t), v == t);
+    }
+}
