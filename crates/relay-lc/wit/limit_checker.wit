@@ -1,0 +1,40 @@
+package pulseengine:relay-limit-checker@0.1.0;
+
+interface limit-checker {
+    record sensor-reading {
+        sensor-id: u32,
+        value: s64,
+    }
+
+    record violation {
+        watchpoint-id: u32,
+        measured: s64,
+        threshold: s64,
+    }
+
+    record watchpoint {
+        sensor-id: u32,
+        op: comparison-op,
+        threshold: s64,
+        enabled: bool,
+        persistence: u32,
+    }
+
+    enum comparison-op {
+        less-than,
+        greater-than,
+        less-or-equal,
+        greater-or-equal,
+        equal,
+        not-equal,
+    }
+
+    init: func() -> result<_, string>;
+    add-watchpoint: func(wp: watchpoint) -> bool;
+    evaluate: func(reading: sensor-reading) -> list<violation>;
+    count: func() -> u32;
+}
+
+world relay-limit-checker {
+    export limit-checker;
+}

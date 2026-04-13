@@ -25,3 +25,22 @@ rust_wasm_component_bindgen(
     wasi_version = "p3",
     profiles = ["release"],
 )
+
+# ═══════════════════════════════════════════════════════════════
+# Limit Checker
+# ═══════════════════════════════════════════════════════════════
+
+wit_library(
+    name = "relay_limit_checker_wit",
+    srcs = ["crates/relay-lc/wit/limit_checker.wit"],
+    package_name = "pulseengine:relay-limit-checker",
+    world = "relay-limit-checker",
+)
+
+rust_wasm_component_bindgen(
+    name = "relay-lc",
+    srcs = ["crates/relay-lc/src/wasm_component.rs"],
+    wit = ":relay_limit_checker_wit",
+    wasi_version = "p3",
+    profiles = ["release"],
+)
