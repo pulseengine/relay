@@ -35,3 +35,16 @@ crate.from_cargo(
     ],
 )
 use_repo(crate, "relay_crates", "crates")
+
+# WASI WIT interfaces from rules_wasm_component
+wasi_wit_ext = use_extension("@rules_wasm_component//wasm:extensions.bzl", "wasi_wit")
+wasi_wit_ext.init()
+use_repo(
+    wasi_wit_ext,
+    "wasi_cli",
+    "wasi_clocks",
+    "wasi_filesystem",
+    "wasi_io",
+    "wasi_random",
+    "wasi_sockets",
+)

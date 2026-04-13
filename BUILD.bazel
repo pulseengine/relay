@@ -44,3 +44,40 @@ rust_wasm_component_bindgen(
     wasi_version = "p3",
     profiles = ["release"],
 )
+
+# ═══════════════════════════════════════════════════════════════
+# CLI Runner — imports scheduler, exercises it, prints results
+# ═══════════════════════════════════════════════════════════════
+
+wit_library(
+    name = "relay_runner_wit",
+    srcs = ["crates/relay-sch/wit/runner.wit"],
+    deps = [
+        ":relay_scheduler_wit",
+        "@wasi_cli//:cli",
+        "@wasi_clocks//:clocks",
+        "@wasi_filesystem//:filesystem",
+        "@wasi_io//:streams",
+        "@wasi_random//:random",
+        "@wasi_sockets//:sockets",
+    ],
+    package_name = "pulseengine:relay-runner",
+    world = "relay-runner",
+)
+
+rust_wasm_component_bindgen(
+    name = "relay-runner",
+    srcs = ["crates/relay-sch/src/runner.rs"],
+    wit = ":relay_runner_wit",
+    wasi_version = "p3",
+    profiles = ["release"],
+)
+
+# Compose: plug scheduler into runner
+load("@rules_wasm_component//wac:defs.bzl", "wac_plug")
+
+wac_plug(
+    name = "relay-sch-cli",
+    plugs = [":relay-sch"],
+    socket = ":relay-runner",
+)

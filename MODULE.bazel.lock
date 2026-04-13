@@ -9617,7 +9617,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%binaryen": {
       "general": {
-        "bzlTransitiveDigest": "nNuEDVySDdceKSqKwi+SXTAllPT3tRtjoma6Vs6YTZw=",
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
         "usagesDigest": "/Ewh1P8NKTaojD511ZYhNpGw4cag/+c97rQVfhGKm/Y=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -9634,7 +9634,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%cpp_component": {
       "general": {
-        "bzlTransitiveDigest": "nNuEDVySDdceKSqKwi+SXTAllPT3tRtjoma6Vs6YTZw=",
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
         "usagesDigest": "gqqbTCOHjxXYdJvPYT4wsDpZaE+6uy3xqL3XQbZ0CNY=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -9652,7 +9652,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%jco": {
       "general": {
-        "bzlTransitiveDigest": "nNuEDVySDdceKSqKwi+SXTAllPT3tRtjoma6Vs6YTZw=",
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
         "usagesDigest": "oujOS+2myrjL8We4txcmWuMEqQxQUYc4KgY9zpAq7R4=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -9670,7 +9670,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%tinygo": {
       "general": {
-        "bzlTransitiveDigest": "nNuEDVySDdceKSqKwi+SXTAllPT3tRtjoma6Vs6YTZw=",
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
         "usagesDigest": "UyIl49zdecsSLmBnrNVtHQ2NJqDXeS+YNflck6WU9PQ=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -9687,7 +9687,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%wasi_sdk": {
       "general": {
-        "bzlTransitiveDigest": "nNuEDVySDdceKSqKwi+SXTAllPT3tRtjoma6Vs6YTZw=",
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
         "usagesDigest": "uhv9yPERG7rDPijeOe/yKN9konNn5u1CDirw8VngJV8=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -9704,9 +9704,350 @@
         }
       }
     },
+    "@@rules_wasm_component+//wasm:extensions.bzl%wasi_wit": {
+      "general": {
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
+        "usagesDigest": "9pXpNweGERxHjzSeJWacqmkcz1KFXdeoYJJ1WBTppbk=",
+        "recordedInputs": [
+          "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
+        ],
+        "generatedRepoSpecs": {
+          "wasi_io_v020": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-io/archive/refs/tags/v0.2.0.tar.gz"
+              ],
+              "sha256": "0e98868cfa86f2927c045b13a0c71f70609c5eeddd477abf011e5fb62549ea6a",
+              "strip_prefix": "wasi-io-0.2.0",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"streams\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:io@0.2.0\",\n    interfaces = [\"error\", \"poll\", \"streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_cli_v020": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-cli/archive/refs/tags/v0.2.0.tar.gz"
+              ],
+              "sha256": "c35931d345381ffaf051329235083f8cec63b9421f120d49fc82d30d8870cb0e",
+              "strip_prefix": "wasi-cli-0.2.0",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"cli\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:cli@0.2.0\",\n    interfaces = [\"environment\", \"exit\", \"stdin\", \"stdout\", \"stderr\", \"terminal-input\", \"terminal-output\", \"terminal-stdin\", \"terminal-stdout\", \"terminal-stderr\"],\n    deps = [\n        \"@wasi_io_v020//:streams\",\n        \"@wasi_clocks_v020//:clocks\",\n        \"@wasi_filesystem_v020//:filesystem\",\n        \"@wasi_sockets_v020//:sockets\",\n        \"@wasi_random_v020//:random\",\n    ],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_clocks_v020": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-clocks/archive/refs/tags/v0.2.0.tar.gz"
+              ],
+              "sha256": "b6131b9ef2968fc6add2e42081770d0f0e22af9c8e5c367716febb7913a5c2a8",
+              "strip_prefix": "wasi-clocks-0.2.0",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"clocks\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:clocks@0.2.0\",\n    interfaces = [\"wall-clock\", \"monotonic-clock\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_filesystem_v020": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-filesystem/archive/refs/tags/v0.2.0.tar.gz"
+              ],
+              "sha256": "862cd22175b488c77fc89c2d4d20b7df7f854f834fd6e39d4e216ac7eeaff9df",
+              "strip_prefix": "wasi-filesystem-0.2.0",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"filesystem\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:filesystem@0.2.0\",\n    interfaces = [\"types\", \"preopens\"],\n    deps = [\"@wasi_io_v020//:streams\", \"@wasi_clocks_v020//:clocks\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_sockets_v020": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-sockets/archive/refs/tags/v0.2.0.tar.gz"
+              ],
+              "sha256": "472c06de15ca9411cced4e4008a024b824e68229a8f4bf0714751073c306c87b",
+              "strip_prefix": "wasi-sockets-0.2.0",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"sockets\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:sockets@0.2.0\",\n    interfaces = [\"network\", \"udp\", \"tcp\", \"udp-create-socket\", \"tcp-create-socket\", \"instance-network\", \"ip-name-lookup\"],\n    deps = [\"@wasi_io_v020//:streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_random_v020": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-random/archive/refs/tags/v0.2.0.tar.gz"
+              ],
+              "sha256": "821b6851ed049d0586817c043693809bb263d35d6b1c991167212dae21f64b2f",
+              "strip_prefix": "wasi-random-0.2.0",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"random\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:random@0.2.0\",\n    interfaces = [\"random\", \"insecure\", \"insecure-seed\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_io": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-io/archive/refs/tags/v0.2.3.tar.gz"
+              ],
+              "sha256": "d34f61c21b3739a88821e57ac1ebc3bd80b79a45ccb2de168453050355cf68d9",
+              "strip_prefix": "wasi-io-0.2.3",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"streams\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:io@0.2.3\",\n    interfaces = [\"error\", \"poll\", \"streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_cli": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-cli/archive/refs/tags/v0.2.3.tar.gz"
+              ],
+              "sha256": "7d717274ebf872b996a031a55e619b9ecee0e5a02e5ae9fdaef84f541958cdf8",
+              "strip_prefix": "wasi-cli-0.2.3",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"cli\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:cli@0.2.3\",\n    interfaces = [\"environment\", \"exit\", \"stdin\", \"stdout\", \"stderr\", \"terminal-input\", \"terminal-output\", \"terminal-stdin\", \"terminal-stdout\", \"terminal-stderr\"],\n    deps = [\"@wasi_io//:streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_clocks": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-clocks/archive/refs/tags/v0.2.3.tar.gz"
+              ],
+              "sha256": "8d56927a581bda2b00774fc5a9ad93fc4d84d88c5e14e7e3f3738f420ae75052",
+              "strip_prefix": "wasi-clocks-0.2.3",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"clocks\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:clocks@0.2.3\",\n    interfaces = [\"wall-clock\", \"monotonic-clock\"],\n    deps = [\"@wasi_io//:streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_filesystem": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-filesystem/archive/refs/tags/v0.2.3.tar.gz"
+              ],
+              "sha256": "e31161ee490a1a9b1eb850ad65c53efa004fcb8a5d3ed43f1a296ccb6c2f24bd",
+              "strip_prefix": "wasi-filesystem-0.2.3",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"filesystem\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:filesystem@0.2.3\",\n    interfaces = [\"types\", \"preopens\"],  # Explicitly specify available interfaces\n    deps = [\"@wasi_io//:streams\", \"@wasi_clocks//:clocks\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_sockets": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-sockets/archive/refs/tags/v0.2.3.tar.gz"
+              ],
+              "sha256": "45398e514b21c0003a67295fac6d711f4a2b730b338f6fd5842c433f4db00490",
+              "strip_prefix": "wasi-sockets-0.2.3",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"sockets\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:sockets@0.2.3\",\n    interfaces = [\"network\", \"udp\", \"tcp\", \"udp-create-socket\", \"tcp-create-socket\", \"instance-network\", \"ip-name-lookup\"],\n    deps = [\"@wasi_io//:streams\", \"@wasi_clocks//:clocks\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_random": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-random/archive/refs/tags/v0.2.3.tar.gz"
+              ],
+              "sha256": "173bf2e11d94bbc6a819afb7a76b39720b46b5a68f0265e76c69794de6e0fc2d",
+              "strip_prefix": "wasi-random-0.2.3",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"random\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:random@0.2.3\",\n    interfaces = [\"random\", \"insecure\", \"insecure-seed\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_http": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-http/archive/refs/tags/v0.2.3.tar.gz"
+              ],
+              "sha256": "9f5f34a720180eff513ad9e7166b005ebcae2414669b84e5ee33c7c7b29560a4",
+              "strip_prefix": "wasi-http-0.2.3",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"http\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:http@0.2.3\",\n    interfaces = [\"types\", \"incoming-handler\", \"outgoing-handler\"],\n    world = \"proxy\",\n    deps = [\n        \"@wasi_io//:streams\",\n        \"@wasi_clocks//:clocks\",\n        \"@wasi_cli//:cli\",\n        \"@wasi_random//:random\",\n    ],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_io_v026": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-io/archive/refs/tags/v0.2.6.tar.gz"
+              ],
+              "sha256": "e3cb3c21d7c49219e885b4564f2dd34beec7403062749c35d73c016043ad6c95",
+              "strip_prefix": "wasi-io-0.2.6",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"streams\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:io@0.2.6\",\n    interfaces = [\"error\", \"poll\", \"streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_cli_v026": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-cli/archive/refs/tags/v0.2.6.tar.gz"
+              ],
+              "sha256": "91fa27b6f83c0199e2fe7912d770609871d350b5242edf44bbdc3fbf17e3e1aa",
+              "strip_prefix": "wasi-cli-0.2.6",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"cli\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:cli@0.2.6\",\n    interfaces = [\"environment\", \"exit\", \"stdin\", \"stdout\", \"stderr\", \"terminal-input\", \"terminal-output\", \"terminal-stdin\", \"terminal-stdout\", \"terminal-stderr\"],\n    deps = [\"@wasi_io_v026//:streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_clocks_v026": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-clocks/archive/refs/tags/v0.2.6.tar.gz"
+              ],
+              "sha256": "771f45e21ba86d4cfefc4e3e1348059bc6d3f95400728feaa4c1c77708f531a6",
+              "strip_prefix": "wasi-clocks-0.2.6",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"clocks\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:clocks@0.2.6\",\n    interfaces = [\"wall-clock\", \"monotonic-clock\"],\n    deps = [\"@wasi_io_v026//:streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_filesystem_v026": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-filesystem/archive/refs/tags/v0.2.6.tar.gz"
+              ],
+              "sha256": "5d1d01dad6e873ceaf7c04ab92cf2a1243842b4798680003c44c57216eb65e78",
+              "strip_prefix": "wasi-filesystem-0.2.6",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"filesystem\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:filesystem@0.2.6\",\n    interfaces = [\"types\", \"preopens\"],\n    deps = [\"@wasi_io_v026//:streams\", \"@wasi_clocks_v026//:clocks\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_sockets_v026": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-sockets/archive/refs/tags/v0.2.6.tar.gz"
+              ],
+              "sha256": "ae27539cf51c44d3a3b4ec16a7343ed1d1705c8a2a101b5c78b1be346cf5febc",
+              "strip_prefix": "wasi-sockets-0.2.6",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"sockets\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:sockets@0.2.6\",\n    interfaces = [\"network\", \"udp\", \"tcp\", \"udp-create-socket\", \"tcp-create-socket\", \"instance-network\", \"ip-name-lookup\"],\n    deps = [\"@wasi_io_v026//:streams\", \"@wasi_clocks_v026//:clocks\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_random_v026": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-random/archive/refs/tags/v0.2.6.tar.gz"
+              ],
+              "sha256": "91c68fb6b22de83b9bdcd775b489086febeaa07bb95fd609b48e6a9dc5b46583",
+              "strip_prefix": "wasi-random-0.2.6",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"random\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:random@0.2.6\",\n    interfaces = [\"random\", \"insecure\", \"insecure-seed\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_http_v026": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-http/archive/refs/tags/v0.2.6.tar.gz"
+              ],
+              "sha256": "d65e9b04faa28333fb008a1e89e5ee704474007b36e7c798f5fbb27025ce9ddc",
+              "strip_prefix": "wasi-http-0.2.6",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"http\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:http@0.2.6\",\n    interfaces = [\"types\", \"incoming-handler\", \"outgoing-handler\"],\n    world = \"proxy\",\n    deps = [\n        \"@wasi_io_v026//:streams\",\n        \"@wasi_clocks_v026//:clocks\",\n        \"@wasi_cli_v026//:cli\",\n        \"@wasi_random_v026//:random\",\n    ],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_io_v028": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-io/archive/refs/tags/v0.2.8.tar.gz"
+              ],
+              "sha256": "5e4c867b06d4e38276e9b80c80ee29dc34943e6b5db678fee8e9f9c249061b61",
+              "strip_prefix": "wasi-io-0.2.8",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"streams\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:io@0.2.8\",\n    interfaces = [\"error\", \"poll\", \"streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_cli_v028": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-cli/archive/refs/tags/v0.2.8.tar.gz"
+              ],
+              "sha256": "2ca56bbbf56ce30edea6aa69a2ebc43bba0138a8fccae641e6ee0902e346ead9",
+              "strip_prefix": "wasi-cli-0.2.8",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"cli\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:cli@0.2.8\",\n    interfaces = [\"environment\", \"exit\", \"stdin\", \"stdout\", \"stderr\", \"terminal-input\", \"terminal-output\", \"terminal-stdin\", \"terminal-stdout\", \"terminal-stderr\"],\n    deps = [\"@wasi_io_v028//:streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_clocks_v028": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-clocks/archive/refs/tags/v0.2.8.tar.gz"
+              ],
+              "sha256": "292274abf4449453bb78110dc9d93486ea4730874fcabea45b49e3311e00c625",
+              "strip_prefix": "wasi-clocks-0.2.8",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"clocks\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:clocks@0.2.8\",\n    interfaces = [\"wall-clock\", \"monotonic-clock\"],\n    deps = [\"@wasi_io_v028//:streams\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_filesystem_v028": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-filesystem/archive/refs/tags/v0.2.8.tar.gz"
+              ],
+              "sha256": "c0c724ff36f8a8222051e3409ca357fc0ff5c03c9b4ceadbdd9192aedba9adad",
+              "strip_prefix": "wasi-filesystem-0.2.8",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"filesystem\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:filesystem@0.2.8\",\n    interfaces = [\"types\", \"preopens\"],\n    deps = [\"@wasi_io_v028//:streams\", \"@wasi_clocks_v028//:clocks\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_sockets_v028": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-sockets/archive/refs/tags/v0.2.8.tar.gz"
+              ],
+              "sha256": "b230f2968957cad739c5b86ee20cf9cc9cd5de138e50d4f67b10ad14104eca09",
+              "strip_prefix": "wasi-sockets-0.2.8",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"sockets\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:sockets@0.2.8\",\n    interfaces = [\"network\", \"udp\", \"tcp\", \"udp-create-socket\", \"tcp-create-socket\", \"instance-network\", \"ip-name-lookup\"],\n    deps = [\"@wasi_io_v028//:streams\", \"@wasi_clocks_v028//:clocks\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_random_v028": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-random/archive/refs/tags/v0.2.8.tar.gz"
+              ],
+              "sha256": "25970acd8089a1b3f1bf7f266ab207b5f1134a424da26a3637d7cc3dee912a3a",
+              "strip_prefix": "wasi-random-0.2.8",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"random\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:random@0.2.8\",\n    interfaces = [\"random\", \"insecure\", \"insecure-seed\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_http_v028": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-http/archive/refs/tags/v0.2.8.tar.gz"
+              ],
+              "sha256": "95a6da213c7f0e30d34e40a2032508b2281d751b6027f57521564dbb348db16f",
+              "strip_prefix": "wasi-http-0.2.8",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"http\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:http@0.2.8\",\n    interfaces = [\"types\", \"incoming-handler\", \"outgoing-handler\"],\n    world = \"proxy\",\n    deps = [\n        \"@wasi_io_v028//:streams\",\n        \"@wasi_clocks_v028//:clocks\",\n        \"@wasi_cli_v028//:cli\",\n        \"@wasi_random_v028//:random\",\n    ],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_nn_v0_2_0_rc_2024_06_25": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-nn/archive/refs/tags/0.2.0-rc-2024-06-25.tar.gz"
+              ],
+              "sha256": "f95b982ea5d7475ff3825e65a6319d6ca1e7aa0a5f92c175ee27db1cd0b2ab06",
+              "strip_prefix": "wasi-nn-0.2.0-rc-2024-06-25",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"nn\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:nn@0.2.0-rc-2024-06-25\",\n    interfaces = [\"tensor\", \"graph\", \"inference\", \"errors\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_nn_v0_2_0_rc_2024_08_19": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-nn/archive/refs/tags/0.2.0-rc-2024-08-19.tar.gz"
+              ],
+              "sha256": "f512a77274cfda4f0afc47c417071a718ea379221987446b19e5060bba6594bc",
+              "strip_prefix": "wasi-nn-0.2.0-rc-2024-08-19",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"nn\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:nn@0.2.0-rc-2024-08-19\",\n    interfaces = [\"tensor\", \"graph\", \"inference\", \"errors\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "wasi_nn": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/WebAssembly/wasi-nn/archive/refs/tags/0.2.0-rc-2024-10-28.tar.gz"
+              ],
+              "sha256": "2cefa3ff992bd064562547f92e20789a88770f0a6898c569b76125bc4f219ab5",
+              "strip_prefix": "wasi-nn-0.2.0-rc-2024-10-28",
+              "build_file_content": "\nload(\"@rules_wasm_component//wit:defs.bzl\", \"wit_library\")\n\nwit_library(\n    name = \"nn\",\n    srcs = glob([\"wit/*.wit\"]),\n    package_name = \"wasi:nn@0.2.0-rc-2024-10-28\",\n    interfaces = [\"tensor\", \"graph\", \"inference\", \"errors\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          }
+        }
+      }
+    },
     "@@rules_wasm_component+//wasm:extensions.bzl%wasm_toolchain": {
       "general": {
-        "bzlTransitiveDigest": "nNuEDVySDdceKSqKwi+SXTAllPT3tRtjoma6Vs6YTZw=",
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
         "usagesDigest": "dlYYpxeknQua02NAb4Cs0GuQSHSvkXVwGcprPm4f068=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -9733,7 +10074,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%wasmtime": {
       "general": {
-        "bzlTransitiveDigest": "nNuEDVySDdceKSqKwi+SXTAllPT3tRtjoma6Vs6YTZw=",
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
         "usagesDigest": "7BDNW4TMJu6Cr4vuaFpk/ykIO40V7Lj90C3LcEFXCaw=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -9751,7 +10092,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%wkg": {
       "general": {
-        "bzlTransitiveDigest": "nNuEDVySDdceKSqKwi+SXTAllPT3tRtjoma6Vs6YTZw=",
+        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
         "usagesDigest": "Vz1y9ot0Xj1SB/ryOHxJr4yqNzlhA/dgxQ9K9FnGbrY=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
