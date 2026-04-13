@@ -5,3 +5,6 @@ module(
 
 bazel_dep(name = "rules_rust", version = "0.61.0")
 bazel_dep(name = "rules_wasm_component", version = "0.1.0")
+bazel_dep(name = "rules_verus", version = "0.1.0")
+bazel_dep(name = "rules_rocq_rust", version = "0.1.0")
+bazel_dep(name = "rules_lean", version = "0.1.0")

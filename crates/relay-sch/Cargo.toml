@@ -8,6 +8,8 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lib]
+# Cargo tests use plain/ (verus-stripped). Verus verification uses src/ via Bazel.
+path = "plain/src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
