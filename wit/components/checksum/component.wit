@@ -1,0 +1,19 @@
+package pulseengine:relay-checksum@0.1.0;
+
+/// Checksum (CS) — verify integrity of onboard memory regions.
+///
+/// Computes CRCs at runtime and compares against baselines.
+/// Detects bit-flips from radiation (SEU). Table-driven: which
+/// memory regions to check and at what rate.
+world checksum {
+    import pulseengine:relay-common-types/types;
+    import pulseengine:relay-software-bus/bus;
+    import pulseengine:relay-tables/tables;
+    import pulseengine:relay-events/events;
+
+    /// Initialize: register checksum tables, compute baselines.
+    export init: func() -> result<_, string>;
+
+    /// Process wakeup messages and verify memory regions.
+    export pulseengine:relay-software-bus/message-handler;
+}

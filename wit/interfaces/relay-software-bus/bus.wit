@@ -1,0 +1,41 @@
+package pulseengine:relay-software-bus@0.1.0;
+
+/// Software Bus — stream-native message routing.
+///
+/// Components are stream transformers. They declare typed input/output
+/// streams in their WIT world. The host wires streams together — either
+/// at build time (Meld static fusion) or at runtime (Kiln dynamic linking).
+///
+/// No centralized message router. No MsgId dispatch. No global mutex.
+/// Each connection is a direct typed stream between producer and consumer.
+///
+/// On embedded (Synth → ARM → Gale):
+///   stream<T> → Gale ring_buf (RB01-RB08 verified)
+///   future<T> → Gale event (EV01-EV08 verified)
+interface bus {
+    use pulseengine:relay-common-types/types.{command-message, telemetry-message, spacecraft-time};
+
+    /// Open a typed command stream for reading.
+    /// The host connects this to the appropriate producer.
+    open-command-stream: func() -> result<command-reader, sb-error>;
+
+    /// Open a typed telemetry stream for reading.
+    open-telemetry-stream: func() -> result<telemetry-reader, sb-error>;
+
+    /// Publish a command into the system.
+    /// The host fans out to all connected consumers.
+    publish-command: func(msg: command-message) -> result<_, sb-error>;
+
+    /// Publish telemetry into the system.
+    publish-telemetry: func(msg: telemetry-message) -> result<_, sb-error>;
+
+    /// Opaque stream reader handles (backed by Gale ring_buf on embedded).
+    type command-reader = u32;
+    type telemetry-reader = u32;
+
+    variant sb-error {
+        buffer-exhausted,
+        stream-closed,
+        backpressure,
+    }
+}

@@ -1,0 +1,27 @@
+package pulseengine:relay-stored-command@0.1.0;
+
+/// Stored Command — transforms time + command sequences into dispatched commands.
+///
+/// Input:  stream of time ticks (to check absolute/relative deadlines)
+/// Input:  stream of ground commands (load sequence, start, stop, switch)
+/// Output: stream of dispatched commands (sent when their time arrives)
+///
+/// Pure stream transformer: (time, sequences) → dispatched commands
+///
+/// On a drone: pre-programmed waypoint sequences, triggered by mission timer
+/// On a spacecraft: absolute-time command sequences for autonomous operations
+/// On an industrial system: batch process sequences with timed steps
+world stored-command {
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+
+    /// Transform: (time ticks + ground commands) → dispatched commands.
+    /// ATS sequences fire at absolute times.
+    /// RTS sequences fire at relative delays from start.
+    export sequence: func(
+        time: stream<timestamp>,
+        ground-commands: stream<command>,
+    ) -> stream<command>;
+}
+
+use pulseengine:relay-common-types/types.{timestamp, command};

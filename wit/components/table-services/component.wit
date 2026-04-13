@@ -1,0 +1,27 @@
+package pulseengine:relay-table-services@0.1.0;
+
+/// Table Services (TBL) — guest component implementation.
+///
+/// Manages runtime-loadable configuration tables with validation,
+/// single/double-buffered modes, and ground-commanded updates.
+///
+/// This is one of the few cFS core services implemented as a guest
+/// component rather than a host service, because table management
+/// is pure data logic with no hardware or lifecycle dependencies.
+world table-services {
+    import pulseengine:relay-common-types/types;
+    import pulseengine:relay-software-bus/bus;
+    import pulseengine:relay-events/events;
+    import pulseengine:relay-executive/executive;
+    import wasi:filesystem/types@0.2.3;
+    import wasi:filesystem/preopens@0.2.3;
+
+    /// Initialize table storage pools.
+    export init: func() -> result<_, string>;
+
+    /// Export the table services interface for other components.
+    export pulseengine:relay-tables/tables;
+
+    /// Process table management commands from ground.
+    export pulseengine:relay-software-bus/message-handler;
+}

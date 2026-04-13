@@ -1,0 +1,53 @@
+package pulseengine:relay-tables@0.1.0;
+
+/// Table Services — runtime-loadable configuration data.
+///
+/// Tables are typed configuration data that can be updated without restarting
+/// components. Supports single-buffered (memory-efficient) and double-buffered
+/// (deterministic swap) modes.
+///
+/// Table Services can be implemented as either a host service or a guest
+/// component. The reference implementation is a guest WASM component.
+interface tables {
+    /// Register a new configuration table.
+    /// validation-fn: optional name of a component export to call for validation.
+    register: func(
+        name: string,
+        size: u32,
+        double-buffered: bool,
+    ) -> result<table-handle, tbl-error>;
+
+    /// Get the current table data (read-only view).
+    /// Caller must call release-address when done reading.
+    get-address: func(handle: table-handle) -> result<list<u8>, tbl-error>;
+
+    /// Release a previously acquired table address.
+    release-address: func(handle: table-handle) -> result<_, tbl-error>;
+
+    /// Check for and process pending table updates.
+    /// Must be called periodically (like cFS CFE_TBL_Manage).
+    /// Returns true if a table update was applied.
+    manage: func(handle: table-handle) -> result<bool, tbl-error>;
+
+    /// Load table data from a byte buffer.
+    load: func(handle: table-handle, data: list<u8>) -> result<_, tbl-error>;
+
+    /// Dump current table data (for ground telemetry).
+    dump: func(handle: table-handle) -> result<list<u8>, tbl-error>;
+
+    /// Opaque table handle.
+    type table-handle = u32;
+
+    variant tbl-error {
+        /// Table name not found
+        not-found,
+        /// Table validation callback rejected the data
+        validation-failed,
+        /// Table is locked by another component
+        locked,
+        /// Table buffer pool exhausted
+        buffer-exhausted,
+        /// Data size doesn't match registered size
+        size-mismatch,
+    }
+}

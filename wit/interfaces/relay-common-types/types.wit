@@ -1,0 +1,172 @@
+package pulseengine:relay-common-types@0.1.0;
+
+/// Core types for the Relay component framework.
+///
+/// Domain-agnostic: these types work for spacecraft, drones,
+/// automotive, industrial, and any real-time embedded system.
+/// Domain-specific types live in separate WIT packages.
+interface types {
+    // ── Identifiers ──────────────────────────────────────────
+
+    /// Channel identifier — names a stream connection between components.
+    type channel-id = u32;
+
+    /// Component instance identifier.
+    type instance-id = u32;
+
+    // ── Time ─────────────────────────────────────────────────
+
+    /// High-resolution timestamp: seconds + subseconds since epoch.
+    /// Subseconds are 2^32 fractions of a second (~0.23ns resolution).
+    record timestamp {
+        seconds: u64,
+        fraction: u32,
+    }
+
+    /// Duration between two timestamps.
+    record duration {
+        seconds: u64,
+        fraction: u32,
+    }
+
+    // ── Messages ─────────────────────────────────────────────
+
+    /// A typed envelope: metadata + payload.
+    /// Components exchange these through streams.
+    record envelope {
+        /// When this message was produced
+        time: timestamp,
+        /// Originating component instance
+        source: instance-id,
+        /// Priority (0 = highest)
+        priority: u8,
+        /// Payload bytes (typed by the stream)
+        data: list<u8>,
+    }
+
+    // ── Health & Status ──────────────────────────────────────
+
+    /// Component health — reported by every component.
+    enum health {
+        nominal,
+        degraded,
+        error,
+        offline,
+    }
+
+    /// Component heartbeat — emitted periodically.
+    record heartbeat {
+        instance: instance-id,
+        health: health,
+        uptime: duration,
+        cmd-count: u32,
+        err-count: u32,
+    }
+
+    // ── Safety ───────────────────────────────────────────────
+
+    enum safety-level {
+        qm,
+        dal-d,
+        dal-c,
+        dal-b,
+        dal-a,
+    }
+
+    enum deadline-type {
+        soft,
+        firm,
+        hard,
+    }
+
+    // ── Scheduling ───────────────────────────────────────────
+
+    /// A scheduled action: fire at a specific time or offset.
+    variant schedule-trigger {
+        /// Fire at absolute time
+        absolute(timestamp),
+        /// Fire after delay from now
+        relative(duration),
+        /// Fire every N ticks
+        periodic(u32),
+    }
+
+    /// An action to take when a schedule fires.
+    record scheduled-action {
+        trigger: schedule-trigger,
+        target-channel: channel-id,
+        payload: list<u8>,
+    }
+
+    // ── Limits & Thresholds ──────────────────────────────────
+
+    /// A threshold violation detected by limit checking.
+    record limit-violation {
+        /// Which watchpoint triggered
+        watchpoint-id: u32,
+        /// The value that exceeded the threshold
+        measured-value: f64,
+        /// The threshold that was exceeded
+        threshold: f64,
+        /// Comparison that triggered
+        comparison: comparison-op,
+        /// When the violation was detected
+        time: timestamp,
+    }
+
+    enum comparison-op {
+        less-than,
+        greater-than,
+        less-or-equal,
+        greater-or-equal,
+        equal,
+        not-equal,
+    }
+
+    // ── Sensor Data (domain-agnostic) ────────────────────────
+
+    /// A sensor reading: named value with timestamp and quality.
+    record sensor-reading {
+        /// Sensor identifier
+        sensor-id: u32,
+        /// Measured value
+        value: f64,
+        /// Measurement quality (0.0 = garbage, 1.0 = perfect)
+        quality: f32,
+        /// When the measurement was taken
+        time: timestamp,
+    }
+
+    // ── Configuration ────────────────────────────────────────
+
+    /// A table update: new configuration data for a component.
+    record table-update {
+        table-name: string,
+        data: list<u8>,
+        version: u32,
+    }
+
+    // ── Commands ──────────────────────────────────────────────
+
+    /// A command to execute.
+    record command {
+        /// Command identifier
+        code: u16,
+        /// Command arguments
+        args: list<u8>,
+        /// When to execute (none = immediately)
+        execute-at: option<timestamp>,
+        /// Originator
+        source: instance-id,
+    }
+
+    /// Result of executing a command.
+    record command-result {
+        /// Original command code
+        code: u16,
+        /// Success or failure
+        success: bool,
+        /// Human-readable status
+        message: string,
+    }
+}

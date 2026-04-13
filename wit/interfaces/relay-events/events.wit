@@ -1,0 +1,39 @@
+package pulseengine:relay-events@0.1.0;
+
+/// Event Services — structured event emission with filtering.
+///
+/// Host-native service that distributes events through the Software Bus
+/// and to ground telemetry. Includes per-event filtering masks to
+/// prevent event storms (safety-critical throttling).
+interface events {
+    use pulseengine:relay-common-types/types.{severity};
+
+    /// Register this component with Event Services.
+    /// Must be called during component initialization.
+    register: func(app-name: string) -> result<_, evs-error>;
+
+    /// Emit a structured event.
+    /// Filtered by severity level and per-event-id masks.
+    send-event: func(
+        event-id: u16,
+        event-severity: severity,
+        message: string,
+    ) -> result<_, evs-error>;
+
+    /// Set a filter mask for an event ID.
+    /// Mask controls output frequency (bitmask-based, like cFS EVS).
+    /// 0x0000 = no filtering, 0xFFFF = filter all.
+    set-filter: func(event-id: u16, mask: u16) -> result<_, evs-error>;
+
+    /// Reset all filter counters (re-enable previously filtered events).
+    reset-all-filters: func() -> result<_, evs-error>;
+
+    variant evs-error {
+        /// Component not registered with EVS
+        not-registered,
+        /// Event ID out of valid range
+        invalid-event-id,
+        /// Event filtered (not an error, informational)
+        filtered,
+    }
+}

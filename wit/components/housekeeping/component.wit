@@ -1,0 +1,32 @@
+package pulseengine:relay-housekeeping@0.1.0;
+
+/// Housekeeping — combines multiple input streams into summary packets.
+///
+/// Input:  multiple streams of heartbeats / sensor readings / status
+/// Input:  copy table defining which fields to extract
+/// Output: stream of combined housekeeping packets
+///
+/// Pure stream combiner: [source1, source2, ...] → [extract, combine] → hk
+///
+/// On a drone: combine IMU + GPS + battery + motor status → single downlink packet
+/// On a spacecraft: combine 20 subsystem statuses → 1 HK telemetry packet
+/// On an ECU: combine CAN bus readings → single diagnostic frame
+world housekeeping {
+    import pulseengine:relay-events/events;
+
+    /// Combine: heartbeat streams → housekeeping output stream.
+    export collect: func(
+        heartbeats: stream<heartbeat>,
+        sensors: stream<sensor-reading>,
+        copy-table: stream<table-update>,
+    ) -> stream<hk-packet>;
+}
+
+use pulseengine:relay-common-types/types.{heartbeat, sensor-reading, table-update, timestamp};
+
+/// A combined housekeeping packet ready for downlink/logging.
+record hk-packet {
+    time: timestamp,
+    data: list<u8>,
+    sequence: u32,
+}

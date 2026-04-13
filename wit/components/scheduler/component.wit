@@ -1,0 +1,32 @@
+package pulseengine:relay-scheduler@0.1.0;
+
+/// Scheduler — transforms time ticks into scheduled actions.
+///
+/// Input:  stream of tick events from the host timer
+/// Output: stream of actions to fire (routed by host to target channels)
+///
+/// The Scheduler is a pure stream transformer:
+///   ticks → [read schedule table] → actions
+///
+/// On a drone: 400Hz IMU ticks → schedule sensor fusion + control loop
+/// On a spacecraft: 1Hz major frame → schedule HK collection + stored commands
+/// On an ECU: 10ms AUTOSAR runnables → schedule diagnostic checks
+world scheduler {
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+
+    /// Transform: tick stream → action stream.
+    /// Each tick, the scheduler reads its table and emits actions to fire.
+    export run: func(
+        ticks: stream<tick-event>,
+        config: stream<table-update>,
+    ) -> stream<scheduled-action>;
+}
+
+// Local types for this component
+use pulseengine:relay-common-types/types.{timestamp, duration, channel-id, table-update, scheduled-action};
+
+record tick-event {
+    frame: u32,
+    time: timestamp,
+}

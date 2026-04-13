@@ -1,0 +1,46 @@
+load("@rules_wasm_component//wasm_component:defs.bzl", "wasm_component_library", "wasm_component_binary", "wit_bindgen")
+
+package(default_visibility = ["//visibility:public"])
+
+# WIT bindgen for shared interfaces
+wit_bindgen(
+    name = "relay_wit_bindings",
+    wit = glob(["wit/**/*.wit"]),
+    world = "relay-minimal",
+)
+
+# Scheduler component
+wasm_component_binary(
+    name = "relay-sch",
+    srcs = glob(["crates/relay-sch/src/**/*.rs"]),
+    wit = glob(["wit/**/*.wit"]),
+    world = "scheduler",
+    deps = [":relay_wit_bindings"],
+)
+
+# Housekeeping component
+wasm_component_binary(
+    name = "relay-hk",
+    srcs = glob(["crates/relay-hk/src/**/*.rs"]),
+    wit = glob(["wit/**/*.wit"]),
+    world = "housekeeping",
+    deps = [":relay_wit_bindings"],
+)
+
+# Limit Checker component
+wasm_component_binary(
+    name = "relay-lc",
+    srcs = glob(["crates/relay-lc/src/**/*.rs"]),
+    wit = glob(["wit/**/*.wit"]),
+    world = "limit-checker",
+    deps = [":relay_wit_bindings"],
+)
+
+# Stored Command component
+wasm_component_binary(
+    name = "relay-sc",
+    srcs = glob(["crates/relay-sc/src/**/*.rs"]),
+    wit = glob(["wit/**/*.wit"]),
+    world = "stored-command",
+    deps = [":relay_wit_bindings"],
+)

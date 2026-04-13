@@ -1,0 +1,20 @@
+package pulseengine:relay-file-manager@0.1.0;
+
+/// File Manager (FM) — onboard file system management via commands.
+///
+/// Operations: copy, move, rename, delete files; create/delete directories;
+/// decompress files; concatenate files. Provides directory listings
+/// and file info telemetry.
+world file-manager {
+    import pulseengine:relay-common-types/types;
+    import pulseengine:relay-software-bus/bus;
+    import pulseengine:relay-events/events;
+    import wasi:filesystem/types@0.2.3;
+    import wasi:filesystem/preopens@0.2.3;
+
+    /// Initialize: subscribe to SB for file commands.
+    export init: func() -> result<_, string>;
+
+    /// Process file management commands.
+    export pulseengine:relay-software-bus/message-handler;
+}

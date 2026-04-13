@@ -1,0 +1,34 @@
+package pulseengine:relay-time@0.1.0;
+
+/// Time Services — spacecraft time correlation.
+///
+/// Host-native service providing multiple time representations.
+/// Backed by kiln-platform TimeProvider and hardware 1Hz tone on embedded.
+interface time {
+    use pulseengine:relay-common-types/types.{spacecraft-time};
+
+    /// Get current time in UTC (Coordinated Universal Time).
+    get-utc: func() -> spacecraft-time;
+
+    /// Get current time in TAI (International Atomic Time).
+    /// TAI = UTC + leap seconds (deterministic conversion).
+    get-tai: func() -> spacecraft-time;
+
+    /// Get Mission Elapsed Time (time since mission start).
+    get-met: func() -> spacecraft-time;
+
+    /// Time arithmetic: add two spacecraft times.
+    add: func(a: spacecraft-time, b: spacecraft-time) -> spacecraft-time;
+
+    /// Time arithmetic: subtract (a - b). Traps if b > a.
+    subtract: func(a: spacecraft-time, b: spacecraft-time) -> spacecraft-time;
+
+    /// Compare two spacecraft times.
+    compare: func(a: spacecraft-time, b: spacecraft-time) -> time-ordering;
+
+    enum time-ordering {
+        less-than,
+        equal,
+        greater-than,
+    }
+}

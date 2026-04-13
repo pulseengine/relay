@@ -1,0 +1,26 @@
+package pulseengine:relay-limit-checker@0.1.0;
+
+/// Limit Checker — transforms sensor readings into violations.
+///
+/// Input:  stream of sensor readings from any source
+/// Input:  stream of table updates (watchpoint/actionpoint config)
+/// Output: stream of limit violations (threshold exceeded)
+/// Output: stream of actions to trigger (RTS activation, events)
+///
+/// Pure stream transformer: readings → [compare against thresholds] → violations
+///
+/// On a drone: battery voltage, motor temperature, altitude → violations
+/// On a spacecraft: bus voltage, thermal sensors, attitude error → violations
+/// On an ECU: coolant temp, oil pressure, RPM → diagnostic trouble codes
+world limit-checker {
+    import pulseengine:relay-events/events;
+
+    /// Transform: sensor readings → limit violations + triggered actions.
+    export monitor: func(
+        readings: stream<sensor-reading>,
+        watchpoint-config: stream<table-update>,
+        actionpoint-config: stream<table-update>,
+    ) -> stream<limit-violation>;
+}
+
+use pulseengine:relay-common-types/types.{sensor-reading, table-update, limit-violation};

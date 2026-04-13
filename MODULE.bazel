@@ -1,0 +1,7 @@
+module(
+    name = "relay",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "rules_rust", version = "0.61.0")
+bazel_dep(name = "rules_wasm_component", version = "0.1.0")

@@ -1,0 +1,55 @@
+package pulseengine:relay-executive@0.1.0;
+
+/// Executive Services — component lifecycle and persistent storage.
+///
+/// Host-native service managing component lifecycle, Critical Data Store
+/// (persistent data across resets), and performance logging.
+interface executive {
+    use pulseengine:relay-common-types/types.{reset-type};
+
+    /// Register this component with Executive Services.
+    /// Returns true if this is a warm restart (CDS data available).
+    register-app: func(app-name: string) -> result<bool, es-error>;
+
+    /// Check if the component should continue running.
+    /// Returns false when the host requests shutdown.
+    run-loop: func() -> bool;
+
+    /// Request component shutdown with a status code.
+    exit-app: func(run-status: u32);
+
+    /// Get the last reset type (power-on, processor, watchdog).
+    get-reset-type: func() -> reset-type;
+
+    /// Critical Data Store: register a persistent data block.
+    /// Data in CDS survives processor resets (not power-on resets).
+    register-cds: func(name: string, size: u32) -> result<cds-handle, es-error>;
+
+    /// Save data to Critical Data Store.
+    save-cds: func(handle: cds-handle, data: list<u8>) -> result<_, es-error>;
+
+    /// Restore data from Critical Data Store (after reset).
+    restore-cds: func(handle: cds-handle) -> result<list<u8>, es-error>;
+
+    /// Performance logging: mark entry into a code section.
+    perf-log-entry: func(marker-id: u32);
+
+    /// Performance logging: mark exit from a code section.
+    perf-log-exit: func(marker-id: u32);
+
+    /// Opaque handle to a CDS block.
+    type cds-handle = u32;
+
+    variant es-error {
+        /// CDS storage full
+        cds-full,
+        /// CDS block not found
+        cds-not-found,
+        /// CDS data corrupted (CRC mismatch)
+        cds-corrupted,
+        /// Component name already registered
+        already-registered,
+        /// System not in OPERATIONAL state
+        not-ready,
+    }
+}

@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/relay-sc",
+    "crates/relay-hk",
+    "crates/relay-lc",
+    "crates/relay-sch",
+    "crates/relay-cs",
+    "crates/relay-ds",
+    "crates/relay-fm",
+    "crates/relay-tbl",
+    "host/relay-sb",
+    "host/relay-es",
+    "host/relay-evs",
+    "host/relay-time",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/pulseengine/relay"
+rust-version = "1.85.0"
+
+[workspace.dependencies]
+wit-bindgen = { version = "0.41.0", default-features = false }
+
+# All guest components are no_std + no alloc.
+# Memory comes from Kiln's capability-based allocator (safe_managed_alloc!)
+# or from Gale's mem_slab / heap on embedded targets.
+#
+# Host crates (host/*) may use std for development/testing but must
+# have a no_std path for the Synth → Gale embedded pipeline.

@@ -1,0 +1,78 @@
+package pulseengine:relay-worlds@0.1.0;
+
+/// ── SYSTEM COMPOSITIONS ─────────────────────────────────────
+///
+/// Each world wires stream transformers together for a target domain.
+/// Components are domain-agnostic; worlds are domain-specific.
+
+/// Drone flight controller: sensor fusion + limit checking + autonomous sequences.
+///
+/// Pipeline:
+///   IMU/GPS sensors → stream<sensor-reading>
+///       → limit-checker (geofence, battery, altitude limits)
+///       → stored-command (waypoint sequences)
+///       → stream<command> → motor controller
+///
+/// Target: Cortex-M4/M33 via Synth → Gale. 256KB SRAM.
+/// P3 callback mode. All streams backed by Gale ring_buf.
+world drone {
+    import pulseengine:relay-common-types/types;
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+}
+
+/// Spacecraft flight software: full cFS-equivalent system.
+///
+/// Pipeline:
+///   ground uplink → stream<command>
+///       → stored-command (ATS/RTS sequencing)
+///       → scheduler (100Hz minor frame → periodic actions)
+///       → limit-checker (bus voltage, thermal, attitude)
+///       → housekeeping (combine all subsystem status)
+///       → data-storage (record to SSR)
+///       → stream<telemetry> → ground downlink
+///
+/// Target: RAD750 via Synth → Gale, or Kiln interpreter for development.
+world spacecraft {
+    import pulseengine:relay-common-types/types;
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+}
+
+/// Automotive ECU: AUTOSAR-style runnable scheduling + diagnostics.
+///
+/// Pipeline:
+///   CAN bus → stream<sensor-reading>
+///       → scheduler (10ms AUTOSAR runnables)
+///       → limit-checker (OBD-II diagnostic thresholds)
+///       → housekeeping (combine into UDS diagnostic frames)
+///
+/// Target: Cortex-M33 (ASIL-D) via Synth → Gale.
+world automotive {
+    import pulseengine:relay-common-types/types;
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+}
+
+/// Industrial controller: process monitoring + batch sequencing.
+///
+/// Pipeline:
+///   field sensors → stream<sensor-reading>
+///       → limit-checker (process limits, safety interlocks)
+///       → stored-command (batch process sequences)
+///       → stream<command> → actuators
+///
+/// Target: Cortex-R5 or RISC-V via Synth → Gale.
+world industrial {
+    import pulseengine:relay-common-types/types;
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+}
+
+/// Minimal: just scheduler + limit checker.
+/// The smallest useful Relay system on any target.
+world minimal {
+    import pulseengine:relay-common-types/types;
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+}

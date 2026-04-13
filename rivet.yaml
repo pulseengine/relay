@@ -1,0 +1,35 @@
+project: relay
+description: Formally verified flight software components for WebAssembly
+version: 0.1.0
+
+artifact_dirs:
+  - artifacts/sysreq
+  - artifacts/swarch
+  - artifacts/swdd
+  - artifacts/swreq
+
+artifact_types:
+  - sysreq
+  - swarch
+  - swdd
+  - swreq
+  - unit-verification
+  - sw-integration-verification
+  - sys-verification
+  - sys-integration-verification
+  - stpa-loss
+  - stpa-hazard
+  - stpa-uca
+
+commit_trailers:
+  required:
+    - Implements
+    - Fixes
+    - Verifies
+    - Refs
+  exemptions:
+    - chore
+    - style
+    - ci
+    - docs
+    - build
