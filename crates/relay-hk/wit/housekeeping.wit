@@ -1,0 +1,44 @@
+package pulseengine:relay-housekeeping@0.1.0;
+
+/// Housekeeping — stream combiner: copies fields from sources into HK packets.
+///
+/// The host configures copy entries that describe which bytes to copy
+/// from which source into the output packet. On collect(), all entries
+/// are applied and an HK packet is produced.
+///
+/// P3 async: all functions are async fn — the host can call without blocking.
+interface housekeeping {
+    /// A copy-table entry describing one field copy.
+    record copy-entry {
+        source-id: u32,
+        source-offset: u32,
+        length: u32,
+        output-offset: u32,
+    }
+
+    /// Source data block (fixed 64 bytes).
+    record source-data {
+        source-id: u32,
+        data: list<u8>,
+    }
+
+    /// An assembled housekeeping packet.
+    record hk-packet {
+        data: list<u8>,
+        length: u32,
+        sequence: u32,
+    }
+
+    /// Initialize the housekeeping engine. Returns error string on failure.
+    init: func() -> result<_, string>;
+
+    /// Add a copy entry. Returns false if table full.
+    add-copy-entry: func(entry: copy-entry) -> bool;
+
+    /// Collect data from sources into an HK packet. Returns none on failure.
+    collect: func(sources: list<source-data>) -> option<hk-packet>;
+}
+
+world relay-housekeeping {
+    export housekeeping;
+}

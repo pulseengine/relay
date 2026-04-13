@@ -1,0 +1,44 @@
+package pulseengine:relay-stored-command@0.1.0;
+
+/// Stored Command — autonomous command sequencing with time tags.
+///
+/// Manages Absolute Time Sequences (ATS) that fire at UTC timestamps,
+/// and Relative Time Sequences (RTS) that fire at offsets from start.
+///
+/// P3 async: all functions are async fn — the host can call without blocking.
+interface stored-command {
+    /// An absolute time sequence command.
+    record ats-command {
+        execute-at-sec: u64,
+        command-code: u16,
+        payload-offset: u32,
+        payload-len: u32,
+        dispatched: bool,
+    }
+
+    /// A dispatched command ready for execution.
+    record dispatched-command {
+        command-code: u16,
+        payload-offset: u32,
+        payload-len: u32,
+    }
+
+    /// Initialize the stored command engine. Returns error string on failure.
+    init: func() -> result<_, string>;
+
+    /// Load an ATS command. Returns false if table full.
+    load-ats-command: func(cmd: ats-command) -> bool;
+
+    /// Start a relative time sequence. Returns false if invalid or empty.
+    start-rts: func(rts-id: u32, current-time: u64) -> bool;
+
+    /// Stop a relative time sequence. Returns false if invalid ID.
+    stop-rts: func(rts-id: u32) -> bool;
+
+    /// Process one tick. Returns commands to dispatch this frame.
+    process-tick: func(current-time: u64) -> list<dispatched-command>;
+}
+
+world relay-stored-command {
+    export stored-command;
+}

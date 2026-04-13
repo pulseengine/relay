@@ -46,6 +46,44 @@ rust_wasm_component_bindgen(
 )
 
 # ═══════════════════════════════════════════════════════════════
+# Stored Command
+# ═══════════════════════════════════════════════════════════════
+
+wit_library(
+    name = "relay_stored_command_wit",
+    srcs = ["crates/relay-sc/wit/stored_command.wit"],
+    package_name = "pulseengine:relay-stored-command",
+    world = "relay-stored-command",
+)
+
+rust_wasm_component_bindgen(
+    name = "relay-sc",
+    srcs = ["crates/relay-sc/src/wasm_component.rs"],
+    wit = ":relay_stored_command_wit",
+    wasi_version = "p3",
+    profiles = ["release"],
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Housekeeping
+# ═══════════════════════════════════════════════════════════════
+
+wit_library(
+    name = "relay_housekeeping_wit",
+    srcs = ["crates/relay-hk/wit/housekeeping.wit"],
+    package_name = "pulseengine:relay-housekeeping",
+    world = "relay-housekeeping",
+)
+
+rust_wasm_component_bindgen(
+    name = "relay-hk",
+    srcs = ["crates/relay-hk/src/wasm_component.rs"],
+    wit = ":relay_housekeeping_wit",
+    wasi_version = "p3",
+    profiles = ["release"],
+)
+
+# ═══════════════════════════════════════════════════════════════
 # CLI Runner — imports scheduler, exercises it, prints results
 # ═══════════════════════════════════════════════════════════════
 
