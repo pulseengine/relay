@@ -1,0 +1,48 @@
+package pulseengine:relay-scheduler@0.1.0;
+
+/// Scheduler — transforms time ticks into scheduled actions.
+///
+/// The host calls tick() at each minor frame (typically 100Hz).
+/// The Scheduler reads its Schedule Definition Table and returns
+/// which actions to fire.
+///
+/// P3 async: tick() is async fn — the host can call without blocking.
+/// On embedded (Gale): callback lifting mode, single stack.
+interface scheduler {
+    /// A scheduled action to fire.
+    record scheduled-action {
+        target-channel: u32,
+        payload-offset: u32,
+        payload-len: u32,
+    }
+
+    /// A schedule slot configuration.
+    record schedule-slot {
+        minor-frame: u32,
+        major-frame: u32,
+        target-channel: u32,
+        payload-offset: u32,
+        payload-len: u32,
+        enabled: bool,
+    }
+
+    /// Initialize the scheduler. Returns error string on failure.
+    init: func() -> result<_, string>;
+
+    /// Process one tick. Returns actions to fire this frame.
+    /// Called by host at each minor frame.
+    tick: func(minor-frame: u32, major-frame: u32) -> list<scheduled-action>;
+
+    /// Add a schedule slot. Returns false if table full.
+    add-slot: func(slot: schedule-slot) -> bool;
+
+    /// Enable or disable a slot. Returns false if index out of range.
+    set-enabled: func(index: u32, enabled: bool) -> bool;
+
+    /// Get current slot count.
+    slot-count: func() -> u32;
+}
+
+world relay-scheduler {
+    export scheduler;
+}

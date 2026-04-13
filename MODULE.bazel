@@ -5,6 +5,33 @@ module(
 
 bazel_dep(name = "rules_rust", version = "0.61.0")
 bazel_dep(name = "rules_wasm_component", version = "0.1.0")
-bazel_dep(name = "rules_verus", version = "0.1.0")
-bazel_dep(name = "rules_rocq_rust", version = "0.1.0")
-bazel_dep(name = "rules_lean", version = "0.1.0")
+bazel_dep(name = "bazel_skylib", version = "1.9.0")
+bazel_dep(name = "platforms", version = "1.0.0")
+
+local_path_override(
+    module_name = "rules_wasm_component",
+    path = "../rules_wasm_component",
+)
+
+# Override rules_rust to match rules_wasm_component's version
+git_override(
+    module_name = "rules_rust",
+    commit = "6281d27f3ffdb826df90db25c1dc66a198345d64",
+    remote = "https://github.com/bazelbuild/rules_rust.git",
+)
+
+# Rust crate dependencies
+crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
+crate.from_cargo(
+    name = "relay_crates",
+    cargo_lockfile = "//crates/relay-sch/wasm:Cargo.lock",
+    manifests = ["//crates/relay-sch/wasm:Cargo.toml"],
+    supported_platform_triples = [
+        "wasm32-wasip2",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+    ],
+)
+use_repo(crate, "relay_crates", "crates")

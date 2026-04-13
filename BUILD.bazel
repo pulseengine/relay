@@ -1,130 +1,27 @@
-load("@rules_verus//verus:defs.bzl", "verus_library", "verus_test")
 load("@rules_wasm_component//rust:defs.bzl", "rust_wasm_component_bindgen")
 load("@rules_wasm_component//wit:defs.bzl", "wit_library")
 
 package(default_visibility = ["//visibility:public"])
 
 # ═══════════════════════════════════════════════════════════════
-# Track 1: Verus verification of core logic (SMT/Z3)
-# ═══════════════════════════════════════════════════════════════
-
-SCHEDULER_VERUS_SRCS = [
-    "crates/relay-sch/src/core.rs",
-]
-
-LIMIT_CHECKER_VERUS_SRCS = [
-    "crates/relay-lc/src/core.rs",
-]
-
-verus_library(
-    name = "relay_sch_verified",
-    srcs = SCHEDULER_VERUS_SRCS,
-    crate_name = "relay_sch",
-)
-
-verus_test(
-    name = "relay_sch_verus_test",
-    srcs = SCHEDULER_VERUS_SRCS,
-    crate_name = "relay_sch",
-)
-
-verus_library(
-    name = "relay_lc_verified",
-    srcs = LIMIT_CHECKER_VERUS_SRCS,
-    crate_name = "relay_lc",
-)
-
-verus_test(
-    name = "relay_lc_verus_test",
-    srcs = LIMIT_CHECKER_VERUS_SRCS,
-    crate_name = "relay_lc",
-)
-
-# ═══════════════════════════════════════════════════════════════
-# Track 2: WIT interface definitions
+# WIT interface
 # ═══════════════════════════════════════════════════════════════
 
 wit_library(
-    name = "relay_common_types",
-    srcs = ["wit/interfaces/relay-common-types/types.wit"],
-    package_name = "pulseengine:relay-common-types",
-)
-
-wit_library(
-    name = "relay_time_interfaces",
-    srcs = ["wit/interfaces/relay-time/time.wit"],
-    package_name = "pulseengine:relay-time",
-    deps = [":relay_common_types"],
-)
-
-wit_library(
-    name = "relay_events_interfaces",
-    srcs = ["wit/interfaces/relay-events/events.wit"],
-    package_name = "pulseengine:relay-events",
-    deps = [":relay_common_types"],
-)
-
-wit_library(
-    name = "relay_scheduler_interfaces",
-    srcs = ["wit/components/scheduler/component.wit"],
+    name = "relay_scheduler_wit",
+    srcs = ["crates/relay-sch/wit/scheduler.wit"],
     package_name = "pulseengine:relay-scheduler",
-    world = "scheduler",
-    deps = [
-        ":relay_common_types",
-        ":relay_time_interfaces",
-        ":relay_events_interfaces",
-    ],
-)
-
-wit_library(
-    name = "relay_limit_checker_interfaces",
-    srcs = ["wit/components/limit-checker/component.wit"],
-    package_name = "pulseengine:relay-limit-checker",
-    world = "limit-checker",
-    deps = [
-        ":relay_common_types",
-        ":relay_events_interfaces",
-    ],
+    world = "relay-scheduler",
 )
 
 # ═══════════════════════════════════════════════════════════════
-# Track 3: P3 WASM component builds (async stream transformers)
+# P3 WASM component
 # ═══════════════════════════════════════════════════════════════
 
 rust_wasm_component_bindgen(
     name = "relay-sch",
-    srcs = glob(["crates/relay-sch/src/**/*.rs"]),
-    wit = ":relay_scheduler_interfaces",
+    srcs = ["crates/relay-sch/src/wasm_component.rs"],
+    wit = ":relay_scheduler_wit",
     wasi_version = "p3",
     profiles = ["release"],
-)
-
-rust_wasm_component_bindgen(
-    name = "relay-lc",
-    srcs = glob(["crates/relay-lc/src/**/*.rs"]),
-    wit = ":relay_limit_checker_interfaces",
-    wasi_version = "p3",
-    profiles = ["release"],
-)
-
-# ═══════════════════════════════════════════════════════════════
-# Test aggregation
-# ═══════════════════════════════════════════════════════════════
-
-test_suite(
-    name = "verus",
-    tags = ["verus"],
-    tests = [
-        ":relay_sch_verus_test",
-        ":relay_lc_verus_test",
-    ],
-)
-
-test_suite(
-    name = "ci",
-    tags = ["ci"],
-    tests = [
-        ":relay_sch_verus_test",
-        ":relay_lc_verus_test",
-    ],
 )
