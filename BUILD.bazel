@@ -1,5 +1,6 @@
 load("@rules_wasm_component//rust:defs.bzl", "rust_wasm_component_bindgen")
 load("@rules_wasm_component//wit:defs.bzl", "wit_library")
+load("@rules_wasm_component//wasm:defs.bzl", "meld_fuse", "synth_compile")
 load("@rules_verus//verus:defs.bzl", "verus_library", "verus_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -188,4 +189,42 @@ wac_plug(
     name = "relay-sch-cli",
     plugs = [":relay-sch"],
     socket = ":relay-runner",
+)
+
+# ═══════════════════════════════════════════════════════════════
+# FULL PIPELINE: Build → Fuse → Compile to ARM
+# ═══════════════════════════════════════════════════════════════
+
+# Fuse scheduler + limit checker into single core module
+meld_fuse(
+    name = "relay-fused",
+    components = [
+        ":relay-sch",
+        ":relay-lc",
+    ],
+)
+
+# Compile fused module to ARM Cortex-M4F ELF
+synth_compile(
+    name = "relay-firmware",
+    wasm_module = ":relay-fused",
+    target = "cortex-m4f",
+)
+
+# Fuse ALL five engines
+meld_fuse(
+    name = "relay-all-fused",
+    components = [
+        ":relay-sch",
+        ":relay-lc",
+        ":relay-sc",
+        ":relay-hk",
+    ],
+)
+
+# Compile all-fused to ARM
+synth_compile(
+    name = "relay-all-firmware",
+    wasm_module = ":relay-all-fused",
+    target = "cortex-m4f",
 )
