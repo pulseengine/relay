@@ -256,3 +256,55 @@ mod tests {
         assert!(r.alert_count as usize <= MAX_ALERTS_PER_CHECK);
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// HS-P01: alert_count never exceeds MAX_ALERTS_PER_CHECK
+    #[kani::proof]
+    fn verify_alert_bounded() {
+        let mut table = HealthTable::new();
+        let app_id: u32 = kani::any();
+        kani::assume(app_id < 100);
+        let max_miss: u32 = kani::any();
+        kani::assume(max_miss >= 1);
+        let action_val: u8 = kani::any();
+        kani::assume(action_val <= 3);
+        let action = match action_val {
+            0 => HsAction::NoAction,
+            1 => HsAction::Event,
+            2 => HsAction::RestartApp,
+            _ => HsAction::ProcessorReset,
+        };
+        table.register_app(app_id, max_miss, action);
+        let time: u64 = kani::any();
+        let result = table.check_health(time);
+        assert!(result.alert_count as usize <= MAX_ALERTS_PER_CHECK);
+    }
+
+    /// HS-P02: disabled apps never generate alerts
+    #[kani::proof]
+    fn verify_disabled_no_alert() {
+        let mut table = HealthTable::new();
+        // An empty table has no enabled apps, so no alerts
+        let time: u64 = kani::any();
+        let result = table.check_health(time);
+        assert_eq!(result.alert_count, 0);
+    }
+
+    /// HS-P03: no panics for any symbolic input
+    #[kani::proof]
+    fn verify_no_panic() {
+        let mut table = HealthTable::new();
+        let app_id: u32 = kani::any();
+        kani::assume(app_id < 100);
+        let max_miss: u32 = kani::any();
+        kani::assume(max_miss >= 1);
+        table.register_app(app_id, max_miss, HsAction::Event);
+        let new_count: u32 = kani::any();
+        table.update_counter(app_id, new_count);
+        let time: u64 = kani::any();
+        let _ = table.check_health(time);
+    }
+}

@@ -158,3 +158,34 @@ mod tests {
         assert_eq!(table.get_active_count(), 2);
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// TO-P01: subscribe then unsubscribe yields Exclude (not Include)
+    #[kani::proof]
+    fn verify_subscribe_unsubscribe() {
+        let mut table = SubscriptionTable::new();
+        let msg_id: u32 = kani::any();
+        let priority: u8 = kani::any();
+        let ok = table.subscribe(msg_id, priority);
+        assert!(ok);
+        assert_eq!(table.evaluate(msg_id), ToDecision::Include);
+        let removed = table.unsubscribe(msg_id);
+        assert!(removed);
+        assert_eq!(table.evaluate(msg_id), ToDecision::Exclude);
+    }
+
+    /// TO-P02: no panics for any symbolic input
+    #[kani::proof]
+    fn verify_no_panic() {
+        let mut table = SubscriptionTable::new();
+        let msg_id: u32 = kani::any();
+        let priority: u8 = kani::any();
+        let _ = table.subscribe(msg_id, priority);
+        let _ = table.unsubscribe(kani::any());
+        let _ = table.evaluate(kani::any());
+        let _ = table.get_active_count();
+    }
+}
