@@ -1,0 +1,53 @@
+package pulseengine:relay-limit-checker-stream@0.1.0;
+
+/// Limit Checker — stream transformer edition.
+///
+/// Takes a stream of sensor readings, emits a stream of violations.
+/// The verified engine (8 Verus properties) processes each reading.
+///
+/// This is the P3-native interface. The non-stream version
+/// (limit_checker.wit) uses individual function calls.
+interface limit-checker-stream {
+    record sensor-reading {
+        sensor-id: u32,
+        value: s64,
+    }
+
+    record violation {
+        watchpoint-id: u32,
+        measured: s64,
+        threshold: s64,
+    }
+
+    record watchpoint {
+        sensor-id: u32,
+        op: comparison-op,
+        threshold: s64,
+        enabled: bool,
+        persistence: u32,
+    }
+
+    enum comparison-op {
+        less-than,
+        greater-than,
+        less-or-equal,
+        greater-or-equal,
+        equal,
+        not-equal,
+    }
+
+    /// Initialize the verified engine.
+    init: func() -> result<_, string>;
+
+    /// Configure a watchpoint.
+    add-watchpoint: func(wp: watchpoint) -> bool;
+
+    /// STREAM TRANSFORMER: readings in → violations out.
+    /// Each reading is evaluated against all watchpoints.
+    /// Violations are emitted to the output stream.
+    monitor: func(readings: stream<sensor-reading>) -> stream<violation>;
+}
+
+world relay-limit-checker-stream {
+    export limit-checker-stream;
+}

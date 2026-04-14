@@ -96,6 +96,26 @@ rust_wasm_component_bindgen(
 )
 
 # ═══════════════════════════════════════════════════════════════
+# Limit Checker — STREAM TRANSFORMER (P3 native)
+# ═══════════════════════════════════════════════════════════════
+
+wit_library(
+    name = "relay_limit_checker_stream_wit",
+    srcs = ["crates/relay-lc/wit/limit_checker_stream.wit"],
+    package_name = "pulseengine:relay-limit-checker-stream",
+    world = "relay-limit-checker-stream",
+)
+
+rust_wasm_component_bindgen(
+    name = "relay-lc-stream",
+    srcs = ["crates/relay-lc/src/wasm_stream_component.rs"],
+    wit = ":relay_limit_checker_stream_wit",
+    wasi_version = "p3",
+    profiles = ["release"],
+    deps = ["@crates//:wit-bindgen"],
+)
+
+# ═══════════════════════════════════════════════════════════════
 # Stored Command
 # ═══════════════════════════════════════════════════════════════
 
