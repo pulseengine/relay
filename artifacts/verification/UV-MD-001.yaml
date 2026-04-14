@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-MD-001
+    type: unit-verification
+    title: "Unit tests for SWDD-MD-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-md.
+      Run via: cargo test -p relay-md
+    tags: [testing, unit, memory-dwell]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-MD-001

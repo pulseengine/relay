@@ -1,0 +1,58 @@
+artifacts:
+  - id: SWDD-LC-001
+    type: sw-detail-design
+    title: Limit Checker engine detailed design
+    status: approved
+    description: >
+      The Limit Checker engine monitors sensor values against configurable
+      watchpoints. Core data structure is WatchpointTable with fixed-size
+      array of MAX_WATCHPOINTS (128) entries.
+
+      Key types:
+        WatchpointTable { entries: [Watchpoint; 128], entry_count: u32 }
+        Watchpoint { sensor_id, op, threshold, enabled, persistence, current_count }
+        EvalResult { violations: [Violation; 32], violation_count: u32 }
+
+      Algorithm (evaluate):
+        For each watchpoint i in 0..entry_count:
+          1. Call wp_decide() (pure decision function)
+          2. Match decision: Skip/Pass/PendingPersistence/Violated
+          3. Apply state update (reset or increment persistence counter)
+          4. If Violated, append to result (bounded by MAX_VIOLATIONS_PER_CYCLE)
+
+      Verus properties verified:
+        LC-P01: init establishes invariant (SWREQ-LC-P01)
+        LC-P02: add_watchpoint preserves invariant (SWREQ-LC-P02)
+        LC-P03: violation_count <= MAX_VIOLATIONS_PER_CYCLE (SWREQ-LC-P03)
+        LC-P04: violation_count <= entry_count (SWREQ-LC-P04)
+        LC-P05: disabled watchpoints skipped (SWREQ-LC-P05)
+        LC-P06: compare() total and deterministic (SWREQ-LC-P06)
+        LC-P07: persistence counter management (SWREQ-LC-P07)
+        LC-P08: violation fires at persistence threshold (SWREQ-LC-P08)
+    tags: [limit-checker, detailed-design, verus, state-machine]
+    fields:
+      unit: crates/relay-lc/src/engine.rs
+      function: "WatchpointTable::evaluate, compare, wp_decide"
+      algorithm: >
+        Decision/apply pattern: wp_decide is pure (no mutation),
+        evaluate loop applies decisions. Loop invariant maintains
+        violation_count <= i and violation_count <= MAX_VIOLATIONS_PER_CYCLE.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-LC-P01
+      - type: satisfies
+        target: SWREQ-LC-P02
+      - type: satisfies
+        target: SWREQ-LC-P03
+      - type: satisfies
+        target: SWREQ-LC-P04
+      - type: satisfies
+        target: SWREQ-LC-P05
+      - type: satisfies
+        target: SWREQ-LC-P06
+      - type: satisfies
+        target: SWREQ-LC-P07
+      - type: satisfies
+        target: SWREQ-LC-P08

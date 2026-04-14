@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-TBL-001
+    type: system-req
+    title: Double-buffered runtime configuration table management
+    status: approved
+    description: >
+      The system shall manage double-buffered runtime configuration tables
+      with registration, load, and activate operations. Load writes to
+      the inactive buffer; activate swaps active and inactive buffer indices.
+      Replaces NASA cFS Table Services (TBL) application.
+    tags: [table-services, configuration, double-buffer]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 5 properties (TBL-P01 through TBL-P05) verified via
+        SMT/Z3. Unit tests confirm buffer management and activation swaps.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

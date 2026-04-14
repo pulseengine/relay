@@ -1,0 +1,135 @@
+artifacts:
+  - id: SWREQ-SCH-P01
+    type: sw-req
+    title: "SCH-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the ScheduleTable invariant shall hold:
+      the table is empty and slot_count is 0.
+    tags: [scheduler, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and count == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-SCH-001
+
+  - id: SWREQ-SCH-P02
+    type: sw-req
+    title: "SCH-P02: Invariant preserved by add_slot"
+    status: approved
+    description: >
+      The add_slot operation shall preserve the table invariant.
+      Count is bounded by MAX_SCHEDULE_SLOTS.
+    tags: [scheduler, invariant, bounded, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: add_slot requires inv(), ensures inv() and count bounded.
+    links:
+      - type: derives-from
+        target: SYSREQ-SCH-001
+
+  - id: SWREQ-SCH-P03
+    type: sw-req
+    title: "SCH-P03: Invariant preserved by process_tick"
+    status: approved
+    description: >
+      The process_tick operation shall preserve the table invariant.
+      The action_count output is bounded.
+    tags: [scheduler, invariant, tick, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: process_tick requires inv(), ensures inv().
+    links:
+      - type: derives-from
+        target: SYSREQ-SCH-001
+
+  - id: SWREQ-SCH-P04
+    type: sw-req
+    title: "SCH-P04: process_tick output bounded by MAX_ACTIONS_PER_TICK"
+    status: approved
+    description: >
+      The process_tick operation shall produce at most MAX_ACTIONS_PER_TICK
+      actions per call.
+    tags: [scheduler, bounded, output, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: process_tick ensures action_count <= MAX_ACTIONS_PER_TICK.
+    links:
+      - type: derives-from
+        target: SYSREQ-SCH-001
+
+  - id: SWREQ-SCH-P05
+    type: sw-req
+    title: "SCH-P05: process_tick output bounded by slot_count"
+    status: approved
+    description: >
+      The process_tick operation shall produce at most slot_count actions.
+    tags: [scheduler, bounded, output, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: process_tick ensures action_count <= slot_count.
+    links:
+      - type: derives-from
+        target: SYSREQ-SCH-001
+
+  - id: SWREQ-SCH-P06
+    type: sw-req
+    title: "SCH-P06: Disabled slots never produce actions"
+    status: approved
+    description: >
+      A schedule slot with enabled == false shall never produce an action
+      in the process_tick output.
+    tags: [scheduler, disabled, safety, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: disabled slots are skipped during tick processing.
+    links:
+      - type: derives-from
+        target: SYSREQ-SCH-001
+
+  - id: SWREQ-SCH-P07
+    type: sw-req
+    title: "SCH-P07: add_slot returns false iff table is full"
+    status: approved
+    description: >
+      The add_slot function shall return false if and only if the table
+      is at maximum capacity.
+    tags: [scheduler, bounded, api, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: add_slot ensures result == !old(self).is_full_spec().
+    links:
+      - type: derives-from
+        target: SYSREQ-SCH-001
+
+  - id: SWREQ-SCH-P08
+    type: sw-req
+    title: "SCH-P08: set_enabled returns false iff index out of range"
+    status: approved
+    description: >
+      The set_enabled function shall return false if and only if the
+      given slot index is out of range.
+    tags: [scheduler, bounds-check, api, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: set_enabled ensures result == (index < slot_count).
+    links:
+      - type: derives-from
+        target: SYSREQ-SCH-001

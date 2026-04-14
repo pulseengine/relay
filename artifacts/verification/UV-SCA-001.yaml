@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-SCA-001
+    type: unit-verification
+    title: "Unit tests for SWDD-SCA-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-sca.
+      Run via: cargo test -p relay-sca
+    tags: [testing, unit, stored-command-absolute]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-SCA-001

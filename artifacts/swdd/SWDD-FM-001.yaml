@@ -1,0 +1,41 @@
+artifacts:
+  - id: SWDD-FM-001
+    type: sw-detail-design
+    title: File Manager engine detailed design
+    status: approved
+    description: >
+      The File Manager engine validates file operation commands.
+      Pure validation logic; actual file I/O is host-provided.
+
+      Key types:
+        FilePath { bytes: [u8; 64], len: u32 }
+        FmCommand { Copy, Move, Rename, Delete }
+
+      Algorithm (validate_request):
+        1. validate_path(source): reject empty, reject > MAX_PATH_LEN
+        2. validate_path(dest): same checks for dest path
+        3. For Copy/Move/Rename: reject if paths_equal(source, dest)
+
+      paths_equal is symmetric: paths_equal(a, b) == paths_equal(b, a)
+
+      Verus properties verified:
+        FM-P01 through FM-P04 (see SWREQ-FM-P01..P04)
+    tags: [file-manager, detailed-design, verus, validation]
+    fields:
+      unit: crates/relay-fm/src/engine.rs
+      function: "validate_path, validate_request, paths_equal"
+      algorithm: >
+        Sequential validation: path length checks first, then
+        source-dest equality check for applicable operations.
+        All validation is pure (no side effects).
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-FM-P01
+      - type: satisfies
+        target: SWREQ-FM-P02
+      - type: satisfies
+        target: SWREQ-FM-P03
+      - type: satisfies
+        target: SWREQ-FM-P04

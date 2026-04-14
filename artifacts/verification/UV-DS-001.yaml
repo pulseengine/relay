@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-DS-001
+    type: unit-verification
+    title: "Unit tests for SWDD-DS-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-ds.
+      Run via: cargo test -p relay-ds
+    tags: [testing, unit, data-storage]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-DS-001

@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-HK-001
+    type: system-req
+    title: Telemetry housekeeping packet combination
+    status: approved
+    description: >
+      The system shall combine telemetry from multiple sources into
+      housekeeping packets using a configurable copy table. Each entry
+      maps a source-id and offset/length to an output packet position.
+      Replaces NASA cFS Housekeeping (HK) application.
+    tags: [housekeeping, telemetry, data-collection]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (HK-P01 through HK-P04) verified via
+        SMT/Z3. Unit tests confirm copy table bounds and output integrity.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

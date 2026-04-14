@@ -1,0 +1,100 @@
+artifacts:
+  - id: SWARCH-RELAY-001
+    type: sw-arch-component
+    title: Relay engine architecture (16 verified flight software engines)
+    status: approved
+    description: >
+      Relay is a collection of 16 formally verified flight software engines,
+      each a drop-in replacement for a NASA cFS application. All engines are
+      no_std, no_alloc, and verified via Verus SMT/Z3. Each engine is a
+      stream transformer following the Relay pattern.
+
+      Engines:
+        LC  — Limit Checker: sensor values vs. configurable thresholds
+        SCH — Scheduler: time-based message dispatch
+        SC  — Stored Command: relative-time command sequences
+        SCA — Stored Command Absolute: absolute-time command execution
+        HK  — Housekeeping: telemetry packet combination
+        CS  — Checksum Services: CRC32 memory integrity
+        HS  — Health & Safety: app health monitoring / stall detection
+        DS  — Data Storage: data filtering and routing
+        FM  — File Manager: file operation command validation
+        CI  — Command Ingest: incoming command packet validation
+        TO  — Telemetry Output: downlink subscription filtering
+        MD  — Memory Dwell: memory address sampling at configured rates
+        MM  — Memory Manager: memory operation request validation
+        TBL — Table Services: double-buffered runtime config tables
+        CCSDS — CCSDS Space Packet Protocol codec
+        CFDP  — CFDP file delivery protocol state machine
+
+      All engines share:
+        - Pure function core (no side effects in verified code)
+        - Fixed-size arrays (no heap allocation)
+        - Verus-annotated invariants, preconditions, postconditions
+        - Decision/apply pattern (pure decision, then mutation)
+
+      Composition is through stream wiring via the Relay scheduler.
+      No shared mutable state between engines.
+    tags: [architecture, verified, flight-software, no-std]
+    fields:
+      interfaces:
+        provided:
+          - "stream<violation> — LC threshold violation output"
+          - "stream<action> — SCH scheduled action output"
+          - "stream<command> — SC/SCA dispatched command output"
+          - "stream<hk-packet> — HK combined telemetry output"
+          - "stream<mismatch> — CS integrity check results"
+          - "stream<alert> — HS health alert output"
+          - "stream<decision> — DS storage routing decisions"
+          - "stream<validation> — FM/CI/MM validation results"
+          - "stream<tlm-packet> — TO filtered downlink output"
+          - "stream<sample-req> — MD dwell sample requests"
+          - "stream<tbl-result> — TBL table operation results"
+          - "stream<ccsds-packet> — CCSDS encoded/decoded packets"
+          - "stream<cfdp-action> — CFDP protocol actions"
+        required:
+          - "stream<sensor-reading> — sensor input for LC"
+          - "stream<tick> — time tick for SCH/SC/SCA"
+          - "stream<tlm-source> — telemetry sources for HK"
+          - "stream<memory-region> — memory regions for CS"
+          - "stream<app-counter> — application counters for HS"
+          - "stream<data-packet> — data packets for DS"
+          - "stream<file-cmd> — file operation commands for FM"
+          - "stream<cmd-packet> — incoming commands for CI"
+          - "stream<tlm-msg> — telemetry messages for TO"
+          - "stream<dwell-tick> — dwell timing for MD"
+          - "stream<mem-request> — memory operation requests for MM"
+      concurrency: "single-threaded cooperative scheduling via Relay Scheduler"
+    links:
+      - type: allocated-from
+        target: SWREQ-LC-P01
+      - type: allocated-from
+        target: SWREQ-SCH-P01
+      - type: allocated-from
+        target: SWREQ-SC-P01
+      - type: allocated-from
+        target: SWREQ-SCA-P01
+      - type: allocated-from
+        target: SWREQ-HK-P01
+      - type: allocated-from
+        target: SWREQ-CS-P01
+      - type: allocated-from
+        target: SWREQ-HS-P01
+      - type: allocated-from
+        target: SWREQ-DS-P01
+      - type: allocated-from
+        target: SWREQ-FM-P01
+      - type: allocated-from
+        target: SWREQ-CI-P01
+      - type: allocated-from
+        target: SWREQ-TO-P01
+      - type: allocated-from
+        target: SWREQ-MD-P01
+      - type: allocated-from
+        target: SWREQ-MM-P01
+      - type: allocated-from
+        target: SWREQ-TBL-P01
+      - type: allocated-from
+        target: SWREQ-CCSDS-P01
+      - type: allocated-from
+        target: SWREQ-CFDP-P01

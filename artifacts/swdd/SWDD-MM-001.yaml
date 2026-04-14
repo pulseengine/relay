@@ -1,0 +1,43 @@
+artifacts:
+  - id: SWDD-MM-001
+    type: sw-detail-design
+    title: Memory Manager engine detailed design
+    status: approved
+    description: >
+      The Memory Manager engine validates memory operation requests.
+      Pure validation logic; actual memory access is host-provided.
+
+      Key types:
+        MmOperation { Peek, Poke, LoadFromFile, DumpToFile, Fill }
+        MemoryConfig { ram_start, ram_end, max_size }
+        ValidationResult { Valid, AddressOutOfRange, SizeZero, SizeTooLarge, Misaligned }
+
+      Algorithm (validate):
+        1. If size == 0, return SizeZero
+        2. If address < ram_start or address >= ram_end, return AddressOutOfRange
+        3. If size > max_size, return SizeTooLarge
+        4. If !is_aligned(address, size), return Misaligned
+        5. Return Valid
+
+      is_aligned: address % size == 0
+
+      Verus properties verified:
+        MM-P01 through MM-P04 (see SWREQ-MM-P01..P04)
+    tags: [memory-manager, detailed-design, verus, validation]
+    fields:
+      unit: crates/relay-mm/src/engine.rs
+      function: "validate, is_aligned"
+      algorithm: >
+        Sequential validation with early return on first failure.
+        All validation is pure (no side effects, no memory access).
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-MM-P01
+      - type: satisfies
+        target: SWREQ-MM-P02
+      - type: satisfies
+        target: SWREQ-MM-P03
+      - type: satisfies
+        target: SWREQ-MM-P04

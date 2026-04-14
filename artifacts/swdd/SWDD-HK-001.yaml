@@ -1,0 +1,41 @@
+artifacts:
+  - id: SWDD-HK-001
+    type: sw-detail-design
+    title: Housekeeping engine detailed design
+    status: approved
+    description: >
+      The Housekeeping engine combines telemetry from multiple sources
+      into output packets using a configurable copy table. Each entry
+      maps source_id + offset + length to an output position.
+
+      Key types:
+        CopyTable { entries: [CopyEntry; 128], entry_count: u32 }
+        CopyEntry { source_id, src_offset, dst_offset, length }
+        SourceData { buffers: [[u8; 64]; 32] }
+
+      Algorithm (collect):
+        For each entry in 0..entry_count:
+          Copy length bytes from source[source_id][src_offset..]
+          to output[dst_offset..], with bounds checks on both sides.
+
+      Verus properties verified:
+        HK-P01 through HK-P04 (see SWREQ-HK-P01..P04)
+    tags: [housekeeping, detailed-design, verus]
+    fields:
+      unit: crates/relay-hk/src/engine.rs
+      function: "CopyTable::collect"
+      algorithm: >
+        Bounded copy: each entry copies from source buffer to output
+        buffer with Verus-verified bounds on both read and write sides.
+        Output size bounded by MAX_OUTPUT_SIZE (256 bytes).
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-HK-P01
+      - type: satisfies
+        target: SWREQ-HK-P02
+      - type: satisfies
+        target: SWREQ-HK-P03
+      - type: satisfies
+        target: SWREQ-HK-P04

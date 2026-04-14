@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-HS-001
+    type: unit-verification
+    title: "Unit tests for SWDD-HS-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-hs.
+      Run via: cargo test -p relay-hs
+    tags: [testing, unit, health-safety]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-HS-001

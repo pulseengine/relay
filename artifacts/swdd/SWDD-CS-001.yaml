@@ -1,0 +1,44 @@
+artifacts:
+  - id: SWDD-CS-001
+    type: sw-detail-design
+    title: Checksum Services engine detailed design
+    status: approved
+    description: >
+      The Checksum Services engine verifies memory integrity by computing
+      CRC32 checksums over configurable regions and comparing against
+      stored baselines.
+
+      Key types:
+        RegionTable { regions: [Region; 64], region_count: u32 }
+        Region { address, size, baseline_crc: u32, enabled: bool }
+        CheckResult { results: [RegionResult; 16], result_count: u32 }
+
+      Algorithm (check_all):
+        For each region in 0..region_count:
+          1. Compute CRC32 over region data (table-driven, polynomial 0xEDB88320)
+          2. Compare computed CRC with baseline
+          3. Report mismatch if different (bounded by MAX_CHECK_PER_CYCLE)
+
+      Verus properties verified:
+        CS-P01 through CS-P05 (see SWREQ-CS-P01..P05)
+    tags: [checksum, detailed-design, verus, crc32]
+    fields:
+      unit: crates/relay-cs/src/engine.rs
+      function: "RegionTable::check_all, crc32"
+      algorithm: >
+        Table-driven CRC32 (reflected polynomial 0xEDB88320).
+        Deterministic: pure function of input bytes. Region comparison
+        is simple equality check against baseline.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-CS-P01
+      - type: satisfies
+        target: SWREQ-CS-P02
+      - type: satisfies
+        target: SWREQ-CS-P03
+      - type: satisfies
+        target: SWREQ-CS-P04
+      - type: satisfies
+        target: SWREQ-CS-P05

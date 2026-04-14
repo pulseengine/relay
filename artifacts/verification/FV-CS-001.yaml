@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-CS-001
+    type: unit-verification
+    title: "Formal verification for SWDD-CS-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-cs engine properties
+      CS-P01 through CS-P05. All 5 properties proven. Run via:
+      bazel test //:verus_relay_cs
+    tags: [verification, formal, verus, checksum]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-CS-001

@@ -1,0 +1,70 @@
+artifacts:
+  - id: SWREQ-MM-P01
+    type: sw-req
+    title: "MM-P01: Valid only when address in range, size > 0, alignment ok"
+    status: approved
+    description: >
+      The validate function shall return Valid only when the address is
+      within the configured RAM range, size is greater than zero, size
+      does not exceed the maximum, and the address is properly aligned.
+    tags: [memory-manager, validation, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: validate returns Valid iff all conditions met.
+    links:
+      - type: derives-from
+        target: SYSREQ-MM-001
+
+  - id: SWREQ-MM-P02
+    type: sw-req
+    title: "MM-P02: AddressOutOfRange when address outside [ram_start, ram_end)"
+    status: approved
+    description: >
+      The validate function shall return AddressOutOfRange when the
+      requested address is outside the configured RAM region.
+    tags: [memory-manager, validation, bounds, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: validate returns AddressOutOfRange when address < ram_start
+        or address >= ram_end.
+    links:
+      - type: derives-from
+        target: SYSREQ-MM-001
+
+  - id: SWREQ-MM-P03
+    type: sw-req
+    title: "MM-P03: SizeZero when size == 0"
+    status: approved
+    description: >
+      The validate function shall return SizeZero when the requested
+      operation size is zero.
+    tags: [memory-manager, validation, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: validate returns SizeZero when size == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-MM-001
+
+  - id: SWREQ-MM-P04
+    type: sw-req
+    title: "MM-P04: is_aligned correct"
+    status: approved
+    description: >
+      The is_aligned function shall return true if and only if
+      address % size == 0.
+    tags: [memory-manager, alignment, correctness, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: is_aligned ensures result == (address % size == 0).
+    links:
+      - type: derives-from
+        target: SYSREQ-MM-001

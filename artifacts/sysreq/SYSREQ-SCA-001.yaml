@@ -1,0 +1,19 @@
+artifacts:
+  - id: SYSREQ-SCA-001
+    type: system-req
+    title: Absolute time command execution
+    status: approved
+    description: >
+      The system shall execute commands at absolute timestamps. Commands
+      fire when the current mission time reaches or exceeds the configured
+      execute-at time. Extension of relay-sc for absolute time-tagged sequences.
+    tags: [stored-command, absolute-time, dispatch]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (SCA-P01 through SCA-P04) verified via
+        SMT/Z3. Unit tests confirm absolute time dispatch and no re-dispatch.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

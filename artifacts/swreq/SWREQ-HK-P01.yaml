@@ -1,0 +1,67 @@
+artifacts:
+  - id: SWREQ-HK-P01
+    type: sw-req
+    title: "HK-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the copy table shall be empty with
+      entry_count at zero.
+    tags: [housekeeping, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and count == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-HK-001
+
+  - id: SWREQ-HK-P02
+    type: sw-req
+    title: "HK-P02: Collect never writes past MAX_OUTPUT_SIZE"
+    status: approved
+    description: >
+      The collect operation shall never write beyond MAX_OUTPUT_SIZE
+      bytes in the output buffer.
+    tags: [housekeeping, bounded, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: collect ensures all writes within MAX_OUTPUT_SIZE bound.
+    links:
+      - type: derives-from
+        target: SYSREQ-HK-001
+
+  - id: SWREQ-HK-P03
+    type: sw-req
+    title: "HK-P03: Collect never reads past source data bounds"
+    status: approved
+    description: >
+      The collect operation shall never read beyond the source data
+      buffer bounds.
+    tags: [housekeeping, bounded, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: collect ensures all source reads within buffer bounds.
+    links:
+      - type: derives-from
+        target: SYSREQ-HK-001
+
+  - id: SWREQ-HK-P04
+    type: sw-req
+    title: "HK-P04: Entry count bounded by MAX_COPY_ENTRIES"
+    status: approved
+    description: >
+      The copy table entry count shall never exceed MAX_COPY_ENTRIES.
+    tags: [housekeeping, bounded, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: add_entry ensures entry_count <= MAX_COPY_ENTRIES.
+    links:
+      - type: derives-from
+        target: SYSREQ-HK-001

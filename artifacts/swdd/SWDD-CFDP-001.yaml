@@ -1,0 +1,44 @@
+artifacts:
+  - id: SWDD-CFDP-001
+    type: sw-detail-design
+    title: CFDP protocol core detailed design
+    status: approved
+    description: >
+      The CFDP engine manages CCSDS File Delivery Protocol state machines.
+      Protocol logic only; no file I/O.
+
+      Key types:
+        TransactionTable { transactions: [Transaction; 16], count: u32 }
+        Transaction { state: TransactionState, retransmit_count, bytes_sent, file_size }
+        TransactionState { Idle, MetadataSent, DataSending, EofSent, Finished }
+
+      State machine:
+        Idle -> MetadataSent -> DataSending -> EofSent -> Finished
+        No skipping states. Retransmit from DataSending on NAK.
+
+      Algorithm (advance_state):
+        1. Validate transition is legal (no state skipping)
+        2. Update state, manage retransmit counter
+        3. Track bytes_sent (never exceeds file_size)
+
+      Verus properties verified:
+        CFDP-P01 through CFDP-P04 (see SWREQ-CFDP-P01..P04)
+    tags: [cfdp, detailed-design, verus, state-machine]
+    fields:
+      unit: crates/relay-cfdp/src/engine.rs
+      function: "TransactionTable::advance_state, add_transaction"
+      algorithm: >
+        State machine with valid transition checking. Retransmit
+        counter bounded by max_retransmit. Bytes_sent bounded by
+        file_size. Transaction count bounded by MAX_TRANSACTIONS.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-CFDP-P01
+      - type: satisfies
+        target: SWREQ-CFDP-P02
+      - type: satisfies
+        target: SWREQ-CFDP-P03
+      - type: satisfies
+        target: SWREQ-CFDP-P04

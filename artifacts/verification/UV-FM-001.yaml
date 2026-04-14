@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-FM-001
+    type: unit-verification
+    title: "Unit tests for SWDD-FM-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-fm.
+      Run via: cargo test -p relay-fm
+    tags: [testing, unit, file-manager]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-FM-001

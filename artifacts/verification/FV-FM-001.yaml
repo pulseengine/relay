@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-FM-001
+    type: unit-verification
+    title: "Formal verification for SWDD-FM-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-fm engine properties
+      FM-P01 through FM-P04. All 4 properties proven. Run via:
+      bazel test //:verus_relay_fm
+    tags: [verification, formal, verus, file-manager]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-FM-001

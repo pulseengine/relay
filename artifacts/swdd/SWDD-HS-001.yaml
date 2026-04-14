@@ -1,0 +1,44 @@
+artifacts:
+  - id: SWDD-HS-001
+    type: sw-detail-design
+    title: Health and Safety engine detailed design
+    status: approved
+    description: >
+      The Health and Safety engine monitors application health by tracking
+      execution counters. When an app's missed counter increments exceed
+      the configured max_miss threshold, a health alert is generated.
+
+      Key types:
+        AppTable { apps: [AppEntry; 32], app_count: u32 }
+        AppEntry { app_id, max_miss, current_miss, enabled, action: HsAction }
+        CheckResult { alerts: [Alert; 8], alert_count: u32 }
+
+      Algorithm (check_health):
+        For each app in 0..app_count:
+          1. Skip if disabled
+          2. If current_miss >= max_miss, emit alert with configured action
+          3. Bound output by MAX_ALERTS_PER_CHECK
+
+      Verus properties verified:
+        HS-P01 through HS-P05 (see SWREQ-HS-P01..P05)
+    tags: [health-safety, detailed-design, verus, watchdog]
+    fields:
+      unit: crates/relay-hs/src/engine.rs
+      function: "AppTable::check_health"
+      algorithm: >
+        Counter-based watchdog: each app has a miss counter compared
+        against max_miss threshold. Disabled apps are skipped.
+        Output bounded by min of app_count and MAX_ALERTS_PER_CHECK.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-HS-P01
+      - type: satisfies
+        target: SWREQ-HS-P02
+      - type: satisfies
+        target: SWREQ-HS-P03
+      - type: satisfies
+        target: SWREQ-HS-P04
+      - type: satisfies
+        target: SWREQ-HS-P05

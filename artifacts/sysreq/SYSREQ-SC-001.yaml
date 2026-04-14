@@ -1,0 +1,19 @@
+artifacts:
+  - id: SYSREQ-SC-001
+    type: system-req
+    title: Relative time stored command execution
+    status: approved
+    description: >
+      The system shall execute stored command sequences at relative time
+      offsets. Supports both Absolute Time Sequences (ATS) and Relative
+      Time Sequences (RTS). Replaces NASA cFS Stored Command (SC) application.
+    tags: [stored-command, sequencing, dispatch]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 5 properties (SC-P01 through SC-P05) verified via
+        SMT/Z3. Unit tests confirm command dispatch ordering and bounds.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

@@ -1,0 +1,16 @@
+artifacts:
+  - id: STKH-RELAY-001
+    type: stakeholder-req
+    title: Formally verified flight software engines for cFS replacement
+    status: approved
+    description: >
+      Space missions require flight software components that are provably
+      correct, memory-safe, and free from runtime panics. The cFS application
+      suite (LC, SCH, SC, HK, CS, HS, DS, FM, CI, TO, MD, MM, TBL) must be
+      replaced with formally verified Rust implementations. All core logic
+      must be proven via Verus SMT/Z3. Components must be no_std, no_alloc,
+      suitable for embedded and WASM targets.
+    tags: [stakeholder, flight-software, safety, formal-verification]
+    fields:
+      priority: must
+      source: "Safety-critical flight software — PulseEngine Relay"

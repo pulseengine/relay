@@ -1,0 +1,84 @@
+artifacts:
+  - id: SWREQ-HS-P01
+    type: sw-req
+    title: "HS-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the app table shall be empty with
+      app_count at zero.
+    tags: [health-safety, invariant, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and count == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-HS-001
+
+  - id: SWREQ-HS-P02
+    type: sw-req
+    title: "HS-P02: check_health output bounded by MAX_ALERTS_PER_CHECK"
+    status: approved
+    description: >
+      The check_health operation shall produce at most MAX_ALERTS_PER_CHECK
+      alerts per call.
+    tags: [health-safety, bounded, output, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: check_health ensures alert_count <= MAX_ALERTS_PER_CHECK.
+    links:
+      - type: derives-from
+        target: SYSREQ-HS-001
+
+  - id: SWREQ-HS-P03
+    type: sw-req
+    title: "HS-P03: Alert count bounded by app_count"
+    status: approved
+    description: >
+      The check_health operation shall produce at most app_count alerts.
+    tags: [health-safety, bounded, output, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: check_health ensures alert_count <= app_count.
+    links:
+      - type: derives-from
+        target: SYSREQ-HS-001
+
+  - id: SWREQ-HS-P04
+    type: sw-req
+    title: "HS-P04: Disabled apps never produce alerts"
+    status: approved
+    description: >
+      An application entry with enabled == false shall never produce
+      an alert in the check_health output.
+    tags: [health-safety, disabled, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: disabled apps are skipped during health checking.
+    links:
+      - type: derives-from
+        target: SYSREQ-HS-001
+
+  - id: SWREQ-HS-P05
+    type: sw-req
+    title: "HS-P05: Alert fires only when current_miss >= max_miss"
+    status: approved
+    description: >
+      A health alert shall only fire when the current miss count meets
+      or exceeds the configured maximum miss threshold.
+    tags: [health-safety, threshold, persistence, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: alert emitted only when current_miss >= max_miss.
+    links:
+      - type: derives-from
+        target: SYSREQ-HS-001

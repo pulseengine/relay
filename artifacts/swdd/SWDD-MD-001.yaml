@@ -1,0 +1,41 @@
+artifacts:
+  - id: SWDD-MD-001
+    type: sw-detail-design
+    title: Memory Dwell engine detailed design
+    status: approved
+    description: >
+      The Memory Dwell engine samples memory addresses at configured rates.
+      Pure scheduling logic; actual memory reads are host-provided.
+
+      Key types:
+        DwellTable { entries: [DwellEntry; 32], entry_count: u32 }
+        DwellEntry { address: u32, size: u8, rate_divisor: u32, enabled: bool }
+        SampleResult { requests: [SampleRequest; 16], request_count: u32 }
+
+      Algorithm (get_samples):
+        For each entry in 0..entry_count:
+          1. Skip if disabled
+          2. If tick_count % rate_divisor == 0, emit sample request
+          3. Bound output by MAX_SAMPLES_PER_CYCLE
+
+      Verus properties verified:
+        MD-P01 through MD-P04 (see SWREQ-MD-P01..P04)
+    tags: [memory-dwell, detailed-design, verus, sampling]
+    fields:
+      unit: crates/relay-md/src/engine.rs
+      function: "DwellTable::get_samples, add_entry"
+      algorithm: >
+        Rate-divisor sampling: entries fire when tick_count is
+        evenly divisible by rate_divisor. Output bounded by
+        min of entry_count and MAX_SAMPLES_PER_CYCLE.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-MD-P01
+      - type: satisfies
+        target: SWREQ-MD-P02
+      - type: satisfies
+        target: SWREQ-MD-P03
+      - type: satisfies
+        target: SWREQ-MD-P04

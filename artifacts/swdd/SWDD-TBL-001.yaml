@@ -1,0 +1,43 @@
+artifacts:
+  - id: SWDD-TBL-001
+    type: sw-detail-design
+    title: Table Services engine detailed design
+    status: approved
+    description: >
+      The Table Services engine manages double-buffered runtime
+      configuration tables with registration, load, and activate.
+
+      Key types:
+        TableRegistry { tables: [TableEntry; 32], table_count: u32 }
+        TableEntry { buffers: [[u8; 256]; 2], active_index: u8 }
+        TblResult { Success, NotFound, Full, InvalidSize }
+
+      Algorithm:
+        register: add entry to registry if not full
+        load: write data to buffer[1 - active_index] (inactive)
+        activate: swap active_index (0->1 or 1->0)
+        get_active: return &buffers[active_index]
+
+      Verus properties verified:
+        TBL-P01 through TBL-P05 (see SWREQ-TBL-P01..P05)
+    tags: [table-services, detailed-design, verus, double-buffer]
+    fields:
+      unit: crates/relay-tbl/src/engine.rs
+      function: "TableRegistry::register, load, activate"
+      algorithm: >
+        Double-buffer swap: load always writes inactive buffer,
+        activate swaps index. Active data is never modified during
+        load, ensuring consistent reads.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-TBL-P01
+      - type: satisfies
+        target: SWREQ-TBL-P02
+      - type: satisfies
+        target: SWREQ-TBL-P03
+      - type: satisfies
+        target: SWREQ-TBL-P04
+      - type: satisfies
+        target: SWREQ-TBL-P05

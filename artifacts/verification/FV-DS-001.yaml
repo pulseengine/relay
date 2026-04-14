@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-DS-001
+    type: unit-verification
+    title: "Formal verification for SWDD-DS-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-ds engine properties
+      DS-P01 through DS-P04. All 4 properties proven. Run via:
+      bazel test //:verus_relay_ds
+    tags: [verification, formal, verus, data-storage]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-DS-001

@@ -1,0 +1,44 @@
+artifacts:
+  - id: SWDD-CCSDS-001
+    type: sw-detail-design
+    title: CCSDS Space Packet codec detailed design
+    status: approved
+    description: >
+      The CCSDS engine encodes and decodes CCSDS Space Packet Protocol
+      headers per CCSDS 133.0-B-2.
+
+      Key types:
+        PacketHeader { version, packet_type, apid, sequence, length }
+        PacketType { Telemetry, Command }
+
+      Algorithm:
+        encode: pack fields into 6-byte header, compute XOR checksum
+        decode: unpack 6-byte header, extract fields, verify checksum
+        roundtrip: decode(encode(header)) == header
+
+      Header layout (6 bytes):
+        Bytes 0-1: version(3) | type(1) | sec_hdr(1) | apid(11)
+        Bytes 2-3: seq_flags(2) | seq_count(14)
+        Bytes 4-5: data_length
+
+      Verus properties verified:
+        CCSDS-P01 through CCSDS-P04 (see SWREQ-CCSDS-P01..P04)
+    tags: [ccsds, detailed-design, verus, codec]
+    fields:
+      unit: crates/relay-ccsds/src/engine.rs
+      function: "encode, decode, checksum"
+      algorithm: >
+        Bit-level packing/unpacking of CCSDS primary header.
+        Checksum is XOR fold of all data bytes. Roundtrip
+        identity proven via encode/decode postcondition composition.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-CCSDS-P01
+      - type: satisfies
+        target: SWREQ-CCSDS-P02
+      - type: satisfies
+        target: SWREQ-CCSDS-P03
+      - type: satisfies
+        target: SWREQ-CCSDS-P04

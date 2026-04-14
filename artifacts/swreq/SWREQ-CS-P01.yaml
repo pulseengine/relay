@@ -1,0 +1,83 @@
+artifacts:
+  - id: SWREQ-CS-P01
+    type: sw-req
+    title: "CS-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the region table shall be empty with
+      region_count at zero.
+    tags: [checksum, invariant, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and count == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-CS-001
+
+  - id: SWREQ-CS-P02
+    type: sw-req
+    title: "CS-P02: CRC is deterministic"
+    status: approved
+    description: >
+      The CRC32 computation shall be deterministic: same input data
+      always produces the same CRC output.
+    tags: [checksum, deterministic, crc32, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: crc32 function is pure with deterministic output.
+    links:
+      - type: derives-from
+        target: SYSREQ-CS-001
+
+  - id: SWREQ-CS-P03
+    type: sw-req
+    title: "CS-P03: Mismatch detected iff CRC differs from baseline"
+    status: approved
+    description: >
+      A mismatch shall be reported if and only if the computed CRC
+      differs from the stored baseline CRC.
+    tags: [checksum, mismatch, integrity, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: check_region ensures mismatch iff computed != baseline.
+    links:
+      - type: derives-from
+        target: SYSREQ-CS-001
+
+  - id: SWREQ-CS-P04
+    type: sw-req
+    title: "CS-P04: Output bounded by MAX_CHECK_PER_CYCLE"
+    status: approved
+    description: >
+      The check cycle shall produce at most MAX_CHECK_PER_CYCLE results.
+    tags: [checksum, bounded, output, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: check_all ensures result_count <= MAX_CHECK_PER_CYCLE.
+    links:
+      - type: derives-from
+        target: SYSREQ-CS-001
+
+  - id: SWREQ-CS-P05
+    type: sw-req
+    title: "CS-P05: Region count bounded by MAX_REGIONS"
+    status: approved
+    description: >
+      The region table shall never contain more than MAX_REGIONS entries.
+    tags: [checksum, bounded, invariant, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: add_region ensures region_count <= MAX_REGIONS.
+    links:
+      - type: derives-from
+        target: SYSREQ-CS-001

@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-HS-001
+    type: system-req
+    title: Application health monitoring and stall detection
+    status: approved
+    description: >
+      The system shall monitor application health by tracking execution
+      counters and detecting stalled applications. When missed counter
+      increments exceed a configurable threshold, an alert is generated.
+      Replaces NASA cFS Health & Safety (HS) application.
+    tags: [health-safety, monitoring, watchdog]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: all 5 properties (HS-P01 through HS-P05) verified via
+        SMT/Z3. Unit tests confirm stall detection and alert generation.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

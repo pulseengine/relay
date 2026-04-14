@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-HK-001
+    type: unit-verification
+    title: "Formal verification for SWDD-HK-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-hk engine properties
+      HK-P01 through HK-P04. All 4 properties proven. Run via:
+      bazel test //:verus_relay_hk
+    tags: [verification, formal, verus, housekeeping]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-HK-001

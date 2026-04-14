@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-CS-001
+    type: unit-verification
+    title: "Unit tests for SWDD-CS-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-cs.
+      Run via: cargo test -p relay-cs
+    tags: [testing, unit, checksum]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-CS-001

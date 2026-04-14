@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-LC-001
+    type: unit-verification
+    title: "Unit tests for SWDD-LC-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-lc.
+      Run via: cargo test -p relay-lc
+    tags: [testing, unit, limit-checker]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-LC-001

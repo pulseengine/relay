@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-CCSDS-001
+    type: unit-verification
+    title: "Formal verification for SWDD-CCSDS-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-ccsds engine properties
+      CCSDS-P01 through CCSDS-P04. All 4 properties proven. Run via:
+      bazel test //:verus_relay_ccsds
+    tags: [verification, formal, verus, ccsds]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-CCSDS-001

@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWDD-CI-001
+    type: sw-detail-design
+    title: Command Ingest engine detailed design
+    status: approved
+    description: >
+      The Command Ingest engine validates incoming command packets:
+      header format, checksum, command code range, stream ID.
+
+      Key types:
+        CommandHeader { stream_id, sequence, length, function_code, checksum }
+        ValidatorConfig { valid_stream_ids: [u16; 16], stream_id_count: u32 }
+
+      Algorithm (validate_header):
+        1. Check stream_id is in valid_stream_ids list
+        2. Compute checksum over packet bytes
+        3. Compare computed checksum against header checksum
+        4. Valid only when all checks pass
+
+      Verus properties verified:
+        CI-P01 through CI-P04 (see SWREQ-CI-P01..P04)
+    tags: [command-ingest, detailed-design, verus, validation]
+    fields:
+      unit: crates/relay-ci/src/engine.rs
+      function: "validate_header, compute_checksum, is_valid_stream_id"
+      algorithm: >
+        Sequential validation: stream ID lookup (linear scan of
+        fixed-size array), checksum computation (deterministic),
+        then conjunction of all checks.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-CI-P01
+      - type: satisfies
+        target: SWREQ-CI-P02
+      - type: satisfies
+        target: SWREQ-CI-P03
+      - type: satisfies
+        target: SWREQ-CI-P04

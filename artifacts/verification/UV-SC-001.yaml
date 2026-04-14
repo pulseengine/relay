@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-SC-001
+    type: unit-verification
+    title: "Unit tests for SWDD-SC-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-sc.
+      Run via: cargo test -p relay-sc
+    tags: [testing, unit, stored-command]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-SC-001

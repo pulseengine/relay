@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-HS-001
+    type: unit-verification
+    title: "Formal verification for SWDD-HS-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-hs engine properties
+      HS-P01 through HS-P05. All 5 properties proven. Run via:
+      bazel test //:verus_relay_hs
+    tags: [verification, formal, verus, health-safety]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-HS-001

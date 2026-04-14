@@ -1,0 +1,19 @@
+artifacts:
+  - id: SYSREQ-CCSDS-001
+    type: system-req
+    title: CCSDS Space Packet Protocol header encoding/decoding
+    status: approved
+    description: >
+      The system shall encode and decode CCSDS Space Packet Protocol headers
+      per CCSDS 133.0-B-2. Encode-then-decode must produce identity (roundtrip).
+      Version field is always 0. APID bounded to 11 bits.
+    tags: [ccsds, protocol, encoding, space-packet]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (CCSDS-P01 through CCSDS-P04) verified
+        via SMT/Z3. Unit tests confirm roundtrip encoding and field bounds.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

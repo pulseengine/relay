@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-CCSDS-001
+    type: unit-verification
+    title: "Unit tests for SWDD-CCSDS-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-ccsds.
+      Run via: cargo test -p relay-ccsds
+    tags: [testing, unit, ccsds]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-CCSDS-001

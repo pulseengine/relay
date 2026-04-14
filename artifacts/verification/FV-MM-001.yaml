@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-MM-001
+    type: unit-verification
+    title: "Formal verification for SWDD-MM-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-mm engine properties
+      MM-P01 through MM-P04. All 4 properties proven. Run via:
+      bazel test //:verus_relay_mm
+    tags: [verification, formal, verus, memory-manager]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-MM-001

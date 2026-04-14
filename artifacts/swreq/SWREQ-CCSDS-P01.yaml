@@ -1,0 +1,68 @@
+artifacts:
+  - id: SWREQ-CCSDS-P01
+    type: sw-req
+    title: "CCSDS-P01: Encode then decode equals identity (roundtrip)"
+    status: approved
+    description: >
+      Encoding a CCSDS header and then decoding the result shall produce
+      the original header fields. The codec is lossless for all valid inputs.
+    tags: [ccsds, roundtrip, correctness, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: decode(encode(header)) == header for all valid headers.
+    links:
+      - type: derives-from
+        target: SYSREQ-CCSDS-001
+
+  - id: SWREQ-CCSDS-P02
+    type: sw-req
+    title: "CCSDS-P02: Version field always 0"
+    status: approved
+    description: >
+      The CCSDS Space Packet Protocol version field shall always be 0
+      per CCSDS 133.0-B-2.
+    tags: [ccsds, protocol, version, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: encode always sets version bits to 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-CCSDS-001
+
+  - id: SWREQ-CCSDS-P03
+    type: sw-req
+    title: "CCSDS-P03: APID bounded to 11 bits"
+    status: approved
+    description: >
+      The Application Process Identifier (APID) shall be bounded to
+      11 bits (0..=0x7FF) per the CCSDS standard.
+    tags: [ccsds, bounded, apid, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: APID value is always <= 0x7FF after encode/decode.
+    links:
+      - type: derives-from
+        target: SYSREQ-CCSDS-001
+
+  - id: SWREQ-CCSDS-P04
+    type: sw-req
+    title: "CCSDS-P04: Checksum is XOR of all bytes"
+    status: approved
+    description: >
+      The packet checksum shall be computed as the XOR of all bytes
+      in the packet data field.
+    tags: [ccsds, checksum, integrity, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: checksum function computes XOR fold over all data bytes.
+    links:
+      - type: derives-from
+        target: SYSREQ-CCSDS-001

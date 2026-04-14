@@ -1,0 +1,41 @@
+artifacts:
+  - id: SWDD-SC-001
+    type: sw-detail-design
+    title: Stored Command engine detailed design
+    status: approved
+    description: >
+      The Stored Command engine dispatches commands from ATS and RTS
+      sequences at relative time offsets. ATS commands are dispatched
+      in time order; RTS sequences advance monotonically.
+
+      Key types:
+        AtsTable { commands: [AtsCommand; 256], count: u32 }
+        RtsTable { sequences: [RtsSequence; 16] }
+        RtsSequence { commands: [RtsCommand; 64], count: u32, index: u32 }
+
+      Algorithm (dispatch):
+        ATS: scan commands in time order, dispatch if time elapsed
+        RTS: advance sequence index, dispatch next command if delay met
+
+      Verus properties verified:
+        SC-P01 through SC-P05 (see SWREQ-SC-P01..P05)
+    tags: [stored-command, detailed-design, verus]
+    fields:
+      unit: crates/relay-sc/src/engine.rs
+      function: "AtsTable::dispatch, RtsTable::advance"
+      algorithm: >
+        Time-ordered dispatch with dispatched flag to prevent re-dispatch.
+        RTS index advances monotonically with relative delay tracking.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-SC-P01
+      - type: satisfies
+        target: SWREQ-SC-P02
+      - type: satisfies
+        target: SWREQ-SC-P03
+      - type: satisfies
+        target: SWREQ-SC-P04
+      - type: satisfies
+        target: SWREQ-SC-P05

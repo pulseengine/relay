@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-TO-001
+    type: system-req
+    title: Telemetry downlink filtering based on subscriptions
+    status: approved
+    description: >
+      The system shall filter telemetry for downlink based on a subscription
+      table. Each subscription maps a message-id to a priority and enabled
+      flag. Only subscribed and enabled telemetry is included in downlink.
+      Replaces NASA cFS Telemetry Output (TO) application.
+    tags: [telemetry-output, filtering, downlink]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (TO-P01 through TO-P04) verified via
+        SMT/Z3. Unit tests confirm subscription management and filtering.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-LC-001
+    type: unit-verification
+    title: "Formal verification for SWDD-LC-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-lc engine properties
+      LC-P01 through LC-P08. All 8 properties proven. Run via:
+      bazel test //:verus_relay_lc
+    tags: [verification, formal, verus, limit-checker]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-LC-001

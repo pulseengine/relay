@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-MD-001
+    type: system-req
+    title: Memory address sampling at configured rates
+    status: approved
+    description: >
+      The system shall sample memory addresses at configured rates using
+      a dwell table. Each entry specifies address, size, rate divisor,
+      and enabled flag. Pure scheduling logic; actual reads are host-provided.
+      Replaces NASA cFS Memory Dwell (MD) application.
+    tags: [memory-dwell, sampling, diagnostics]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (MD-P01 through MD-P04) verified via
+        SMT/Z3. Unit tests confirm dwell table management and sample bounds.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

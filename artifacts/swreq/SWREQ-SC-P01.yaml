@@ -1,0 +1,84 @@
+artifacts:
+  - id: SWREQ-SC-P01
+    type: sw-req
+    title: "SC-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the stored command tables shall be empty
+      with all counts at zero.
+    tags: [stored-command, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and counts == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-SC-001
+
+  - id: SWREQ-SC-P02
+    type: sw-req
+    title: "SC-P02: Dispatch count bounded by MAX_DISPATCH_PER_TICK"
+    status: approved
+    description: >
+      Each tick shall dispatch at most MAX_DISPATCH_PER_TICK commands.
+    tags: [stored-command, bounded, output, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: dispatch ensures count <= MAX_DISPATCH_PER_TICK.
+    links:
+      - type: derives-from
+        target: SYSREQ-SC-001
+
+  - id: SWREQ-SC-P03
+    type: sw-req
+    title: "SC-P03: ATS commands dispatch in time order"
+    status: approved
+    description: >
+      ATS commands shall be dispatched in monotonically increasing time
+      order. No command with a later timestamp fires before an earlier one.
+    tags: [stored-command, ordering, ats, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: ATS dispatch loop maintains time ordering invariant.
+    links:
+      - type: derives-from
+        target: SYSREQ-SC-001
+
+  - id: SWREQ-SC-P04
+    type: sw-req
+    title: "SC-P04: RTS sequence advances monotonically"
+    status: approved
+    description: >
+      The RTS sequence index shall advance monotonically. No backward
+      jumps in the command sequence.
+    tags: [stored-command, ordering, rts, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: RTS processing ensures index advances monotonically.
+    links:
+      - type: derives-from
+        target: SYSREQ-SC-001
+
+  - id: SWREQ-SC-P05
+    type: sw-req
+    title: "SC-P05: Dispatched ATS commands are never re-dispatched"
+    status: approved
+    description: >
+      Once an ATS command has been dispatched, it shall not be dispatched
+      again in subsequent ticks.
+    tags: [stored-command, idempotent, ats, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: dispatched flag prevents re-dispatch of ATS commands.
+    links:
+      - type: derives-from
+        target: SYSREQ-SC-001

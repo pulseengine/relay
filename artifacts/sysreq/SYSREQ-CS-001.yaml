@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-CS-001
+    type: system-req
+    title: Memory integrity verification via CRC32
+    status: approved
+    description: >
+      The system shall verify memory integrity via CRC32 checksums
+      computed over configurable memory regions. Detects bit-flips from
+      radiation or corruption by comparing against stored baselines.
+      Replaces NASA cFS Checksum Services (CS) application.
+    tags: [checksum, integrity, safety, radiation]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: all 5 properties (CS-P01 through CS-P05) verified via
+        SMT/Z3. Unit tests confirm CRC determinism and mismatch detection.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

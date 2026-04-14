@@ -1,0 +1,69 @@
+artifacts:
+  - id: SWREQ-CI-P01
+    type: sw-req
+    title: "CI-P01: validate_header returns Valid only when all checks pass"
+    status: approved
+    description: >
+      The validate_header function shall return Valid only when all
+      validation checks pass: valid stream_id, correct checksum, valid
+      command code, and correct message length.
+    tags: [command-ingest, validation, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: validate_header returns Valid iff all sub-checks pass.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001
+
+  - id: SWREQ-CI-P02
+    type: sw-req
+    title: "CI-P02: compute_checksum is deterministic"
+    status: approved
+    description: >
+      The compute_checksum function shall be deterministic: same input
+      bytes always produce the same checksum output.
+    tags: [command-ingest, deterministic, checksum, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: compute_checksum is a pure function with deterministic output.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001
+
+  - id: SWREQ-CI-P03
+    type: sw-req
+    title: "CI-P03: is_valid_stream_id returns true only for configured IDs"
+    status: approved
+    description: >
+      The is_valid_stream_id function shall return true only for stream
+      IDs present in the configured valid stream ID list.
+    tags: [command-ingest, validation, stream-id, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: is_valid_stream_id matches only configured stream IDs.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001
+
+  - id: SWREQ-CI-P04
+    type: sw-req
+    title: "CI-P04: stream_id_count bounded by array size"
+    status: approved
+    description: >
+      The valid stream ID list shall never exceed MAX_STREAM_IDS (16)
+      entries.
+    tags: [command-ingest, bounded, invariant, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: stream_id_count <= MAX_STREAM_IDS.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001

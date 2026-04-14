@@ -1,0 +1,69 @@
+artifacts:
+  - id: SWREQ-MD-P01
+    type: sw-req
+    title: "MD-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the dwell table shall be empty with
+      entry_count at zero.
+    tags: [memory-dwell, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and count == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-MD-001
+
+  - id: SWREQ-MD-P02
+    type: sw-req
+    title: "MD-P02: add_entry succeeds iff table not full"
+    status: approved
+    description: >
+      The add_entry function shall succeed if and only if the table is
+      not at maximum capacity. On success, count increases by 1.
+    tags: [memory-dwell, bounded, api, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: add_entry ensures result == !old(self).is_full_spec()
+        and count increments on success.
+    links:
+      - type: derives-from
+        target: SYSREQ-MD-001
+
+  - id: SWREQ-MD-P03
+    type: sw-req
+    title: "MD-P03: get_samples output bounded by MAX_SAMPLES_PER_CYCLE"
+    status: approved
+    description: >
+      The get_samples operation shall produce at most MAX_SAMPLES_PER_CYCLE
+      sample requests per call.
+    tags: [memory-dwell, bounded, output, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: get_samples ensures request_count <= MAX_SAMPLES_PER_CYCLE.
+    links:
+      - type: derives-from
+        target: SYSREQ-MD-001
+
+  - id: SWREQ-MD-P04
+    type: sw-req
+    title: "MD-P04: get_samples output bounded by entry_count"
+    status: approved
+    description: >
+      The get_samples operation shall produce at most entry_count
+      sample requests.
+    tags: [memory-dwell, bounded, output, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: get_samples ensures request_count <= entry_count.
+    links:
+      - type: derives-from
+        target: SYSREQ-MD-001

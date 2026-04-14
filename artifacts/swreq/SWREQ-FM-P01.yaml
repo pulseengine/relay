@@ -1,0 +1,69 @@
+artifacts:
+  - id: SWREQ-FM-P01
+    type: sw-req
+    title: "FM-P01: validate_path rejects empty paths"
+    status: approved
+    description: >
+      The validate_path function shall reject paths with length zero.
+    tags: [file-manager, validation, safety, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: validate_path returns Invalid when path.len == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-FM-001
+
+  - id: SWREQ-FM-P02
+    type: sw-req
+    title: "FM-P02: validate_path rejects paths exceeding MAX_PATH_LEN"
+    status: approved
+    description: >
+      The validate_path function shall reject paths whose length
+      exceeds MAX_PATH_LEN.
+    tags: [file-manager, validation, bounded, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: validate_path returns Invalid when path.len > MAX_PATH_LEN.
+    links:
+      - type: derives-from
+        target: SYSREQ-FM-001
+
+  - id: SWREQ-FM-P03
+    type: sw-req
+    title: "FM-P03: validate_request rejects source == dest for Copy/Move/Rename"
+    status: approved
+    description: >
+      The validate_request function shall reject file operation requests
+      where source path equals destination path for Copy, Move, and Rename
+      operations.
+    tags: [file-manager, validation, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: validate_request returns Invalid when source == dest
+        for Copy/Move/Rename commands.
+    links:
+      - type: derives-from
+        target: SYSREQ-FM-001
+
+  - id: SWREQ-FM-P04
+    type: sw-req
+    title: "FM-P04: paths_equal is symmetric"
+    status: approved
+    description: >
+      The paths_equal comparison function shall be symmetric:
+      paths_equal(a, b) == paths_equal(b, a).
+    tags: [file-manager, correctness, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: paths_equal(a, b) <==> paths_equal(b, a).
+    links:
+      - type: derives-from
+        target: SYSREQ-FM-001

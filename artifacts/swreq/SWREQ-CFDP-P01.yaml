@@ -1,0 +1,69 @@
+artifacts:
+  - id: SWREQ-CFDP-P01
+    type: sw-req
+    title: "CFDP-P01: State transitions are valid (no skipping states)"
+    status: approved
+    description: >
+      CFDP transaction state transitions shall follow the valid state
+      machine graph. No state may be skipped. Transitions follow:
+      Idle -> MetadataSent -> DataSending -> EofSent -> Finished.
+    tags: [cfdp, state-machine, correctness, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: advance_state only allows valid next-state transitions.
+    links:
+      - type: derives-from
+        target: SYSREQ-CFDP-001
+
+  - id: SWREQ-CFDP-P02
+    type: sw-req
+    title: "CFDP-P02: Retransmit count bounded by max_retransmit"
+    status: approved
+    description: >
+      The retransmission counter for any transaction shall never exceed
+      the configured max_retransmit limit.
+    tags: [cfdp, bounded, retransmit, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: retransmit_count <= max_retransmit.
+    links:
+      - type: derives-from
+        target: SYSREQ-CFDP-001
+
+  - id: SWREQ-CFDP-P03
+    type: sw-req
+    title: "CFDP-P03: bytes_sent <= file_size"
+    status: approved
+    description: >
+      The bytes_sent counter for any transaction shall never exceed
+      the file_size. No data is sent beyond the file boundary.
+    tags: [cfdp, bounded, data-integrity, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: bytes_sent <= file_size after every send operation.
+    links:
+      - type: derives-from
+        target: SYSREQ-CFDP-001
+
+  - id: SWREQ-CFDP-P04
+    type: sw-req
+    title: "CFDP-P04: Transaction count bounded by MAX_TRANSACTIONS"
+    status: approved
+    description: >
+      The number of concurrent CFDP transactions shall never exceed
+      MAX_TRANSACTIONS.
+    tags: [cfdp, bounded, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: transaction_count <= MAX_TRANSACTIONS.
+    links:
+      - type: derives-from
+        target: SYSREQ-CFDP-001

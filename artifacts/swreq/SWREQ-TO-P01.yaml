@@ -1,0 +1,69 @@
+artifacts:
+  - id: SWREQ-TO-P01
+    type: sw-req
+    title: "TO-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the subscription table shall be empty with
+      entry_count at zero.
+    tags: [telemetry-output, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and count == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-TO-001
+
+  - id: SWREQ-TO-P02
+    type: sw-req
+    title: "TO-P02: Subscribe succeeds iff table not full"
+    status: approved
+    description: >
+      The subscribe function shall succeed if and only if the table is
+      not at maximum capacity. On success, count increases by 1.
+    tags: [telemetry-output, bounded, api, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: subscribe ensures result == !old(self).is_full_spec()
+        and count increments on success.
+    links:
+      - type: derives-from
+        target: SYSREQ-TO-001
+
+  - id: SWREQ-TO-P03
+    type: sw-req
+    title: "TO-P03: Evaluate returns NotSubscribed when msg_id not found"
+    status: approved
+    description: >
+      The evaluate function shall return NotSubscribed when the given
+      message ID is not in the subscription table.
+    tags: [telemetry-output, filtering, correctness, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: evaluate returns NotSubscribed for unregistered msg_ids.
+    links:
+      - type: derives-from
+        target: SYSREQ-TO-001
+
+  - id: SWREQ-TO-P04
+    type: sw-req
+    title: "TO-P04: Entry count bounded by MAX_SUBSCRIPTIONS"
+    status: approved
+    description: >
+      The subscription table shall never contain more than
+      MAX_SUBSCRIPTIONS entries.
+    tags: [telemetry-output, bounded, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: entry_count <= MAX_SUBSCRIPTIONS.
+    links:
+      - type: derives-from
+        target: SYSREQ-TO-001

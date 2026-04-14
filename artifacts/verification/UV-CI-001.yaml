@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-CI-001
+    type: unit-verification
+    title: "Unit tests for SWDD-CI-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-ci.
+      Run via: cargo test -p relay-ci
+    tags: [testing, unit, command-ingest]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-CI-001

@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-SCH-001
+    type: unit-verification
+    title: "Unit tests for SWDD-SCH-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-sch.
+      Run via: cargo test -p relay-sch
+    tags: [testing, unit, scheduler]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-SCH-001

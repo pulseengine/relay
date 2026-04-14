@@ -1,0 +1,19 @@
+artifacts:
+  - id: SYSREQ-CI-001
+    type: system-req
+    title: Incoming command packet validation
+    status: approved
+    description: >
+      The system shall validate incoming command packets including header
+      format, checksum verification, command code range checking, and
+      stream ID validation. Replaces NASA cFS Command Ingest (CI) application.
+    tags: [command-ingest, validation, uplink]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (CI-P01 through CI-P04) verified via
+        SMT/Z3. Unit tests confirm header validation and checksum determinism.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

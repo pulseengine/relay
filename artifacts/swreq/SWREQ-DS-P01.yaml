@@ -1,0 +1,67 @@
+artifacts:
+  - id: SWREQ-DS-P01
+    type: sw-req
+    title: "DS-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the filter table shall be empty with
+      filter_count at zero.
+    tags: [data-storage, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and count == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-DS-001
+
+  - id: SWREQ-DS-P02
+    type: sw-req
+    title: "DS-P02: Decision count bounded by MAX_DECISIONS_PER_CHECK"
+    status: approved
+    description: >
+      The filter evaluation shall produce at most MAX_DECISIONS_PER_CHECK
+      routing decisions per call.
+    tags: [data-storage, bounded, output, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: evaluate ensures decision_count <= MAX_DECISIONS_PER_CHECK.
+    links:
+      - type: derives-from
+        target: SYSREQ-DS-001
+
+  - id: SWREQ-DS-P03
+    type: sw-req
+    title: "DS-P03: Disabled filters never produce decisions"
+    status: approved
+    description: >
+      A filter entry with enabled == false shall never produce a routing
+      decision in the output.
+    tags: [data-storage, disabled, safety, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: disabled filters are skipped during evaluation.
+    links:
+      - type: derives-from
+        target: SYSREQ-DS-001
+
+  - id: SWREQ-DS-P04
+    type: sw-req
+    title: "DS-P04: Filter count bounded by MAX_FILTERS"
+    status: approved
+    description: >
+      The filter table shall never contain more than MAX_FILTERS entries.
+    tags: [data-storage, bounded, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: add_filter ensures filter_count <= MAX_FILTERS.
+    links:
+      - type: derives-from
+        target: SYSREQ-DS-001

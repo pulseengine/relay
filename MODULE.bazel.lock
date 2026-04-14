@@ -9706,7 +9706,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%wasi_wit": {
       "general": {
-        "bzlTransitiveDigest": "86dIHLN+HLk1NyPtHci4r1WETPjPZWx4oSvIO9p88Og=",
+        "bzlTransitiveDigest": "3CWcG2cwGoxGcyMOVgV/5LiHV5C4phoDpEyNaowO+HA=",
         "usagesDigest": "9pXpNweGERxHjzSeJWacqmkcz1KFXdeoYJJ1WBTppbk=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"

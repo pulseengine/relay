@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-SC-001
+    type: unit-verification
+    title: "Formal verification for SWDD-SC-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-sc engine properties
+      SC-P01 through SC-P05. All 5 properties proven. Run via:
+      bazel test //:verus_relay_sc
+    tags: [verification, formal, verus, stored-command]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-SC-001

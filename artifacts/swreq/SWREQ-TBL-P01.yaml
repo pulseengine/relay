@@ -1,0 +1,85 @@
+artifacts:
+  - id: SWREQ-TBL-P01
+    type: sw-req
+    title: "TBL-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the table registry shall be empty with
+      table_count at zero.
+    tags: [table-services, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv() and count == 0.
+    links:
+      - type: derives-from
+        target: SYSREQ-TBL-001
+
+  - id: SWREQ-TBL-P02
+    type: sw-req
+    title: "TBL-P02: Invariant preserved by register"
+    status: approved
+    description: >
+      The register operation shall preserve the registry invariant.
+      Count is bounded by MAX_TABLES.
+    tags: [table-services, invariant, bounded, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: register requires inv(), ensures inv() and count bounded.
+    links:
+      - type: derives-from
+        target: SYSREQ-TBL-001
+
+  - id: SWREQ-TBL-P03
+    type: sw-req
+    title: "TBL-P03: Load writes to inactive buffer only"
+    status: approved
+    description: >
+      The load operation shall write data only to the inactive buffer,
+      never to the currently active buffer.
+    tags: [table-services, double-buffer, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: load writes to buffer[1 - active_index].
+    links:
+      - type: derives-from
+        target: SYSREQ-TBL-001
+
+  - id: SWREQ-TBL-P04
+    type: sw-req
+    title: "TBL-P04: Activate swaps active/inactive buffer index"
+    status: approved
+    description: >
+      The activate operation shall swap the active and inactive buffer
+      indices, making the previously loaded data become the active
+      configuration.
+    tags: [table-services, double-buffer, activation, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: activate ensures new active_index == 1 - old active_index.
+    links:
+      - type: derives-from
+        target: SYSREQ-TBL-001
+
+  - id: SWREQ-TBL-P05
+    type: sw-req
+    title: "TBL-P05: Table count bounded by MAX_TABLES"
+    status: approved
+    description: >
+      The table registry shall never contain more than MAX_TABLES entries.
+    tags: [table-services, bounded, invariant, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: table_count <= MAX_TABLES.
+    links:
+      - type: derives-from
+        target: SYSREQ-TBL-001

@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-DS-001
+    type: system-req
+    title: Data filtering and routing to storage destinations
+    status: approved
+    description: >
+      The system shall filter and route data packets to storage destinations
+      based on configurable filter tables. Each filter matches message-id
+      patterns and routes matching packets to configured file destinations.
+      Replaces NASA cFS Data Storage (DS) application.
+    tags: [data-storage, filtering, routing]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (DS-P01 through DS-P04) verified via
+        SMT/Z3. Unit tests confirm filter matching and routing decisions.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

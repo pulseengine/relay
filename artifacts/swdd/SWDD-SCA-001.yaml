@@ -1,0 +1,39 @@
+artifacts:
+  - id: SWDD-SCA-001
+    type: sw-detail-design
+    title: Stored Command Absolute engine detailed design
+    status: approved
+    description: >
+      The Stored Command Absolute engine dispatches commands at absolute
+      timestamps. Commands fire when current mission time reaches or
+      exceeds the configured execute_at_sec.
+
+      Key types:
+        AbsCommandTable { commands: [AbsCommand; 256], count: u32 }
+        AbsCommand { execute_at_sec: u64, command_code: u16, dispatched: bool }
+
+      Algorithm (dispatch):
+        For each command in 0..count:
+          If !dispatched && current_time >= execute_at_sec:
+            Mark dispatched, emit command (bounded by MAX_DISPATCH_PER_TICK)
+
+      Verus properties verified:
+        SCA-P01 through SCA-P04 (see SWREQ-SCA-P01..P04)
+    tags: [stored-command-absolute, detailed-design, verus]
+    fields:
+      unit: crates/relay-sca/src/engine.rs
+      function: "AbsCommandTable::dispatch, add_command"
+      algorithm: >
+        Absolute time comparison with dispatched flag to prevent
+        re-dispatch. Output bounded by MAX_DISPATCH_PER_TICK.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-SCA-P01
+      - type: satisfies
+        target: SWREQ-SCA-P02
+      - type: satisfies
+        target: SWREQ-SCA-P03
+      - type: satisfies
+        target: SWREQ-SCA-P04

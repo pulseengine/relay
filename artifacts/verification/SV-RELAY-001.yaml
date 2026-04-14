@@ -1,0 +1,361 @@
+artifacts:
+  - id: SV-RELAY-001
+    type: sw-verification
+    title: Limit Checker SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Limit Checker engine satisfies all
+      LC software requirements. Combines unit test evidence (UV-LC-001)
+      and formal verification evidence (FV-LC-001) to demonstrate
+      SWREQ-LC-P01 through SWREQ-LC-P08 are met.
+    tags: [verification, limit-checker, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-LC-P01
+      - type: verifies
+        target: SWREQ-LC-P02
+      - type: verifies
+        target: SWREQ-LC-P03
+      - type: verifies
+        target: SWREQ-LC-P04
+      - type: verifies
+        target: SWREQ-LC-P05
+      - type: verifies
+        target: SWREQ-LC-P06
+      - type: verifies
+        target: SWREQ-LC-P07
+      - type: verifies
+        target: SWREQ-LC-P08
+
+  - id: SV-RELAY-002
+    type: sw-verification
+    title: Scheduler SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Scheduler engine satisfies all
+      SCH software requirements. Combines unit test evidence (UV-SCH-001)
+      and formal verification evidence (FV-SCH-001).
+    tags: [verification, scheduler, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-SCH-P01
+      - type: verifies
+        target: SWREQ-SCH-P02
+      - type: verifies
+        target: SWREQ-SCH-P03
+      - type: verifies
+        target: SWREQ-SCH-P04
+      - type: verifies
+        target: SWREQ-SCH-P05
+      - type: verifies
+        target: SWREQ-SCH-P06
+      - type: verifies
+        target: SWREQ-SCH-P07
+      - type: verifies
+        target: SWREQ-SCH-P08
+
+  - id: SV-RELAY-003
+    type: sw-verification
+    title: Stored Command SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Stored Command engine satisfies all
+      SC software requirements. Combines unit test evidence (UV-SC-001)
+      and formal verification evidence (FV-SC-001).
+    tags: [verification, stored-command, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-SC-P01
+      - type: verifies
+        target: SWREQ-SC-P02
+      - type: verifies
+        target: SWREQ-SC-P03
+      - type: verifies
+        target: SWREQ-SC-P04
+      - type: verifies
+        target: SWREQ-SC-P05
+
+  - id: SV-RELAY-004
+    type: sw-verification
+    title: Stored Command Absolute SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Stored Command Absolute engine
+      satisfies all SCA software requirements. Combines unit test
+      evidence (UV-SCA-001) and formal verification evidence (FV-SCA-001).
+    tags: [verification, stored-command-absolute, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-SCA-P01
+      - type: verifies
+        target: SWREQ-SCA-P02
+      - type: verifies
+        target: SWREQ-SCA-P03
+      - type: verifies
+        target: SWREQ-SCA-P04
+
+  - id: SV-RELAY-005
+    type: sw-verification
+    title: Housekeeping SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Housekeeping engine satisfies all
+      HK software requirements. Combines unit test evidence (UV-HK-001)
+      and formal verification evidence (FV-HK-001).
+    tags: [verification, housekeeping, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-HK-P01
+      - type: verifies
+        target: SWREQ-HK-P02
+      - type: verifies
+        target: SWREQ-HK-P03
+      - type: verifies
+        target: SWREQ-HK-P04
+
+  - id: SV-RELAY-006
+    type: sw-verification
+    title: Checksum Services SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Checksum Services engine satisfies
+      all CS software requirements. Combines unit test evidence (UV-CS-001)
+      and formal verification evidence (FV-CS-001).
+    tags: [verification, checksum, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-CS-P01
+      - type: verifies
+        target: SWREQ-CS-P02
+      - type: verifies
+        target: SWREQ-CS-P03
+      - type: verifies
+        target: SWREQ-CS-P04
+      - type: verifies
+        target: SWREQ-CS-P05
+
+  - id: SV-RELAY-007
+    type: sw-verification
+    title: Health and Safety SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Health and Safety engine satisfies
+      all HS software requirements. Combines unit test evidence (UV-HS-001)
+      and formal verification evidence (FV-HS-001).
+    tags: [verification, health-safety, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-HS-P01
+      - type: verifies
+        target: SWREQ-HS-P02
+      - type: verifies
+        target: SWREQ-HS-P03
+      - type: verifies
+        target: SWREQ-HS-P04
+      - type: verifies
+        target: SWREQ-HS-P05
+
+  - id: SV-RELAY-008
+    type: sw-verification
+    title: Data Storage SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Data Storage engine satisfies all
+      DS software requirements. Combines unit test evidence (UV-DS-001)
+      and formal verification evidence (FV-DS-001).
+    tags: [verification, data-storage, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-DS-P01
+      - type: verifies
+        target: SWREQ-DS-P02
+      - type: verifies
+        target: SWREQ-DS-P03
+      - type: verifies
+        target: SWREQ-DS-P04
+
+  - id: SV-RELAY-009
+    type: sw-verification
+    title: File Manager SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the File Manager engine satisfies all
+      FM software requirements. Combines unit test evidence (UV-FM-001)
+      and formal verification evidence (FV-FM-001).
+    tags: [verification, file-manager, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-FM-P01
+      - type: verifies
+        target: SWREQ-FM-P02
+      - type: verifies
+        target: SWREQ-FM-P03
+      - type: verifies
+        target: SWREQ-FM-P04
+
+  - id: SV-RELAY-010
+    type: sw-verification
+    title: Command Ingest SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Command Ingest engine satisfies all
+      CI software requirements. Combines unit test evidence (UV-CI-001)
+      and formal verification evidence (FV-CI-001).
+    tags: [verification, command-ingest, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-CI-P01
+      - type: verifies
+        target: SWREQ-CI-P02
+      - type: verifies
+        target: SWREQ-CI-P03
+      - type: verifies
+        target: SWREQ-CI-P04
+
+  - id: SV-RELAY-011
+    type: sw-verification
+    title: Telemetry Output SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Telemetry Output engine satisfies
+      all TO software requirements. Combines unit test evidence (UV-TO-001)
+      and formal verification evidence (FV-TO-001).
+    tags: [verification, telemetry-output, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-TO-P01
+      - type: verifies
+        target: SWREQ-TO-P02
+      - type: verifies
+        target: SWREQ-TO-P03
+      - type: verifies
+        target: SWREQ-TO-P04
+
+  - id: SV-RELAY-012
+    type: sw-verification
+    title: Memory Dwell SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Memory Dwell engine satisfies all
+      MD software requirements. Combines unit test evidence (UV-MD-001)
+      and formal verification evidence (FV-MD-001).
+    tags: [verification, memory-dwell, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-MD-P01
+      - type: verifies
+        target: SWREQ-MD-P02
+      - type: verifies
+        target: SWREQ-MD-P03
+      - type: verifies
+        target: SWREQ-MD-P04
+
+  - id: SV-RELAY-013
+    type: sw-verification
+    title: Memory Manager SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Memory Manager engine satisfies all
+      MM software requirements. Combines unit test evidence (UV-MM-001)
+      and formal verification evidence (FV-MM-001).
+    tags: [verification, memory-manager, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-MM-P01
+      - type: verifies
+        target: SWREQ-MM-P02
+      - type: verifies
+        target: SWREQ-MM-P03
+      - type: verifies
+        target: SWREQ-MM-P04
+
+  - id: SV-RELAY-014
+    type: sw-verification
+    title: Table Services SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the Table Services engine satisfies all
+      TBL software requirements. Combines unit test evidence (UV-TBL-001)
+      and formal verification evidence (FV-TBL-001).
+    tags: [verification, table-services, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-TBL-P01
+      - type: verifies
+        target: SWREQ-TBL-P02
+      - type: verifies
+        target: SWREQ-TBL-P03
+      - type: verifies
+        target: SWREQ-TBL-P04
+      - type: verifies
+        target: SWREQ-TBL-P05
+
+  - id: SV-RELAY-015
+    type: sw-verification
+    title: CCSDS codec SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the CCSDS codec engine satisfies all
+      CCSDS software requirements. Combines unit test evidence (UV-CCSDS-001)
+      and formal verification evidence (FV-CCSDS-001).
+    tags: [verification, ccsds, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-CCSDS-P01
+      - type: verifies
+        target: SWREQ-CCSDS-P02
+      - type: verifies
+        target: SWREQ-CCSDS-P03
+      - type: verifies
+        target: SWREQ-CCSDS-P04
+
+  - id: SV-RELAY-016
+    type: sw-verification
+    title: CFDP protocol SW requirement verification
+    status: approved
+    description: >
+      SW-level verification that the CFDP protocol engine satisfies all
+      CFDP software requirements. Combines unit test evidence (UV-CFDP-001)
+      and formal verification evidence (FV-CFDP-001).
+    tags: [verification, cfdp, swe-6]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWREQ-CFDP-P01
+      - type: verifies
+        target: SWREQ-CFDP-P02
+      - type: verifies
+        target: SWREQ-CFDP-P03
+      - type: verifies
+        target: SWREQ-CFDP-P04

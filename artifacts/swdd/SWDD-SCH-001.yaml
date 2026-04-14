@@ -1,0 +1,50 @@
+artifacts:
+  - id: SWDD-SCH-001
+    type: sw-detail-design
+    title: Scheduler engine detailed design
+    status: approved
+    description: >
+      The Scheduler engine dispatches actions at configured time intervals.
+      Core data structure is ScheduleTable with fixed-size array of
+      MAX_SCHEDULE_SLOTS (256) entries.
+
+      Key types:
+        ScheduleTable { slots: [ScheduleSlot; 256], slot_count: u32 }
+        ScheduleSlot { channel_id, period, offset, enabled }
+        TickResult { actions: [Action; 16], action_count: u32 }
+
+      Algorithm (process_tick):
+        For each slot i in 0..slot_count:
+          1. Skip if disabled or period mismatch
+          2. If tick_count matches slot timing, emit action
+          3. Bound output by MAX_ACTIONS_PER_TICK
+
+      Verus properties verified:
+        SCH-P01 through SCH-P08 (see SWREQ-SCH-P01..P08)
+    tags: [scheduler, detailed-design, verus]
+    fields:
+      unit: crates/relay-sch/src/engine.rs
+      function: "ScheduleTable::process_tick, add_slot, set_enabled"
+      algorithm: >
+        Tick-driven evaluation: each tick checks all slots against
+        current tick_count modulo period. Output bounded by min of
+        slot_count and MAX_ACTIONS_PER_TICK.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-SCH-P01
+      - type: satisfies
+        target: SWREQ-SCH-P02
+      - type: satisfies
+        target: SWREQ-SCH-P03
+      - type: satisfies
+        target: SWREQ-SCH-P04
+      - type: satisfies
+        target: SWREQ-SCH-P05
+      - type: satisfies
+        target: SWREQ-SCH-P06
+      - type: satisfies
+        target: SWREQ-SCH-P07
+      - type: satisfies
+        target: SWREQ-SCH-P08

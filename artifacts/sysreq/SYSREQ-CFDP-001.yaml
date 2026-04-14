@@ -1,0 +1,19 @@
+artifacts:
+  - id: SYSREQ-CFDP-001
+    type: system-req
+    title: CFDP file delivery protocol state machine management
+    status: approved
+    description: >
+      The system shall manage CFDP file delivery protocol state machines
+      per CCSDS 727.0-B-5. Handles transaction lifecycle, ACK/NAK,
+      metadata, EOF, and retransmission. No file I/O; protocol logic only.
+    tags: [cfdp, protocol, file-delivery, state-machine]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (CFDP-P01 through CFDP-P04) verified
+        via SMT/Z3. Unit tests confirm state transitions and bounds.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

@@ -1,0 +1,147 @@
+artifacts:
+  - id: SWREQ-LC-P01
+    type: sw-req
+    title: "LC-P01: Invariant holds after init"
+    status: approved
+    description: >
+      After initialization, the WatchpointTable invariant shall hold:
+      the table is empty and entry_count is 0. The invariant guarantees
+      entry_count <= MAX_WATCHPOINTS.
+    tags: [limit-checker, invariant, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: new() postcondition establishes inv(), count_spec() == 0,
+        and !is_full_spec().
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001
+
+  - id: SWREQ-LC-P02
+    type: sw-req
+    title: "LC-P02: Invariant preserved by add_watchpoint"
+    status: approved
+    description: >
+      The add_watchpoint operation shall preserve the table invariant.
+      If the table is not full, count increases by 1; if full, count
+      is unchanged and false is returned.
+    tags: [limit-checker, invariant, bounded, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: add_watchpoint requires old(self).inv(), ensures self.inv()
+        and count bounded.
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001
+
+  - id: SWREQ-LC-P03
+    type: sw-req
+    title: "LC-P03: Evaluate output bounded by MAX_VIOLATIONS_PER_CYCLE"
+    status: approved
+    description: >
+      The evaluate operation shall produce at most MAX_VIOLATIONS_PER_CYCLE
+      violations per call. violation_count <= MAX_VIOLATIONS_PER_CYCLE.
+    tags: [limit-checker, bounded, output, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: evaluate ensures result.violation_count as usize <=
+        MAX_VIOLATIONS_PER_CYCLE.
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001
+
+  - id: SWREQ-LC-P04
+    type: sw-req
+    title: "LC-P04: Evaluate output bounded by entry_count"
+    status: approved
+    description: >
+      The evaluate operation shall produce at most entry_count violations.
+      violation_count <= entry_count.
+    tags: [limit-checker, bounded, output, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: evaluate ensures result.violation_count <= self.entry_count.
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001
+
+  - id: SWREQ-LC-P05
+    type: sw-req
+    title: "LC-P05: Disabled watchpoints never produce violations"
+    status: approved
+    description: >
+      A watchpoint with enabled == false shall never produce a violation
+      in the evaluate output. Disabled watchpoints are skipped.
+    tags: [limit-checker, disabled, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: wp_decide ensures !wp_enabled ==> result === WpDecision::Skip.
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001
+
+  - id: SWREQ-LC-P06
+    type: sw-req
+    title: "LC-P06: compare() is total and deterministic"
+    status: approved
+    description: >
+      The compare function shall be total and deterministic for all six
+      comparison operator values. Every operator produces a correct boolean
+      result for all (value, threshold) pairs.
+    tags: [limit-checker, compare, deterministic, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: compare ensures correct result for each of 6 operators
+        via postcondition implications.
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001
+
+  - id: SWREQ-LC-P07
+    type: sw-req
+    title: "LC-P07: Persistence counter increments on violation, resets on normal"
+    status: approved
+    description: >
+      When a watchpoint threshold is exceeded, its persistence counter
+      shall increment. When the reading is normal, the counter shall
+      reset to zero.
+    tags: [limit-checker, persistence, state, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: evaluate applies Pass->reset and PendingPersistence/
+        Violated->increment via wp_decide decision pattern.
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001
+
+  - id: SWREQ-LC-P08
+    type: sw-req
+    title: "LC-P08: Violation only fires when current_count >= persistence"
+    status: approved
+    description: >
+      A violation shall only be emitted when the persistence counter
+      (after increment) meets or exceeds the configured persistence
+      threshold. This prevents transient spikes from causing violations.
+    tags: [limit-checker, persistence, threshold, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: wp_decide returns Violated only when new_count >=
+        wp_persistence.
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001

@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-MM-001
+    type: system-req
+    title: Memory operation request validation
+    status: approved
+    description: >
+      The system shall validate memory operation requests including peek,
+      poke, load, dump, and fill. Validates address range, size bounds,
+      and alignment. Pure validation; actual memory access is host-provided.
+      Replaces NASA cFS Memory Manager (MM) application.
+    tags: [memory-manager, validation, safety]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (MM-P01 through MM-P04) verified via
+        SMT/Z3. Unit tests confirm address validation and alignment checks.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

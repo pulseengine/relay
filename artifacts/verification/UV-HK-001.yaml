@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-HK-001
+    type: unit-verification
+    title: "Unit tests for SWDD-HK-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-hk.
+      Run via: cargo test -p relay-hk
+    tags: [testing, unit, housekeeping]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-HK-001

@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-TO-001
+    type: unit-verification
+    title: "Formal verification for SWDD-TO-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-to engine properties
+      TO-P01 through TO-P04. All 4 properties proven. Run via:
+      bazel test //:verus_relay_to
+    tags: [verification, formal, verus, telemetry-output]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-TO-001

@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-TBL-001
+    type: unit-verification
+    title: "Formal verification for SWDD-TBL-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-tbl engine properties
+      TBL-P01 through TBL-P05. All 5 properties proven. Run via:
+      bazel test //:verus_relay_tbl
+    tags: [verification, formal, verus, table-services]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-TBL-001

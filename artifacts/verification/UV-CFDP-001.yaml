@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-CFDP-001
+    type: unit-verification
+    title: "Unit tests for SWDD-CFDP-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-cfdp.
+      Run via: cargo test -p relay-cfdp
+    tags: [testing, unit, cfdp]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-CFDP-001

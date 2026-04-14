@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-FM-001
+    type: system-req
+    title: File operation command validation
+    status: approved
+    description: >
+      The system shall validate file operation commands including copy,
+      move, rename, and delete. Validates path lengths, rejects empty
+      paths, and prevents source==destination for copy/move/rename.
+      Replaces NASA cFS File Manager (FM) application.
+    tags: [file-manager, validation, commands]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 4 properties (FM-P01 through FM-P04) verified via
+        SMT/Z3. Unit tests confirm path validation and rejection cases.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

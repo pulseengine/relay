@@ -1,0 +1,19 @@
+artifacts:
+  - id: SYSREQ-SCH-001
+    type: system-req
+    title: Time-based message scheduling
+    status: approved
+    description: >
+      The system shall dispatch messages at configured time intervals using
+      a schedule table. Each slot specifies a channel-id, period, and offset.
+      Replaces NASA cFS Scheduler (SCH) application.
+    tags: [scheduler, timing, dispatch]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: all 8 properties (SCH-P01 through SCH-P08) verified via
+        SMT/Z3. Unit tests confirm slot-based scheduling at boundary values.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

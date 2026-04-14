@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-TO-001
+    type: unit-verification
+    title: "Unit tests for SWDD-TO-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-to.
+      Run via: cargo test -p relay-to
+    tags: [testing, unit, telemetry-output]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-TO-001

@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWDD-DS-001
+    type: sw-detail-design
+    title: Data Storage engine detailed design
+    status: approved
+    description: >
+      The Data Storage engine filters and routes data packets to storage
+      destinations based on configurable filter tables.
+
+      Key types:
+        FilterTable { filters: [Filter; 64], filter_count: u32 }
+        Filter { msg_id, destination, file_type: FileType, enabled: bool }
+        DecisionResult { decisions: [Decision; 16], decision_count: u32 }
+
+      Algorithm (evaluate):
+        For each filter in 0..filter_count:
+          1. Skip if disabled
+          2. Match msg_id against packet
+          3. If match, emit routing decision (bounded by MAX_DECISIONS_PER_CHECK)
+
+      Verus properties verified:
+        DS-P01 through DS-P04 (see SWREQ-DS-P01..P04)
+    tags: [data-storage, detailed-design, verus, filtering]
+    fields:
+      unit: crates/relay-ds/src/engine.rs
+      function: "FilterTable::evaluate"
+      algorithm: >
+        Message-ID matching with filter table. Disabled filters skipped.
+        Output bounded by min of filter_count and MAX_DECISIONS_PER_CHECK.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-DS-P01
+      - type: satisfies
+        target: SWREQ-DS-P02
+      - type: satisfies
+        target: SWREQ-DS-P03
+      - type: satisfies
+        target: SWREQ-DS-P04

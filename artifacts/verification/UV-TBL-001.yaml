@@ -1,0 +1,14 @@
+artifacts:
+  - id: UV-TBL-001
+    type: unit-verification
+    title: "Unit tests for SWDD-TBL-001"
+    status: approved
+    description: >
+      Automated unit tests verifying the detailed design of relay-tbl.
+      Run via: cargo test -p relay-tbl
+    tags: [testing, unit, table-services]
+    fields:
+      method: automated-test
+    links:
+      - type: verifies
+        target: SWDD-TBL-001

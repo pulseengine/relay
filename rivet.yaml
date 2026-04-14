@@ -1,35 +1,27 @@
-project: relay
-description: Formally verified flight software components for WebAssembly
-version: 0.1.0
+project:
+  name: relay
+  version: "0.1.0"
+  schemas:
+    - common
+    - aspice
+  description: >
+    Formally verified flight software engines for cFS replacement.
+    16 engines, all Verus SMT/Z3 proven. Drop-in replacements for
+    NASA cFS applications.
 
-artifact_dirs:
-  - artifacts/sysreq
-  - artifacts/swarch
-  - artifacts/swdd
-  - artifacts/swreq
+sources:
+  - path: artifacts/sysreq
+    format: generic-yaml
+  - path: artifacts/swarch
+    format: generic-yaml
+  - path: artifacts/swreq
+    format: generic-yaml
+  - path: artifacts/swdd
+    format: generic-yaml
+  - path: artifacts/verification
+    format: generic-yaml
 
-artifact_types:
-  - sysreq
-  - swarch
-  - swdd
-  - swreq
-  - unit-verification
-  - sw-integration-verification
-  - sys-verification
-  - sys-integration-verification
-  - stpa-loss
-  - stpa-hazard
-  - stpa-uca
+docs:
+  - docs
 
-commit_trailers:
-  required:
-    - Implements
-    - Fixes
-    - Verifies
-    - Refs
-  exemptions:
-    - chore
-    - style
-    - ci
-    - docs
-    - build
+results: results

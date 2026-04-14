@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-CI-001
+    type: unit-verification
+    title: "Formal verification for SWDD-CI-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-ci engine properties
+      CI-P01 through CI-P04. All 4 properties proven. Run via:
+      bazel test //:verus_relay_ci
+    tags: [verification, formal, verus, command-ingest]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-CI-001

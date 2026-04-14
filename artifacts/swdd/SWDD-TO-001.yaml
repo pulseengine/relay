@@ -1,0 +1,41 @@
+artifacts:
+  - id: SWDD-TO-001
+    type: sw-detail-design
+    title: Telemetry Output engine detailed design
+    status: approved
+    description: >
+      The Telemetry Output engine filters telemetry for downlink based
+      on a subscription table.
+
+      Key types:
+        SubscriptionTable { entries: [Subscription; 128], entry_count: u32 }
+        Subscription { msg_id: u32, priority: u8, enabled: bool }
+
+      Algorithm (evaluate):
+        For a given msg_id:
+          1. Linear scan entries for matching msg_id
+          2. If found and enabled, return Subscribed with priority
+          3. If not found, return NotSubscribed
+
+      subscribe: append entry if table not full, increment count.
+
+      Verus properties verified:
+        TO-P01 through TO-P04 (see SWREQ-TO-P01..P04)
+    tags: [telemetry-output, detailed-design, verus, filtering]
+    fields:
+      unit: crates/relay-to/src/engine.rs
+      function: "SubscriptionTable::evaluate, subscribe"
+      algorithm: >
+        Linear scan subscription lookup. Subscribe appends to
+        fixed-size array. Entry count bounded by MAX_SUBSCRIPTIONS.
+    links:
+      - type: refines
+        target: SWARCH-RELAY-001
+      - type: satisfies
+        target: SWREQ-TO-P01
+      - type: satisfies
+        target: SWREQ-TO-P02
+      - type: satisfies
+        target: SWREQ-TO-P03
+      - type: satisfies
+        target: SWREQ-TO-P04

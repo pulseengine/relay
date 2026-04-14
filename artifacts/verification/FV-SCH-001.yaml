@@ -1,0 +1,15 @@
+artifacts:
+  - id: FV-SCH-001
+    type: unit-verification
+    title: "Formal verification for SWDD-SCH-001"
+    status: approved
+    description: >
+      Verus SMT/Z3 formal verification of relay-sch engine properties
+      SCH-P01 through SCH-P08. All 8 properties proven. Run via:
+      bazel test //:verus_relay_sch
+    tags: [verification, formal, verus, scheduler]
+    fields:
+      method: formal-verification
+    links:
+      - type: verifies
+        target: SWDD-SCH-001

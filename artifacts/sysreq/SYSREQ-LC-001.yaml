@@ -1,0 +1,20 @@
+artifacts:
+  - id: SYSREQ-LC-001
+    type: system-req
+    title: Sensor value limit checking against configurable thresholds
+    status: approved
+    description: >
+      The system shall monitor sensor values against configurable thresholds
+      and generate violations when thresholds are exceeded. Watchpoints define
+      sensor-id, comparison operator, threshold value, and persistence count.
+      Replaces NASA cFS Limit Checker (LC) application.
+    tags: [limit-checker, safety, monitoring]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus proof: all 8 properties (LC-P01 through LC-P08) verified via
+        SMT/Z3. Unit tests confirm watchpoint evaluation at boundary values.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001
