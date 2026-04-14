@@ -36,7 +36,8 @@ impl Watchpoint { pub const fn empty() -> Self { Watchpoint { sensor_id: 0, op: 
 impl Violation { pub const fn empty() -> Self { Violation { watchpoint_id: 0, measured: 0, threshold: 0, op: ComparisonOp::LessThan } } }
 
 impl WatchpointTable {
-    pub fn new() -> Self { WatchpointTable { entries: [Watchpoint::empty(); MAX_WATCHPOINTS], entry_count: 0 } }
+    pub const NEW: Self = WatchpointTable { entries: [Watchpoint::empty(); MAX_WATCHPOINTS], entry_count: 0 };
+    pub fn new() -> Self { Self::NEW }
 
     pub fn add_watchpoint(&mut self, wp: Watchpoint) -> bool {
         if self.entry_count as usize >= MAX_WATCHPOINTS { return false; }

@@ -12,5 +12,9 @@ rust-version.workspace = true
 path = "plain/src/lib.rs"
 crate-type = ["rlib"]
 
+[features]
+default = []
+c-api = []
+
 [dependencies]
 wit-bindgen = { workspace = true, default-features = false }
