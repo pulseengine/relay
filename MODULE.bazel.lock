@@ -191,6 +191,8 @@
     "https://bcr.bazel.build/modules/rules_license/0.0.7/MODULE.bazel": "088fbeb0b6a419005b89cf93fe62d9517c0a2b8bb56af3244af65ecfe37e7d5d",
     "https://bcr.bazel.build/modules/rules_license/1.0.0/MODULE.bazel": "a7fda60eefdf3d8c827262ba499957e4df06f659330bbe6cdbdb975b768bb65c",
     "https://bcr.bazel.build/modules/rules_license/1.0.0/source.json": "a52c89e54cc311196e478f8382df91c15f7a2bfdf4c6cd0e2675cc2ff0b56efb",
+    "https://bcr.bazel.build/modules/rules_nixpkgs_core/0.13.0/MODULE.bazel": "b826d994220017d44c8a4e55435c2c2e6b4733eaaff69fff65232e0010afcb7b",
+    "https://bcr.bazel.build/modules/rules_nixpkgs_core/0.13.0/source.json": "c542b96a9d6ab189bd1a65da43e6c7b8be5f1099876ffba35cd9d2275f82740e",
     "https://bcr.bazel.build/modules/rules_nodejs/6.5.0/MODULE.bazel": "546d0cf79f36f9f6e080816045f97234b071c205f4542e3351bd4424282a8810",
     "https://bcr.bazel.build/modules/rules_nodejs/6.5.0/source.json": "ac075bc5babebc25a0adc88ee885f2c8d8520d141f6e139ba9dfa0eedb5be908",
     "https://bcr.bazel.build/modules/rules_oci/2.3.0/MODULE.bazel": "49075197960c924c0a4d759b7c765c3d00a41d2fdd4a943b42823c1d016ab4ec",
@@ -307,6 +309,66 @@
               "urls": [
                 "https://github.com/bazelbuild/rules_android/archive/v0.1.1.zip"
               ]
+            }
+          }
+        }
+      }
+    },
+    "@@rules_lean+//lean:extensions.bzl%lean": {
+      "general": {
+        "bzlTransitiveDigest": "xWCDsrgjR1eNscJlJQNMqFhLpDMbq9p2hefEcKeC+TE=",
+        "usagesDigest": "PqjHZm+kuf+rX6/nY0brJWyw4hNgqhD6vlj591IYLCU=",
+        "recordedInputs": [],
+        "generatedRepoSpecs": {
+          "lean_darwin_aarch64": {
+            "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_release",
+            "attributes": {
+              "version": "4.27.0",
+              "platform": "darwin_aarch64",
+              "sha256": "01e7d9130464bc7d847baece07dfb2c4f48dd02e71b4b9a77d484914ea594efb"
+            }
+          },
+          "lean_darwin_x86_64": {
+            "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_release",
+            "attributes": {
+              "version": "4.27.0",
+              "platform": "darwin_x86_64",
+              "sha256": "e4ca541d86881c35497cb6e6c1a21358f03a4b2cfb2e8d4e14e58dc2a0a805ae"
+            }
+          },
+          "lean_linux_x86_64": {
+            "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_release",
+            "attributes": {
+              "version": "4.27.0",
+              "platform": "linux_x86_64",
+              "sha256": "056e2dc8564fc064a801e69f3eb18c044b9b546bc8b0e5a2c00247f8a1cb8ce6"
+            }
+          },
+          "lean_linux_aarch64": {
+            "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_release",
+            "attributes": {
+              "version": "4.27.0",
+              "platform": "linux_aarch64",
+              "sha256": "b256eec276baaaccc3eb3fa64d7ccff64f710b7caa074f305ba95e0013ad31e7"
+            }
+          },
+          "lean_toolchains": {
+            "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_toolchains_hub",
+            "attributes": {
+              "platforms": [
+                "darwin_aarch64",
+                "darwin_x86_64",
+                "linux_x86_64",
+                "linux_aarch64"
+              ]
+            }
+          },
+          "mathlib": {
+            "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%mathlib_repo",
+            "attributes": {
+              "host_platform": "darwin_aarch64",
+              "lean_version": "4.27.0",
+              "mathlib_rev": "v4.27.0"
             }
           }
         }

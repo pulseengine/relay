@@ -24,6 +24,7 @@ Require Import Stdlib.Init.Logic.
 Require Import Stdlib.ZArith.ZArith.
 Require Import Stdlib.Arith.PeanoNat.
 Open Scope Z_scope.
+Require Import Stdlib.micromega.Lia.
 
 (* ========================================================================= *)
 (** * Section 1: Abstract Invariant Definitions *)

@@ -19,6 +19,24 @@ local_path_override(
     path = "../rules_verus",
 )
 
+bazel_dep(name = "rules_rocq_rust", version = "0.1.0")
+local_path_override(
+    module_name = "rules_rocq_rust",
+    path = "../rules_rocq_rust",
+)
+
+bazel_dep(name = "rules_lean", version = "0.1.0")
+local_path_override(
+    module_name = "rules_lean",
+    path = "../rules_lean",
+)
+
+# Lean 4 toolchain + Mathlib
+lean = use_extension("@rules_lean//lean:extensions.bzl", "lean")
+lean.toolchain(version = "4.27.0")
+use_repo(lean, "lean_toolchains", "mathlib")
+register_toolchains("@lean_toolchains//:all")
+
 # Override rules_rust to match rules_wasm_component's version
 git_override(
     module_name = "rules_rust",
