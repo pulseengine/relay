@@ -1,7 +1,30 @@
 load("@rules_wasm_component//rust:defs.bzl", "rust_wasm_component_bindgen")
 load("@rules_wasm_component//wit:defs.bzl", "wit_library")
+load("@rules_verus//verus:defs.bzl", "verus_library", "verus_test")
 
 package(default_visibility = ["//visibility:public"])
+
+# ═══════════════════════════════════════════════════════════════
+# Verus verification (Track 1: SMT/Z3)
+# ═══════════════════════════════════════════════════════════════
+
+verus_test(
+    name = "relay_lc_verus_test",
+    srcs = [
+        "crates/relay-lc/src/lib.rs",
+        "crates/relay-lc/src/engine.rs",
+    ],
+    crate_name = "relay_lc",
+)
+
+verus_test(
+    name = "relay_sch_verus_test",
+    srcs = [
+        "crates/relay-sch/src/lib.rs",
+        "crates/relay-sch/src/engine.rs",
+    ],
+    crate_name = "relay_sch",
+)
 
 # ═══════════════════════════════════════════════════════════════
 # WIT interface

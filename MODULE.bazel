@@ -13,6 +13,12 @@ local_path_override(
     path = "../rules_wasm_component",
 )
 
+bazel_dep(name = "rules_verus", version = "0.1.0")
+local_path_override(
+    module_name = "rules_verus",
+    path = "../rules_verus",
+)
+
 # Override rules_rust to match rules_wasm_component's version
 git_override(
     module_name = "rules_rust",
