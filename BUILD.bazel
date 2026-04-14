@@ -327,3 +327,22 @@ synth_compile(
     wasm_module = ":relay-all-fused",
     target = "cortex-m4f",
 )
+
+# ═══════════════════════════════════════════════════════════════
+# Formal proof tests (Track 2: Rocq + Lean)
+# ═══════════════════════════════════════════════════════════════
+
+test_suite(
+    name = "proof_tests",
+    tests = [
+        # Rocq abstract invariant proofs
+        "//proofs/rocq:lc_proofs_test",
+        "//proofs/rocq:sch_proofs_test",
+        "//proofs/rocq:sc_proofs_test",
+        "//proofs/rocq:hs_proofs_test",
+        "//proofs/rocq:cfdp_proofs_test",
+        # Lean mathematical proofs
+        "//proofs/lean:wcet_analysis_test",
+        "//proofs/lean:backpressure_safety_test",
+    ],
+)

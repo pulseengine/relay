@@ -1,0 +1,38 @@
+# Lean 4 proofs: mathematical foundations for Relay engines
+#
+# These are PURE MATHEMATICAL proofs about timing, buffer sizing,
+# and stream composition safety. They do not depend on any
+# implementation code.
+#
+#   - WCET Analysis: worst-case execution time bounds per engine
+#   - Backpressure Safety: bounded stream transformer composition
+
+load("@rules_lean//lean:defs.bzl", "lean_library", "lean_proof_test")
+
+# ── WCET Analysis ─────────────────────────────────────────────────────
+
+lean_library(
+    name = "wcet_analysis",
+    srcs = ["WcetAnalysis.lean"],
+    deps = ["@mathlib//:Mathlib"],
+)
+
+lean_proof_test(
+    name = "wcet_analysis_test",
+    srcs = ["WcetAnalysis.lean"],
+    deps = [":wcet_analysis", "@mathlib//:Mathlib"],
+)
+
+# ── Backpressure Safety ───────────────────────────────────────────────
+
+lean_library(
+    name = "backpressure_safety",
+    srcs = ["BackpressureSafety.lean"],
+    deps = ["@mathlib//:Mathlib"],
+)
+
+lean_proof_test(
+    name = "backpressure_safety_test",
+    srcs = ["BackpressureSafety.lean"],
+    deps = [":backpressure_safety", "@mathlib//:Mathlib"],
+)

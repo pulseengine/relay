@@ -1,0 +1,82 @@
+# Abstract invariant proofs for Relay engines (Rocq/Coq)
+#
+# These proofs reason about each engine's abstract properties
+# (invariant preservation, compositional correctness) using Rocq's
+# tactic language over Z. They complement the SMT-backed Verus proofs
+# in each engine's engine.rs.
+#
+# Unlike Gale's sem_proofs.v which imports rocq-of-rust translated code,
+# these are PURE ABSTRACT proofs — they use only Stdlib.ZArith and
+# do not depend on any translation infrastructure.
+
+load("@rules_rocq_rust//rocq:defs.bzl", "rocq_library", "rocq_proof_test")
+
+# ── Limit Checker proofs ────────────────────────────────────────────────
+
+rocq_library(
+    name = "lc_proofs",
+    srcs = ["lc_proofs.v"],
+    extra_flags = ["-impredicative-set"],
+)
+
+rocq_proof_test(
+    name = "lc_proofs_test",
+    srcs = ["lc_proofs.v"],
+    deps = [":lc_proofs"],
+)
+
+# ── Scheduler proofs ────────────────────────────────────────────────────
+
+rocq_library(
+    name = "sch_proofs",
+    srcs = ["sch_proofs.v"],
+    extra_flags = ["-impredicative-set"],
+)
+
+rocq_proof_test(
+    name = "sch_proofs_test",
+    srcs = ["sch_proofs.v"],
+    deps = [":sch_proofs"],
+)
+
+# ── Stored Command proofs ───────────────────────────────────────────────
+
+rocq_library(
+    name = "sc_proofs",
+    srcs = ["sc_proofs.v"],
+    extra_flags = ["-impredicative-set"],
+)
+
+rocq_proof_test(
+    name = "sc_proofs_test",
+    srcs = ["sc_proofs.v"],
+    deps = [":sc_proofs"],
+)
+
+# ── Health & Safety proofs ──────────────────────────────────────────────
+
+rocq_library(
+    name = "hs_proofs",
+    srcs = ["hs_proofs.v"],
+    extra_flags = ["-impredicative-set"],
+)
+
+rocq_proof_test(
+    name = "hs_proofs_test",
+    srcs = ["hs_proofs.v"],
+    deps = [":hs_proofs"],
+)
+
+# ── CFDP proofs ─────────────────────────────────────────────────────────
+
+rocq_library(
+    name = "cfdp_proofs",
+    srcs = ["cfdp_proofs.v"],
+    extra_flags = ["-impredicative-set"],
+)
+
+rocq_proof_test(
+    name = "cfdp_proofs_test",
+    srcs = ["cfdp_proofs.v"],
+    deps = [":cfdp_proofs"],
+)
