@@ -1,6 +1,6 @@
 [package]
-name = "relay-tbl"
-description = "Relay Table Services — runtime configuration table management with double buffering"
+name = "relay-ccsds"
+description = "Relay CCSDS Packet Codec — Space Packet Protocol encoding/decoding"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

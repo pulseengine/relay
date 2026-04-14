@@ -117,6 +117,42 @@ verus_test(
     crate_name = "relay_fm",
 )
 
+verus_test(
+    name = "relay_sca_verus_test",
+    srcs = [
+        "crates/relay-sca/src/lib.rs",
+        "crates/relay-sca/src/engine.rs",
+    ],
+    crate_name = "relay_sca",
+)
+
+verus_test(
+    name = "relay_tbl_verus_test",
+    srcs = [
+        "crates/relay-tbl/src/lib.rs",
+        "crates/relay-tbl/src/engine.rs",
+    ],
+    crate_name = "relay_tbl",
+)
+
+verus_test(
+    name = "relay_ccsds_verus_test",
+    srcs = [
+        "crates/relay-ccsds/src/lib.rs",
+        "crates/relay-ccsds/src/engine.rs",
+    ],
+    crate_name = "relay_ccsds",
+)
+
+verus_test(
+    name = "relay_cfdp_verus_test",
+    srcs = [
+        "crates/relay-cfdp/src/lib.rs",
+        "crates/relay-cfdp/src/engine.rs",
+    ],
+    crate_name = "relay_cfdp",
+)
+
 # ═══════════════════════════════════════════════════════════════
 # WIT interface
 # ═══════════════════════════════════════════════════════════════

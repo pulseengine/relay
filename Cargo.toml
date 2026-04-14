@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/relay-sc",
+    "crates/relay-sca",
     "crates/relay-hk",
     "crates/relay-lc",
     "crates/relay-sch",
@@ -14,6 +15,8 @@ members = [
     "crates/relay-to",
     "crates/relay-md",
     "crates/relay-mm",
+    "crates/relay-ccsds",
+    "crates/relay-cfdp",
     "host/relay-sb",
     "host/relay-es",
     "host/relay-evs",

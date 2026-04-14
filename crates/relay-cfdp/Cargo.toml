@@ -1,6 +1,6 @@
 [package]
-name = "relay-tbl"
-description = "Relay Table Services — runtime configuration table management with double buffering"
+name = "relay-cfdp"
+description = "Relay CFDP Protocol Core — CCSDS File Delivery Protocol state machine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
