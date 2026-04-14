@@ -26,6 +26,33 @@ verus_test(
     crate_name = "relay_sch",
 )
 
+verus_test(
+    name = "relay_sc_verus_test",
+    srcs = [
+        "crates/relay-sc/src/lib.rs",
+        "crates/relay-sc/src/engine.rs",
+    ],
+    crate_name = "relay_sc",
+)
+
+verus_test(
+    name = "relay_hk_verus_test",
+    srcs = [
+        "crates/relay-hk/src/lib.rs",
+        "crates/relay-hk/src/engine.rs",
+    ],
+    crate_name = "relay_hk",
+)
+
+verus_test(
+    name = "relay_cs_verus_test",
+    srcs = [
+        "crates/relay-cs/src/lib.rs",
+        "crates/relay-cs/src/engine.rs",
+    ],
+    crate_name = "relay_cs",
+)
+
 # ═══════════════════════════════════════════════════════════════
 # WIT interface
 # ═══════════════════════════════════════════════════════════════
