@@ -1,0 +1,23 @@
+[package]
+name = "relay-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+relay-lc = { path = "../crates/relay-lc" }
+relay-sch = { path = "../crates/relay-sch" }
+
+[workspace]
+
+[[bin]]
+name = "fuzz_lc_evaluate"
+path = "fuzz_targets/fuzz_lc_evaluate.rs"
+
+[[bin]]
+name = "fuzz_sch_tick"
+path = "fuzz_targets/fuzz_sch_tick.rs"

@@ -17,3 +17,6 @@ wit-bindgen = { workspace = true, default-features = false }
 
 # no_std + no alloc: WASM components run in bounded memory.
 # All allocation through Kiln capability system or static buffers.
+
+[dev-dependencies]
+proptest.workspace = true

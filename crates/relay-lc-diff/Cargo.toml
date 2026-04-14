@@ -1,0 +1,17 @@
+[package]
+name = "relay-lc-diff"
+description = "Differential tests: relay-lc engine vs naive reference implementation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+relay-lc = { path = "../relay-lc" }
+
+[dev-dependencies]
+proptest.workspace = true

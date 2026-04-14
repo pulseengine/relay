@@ -17,6 +17,7 @@ members = [
     "crates/relay-mm",
     "crates/relay-ccsds",
     "crates/relay-cfdp",
+    "crates/relay-lc-diff",
     "host/relay-sb",
     "host/relay-es",
     "host/relay-evs",
@@ -32,6 +33,7 @@ rust-version = "1.85.0"
 
 [workspace.dependencies]
 wit-bindgen = { version = "0.41.0", default-features = false }
+proptest = "1"
 
 # All guest components are no_std + no alloc.
 # Memory comes from Kiln's capability-based allocator (safe_managed_alloc!)

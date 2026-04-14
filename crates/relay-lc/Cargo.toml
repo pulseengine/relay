@@ -18,3 +18,6 @@ c-api = []
 
 [dependencies]
 wit-bindgen = { workspace = true, default-features = false }
+
+[dev-dependencies]
+proptest.workspace = true

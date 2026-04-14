@@ -4,17 +4,17 @@
 pub const MAX_WATCHPOINTS: usize = 128;
 pub const MAX_VIOLATIONS_PER_CYCLE: usize = 32;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ComparisonOp { LessThan = 0, GreaterThan = 1, LessOrEqual = 2, GreaterOrEqual = 3, Equal = 4, NotEqual = 5 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Watchpoint { pub sensor_id: u32, pub op: ComparisonOp, pub threshold: i64, pub enabled: bool, pub persistence: u32, pub current_count: u32 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Violation { pub watchpoint_id: u32, pub measured: i64, pub threshold: i64, pub op: ComparisonOp }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct SensorReading { pub sensor_id: u32, pub value: i64 }
 
 pub struct EvalResult { pub violations: [Violation; MAX_VIOLATIONS_PER_CYCLE], pub violation_count: u32 }
@@ -91,6 +91,88 @@ mod tests {
     #[test] fn test_disabled() { let mut t = WatchpointTable::new(); t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0, enabled: false, persistence: 1, current_count: 0 }); assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 999 }).violation_count, 0); }
     #[test] fn test_ops() { assert!(compare(5, ComparisonOp::LessThan, 10)); assert!(compare(10, ComparisonOp::GreaterThan, 5)); assert!(compare(5, ComparisonOp::Equal, 5)); assert!(compare(5, ComparisonOp::NotEqual, 6)); }
     #[test] fn test_bounded() { let mut t = WatchpointTable::new(); for _ in 0..(MAX_VIOLATIONS_PER_CYCLE + 10) { t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0, enabled: true, persistence: 1, current_count: 0 }); } assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 100 }).violation_count, MAX_VIOLATIONS_PER_CYCLE as u32); }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    prop_compose! {
+        fn arb_watchpoint()(
+            sensor_id in 0u32..100,
+            op in 0u8..6,
+            threshold in -1000i64..1000,
+            persistence in 1u32..10,
+        ) -> Watchpoint {
+            let op = match op {
+                0 => ComparisonOp::LessThan, 1 => ComparisonOp::GreaterThan,
+                2 => ComparisonOp::LessOrEqual, 3 => ComparisonOp::GreaterOrEqual,
+                4 => ComparisonOp::Equal, _ => ComparisonOp::NotEqual,
+            };
+            Watchpoint { sensor_id, op, threshold, enabled: true, persistence, current_count: 0 }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn output_always_bounded(
+            wps in proptest::collection::vec(arb_watchpoint(), 1..20),
+            sensor_id in 0u32..100,
+            value in -2000i64..2000,
+        ) {
+            let mut table = WatchpointTable::new();
+            for wp in &wps { table.add_watchpoint(*wp); }
+            let result = table.evaluate(SensorReading { sensor_id, value });
+            prop_assert!(result.violation_count as usize <= MAX_VIOLATIONS_PER_CYCLE);
+            prop_assert!(result.violation_count <= table.count());
+        }
+
+        #[test]
+        fn disabled_never_fires(
+            sensor_id in 0u32..100,
+            threshold in -1000i64..1000,
+            value in -2000i64..2000,
+        ) {
+            let mut table = WatchpointTable::new();
+            table.add_watchpoint(Watchpoint {
+                sensor_id, op: ComparisonOp::GreaterThan, threshold,
+                enabled: false, persistence: 1, current_count: 0,
+            });
+            let result = table.evaluate(SensorReading { sensor_id, value });
+            prop_assert_eq!(result.violation_count, 0);
+        }
+
+        #[test]
+        fn compare_matches_rust(
+            value in i64::MIN..i64::MAX,
+            threshold in i64::MIN..i64::MAX,
+        ) {
+            prop_assert_eq!(compare(value, ComparisonOp::LessThan, threshold), value < threshold);
+            prop_assert_eq!(compare(value, ComparisonOp::GreaterThan, threshold), value > threshold);
+            prop_assert_eq!(compare(value, ComparisonOp::Equal, threshold), value == threshold);
+        }
+
+        #[test]
+        fn persistence_requires_consecutive(
+            value in 1i64..1000,
+            persistence in 2u32..10,
+        ) {
+            let mut table = WatchpointTable::new();
+            table.add_watchpoint(Watchpoint {
+                sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0,
+                enabled: true, persistence, current_count: 0,
+            });
+            // First (persistence-1) evaluations should NOT fire
+            for _ in 0..persistence-1 {
+                let r = table.evaluate(SensorReading { sensor_id: 1, value });
+                prop_assert_eq!(r.violation_count, 0);
+            }
+            // The persistence-th evaluation SHOULD fire
+            let r = table.evaluate(SensorReading { sensor_id: 1, value });
+            prop_assert_eq!(r.violation_count, 1);
+        }
+    }
 }
 
 #[cfg(kani)]

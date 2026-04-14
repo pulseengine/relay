@@ -98,6 +98,62 @@ mod tests {
     #[test] fn test_enable() { let mut t = ScheduleTable::new(); t.add_slot(ScheduleSlot { minor_frame: 0, major_frame: 0, target_channel: 1, payload_offset: 0, payload_len: 0, enabled: true }); assert_eq!(t.process_tick(0, 0).action_count, 1); t.set_enabled(0, false); assert_eq!(t.process_tick(0, 0).action_count, 0); assert!(!t.set_enabled(99, true)); }
 }
 
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn tick_output_always_bounded(
+            minor in 0u32..100,
+            major in 0u32..100,
+            num_slots in 0usize..30,
+        ) {
+            let mut table = ScheduleTable::new();
+            for i in 0..num_slots {
+                table.add_slot(ScheduleSlot {
+                    minor_frame: (i as u32) % 10,
+                    major_frame: 0,
+                    target_channel: i as u32,
+                    payload_offset: 0, payload_len: 0, enabled: true,
+                });
+            }
+            let result = table.process_tick(minor, major);
+            prop_assert!(result.action_count as usize <= MAX_ACTIONS_PER_TICK);
+        }
+
+        #[test]
+        fn disabled_slot_never_fires(
+            minor in 0u32..1000,
+            major in 0u32..1000,
+        ) {
+            let mut table = ScheduleTable::new();
+            table.add_slot(ScheduleSlot {
+                minor_frame: minor, major_frame: major,
+                target_channel: 1, payload_offset: 0, payload_len: 0, enabled: false,
+            });
+            let result = table.process_tick(minor, major);
+            prop_assert_eq!(result.action_count, 0);
+        }
+
+        #[test]
+        fn major_frame_zero_is_wildcard(
+            minor in 0u32..100,
+            major in 1u32..100,
+        ) {
+            let mut table = ScheduleTable::new();
+            table.add_slot(ScheduleSlot {
+                minor_frame: minor, major_frame: 0,
+                target_channel: 1, payload_offset: 0, payload_len: 0, enabled: true,
+            });
+            // major_frame=0 means match any major
+            let result = table.process_tick(minor, major);
+            prop_assert_eq!(result.action_count, 1);
+        }
+    }
+}
+
 #[cfg(kani)]
 mod kani_proofs {
     use super::*;

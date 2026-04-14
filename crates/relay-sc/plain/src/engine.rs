@@ -326,3 +326,65 @@ mod tests {
         assert!(!store.start_rts(MAX_RTS_SEQUENCES as u32, 0));
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn dispatch_count_always_bounded(
+            num_cmds in 0usize..20,
+            current_time in 0u64..1000,
+        ) {
+            let mut store = CommandStore::new();
+            for i in 0..num_cmds {
+                store.load_ats_command(AtsCommand {
+                    execute_at_sec: (i as u64) % (current_time.saturating_add(1)),
+                    command_code: i as u16,
+                    payload_offset: 0,
+                    payload_len: 0,
+                    dispatched: false,
+                });
+            }
+            let result = store.process_tick(current_time);
+            prop_assert!(result.dispatch_count as usize <= MAX_DISPATCH_PER_TICK);
+        }
+
+        #[test]
+        fn dispatched_commands_not_redispatched(
+            execute_at in 0u64..100,
+        ) {
+            let mut store = CommandStore::new();
+            store.load_ats_command(AtsCommand {
+                execute_at_sec: execute_at,
+                command_code: 0x42,
+                payload_offset: 0,
+                payload_len: 8,
+                dispatched: false,
+            });
+            let r1 = store.process_tick(execute_at);
+            prop_assert_eq!(r1.dispatch_count, 1);
+            // Second tick: same command must NOT dispatch again
+            let r2 = store.process_tick(execute_at + 1);
+            prop_assert_eq!(r2.dispatch_count, 0);
+        }
+
+        #[test]
+        fn ats_not_dispatched_early(
+            execute_at in 1u64..1000,
+        ) {
+            let mut store = CommandStore::new();
+            store.load_ats_command(AtsCommand {
+                execute_at_sec: execute_at,
+                command_code: 0x01,
+                payload_offset: 0,
+                payload_len: 0,
+                dispatched: false,
+            });
+            let result = store.process_tick(execute_at - 1);
+            prop_assert_eq!(result.dispatch_count, 0);
+        }
+    }
+}
