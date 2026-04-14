@@ -1,6 +1,6 @@
 [package]
-name = "relay-fm"
-description = "Relay File Manager — command validation for file operations"
+name = "relay-mm"
+description = "Relay Memory Manager — validates memory operation requests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

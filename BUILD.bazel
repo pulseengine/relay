@@ -54,6 +54,69 @@ verus_test(
     crate_name = "relay_cs",
 )
 
+verus_test(
+    name = "relay_ci_verus_test",
+    srcs = [
+        "crates/relay-ci/src/lib.rs",
+        "crates/relay-ci/src/engine.rs",
+    ],
+    crate_name = "relay_ci",
+)
+
+verus_test(
+    name = "relay_to_verus_test",
+    srcs = [
+        "crates/relay-to/src/lib.rs",
+        "crates/relay-to/src/engine.rs",
+    ],
+    crate_name = "relay_to",
+)
+
+verus_test(
+    name = "relay_md_verus_test",
+    srcs = [
+        "crates/relay-md/src/lib.rs",
+        "crates/relay-md/src/engine.rs",
+    ],
+    crate_name = "relay_md",
+)
+
+verus_test(
+    name = "relay_mm_verus_test",
+    srcs = [
+        "crates/relay-mm/src/lib.rs",
+        "crates/relay-mm/src/engine.rs",
+    ],
+    crate_name = "relay_mm",
+)
+
+verus_test(
+    name = "relay_hs_verus_test",
+    srcs = [
+        "crates/relay-hs/src/lib.rs",
+        "crates/relay-hs/src/engine.rs",
+    ],
+    crate_name = "relay_hs",
+)
+
+verus_test(
+    name = "relay_ds_verus_test",
+    srcs = [
+        "crates/relay-ds/src/lib.rs",
+        "crates/relay-ds/src/engine.rs",
+    ],
+    crate_name = "relay_ds",
+)
+
+verus_test(
+    name = "relay_fm_verus_test",
+    srcs = [
+        "crates/relay-fm/src/lib.rs",
+        "crates/relay-fm/src/engine.rs",
+    ],
+    crate_name = "relay_fm",
+)
+
 # ═══════════════════════════════════════════════════════════════
 # WIT interface
 # ═══════════════════════════════════════════════════════════════

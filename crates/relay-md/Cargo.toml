@@ -1,6 +1,6 @@
 [package]
-name = "relay-fm"
-description = "Relay File Manager — command validation for file operations"
+name = "relay-md"
+description = "Relay Memory Dwell — samples memory addresses at configured rates"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
