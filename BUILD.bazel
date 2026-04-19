@@ -140,6 +140,7 @@ verus_test(
     srcs = [
         "crates/relay-ccsds/src/lib.rs",
         "crates/relay-ccsds/src/engine.rs",
+        "crates/relay-ccsds/src/sensor_wire.rs",
     ],
     crate_name = "relay_ccsds",
 )

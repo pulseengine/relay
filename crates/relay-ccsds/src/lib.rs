@@ -6,3 +6,4 @@
 //! Verified core logic with Verus SMT/Z3 proofs.
 
 pub mod engine;
+pub mod sensor_wire;
