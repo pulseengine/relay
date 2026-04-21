@@ -1,0 +1,53 @@
+package pulseengine:relay-primitives@0.1.0;
+
+/// Canonical stream transformers — verified primitives lifted to stream<T>.
+///
+/// Each transformer is a pure function from one or more input streams to
+/// one or more output streams. Configuration is captured at instantiation
+/// time (function parameters); the data plane is purely streams.
+///
+/// Compositional WCET and memory bounds are proved in:
+///   proofs/lean/CompositionalWcet.lean
+///
+/// The verified kernels these wrap live in:
+///   crates/relay-primitives/src/{compare, persistence, rate_divide, time_gate}.rs
+interface transformers {
+    use pulseengine:relay-common-types/types.{value, comparison-op};
+
+    /// Compare each value against a threshold under a fixed operator.
+    /// Output is a stream of bools — one per input.
+    /// WCET (proved): constant per element.
+    compare: func(
+        op: comparison-op,
+        threshold: value,
+        input: stream<value>,
+    ) -> stream<bool>;
+
+    /// Fire only after N consecutive true values. Resets on any false.
+    /// WCET (proved): constant per element.
+    /// State (proved bounded): one u32 counter, saturates at u32::MAX.
+    persistence: func(
+        n: u32,
+        input: stream<bool>,
+    ) -> stream<bool>;
+
+    /// Emit only every Nth value. Divisor 0 = never emit, 1 = pass-through.
+    /// WCET (proved): constant per element.
+    rate-divide: func(
+        divisor: u32,
+        input: stream<value>,
+    ) -> stream<value>;
+
+    /// Time-gated emit. Each input pair (scheduled-at, payload) is held
+    /// until the most recent clock tick is >= scheduled-at, then emitted.
+    /// WCET (proved): constant per clock tick + constant per scheduled item.
+    time-gate: func(
+        clock: stream<u64>,
+        scheduled: stream<tuple<u64, value>>,
+    ) -> stream<value>;
+}
+
+/// Default world: export the primitives interface for composition by Meld.
+world primitives {
+    export transformers;
+}

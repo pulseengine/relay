@@ -36,3 +36,20 @@ lean_proof_test(
     srcs = ["BackpressureSafety.lean"],
     deps = [":backpressure_safety", "@mathlib//:Mathlib"],
 )
+
+# ── Compositional WCET ────────────────────────────────────────────────
+# The novel result: WCET of a pipeline = sum of stage WCETs + handoff.
+# Connects the verified primitive bounds to the engine-level WCET in
+# WcetAnalysis.lean, replacing magic constants with derived sums.
+
+lean_library(
+    name = "compositional_wcet",
+    srcs = ["CompositionalWcet.lean"],
+    deps = ["@mathlib//:Mathlib"],
+)
+
+lean_proof_test(
+    name = "compositional_wcet_test",
+    srcs = ["CompositionalWcet.lean"],
+    deps = [":compositional_wcet", "@mathlib//:Mathlib"],
+)

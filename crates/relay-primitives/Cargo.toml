@@ -1,0 +1,19 @@
+[package]
+name = "relay-primitives"
+description = "Relay core verified primitives — the domain-agnostic kernel that every transformer builds on"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Cargo tests use plain/ (Verus-stripped). Verus verification uses src/ via Bazel.
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[features]
+default = []
+
+[dev-dependencies]
+proptest.workspace = true

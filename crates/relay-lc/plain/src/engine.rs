@@ -1,12 +1,13 @@
-//! Relay Limit Checker — plain Rust (generated from Verus source via verus-strip).
-//! Source of truth: ../src/core.rs (Verus-annotated). Do not edit manually.
+//! Relay Limit Checker — plain Rust (Verus-stripped mirror of ../src/engine.rs).
+//!
+//! LC = compare (from relay-primitives) + persistence (from relay-primitives)
+//!      + LC-specific glue (watchpoint table, sensor-id match, bounded output).
+//! Source of truth: ../src/engine.rs.
+
+pub use crate::compare::{compare_i64 as compare, ComparisonOp};
 
 pub const MAX_WATCHPOINTS: usize = 128;
 pub const MAX_VIOLATIONS_PER_CYCLE: usize = 32;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ComparisonOp { LessThan = 0, GreaterThan = 1, LessOrEqual = 2, GreaterOrEqual = 3, Equal = 4, NotEqual = 5 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Watchpoint { pub sensor_id: u32, pub op: ComparisonOp, pub threshold: i64, pub enabled: bool, pub persistence: u32, pub current_count: u32 }
@@ -21,17 +22,6 @@ pub struct EvalResult { pub violations: [Violation; MAX_VIOLATIONS_PER_CYCLE], p
 
 pub struct WatchpointTable { entries: [Watchpoint; MAX_WATCHPOINTS], entry_count: u32 }
 
-pub fn compare(value: i64, op: ComparisonOp, threshold: i64) -> bool {
-    match op {
-        ComparisonOp::LessThan => value < threshold,
-        ComparisonOp::GreaterThan => value > threshold,
-        ComparisonOp::LessOrEqual => value <= threshold,
-        ComparisonOp::GreaterOrEqual => value >= threshold,
-        ComparisonOp::Equal => value == threshold,
-        ComparisonOp::NotEqual => value != threshold,
-    }
-}
-
 impl Watchpoint { pub const fn empty() -> Self { Watchpoint { sensor_id: 0, op: ComparisonOp::LessThan, threshold: 0, enabled: false, persistence: 1, current_count: 0 } } }
 impl Violation { pub const fn empty() -> Self { Violation { watchpoint_id: 0, measured: 0, threshold: 0, op: ComparisonOp::LessThan } } }
 
@@ -42,7 +32,7 @@ impl WatchpointTable {
     pub fn add_watchpoint(&mut self, wp: Watchpoint) -> bool {
         if self.entry_count as usize >= MAX_WATCHPOINTS { return false; }
         self.entries[self.entry_count as usize] = wp;
-        self.entry_count = self.entry_count + 1;
+        self.entry_count += 1;
         true
     }
 
@@ -55,25 +45,19 @@ impl WatchpointTable {
         while i < count {
             if result.violation_count as usize >= MAX_VIOLATIONS_PER_CYCLE { break; }
             let idx = i as usize;
-            let enabled = self.entries[idx].enabled;
-            let sid = self.entries[idx].sensor_id;
-            let op = self.entries[idx].op;
-            let threshold = self.entries[idx].threshold;
-            let persistence = self.entries[idx].persistence;
-            if enabled && sid == reading.sensor_id {
-                let violated = compare(reading.value, op, threshold);
-                if violated {
-                    self.entries[idx].current_count = if self.entries[idx].current_count < u32::MAX { self.entries[idx].current_count + 1 } else { u32::MAX };
-                    if self.entries[idx].current_count >= persistence {
-                        let vidx = result.violation_count as usize;
-                        result.violations[vidx] = Violation { watchpoint_id: i, measured: reading.value, threshold, op };
-                        result.violation_count = result.violation_count + 1;
-                    }
-                } else {
-                    self.entries[idx].current_count = 0;
+            let wp = self.entries[idx];
+            if wp.enabled && wp.sensor_id == reading.sensor_id {
+                // Composition of verified primitives: compare → persistence::decide → persistence::apply.
+                let violated = compare(reading.value, wp.op, wp.threshold);
+                let decision = crate::persistence::decide(violated, wp.current_count, wp.persistence);
+                self.entries[idx].current_count = crate::persistence::apply(decision, wp.current_count);
+                if decision == crate::persistence::PersistenceDecision::Fire {
+                    let vidx = result.violation_count as usize;
+                    result.violations[vidx] = Violation { watchpoint_id: i, measured: reading.value, threshold: wp.threshold, op: wp.op };
+                    result.violation_count += 1;
                 }
             }
-            i = i + 1;
+            i += 1;
         }
         result
     }
@@ -163,12 +147,10 @@ mod proptests {
                 sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0,
                 enabled: true, persistence, current_count: 0,
             });
-            // First (persistence-1) evaluations should NOT fire
             for _ in 0..persistence-1 {
                 let r = table.evaluate(SensorReading { sensor_id: 1, value });
                 prop_assert_eq!(r.violation_count, 0);
             }
-            // The persistence-th evaluation SHOULD fire
             let r = table.evaluate(SensorReading { sensor_id: 1, value });
             prop_assert_eq!(r.violation_count, 1);
         }
@@ -204,7 +186,7 @@ mod kani_proofs {
         assert!(result.violation_count as usize <= MAX_VIOLATIONS_PER_CYCLE);
     }
 
-    /// LC-P06: compare is total — never panics for any input
+    /// LC-P06 (inherited from CMP-P01): compare is total
     #[kani::proof]
     fn verify_compare_total() {
         let value: i64 = kani::any();
@@ -217,7 +199,6 @@ mod kani_proofs {
             4 => ComparisonOp::Equal, _ => ComparisonOp::NotEqual,
         };
         let result = compare(value, op, threshold);
-        // Just verifying it doesn't panic and returns a bool
         assert!(result || !result);
     }
 
@@ -236,7 +217,7 @@ mod kani_proofs {
         assert_eq!(result.violation_count, 0);
     }
 
-    /// LC-P03: compare matches the operator semantics
+    /// LC-P03 (inherited from CMP-P03): compare matches operator semantics
     #[kani::proof]
     fn verify_compare_semantics() {
         let v: i64 = kani::any();

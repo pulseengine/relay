@@ -12,11 +12,16 @@
 //!   LC-P03: evaluate output bounded: violation_count <= MAX_VIOLATIONS_PER_CYCLE
 //!   LC-P04: evaluate output bounded: violation_count <= entry_count
 //!   LC-P05: Disabled watchpoints never produce violations
-//!   LC-P06: compare() is total and deterministic for all operator values
-//!   LC-P07: Persistence counter increments on violation, resets on normal
-//!   LC-P08: Violation only fires when current_count >= persistence
+//!   LC-P06: compare() is total (INHERITED from relay-primitives CMP-P01..P03)
+//!   LC-P07: Persistence counter semantics (INHERITED from relay-primitives PER-P01..P05)
+//!   LC-P08: Violation only fires when current_count >= persistence (INHERITED)
 //!
 //! NO async, NO alloc, NO trait objects, NO closures.
+//!
+//! Composition: LC is compare + persistence + LC-specific glue
+//! (watchpoint table, sensor-id matching, bounded output collection).
+
+pub use crate::compare::{compare_i64 as compare, ComparisonOp};
 
 use vstd::prelude::*;
 
@@ -24,17 +29,6 @@ verus! {
 
 pub const MAX_WATCHPOINTS: usize = 128;
 pub const MAX_VIOLATIONS_PER_CYCLE: usize = 32;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ComparisonOp {
-    LessThan = 0,
-    GreaterThan = 1,
-    LessOrEqual = 2,
-    GreaterOrEqual = 3,
-    Equal = 4,
-    NotEqual = 5,
-}
 
 #[derive(Clone, Copy)]
 pub struct Watchpoint {
@@ -86,25 +80,8 @@ pub struct WatchpointTable {
 // Specification functions
 // =================================================================
 
-/// LC-P06: compare is total and deterministic.
-pub fn compare(value: i64, op: ComparisonOp, threshold: i64) -> (result: bool)
-    ensures
-        op === ComparisonOp::LessThan ==> result == (value < threshold),
-        op === ComparisonOp::GreaterThan ==> result == (value > threshold),
-        op === ComparisonOp::LessOrEqual ==> result == (value <= threshold),
-        op === ComparisonOp::GreaterOrEqual ==> result == (value >= threshold),
-        op === ComparisonOp::Equal ==> result == (value == threshold),
-        op === ComparisonOp::NotEqual ==> result == (value != threshold),
-{
-    match op {
-        ComparisonOp::LessThan => value < threshold,
-        ComparisonOp::GreaterThan => value > threshold,
-        ComparisonOp::LessOrEqual => value <= threshold,
-        ComparisonOp::GreaterOrEqual => value >= threshold,
-        ComparisonOp::Equal => value == threshold,
-        ComparisonOp::NotEqual => value != threshold,
-    }
-}
+// compare() is now inherited from relay-primitives::compare (re-exported at
+// module level above). LC-P06 becomes the primitive's CMP-P01..P03.
 
 /// Decision for a single watchpoint evaluation (Gale pattern: lightweight decision fn).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -119,7 +96,9 @@ pub enum WpDecision {
     Violated,
 }
 
-/// Decide what to do for a single watchpoint (pure function, no mutation).
+/// Decide what to do for a single watchpoint.
+/// Composed from primitives: compare (CMP-*) + persistence::decide (PER-*).
+/// The LC-specific glue is the sensor-id matching + enabled bit.
 pub fn wp_decide(
     wp_sensor_id: u32,
     wp_op: ComparisonOp,
@@ -138,15 +117,11 @@ pub fn wp_decide(
         return WpDecision::Skip;
     }
     let violated = compare(reading_value, wp_op, wp_threshold);
-    if !violated {
-        return WpDecision::Pass;
-    }
-    // Violated: check persistence (current_count + 1 because we're about to increment)
-    let new_count = if wp_current_count < u32::MAX { wp_current_count + 1 } else { u32::MAX };
-    if new_count >= wp_persistence {
-        WpDecision::Violated
-    } else {
-        WpDecision::PendingPersistence
+    let decision = crate::persistence::decide(violated, wp_current_count, wp_persistence);
+    match decision {
+        crate::persistence::PersistenceDecision::Pass => WpDecision::Pass,
+        crate::persistence::PersistenceDecision::Pending => WpDecision::PendingPersistence,
+        crate::persistence::PersistenceDecision::Fire => WpDecision::Violated,
     }
 }
 
@@ -290,42 +265,32 @@ impl WatchpointTable {
                 reading.sensor_id, reading.value,
             );
 
+            // Apply the counter update via the primitive, then check for fire.
+            // Counter update is a simple function of the decision — the primitive's
+            // persistence::apply encapsulates it (PER-P02/P03).
             match decision {
                 WpDecision::Skip => {},
-                WpDecision::Pass => {
-                    // LC-P07: reset persistence counter
-                    let mut updated = wp;
-                    updated.current_count = 0;
-                    self.entries.set(idx, updated);
-                },
-                WpDecision::PendingPersistence => {
-                    // LC-P07: increment persistence counter
-                    let mut updated = wp;
-                    updated.current_count = if wp.current_count < u32::MAX {
-                        wp.current_count + 1
-                    } else {
-                        u32::MAX
+                _ => {
+                    let prim_decision = match decision {
+                        WpDecision::Pass => crate::persistence::PersistenceDecision::Pass,
+                        WpDecision::PendingPersistence => crate::persistence::PersistenceDecision::Pending,
+                        WpDecision::Violated => crate::persistence::PersistenceDecision::Fire,
+                        WpDecision::Skip => crate::persistence::PersistenceDecision::Pass, // unreachable
                     };
-                    self.entries.set(idx, updated);
-                },
-                WpDecision::Violated => {
-                    // LC-P07: increment + LC-P08: emit violation
                     let mut updated = wp;
-                    updated.current_count = if wp.current_count < u32::MAX {
-                        wp.current_count + 1
-                    } else {
-                        u32::MAX
-                    };
+                    updated.current_count = crate::persistence::apply(prim_decision, wp.current_count);
                     self.entries.set(idx, updated);
 
-                    let vidx = result.violation_count as usize;
-                    result.violations.set(vidx, Violation {
-                        watchpoint_id: i,
-                        measured: reading.value,
-                        threshold: wp.threshold,
-                        op: wp.op,
-                    });
-                    result.violation_count = result.violation_count + 1;
+                    if matches!(decision, WpDecision::Violated) {
+                        let vidx = result.violation_count as usize;
+                        result.violations.set(vidx, Violation {
+                            watchpoint_id: i,
+                            measured: reading.value,
+                            threshold: wp.threshold,
+                            op: wp.op,
+                        });
+                        result.violation_count = result.violation_count + 1;
+                    }
                 },
             }
 

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/relay-primitives",
     "crates/relay-sc",
     "crates/relay-sca",
     "crates/relay-hk",

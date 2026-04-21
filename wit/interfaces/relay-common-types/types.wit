@@ -169,4 +169,28 @@ interface types {
         /// Human-readable status
         message: string,
     }
+
+    // ── Canonical value type for generic transformers ──────────
+    //
+    // WIT has no generics, so transformers that operate on "any numeric
+    // stream" use this variant. Every Relay primitive transformer
+    // (compare, persistence, rate-divide, time-gate) accepts stream<value>
+    // on its data plane.
+    //
+    // Transformers that need provenance (sensor-id, timestamp, quality)
+    // continue to use sensor-reading. Transformers that need typed
+    // payloads (commands, packets) use their own records.
+
+    variant value {
+        /// Signed integer value
+        i64-val(s64),
+        /// Unsigned integer value
+        u64-val(u64),
+        /// Floating point value
+        f64-val(f64),
+        /// Boolean value
+        bool-val(bool),
+        /// Raw bytes (CCSDS payloads, opaque blobs)
+        bytes-val(list<u8>),
+    }
 }
