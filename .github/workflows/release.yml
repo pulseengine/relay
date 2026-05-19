@@ -95,7 +95,7 @@ jobs:
           cp CHANGELOG.md staging/ 2>/dev/null || true
           cp LICENSE staging/ 2>/dev/null || true
           tar -czf "$ARCHIVE" -C staging .
-          sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
+          shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - name: Package (zip)
@@ -110,7 +110,7 @@ jobs:
           cp CHANGELOG.md staging/ 2>/dev/null || true
           cp LICENSE staging/ 2>/dev/null || true
           cd staging && 7z a "../${ARCHIVE}" . && cd ..
-          sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
+          shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - name: Install cosign
