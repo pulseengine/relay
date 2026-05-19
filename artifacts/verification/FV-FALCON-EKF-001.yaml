@@ -1,0 +1,57 @@
+artifacts:
+  - id: FV-FALCON-EKF-001
+    type: unit-verification
+    title: "Unit + property tests + accuracy bench for relay-ekf (v0.2)"
+    status: approved
+    description: >
+      v0.2 verification of the real Mahony complementary-filter
+      attitude estimator (`relay-ekf`). Replaces the v0.1 stub
+      verification (FV-FALCON-EKF-STUB-001).
+
+      Three layers of evidence:
+
+      1. Unit + property tests in `crates/relay-ekf` (16 cases) —
+         every EKF-P0* property has at least one direct test plus
+         a proptest invariant:
+           - EKF-P01: unit-quaternion preservation (per-tick + sequence proptest)
+           - EKF-P02: no NaN/∞ under adversarial accel (zero, extreme, NaN)
+           - EKF-P03: innovation monotone with tilt disagreement
+           - EKF-P04: static rest converges to gravity-aligned attitude
+           - EKF-P05: pure yaw does not destabilise tilt estimate
+           - bias bounded ±0.5 rad/s under sustained excitation
+      2. Bench tests in `examples/falcon-ekf-bench` (5 cases) — the
+         deterministic synthetic trajectory passes within the v0.2
+         budget (RMS-steady ≤ 5°, final ≤ 5°, no NaN); the noisy
+         trajectory (σ=0.2 m/s² accel + σ=0.02 rad/s gyro) passes
+         the loosened budget.
+      3. End-to-end binary smoke (`cargo run -p falcon-ekf-bench`) —
+         runs the full 25 s × 200 Hz trajectory and emits the
+         PASS/FAIL line plus all accuracy metrics.
+
+      v0.2 verification posture is "extensive testing + proptest
+      property invariants + accuracy bench." Verus SMT proofs on
+      quaternion algebra remain on the v0.4 roadmap when the
+      `src/` Verus-annotated track + Bazel `verus_test` rules
+      land alongside the magnetometer fusion work.
+    tags: [verification, falcon, ekf, unit-test, proptest, accuracy, v0.2]
+    fields:
+      method: automated-test
+      proptest-cases-default: 256
+      test-count: 21
+      steps:
+        - run: cargo test -p relay-ekf
+        - run: cargo test -p relay-ekf --release
+        - run: PROPTEST_CASES=4096 cargo test -p relay-ekf
+        - run: cargo test -p falcon-ekf-bench
+        - run: cargo run -q -p falcon-ekf-bench --release
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-EKF-P01
+      - type: verifies
+        target: SWREQ-FALCON-EKF-P02
+      - type: verifies
+        target: SWREQ-FALCON-EKF-P03
+      - type: verifies
+        target: SWREQ-FALCON-EKF-P04
+      - type: implements
+        target: FEAT-FALCON-v0.2
