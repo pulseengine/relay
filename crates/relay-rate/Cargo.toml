@@ -1,0 +1,20 @@
+[package]
+name = "relay-rate"
+description = "Relay rate-PID — body-rate stabilizer (v0.3, replaces v0.1 stub)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Cargo tests use plain/ (verus-stripped). Verus verification uses src/ via Bazel.
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+# Pure no_std + no_alloc. Math limited to multiplies, adds, clamps —
+# no transcendentals required.
+
+[dev-dependencies]
+proptest.workspace = true
