@@ -1,0 +1,114 @@
+name: Verification Gate
+
+# Mirrors the witness + spar pattern: extract `fields.steps[].run`
+# from every rivet `unit-verification` artifact matching a filter,
+# execute each, aggregate pass/fail per artifact, post a sticky
+# PR comment.
+#
+# Default filter: every falcon-tagged verification artifact.
+# Per-PR override: include `Verify-Filter: <expr>` in the PR body
+# using rivet's S-expression filter syntax, e.g.
+#   Verify-Filter: (and (has-tag "falcon") (has-tag "v0.1"))
+#
+# Locally:
+#     python3 scripts/run-falcon-verification.py --markdown
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gate:
+    name: Verification gate (rivet-driven)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: "-D warnings"
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install rivet (skip if cached)
+        shell: bash
+        run: |
+          if command -v rivet >/dev/null 2>&1; then
+            echo "rivet already on PATH: $(rivet --version)"
+          else
+            cargo install --locked \
+              --git https://github.com/pulseengine/rivet \
+              --bin rivet \
+              rivet-cli
+          fi
+
+      # Untrusted: github.event.pull_request.body is attacker-
+      # controllable. Bind to env, dereference via $PR_BODY in a
+      # double-quoted context, and treat parse-failure as the
+      # "no override" path. Filter then flows to the next step
+      # via GITHUB_OUTPUT (which is sanitized).
+      - name: Pick verification filter (per-PR override via body)
+        id: pick
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        shell: bash
+        run: |
+          DEFAULT='(has-tag "falcon")'
+          OVERRIDE=$(printf '%s' "$PR_BODY" \
+            | grep -m1 -E '^Verify-Filter:' \
+            | sed 's/^Verify-Filter:[[:space:]]*//' || true)
+          if [ -n "${OVERRIDE:-}" ]; then
+            printf 'filter=%s\n' "$OVERRIDE" >>"$GITHUB_OUTPUT"
+          else
+            printf 'filter=%s\n' "$DEFAULT" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Run falcon verification gate
+        id: verify
+        continue-on-error: true
+        env:
+          FILTER: ${{ steps.pick.outputs.filter }}
+        shell: bash
+        run: |
+          python3 scripts/run-falcon-verification.py \
+            --filter "$FILTER" \
+            --markdown > verification-output.md
+          # Re-run in non-markdown mode so exit code drives the
+          # continue-on-error gate.
+          python3 scripts/run-falcon-verification.py --filter "$FILTER"
+
+      - name: Upload verification output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-output
+          path: verification-output.md
+          if-no-files-found: warn
+
+      - name: Post sticky PR comment
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          python3 tools/post_verification_comment.py "$PR_NUMBER" \
+            --body-file verification-output.md
+
+      - name: Fail job if any verification artifact failed
+        if: steps.verify.outcome != 'success'
+        shell: bash
+        run: |
+          echo "::error::One or more falcon verification artifacts failed; see the sticky PR comment"
+          exit 1

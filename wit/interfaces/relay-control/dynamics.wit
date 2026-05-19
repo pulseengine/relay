@@ -1,0 +1,76 @@
+package pulseengine:relay-control@0.1.0;
+
+/// Falcon control-cascade types.
+///
+/// The typed streams that flow between sensor drivers, the state
+/// estimator (EKF), and the rate / attitude / position / mixer
+/// components. Domain-agnostic: every multirotor / fixed-wing /
+/// VTOL airframe uses the same dynamics interface; only the mixer
+/// is variant-specific.
+///
+/// v0.1 scope: vehicle-state + imu-sample (used by stub EKF).
+/// Full setpoint types land with their corresponding controllers
+/// (attitude-setpoint in v0.4, rate-setpoint in v0.3, etc).
+interface dynamics {
+    use pulseengine:relay-common-types/types.{timestamp};
+
+    /// Raw IMU sample — accelerometer + gyroscope reading.
+    record imu-sample {
+        time: timestamp,
+        /// Body-frame acceleration in m/s^2 (x, y, z).
+        accel-body: tuple<f32, f32, f32>,
+        /// Body-frame angular rate in rad/s (roll, pitch, yaw).
+        gyro-body: tuple<f32, f32, f32>,
+    }
+
+    /// Vehicle-state estimate — output of the EKF.
+    record vehicle-state {
+        time: timestamp,
+        /// Unit quaternion, body-frame to NED-frame rotation.
+        quaternion: tuple<f32, f32, f32, f32>,
+        /// Position in NED frame (north, east, down) meters.
+        position-ned: tuple<f32, f32, f32>,
+        /// Velocity in NED frame (north, east, down) m/s.
+        velocity-ned: tuple<f32, f32, f32>,
+        /// EKF innovation health — normalized residual magnitude.
+        /// 0.0 = perfect agreement; 1.0 = single-sigma residual;
+        /// > 5.0 indicates likely sensor failure.
+        innovation: f32,
+    }
+
+    /// Rate setpoint — body-frame angular velocity command + thrust.
+    /// Produced by attitude controller, consumed by rate controller.
+    /// Lands in v0.3 alongside relay-rate; declared here for forward
+    /// compatibility of the falcon-quad world spec.
+    record rate-setpoint {
+        time: timestamp,
+        rates-body: tuple<f32, f32, f32>,
+        thrust: f32,
+    }
+
+    /// Attitude setpoint — body orientation command + thrust.
+    /// Produced by position controller, consumed by attitude controller.
+    /// Lands in v0.4 alongside relay-att.
+    record attitude-setpoint {
+        time: timestamp,
+        quaternion: tuple<f32, f32, f32, f32>,
+        thrust: f32,
+    }
+
+    /// Torque setpoint — body-frame torque command + thrust.
+    /// Produced by rate controller, consumed by mixer.
+    /// Lands in v0.3 alongside relay-rate.
+    record torque-setpoint {
+        time: timestamp,
+        torque-body: tuple<f32, f32, f32>,
+        thrust: f32,
+    }
+
+    /// Motor PWM output — per-motor normalized [0.0, 1.0] command.
+    /// Shape is airframe-specific; falcon-quad emits 4 motors,
+    /// falcon-hex emits 6, falcon-coax emits 2.
+    record motor-pwm {
+        time: timestamp,
+        values: list<f32>,
+    }
+}

@@ -1,0 +1,62 @@
+artifacts:
+  - id: SWREQ-FALCON-POS-P01
+    type: sw-req
+    title: "POS-P01: Setpoint magnitude bounds"
+    status: approved
+    description: >
+      The position controller shall accept setpoints within
+      configured bounds: position [-1e6, +1e6] m, velocity
+      [-vmax, +vmax] m/s where vmax is TBL-loaded.
+    tags: [falcon, position-control, bounds, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus contract: setpoint bounds checked on every
+        update; out-of-bounds setpoints saturated, not panicked.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004
+
+  - id: SWREQ-FALCON-POS-P02
+    type: sw-req
+    title: "POS-P02: Full cascade Lyapunov stability"
+    status: approved
+    description: >
+      The full attitude+position cascade shall preserve
+      Lyapunov stability under bounded disturbances. Composes
+      ATT-P02 and RATE-P03 with the outer position loop.
+    tags: [falcon, position-control, cascade, stability, lean]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Lean proof: nested cascade composition admits a joint
+        Lyapunov function under timescale-separation
+        (50/250/1000 Hz ratio assumption).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004
+
+  - id: SWREQ-FALCON-POS-P03
+    type: sw-req
+    title: "POS-P03: Mission setpoint integration via stored-command"
+    status: approved
+    description: >
+      Position setpoints arriving via the cFS-DNA stored-command
+      stream (SC SCHEDULED_ACTION -> setpoint) shall be type-
+      compatible with operator setpoints (relay-mavlink direct
+      command). One position controller, two upstream sources.
+      This is the Leeloo signature for the position layer.
+    tags: [falcon, position-control, dual-dna, leeloo]
+    fields:
+      req-type: architectural
+      priority: must
+      verification-criteria: >
+        End-to-end SITL test: load a mission via TBL, execute
+        via SC, observe position controller follows the mission.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004
+      - type: derives-from
+        target: SYSREQ-FALCON-008

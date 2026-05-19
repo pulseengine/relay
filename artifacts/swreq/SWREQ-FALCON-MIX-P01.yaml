@@ -1,0 +1,85 @@
+artifacts:
+  - id: SWREQ-FALCON-MIX-P01
+    type: sw-req
+    title: "MIX-P01: Mixer matrix derived from Drake MultibodyPlant"
+    status: approved
+    description: >
+      Each airframe variant's mixer matrix shall be derived
+      symbolically from a Drake MultibodyPlant model of the
+      airframe geometry (rotor positions, thrust directions,
+      torque arms). The same MultibodyPlant feeds the Gazebo
+      SDF used for SITL — single source of truth.
+    tags: [falcon, mixer, drake, multibody, derivation]
+    fields:
+      req-type: architectural
+      priority: must
+      verification-criteria: >
+        rivet links each variant mixer to its source
+        MultibodyPlant; diff against an alternative manual
+        derivation shows zero deviation within numerical
+        tolerance.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005
+
+  - id: SWREQ-FALCON-MIX-P02
+    type: sw-req
+    title: "MIX-P02: No-negative-thrust invariant"
+    status: approved
+    description: >
+      The mixer's per-motor PWM output shall always be in
+      [0.0, 1.0]. Negative thrust commands are saturated to
+      zero (multirotor cannot reverse-spin without dedicated
+      hardware). For airframes that allow reverse thrust
+      (e.g., reversible-pitch), the invariant is parameterized.
+    tags: [falcon, mixer, invariant, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus contract: forall i, motor_pwm[i] in [0.0, 1.0].
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005
+
+  - id: SWREQ-FALCON-MIX-P03
+    type: sw-req
+    title: "MIX-P03: Saturation handling preserves priority order"
+    status: approved
+    description: >
+      When mixer output would exceed motor limits, saturation
+      handling shall preserve a configurable priority order
+      (thrust first, then yaw, then roll/pitch). PX4 reference
+      implementation's approach, adapted to verified WIT.
+    tags: [falcon, mixer, saturation, priority, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: saturation reduces lower-priority commands
+        first while preserving thrust within limits.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005
+
+  - id: SWREQ-FALCON-MIX-P04
+    type: sw-req
+    title: "MIX-P04: Per-variant motor count exported correctly"
+    status: approved
+    description: >
+      Each falcon-* world shall export stream<motor-pwm> with
+      a list length matching its airframe variant (4 for
+      falcon-quad, 6 for falcon-hex, etc.). meld static fusion
+      enforces this at build time.
+    tags: [falcon, mixer, variants, wit, meld]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        meld build fails if the mixer's exported motor count
+        does not match the world's airframe variant.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005
+      - type: derives-from
+        target: SYSREQ-FALCON-007

@@ -1,0 +1,36 @@
+artifacts:
+  - id: STKH-FALCON-001
+    type: stakeholder-req
+    title: Verified dual-DNA flight stack for safety-critical drones and smallsats
+    status: approved
+    description: >
+      Drone operations in regulated airspace and CubeSat / smallsat
+      missions require flight software that is provably correct,
+      memory-safe, free from runtime panics, and able to demonstrate
+      certification credit across multiple safety standards from a
+      single evidence chain. Existing open-source flight stacks (PX4,
+      ArduPilot, F-Prime, cFS) each address part of this surface but
+      none address all of it: PX4 lacks formal verification, cFS lacks
+      a control cascade, F-Prime is C++ without proofs, ArduPilot is
+      GPL-v3. Falcon must combine cFS-grade mission semantics with
+      PX4-grade control law, expressed as formally verified WebAssembly
+      components fused statically by meld, run on Gale (verified RTOS)
+      via WASM Component Model Preview 3 streams. Triple-track
+      verification (Verus + Rocq + Lean) plus the full overdo chain
+      (Kani + proptest + tokio-rs/loom + sanitizers + cargo-mutants +
+      witness MC/DC + rivet traceability + sigil signed evidence).
+      The chain must earn credit across DO-178C DAL-A, ISO 26262
+      ASIL-D, IEC 61508 SIL-4, IEC 62304 Class C, ECSS-Q-ST-80C Cat A,
+      and EN 50128 SIL-4.
+    tags: [stakeholder, falcon, flight-software, dual-dna, safety,
+           formal-verification, multi-domain]
+    fields:
+      priority: must
+      source: "Safety-critical flight software — PulseEngine Relay + Falcon"
+      target-domains:
+        - DO-178C DAL-A (avionics, EASA U-space BVLOS, military UAS)
+        - ISO 26262 ASIL-D (automotive look-aside drones)
+        - IEC 61508 SIL-4 (general functional safety)
+        - IEC 62304 Class C (medical delivery drones)
+        - ECSS-Q-ST-80C Cat A (smallsat constellation)
+        - EN 50128 SIL-4 (railway track inspection drones)

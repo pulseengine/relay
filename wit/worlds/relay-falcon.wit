@@ -1,0 +1,55 @@
+package pulseengine:relay-worlds@0.1.0;
+
+/// Falcon — dual-DNA flight stack worlds.
+///
+/// Each world wires cFS-DNA mission semantics with PX4-DNA control
+/// cascade for a specific airframe variant. The control-cascade
+/// components are shared across variants; only the mixer (and the
+/// motor-pwm export shape) differs.
+///
+/// v0.1 ships falcon-quad with stub components; remaining airframes
+/// follow in later releases.
+///
+/// "Leeloo": one shared bus, one shared time, one shared verification
+/// CI. Components from both lineages compose freely.
+
+use pulseengine:relay-mavlink/protocol.{heartbeat, frame, codec-error};
+use pulseengine:relay-control/dynamics.{vehicle-state, imu-sample, motor-pwm};
+
+/// Falcon quadcopter — X-configuration, 4 motors.
+/// First-ship target in v0.1.
+world falcon-quad {
+    // cFS-DNA: mission/ops layer
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+
+    // PX4-DNA: control/dynamics layer
+    import pulseengine:relay-control/dynamics;
+
+    // MAVLink interop bridge
+    import pulseengine:relay-mavlink/protocol;
+
+    // v0.1: just heartbeat exchange + stub state-estimator output.
+    // v0.2+: full ekf, attitude/rate/position controllers, mixer.
+    export hello: func() -> string;
+}
+
+/// Falcon hex — 6-motor fault-tolerant variant.
+/// Ships in v1.0; declared here for cross-variant world reuse demos.
+world falcon-hex {
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+    import pulseengine:relay-control/dynamics;
+    import pulseengine:relay-mavlink/protocol;
+    export hello: func() -> string;
+}
+
+/// Falcon coax — counter-rotating coaxial, Ingenuity-class.
+/// Ships in v1.0; the satellite-DNA test case (drone closest to spacecraft).
+world falcon-coax {
+    import pulseengine:relay-time/time;
+    import pulseengine:relay-events/events;
+    import pulseengine:relay-control/dynamics;
+    import pulseengine:relay-mavlink/protocol;
+    export hello: func() -> string;
+}

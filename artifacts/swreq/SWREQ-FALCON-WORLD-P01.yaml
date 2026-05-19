@@ -1,0 +1,47 @@
+artifacts:
+  - id: SWREQ-FALCON-WORLD-P01
+    type: sw-req
+    title: "WORLD-P01: falcon-quad world spec wires the full cascade"
+    status: approved
+    description: >
+      The pulseengine:relay-worlds/falcon-quad world shall
+      import the full cFS-DNA service surface (software-bus,
+      time, events, tables, executive) AND the full PX4-DNA
+      control surface (dynamics, mavlink, imu/gps/mag/baro/pwm
+      host services) AND wire them to a 4-motor X-configuration
+      quadcopter exported as stream<motor-pwm> of length 4.
+    tags: [falcon, world, falcon-quad, wit, meld]
+    fields:
+      req-type: architectural
+      priority: must
+      verification-criteria: >
+        meld fuse on the falcon-quad world succeeds and
+        produces a single .wasm bundle with the expected
+        exports.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-007
+      - type: derives-from
+        target: SYSREQ-FALCON-008
+
+  - id: SWREQ-FALCON-WORLD-P02
+    type: sw-req
+    title: "WORLD-P02: Variant worlds share the same control cascade"
+    status: approved
+    description: >
+      All falcon-* worlds (quad, hex, coax, vtol, fw) shall
+      reuse the same relay-ekf, relay-rate, relay-att, relay-pos
+      components without modification. Only the mixer
+      (relay-mix-*) and the exported stream<motor-pwm> shape
+      differ between variants.
+    tags: [falcon, world, variants, reuse]
+    fields:
+      req-type: architectural
+      priority: must
+      verification-criteria: >
+        meld fuse on each variant world succeeds without
+        modification to the cascade components. CI builds all
+        five variants from one source tree.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-007

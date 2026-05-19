@@ -1,0 +1,354 @@
+artifacts:
+  - id: FEAT-FALCON-v0.1
+    type: feature
+    title: "v0.1 — falcon-hello: boots and waves at QGroundControl"
+    status: approved
+    description: >
+      LANDED. Minimum viable flight stack:
+
+      Ships:
+        - wit/interfaces/relay-mavlink/protocol.wit
+        - wit/interfaces/relay-control/dynamics.wit
+        - wit/worlds/relay-falcon.wit (falcon-quad, falcon-hex,
+          falcon-coax world specs)
+        - crates/relay-mavlink (no_std v2 codec — CRC, heartbeat,
+          frame envelope) — 33 unit + proptest cases green
+        - crates/relay-ekf-stub (no_std stub state-estimator) —
+          9 unit + proptest cases green
+        - examples/falcon-hello (runnable bidirectional UDP
+          heartbeat demo with --mode vehicle and --mode gcs) —
+          9 integration tests including end-to-end UDP exchange
+
+      Verification (overdo chain at v0.1 layer):
+        - cargo test --workspace: 49 test suites green, 0 failures
+        - rivet trace from FEAT-FALCON-v0.1 -> SWREQ-FALCON-* ->
+          SWDD-FALCON-* -> FV-FALCON-* validated, 0 broken xrefs
+
+      Acceptance test passing:
+        examples/falcon-hello/src/main.rs: tests::vehicle_and_gcs_
+        exchange_heartbeats_over_udp — vehicle and GCS exchange
+        real MAVLink frames over UDP loopback, payload decoded
+        byte-for-byte equals encoded original.
+
+      Manual verification:
+        cargo run -p falcon-hello -- --mode gcs --duration 3
+        cargo run -p falcon-hello -- --mode vehicle --duration 3
+        => 10 heartbeats sent, 10 received, clean exit.
+
+      Deferred to v0.2: Verus SMT proofs, witness MC/DC coverage,
+      sigil signing, kiln WASM runtime, synth AOT.
+    tags: [falcon, milestone, v0.1, hello, landed]
+    fields:
+      release-target: "first tagged release — landed"
+      example: examples/falcon-hello
+      test-count: 51
+      maps-to-overdo-layer: "cargo tests + proptest + rivet traceability"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-006
+      - type: implements
+        target: SYSREQ-FALCON-007
+      - type: depends-on
+        target: SWREQ-FALCON-WORLD-P01
+      - type: depends-on
+        target: SWREQ-FALCON-MAVLINK-P02
+      - type: verified-by
+        target: FV-FALCON-MAVLINK-001
+      - type: verified-by
+        target: FV-FALCON-EKF-STUB-001
+      - type: verified-by
+        target: FV-FALCON-WORLD-001
+
+  - id: FEAT-FALCON-v0.2
+    type: feature
+    title: "v0.2 — falcon-ekf-bench: verified complementary filter"
+    status: pending
+    description: >
+      Real relay-ekf (complementary filter for attitude only).
+      No GPS or baro fusion yet. Runs against synthetic IMU log.
+
+      Ships:
+        - crates/relay-ekf (complementary filter implementation)
+        - examples/falcon-ekf-bench (verifiable, no hardware needed)
+        - proofs/verus/falcon-ekf/
+        - proofs/lean/falcon-ekf/wcet.lean
+
+      Verification chain delta:
+        - Verus contracts on quaternion algebra (EKF-P01)
+        - Verus contracts on numerical state bounds (EKF-P02)
+        - Lean WCET bound (EKF-P04)
+        - proptest on random sensor distributions
+        - witness MC/DC on post-codegen WASM
+        - cargo-mutants on EKF tests
+
+      Acceptance test: replay synthetic log of a 10-second flight
+      profile, complementary filter tracks ground-truth attitude
+      within 2 degrees RMS.
+    tags: [falcon, milestone, v0.2, ekf, verified]
+    fields:
+      release-target: "verus + lean + witness chain demonstrated"
+      example: examples/falcon-ekf-bench
+      maps-to-overdo-layer: "Verus + Lean + witness MC/DC + proptest"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-001
+      - type: depends-on
+        target: SWREQ-FALCON-EKF-P01
+      - type: depends-on
+        target: SWREQ-FALCON-EKF-P02
+      - type: depends-on
+        target: SWREQ-FALCON-EKF-P04
+      - type: blocks
+        target: FEAT-FALCON-v0.3
+
+  - id: FEAT-FALCON-v0.3
+    type: feature
+    title: "v0.3 — falcon-sitl-hover: rate stabilizer in deterministic SITL"
+    status: pending
+    description: >
+      First SITL example. relay-rate (1 kHz PID) wired with
+      relay-ekf, stabilizes attitude in Gazebo Harmonic SITL.
+      Quadcopter does not yet hover autonomously (no att/pos
+      control yet) but maintains commanded attitude.
+
+      Ships:
+        - crates/relay-rate (PID + anti-windup)
+        - Gazebo Harmonic integration via PX4 SITL conventions
+        - rerun.io .rrd evidence recording
+        - examples/falcon-sitl-hover (seeded, headless, reproducible)
+
+      Verification chain delta:
+        - Lean Lyapunov proof of rate loop (RATE-P03)
+        - Kani for integer overflow on rate setpoint paths
+        - tokio-rs/loom on host-side bridge code
+        - byte-identical SITL output given seed (SYSREQ-FALCON-009)
+
+      Acceptance test: 30-second SITL run with seed 42 produces
+      SHA-256-identical .rrd file across 10 repeated runs.
+    tags: [falcon, milestone, v0.3, sitl, rate-control]
+    fields:
+      release-target: "first SITL + deterministic evidence"
+      example: examples/falcon-sitl-hover
+      maps-to-overdo-layer: "+ Lean Lyapunov + Kani + loom + deterministic SITL"
+      simulator: "Gazebo Harmonic (primary) via PX4 SITL"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-002
+      - type: implements
+        target: SYSREQ-FALCON-009
+      - type: depends-on
+        target: SWREQ-FALCON-RATE-P01
+      - type: depends-on
+        target: SWREQ-FALCON-RATE-P03
+      - type: depends-on
+        target: FEAT-FALCON-v0.2
+
+  - id: FEAT-FALCON-v0.4
+    type: feature
+    title: "v0.4 — full inner cascade: attitude + rate + mixer SITL hover"
+    status: pending
+    description: >
+      relay-att (250 Hz quaternion error) + relay-mix (1 kHz
+      static matrix mixer) join the cascade. falcon-quad hovers
+      autonomously in SITL.
+
+      Ships:
+        - crates/relay-att (quaternion-error proportional control)
+        - crates/relay-mix-quad (4x4 mixer for X-configuration)
+        - Drake-derived mixer matrix from quad MultibodyPlant
+        - extends examples/falcon-sitl-hover to autonomous hover
+
+      Verification chain delta:
+        - Rocq theorems for quaternion-error invariants (ATT-P01)
+        - Verus contracts on mixer matrix arithmetic (MIX-P01..P04)
+        - differential test vs PX4 mc_att_control + mc_mixer reference
+
+      Acceptance test: SITL hover for 60 seconds with position
+      drift < 2 m RMS under simulated wind disturbance.
+    tags: [falcon, milestone, v0.4, attitude-control, mixer, hover]
+    fields:
+      release-target: "autonomous hover; PX4-differential test green"
+      example: examples/falcon-sitl-hover (extended)
+      maps-to-overdo-layer: "+ Rocq + Verus matrix + differential test"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-003
+      - type: implements
+        target: SYSREQ-FALCON-005
+      - type: depends-on
+        target: SWREQ-FALCON-ATT-P01
+      - type: depends-on
+        target: SWREQ-FALCON-MIX-P01
+      - type: depends-on
+        target: SWREQ-FALCON-MIX-P02
+      - type: depends-on
+        target: FEAT-FALCON-v0.3
+
+  - id: FEAT-FALCON-v0.5
+    type: feature
+    title: "v0.5 — outer position loop + waypoint mission via stored-command"
+    status: pending
+    description: >
+      relay-pos (50 Hz cascade PID) joins. relay-gps host service
+      provides simulated GPS. cFS-DNA stored-command engine
+      executes waypoint missions.
+
+      Ships:
+        - crates/relay-pos
+        - host/relay-gps
+        - mission loader (TBL-based waypoint table)
+        - extends examples/falcon-sitl-hover to waypoint flight
+
+      Verification chain delta:
+        - Lean cascade stability proof (POS-P02)
+        - cargo-mutants on full cascade
+        - sanitizer pass on full simulation harness
+        - end-to-end test of dual-DNA composition (POS-P03)
+
+      Acceptance test: 4-waypoint square mission completed in
+      SITL, all waypoints reached within 1 m, returns to home.
+    tags: [falcon, milestone, v0.5, position-control, mission]
+    fields:
+      release-target: "waypoint mission in SITL; dual-DNA validated"
+      example: examples/falcon-sitl-hover (extended)
+      maps-to-overdo-layer: "+ cargo-mutants + sanitizers + dual-DNA E2E"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-004
+      - type: implements
+        target: SYSREQ-FALCON-008
+      - type: depends-on
+        target: SWREQ-FALCON-POS-P01
+      - type: depends-on
+        target: SWREQ-FALCON-POS-P02
+      - type: depends-on
+        target: SWREQ-FALCON-POS-P03
+      - type: depends-on
+        target: FEAT-FALCON-v0.4
+
+  - id: FEAT-FALCON-v0.6
+    type: feature
+    title: "v0.6 — hardware bring-up on Cube Orange or pulseengine-board"
+    status: pending
+    description: >
+      First real silicon. synth AOT-compiles WASM components to
+      Cortex-M7 binary. Runs on Cube Orange (FMUv6X) or a
+      pulseengine-custom Cortex-M7 board. Tethered hover.
+
+      Ships:
+        - synth target=cortex-m7 toolchain
+        - host/relay-imu, host/relay-mag, host/relay-baro,
+          host/relay-pwm (real silicon drivers)
+        - HITL harness (we author this — no off-the-shelf
+          WASM-on-MCU HITL framework exists in 2025-2026)
+        - bring-up procedure documentation
+
+      Verification chain delta:
+        - criterion budgets met on real silicon
+        - synth+kiln WASM-on-MCU runtime trace
+        - sigil-signed firmware bundle
+        - HITL test loop (Pixhawk 6X + custom STM32H7 board
+          speaking HIL_* MAVLink messages over USB-CDC 921600)
+
+      Acceptance test: tethered hover for 60 seconds; vehicle
+      maintains position within 0.5 m of takeoff point.
+    tags: [falcon, milestone, v0.6, hardware, hitl]
+    fields:
+      release-target: "first hardware hover; HITL framework operational"
+      hardware-target: "Cube Orange (FMUv6X) or pulseengine STM32H7 board"
+      maps-to-overdo-layer: "+ criterion on silicon + HITL"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.5
+
+  - id: FEAT-FALCON-v0.7
+    type: feature
+    title: "v0.7 — untethered hover + fault injection on relay-hs"
+    status: pending
+    description: >
+      Untethered flight. fault injection exercises the relay-hs
+      (Health & Safety) watchdog and validates RTL behavior on
+      simulated EKF divergence.
+
+      Verification chain delta:
+        - fault injection test suite
+        - relay-hs triggers RTL on EKF divergence
+        - relay-sc executes RTL stored-command sequence
+    tags: [falcon, milestone, v0.7, untethered, fault-injection]
+    fields:
+      release-target: "untethered hover; safety-state validated"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.6
+
+  - id: FEAT-FALCON-v0.8
+    type: feature
+    title: "v0.8 — untethered waypoint mission + EASA U-space telemetry"
+    status: pending
+    description: >
+      First untethered autonomous mission. EASA U-space telemetry
+      profile (network identification, geofencing) implemented
+      via relay-to.
+
+      Verification chain delta:
+        - Z3 translation validation across loom optimizations
+        - EASA-conformant downlink telemetry
+        - rivet snapshot per release (audit-ready)
+    tags: [falcon, milestone, v0.8, mission, easa-u-space]
+    fields:
+      release-target: "untethered mission; EASA U-space profile ready"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.7
+
+  - id: FEAT-FALCON-v0.9
+    type: feature
+    title: "v0.9 — geofence + RTL under EW-simulated GPS loss"
+    status: pending
+    description: >
+      relay-lc geofence triggers relay-sc RTL sequence. Validated
+      under EW-simulated GPS loss / spoofing in HITL harness.
+
+      Verification chain delta:
+        - abstract interpretation pass via MIRAI or Charon-based
+          analyzer (closes the third DO-333 technique class)
+    tags: [falcon, milestone, v0.9, geofence, rtl, ew]
+    fields:
+      release-target: "geofence/RTL validated; AI in chain"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.8
+
+  - id: FEAT-FALCON-v1.0
+    type: feature
+    title: "v1.0 — six-domain credit dossier + airframe variants"
+    status: pending
+    description: >
+      Full overdo matrix green across all six safety domains in
+      rivet validate output. Check-It checkers qualified for the
+      EKF and mixer (DO-330 path). falcon-coax and falcon-hex
+      variants ship alongside falcon-quad.
+
+      Ships:
+        - DO-178C DAL-A credit bundle
+        - ISO 26262 ASIL-D credit bundle
+        - IEC 61508 SIL-4 credit bundle
+        - IEC 62304 Class C credit bundle
+        - ECSS-Q-ST-80C Cat A credit bundle
+        - EN 50128 SIL-4 credit bundle
+        - falcon-coax world spec (Ingenuity-class)
+        - falcon-hex world spec (fault-tolerant)
+        - Check-It qualified checkers for EKF + mixer
+
+      v1.0 is when the evidence dossier clears the bar — not when
+      the features are complete. v2.x adds falcon-vtol and
+      falcon-fw worlds.
+    tags: [falcon, milestone, v1.0, dossier, certification]
+    fields:
+      release-target: "six-domain credit ready for assessor handoff"
+      shipping-variants: ["falcon-quad", "falcon-hex", "falcon-coax"]
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-010
+      - type: depends-on
+        target: FEAT-FALCON-v0.9

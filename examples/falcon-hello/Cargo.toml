@@ -1,0 +1,16 @@
+[package]
+name = "falcon-hello"
+description = "Falcon v0.1 example — MAVLink heartbeat exchange over UDP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "falcon-hello"
+path = "src/main.rs"
+
+[dependencies]
+relay-mavlink = { path = "../../crates/relay-mavlink" }
+relay-ekf-stub = { path = "../../crates/relay-ekf-stub" }

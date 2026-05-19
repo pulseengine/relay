@@ -1,0 +1,251 @@
+artifacts:
+  - id: SYSREQ-FALCON-001
+    type: system-req
+    title: State estimation via Kalman / complementary filter
+    status: approved
+    description: >
+      The system shall estimate vehicle attitude, position, and
+      velocity by fusing IMU, GPS, magnetometer, and barometric
+      sensor streams. Initial implementation (v0.2) uses a
+      complementary filter for attitude only; full EKF lands in
+      v0.4. Output is a stream<vehicle-state> with quaternion,
+      NED position, NED velocity, and an EKF innovation health
+      metric for downstream limit-checking. Replaces PX4 ekf2
+      module, but expressed as a verified WASM component.
+    tags: [falcon, ekf, state-estimation, sensor-fusion]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proofs on quaternion normalization invariants,
+        numerical bounds on f32 state; Lean WCET bound proves
+        the estimator fits the IMU-rate budget; proptest for
+        random sensor distributions; witness MC/DC for branch
+        coverage on the post-codegen WASM.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-002
+    type: system-req
+    title: Body-rate control loop at 1 kHz
+    status: approved
+    description: >
+      The system shall provide a body-rate control loop that runs
+      at 1 kHz, accepting rate setpoints (body-frame angular
+      velocity + thrust scalar) and producing torque setpoints.
+      Implements PID with anti-windup. Replaces PX4 mc_rate_control,
+      but expressed as a verified WASM component.
+    tags: [falcon, rate-control, pid, real-time]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proofs on PID coefficient bounds and anti-windup
+        saturation; Lean Lyapunov proof of rate-loop stability;
+        Kani for integer overflow paths; differential test
+        against PX4 reference implementation.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-003
+    type: system-req
+    title: Attitude control loop at 250 Hz
+    status: approved
+    description: >
+      The system shall provide an attitude control loop that runs
+      at 250 Hz, accepting attitude setpoints (quaternion + thrust)
+      and producing body-rate setpoints. Implements quaternion-error
+      based control. Replaces PX4 mc_att_control, but expressed as
+      a verified WASM component.
+    tags: [falcon, attitude-control, quaternion]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Rocq theorems for quaternion-error invariants; Verus
+        contracts on quaternion normalization; Lean cascade
+        composition with rate loop; differential test against
+        PX4 reference.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-004
+    type: system-req
+    title: Position control loop at 50 Hz
+    status: approved
+    description: >
+      The system shall provide a position control loop that runs
+      at 50 Hz, accepting NED position / velocity setpoints from
+      the navigator and producing attitude setpoints + thrust.
+      Replaces PX4 mc_pos_control, but expressed as a verified
+      WASM component.
+    tags: [falcon, position-control, navigation]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus contracts on setpoint bounds; Lean proof of
+        cascade stability with attitude loop; cargo-mutants
+        on the full cascade; differential test against PX4.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-005
+    type: system-req
+    title: Control allocation (motor mixing) per airframe variant
+    status: approved
+    description: >
+      The system shall translate body-frame torque + thrust
+      setpoints into per-motor PWM commands using a static mixer
+      matrix derived from the airframe geometry. Mixer matrix
+      derivation is Drake-symbolic; the WIT signature of the
+      exported stream<motor-pwm> is airframe-specific. Replaces
+      PX4 control_allocator, but expressed as a verified WASM
+      component, with per-airframe variants (falcon-quad,
+      falcon-hex, falcon-coax, falcon-vtol, falcon-fw).
+    tags: [falcon, mixer, control-allocation, airframe]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proofs on matrix arithmetic; Drake-derived
+        MultibodyPlant ground truth for the mixer geometry;
+        invariant that allocator never commands negative thrust
+        or saturated negative roll/pitch/yaw simultaneously.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-006
+    type: system-req
+    title: MAVLink protocol interop for ground-station compatibility
+    status: approved
+    description: >
+      The system shall implement the MAVLink v2 protocol for
+      command, telemetry, and parameter exchange with industry-
+      standard ground control stations (QGroundControl, Auterion
+      Mission Control, MAVSDK). MAVLink messages translate to/from
+      the relay-software-bus typed stream messages via a guest
+      WASM codec component. This is the falcon-to-PX4-ecosystem
+      bridge — the entire MAVLink ecosystem works against falcon
+      without modification.
+    tags: [falcon, mavlink, interop, ground-station]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus contracts on packet parsing bounds; proptest on
+        random MAVLink message corpora; QGroundControl
+        interop test demonstrating heartbeat, parameter, and
+        command exchange.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-007
+    type: system-req
+    title: Airframe-variant world specifications
+    status: approved
+    description: >
+      The system shall provide WIT world specifications for
+      distinct airframe variants (falcon-quad, falcon-hex,
+      falcon-coax, falcon-vtol, falcon-fw). Each world wires
+      the same control-cascade components but exports a
+      different stream<motor-pwm> shape (motor count) and
+      imports a variant-specific mixer. Variants ship in
+      separate releases per the falcon release plan.
+    tags: [falcon, airframe, variants, world-spec]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        meld static-fusion succeeds for each variant world;
+        Verus proofs on each mixer-specific matrix; SITL
+        flight tests for each variant.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-008
+    type: system-req
+    title: Dual-DNA composition with cFS mission layer
+    status: approved
+    description: >
+      The system shall share its message bus, time service,
+      event service, table service, executive service, and
+      stored-command engine between the cFS-DNA mission layer
+      (existing relay components) and the PX4-DNA control layer
+      (new falcon components). PID gains arrive through table
+      services. EKF innovation emits through event services.
+      Geofence trips route through limit-checker. Stored
+      missions execute through stored-command. This is the
+      Leeloo property — not cFS+PX4 with a translation layer
+      between them, but a single organism with shared
+      cross-DNA services.
+    tags: [falcon, dual-dna, leeloo, composition, integration]
+    fields:
+      req-type: architectural
+      priority: must
+      verification-criteria: >
+        End-to-end SITL test exercising at minimum: TBL load
+        triggers PID gain update, EVS event emitted from EKF
+        when innovation exceeds threshold, LC violation
+        triggers SC stored-command RTL sequence.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-009
+    type: system-req
+    title: Deterministic SITL with byte-identical evidence
+    status: approved
+    description: >
+      The system shall provide a software-in-the-loop test
+      framework that produces byte-identical output given a
+      seed, headless mode, and a fixed simulation step. Primary
+      backend is Gazebo Harmonic via PX4 SITL conventions;
+      secondary backend is MuJoCo 3 for differential testing.
+      All SITL runs produce rerun.io .rrd evidence files
+      signed by sigil and indexed by rivet.
+    tags: [falcon, sitl, determinism, evidence, simulation]
+    fields:
+      req-type: non-functional
+      priority: must
+      verification-criteria: >
+        CI runs SITL with seed 42 produce SHA-256-identical
+        .rrd output across multiple runs on the same backend.
+        rivet validate links every run to a falcon test
+        requirement.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-010
+    type: system-req
+    title: Multi-domain credit-evidence packaging
+    status: approved
+    description: >
+      The system shall package its evidence chain (Verus proof
+      certificates, Rocq theorem files, Lean compiled proofs,
+      Kani results, proptest reports, witness MC/DC coverage,
+      sanitizer logs, mutation testing reports, criterion
+      benchmarks, SITL .rrd files) into per-domain credit
+      bundles via rivet exports. Each bundle maps the falcon
+      evidence onto the technique tables of one safety standard
+      (DO-178C, ISO 26262, IEC 61508, IEC 62304, ECSS-Q-ST-80C,
+      EN 50128).
+    tags: [falcon, evidence, credit, dossier, certification]
+    fields:
+      req-type: non-functional
+      priority: should
+      verification-criteria: >
+        rivet export --bundle do178c-dal-a produces a tarball
+        with the technique coverage matrix and the underlying
+        evidence files. Same for the other five standards.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
