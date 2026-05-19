@@ -1,0 +1,69 @@
+package pulseengine:relay-mavlink@0.1.0;
+
+/// MAVLink v2 protocol codec — encode and decode messages.
+///
+/// Falcon's interop bridge to the entire PX4/ArduPilot ecosystem.
+/// QGroundControl, MAVSDK, Auterion Mission Control all speak this
+/// wire format. The codec is no_std + no_alloc and bounds-checks
+/// every parse.
+///
+/// v0.1 scope: HEARTBEAT (message id 0) encode/decode only. Other
+/// messages land in later releases (PARAM_SET in v0.4, MISSION_*
+/// in v0.5, COMMAND_LONG in v0.6).
+///
+/// Wire format reference: https://mavlink.io/en/guide/serialization.html
+/// CRC algorithm: X.25 (poly=0x1021, init=0xFFFF), with per-message
+/// CRC_EXTRA byte. HEARTBEAT's CRC_EXTRA is 50.
+interface protocol {
+    /// Heartbeat message — sent at 1 Hz by every MAVLink node.
+    /// Causes the receiving GCS to add the vehicle to its list.
+    record heartbeat {
+        /// Custom flight mode (autopilot-specific, falcon defines).
+        custom-mode: u32,
+        /// MAV_TYPE — vehicle class (quadrotor = 2).
+        mav-type: u8,
+        /// MAV_AUTOPILOT — autopilot identity. falcon claims 12 = INVALID
+        /// in v0.1 (we are not PX4 or ArduPilot); later we register a
+        /// MAV_AUTOPILOT_FALCON value with the spec maintainers.
+        autopilot: u8,
+        /// MAV_MODE_FLAG bitfield.
+        base-mode: u8,
+        /// MAV_STATE — system status (STANDBY = 3, ACTIVE = 4, etc).
+        system-status: u8,
+        /// MAVLink protocol version (2 for v2).
+        mavlink-version: u8,
+    }
+
+    /// MAVLink frame envelope — what gets put on the wire.
+    record frame {
+        /// MAVLink v2 magic byte 0xFD; v1 is 0xFE (we do v2 only).
+        magic: u8,
+        /// Payload length in bytes.
+        len: u8,
+        /// Incompatibility flags (0 = unsigned, 1 = signed).
+        incompat-flags: u8,
+        /// Compatibility flags.
+        compat-flags: u8,
+        /// Sequence number, increments per packet.
+        seq: u8,
+        /// System identifier (1 for vehicle, 255 for GCS by convention).
+        system-id: u8,
+        /// Component identifier (1 for autopilot, 0 for all).
+        component-id: u8,
+        /// Message identifier (0 = HEARTBEAT).
+        message-id: u32,
+    }
+
+    variant codec-error {
+        /// Buffer too short to contain a valid frame.
+        truncated,
+        /// Wrong magic byte at start of frame.
+        bad-magic,
+        /// CRC validation failed.
+        bad-crc,
+        /// Unsupported message ID (v0.1: only HEARTBEAT).
+        unsupported-message,
+        /// Payload length doesn't match message definition.
+        bad-payload-length,
+    }
+}

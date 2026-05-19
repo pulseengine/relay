@@ -1,0 +1,109 @@
+artifacts:
+  - id: SWARCH-FALCON-001
+    type: sw-arch-component
+    title: Falcon dual-DNA architecture (Leeloo composition)
+    status: approved
+    description: >
+      Falcon is the dual-DNA flight stack inside relay: the existing
+      cFS-isomorphic mission layer (SCH, LC, HK, SC, SCA, DS, FM, HS,
+      CS, MD, MM, TBL, CI, TO, CCSDS, CFDP) fused with a new PX4-style
+      real-time control cascade (EKF, RATE, ATT, POS, MIX) sharing
+      one software bus, one time service, one event service, and one
+      verification CI. The Leeloo property: components from both
+      lineages compose freely. PID gains arrive via TBL load. EKF
+      innovation health emits via EVS. Geofence violations route
+      through LC into SC stored-command sequences (RTL trigger).
+      Stored missions execute through SC into the setpoint stream
+      consumed by POS-CONTROL.
+
+      Architecture layers:
+
+        Mission/ops (cFS-DNA, 1-10 Hz command rate):
+          ground link (CI/TO) <-> CCSDS/CFDP
+          stored command (SC/SCA) -> scheduler (SCH)
+          limit checker (LC) <- housekeeping (HK)
+          data storage (DS) + file manager (FM) + memory (MD/MM)
+          events (EVS) + tables (TBL) + time + executive (ES)
+          health & safety (HS) + checksum (CS)
+
+        Control/dynamics (PX4-DNA, 50-1000 Hz control rate):
+          sensor drivers (IMU, GPS, MAG, BARO) host services
+          -> stream<imu-sample>
+          relay-ekf (state estimator)        - 1000 Hz
+          -> stream<vehicle-state>
+          relay-pos + navigator               -   50 Hz
+          -> stream<attitude-setpoint>
+          relay-att                           -  250 Hz
+          -> stream<rate-setpoint>
+          relay-rate                          - 1000 Hz
+          -> stream<torque-setpoint>
+          relay-mix (control allocator)       - 1000 Hz
+          -> stream<motor-pwm>
+          relay-pwm / DShot (host service)
+
+      Cross-DNA flows (the Leeloo signature):
+        - PID gains: relay-tbl LOAD -> mixer / controllers pickup
+        - EKF health: relay-ekf -> relay-evs SEND_EVENT
+        - Geofence: relay-lc VIOLATION -> relay-sc RTL trigger
+        - Mission: relay-sc SCHEDULED_ACTION -> setpoint stream
+        - Watchdog: relay-hs TIMEOUT -> safe-state landing
+
+      Composition is through stream wiring via meld (build-time
+      static fusion). No runtime topic-name lookup, no router thread.
+      Each variant world (falcon-quad, falcon-hex, falcon-coax,
+      falcon-vtol, falcon-fw) shares the cascade components but
+      provides a variant-specific mixer (Drake-derived geometry,
+      Verus-checked) and exports a variant-specific stream<motor-pwm>
+      shape.
+
+      Verification stratification:
+        - cFS-DNA: existing Verus + Rocq + Lean tracks unchanged
+        - PX4-DNA: new components carry the full overdo chain
+        - Cross-DNA: end-to-end SITL exercises the integration
+    tags: [architecture, falcon, dual-dna, leeloo, verified, control-cascade]
+    fields:
+      composition: "build-time static fusion via meld; no runtime routing"
+      interfaces:
+        provided:
+          - "stream<vehicle-state> — EKF estimator output"
+          - "stream<rate-setpoint> — attitude controller output"
+          - "stream<torque-setpoint> — rate controller output"
+          - "stream<motor-pwm> — mixer output (airframe-variant-specific shape)"
+          - "stream<mavlink-message> — MAVLink codec output for ground link"
+        required:
+          - "stream<imu-sample> — host service IMU input"
+          - "stream<gps-fix> — host service GPS input"
+          - "stream<sensor-reading> — magnetometer + barometer input"
+          - "stream<table-update> — PID gains via cFS-DNA Table Services"
+          - "stream<command-message> — uplink commands via CI"
+      concurrency: >
+        single-threaded cooperative scheduling per host (cFS-DNA cycle
+        + control-cascade cycle); P3 callback-mode streams on embedded;
+        loom-checked on the std/desktop sim path
+      timescale-stratification:
+        mission-ops: "1-10 Hz"
+        navigator: "10 Hz"
+        position-control: "50 Hz"
+        attitude-control: "250 Hz"
+        rate-control: "1000 Hz"
+        mixer-allocator: "1000 Hz"
+        ekf-estimator: "1000 Hz (IMU-rate)"
+    links:
+      - type: allocated-from
+        target: SYSREQ-FALCON-001
+      - type: allocated-from
+        target: SYSREQ-FALCON-002
+      - type: allocated-from
+        target: SYSREQ-FALCON-003
+      - type: allocated-from
+        target: SYSREQ-FALCON-004
+      - type: allocated-from
+        target: SYSREQ-FALCON-005
+      - type: allocated-from
+        target: SYSREQ-FALCON-006
+      - type: allocated-from
+        target: SYSREQ-FALCON-007
+      - type: allocated-from
+        target: SYSREQ-FALCON-008
+      - type: refines
+        target: SWARCH-RELAY-001

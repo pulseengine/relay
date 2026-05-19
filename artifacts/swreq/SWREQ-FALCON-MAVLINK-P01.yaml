@@ -1,0 +1,65 @@
+artifacts:
+  - id: SWREQ-FALCON-MAVLINK-P01
+    type: sw-req
+    title: "MAVLINK-P01: Packet parsing bounds-checked"
+    status: approved
+    description: >
+      The MAVLink codec component shall reject malformed packets
+      without panicking, returning a typed parse error. CRC
+      validation is performed on every received packet; packets
+      with invalid CRC are dropped silently (per MAVLink spec).
+    tags: [falcon, mavlink, parsing, safety, verus]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Verus contract: parse(bytes) returns Result<Message,
+        ParseError> with no panic paths. proptest with random
+        byte corpora confirms.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
+
+  - id: SWREQ-FALCON-MAVLINK-P02
+    type: sw-req
+    title: "MAVLINK-P02: QGroundControl heartbeat interop"
+    status: approved
+    description: >
+      The falcon stack shall respond to QGroundControl's
+      MAVLINK_MSG_ID_HEARTBEAT with a valid heartbeat reply
+      including system-id, component-id, autopilot type, and
+      flight mode. Vehicle appears in QGroundControl's vehicle
+      list within 5 seconds of connection.
+    tags: [falcon, mavlink, qgroundcontrol, interop]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Integration test: QGroundControl connected via serial
+        or UDP detects the vehicle within 5 seconds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
+
+  - id: SWREQ-FALCON-MAVLINK-P03
+    type: sw-req
+    title: "MAVLINK-P03: PARAM_SET routes to relay-tbl"
+    status: approved
+    description: >
+      MAVLink PARAM_SET commands shall route to the cFS-DNA
+      Table Services for parameter updates. PID gains updated
+      via MAVLink land in TBL and propagate to the controllers
+      via the existing relay-tbl manage cycle. Operator can
+      retune the vehicle from QGC without restart.
+    tags: [falcon, mavlink, parameters, dual-dna, leeloo]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Integration test: PARAM_SET kp 0.5 via QGC -> TBL load
+        -> controller picks up new gain at next manage tick.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
+      - type: derives-from
+        target: SYSREQ-FALCON-008

@@ -15,3 +15,6 @@ bazel-*
 .DS_Store
 Thumbs.db
 Cargo.lock
+
+# Claude Code session-local settings
+.claude/

@@ -1,0 +1,57 @@
+artifacts:
+  - id: SWDD-FALCON-ATT-001
+    type: sw-detail-design
+    title: Attitude controller detailed design
+    status: approved
+    description: >
+      The attitude controller is a stream transformer:
+        (vehicle-state, attitude-setpoint, table-update)
+          -> stream<rate-setpoint>
+
+      Quaternion-error-based proportional controller. Runs at
+      250 Hz (every 4 IMU samples).
+
+      Key types:
+        AttState {
+          gains: AttGains,
+        }
+        AttGains {
+          kp_att: [f32; 3],            // proportional on attitude error
+          rate_max: [f32; 3],          // saturate output rates
+        }
+
+      Algorithm:
+        q_state = vehicle_state.quaternion
+        q_setpoint = setpoint.quaternion
+        q_err = q_setpoint * conj(q_state)
+        if q_err[0] < 0.0: q_err = -q_err  // shortest rotation
+        rate_cmd = 2.0 * q_err[1..4] * kp_att   // small-angle approx
+        rate_cmd = clamp(rate_cmd, -rate_max, +rate_max)
+        thrust_out = setpoint.thrust       // pass-through
+
+      For attitude error |theta| > 30 deg, full quaternion-log
+      path is used instead of small-angle approximation:
+        theta = 2 * acos(q_err[0])
+        axis = q_err[1..4] / sin(theta/2)
+        rate_cmd = axis * theta * kp_att / dt_target
+
+      Rocq theorems verify quaternion-error invariants (ATT-P01).
+      Lean cascade-stability proof with rate loop (ATT-P02).
+      Kani bounded check on small-angle linearization (ATT-P03).
+    tags: [falcon, attitude-control, quaternion, detailed-design, rocq]
+    fields:
+      unit: crates/relay-att/src/lib.rs
+      function: "AttController::tick"
+      algorithm: >
+        Quaternion-error proportional control with small-angle
+        linearization and full-rotation fallback above 30 deg.
+      tick-rate: "250 Hz"
+    links:
+      - type: refines
+        target: SWARCH-FALCON-001
+      - type: satisfies
+        target: SWREQ-FALCON-ATT-P01
+      - type: satisfies
+        target: SWREQ-FALCON-ATT-P02
+      - type: satisfies
+        target: SWREQ-FALCON-ATT-P03

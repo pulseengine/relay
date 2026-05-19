@@ -1,0 +1,65 @@
+artifacts:
+  - id: SWDD-FALCON-POS-001
+    type: sw-detail-design
+    title: Position controller detailed design
+    status: approved
+    description: >
+      The position controller is a stream transformer:
+        (vehicle-state, position-setpoint, table-update)
+          -> stream<attitude-setpoint>
+
+      Cascaded PID: outer position loop produces velocity
+      setpoints; inner velocity loop produces acceleration
+      commands; acceleration commands convert to attitude-tilt
+      + thrust. Runs at 50 Hz.
+
+      Key types:
+        PosState {
+          v_integral: [f32; 3],         // velocity-loop integral
+          gains: PosGains,
+        }
+        PosGains {
+          kp_pos: [f32; 3],
+          kp_vel: [f32; 3], ki_vel: [f32; 3], kd_vel: [f32; 3],
+          v_max: [f32; 3],              // velocity saturation
+          tilt_max: f32,                // max bank/pitch angle
+          thrust_hover: f32,            // hover thrust baseline
+        }
+
+      Algorithm:
+        // outer position loop -> velocity setpoint
+        pos_err = setpoint.position - state.p_ned
+        v_setpoint = pos_err * kp_pos
+        v_setpoint = clamp(v_setpoint, -v_max, +v_max)
+
+        // inner velocity loop -> acceleration command
+        v_err = v_setpoint - state.v_ned
+        v_integral += v_err * dt  (with anti-windup)
+        accel_cmd = kp_vel*v_err + ki_vel*v_integral + kd_vel*v_err_derivative
+        accel_cmd[2] += gravity  // compensate for NED-down
+
+        // acceleration -> attitude + thrust
+        thrust = ||accel_cmd|| / max_thrust
+        tilt_axis = accel_cmd_horizontal_unit
+        tilt_angle = atan2(accel_cmd_horizontal_mag, -accel_cmd_z)
+        tilt_angle = clamp(tilt_angle, 0, tilt_max)
+        q_setpoint = quaternion_from_axis_angle(tilt_axis, tilt_angle)
+
+      Mission integration (POS-P03): setpoints arrive via TWO
+      channels — operator command (relay-mavlink) and stored
+      command (relay-sc). Position controller is source-agnostic.
+    tags: [falcon, position-control, cascade, detailed-design]
+    fields:
+      unit: crates/relay-pos/src/lib.rs
+      function: "PosController::tick"
+      algorithm: "Cascaded position-velocity PID -> tilt + thrust."
+      tick-rate: "50 Hz"
+    links:
+      - type: refines
+        target: SWARCH-FALCON-001
+      - type: satisfies
+        target: SWREQ-FALCON-POS-P01
+      - type: satisfies
+        target: SWREQ-FALCON-POS-P02
+      - type: satisfies
+        target: SWREQ-FALCON-POS-P03

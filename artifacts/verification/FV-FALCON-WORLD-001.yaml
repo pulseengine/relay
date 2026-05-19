@@ -1,0 +1,49 @@
+artifacts:
+  - id: FV-FALCON-WORLD-001
+    type: unit-verification
+    title: "v0.1 end-to-end UDP heartbeat exchange test"
+    status: approved
+    description: >
+      Integration test in examples/falcon-hello demonstrating the
+      v0.1 acceptance criterion: vehicle and GCS exchange MAVLink
+      heartbeats over real UDP sockets, the GCS decodes the
+      message, and the decoded payload byte-for-byte matches
+      what the vehicle encoded.
+
+      Two layers of verification:
+
+      1. In-process integration test (cargo test -p falcon-hello)
+         spins up vehicle + GCS threads on ephemeral UDP ports and
+         exchanges heartbeats in-process. Includes:
+           - vehicle_and_gcs_exchange_heartbeats_over_udp
+           - handle_inbound_rejects_unsupported_message
+           - handle_inbound_propagates_bad_crc
+           - handle_inbound_truncated
+           - args_default_ports_for_vehicle_mode / _gcs_mode
+           - args_rejects_unknown_mode / _missing_mode
+           - current_timestamp_is_monotone_within_a_run
+
+      2. End-to-end binary smoke test
+         (scripts/falcon-hello-demo.sh) builds the release binary,
+         spawns vehicle + GCS as separate OS processes, exchanges
+         heartbeats over real UDP for a bounded duration, asserts
+         that the GCS received ≥ 8 heartbeats with the expected
+         decoded payload fields. This is the artifact that proves
+         the v0.1 binary actually works as a deliverable, not just
+         that the codec round-trips in memory.
+
+      Total: 9 in-process tests + 1 binary smoke.
+    tags: [verification, falcon, integration, udp, end-to-end, v0.1]
+    fields:
+      method: integration-test
+      test-count: 10
+      steps:
+        - run: cargo test -p falcon-hello
+        - run: scripts/falcon-hello-demo.sh
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WORLD-P01
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P02
+      - type: implements
+        target: FEAT-FALCON-v0.1

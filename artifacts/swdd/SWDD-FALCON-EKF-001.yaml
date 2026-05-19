@@ -1,0 +1,65 @@
+artifacts:
+  - id: SWDD-FALCON-EKF-001
+    type: sw-detail-design
+    title: EKF / complementary filter detailed design
+    status: approved
+    description: >
+      The EKF component is a stream transformer:
+        (imu, gps, mag, baro) -> stream<vehicle-state>
+
+      v0.2 implementation: complementary filter for attitude
+      only (no GPS/baro fusion). v0.4 implementation: full
+      multiplicative extended Kalman filter (MEKF) on SO(3)
+      with position/velocity in NED frame.
+
+      Key types (v0.4):
+        EkfState {
+          q: [f32; 4],                  // unit quaternion, body-to-NED
+          p_ned: [f32; 3],              // position NED, meters
+          v_ned: [f32; 3],              // velocity NED, m/s
+          bias_gyro: [f32; 3],          // gyro bias estimate
+          bias_accel: [f32; 3],         // accel bias estimate
+          covariance: [[f32; 15]; 15],  // error-state covariance
+          innovation: f32,              // normalized innovation health
+        }
+
+      Algorithm:
+        propagate(dt):
+          - integrate gyro to update q (Rodrigues / quaternion update)
+          - integrate accel-minus-gravity-minus-bias to update v_ned
+          - integrate v_ned to update p_ned
+          - propagate covariance via state-transition Jacobian
+
+        correct(measurement):
+          - compute residual = measurement - h(state)
+          - compute innovation = ||residual||/sqrt(diag(R + H*P*H^T))
+          - if innovation > threshold: skip update (gating)
+          - else: K = P*H^T*(H*P*H^T + R)^-1; state += K*residual
+          - joseph form covariance update for numerical stability
+
+      Verus properties verified (see SWREQ-FALCON-EKF-P01..P04).
+
+      Drake integration: airframe-specific noise covariances are
+      derived from the Drake MultibodyPlant (sensor placement,
+      moment of inertia tensor). Single source of truth.
+    tags: [falcon, ekf, detailed-design, verus, drake]
+    fields:
+      unit: crates/relay-ekf/src/lib.rs
+      function: "EkfState::propagate, EkfState::correct"
+      algorithm: >
+        Multiplicative EKF on SO(3) with NED position/velocity;
+        Joseph-form covariance for numerical stability;
+        innovation-gated correction.
+      v02-scope: "attitude-only complementary filter (skips GPS/baro)"
+      v04-scope: "full MEKF with position/velocity/bias estimation"
+    links:
+      - type: refines
+        target: SWARCH-FALCON-001
+      - type: satisfies
+        target: SWREQ-FALCON-EKF-P01
+      - type: satisfies
+        target: SWREQ-FALCON-EKF-P02
+      - type: satisfies
+        target: SWREQ-FALCON-EKF-P03
+      - type: satisfies
+        target: SWREQ-FALCON-EKF-P04

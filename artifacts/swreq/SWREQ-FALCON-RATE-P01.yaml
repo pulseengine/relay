@@ -1,0 +1,77 @@
+artifacts:
+  - id: SWREQ-FALCON-RATE-P01
+    type: sw-req
+    title: "RATE-P01: PID integrator anti-windup saturation"
+    status: approved
+    description: >
+      The rate controller's integral term shall saturate at the
+      configured anti-windup limits and never exceed them after
+      any sequence of inputs. Prevents integral windup during
+      actuator saturation.
+    tags: [falcon, rate-control, pid, anti-windup, verus]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verus proof: integrator state in [-i_max, +i_max] after
+        any process_tick call sequence.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+
+  - id: SWREQ-FALCON-RATE-P02
+    type: sw-req
+    title: "RATE-P02: Coefficient bounds preserve numerical stability"
+    status: approved
+    description: >
+      The rate controller's PID coefficients shall be bounded
+      such that the resulting transfer function has poles
+      strictly inside the unit circle (discrete-time stability).
+    tags: [falcon, rate-control, pid, stability, lean]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Lean proof: PID poles in unit disk for kp/ki/kd within
+        TBL-loaded admissible ranges; Verus contract enforces
+        bounds at table-load validation time.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+
+  - id: SWREQ-FALCON-RATE-P03
+    type: sw-req
+    title: "RATE-P03: Lyapunov stability of rate loop"
+    status: approved
+    description: >
+      The closed-loop body-rate response shall be Lyapunov-stable
+      under any bounded disturbance, for the rate setpoint range
+      [-pi, +pi] rad/s on each axis.
+    tags: [falcon, rate-control, lyapunov, lean]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Lean proof: Lyapunov function V(e) = e^T P e decreases
+        monotonically along trajectories of the closed-loop
+        system; constants P derived from PID gains.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+
+  - id: SWREQ-FALCON-RATE-P04
+    type: sw-req
+    title: "RATE-P04: WCET bounded by 1 ms control period"
+    status: approved
+    description: >
+      The rate controller's run function shall complete within
+      1 ms (1 kHz update rate) on the target Cortex-M7.
+    tags: [falcon, rate-control, wcet, lean]
+    fields:
+      req-type: non-functional
+      priority: must
+      verification-criteria: >
+        Lean WCET proof + criterion benchmark on hardware.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002

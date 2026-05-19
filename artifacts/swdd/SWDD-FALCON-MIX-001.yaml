@@ -1,0 +1,57 @@
+artifacts:
+  - id: SWDD-FALCON-MIX-001
+    type: sw-detail-design
+    title: Control allocator (mixer) detailed design — falcon-quad
+    status: approved
+    description: >
+      The mixer is a stream transformer:
+        (torque-setpoint, thrust-setpoint) -> stream<motor-pwm>
+
+      Per-airframe; falcon-quad variant lives in crates/relay-mix-quad.
+      Maps body-frame [roll-torque, pitch-torque, yaw-torque, thrust]
+      to per-motor PWM via a static 4x4 mixer matrix.
+
+      Mixer matrix (X-configuration, motors numbered 1..4 clockwise
+      from front-right):
+
+        |m1|     | 1  -1   1   1 |   |roll  |
+        |m2|  =  |-1   1   1   1 | * |pitch |
+        |m3|     | 1   1  -1   1 |   |yaw   |
+        |m4|     |-1  -1  -1   1 |   |thrust|
+
+      Saturation handling (MIX-P03 priority order):
+        1. Find max(m_i) and min(m_i).
+        2. If max > 1.0: scale all m_i to keep max = 1.0
+           (preserves thrust direction, sacrifices yaw authority).
+        3. If min < 0.0 after step 2: reduce yaw command, retry.
+        4. If still saturated: reduce roll/pitch, retry.
+        5. Clamp each m_i to [0.0, 1.0].
+
+      Mixer matrix derivation: each m_i column is derived
+      symbolically from the Drake MultibodyPlant of the falcon-quad
+      airframe (rotor position relative to CoM, thrust direction,
+      yaw-reaction-torque sign). Same plant feeds the Gazebo SDF
+      used in SITL.
+
+      For other variants (falcon-hex, falcon-coax, falcon-vtol,
+      falcon-fw), separate SWDD-FALCON-MIX-*-001 artifacts describe
+      the variant-specific matrix derivation.
+    tags: [falcon, mixer, control-allocation, drake, falcon-quad]
+    fields:
+      unit: crates/relay-mix-quad/src/lib.rs
+      function: "MixerQuad::allocate"
+      algorithm: "Static 4x4 matrix multiply + priority-preserving saturation."
+      tick-rate: "1 kHz"
+      variant: "falcon-quad (X-configuration)"
+      derivation-source: "Drake MultibodyPlant — drake/falcon-quad.urdf"
+    links:
+      - type: refines
+        target: SWARCH-FALCON-001
+      - type: satisfies
+        target: SWREQ-FALCON-MIX-P01
+      - type: satisfies
+        target: SWREQ-FALCON-MIX-P02
+      - type: satisfies
+        target: SWREQ-FALCON-MIX-P03
+      - type: satisfies
+        target: SWREQ-FALCON-MIX-P04

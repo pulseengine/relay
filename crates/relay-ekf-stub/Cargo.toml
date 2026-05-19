@@ -1,0 +1,20 @@
+[package]
+name = "relay-ekf-stub"
+description = "Relay EKF stub — v0.1 placeholder that emits a constant vehicle-state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Cargo tests use plain/ (verus-stripped). Verus verification uses src/ via Bazel.
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+
+# no_std + no alloc. The real EKF (v0.2+) replaces this stub.
+
+[dev-dependencies]
+proptest.workspace = true

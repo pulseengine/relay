@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-FALCON-EKF-STUB-001
+    type: unit-verification
+    title: "Unit + property tests for relay-ekf-stub (v0.1)"
+    status: approved
+    description: >
+      Cargo unit + proptest verification of the relay-ekf-stub
+      placeholder state estimator. Covers the v0.1 surrogate for
+      the SWREQ-FALCON-EKF-* properties: unit-quaternion output,
+      deterministic time pass-through, healthy innovation range.
+
+      9 tests in the crate, all green.
+
+      The stub is a v0.1 placeholder. Real EKF (relay-ekf) lands in
+      v0.2 with full Verus contracts on quaternion algebra and
+      numerical state bounds, plus a Lean WCET proof. This
+      verification artifact is intentionally narrow: it only
+      establishes that the stub satisfies its v0.1 contract (always
+      emits unit quaternion, deterministic, healthy innovation).
+      The full EKF-P01..P04 properties verify in v0.2.
+    tags: [verification, falcon, ekf, stub, unit-test, proptest, v0.1]
+    fields:
+      method: automated-test
+      proptest-cases-default: 256
+      test-count: 9
+      v01-scope: "stub placeholder; real EKF in v0.2"
+      steps:
+        - run: cargo test -p relay-ekf-stub
+        - run: cargo test -p relay-ekf-stub --release
+        - run: PROPTEST_CASES=4096 cargo test -p relay-ekf-stub
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-EKF-P01
+      - type: implements
+        target: FEAT-FALCON-v0.1

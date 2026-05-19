@@ -1,0 +1,197 @@
+name: Release
+
+# Tag-triggered: builds falcon-hello for five targets, signs each
+# archive with cosign keyless OIDC, computes SHA-256 checksums,
+# publishes a GitHub Release.
+#
+# Tag convention: falcon-v<semver>, e.g. falcon-v0.1.0.
+#
+# Per-tag serial concurrency: never cancel a release mid-publish;
+# a half-published release leaves the GitHub Release inconsistent.
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  push:
+    tags:
+      - "falcon-v*"
+
+permissions:
+  contents: write
+  # Keyless cosign via GitHub OIDC. Exchanges a short-lived id-token
+  # for a Fulcio code-signing certificate bound to this workflow's
+  # identity; no long-term key custody.
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+    env:
+      TARGET: ${{ matrix.target }}
+      ARCHIVE_KIND: ${{ matrix.archive }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install cross (linux aarch64 only)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build falcon-hello (native)
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: cargo build --release --target "$TARGET" -p falcon-hello
+
+      - name: Build falcon-hello (cross)
+        if: matrix.cross
+        shell: bash
+        run: cross build --release --target "$TARGET" -p falcon-hello
+
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          strip "target/${TARGET}/release/falcon-hello" 2>/dev/null || true
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          ARCHIVE="${VERSION}-${TARGET}.tar.gz"
+          mkdir -p staging
+          cp "target/${TARGET}/release/falcon-hello" staging/
+          cp falcon/README.md staging/README.md 2>/dev/null || true
+          cp CHANGELOG.md staging/ 2>/dev/null || true
+          cp LICENSE staging/ 2>/dev/null || true
+          tar -czf "$ARCHIVE" -C staging .
+          sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          ARCHIVE="${VERSION}-${TARGET}.zip"
+          mkdir -p staging
+          cp "target/${TARGET}/release/falcon-hello.exe" staging/
+          cp falcon/README.md staging/README.md 2>/dev/null || true
+          cp CHANGELOG.md staging/ 2>/dev/null || true
+          cp LICENSE staging/ 2>/dev/null || true
+          cd staging && 7z a "../${ARCHIVE}" . && cd ..
+          sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Cosign keyless sign
+        shell: bash
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --output-signature "${ARCHIVE}.cosign.sig" \
+            --output-certificate "${ARCHIVE}.cosign.cert" \
+            "${ARCHIVE}"
+          echo "::notice::cosign keyless signature emitted for ${ARCHIVE}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
+            ${{ env.ARCHIVE }}.cosign.sig
+            ${{ env.ARCHIVE }}.cosign.cert
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage release files
+        shell: bash
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( \
+            -name "*.tar.gz" -o -name "*.zip" \
+            -o -name "*.sha256" \
+            -o -name "*.cosign.sig" -o -name "*.cosign.cert" \
+          \) -exec cp {} release-files/ \;
+          ls -la release-files
+
+      - name: Pick release notes body
+        id: notes
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          STEM="${TAG#falcon-}"
+          NOTES_FILE=".github/release-notes/${STEM}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            echo "Using release notes from $NOTES_FILE"
+            printf 'notes_path=%s\n' "$NOTES_FILE" >>"$GITHUB_OUTPUT"
+          else
+            echo "No release notes file at $NOTES_FILE; using gh autogen"
+            printf 'notes_path=\n' >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES_PATH: ${{ steps.notes.outputs.notes_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${NOTES_PATH}" ]; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file "${NOTES_PATH}" \
+              release-files/*
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              release-files/*
+          fi

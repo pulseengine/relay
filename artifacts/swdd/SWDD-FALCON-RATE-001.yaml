@@ -1,0 +1,63 @@
+artifacts:
+  - id: SWDD-FALCON-RATE-001
+    type: sw-detail-design
+    title: Body-rate controller detailed design
+    status: approved
+    description: >
+      The rate controller is a stream transformer:
+        (vehicle-state, rate-setpoint, table-update)
+          -> stream<torque-setpoint>
+
+      PID with anti-windup on each body axis (roll/pitch/yaw rates).
+      Runs at 1 kHz (every IMU sample).
+
+      Key types:
+        RateState {
+          integral: [f32; 3],          // anti-wound-up integral
+          last_error: [f32; 3],        // for derivative term
+          gains: RateGains,            // TBL-loaded
+        }
+
+        RateGains {
+          kp: [f32; 3], ki: [f32; 3], kd: [f32; 3],
+          i_max: [f32; 3],            // anti-windup limits
+          torque_max: [f32; 3],
+        }
+
+      Algorithm (per axis):
+        error = setpoint - measured_rate
+        integral_candidate = integral + error * dt
+        if (integral_candidate * gains.ki) saturates torque_max:
+          // don't accumulate (anti-windup)
+          integral = clamp(integral, -i_max, +i_max)
+        else:
+          integral = integral_candidate
+        derivative = (error - last_error) / dt
+        torque = kp*error + ki*integral + kd*derivative
+        torque = clamp(torque, -torque_max, +torque_max)
+        last_error = error
+
+      Verus properties (RATE-P01..P04) cover integrator
+      saturation, PID coefficient bounds, Lyapunov stability,
+      and WCET.
+
+      Differential test: compare output trajectory against PX4
+      mc_rate_control on identical input streams; tolerance
+      derived from PX4's documented tuning range.
+    tags: [falcon, rate-control, pid, detailed-design, verus, lean]
+    fields:
+      unit: crates/relay-rate/src/lib.rs
+      function: "RateController::tick"
+      algorithm: "Per-axis PID with anti-windup; clamped output."
+      tick-rate: "1 kHz"
+    links:
+      - type: refines
+        target: SWARCH-FALCON-001
+      - type: satisfies
+        target: SWREQ-FALCON-RATE-P01
+      - type: satisfies
+        target: SWREQ-FALCON-RATE-P02
+      - type: satisfies
+        target: SWREQ-FALCON-RATE-P03
+      - type: satisfies
+        target: SWREQ-FALCON-RATE-P04

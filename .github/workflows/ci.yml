@@ -1,0 +1,85 @@
+name: CI
+
+# Standard cargo CI for the relay workspace. fmt + clippy + test
+# across linux/macos/windows. Bazel verus jobs follow in v0.2 when
+# the falcon crates get Verus annotations.
+#
+# Runner labels start on github-hosted; flip to pulseengine
+# self-hosted labels (e.g. [self-hosted, linux, x64, rust-cpu])
+# once a runner pool is wired up for this repo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # NB: RUSTFLAGS=-D warnings deliberately NOT set at workflow level.
+  # Pre-existing cFS engine crates use `#[cfg(kani)]` without a
+  # corresponding `check-cfg` declaration, which lights up
+  # `unexpected_cfgs` lint and would block compilation. Lifting that
+  # is a separate cleanup (one per cFS crate); for v0.1 we accept the
+  # warning. Clippy on the falcon-scoped crates still uses
+  # `-- -D warnings` to keep falcon code itself warning-free.
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      # Pre-existing cFS crates emit rustfmt deltas; v0.1 tolerates
+      # them while v0.2 cleans the workspace up.
+      - run: cargo fmt --all -- --check
+        continue-on-error: true
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # Scope tight: only the v0.1 falcon crates. Workspace-wide
+      # clippy lights up pre-existing warnings in cFS crates that
+      # are out of v0.1 scope.
+      - name: Clippy on v0.1 falcon crates
+        run: |
+          cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
+            --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test --workspace --all-targets
+
+  falcon-hello-smoke:
+    name: falcon-hello end-to-end demo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run falcon-hello UDP-loopback demo
+        run: bash scripts/falcon-hello-demo.sh

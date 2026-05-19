@@ -1,0 +1,65 @@
+artifacts:
+  - id: SWREQ-FALCON-ATT-P01
+    type: sw-req
+    title: "ATT-P01: Quaternion-error invariant preserved"
+    status: approved
+    description: >
+      The attitude controller's quaternion error computation
+      shall produce a result in [-1, +1] componentwise, with
+      the convention that the shorter rotation is always taken
+      (q_err and -q_err are equivalent rotations; the controller
+      picks the one with non-negative scalar component).
+    tags: [falcon, attitude-control, quaternion, rocq]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Rocq theorem: q_err = q_setpoint * conj(q_state) is unit-
+        quaternion when both inputs are unit-quaternion; scalar
+        sign-selection produces shorter rotation.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-003
+
+  - id: SWREQ-FALCON-ATT-P02
+    type: sw-req
+    title: "ATT-P02: Cascade stability with rate loop"
+    status: approved
+    description: >
+      The attitude controller, composed in cascade with the rate
+      controller (RATE-P03), shall preserve closed-loop Lyapunov
+      stability. The attitude loop runs at 1/4 the rate-loop
+      frequency (250 Hz vs 1000 Hz) to ensure inner-loop
+      convergence between updates.
+    tags: [falcon, attitude-control, cascade, stability, lean]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Lean proof: cascade composition with RATE-P03 admits
+        a joint Lyapunov function under the timescale
+        separation assumption.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-003
+
+  - id: SWREQ-FALCON-ATT-P03
+    type: sw-req
+    title: "ATT-P03: Small-angle approximation bounds"
+    status: approved
+    description: >
+      Where the attitude controller uses small-angle
+      linearization (for computational efficiency), the
+      approximation shall hold within stated error bounds for
+      attitude error |theta| < theta_max = 30 degrees.
+    tags: [falcon, attitude-control, small-angle, kani]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Kani bounded check: linearization error < 1% for
+        |theta| < 30 deg. Above 30 deg, full quaternion path
+        is taken.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-003
