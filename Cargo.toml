@@ -25,6 +25,7 @@ members = [
     "crates/relay-rate",
     "crates/relay-att",
     "crates/relay-mix-quad",
+    "crates/relay-pos",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
     "examples/falcon-sitl-hover",

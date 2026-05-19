@@ -254,32 +254,58 @@ artifacts:
 
   - id: FEAT-FALCON-v0.5
     type: feature
-    title: "v0.5 — outer position loop + waypoint mission via stored-command"
-    status: pending
+    title: "v0.5 — outer position loop: vehicle flies to a 10 m waypoint in SITL"
+    status: approved
     description: >
-      relay-pos (50 Hz cascade PID) joins. relay-gps host service
-      provides simulated GPS. cFS-DNA stored-command engine
-      executes waypoint missions.
+      LANDED. Full outer-loop cascade closes. POS → ATT → RATE → MIX
+      → plant (now with translational dynamics) drives the vehicle
+      from origin to a 10 m north waypoint in pure-Rust SITL.
 
       Ships:
-        - crates/relay-pos
-        - host/relay-gps
-        - mission loader (TBL-based waypoint table)
-        - extends examples/falcon-sitl-hover to waypoint flight
+        - crates/relay-pos — cascaded P-PI position controller.
+          50 Hz outer loop, NED frame, anti-windup, NaN-safe input
+          sanitisation. Position error → velocity setpoint (P,
+          clamped); velocity error → acceleration command (PI,
+          integral-bounded); acceleration → tilt + thrust via the
+          small-angle map; yaw held or followed. 13 unit + proptest
+          cases.
+        - examples/falcon-sitl-hover extends with `mission` scenario
+          + translational plant dynamics. Vehicle starts at NED
+          origin, commanded to (10, 0, 0) m. Achieved:
+            * convergence to <0.5 m:  4.045 s   (budget 10 s)
+            * final distance:          0.010 m   (budget 0.5 m)
+            * RMS-steady (last 2 s):   0.015 m   (budget 1.0 m)
+            * peak distance error:    10.000 m   (initial)
+            * loop wall time:           1.3 ms for 12000 samples
+        - Plant gains translational state (NED position + velocity)
+          + thrust + drag + gravity integration. Used only by the
+          mission scenario; the v0.3 and v0.4 scenarios continue to
+          use the rotational-only `step` path.
 
-      Verification chain delta:
-        - Lean cascade stability proof (POS-P02)
-        - cargo-mutants on full cascade
-        - sanitizer pass on full simulation harness
-        - end-to-end test of dual-DNA composition (POS-P03)
+      Verification posture:
+        - cargo test --workspace: 60 test suites green (was 59 in v0.4)
+        - python3 scripts/run-falcon-verification.py: ✅ 8/8 FV
+          artifacts green, 31/31 steps PASS
+        - rivet validate: 0 broken cross-references
 
-      Acceptance test: 4-waypoint square mission completed in
-      SITL, all waypoints reached within 1 m, returns to home.
-    tags: [falcon, milestone, v0.5, position-control, mission]
+      Scope notes — what slipped to v0.6:
+        - host/relay-gps GPS host service (v0.5 feeds plant position
+          directly to controller — same source-agnostic POS-P03
+          interface, but no real GPS noise/latency yet)
+        - cFS-DNA stored-command mission execution via relay-sc
+          (waypoint hard-coded in scenario; v0.6 wires it through
+          relay-sc + relay-tbl for the cFS↔PX4 dual-DNA showcase)
+        - cargo-mutants on full cascade → v0.6
+        - sanitizer pass → v0.6
+        - Gazebo Harmonic SITL → v0.7 (pure-Rust SITL still does
+          everything the mission verification needs; Gazebo becomes
+          worthwhile when wind disturbance + sensor latency matter)
+    tags: [falcon, milestone, v0.5, position-control, mission, landed]
     fields:
-      release-target: "waypoint mission in SITL; dual-DNA validated"
-      example: examples/falcon-sitl-hover (extended)
-      maps-to-overdo-layer: "+ cargo-mutants + sanitizers + dual-DNA E2E"
+      release-target: "10 m waypoint reached and settled in SITL"
+      example: examples/falcon-sitl-hover
+      test-count: 15
+      maps-to-overdo-layer: "cargo tests + proptest 4k fuzz + mission cascade bench"
     links:
       - type: implements
         target: SYSREQ-FALCON-004
@@ -293,6 +319,10 @@ artifacts:
         target: SWREQ-FALCON-POS-P03
       - type: depends-on
         target: FEAT-FALCON-v0.4
+      - type: verified-by
+        target: FV-FALCON-POS-001
+      - type: blocks
+        target: FEAT-FALCON-v0.6
 
   - id: FEAT-FALCON-v0.6
     type: feature

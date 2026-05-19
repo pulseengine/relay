@@ -1,0 +1,18 @@
+[package]
+name = "relay-pos"
+description = "Relay position controller — cascaded P-PI: pos → vel → accel → attitude (v0.5)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+proptest.workspace = true

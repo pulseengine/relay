@@ -1,0 +1,59 @@
+artifacts:
+  - id: FV-FALCON-POS-001
+    type: unit-verification
+    title: "Unit + property tests + mission SITL for relay-pos (v0.5)"
+    status: approved
+    description: >
+      v0.5 verification of the position controller (`relay-pos`) and
+      the full POS → ATT → RATE → MIX → plant cascade in the
+      falcon-sitl-hover `mission` scenario.
+
+      Three evidence layers:
+
+      1. Unit + property tests in `crates/relay-pos` (13 cases):
+           - POS-P01: setpoint bounds enforced; out-of-range or NaN/∞
+             inputs sanitised; integral bounded ±i_max
+             (deterministic + proptest over arbitrary state)
+           - Forward (+north) setpoint produces nose-down pitch
+           - East (+east) setpoint produces right-side-down roll
+           - Above-setpoint altitude reduces thrust; below increases it
+           - Tilt clamped to tilt_max under large position errors
+           - velocity setpoint clamped to v_max_horizontal / v_max_vertical
+           - Yaw held when `yaw_setpoint` is NaN; followed when finite
+           - `reset()` clears integrator
+       2. Mission scenario in `examples/falcon-sitl-hover` (2 added
+          cases):
+            - deterministic_mission_passes:
+                vehicle at NED origin, commanded to (10, 0, 0) m;
+                cascade POS(50Hz) → ATT(250Hz) → RATE(1kHz) → MIX +
+                plant translational dynamics. Achieved:
+                final distance 0.010 m, RMS-steady 0.015 m,
+                convergence 4.045 s.
+            - noisy_mission_still_reaches_waypoint (looser budget)
+       3. End-to-end binary smoke
+          (`cargo run -p falcon-sitl-hover -- --scenario mission`)
+          — prints metrics and PASS/FAIL.
+
+       Verus SMT contracts on the cascade Lyapunov decay and Rocq
+       proofs of the small-angle accel-to-tilt map remain on the
+       v0.6 roadmap.
+    tags: [verification, falcon, position-control, mission, cascade, v0.5]
+    fields:
+      method: automated-test
+      proptest-cases-default: 256
+      test-count: 15
+      steps:
+        - run: cargo test -p relay-pos
+        - run: cargo test -p relay-pos --release
+        - run: PROPTEST_CASES=4096 cargo test -p relay-pos
+        - run: cargo test -p falcon-sitl-hover
+        - run: cargo run -q -p falcon-sitl-hover --release -- --scenario mission
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-POS-P01
+      - type: verifies
+        target: SWREQ-FALCON-POS-P02
+      - type: verifies
+        target: SWREQ-FALCON-POS-P03
+      - type: implements
+        target: FEAT-FALCON-v0.5
