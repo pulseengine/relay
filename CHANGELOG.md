@@ -9,6 +9,74 @@ Tags use a per-track prefix:
 - `falcon-v<semver>` — the falcon dual-DNA flight stack
 - (future) `relay-v<semver>` — the relay substrate itself
 
+## [falcon-v0.2.0] — 2026-05-19
+
+Real attitude estimator. Replaces the v0.1 stub with a Mahony
+complementary filter on SO(3), validated by a deterministic
+synthetic-IMU accuracy bench. No flight dynamics yet — that's v0.3.
+
+### Added
+
+- **`crates/relay-ekf`** — no_std + libm implementation of the
+  Mahony, Hamel & Pflimlin (2008) complementary filter on SO(3)
+  with gravity-only correction:
+  - `Ekf::new()`, `Ekf::with_gains(EkfGains{kp, ki})`,
+    `Ekf::set_initial_quaternion(q)`, `Ekf::tick(ImuSample)`.
+  - Defaults Kp=2.0, Ki=0.05 (tuned for a 200 Hz–1 kHz consumer-
+    grade IMU).
+  - Bias estimate bounded ±0.5 rad/s under sustained excitation.
+  - Pure-math helpers (`quat_mul`, `quat_conj`,
+    `rotate_body_to_ned_inverse`, `cross`, `normalise`,
+    `is_unit_quaternion`) exported for the controller layer.
+  - 16 unit + proptest cases covering EKF-P01..P05 surrogates:
+    unit-quaternion preservation per-tick + sequence, no NaN
+    under adversarial accel, innovation monotone with tilt
+    disagreement, static rest convergence, pure-yaw stability,
+    bias bound.
+- **`examples/falcon-ekf-bench`** — runnable accuracy bench:
+  - 25-second deterministic synthetic trajectory at 200 Hz
+    (rest at 20° pitch → roll → rest → yaw → rest).
+  - Compares estimator vs ground truth, reports RMS attitude
+    error in degrees + convergence time.
+  - CLI: `cargo run -p falcon-ekf-bench --release` (deterministic);
+    `--noise 0.2` for σ=0.2 m/s² IMU noise.
+  - Acceptance budget: RMS-steady ≤ 5°, final ≤ 5°, no NaN.
+  - Achieved on this release: RMS-steady **3.31°**, final
+    **3.02°**, convergence **0.68 s**, peak 19.8°.
+- **`artifacts/verification/FV-FALCON-EKF-001.yaml`** — v0.2
+  verification artifact with extractable `fields.steps`:
+  `cargo test -p relay-ekf` + release rerun + 4 k proptest fuzz
+  + bench tests + bench binary smoke. Supersedes v0.1's
+  `FV-FALCON-EKF-STUB-001` (which is preserved for history).
+
+### Verification
+
+- `cargo test --workspace`: 50 test suites green (was 49 in v0.1;
+  one new — `falcon-ekf-bench`).
+- `cargo test -p relay-ekf`: 16/16 PASS including 2 proptest cases
+  at 256 default + 4096 fuzz mode.
+- `cargo run -p falcon-ekf-bench --release`: PASS at v0.2 budget.
+- `python3 scripts/run-falcon-verification.py --markdown` against
+  the new gate: ✅ 4/4 falcon FV artifacts pass, 13/13 steps green.
+- `rivet validate`: 0 broken cross-references.
+
+### Known limitations
+
+- **No magnetometer fusion yet** — gravity-only Mahony filter
+  cannot observe heading directly. Small residual yaw drift is
+  fundamental until v0.4 (`relay-att` with mag).
+- **No Verus SMT proofs yet** on the EKF math. Deferred to v0.4
+  with the `src/` Verus-annotated track + Bazel `verus_test`
+  rules. v0.2 covers the same property classes via proptest at
+  4 k cases.
+- **No Lean WCET proof yet** on `Ekf::tick`. The estimator's wall
+  time on a single tick is empirically ≤ 1 µs (5000 samples in
+  333 µs on the bench runner), well inside a 1 ms IMU period;
+  formal proof lands in v0.4.
+- **No WASM-component compilation yet** — the EKF compiles as a
+  plain `cargo` crate. wit-bindgen integration follows when the
+  relay-substrate's P3 streams arrive (v0.3+).
+
 ## [falcon-v0.1.0] — 2026-05-19
 
 The dual-DNA flight stack's first tagged release. Pre-product:

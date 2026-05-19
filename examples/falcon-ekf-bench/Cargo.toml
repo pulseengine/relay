@@ -1,0 +1,16 @@
+[package]
+name = "falcon-ekf-bench"
+description = "Falcon v0.2 — synthetic-IMU attitude-estimator accuracy bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "falcon-ekf-bench"
+path = "src/main.rs"
+
+[dependencies]
+relay-ekf = { path = "../../crates/relay-ekf" }
+libm = "0.2"
