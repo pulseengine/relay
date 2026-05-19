@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: cargo
+    directory: /crates/relay-ccsds
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: cargo
+    directory: /crates/relay-cfdp
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: cargo
+    directory: /crates/relay-ci
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
