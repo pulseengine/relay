@@ -1,0 +1,50 @@
+artifacts:
+  - id: FV-FALCON-MIX-001
+    type: unit-verification
+    title: "Unit + property tests for relay-mix-quad (v0.4)"
+    status: approved
+    description: >
+      v0.4 verification of the X-config quadcopter mixer
+      (`relay-mix-quad`). Maps body-frame (torque, thrust) commands
+      to four motor PWM values for falcon-quad. Standalone
+      verification of the matrix arithmetic + saturation handling;
+      cascade integration is exercised by the `attitude` scenario
+      in `falcon-sitl-hover` (covered by FV-FALCON-ATT-001).
+
+      Unit + proptest cases (10):
+         - MIX-P01 surrogate: zero command yields all motors equal to
+           collective thrust (the matrix has the right thrust column).
+         - MIX-P02: outputs in `[0, 1]` for arbitrary finite inputs
+           (deterministic + proptest, 256/4096 cases).
+         - MIX-P03: torque-direction signs preserved under saturation
+           (single-axis proptest); +roll lifts left side; +pitch lifts
+           front; +yaw spins CCW motors.
+         - High thrust + torque saturates gracefully (excess shifted
+           off the bus, max stays ≤ 1.0).
+         - NaN/∞ inputs sanitised to zero, no propagation.
+         - Negative thrust clipped to zero (motors cannot reverse).
+
+      v0.5 will formalise the matrix derivation via a Drake
+      MultibodyPlant export — same mixer numerically, sourced from
+      first-principles airframe geometry; `motors_to_torque_signs`
+      helper makes the reverse mapping unit-testable today.
+    tags: [verification, falcon, mixer, control-allocation, v0.4]
+    fields:
+      method: automated-test
+      proptest-cases-default: 256
+      test-count: 10
+      steps:
+        - run: cargo test -p relay-mix-quad
+        - run: cargo test -p relay-mix-quad --release
+        - run: PROPTEST_CASES=4096 cargo test -p relay-mix-quad
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MIX-P01
+      - type: verifies
+        target: SWREQ-FALCON-MIX-P02
+      - type: verifies
+        target: SWREQ-FALCON-MIX-P03
+      - type: verifies
+        target: SWREQ-FALCON-MIX-P04
+      - type: implements
+        target: FEAT-FALCON-v0.4

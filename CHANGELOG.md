@@ -9,6 +9,101 @@ Tags use a per-track prefix:
 - `falcon-v<semver>` — the falcon dual-DNA flight stack
 - (future) `relay-v<semver>` — the relay substrate itself
 
+## [falcon-v0.4.0] — 2026-05-19
+
+Full inner cascade closes. Attitude controller cascades into rate
+PID into mixer into plant, all in pure-Rust SITL. Commanded 20° tilt
+reached in 0.352 s with 0.029° steady-state error.
+
+### Added
+
+- **`crates/relay-att`** — quaternion-error proportional attitude
+  controller:
+  - `AttController::tick(time, q_estimate, q_setpoint) → rate_cmd`
+    consumes the EKF attitude estimate plus a setpoint quaternion;
+    emits a body-rate command.
+  - Shortest-arc selection: `q_err` always has non-negative scalar
+    after correction.
+  - Small-angle linearised output (`2 * q_err.vec * Kp`) within
+    ~1.5 % of the exact axis-angle formula for `|θ| < 30°`.
+  - Clamp to `rate_max` per axis (defaults `[4, 4, 2] rad/s`).
+  - NaN-safe sanitisation: degenerate inputs fall back to identity
+    rather than poisoning the cascade.
+  - Embedded-friendly: no libm dependency (in-tree Newton sqrt for
+    quaternion normalisation).
+  - 10 unit + proptest cases for ATT-P01 (q_err invariant + shortest
+    arc), ATT-P03 (small-angle bound), clamp, NaN handling.
+- **`crates/relay-mix-quad`** — X-config 4-motor mixer for
+  falcon-quad:
+  - `QuadMixer::mix(torque_body, thrust) → [m1, m2, m3, m4]` with
+    every output in `[0, 1]`.
+  - Standard PX4 quad-x convention: motors numbered 1–4 clockwise
+    from front-right, diagonal pairs spin CW/CCW.
+  - Mixer matrix (rows = motors, columns = thrust/roll/pitch/yaw):
+
+    ```
+    M1 = [+1, -1, +1, -1]   front-right CW
+    M2 = [+1, -1, -1, +1]   back-right CCW
+    M3 = [+1, +1, -1, -1]   back-left  CW
+    M4 = [+1, +1, +1, +1]   front-left CCW
+    ```
+  - Priority-preserving saturation: when raw mix exceeds 1.0, shift
+    bus down (sacrifices collective thrust before sacrificing
+    torque); negative outputs clipped to zero.
+  - NaN sanitisation; negative thrust clipped to zero.
+  - 10 unit + proptest cases including single-axis sign-preservation
+    proptest.
+- **`examples/falcon-sitl-hover` `attitude` scenario** — extends the
+  v0.3 closed-loop bench with the full cascade. Setpoint 20° tilt
+  about body-x. Outer ATT loop at 250 Hz; inner RATE loop at 1 kHz;
+  MIX exercised every tick (NaN check). Returns PASS when
+  convergence ≤ 1.5 s, RMS-steady ≤ 2°, no NaN. 2 added integration
+  tests.
+- **`FV-FALCON-ATT-001`, `FV-FALCON-MIX-001`** — v0.4 verification
+  artifacts with extractable `fields.steps` (5 + 3 steps).
+- **`FEAT-FALCON-v0.4`** bumped `pending` → `approved` with achieved
+  metrics inline.
+
+### Achieved bench metrics
+
+| metric | value | budget |
+|---|---|---|
+| cascade convergence (to <2° tilt error) | **0.352 s** | ≤ 1.5 s |
+| RMS-steady attitude error (last 1 s) | **0.029°** | ≤ 2.0° |
+| peak attitude error | 19.989° (initial tilt) | — |
+| loop wall time (5000 samples) | 545 µs | — |
+| NaN/∞ in cascade | none | none |
+
+### Verification
+
+- `cargo test --workspace`: 57 test suites green (was 55 in v0.3).
+- `cargo test -p relay-att`: 10/10 PASS including 1 proptest at
+  256-default + 4096-fuzz.
+- `cargo test -p relay-mix-quad`: 10/10 PASS including 2 proptest.
+- `cargo test -p falcon-sitl-hover`: 7/7 PASS (was 5 in v0.3; +2
+  attitude scenarios).
+- `cargo run -p falcon-sitl-hover --release`: PASS on all four
+  scenarios (step, disturbance, hover, attitude).
+- `python3 scripts/run-falcon-verification.py --markdown`: ✅ 7/7
+  falcon FV artifacts pass, 26/26 steps green.
+- `rivet validate`: 0 broken cross-references.
+
+### Scope notes — what slipped to v0.5
+
+- **Drake-derived MultibodyPlant export** for the mixer matrix —
+  matrix is hand-derived from first-principles airframe geometry in
+  v0.4; same derivation will be cross-checked against a SymPy/Drake
+  export in v0.5 (`SWREQ-FALCON-MIX-P01` formalisation).
+- **Rocq formal proof of ATT-P01** quaternion-error invariants → v0.5
+  with `rules_rocq_rust` wiring.
+- **Verus SMT contracts on mixer arithmetic** (no_std + no_alloc
+  Verus proof of MIX-P02) → v0.5.
+- **Gazebo Harmonic SITL** → v0.5 with the position controller, when
+  a full mission flight makes Gazebo's overhead worthwhile.
+- **rerun.io `.rrd` evidence** → v0.5.
+- **Differential test vs PX4 mc_att_control** — v0.5 once we wire
+  the PX4 reference build into CI for direct trace comparison.
+
 ## [falcon-v0.3.0] — 2026-05-19
 
 Rate controller + closed-loop SITL. The inner control loop closes:

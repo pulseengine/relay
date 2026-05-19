@@ -1,0 +1,54 @@
+artifacts:
+  - id: FV-FALCON-ATT-001
+    type: unit-verification
+    title: "Unit + property tests for relay-att + cascade hover bench (v0.4)"
+    status: approved
+    description: >
+      v0.4 verification of the attitude controller (`relay-att`) and
+      the full ATT → RATE → MIX → plant cascade closed-loop bench.
+
+      Three evidence layers:
+
+      1. Unit + property tests in `crates/relay-att` (10 cases):
+           - ATT-P01: q_err is unit-norm; sign-correction picks the
+             shortest arc (deterministic + proptest over unit-quat
+             pairs)
+           - ATT-P03 (surrogate): small-angle linearisation within
+             ~1.5 % of exact axis-angle for |θ| < 30°
+           - Rate command clamped to rate_max per axis
+           - Degenerate input (NaN, zero quaternion) does not propagate
+             NaN; controller falls back to identity-attitude
+           - sqrt_f32 matches libm within 1e-5 relative tolerance
+       2. Attitude scenario in `examples/falcon-sitl-hover` (2 added
+          cases):
+            - deterministic_attitude_cascade_passes:
+                setpoint 20° tilt about x, runs ATT (250 Hz) +
+                RATE (1 kHz) + MIX, plant integrates torque. Achieved:
+                convergence 0.352 s, RMS-steady 0.029°, no NaN.
+            - noisy_attitude_cascade_still_passes (looser budget)
+       3. End-to-end binary smoke
+          (`cargo run -p falcon-sitl-hover -- --scenario attitude`)
+          — prints metrics and PASS/FAIL.
+
+       Rocq formal proof of ATT-P01 invariants is deferred to v0.5
+       with `rules_rocq_rust` wiring.
+    tags: [verification, falcon, attitude-control, quaternion, cascade, v0.4]
+    fields:
+      method: automated-test
+      proptest-cases-default: 256
+      test-count: 12
+      steps:
+        - run: cargo test -p relay-att
+        - run: cargo test -p relay-att --release
+        - run: PROPTEST_CASES=4096 cargo test -p relay-att
+        - run: cargo test -p falcon-sitl-hover
+        - run: cargo run -q -p falcon-sitl-hover --release -- --scenario attitude
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-ATT-P01
+      - type: verifies
+        target: SWREQ-FALCON-ATT-P02
+      - type: verifies
+        target: SWREQ-FALCON-ATT-P03
+      - type: implements
+        target: FEAT-FALCON-v0.4

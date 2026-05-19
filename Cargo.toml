@@ -23,6 +23,8 @@ members = [
     "crates/relay-ekf-stub",
     "crates/relay-ekf",
     "crates/relay-rate",
+    "crates/relay-att",
+    "crates/relay-mix-quad",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
     "examples/falcon-sitl-hover",
