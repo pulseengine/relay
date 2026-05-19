@@ -95,7 +95,7 @@ jobs:
           cp CHANGELOG.md staging/ 2>/dev/null || true
           cp LICENSE staging/ 2>/dev/null || true
           tar -czf "$ARCHIVE" -C staging .
-          shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
+          python3 -c "import hashlib,sys; p=sys.argv[1]; print(f'{hashlib.sha256(open(p,\"rb\").read()).hexdigest()}  {p}')" "$ARCHIVE" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - name: Package (zip)
@@ -110,7 +110,7 @@ jobs:
           cp CHANGELOG.md staging/ 2>/dev/null || true
           cp LICENSE staging/ 2>/dev/null || true
           cd staging && 7z a "../${ARCHIVE}" . && cd ..
-          shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
+          python3 -c "import hashlib,sys; p=sys.argv[1]; print(f'{hashlib.sha256(open(p,\"rb\").read()).hexdigest()}  {p}')" "$ARCHIVE" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - name: Install cosign
