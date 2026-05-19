@@ -1,0 +1,17 @@
+[package]
+name = "falcon-sitl-hover"
+description = "Falcon v0.3 — pure-Rust closed-loop SITL: EKF + rate PID stabilizes the body"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "falcon-sitl-hover"
+path = "src/main.rs"
+
+[dependencies]
+relay-ekf = { path = "../../crates/relay-ekf" }
+relay-rate = { path = "../../crates/relay-rate" }
+libm = "0.2"

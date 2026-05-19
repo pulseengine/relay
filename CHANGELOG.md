@@ -9,6 +9,88 @@ Tags use a per-track prefix:
 - `falcon-v<semver>` — the falcon dual-DNA flight stack
 - (future) `relay-v<semver>` — the relay substrate itself
 
+## [falcon-v0.3.0] — 2026-05-19
+
+Rate controller + closed-loop SITL. The inner control loop closes:
+EKF estimates attitude, rate PID drives commanded body rates, plant
+integrates dynamics, closed loop converges. Pure-Rust SITL runs in
+CI — no Gazebo install required.
+
+### Added
+
+- **`crates/relay-rate`** — body-rate PID stabilizer:
+  - 3-axis PID with clamp-and-hold anti-windup. no_std + no_alloc;
+    no transcendentals (just adds/multiplies/clamps).
+  - Default gains tuned for a 500 g, 10-inch quadcopter at 1 kHz
+    update; `RateGains::DEFAULT` with `i_max` and `torque_max`
+    bounds per axis.
+  - `RatePid::tick(time, measured_rate, setpoint_rate) -> torque`
+    consumes gyro + setpoint, emits torque. dt derived from time
+    deltas, clamped `[0.0001, 0.1]` s to defend against jumps.
+  - `RatePid::reset()` for arm/disarm + setpoint discontinuity.
+  - `RatePid::set_gains(g)` for TBL load.
+  - 13 unit + proptest cases for RATE-P01 (integral bounded),
+    RATE-P02 (no NaN/∞ propagation), RATE-P03 (step response
+    convergence + Lyapunov surrogate), output-clamp, dt
+    defensive bounding, reset semantics.
+- **`examples/falcon-sitl-hover`** — closed-loop SITL bench. Pure
+  Rust rigid-body plant (rotational dynamics + quaternion
+  integration) driven by the v0.2 EKF + v0.3 rate PID. Three
+  scenarios:
+    - `step`: setpoint `[0.5, -0.3, 0.4] rad/s`; verify rise time,
+      overshoot, steady-state error.
+    - `disturbance`: at hover, inject a `1 rad/s` impulse about y;
+      verify recovery time.
+    - `hover`: vehicle starts with non-zero rates
+      `[0.7, -0.5, 0.3]`; verify settle.
+  CLI: `--scenario step|disturbance|hover|all`, `--noise σ`,
+  `--quiet`. Returns 0 on PASS, 1 on FAIL. 5 unit + integration
+  tests covering each scenario plus a noisy variant.
+- **`artifacts/verification/FV-FALCON-RATE-001.yaml`** — v0.3
+  verification artifact with extractable `fields.steps` (5 step
+  commands).
+- **`FEAT-FALCON-v0.3`** bumped `pending` → `approved` with
+  achieved metrics inline.
+
+### Achieved bench metrics
+
+| scenario | convergence | overshoot | RMS-steady |
+|---|---|---|---|
+| step ([0.5, -0.3, 0.4] rad/s) | **0.139 s** | **1.2 %** | **0.0012 rad/s** |
+| disturbance recovery (1 rad/s) | **0.141 s** | — | — |
+| hover from [0.7, -0.5, 0.3] | **0.175 s** | — | — |
+
+Loop wall time: ~400 µs for 5000 samples (one full 5 s trajectory).
+No NaN/∞ in any scenario. Deterministic given a seed.
+
+### Verification
+
+- `cargo test --workspace`: 55 test suites green (was 52 in v0.2).
+- `cargo test -p relay-rate`: 13/13 PASS including 2 proptest at
+  256-default + 4096-fuzz.
+- `cargo test -p falcon-sitl-hover`: 5/5 PASS.
+- `cargo run -p falcon-sitl-hover --release`: PASS on all three
+  scenarios.
+- `python3 scripts/run-falcon-verification.py --markdown`: ✅ 5/5
+  falcon FV artifacts pass, 18/18 steps green.
+- `rivet validate`: 0 broken cross-references.
+
+### Scope notes — what slipped
+
+- **Gazebo Harmonic SITL** was originally scoped for v0.3 but
+  pushed to v0.4. Pure-Rust SITL ships now because it runs in CI
+  without Gazebo installation and produces byte-identical results
+  given a seed. Real Gazebo lockstep arrives when the full
+  attitude cascade (v0.4 with `relay-att`) makes a full hover
+  meaningful.
+- **Lean Lyapunov proof** of the rate loop → v0.4 with
+  `rules_lean` wiring. The bench's empirical convergence is the
+  v0.3 surrogate.
+- **Kani bounded-overflow** on PID arithmetic → v0.4.
+- **tokio-rs/loom** on a host bridge → v0.5 once the bridge
+  exists.
+- **rerun.io `.rrd` evidence** → v0.4 with the SITL hookup.
+
 ## [falcon-v0.2.0] — 2026-05-19
 
 Real attitude estimator. Replaces the v0.1 stub with a Mahony

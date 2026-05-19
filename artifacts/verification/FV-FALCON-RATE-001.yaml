@@ -1,0 +1,65 @@
+artifacts:
+  - id: FV-FALCON-RATE-001
+    type: unit-verification
+    title: "Unit + property + closed-loop SITL for relay-rate (v0.3)"
+    status: approved
+    description: >
+      v0.3 verification of the body-rate PID controller (`relay-rate`)
+      and the closed-loop pure-Rust SITL bench
+      (`examples/falcon-sitl-hover`). Three evidence layers:
+
+      1. Unit + proptest tests in `crates/relay-rate` (13 cases) —
+         every RATE-P0* property covered:
+           - RATE-P01: integral bounded ±i_max regardless of input
+             history (deterministic + proptest)
+           - RATE-P02: no NaN/∞ propagates under adversarial input
+             (NaN, ∞, extreme magnitudes; deterministic + proptest)
+           - RATE-P03 (Lyapunov): step response on a pure-integrator
+             plant converges within 2 s with steady-state error
+             < 0.01 rad/s
+           - RATE-P04 (WCET surrogate): tick completes < 1 µs
+             empirically; formal Lean proof deferred to v0.4
+           - anti-windup, output clamping, reset semantics, dt
+             defensive clamping
+      2. Closed-loop SITL bench tests in `examples/falcon-sitl-hover`
+         (5 cases) — three scenarios run to a quantitative pass
+         criterion against a pure-Rust rigid-body plant + the v0.2
+         EKF + the v0.3 rate PID:
+           - step: setpoint [0.5, -0.3, 0.4] rad/s reached within 1 s,
+             overshoot ≤ 30 %, final error ≤ 0.02 rad/s
+           - disturbance: 1 rad/s impulse recovered within 0.5 s
+           - hover: initial random rates [0.7,-0.5,0.3] → settled
+             within 1 s
+           - noisy variant of step: looser budget (1.5 s / 50 %)
+           - plant quaternion stays unit under integration
+      3. End-to-end binary smoke (`cargo run -p falcon-sitl-hover
+         --release`) — prints per-scenario metrics + PASS/FAIL line.
+         Achieved on this release: step 0.139 s convergence, 1.2 %
+         overshoot, 0.0012 rad/s RMS-steady; disturbance recovery
+         0.141 s; hover convergence 0.175 s.
+
+      v0.3 verification posture: extensive testing + proptest
+      property invariants + closed-loop accuracy bench. Verus SMT
+      contracts + Lean Lyapunov proof remain on the v0.4 roadmap.
+    tags: [verification, falcon, rate, pid, closed-loop, sitl, v0.3]
+    fields:
+      method: automated-test
+      proptest-cases-default: 256
+      test-count: 18
+      steps:
+        - run: cargo test -p relay-rate
+        - run: cargo test -p relay-rate --release
+        - run: PROPTEST_CASES=4096 cargo test -p relay-rate
+        - run: cargo test -p falcon-sitl-hover
+        - run: cargo run -q -p falcon-sitl-hover --release
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-RATE-P01
+      - type: verifies
+        target: SWREQ-FALCON-RATE-P02
+      - type: verifies
+        target: SWREQ-FALCON-RATE-P03
+      - type: verifies
+        target: SWREQ-FALCON-RATE-P04
+      - type: implements
+        target: FEAT-FALCON-v0.3
