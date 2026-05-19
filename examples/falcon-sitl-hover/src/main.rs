@@ -45,6 +45,7 @@ use libm::sqrtf;
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{quat_mul, Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
+use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTimestamp};
 use relay_rate::{RatePid, Timestamp as RateTimestamp};
 
 const SAMPLE_RATE_HZ: f32 = 1000.0;
@@ -52,6 +53,9 @@ const TRAJECTORY_SECONDS: f32 = 5.0;
 const GRAVITY: f32 = 9.81;
 const INERTIA: f32 = 0.005;     // kg·m², 500 g, 10-inch quad
 const FRICTION: f32 = 0.001;    // rad/s damping coefficient
+/// Thrust scale: normalised thrust 0.5 produces 1g acceleration at hover.
+const THRUST_SCALE: f32 = 19.62;
+const DRAG_COEFFICIENT: f32 = 0.4;
 
 /// Pseudo-random Gaussian-ish noise via two-sample averaging of an LCG.
 struct Rng(u32);
@@ -75,6 +79,10 @@ struct Plant {
     omega: [f32; 3],
     /// Body-to-NED unit quaternion.
     q: [f32; 4],
+    /// Position in NED frame (m).
+    p_ned: [f32; 3],
+    /// Velocity in NED frame (m/s).
+    v_ned: [f32; 3],
 }
 
 impl Plant {
@@ -82,6 +90,8 @@ impl Plant {
         Self {
             omega: [0.0; 3],
             q: [1.0, 0.0, 0.0, 0.0],
+            p_ned: [0.0; 3],
+            v_ned: [0.0; 3],
         }
     }
 
@@ -89,17 +99,54 @@ impl Plant {
         Self {
             omega,
             q: [1.0, 0.0, 0.0, 0.0],
+            p_ned: [0.0; 3],
+            v_ned: [0.0; 3],
         }
     }
 
-    /// Integrate the rigid-body dynamics forward by `dt` under torque.
+    /// Integrate rotational dynamics forward by `dt` under torque.
+    /// Translational state is unchanged (used by v0.3 / v0.4 scenarios
+    /// that don't need flight).
     fn step(&mut self, torque: [f32; 3], dt: f32) {
         // omega_dot = (torque - friction*omega) / inertia
         for i in 0..3 {
             self.omega[i] +=
                 ((torque[i] - FRICTION * self.omega[i]) / INERTIA) * dt;
         }
-        // q_dot = 0.5 * q ⊗ (0, omega)
+        self.integrate_quaternion(dt);
+    }
+
+    /// Integrate rotational + translational dynamics by `dt`.
+    /// Adds collective thrust + gravity + linear drag. Used by the
+    /// v0.5 `mission` scenario.
+    fn step_full(&mut self, torque: [f32; 3], thrust_normalised: f32, dt: f32) {
+        // Rotational.
+        for i in 0..3 {
+            self.omega[i] +=
+                ((torque[i] - FRICTION * self.omega[i]) / INERTIA) * dt;
+        }
+        self.integrate_quaternion(dt);
+
+        // Translational. Thrust acts along body -z (the body's "up").
+        // Rotate body-frame thrust vector into NED.
+        let t = thrust_normalised.clamp(0.0, 1.0) * THRUST_SCALE;
+        let thrust_body = [0.0, 0.0, -t]; // body up = -z body
+        let qv = [0.0, thrust_body[0], thrust_body[1], thrust_body[2]];
+        let qc = [self.q[0], -self.q[1], -self.q[2], -self.q[3]];
+        let t1 = quat_mul(self.q, quat_mul(qv, qc));
+        let thrust_ned = [t1[1], t1[2], t1[3]];
+
+        // a_ned = thrust_ned + g_ned - drag * v
+        for i in 0..3 {
+            let g = if i == 2 { GRAVITY } else { 0.0 };
+            let drag = DRAG_COEFFICIENT * self.v_ned[i];
+            let a = thrust_ned[i] + g - drag;
+            self.v_ned[i] += a * dt;
+            self.p_ned[i] += self.v_ned[i] * dt;
+        }
+    }
+
+    fn integrate_quaternion(&mut self, dt: f32) {
         let qdot = quat_mul(self.q, [0.0, self.omega[0], self.omega[1], self.omega[2]]);
         let mut q_new = [
             self.q[0] + 0.5 * qdot[0] * dt,
@@ -149,6 +196,8 @@ enum Scenario {
     Hover,
     /// v0.4: full attitude cascade — ATT → RATE → MIX → plant.
     Attitude,
+    /// v0.5: full mission cascade — POS → ATT → RATE → MIX → plant.
+    Mission,
     All,
 }
 
@@ -179,6 +228,11 @@ fn rate_ts_of(secs: f32) -> RateTimestamp {
 fn att_ts_of(secs: f32) -> AttTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
     AttTimestamp { seconds: secs as u64, fraction: frac }
+}
+
+fn pos_ts_of(secs: f32) -> PosTimestamp {
+    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
+    PosTimestamp { seconds: secs as u64, fraction: frac }
 }
 
 fn quat_error_deg(a: [f32; 4], b: [f32; 4]) -> f32 {
@@ -413,6 +467,135 @@ fn run_hover(noise_std: f32) -> ScenarioResult {
     }
 }
 
+/// v0.5 mission scenario: full cascade POS → ATT → RATE → MIX →
+/// plant with translational dynamics. Vehicle starts at NED origin,
+/// commanded to a 10-m waypoint, must arrive and settle.
+fn run_mission(noise_std: f32) -> ScenarioResult {
+    let mut plant = Plant::at_rest();
+    let mut ekf = Ekf::new();
+    let mut rate_pid = RatePid::new();
+    let mut att = AttController::new();
+    let mut pos = PosController::new();
+    let mut mixer = QuadMixer::new();
+    let mut rng = Rng::new(0x4FA1C001);
+    let dt = 1.0 / SAMPLE_RATE_HZ;
+    // 12 s gives the cascade time to reach + settle at the waypoint.
+    let mission_seconds = 12.0_f32;
+    let n = (mission_seconds * SAMPLE_RATE_HZ) as usize;
+
+    let waypoint = [10.0_f32, 0.0, 0.0]; // 10 m north, hover altitude
+    let setpoint = PositionSetpoint::hover_at(waypoint);
+
+    let pos_decimation = 20_usize; // 1 kHz / 20 = 50 Hz pos rate
+    let att_decimation = 4_usize;  // 1 kHz / 4  = 250 Hz att rate
+    let mut current_attitude_setpoint = [1.0_f32, 0.0, 0.0, 0.0];
+    let mut current_thrust = 0.5_f32; // start at hover
+    let mut current_rate_setpoint = [0.0_f32; 3];
+
+    let mut peak_dist_err = 0.0_f32;
+    let mut convergence = f32::NAN;
+    let mut convergence_holding = false;
+    let mut nan_seen = false;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0_usize;
+    let steady_start = ((mission_seconds - 2.0).max(0.0) * SAMPLE_RATE_HZ) as usize;
+
+    let t0 = Instant::now();
+    for i in 0..n {
+        let t = i as f32 * dt;
+        // 1. IMU + EKF (1 kHz). EKF only does attitude in v0.2; we
+        //    feed the plant's true NED pose to POS directly (the
+        //    v0.6 GPS host service replaces this).
+        let (mut sample, gyro) = plant.measure(&mut rng, noise_std);
+        sample.time = ekf_ts_of(t);
+        let st = ekf.tick(sample);
+        if !st.quaternion[0].is_finite() {
+            nan_seen = true;
+        }
+
+        // 2. Outer position loop (50 Hz).
+        if i % pos_decimation == 0 {
+            let att_sp = pos.tick(
+                pos_ts_of(t),
+                plant.p_ned,
+                plant.v_ned,
+                st.quaternion,
+                setpoint,
+            );
+            current_attitude_setpoint = att_sp.quaternion;
+            current_thrust = att_sp.thrust;
+        }
+        // 3. Attitude loop (250 Hz).
+        if i % att_decimation == 0 {
+            current_rate_setpoint = att.tick(
+                att_ts_of(t),
+                st.quaternion,
+                current_attitude_setpoint,
+            );
+        }
+        // 4. Rate loop (1 kHz).
+        let torque = rate_pid.tick(rate_ts_of(t), gyro, current_rate_setpoint);
+        for k in 0..3 {
+            if !torque[k].is_finite() {
+                nan_seen = true;
+            }
+        }
+        // 5. Mixer (exercised for NaN-check; plant uses torque directly).
+        let _motors = mixer.mix(torque, current_thrust);
+        if mixer.last_motors().iter().any(|v| !v.is_finite()) {
+            nan_seen = true;
+        }
+        // 6. Plant with translational dynamics.
+        plant.step_full(torque, current_thrust, dt);
+
+        let dist = sqrtf(
+            (plant.p_ned[0] - waypoint[0]).powi(2)
+                + (plant.p_ned[1] - waypoint[1]).powi(2)
+                + (plant.p_ned[2] - waypoint[2]).powi(2),
+        );
+        if dist > peak_dist_err {
+            peak_dist_err = dist;
+        }
+        if dist < 0.5 && !convergence_holding {
+            convergence = t;
+            convergence_holding = true;
+        } else if dist >= 0.5 && convergence_holding {
+            convergence = f32::NAN;
+            convergence_holding = false;
+        }
+        if i >= steady_start {
+            sum_sq_steady += dist * dist;
+            steady_count += 1;
+        }
+    }
+    let elapsed = t0.elapsed().as_micros();
+    let final_dist = sqrtf(
+        (plant.p_ned[0] - waypoint[0]).powi(2)
+            + (plant.p_ned[1] - waypoint[1]).powi(2)
+            + (plant.p_ned[2] - waypoint[2]).powi(2),
+    );
+    let rms_steady = sqrtf(sum_sq_steady / steady_count.max(1) as f32);
+
+    let pass = !nan_seen
+        && !convergence.is_nan()
+        && convergence <= 10.0
+        && final_dist <= 0.5
+        && rms_steady <= 1.0;
+
+    ScenarioResult {
+        label: "mission",
+        samples: n,
+        final_omega: plant.v_ned,        // repurpose final-ω slot for final velocity
+        peak_omega_after_setup: peak_dist_err, // peak distance error (m)
+        rms_error_steady: rms_steady,
+        convergence_time_s: convergence,
+        overshoot_pct: final_dist,        // repurpose overshoot slot for final distance (m)
+        nan_seen,
+        elapsed_micros: elapsed,
+        pass,
+    }
+}
+
 /// v0.4 attitude scenario: full cascade ATT → RATE → MIX → plant.
 /// Commanded setpoint is 20° tilt about body-x. We run the inner
 /// rate controller at 1 kHz and the outer attitude controller at
@@ -519,13 +702,21 @@ fn run_attitude(noise_std: f32) -> ScenarioResult {
 fn print_result(r: &ScenarioResult) {
     println!("--- scenario: {} ---", r.label);
     println!("  samples              {}", r.samples);
-    println!("  final ω (rad/s)      [{:+.4}, {:+.4}, {:+.4}]",
-        r.final_omega[0], r.final_omega[1], r.final_omega[2]);
-    if r.label == "attitude" {
-        println!("  peak attitude err    {:.3}°", r.peak_omega_after_setup);
-        println!("  RMS error (steady)   {:.3}° (last 1s)", r.rms_error_steady);
+    if r.label == "mission" {
+        println!("  final v (m/s NED)    [{:+.3}, {:+.3}, {:+.3}]",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        println!("  peak distance error  {:.3} m", r.peak_omega_after_setup);
+        println!("  final distance       {:.3} m", r.overshoot_pct);
+        println!("  RMS distance (steady){:.3} m (last 2s)", r.rms_error_steady);
     } else {
-        println!("  peak ω above sp      {:.4} rad/s", r.peak_omega_after_setup);
+        println!("  final ω (rad/s)      [{:+.4}, {:+.4}, {:+.4}]",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        if r.label == "attitude" {
+            println!("  peak attitude err    {:.3}°", r.peak_omega_after_setup);
+            println!("  RMS error (steady)   {:.3}° (last 1s)", r.rms_error_steady);
+        } else {
+            println!("  peak ω above sp      {:.4} rad/s", r.peak_omega_after_setup);
+        }
     }
     if r.label == "step" {
         println!("  overshoot            {:.1} %", r.overshoot_pct);
@@ -557,7 +748,8 @@ fn print_help() {
            step         rate controller follows a [0.5, -0.3, 0.4] rad/s setpoint\n  \
            disturbance  rate controller recovers from a 1 rad/s impulse\n  \
            hover        rate controller settles from non-zero initial rates\n  \
-           attitude     ATT→RATE→MIX cascade tilts vehicle 20° about x (v0.4)\n"
+           attitude     ATT→RATE→MIX cascade tilts vehicle 20° about x (v0.4)\n  \
+           mission      POS→ATT→RATE→MIX cascade flies to 10m waypoint (v0.5)\n"
     );
 }
 
@@ -574,9 +766,10 @@ fn main() -> ExitCode {
                 Some("disturbance") => scenario = Scenario::Disturbance,
                 Some("hover") => scenario = Scenario::Hover,
                 Some("attitude") => scenario = Scenario::Attitude,
+                Some("mission") => scenario = Scenario::Mission,
                 Some("all") => scenario = Scenario::All,
                 other => {
-                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|all, got {:?}", other);
+                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|mission|all, got {:?}", other);
                     return ExitCode::from(2);
                 }
             },
@@ -606,6 +799,7 @@ fn main() -> ExitCode {
             Scenario::Disturbance => run_disturbance(noise),
             Scenario::Hover => run_hover(noise),
             Scenario::Attitude => run_attitude(noise),
+            Scenario::Mission => run_mission(noise),
             Scenario::All => unreachable!(),
         }
     };
@@ -617,6 +811,7 @@ fn main() -> ExitCode {
             results.push(run_one(Scenario::Disturbance));
             results.push(run_one(Scenario::Hover));
             results.push(run_one(Scenario::Attitude));
+            results.push(run_one(Scenario::Mission));
         }
         s => results.push(run_one(s)),
     }
@@ -693,6 +888,43 @@ mod tests {
         // Looser budget with IMU noise.
         assert!(r.convergence_time_s.is_nan() || r.convergence_time_s <= 2.0);
         assert!(r.rms_error_steady <= 4.0);
+    }
+
+    #[test]
+    fn deterministic_mission_passes() {
+        let r = run_mission(0.0);
+        assert!(r.pass, "mission result: {:?}", r);
+        assert!(!r.nan_seen);
+        assert!(r.convergence_time_s <= 10.0,
+            "mission convergence {} exceeds 10 s", r.convergence_time_s);
+        assert!(r.overshoot_pct <= 0.5,
+            "final distance {} m exceeds 0.5 m", r.overshoot_pct);
+    }
+
+    #[test]
+    fn noisy_mission_still_reaches_waypoint() {
+        let r = run_mission(0.05);
+        assert!(!r.nan_seen);
+        // Looser budget with noise.
+        assert!(r.overshoot_pct <= 1.5,
+            "noisy mission final distance {} m exceeds 1.5 m", r.overshoot_pct);
+    }
+
+    #[test]
+    fn plant_step_full_preserves_unit_quaternion_and_finite_state() {
+        let mut plant = Plant::at_rest();
+        for _ in 0..1000 {
+            plant.step_full([0.001, -0.001, 0.0005], 0.5, 1.0 / 1000.0);
+            let n = sqrtf(
+                plant.q[0].powi(2) + plant.q[1].powi(2)
+                    + plant.q[2].powi(2) + plant.q[3].powi(2),
+            );
+            assert!((n - 1.0).abs() < 1.0e-3);
+            for k in 0..3 {
+                assert!(plant.p_ned[k].is_finite());
+                assert!(plant.v_ned[k].is_finite());
+            }
+        }
     }
 
     #[test]

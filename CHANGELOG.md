@@ -9,6 +9,88 @@ Tags use a per-track prefix:
 - `falcon-v<semver>` — the falcon dual-DNA flight stack
 - (future) `relay-v<semver>` — the relay substrate itself
 
+## [falcon-v0.5.0] — 2026-05-19
+
+The full outer-loop cascade closes. Vehicle flies from origin to a
+10 m waypoint in pure-Rust SITL, settles within centimetres,
+deterministic given a seed. POS → ATT → RATE → MIX → plant — five
+layers of control closing in one bench.
+
+### Added
+
+- **`crates/relay-pos`** — cascaded P-PI position controller:
+  - `PosController::tick(time, vehicle_pos, vehicle_vel,
+    vehicle_quat, setpoint) → AttitudeSetpoint { quaternion, thrust }`
+    consumes the vehicle's NED pose + a position setpoint and emits
+    the attitude-loop setpoint for the inner cascade.
+  - Outer P loop: position error → velocity setpoint clamped to
+    `v_max_horizontal` / `v_max_vertical`.
+  - Inner PI loop: velocity error → acceleration command, integral
+    bounded ±`i_max`.
+  - Small-angle map: horizontal acceleration → roll/pitch tilt;
+    vertical acceleration → collective thrust (hover + offset).
+  - Yaw: held when `yaw_setpoint` is NaN; followed when finite.
+  - `PositionSetpoint::hover_at(pos)` for the common case.
+  - NaN-safe sanitisation throughout; no panics on degenerate input.
+  - 13 unit + proptest cases covering POS-P01 bounds, tilt clamp,
+    altitude → thrust mapping (both directions), yaw hold/follow,
+    integrator reset.
+- **`examples/falcon-sitl-hover` `mission` scenario** — the v0.3/v0.4
+  bench gains:
+  - Translational plant dynamics (NED position + velocity, thrust
+    in body-up direction rotated to NED, gravity, linear drag).
+  - New `mission` scenario: vehicle starts at NED origin, commanded
+    to (10, 0, 0) m, must reach and settle. Outer POS at 50 Hz,
+    inner ATT at 250 Hz, RATE at 1 kHz; mixer exercised every tick.
+  - Pass budget: final distance ≤ 0.5 m, convergence ≤ 10 s,
+    RMS-steady (last 2 s) ≤ 1.0 m, no NaN.
+  - 2 added integration tests (deterministic + noisy).
+- **`FV-FALCON-POS-001`** verification artifact with extractable
+  `fields.steps`. Brings the falcon gate from 7 → 8 artifacts
+  (26 → 31 steps).
+- **`FEAT-FALCON-v0.5`** bumped `pending` → `approved` with achieved
+  metrics inline.
+
+### Achieved bench metrics
+
+| metric | value | budget |
+|---|---|---|
+| convergence to <0.5 m | **4.045 s** | ≤ 10 s |
+| final distance | **0.010 m** | ≤ 0.5 m |
+| RMS-steady distance (last 2 s) | **0.015 m** | ≤ 1.0 m |
+| peak distance error | 10.000 m (initial) | — |
+| loop wall time (12000 samples) | 1.3 ms | — |
+| NaN/∞ in cascade | none | none |
+
+### Verification
+
+- `cargo test --workspace`: 60 test suites green (was 59 in v0.4).
+- `cargo test -p relay-pos`: 13/13 PASS including 1 proptest at
+  256-default + 4096-fuzz.
+- `cargo test -p falcon-sitl-hover`: 10/10 PASS (added mission +
+  noisy-mission + plant translational state tests).
+- `cargo run -p falcon-sitl-hover --release`: PASS on all 5
+  scenarios.
+- `python3 scripts/run-falcon-verification.py --markdown`: ✅ 8/8
+  falcon FV artifacts pass, 31/31 steps green.
+- `rivet validate`: 0 broken cross-references.
+
+### Scope notes — what slipped to v0.6
+
+- **`host/relay-gps` host service** — v0.5 feeds plant position
+  directly to the controller (the POS-P03 source-agnostic interface
+  doesn't care, but real GPS noise/latency aren't exercised yet).
+- **cFS-DNA stored-command mission execution** via `relay-sc` →
+  v0.6 wires the waypoint through TBL + SC for the cFS↔PX4
+  dual-DNA showcase.
+- **`cargo-mutants` on full cascade** → v0.6 (CI infrastructure
+  work).
+- **Sanitizer pass** (ASAN / TSAN / Miri) on the SITL harness →
+  v0.6.
+- **Gazebo Harmonic SITL** → v0.7 — pure-Rust SITL still does
+  everything verification needs; Gazebo earns its overhead when
+  wind disturbance + sensor latency become first-class concerns.
+
 ## [falcon-v0.4.0] — 2026-05-19
 
 Full inner cascade closes. Attitude controller cascades into rate

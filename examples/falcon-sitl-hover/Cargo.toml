@@ -16,4 +16,5 @@ relay-ekf = { path = "../../crates/relay-ekf" }
 relay-rate = { path = "../../crates/relay-rate" }
 relay-att = { path = "../../crates/relay-att" }
 relay-mix-quad = { path = "../../crates/relay-mix-quad" }
+relay-pos = { path = "../../crates/relay-pos" }
 libm = "0.2"
