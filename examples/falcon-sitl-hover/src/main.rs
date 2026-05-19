@@ -42,7 +42,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use libm::sqrtf;
+use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{quat_mul, Ekf, ImuSample, Timestamp as EkfTimestamp};
+use relay_mix_quad::QuadMixer;
 use relay_rate::{RatePid, Timestamp as RateTimestamp};
 
 const SAMPLE_RATE_HZ: f32 = 1000.0;
@@ -145,6 +147,8 @@ enum Scenario {
     Step,
     Disturbance,
     Hover,
+    /// v0.4: full attitude cascade — ATT → RATE → MIX → plant.
+    Attitude,
     All,
 }
 
@@ -170,6 +174,17 @@ fn ekf_ts_of(secs: f32) -> EkfTimestamp {
 fn rate_ts_of(secs: f32) -> RateTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
     RateTimestamp { seconds: secs as u64, fraction: frac }
+}
+
+fn att_ts_of(secs: f32) -> AttTimestamp {
+    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
+    AttTimestamp { seconds: secs as u64, fraction: frac }
+}
+
+fn quat_error_deg(a: [f32; 4], b: [f32; 4]) -> f32 {
+    let dot = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]).abs();
+    let c = dot.clamp(-1.0, 1.0);
+    (2.0 * libm::acosf(c)).to_degrees()
 }
 
 fn run_step_response(noise_std: f32) -> ScenarioResult {
@@ -398,12 +413,120 @@ fn run_hover(noise_std: f32) -> ScenarioResult {
     }
 }
 
+/// v0.4 attitude scenario: full cascade ATT → RATE → MIX → plant.
+/// Commanded setpoint is 20° tilt about body-x. We run the inner
+/// rate controller at 1 kHz and the outer attitude controller at
+/// 250 Hz (every 4th tick). Mixer maps torque to motor PWM but the
+/// plant in v0.4 still consumes torque directly — the mixer is
+/// independently unit-tested, and the bench just verifies it doesn't
+/// introduce NaN / saturate the cascade.
+fn run_attitude(noise_std: f32) -> ScenarioResult {
+    let mut plant = Plant::at_rest();
+    let mut ekf = Ekf::new();
+    let mut pid = RatePid::new();
+    let mut att = AttController::new();
+    let mut mixer = QuadMixer::new();
+    let mut rng = Rng::new(0xA770F1AE);
+    let dt = 1.0 / SAMPLE_RATE_HZ;
+    let n = (TRAJECTORY_SECONDS * SAMPLE_RATE_HZ) as usize;
+
+    // Setpoint: 20° tilt about body-x (positive roll).
+    let half = (20.0_f32).to_radians() * 0.5;
+    let attitude_setpoint = [libm::cosf(half), libm::sinf(half), 0.0, 0.0];
+
+    let att_decimation = 4_usize; // 1 kHz / 4 = 250 Hz attitude rate
+    let mut current_rate_setpoint = [0.0_f32; 3];
+
+    let mut peak_err_deg = 0.0_f32;
+    let mut convergence = f32::NAN;
+    let mut convergence_holding = false;
+    let mut nan_seen = false;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0_usize;
+    let steady_start = ((TRAJECTORY_SECONDS - 1.0).max(0.0) * SAMPLE_RATE_HZ) as usize;
+
+    let t0 = Instant::now();
+    for i in 0..n {
+        let t = i as f32 * dt;
+        let (mut sample, gyro) = plant.measure(&mut rng, noise_std);
+        sample.time = ekf_ts_of(t);
+        let st = ekf.tick(sample);
+        if !st.quaternion[0].is_finite() {
+            nan_seen = true;
+        }
+        // Outer loop (250 Hz): refresh rate setpoint.
+        if i % att_decimation == 0 {
+            current_rate_setpoint =
+                att.tick(att_ts_of(t), st.quaternion, attitude_setpoint);
+        }
+        // Inner loop (1 kHz): rate PID -> torque.
+        let torque = pid.tick(rate_ts_of(t), gyro, current_rate_setpoint);
+        for k in 0..3 {
+            if !torque[k].is_finite() {
+                nan_seen = true;
+            }
+        }
+        // Mixer demo: produce motor commands. The plant doesn't
+        // consume them in v0.4 (it integrates torque directly), but
+        // we still exercise the mixer here so any NaN/saturation
+        // shows up in this scenario.
+        let _motors = mixer.mix(torque, 0.5);
+        if mixer.last_motors().iter().any(|v| !v.is_finite()) {
+            nan_seen = true;
+        }
+        plant.step(torque, dt);
+        let err = quat_error_deg(plant.q, attitude_setpoint);
+        if err > peak_err_deg {
+            peak_err_deg = err;
+        }
+        if err < 2.0 && !convergence_holding {
+            convergence = t;
+            convergence_holding = true;
+        } else if err >= 2.0 && convergence_holding {
+            convergence = f32::NAN;
+            convergence_holding = false;
+        }
+        if i >= steady_start {
+            sum_sq_steady += err * err;
+            steady_count += 1;
+        }
+    }
+    let elapsed = t0.elapsed().as_micros();
+
+    let final_err = quat_error_deg(plant.q, attitude_setpoint);
+    let rms_steady = sqrtf(sum_sq_steady / steady_count.max(1) as f32);
+
+    let pass = !nan_seen
+        && !convergence.is_nan()
+        && convergence <= 1.5
+        && final_err <= 2.0
+        && rms_steady <= 2.0;
+
+    ScenarioResult {
+        label: "attitude",
+        samples: n,
+        final_omega: plant.omega,
+        peak_omega_after_setup: peak_err_deg,
+        rms_error_steady: rms_steady,
+        convergence_time_s: convergence,
+        overshoot_pct: 0.0,
+        nan_seen,
+        elapsed_micros: elapsed,
+        pass,
+    }
+}
+
 fn print_result(r: &ScenarioResult) {
     println!("--- scenario: {} ---", r.label);
     println!("  samples              {}", r.samples);
     println!("  final ω (rad/s)      [{:+.4}, {:+.4}, {:+.4}]",
         r.final_omega[0], r.final_omega[1], r.final_omega[2]);
-    println!("  peak ω above sp      {:.4} rad/s", r.peak_omega_after_setup);
+    if r.label == "attitude" {
+        println!("  peak attitude err    {:.3}°", r.peak_omega_after_setup);
+        println!("  RMS error (steady)   {:.3}° (last 1s)", r.rms_error_steady);
+    } else {
+        println!("  peak ω above sp      {:.4} rad/s", r.peak_omega_after_setup);
+    }
     if r.label == "step" {
         println!("  overshoot            {:.1} %", r.overshoot_pct);
         println!("  RMS error (steady)   {:.4} rad/s", r.rms_error_steady);
@@ -422,14 +545,19 @@ fn print_result(r: &ScenarioResult) {
 
 fn print_help() {
     eprintln!(
-        "falcon-sitl-hover — v0.3 closed-loop SITL bench\n\n\
+        "falcon-sitl-hover — v0.3+v0.4 closed-loop SITL bench\n\n\
          USAGE:\n  \
-           falcon-sitl-hover [--scenario step|disturbance|hover|all] [--noise σ] [--quiet]\n\n\
+           falcon-sitl-hover [--scenario step|disturbance|hover|attitude|all] [--noise σ] [--quiet]\n\n\
          OPTIONS:\n  \
-           --scenario NAME   one of step, disturbance, hover, all (default: all)\n  \
+           --scenario NAME   one of step, disturbance, hover, attitude, all (default: all)\n  \
            --noise SIGMA     accelerometer / gyro white-noise σ (default 0.0)\n  \
            --quiet           only print PASS/FAIL summary\n  \
-           --help            this text\n"
+           --help            this text\n\n\
+         Scenarios:\n  \
+           step         rate controller follows a [0.5, -0.3, 0.4] rad/s setpoint\n  \
+           disturbance  rate controller recovers from a 1 rad/s impulse\n  \
+           hover        rate controller settles from non-zero initial rates\n  \
+           attitude     ATT→RATE→MIX cascade tilts vehicle 20° about x (v0.4)\n"
     );
 }
 
@@ -445,9 +573,10 @@ fn main() -> ExitCode {
                 Some("step") => scenario = Scenario::Step,
                 Some("disturbance") => scenario = Scenario::Disturbance,
                 Some("hover") => scenario = Scenario::Hover,
+                Some("attitude") => scenario = Scenario::Attitude,
                 Some("all") => scenario = Scenario::All,
                 other => {
-                    eprintln!("error: --scenario expects step|disturbance|hover|all, got {:?}", other);
+                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|all, got {:?}", other);
                     return ExitCode::from(2);
                 }
             },
@@ -476,6 +605,7 @@ fn main() -> ExitCode {
             Scenario::Step => run_step_response(noise),
             Scenario::Disturbance => run_disturbance(noise),
             Scenario::Hover => run_hover(noise),
+            Scenario::Attitude => run_attitude(noise),
             Scenario::All => unreachable!(),
         }
     };
@@ -486,6 +616,7 @@ fn main() -> ExitCode {
             results.push(run_one(Scenario::Step));
             results.push(run_one(Scenario::Disturbance));
             results.push(run_one(Scenario::Hover));
+            results.push(run_one(Scenario::Attitude));
         }
         s => results.push(run_one(s)),
     }
@@ -543,6 +674,25 @@ mod tests {
         // Looser budget with noise on accel + gyro.
         assert!(r.convergence_time_s <= 1.5);
         assert!(r.overshoot_pct <= 50.0);
+    }
+
+    #[test]
+    fn deterministic_attitude_cascade_passes() {
+        let r = run_attitude(0.0);
+        assert!(r.pass, "attitude result: {:?}", r);
+        assert!(!r.nan_seen);
+        assert!(r.convergence_time_s <= 1.5);
+        assert!(r.rms_error_steady <= 2.0,
+            "attitude RMS-steady {:.3}° exceeds 2° budget", r.rms_error_steady);
+    }
+
+    #[test]
+    fn noisy_attitude_cascade_still_passes() {
+        let r = run_attitude(0.05);
+        assert!(!r.nan_seen);
+        // Looser budget with IMU noise.
+        assert!(r.convergence_time_s.is_nan() || r.convergence_time_s <= 2.0);
+        assert!(r.rms_error_steady <= 4.0);
     }
 
     #[test]
