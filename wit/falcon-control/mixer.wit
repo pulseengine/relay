@@ -1,0 +1,43 @@
+package falcon:control@0.6.0;
+
+/// Falcon control-cascade component interfaces — v0.6 pipeline shape.
+///
+/// These worlds are hand-authored here to the shape that
+/// `spar-codegen`'s `wit_gen` module emits from the AADL airframe
+/// model. When the spar → WIT codegen path is wired end-to-end
+/// (tracked for the rules_wasm_component Bazel integration), these
+/// files become generated artifacts; until then they are the
+/// reference contract the WASM components are built against.
+///
+/// v0.6 keeps every function scalar-in / scalar-out: no records, no
+/// lists, no linear-memory pointers. The canonical ABI for an
+/// all-scalar signature is the flat core-wasm signature itself, so
+/// `wasm-tools component embed` + `new` lift the core exports into
+/// the component with zero glue — and `synth` lowers them to ARM
+/// without needing a realloc/canonical-ABI runtime. Structured
+/// record/list interfaces land once the synth backend grows
+/// canonical-ABI support.
+
+/// Mixer component — X-config quadcopter control allocation.
+/// Wraps `relay-mix-quad::QuadMixer`.
+world mixer {
+    /// One motor's PWM command for the falcon-quad airframe.
+    /// `idx` selects the motor (0-3, wraps mod 4).
+    export falcon-mix-motor: func(
+        idx: u32,
+        roll: f32,
+        pitch: f32,
+        yaw: f32,
+        thrust: f32,
+    ) -> f32;
+
+    /// Sum of all four motor commands — a scalar digest of a full
+    /// mix, used as the cross-pipeline reference check (wasmtime vs
+    /// native vs synth-on-Renode all compare this number).
+    export falcon-mix-total: func(
+        roll: f32,
+        pitch: f32,
+        yaw: f32,
+        thrust: f32,
+    ) -> f32;
+}

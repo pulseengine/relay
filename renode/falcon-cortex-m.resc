@@ -1,0 +1,36 @@
+:name: Falcon control layer on STM32H743 (Cortex-M7)
+:description: Loads the synth-compiled falcon ARM ELF onto an emulated
+:description: STM32H743 — the FMU-class MCU from the falcon roadmap —
+:description: and runs the fused control layer bare-metal.
+
+# ── machine ───────────────────────────────────────────────────────
+# STM32H743: Cortex-M7 @ 480 MHz, the FMU-class part falcon v0.6
+# targets. Renode ships this platform description.
+mach create "falcon"
+machine LoadPlatformDescription @platforms/cpus/stm32h743.repl
+
+# ── firmware ──────────────────────────────────────────────────────
+# The ELF is produced by scripts/falcon-wasm-pipeline.sh:
+#   relay-* crates → wasm32 → meld fuse → wasm-opt → synth --cortex-m
+# Path is relative to the repo root; pass --variable on the CLI to
+# override:  renode -e "$path falcon-fused.elf" falcon-cortex-m.resc
+$elf ?= @target/falcon-pipeline/falcon-fused.elf
+sysbus LoadELF $elf
+
+# ── observability ─────────────────────────────────────────────────
+# USART1 is the falcon telemetry channel. Anything the control layer
+# writes there is captured in the Renode log + analyzer.
+showAnalyzer sysbus.usart1
+
+# ── reset vector ──────────────────────────────────────────────────
+# synth ELFs are bare-metal: entry at the start of .text. Point the
+# CPU PC at the ELF entry and run.
+macro reset
+"""
+    sysbus LoadELF $elf
+"""
+runMacro $reset
+
+echo "falcon control layer loaded — start to run, 'pause' to inspect."
+# In a renode_test (robot) harness `start` + a telemetry assertion
+# runs automatically; interactively, type `start`.

@@ -1,0 +1,19 @@
+[package]
+name = "falcon-mix-component"
+description = "Falcon v0.6 — relay-mix-quad as a WASM component for the meld→synth pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# cdylib → wasm32-unknown-unknown core module; rlib → native cargo test.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+relay-mix-quad = { path = "../../crates/relay-mix-quad" }
+
+# Release-profile knobs (panic=abort, opt-level=s, lto, 1 CGU) live in
+# the workspace root Cargo.toml — Cargo only honours [profile.*] there.
+# The wasm32 build picks them up; wasm-opt does the rest downstream.
