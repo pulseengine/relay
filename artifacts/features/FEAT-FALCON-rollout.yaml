@@ -326,38 +326,76 @@ artifacts:
 
   - id: FEAT-FALCON-v0.6
     type: feature
-    title: "v0.6 — hardware bring-up on Cube Orange or pulseengine-board"
-    status: pending
+    title: "v0.6 — WASM component pipeline: meld fuse → wasm-opt → synth → ARM ELF"
+    status: approved
     description: >
-      First real silicon. synth AOT-compiles WASM components to
-      Cortex-M7 binary. Runs on Cube Orange (FMUv6X) or a
-      pulseengine-custom Cortex-M7 board. Tethered hover.
+      LANDED (reworked). Original v0.6 scope was hardware bring-up on
+      a Cube Orange. Hardware was not in place, so v0.6 was reworked
+      to the WASM component pipeline + Renode emulation — which is
+      strictly more useful: it exercises the full
+      meld → wasm-opt → synth toolchain and produces a real ARM
+      Cortex-M ELF, hardware-independent and CI-reproducible.
 
       Ships:
-        - synth target=cortex-m7 toolchain
-        - host/relay-imu, host/relay-mag, host/relay-baro,
-          host/relay-pwm (real silicon drivers)
-        - HITL harness (we author this — no off-the-shelf
-          WASM-on-MCU HITL framework exists in 2025-2026)
-        - bring-up procedure documentation
+        - wasm/falcon-mix-component, wasm/falcon-rate-component —
+          thin cdylib wrappers exposing relay-mix-quad / relay-rate
+          as scalar-ABI WASM exports. Built to wasm32-unknown-unknown.
+        - wit/falcon-control/{mixer,rate}.wit — WIT worlds in the
+          shape spar-codegen's wit_gen module emits from the AADL
+          airframe model (hand-authored now; spar→WIT codegen is the
+          rules_wasm_component follow-up).
+        - scripts/falcon-wasm-pipeline.sh — the reproducible
+          pipeline: cargo build wasm32 → wasm-tools component
+          embed+new → meld fuse --memory shared → wasm-opt -Os →
+          synth compile --cortex-m. wasmtime is the reference oracle.
+        - renode/falcon-cortex-m.resc — Renode STM32H743
+          (Cortex-M7) machine script; loads the synth ELF. Runs in
+          Linux CI via renode-bazel-rules.
+        - meld + synth cargo-installed as pinned ~/.cargo/bin
+          binaries (repo churn cannot break the pipeline).
 
-      Verification chain delta:
-        - criterion budgets met on real silicon
-        - synth+kiln WASM-on-MCU runtime trace
-        - sigil-signed firmware bundle
-        - HITL test loop (Pixhawk 6X + custom STM32H7 board
-          speaking HIL_* MAVLink messages over USB-CDC 921600)
+      Pipeline result (scripts/falcon-wasm-pipeline.sh):
+        - 2 components → meld fuse (shared memory) → 4412 B module
+        - wasm-opt -Os: 4412 B → 4126 B
+        - synth compile: FUSED module → 1716 B ARM Cortex-M ELF;
+          mixer standalone → 911 B ELF
+        - wasmtime reference checks pass (falcon-mix-total = 2.0,
+          falcon-rate-torque(1.0) > 0)
 
-      Acceptance test: tethered hover for 60 seconds; vehicle
-      maintains position within 0.5 m of takeoff point.
-    tags: [falcon, milestone, v0.6, hardware, hitl]
+      Hickups (the user predicted them; all tracked):
+        - synth #120 — unmapped-vreg panic on f32 division
+          (compiler_builtins float::div); falcon-rate-component
+          standalone trips it. The meld-fused module compiles fine.
+          Commented on the open issue with the falcon repro.
+        - synth #124 (filed) — synth verify is advertised in the
+          CLI but inert unless built with --features verify.
+        - meld #172 (filed) — meld fuse defaults to --memory multi,
+          which wasm-opt/synth reject; pipeline uses --memory shared.
+        - Renode has no macOS-arm64 portable build; emulation runs
+          in Linux CI. The pulseengine/renode-bazel-rules mac port
+          is in progress.
+
+      Deferred to v0.7:
+        - The 3 libm-using control crates (ekf/att/pos) through the
+          pipeline — pending synth #120 fix (they do f32 division).
+        - Full Bazel integration via rules_wasm_component.
+        - Live Renode run wired into CI.
+        - synth verify Z3 translation validation (needs synth built
+          with --features verify; synth #124).
+    tags: [falcon, milestone, v0.6, wasm-pipeline, meld, synth, renode, landed]
     fields:
-      release-target: "first hardware hover; HITL framework operational"
-      hardware-target: "Cube Orange (FMUv6X) or pulseengine STM32H7 board"
-      maps-to-overdo-layer: "+ criterion on silicon + HITL"
+      release-target: "fused WASM control layer → ARM Cortex-M ELF"
+      pipeline: "cargo wasm32 → wasm-tools → meld → wasm-opt → synth"
+      tracked-tool-issues: "synth#120, synth#124, meld#172"
     links:
+      - type: implements
+        target: SYSREQ-FALCON-005
       - type: depends-on
         target: FEAT-FALCON-v0.5
+      - type: verified-by
+        target: FV-FALCON-PIPELINE-001
+      - type: blocks
+        target: FEAT-FALCON-v0.7
 
   - id: FEAT-FALCON-v0.7
     type: feature

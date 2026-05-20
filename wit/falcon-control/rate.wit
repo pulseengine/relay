@@ -1,0 +1,14 @@
+package falcon:control-rate@0.6.0;
+
+/// Rate-controller component interface — v0.6 pipeline shape.
+/// Wraps `relay-rate::RatePid`. Spar-codegen `wit_gen` target shape;
+/// see wit/falcon-control/mixer.wit for the full rationale.
+world rate {
+    /// Closed-loop step-response digest — runs the PID against a
+    /// pure-integrator plant for 1 s at 1 kHz, returns the final
+    /// tracked body rate (rad/s). Converges to `setpoint-x`.
+    export falcon-rate-step-digest: func(setpoint-x: f32) -> f32;
+
+    /// Single-tick x-axis torque from rest for the given setpoint.
+    export falcon-rate-torque: func(setpoint-x: f32) -> f32;
+}

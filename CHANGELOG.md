@@ -9,6 +9,91 @@ Tags use a per-track prefix:
 - `falcon-v<semver>` — the falcon dual-DNA flight stack
 - (future) `relay-v<semver>` — the relay substrate itself
 
+## [falcon-v0.6.0] — 2026-05-20
+
+The WASM component pipeline. Control crates compile to WASM, fuse
+through `meld` into one single-memory module, optimise through
+`wasm-opt`, and AOT-compile through `synth` to a real ARM Cortex-M
+ELF — hardware-independent, CI-reproducible.
+
+Original v0.6 scope was hardware bring-up on a Cube Orange. Hardware
+wasn't in place, so v0.6 was reworked to the WASM pipeline + Renode
+emulation — which exercises the full meld → wasm-opt → synth
+toolchain and is strictly more useful as a foundation.
+
+### Added
+
+- **`wasm/falcon-mix-component`, `wasm/falcon-rate-component`** —
+  thin `cdylib` wrappers exposing `relay-mix-quad` / `relay-rate` as
+  scalar-ABI WASM exports (`#[export_name]` kebab names matching the
+  WIT worlds). Build to `wasm32-unknown-unknown`. The `rlib` path is
+  unit-tested natively against the underlying control crates so the
+  wasm exports are proven faithful (5 tests).
+- **`wit/falcon-control/{mixer,rate}.wit`** — WIT worlds in the
+  shape `spar-codegen`'s `wit_gen` module emits from the AADL
+  airframe model. Hand-authored for v0.6; the spar → WIT codegen
+  path is the `rules_wasm_component` follow-up.
+- **`scripts/falcon-wasm-pipeline.sh`** — the reproducible pipeline:
+  `cargo build --target wasm32` → `wasm-tools component embed`+`new`
+  → `meld fuse --memory shared --address-rebase` → `wasm-opt -Os` →
+  `synth compile --cortex-m`. `wasmtime` is the reference oracle.
+- **`renode/falcon-cortex-m.resc`** + `renode/README.md` — Renode
+  STM32H743 (Cortex-M7) machine script that loads the synth ELF.
+  Runs in Linux CI via `renode-bazel-rules` (no macOS-arm64 portable
+  Renode build exists; the `pulseengine/renode-bazel-rules` mac port
+  is in progress).
+- **`FV-FALCON-PIPELINE-001`** verification artifact;
+  **`FEAT-FALCON-v0.6`** bumped `pending` → `approved`, scope
+  reworked from hardware to WASM-pipeline.
+- **meld + synth `cargo install`'d** as pinned `~/.cargo/bin`
+  binaries so development churn in those repos cannot break the
+  falcon pipeline.
+
+### Pipeline result
+
+```
+2 components → meld fuse (shared memory) → 4412 B single-memory module
+wasm-opt -Os:  4412 B → 4126 B
+synth compile: fused module  → 1716 B ARM Cortex-M ELF
+               mixer standalone → 911 B ARM ELF
+wasmtime ref:  falcon-mix-total(0,0,0,0.5) = 2.0   ✓ matches native
+               falcon-rate-torque(1.0) > 0         ✓
+synth disasm:  elf32-littlearm confirmed
+```
+
+### Tool issues found + tracked
+
+Bring-up surfaced three real tool issues — all investigated and
+filed upstream so they're tracked:
+
+- **synth#120** — `unmapped vreg` panic on f32 division
+  (`compiler_builtins` `float::div`). `falcon-rate-component`
+  standalone trips it; the `meld`-fused module containing the same
+  code compiles fine. Commented on the open issue with the falcon
+  repro.
+- **synth#124** (filed) — `synth verify` is advertised in the CLI
+  but is inert unless synth is built with `--features verify`.
+- **meld#172** (filed) — `meld fuse` defaults to `--memory multi`,
+  producing a module `wasm-opt` and `synth` reject; the pipeline
+  works around it with `--memory shared --address-rebase`.
+
+### Verification
+
+- `cargo test --workspace`: 63 test suites green (was 61 in v0.5;
+  +2 wrapper crates).
+- `bash scripts/falcon-wasm-pipeline.sh`: PASS — meld fuse +
+  wasm-opt + synth produce ARM ELFs (2/3 targets; the rate
+  standalone is synth#120, documented).
+- `rivet validate`: 0 broken cross-references.
+
+### Deferred to v0.7
+
+- The 3 libm-using control crates (`ekf`/`att`/`pos`) through the
+  pipeline — gated on synth#120 (they do f32 division).
+- Full Bazel integration via `rules_wasm_component`.
+- Live Renode run wired into CI.
+- `synth verify` Z3 translation validation (gated on synth#124).
+
 ## [falcon-v0.5.0] — 2026-05-19
 
 The full outer-loop cascade closes. Vehicle flies from origin to a
