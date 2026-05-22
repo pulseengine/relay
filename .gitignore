@@ -18,3 +18,8 @@ Cargo.lock
 
 # Claude Code session-local settings
 .claude/
+
+# cargo-component-generated WIT bindings under wasm/cm — superseded by
+# Bazel's rust_wasm_component_bindgen (bindings are generated at build
+# time; the lib.rs files alias the generated crate).
+wasm/cm/*/src/bindings.rs

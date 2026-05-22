@@ -1,6 +1,6 @@
 artifacts:
   - id: FV-FALCON-ATT-001
-    type: unit-verification
+    type: sw-verification
     title: "Unit + property tests for relay-att + cascade hover bench (v0.4)"
     status: approved
     description: >
@@ -50,5 +50,3 @@ artifacts:
         target: SWREQ-FALCON-ATT-P02
       - type: verifies
         target: SWREQ-FALCON-ATT-P03
-      - type: implements
-        target: FEAT-FALCON-v0.4

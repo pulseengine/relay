@@ -1,6 +1,6 @@
 artifacts:
   - id: FV-FALCON-MAVLINK-001
-    type: unit-verification
+    type: sw-verification
     title: "Unit + property tests for relay-mavlink (v0.1)"
     status: approved
     description: >
@@ -48,5 +48,3 @@ artifacts:
         target: SWREQ-FALCON-MAVLINK-P02
       - type: verifies
         target: SWREQ-FALCON-MAVLINK-P03
-      - type: implements
-        target: FEAT-FALCON-v0.1

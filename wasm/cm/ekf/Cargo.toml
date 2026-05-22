@@ -1,0 +1,32 @@
+# Standalone cargo-component crate — kept out of the relay cargo
+# workspace (generated bindings module won't build under plain cargo).
+[package]
+name = "falcon-ekf-cm"
+description = "Falcon v0.7 — ekf as a Component Model component (wac cascade)"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/pulseengine/relay"
+rust-version = "1.85"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+relay-ekf = { path = "../../../crates/relay-ekf" }
+wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+
+[package.metadata.component]
+package = "falcon:cascade"
+
+[package.metadata.component.target]
+path = "../../../wit/falcon-cascade"
+world = "ekf-component"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+[workspace]

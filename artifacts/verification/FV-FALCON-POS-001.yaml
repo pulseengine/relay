@@ -1,6 +1,6 @@
 artifacts:
   - id: FV-FALCON-POS-001
-    type: unit-verification
+    type: sw-verification
     title: "Unit + property tests + mission SITL for relay-pos (v0.5)"
     status: approved
     description: >
@@ -55,5 +55,3 @@ artifacts:
         target: SWREQ-FALCON-POS-P02
       - type: verifies
         target: SWREQ-FALCON-POS-P03
-      - type: implements
-        target: FEAT-FALCON-v0.5

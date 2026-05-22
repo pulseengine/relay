@@ -89,21 +89,22 @@ artifacts:
         mixer-allocator: "1000 Hz"
         ekf-estimator: "1000 Hz (IMU-rate)"
     links:
+      # SWE.2 — a sw-arch-component is allocated from sw-requirements
+      # (one lead requirement per falcon subsystem). The SYSREQ-FALCON
+      # chain still holds transitively: SWREQ derives-from SYSREQ.
       - type: allocated-from
-        target: SYSREQ-FALCON-001
+        target: SWREQ-FALCON-EKF-P01
       - type: allocated-from
-        target: SYSREQ-FALCON-002
+        target: SWREQ-FALCON-RATE-P01
       - type: allocated-from
-        target: SYSREQ-FALCON-003
+        target: SWREQ-FALCON-ATT-P01
       - type: allocated-from
-        target: SYSREQ-FALCON-004
+        target: SWREQ-FALCON-POS-P01
       - type: allocated-from
-        target: SYSREQ-FALCON-005
+        target: SWREQ-FALCON-MIX-P01
       - type: allocated-from
-        target: SYSREQ-FALCON-006
+        target: SWREQ-FALCON-MAVLINK-P01
       - type: allocated-from
-        target: SYSREQ-FALCON-007
-      - type: allocated-from
-        target: SYSREQ-FALCON-008
+        target: SWREQ-FALCON-WORLD-P01
       - type: refines
         target: SWARCH-RELAY-001

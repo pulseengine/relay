@@ -399,7 +399,46 @@ artifacts:
 
   - id: FEAT-FALCON-v0.7
     type: feature
-    title: "v0.7 — untethered hover + fault injection on relay-hs"
+    title: "v0.7 — Bazel + Component Model: cascade as composed WIT components"
+    status: pending
+    description: >
+      The v0.6-deferred "full Bazel integration" milestone. The v0.6
+      raw `#[export_name]` scalar shortcut is replaced by real
+      Component Model components: each controller (ekf, position,
+      attitude, rate, mixer) is a typed component exporting one WIT
+      interface, and a `cascade` orchestrator imports all five and
+      exports the top-level `step`. `wac` composes the graph.
+
+      The Rocq verification track is activated alongside: the
+      Nix-backed Coq 9.1 toolchain from rules_rocq_rust is wired into
+      MODULE.bazel, completing the Verus + Rocq + Lean triad.
+
+      Ships:
+        - wit/falcon-cascade/cascade.wit — five leaf interfaces plus
+          the cascade world (flat-f32-record ABI, so wac composition
+          and the synth → ARM lowering both stay simple).
+        - wasm/cm/{ekf,position,attitude,rate,falcon-mixer,cascade} —
+          six Component Model components wrapping the relay-* control
+          crates; all build to wasm32 and componentize.
+        - BUILD.bazel — wit_library + rust_wasm_component_bindgen
+          targets for all six, plus wac_plug composing the cascade.
+        - MODULE.bazel — the `rocq` / `rocq_of_rust` module
+          extensions wired (Nix-hermetic Coq 9.1).
+
+      Verification chain delta:
+        - bazel build of the composed cascade component
+        - rivet validate clean against the rivet 0.10 schema
+        - Rocq track runnable (//proofs/rocq:*_test)
+    tags: [falcon, milestone, v0.7, bazel, component-model, wac, nix]
+    fields:
+      release-target: "cascade composes as WIT components under Bazel"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.6
+
+  - id: FEAT-FALCON-v0.8
+    type: feature
+    title: "v0.8 — untethered hover + fault injection on relay-hs"
     status: pending
     description: >
       Untethered flight. fault injection exercises the relay-hs
@@ -410,16 +449,16 @@ artifacts:
         - fault injection test suite
         - relay-hs triggers RTL on EKF divergence
         - relay-sc executes RTL stored-command sequence
-    tags: [falcon, milestone, v0.7, untethered, fault-injection]
+    tags: [falcon, milestone, v0.8, untethered, fault-injection]
     fields:
       release-target: "untethered hover; safety-state validated"
     links:
       - type: depends-on
-        target: FEAT-FALCON-v0.6
+        target: FEAT-FALCON-v0.7
 
-  - id: FEAT-FALCON-v0.8
+  - id: FEAT-FALCON-v0.9
     type: feature
-    title: "v0.8 — untethered waypoint mission + EASA U-space telemetry"
+    title: "v0.9 — untethered waypoint mission + EASA U-space telemetry"
     status: pending
     description: >
       First untethered autonomous mission. EASA U-space telemetry
@@ -430,16 +469,16 @@ artifacts:
         - Z3 translation validation across loom optimizations
         - EASA-conformant downlink telemetry
         - rivet snapshot per release (audit-ready)
-    tags: [falcon, milestone, v0.8, mission, easa-u-space]
+    tags: [falcon, milestone, v0.9, mission, easa-u-space]
     fields:
       release-target: "untethered mission; EASA U-space profile ready"
     links:
       - type: depends-on
-        target: FEAT-FALCON-v0.7
+        target: FEAT-FALCON-v0.8
 
-  - id: FEAT-FALCON-v0.9
+  - id: FEAT-FALCON-v0.10
     type: feature
-    title: "v0.9 — geofence + RTL under EW-simulated GPS loss"
+    title: "v0.10 — geofence + RTL under EW-simulated GPS loss"
     status: pending
     description: >
       relay-lc geofence triggers relay-sc RTL sequence. Validated
@@ -448,12 +487,12 @@ artifacts:
       Verification chain delta:
         - abstract interpretation pass via MIRAI or Charon-based
           analyzer (closes the third DO-333 technique class)
-    tags: [falcon, milestone, v0.9, geofence, rtl, ew]
+    tags: [falcon, milestone, v0.10, geofence, rtl, ew]
     fields:
       release-target: "geofence/RTL validated; AI in chain"
     links:
       - type: depends-on
-        target: FEAT-FALCON-v0.8
+        target: FEAT-FALCON-v0.9
 
   - id: FEAT-FALCON-v1.0
     type: feature
@@ -487,4 +526,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.9
+        target: FEAT-FALCON-v0.10

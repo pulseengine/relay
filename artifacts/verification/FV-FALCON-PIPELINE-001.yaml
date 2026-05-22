@@ -1,6 +1,6 @@
 artifacts:
   - id: FV-FALCON-PIPELINE-001
-    type: unit-verification
+    type: sw-verification
     title: "WASM component pipeline — meld fuse → wasm-opt → synth (v0.6)"
     status: approved
     description: >
@@ -63,5 +63,3 @@ artifacts:
         target: SWREQ-FALCON-MIX-P01
       - type: verifies
         target: SWREQ-FALCON-RATE-P01
-      - type: implements
-        target: FEAT-FALCON-v0.6

@@ -24,6 +24,7 @@
 //!   cargo run -p falcon-sitl-hover --release -- --scenario step
 //!   cargo run -p falcon-sitl-hover --release -- --scenario disturbance
 //!   cargo run -p falcon-sitl-hover --release -- --scenario hover
+//!   cargo run -p falcon-sitl-hover --release -- --scenario fault
 //!   cargo run -p falcon-sitl-hover --release -- --noise 0.05
 //!
 //! ## Pass criteria (v0.3 acceptance)
@@ -34,6 +35,8 @@
 //!                0.5 s of the impulse.
 //! - hover:       initial random rates ≤ 1 rad/s settle to ≤ 0.02
 //!                within 1.0 s.
+//! - fault:       an injected accelerometer fault is caught by the
+//!                EKF watchdog and RTL triggers within 0.5 s.
 //! - no NaN/∞ anywhere in the loop.
 //!
 //! Failures print a diff and exit with code 1.
@@ -56,6 +59,10 @@ const FRICTION: f32 = 0.001;    // rad/s damping coefficient
 /// Thrust scale: normalised thrust 0.5 produces 1g acceleration at hover.
 const THRUST_SCALE: f32 = 19.62;
 const DRAG_COEFFICIENT: f32 = 0.4;
+/// v0.8 fault scenario — wall-clock time the accelerometer fault is
+/// injected. By 8 s the vehicle has reached and settled at the
+/// waypoint, so pre-fault EKF innovation is low.
+const FAULT_INJECT_S: f32 = 8.0;
 
 /// Pseudo-random Gaussian-ish noise via two-sample averaging of an LCG.
 struct Rng(u32);
@@ -198,6 +205,9 @@ enum Scenario {
     Attitude,
     /// v0.5: full mission cascade — POS → ATT → RATE → MIX → plant.
     Mission,
+    /// v0.8: fault injection — EKF divergence trips the relay-hs
+    /// watchdog, which triggers Return-To-Launch.
+    Fault,
     All,
 }
 
@@ -699,6 +709,207 @@ fn run_attitude(noise_std: f32) -> ScenarioResult {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v0.8 — EKF-divergence watchdog (the relay-hs Health & Safety role)
+// ═══════════════════════════════════════════════════════════════
+
+/// Health & Safety watchdog for EKF divergence.
+///
+/// The Mahony filter reports a normalised `innovation` each tick —
+/// `sin(θ)` of the angle between the *measured* gravity direction and
+/// the filter's *predicted* one (see `relay-ekf`). Healthy flight sits
+/// near zero; a failing accelerometer drives it toward 1.0. This
+/// watchdog turns that scalar into one safety decision: trigger
+/// Return-To-Launch.
+///
+/// In the cFS-DNA production path this is the verified `relay-hs`
+/// engine, and the RTL it raises is executed by `relay-sc` as a
+/// stored-command sequence. Here it runs inline in the SITL so the
+/// fault-injection scenario can exercise the trigger end-to-end.
+struct EkfWatchdog {
+    /// Innovation above which a tick counts as "diverging". Set well
+    /// clear of the ~0.29 innovation that normal mission acceleration
+    /// induces, and well below the ~0.9 of a hard accelerometer fault.
+    innovation_limit: f32,
+    /// Consecutive over-limit ticks required before RTL commits — a
+    /// debounce, so a single noisy sample cannot abort the mission.
+    trip_after: u32,
+    /// Running count of consecutive over-limit ticks.
+    consecutive_over: u32,
+    /// RTL latches once tripped: a safe state is never un-entered.
+    rtl_latched: bool,
+}
+
+impl EkfWatchdog {
+    /// Defaults for the 1 kHz cascade: 0.40 innovation limit, 50 ms
+    /// of sustained divergence before RTL.
+    fn new() -> Self {
+        Self {
+            innovation_limit: 0.40,
+            trip_after: 50,
+            consecutive_over: 0,
+            rtl_latched: false,
+        }
+    }
+
+    /// Feed one EKF `innovation` sample. Returns `true` on the single
+    /// tick RTL trips, so the caller can timestamp the event.
+    fn observe(&mut self, innovation: f32) -> bool {
+        if self.rtl_latched {
+            return false;
+        }
+        // A non-finite innovation is itself a divergence signal.
+        if !innovation.is_finite() || innovation > self.innovation_limit {
+            self.consecutive_over = self.consecutive_over.saturating_add(1);
+        } else {
+            self.consecutive_over = 0;
+        }
+        if self.should_trigger_rtl() {
+            self.rtl_latched = true;
+            return true;
+        }
+        false
+    }
+
+    /// The RTL trigger predicate — the heart of the fault response.
+    ///
+    /// Baseline: a fixed debounce — `trip_after` *strictly consecutive*
+    /// ticks over `innovation_limit`. Sound and deterministic for a
+    /// clean step fault, but brittle against an *intermittent* fault
+    /// (a loose IMU connector, vibration) whose signal dips below the
+    /// limit often enough to keep resetting the counter. A sliding
+    /// "M-of-the-last-N over limit" rule is the robust upgrade.
+    fn should_trigger_rtl(&self) -> bool {
+        self.consecutive_over >= self.trip_after
+    }
+
+    /// True once RTL has been committed.
+    fn rtl_active(&self) -> bool {
+        self.rtl_latched
+    }
+}
+
+/// v0.8 fault-injection scenario.
+///
+/// Flies the full mission cascade to a waypoint, then at
+/// `FAULT_INJECT_S` injects a hard accelerometer bias. The EKF
+/// estimate diverges, its `innovation` spikes, and the `EkfWatchdog`
+/// must catch it and latch Return-To-Launch — which retargets the
+/// position controller from the mission waypoint back to home.
+///
+/// Pass = no NaN, RTL triggered, and detection latency ≤ 0.5 s.
+fn run_fault(noise_std: f32) -> ScenarioResult {
+    let mut plant = Plant::at_rest();
+    let mut ekf = Ekf::new();
+    let mut rate_pid = RatePid::new();
+    let mut att = AttController::new();
+    let mut pos = PosController::new();
+    let mut mixer = QuadMixer::new();
+    let mut rng = Rng::new(0xFA017EED);
+    let mut watchdog = EkfWatchdog::new();
+    let dt = 1.0 / SAMPLE_RATE_HZ;
+    let fault_seconds = 16.0_f32;
+    let n = (fault_seconds * SAMPLE_RATE_HZ) as usize;
+
+    let waypoint = [10.0_f32, 0.0, 0.0];
+    let mission_sp = PositionSetpoint::hover_at(waypoint);
+    let rtl_sp = PositionSetpoint::hover_at([0.0, 0.0, 0.0]); // home
+
+    let pos_decimation = 20_usize; // 50 Hz
+    let att_decimation = 4_usize; //  250 Hz
+    let mut current_attitude_setpoint = [1.0_f32, 0.0, 0.0, 0.0];
+    let mut current_thrust = 0.5_f32;
+    let mut current_rate_setpoint = [0.0_f32; 3];
+
+    let fault_step = (FAULT_INJECT_S * SAMPLE_RATE_HZ) as usize;
+    let mut peak_innovation = 0.0_f32;
+    let mut rtl_triggered_s = f32::NAN;
+    let mut nan_seen = false;
+
+    let t0 = Instant::now();
+    for i in 0..n {
+        let t = i as f32 * dt;
+
+        // 1. IMU + EKF (1 kHz).
+        let (mut sample, gyro) = plant.measure(&mut rng, noise_std);
+        sample.time = ekf_ts_of(t);
+        // Fault injection: a hard +x accelerometer bias from t = 8 s.
+        // The filter reads a gravity direction tilted ~69° off true,
+        // so its attitude estimate diverges and innovation spikes.
+        if i >= fault_step {
+            sample.accel_body[0] += 25.0;
+        }
+        let st = ekf.tick(sample);
+        if !st.quaternion[0].is_finite() {
+            nan_seen = true;
+        }
+        if st.innovation > peak_innovation {
+            peak_innovation = st.innovation;
+        }
+
+        // 2. Health & Safety watchdog observes the EKF innovation.
+        if watchdog.observe(st.innovation) {
+            rtl_triggered_s = t;
+        }
+
+        // 3. Active setpoint: the mission waypoint until RTL latches,
+        //    then home. In the cFS-DNA path this switch is a relay-sc
+        //    stored-command sequence fired by the relay-hs alert.
+        let setpoint = if watchdog.rtl_active() { rtl_sp } else { mission_sp };
+
+        // 4. Outer position loop (50 Hz).
+        if i % pos_decimation == 0 {
+            let att_sp = pos.tick(
+                pos_ts_of(t),
+                plant.p_ned,
+                plant.v_ned,
+                st.quaternion,
+                setpoint,
+            );
+            current_attitude_setpoint = att_sp.quaternion;
+            current_thrust = att_sp.thrust;
+        }
+        // 5. Attitude loop (250 Hz).
+        if i % att_decimation == 0 {
+            current_rate_setpoint =
+                att.tick(att_ts_of(t), st.quaternion, current_attitude_setpoint);
+        }
+        // 6. Rate loop (1 kHz) + mixer + plant.
+        let torque = rate_pid.tick(rate_ts_of(t), gyro, current_rate_setpoint);
+        for k in 0..3 {
+            if !torque[k].is_finite() {
+                nan_seen = true;
+            }
+        }
+        let _motors = mixer.mix(torque, current_thrust);
+        if mixer.last_motors().iter().any(|v| !v.is_finite()) {
+            nan_seen = true;
+        }
+        plant.step_full(torque, current_thrust, dt);
+    }
+    let elapsed = t0.elapsed().as_micros();
+
+    let rtl_triggered = !rtl_triggered_s.is_nan();
+    let detection_latency = rtl_triggered_s - FAULT_INJECT_S;
+    let pass = !nan_seen
+        && rtl_triggered
+        && detection_latency >= 0.0
+        && detection_latency <= 0.5;
+
+    ScenarioResult {
+        label: "fault",
+        samples: n,
+        final_omega: plant.p_ned,                // final NED position
+        peak_omega_after_setup: peak_innovation, // peak EKF innovation
+        rms_error_steady: 0.0,
+        convergence_time_s: detection_latency, //  RTL detection latency (s)
+        overshoot_pct: 0.0,
+        nan_seen,
+        elapsed_micros: elapsed,
+        pass,
+    }
+}
+
 fn print_result(r: &ScenarioResult) {
     println!("--- scenario: {} ---", r.label);
     println!("  samples              {}", r.samples);
@@ -708,6 +919,10 @@ fn print_result(r: &ScenarioResult) {
         println!("  peak distance error  {:.3} m", r.peak_omega_after_setup);
         println!("  final distance       {:.3} m", r.overshoot_pct);
         println!("  RMS distance (steady){:.3} m (last 2s)", r.rms_error_steady);
+    } else if r.label == "fault" {
+        println!("  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        println!("  peak EKF innovation  {:.4}", r.peak_omega_after_setup);
     } else {
         println!("  final ω (rad/s)      [{:+.4}, {:+.4}, {:+.4}]",
             r.final_omega[0], r.final_omega[1], r.final_omega[2]);
@@ -723,9 +938,15 @@ fn print_result(r: &ScenarioResult) {
         println!("  RMS error (steady)   {:.4} rad/s", r.rms_error_steady);
     }
     if r.convergence_time_s.is_nan() {
-        println!("  convergence/recovery never");
+        if r.label == "fault" {
+            println!("  RTL                  never triggered");
+        } else {
+            println!("  convergence/recovery never");
+        }
     } else if r.label == "disturbance" {
         println!("  recovery time        {:.3}s after impulse", r.convergence_time_s);
+    } else if r.label == "fault" {
+        println!("  RTL detection        {:.3}s after fault injection", r.convergence_time_s);
     } else {
         println!("  convergence time     {:.3}s", r.convergence_time_s);
     }
@@ -736,11 +957,11 @@ fn print_result(r: &ScenarioResult) {
 
 fn print_help() {
     eprintln!(
-        "falcon-sitl-hover — v0.3+v0.4 closed-loop SITL bench\n\n\
+        "falcon-sitl-hover — closed-loop SITL bench (v0.3–v0.8)\n\n\
          USAGE:\n  \
-           falcon-sitl-hover [--scenario step|disturbance|hover|attitude|all] [--noise σ] [--quiet]\n\n\
+           falcon-sitl-hover [--scenario step|disturbance|hover|attitude|mission|fault|all] [--noise σ] [--quiet]\n\n\
          OPTIONS:\n  \
-           --scenario NAME   one of step, disturbance, hover, attitude, all (default: all)\n  \
+           --scenario NAME   one of step, disturbance, hover, attitude, mission, fault, all (default: all)\n  \
            --noise SIGMA     accelerometer / gyro white-noise σ (default 0.0)\n  \
            --quiet           only print PASS/FAIL summary\n  \
            --help            this text\n\n\
@@ -749,7 +970,8 @@ fn print_help() {
            disturbance  rate controller recovers from a 1 rad/s impulse\n  \
            hover        rate controller settles from non-zero initial rates\n  \
            attitude     ATT→RATE→MIX cascade tilts vehicle 20° about x (v0.4)\n  \
-           mission      POS→ATT→RATE→MIX cascade flies to 10m waypoint (v0.5)\n"
+           mission      POS→ATT→RATE→MIX cascade flies to 10m waypoint (v0.5)\n  \
+           fault        injected EKF fault trips the relay-hs watchdog → RTL (v0.8)\n"
     );
 }
 
@@ -767,9 +989,10 @@ fn main() -> ExitCode {
                 Some("hover") => scenario = Scenario::Hover,
                 Some("attitude") => scenario = Scenario::Attitude,
                 Some("mission") => scenario = Scenario::Mission,
+                Some("fault") => scenario = Scenario::Fault,
                 Some("all") => scenario = Scenario::All,
                 other => {
-                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|mission|all, got {:?}", other);
+                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|mission|fault|all, got {:?}", other);
                     return ExitCode::from(2);
                 }
             },
@@ -800,6 +1023,7 @@ fn main() -> ExitCode {
             Scenario::Hover => run_hover(noise),
             Scenario::Attitude => run_attitude(noise),
             Scenario::Mission => run_mission(noise),
+            Scenario::Fault => run_fault(noise),
             Scenario::All => unreachable!(),
         }
     };
@@ -812,6 +1036,7 @@ fn main() -> ExitCode {
             results.push(run_one(Scenario::Hover));
             results.push(run_one(Scenario::Attitude));
             results.push(run_one(Scenario::Mission));
+            results.push(run_one(Scenario::Fault));
         }
         s => results.push(run_one(s)),
     }
@@ -908,6 +1133,55 @@ mod tests {
         // Looser budget with noise.
         assert!(r.overshoot_pct <= 1.5,
             "noisy mission final distance {} m exceeds 1.5 m", r.overshoot_pct);
+    }
+
+    #[test]
+    fn deterministic_fault_triggers_rtl() {
+        let r = run_fault(0.0);
+        assert!(r.pass, "fault result: {:?}", r);
+        assert!(!r.nan_seen);
+        assert!(!r.convergence_time_s.is_nan(), "RTL never triggered");
+        assert!(r.convergence_time_s <= 0.5,
+            "RTL detection latency {:.3}s exceeds 0.5s budget", r.convergence_time_s);
+        assert!(r.peak_omega_after_setup > 0.4,
+            "fault should drive EKF innovation past the 0.4 limit, got {:.3}",
+            r.peak_omega_after_setup);
+    }
+
+    #[test]
+    fn noisy_fault_still_triggers_rtl() {
+        let r = run_fault(0.05);
+        assert!(!r.nan_seen);
+        // A hard accelerometer bias dwarfs the IMU noise floor — RTL
+        // must still latch, just with a looser latency budget.
+        assert!(!r.convergence_time_s.is_nan(), "RTL never triggered under noise");
+        assert!(r.convergence_time_s <= 1.0);
+    }
+
+    #[test]
+    fn ekf_watchdog_ignores_healthy_innovation() {
+        let mut wd = EkfWatchdog::new();
+        // A long run of healthy innovation must never trip RTL.
+        for _ in 0..5000 {
+            assert!(!wd.observe(0.04));
+        }
+        assert!(!wd.rtl_active());
+    }
+
+    #[test]
+    fn ekf_watchdog_debounces_transient_spikes() {
+        let mut wd = EkfWatchdog::new();
+        // Over-limit bursts one tick short of `trip_after`, each
+        // cleared by healthy samples, must never commit RTL.
+        for _ in 0..10 {
+            for _ in 0..49 {
+                wd.observe(0.9);
+            }
+            for _ in 0..5 {
+                wd.observe(0.02);
+            }
+        }
+        assert!(!wd.rtl_active(), "watchdog tripped on sub-threshold transients");
     }
 
     #[test]

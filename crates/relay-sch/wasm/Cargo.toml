@@ -8,4 +8,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wit-bindgen = "0.41.0"
+# libm — no_std transcendentals for the falcon control crates
+# (relay-ekf, relay-pos) built as Bazel rust_library targets.
+# Adding this requires a crate_universe repin: CARGO_BAZEL_REPIN=1.
+libm = "0.2"
 [workspace]
