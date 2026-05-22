@@ -15,6 +15,9 @@ bazel-*
 .DS_Store
 Thumbs.db
 Cargo.lock
+# ...except the crate_universe manifest lockfile, which must be
+# committed so the Bazel build (and Bazel CI) is reproducible.
+!crates/relay-sch/wasm/Cargo.lock
 
 # Claude Code session-local settings
 .claude/
