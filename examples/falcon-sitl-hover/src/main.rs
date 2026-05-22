@@ -731,24 +731,40 @@ struct EkfWatchdog {
     /// clear of the ~0.29 innovation that normal mission acceleration
     /// induces, and well below the ~0.9 of a hard accelerometer fault.
     innovation_limit: f32,
-    /// Consecutive over-limit ticks required before RTL commits — a
-    /// debounce, so a single noisy sample cannot abort the mission.
-    trip_after: u32,
-    /// Running count of consecutive over-limit ticks.
-    consecutive_over: u32,
+    /// Sliding-window length in ticks (must be ≤ 64).
+    window: u32,
+    /// Over-limit ticks within the window that commit RTL.
+    trip_threshold: u32,
+    /// Bit `i` = "the tick `i` ago was over-limit"; bit 0 is the
+    /// latest. A sliding window, not a consecutive counter — an
+    /// intermittent fault that dips below the limit some ticks still
+    /// accumulates, where a consecutive count would reset on the dip.
+    history: u64,
     /// RTL latches once tripped: a safe state is never un-entered.
     rtl_latched: bool,
 }
 
 impl EkfWatchdog {
-    /// Defaults for the 1 kHz cascade: 0.40 innovation limit, 50 ms
-    /// of sustained divergence before RTL.
+    /// Defaults for the 1 kHz cascade: 0.40 innovation limit; RTL when
+    /// 48 of the last 64 ms are over-limit — a 16-tick dropout margin
+    /// rejects isolated noise while still catching a fault that is
+    /// only intermittently over the limit.
     fn new() -> Self {
         Self {
             innovation_limit: 0.40,
-            trip_after: 50,
-            consecutive_over: 0,
+            window: 64,
+            trip_threshold: 48,
+            history: 0,
             rtl_latched: false,
+        }
+    }
+
+    /// Mask of the `window` lowest bits.
+    fn window_mask(&self) -> u64 {
+        if self.window >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << self.window) - 1
         }
     }
 
@@ -758,12 +774,10 @@ impl EkfWatchdog {
         if self.rtl_latched {
             return false;
         }
-        // A non-finite innovation is itself a divergence signal.
-        if !innovation.is_finite() || innovation > self.innovation_limit {
-            self.consecutive_over = self.consecutive_over.saturating_add(1);
-        } else {
-            self.consecutive_over = 0;
-        }
+        // Shift the window and record this tick. A non-finite
+        // innovation is itself a divergence signal — count it over.
+        let over_limit = !innovation.is_finite() || innovation > self.innovation_limit;
+        self.history = ((self.history << 1) | (over_limit as u64)) & self.window_mask();
         if self.should_trigger_rtl() {
             self.rtl_latched = true;
             return true;
@@ -773,14 +787,16 @@ impl EkfWatchdog {
 
     /// The RTL trigger predicate — the heart of the fault response.
     ///
-    /// Baseline: a fixed debounce — `trip_after` *strictly consecutive*
-    /// ticks over `innovation_limit`. Sound and deterministic for a
-    /// clean step fault, but brittle against an *intermittent* fault
-    /// (a loose IMU connector, vibration) whose signal dips below the
-    /// limit often enough to keep resetting the counter. A sliding
-    /// "M-of-the-last-N over limit" rule is the robust upgrade.
+    /// A sliding "M-of-the-last-N over limit" rule: RTL commits when
+    /// `trip_threshold` of the `window` most recent ticks were over
+    /// `innovation_limit`. Unlike a strict consecutive counter — which
+    /// a single healthy sample resets — this catches an intermittent
+    /// fault (a loose IMU connector, vibration) whose innovation dips
+    /// below the limit often enough to keep a consecutive count low,
+    /// while the `window − trip_threshold` dropout margin still
+    /// rejects isolated noise spikes.
     fn should_trigger_rtl(&self) -> bool {
-        self.consecutive_over >= self.trip_after
+        (self.history & self.window_mask()).count_ones() >= self.trip_threshold
     }
 
     /// True once RTL has been committed.
@@ -1171,17 +1187,36 @@ mod tests {
     #[test]
     fn ekf_watchdog_debounces_transient_spikes() {
         let mut wd = EkfWatchdog::new();
-        // Over-limit bursts one tick short of `trip_after`, each
-        // cleared by healthy samples, must never commit RTL.
-        for _ in 0..10 {
-            for _ in 0..49 {
-                wd.observe(0.9);
-            }
-            for _ in 0..5 {
+        // Isolated over-limit spikes — one every 20 ticks — never let
+        // the sliding window accumulate trip_threshold over-limit
+        // ticks, so RTL must not commit.
+        for _ in 0..500 {
+            wd.observe(0.9);
+            for _ in 0..19 {
                 wd.observe(0.02);
             }
         }
-        assert!(!wd.rtl_active(), "watchdog tripped on sub-threshold transients");
+        assert!(!wd.rtl_active(), "watchdog tripped on isolated noise spikes");
+    }
+
+    #[test]
+    fn ekf_watchdog_catches_intermittent_fault() {
+        let mut wd = EkfWatchdog::new();
+        // An intermittent fault — over-limit 4 ticks in every 5, e.g.
+        // a loose IMU connector. A strict consecutive counter never
+        // reaches its threshold (the 1-in-5 healthy tick resets it),
+        // but the sliding window still accumulates and commits RTL.
+        let mut tripped = false;
+        for _ in 0..200 {
+            for _ in 0..4 {
+                tripped |= wd.observe(0.9);
+            }
+            tripped |= wd.observe(0.02);
+        }
+        assert!(
+            tripped && wd.rtl_active(),
+            "sliding window should catch a 4-of-5 intermittent fault"
+        );
     }
 
     #[test]
