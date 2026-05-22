@@ -45,7 +45,7 @@ repository = "https://github.com/pulseengine/relay"
 rust-version = "1.85.0"
 
 [workspace.dependencies]
-wit-bindgen = { version = "0.41.0", default-features = false }
+wit-bindgen = { version = "0.57.1", default-features = false }
 proptest = "1"
 
 # All guest components are no_std + no alloc.
