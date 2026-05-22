@@ -29,8 +29,6 @@ members = [
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
     "examples/falcon-sitl-hover",
-    "wasm/falcon-mix-component",
-    "wasm/falcon-rate-component",
     "host/relay-sb",
     "host/relay-es",
     "host/relay-evs",
