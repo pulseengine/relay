@@ -566,3 +566,27 @@ wac_plug(
     ],
     socket = ":falcon-cascade",
 )
+
+# ── meld → synth: lower the cascade to an ARM Cortex-M ELF ────────
+# meld_fuse resolves the cascade's five imports against the leaf
+# exports into one single-memory core module; synth_compile AOT-
+# compiles that to a Cortex-M7 ELF (the STM32H743 of
+# renode/falcon-cortex-m.resc). This is the v0.7 equivalent of the
+# v0.6 meld→wasm-opt→synth pipeline, now fully inside Bazel.
+meld_fuse(
+    name = "falcon-cascade-fused",
+    components = [
+        ":falcon-ekf",
+        ":falcon-position",
+        ":falcon-attitude",
+        ":falcon-rate",
+        ":falcon-mixer",
+        ":falcon-cascade",
+    ],
+)
+
+synth_compile(
+    name = "falcon-cascade-firmware",
+    target = "cortex-m7",
+    wasm_module = ":falcon-cascade-fused",
+)
