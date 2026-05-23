@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-FAULT-P01
+    type: sw-req
+    title: "FAULT-P01 — EKF divergence latches RTL within 500 ms"
+    status: approved
+    description: >
+      The relay-hs EkfHealthMonitor shall observe a per-tick boolean
+      `over_limit` signal (the f32 → bool gate "EKF innovation > limit"
+      lives in the caller) and latch the system into a Return-To-Launch
+      (RTL) safe state once `trip_threshold` of the last `window` ticks
+      are over-limit. The latch is monotone (Verus HS-P06): once
+      latched, the safe state is never un-entered. observe() returns
+      true only on the latch transition (Verus HS-P07), so the caller
+      can timestamp the event exactly once.
+
+      With the default window of 64 ticks at the 1 kHz cascade rate
+      and trip_threshold = 48, a hard accelerometer fault (innovation
+      sustained > 0.40) latches RTL within ≤ 500 ms — well within the
+      single-revolution attitude excursion of a quadcopter with a
+      sub-second time constant.
+
+      Property summary:
+        FAULT-P01: latency budget — ≤ 500 ms from fault onset to
+                   monitor.rtl_active() == true under a sustained
+                   over-limit signal.
+    tags: [falcon, sw-req, safety, fault-detection, rtl, v0.8]
+    fields:
+      req-type: functional
+      priority: must
+      maps-to-verified-property: "HS-P06 (monotone latch), HS-P07 (transition-only)"
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011
