@@ -22,8 +22,9 @@ sources:
     format: generic-yaml
   - path: artifacts/verification
     format: generic-yaml
-  - path: artifacts/features
-    format: generic-yaml
+  # artifacts/features/ is a release roadmap, not an ASPICE work
+  # product — rivet 0.10's schema has no `feature` type. It stays a
+  # human-maintained doc, intentionally outside rivet's validation.
 
 docs:
   - docs

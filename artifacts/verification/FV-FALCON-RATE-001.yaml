@@ -1,6 +1,6 @@
 artifacts:
   - id: FV-FALCON-RATE-001
-    type: unit-verification
+    type: sw-verification
     title: "Unit + property + closed-loop SITL for relay-rate (v0.3)"
     status: approved
     description: >
@@ -61,5 +61,3 @@ artifacts:
         target: SWREQ-FALCON-RATE-P03
       - type: verifies
         target: SWREQ-FALCON-RATE-P04
-      - type: implements
-        target: FEAT-FALCON-v0.3

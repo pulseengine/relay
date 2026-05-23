@@ -1,6 +1,6 @@
 artifacts:
   - id: FV-FALCON-EKF-STUB-001
-    type: unit-verification
+    type: sw-verification
     title: "Unit + property tests for relay-ekf-stub (v0.1)"
     status: approved
     description: >
@@ -31,5 +31,3 @@ artifacts:
     links:
       - type: verifies
         target: SWREQ-FALCON-EKF-P01
-      - type: implements
-        target: FEAT-FALCON-v0.1

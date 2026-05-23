@@ -2,6 +2,7 @@ load("@rules_wasm_component//rust:defs.bzl", "rust_wasm_component_bindgen")
 load("@rules_wasm_component//wit:defs.bzl", "wit_library")
 load("@rules_wasm_component//wasm:defs.bzl", "meld_fuse", "synth_compile")
 load("@rules_verus//verus:defs.bzl", "verus_library", "verus_strip_test", "verus_test")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -399,4 +400,193 @@ test_suite(
         "//proofs/lean:backpressure_safety_test",
         "//proofs/lean:compositional_wcet_test",
     ],
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Falcon v0.7 — control cascade as Component Model components
+#
+# wit/falcon-cascade/cascade.wit declares five leaf interfaces
+# (ekf, position, attitude, rate, mixer) and a `cascade` world that
+# imports all five and exports `step`. One wit_library per world;
+# rust_wasm_component_bindgen generates per-world bindings; wac_plug
+# composes the cascade socket against the five leaf plugs.
+#
+# The six rust_wasm_component_bindgen targets + wac_plug land once
+# the control-crate dependency approach is settled (see the v0.7
+# notes) — the wasm/cm/* leaf components depend on the relay-ekf /
+# relay-pos / relay-att / relay-rate / relay-mix-quad crates, which
+# do not yet have Bazel targets.
+# ═══════════════════════════════════════════════════════════════
+
+wit_library(
+    name = "falcon_ekf_wit",
+    srcs = ["wit/falcon-cascade/cascade.wit"],
+    package_name = "falcon:cascade",
+    world = "ekf-component",
+)
+
+wit_library(
+    name = "falcon_position_wit",
+    srcs = ["wit/falcon-cascade/cascade.wit"],
+    package_name = "falcon:cascade",
+    world = "position-component",
+)
+
+wit_library(
+    name = "falcon_attitude_wit",
+    srcs = ["wit/falcon-cascade/cascade.wit"],
+    package_name = "falcon:cascade",
+    world = "attitude-component",
+)
+
+wit_library(
+    name = "falcon_rate_wit",
+    srcs = ["wit/falcon-cascade/cascade.wit"],
+    package_name = "falcon:cascade",
+    world = "rate-component",
+)
+
+wit_library(
+    name = "falcon_mixer_wit",
+    srcs = ["wit/falcon-cascade/cascade.wit"],
+    package_name = "falcon:cascade",
+    world = "mixer-component",
+)
+
+wit_library(
+    name = "falcon_cascade_wit",
+    srcs = ["wit/falcon-cascade/cascade.wit"],
+    package_name = "falcon:cascade",
+    world = "cascade",
+)
+
+# ── control-crate libraries — the verified relay-* control logic ──
+# Wrap crates/relay-*/plain/src/lib.rs as Bazel rust_library targets so
+# the leaf CM components can depend on them. relay-ekf / relay-pos pull
+# libm for no_std transcendentals from the @libm_crate http_archive
+# (see MODULE.bazel).
+
+rust_library(
+    name = "relay-ekf",
+    srcs = glob(["crates/relay-ekf/plain/src/**/*.rs"]),
+    edition = "2024",
+    deps = ["@libm_crate//:libm"],
+)
+
+rust_library(
+    name = "relay-pos",
+    srcs = glob(["crates/relay-pos/plain/src/**/*.rs"]),
+    edition = "2024",
+    deps = ["@libm_crate//:libm"],
+)
+
+rust_library(
+    name = "relay-att",
+    srcs = glob(["crates/relay-att/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "relay-rate",
+    srcs = glob(["crates/relay-rate/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "relay-mix-quad",
+    srcs = glob(["crates/relay-mix-quad/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+# ── leaf CM components — one WIT interface each ───────────────────
+# rust_wasm_component_bindgen generates a `<name>_bindings` crate
+# (e.g. falcon_ekf_bindings); wasm/cm/*/src/lib.rs aliases it back to
+# `bindings` so the cargo-component-shaped source compiles unchanged.
+
+rust_wasm_component_bindgen(
+    name = "falcon-ekf",
+    srcs = ["wasm/cm/ekf/src/lib.rs"],
+    wit = ":falcon_ekf_wit",
+    deps = [":relay-ekf"],
+    profiles = ["release"],
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-position",
+    srcs = ["wasm/cm/position/src/lib.rs"],
+    wit = ":falcon_position_wit",
+    deps = [":relay-pos"],
+    profiles = ["release"],
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-attitude",
+    srcs = ["wasm/cm/attitude/src/lib.rs"],
+    wit = ":falcon_attitude_wit",
+    deps = [":relay-att"],
+    profiles = ["release"],
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-rate",
+    srcs = ["wasm/cm/rate/src/lib.rs"],
+    wit = ":falcon_rate_wit",
+    deps = [":relay-rate"],
+    profiles = ["release"],
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-mixer",
+    srcs = ["wasm/cm/falcon-mixer/src/lib.rs"],
+    wit = ":falcon_mixer_wit",
+    deps = [":relay-mix-quad"],
+    profiles = ["release"],
+)
+
+# ── cascade orchestrator — imports the five, exports `step` ───────
+# No control-crate dep: the cascade is pure orchestration.
+rust_wasm_component_bindgen(
+    name = "falcon-cascade",
+    srcs = ["wasm/cm/cascade/src/lib.rs"],
+    wit = ":falcon_cascade_wit",
+    profiles = ["release"],
+)
+
+# ── wac composition — plug the five leaves into the cascade ───────
+# The cascade is the socket (imports five interfaces); each leaf is a
+# plug (exports one). wac matches imports to exports by interface.
+wac_plug(
+    name = "falcon-cascade-composed",
+    plugs = [
+        ":falcon-ekf",
+        ":falcon-position",
+        ":falcon-attitude",
+        ":falcon-rate",
+        ":falcon-mixer",
+    ],
+    socket = ":falcon-cascade",
+)
+
+# ── meld → synth: lower the cascade to an ARM Cortex-M ELF ────────
+# meld_fuse resolves the cascade's five imports against the leaf
+# exports into one single-memory core module; synth_compile AOT-
+# compiles that to a Cortex-M7 ELF (the STM32H743 of
+# renode/falcon-cortex-m.resc). This is the v0.7 equivalent of the
+# v0.6 meld→wasm-opt→synth pipeline, now fully inside Bazel.
+meld_fuse(
+    name = "falcon-cascade-fused",
+    components = [
+        ":falcon-ekf",
+        ":falcon-position",
+        ":falcon-attitude",
+        ":falcon-rate",
+        ":falcon-mixer",
+        ":falcon-cascade",
+    ],
+)
+
+synth_compile(
+    name = "falcon-cascade-firmware",
+    target = "cortex-m7",
+    wasm_module = ":falcon-cascade-fused",
 )

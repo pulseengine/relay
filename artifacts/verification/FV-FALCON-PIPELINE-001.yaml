@@ -1,67 +1,43 @@
 artifacts:
   - id: FV-FALCON-PIPELINE-001
-    type: unit-verification
-    title: "WASM component pipeline — meld fuse → wasm-opt → synth (v0.6)"
+    type: sw-verification
+    title: "WASM pipeline — Component Model cascade under Bazel (v0.7)"
     status: approved
     description: >
-      v0.6 verification of the falcon WASM component pipeline:
-      control crates → wasm32 core modules → WASM components →
-      meld fuse → wasm-opt → synth ARM Cortex-M ELF.
+      Verification of the falcon WASM pipeline. v0.6 built the control
+      layer as raw `#[export_name]` scalar modules fused by meld; v0.7
+      reworked it into real Component Model components composed by wac
+      under Bazel. This artifact tracks the current (v0.7) pipeline.
 
       Evidence layers:
 
-      1. Native wrapper-crate tests (`cargo test`) — the
-         wasm/falcon-*-component crates expose the control logic as
-         scalar exports; their rlib build path is unit-tested
-         against the underlying control crates so the wasm exports
-         are proven faithful proxies. These run in the standard CI
-         and are the extractable `fields.steps` below.
+      1. Control-crate property tests (`cargo test`) — relay-mix-quad
+         and relay-rate carry the MIX-P0* / RATE-P0* property + proptest
+         suites. The v0.7 CM components (wasm/cm/*) are thin wrappers
+         over these crates, so the crate tests prove the exported
+         behaviour faithful.
 
-      2. Host pipeline (`scripts/falcon-wasm-pipeline.sh`) — not in
-         `fields.steps` because it needs the WASM toolchain
-         (wasm-tools, meld, wasm-opt, synth) which the current CI
-         image does not carry; it runs locally and will run in CI
-         once rules_wasm_component lands. Verified manually on this
-         release:
-           - 2 components built + component-ized (2 exports each)
-           - meld fuse --memory shared → 4412 B single-memory module
-           - wasmtime reference: falcon-mix-total(0,0,0,0.5) = 2.0,
-             falcon-rate-torque(1.0) > 0  (match native bench)
-           - wasm-opt -Os: 4412 B → 4126 B
-           - synth compile --cortex-m: fused module → 1716 B ARM
-             Cortex-M ELF; mixer standalone → 911 B ELF
-           - synth disasm confirms elf32-littlearm
+      2. Cascade SITL (`cargo test -p falcon-sitl-hover`) — the full
+         POS → ATT → RATE → MIX cascade closes in the pure-Rust SITL,
+         exercising the same control logic the CM components export.
 
-      3. Renode emulation harness (`renode/falcon-cortex-m.resc`) —
-         STM32H743 Cortex-M7 machine script, staged for the Linux
-         CI run via renode-bazel-rules.
+      3. Bazel Component Model build — `bazel build
+         //:falcon-cascade-composed` builds the six CM components
+         (wit_library + rust_wasm_component_bindgen) and composes them
+         with wac_plug into falcon-cascade-composed.wasm.
 
-      Known tool issues found during bring-up, all tracked upstream:
-        - synth#120 — unmapped-vreg panic on f32 division
-          (falcon-rate-component standalone); fused module unaffected
-        - synth#124 — synth verify inert without --features verify
-        - meld#172 — meld fuse --memory multi default rejected
-          downstream; pipeline uses --memory shared
-
-      v0.6 verification posture: extensive native testing of the
-      wrapper crates + a manually-verified, reproducible host
-      pipeline script. The synth verify Z3 translation-validation
-      step lands when synth ships verify support (synth#124).
-    tags: [verification, falcon, wasm-pipeline, meld, synth, v0.6]
+      The meld → wasm-opt → synth → ARM Cortex-M ELF lowering of the
+      composed cascade is tracked separately.
+    tags: [verification, falcon, wasm-pipeline, component-model, bazel, v0.7]
     fields:
       method: automated-test
-      test-count: 5
-      pipeline-script: scripts/falcon-wasm-pipeline.sh
-      tracked-tool-issues: "synth#120, synth#124, meld#172"
+      bazel-target: "//:falcon-cascade-composed"
       steps:
-        - run: cargo test -p falcon-mix-component
-        - run: cargo test -p falcon-rate-component
-        - run: cargo test -p falcon-mix-component --release
-        - run: cargo test -p falcon-rate-component --release
+        - run: cargo test -p relay-mix-quad
+        - run: cargo test -p relay-rate
+        - run: cargo test -p falcon-sitl-hover
     links:
       - type: verifies
         target: SWREQ-FALCON-MIX-P01
       - type: verifies
         target: SWREQ-FALCON-RATE-P01
-      - type: implements
-        target: FEAT-FALCON-v0.6

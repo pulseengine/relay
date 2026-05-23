@@ -1,6 +1,6 @@
 artifacts:
   - id: FV-FALCON-EKF-001
-    type: unit-verification
+    type: sw-verification
     title: "Unit + property tests + accuracy bench for relay-ekf (v0.2)"
     status: approved
     description: >
@@ -53,5 +53,3 @@ artifacts:
         target: SWREQ-FALCON-EKF-P03
       - type: verifies
         target: SWREQ-FALCON-EKF-P04
-      - type: implements
-        target: FEAT-FALCON-v0.2

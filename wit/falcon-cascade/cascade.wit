@@ -1,0 +1,124 @@
+package falcon:cascade@0.7.0;
+
+/// Falcon control cascade — Component Model edition.
+///
+/// Each controller is a typed component exporting one interface.
+/// The `cascade` world imports all five and exports the top-level
+/// `step`; `wac` wires the graph (falcon-cascade.wac). This is the
+/// v0.7 rework: the v0.6 raw-`#[export_name]` scalar shortcut is
+/// replaced by real Component Model components so the cascade
+/// composes declaratively.
+///
+/// Records use flat f32 fields (not tuple<>) — the canonical ABI is
+/// then a flat scalar list, which keeps both wac composition and the
+/// eventual synth → ARM lowering simple.
+
+interface types {
+    /// EKF state estimate. quaternion is body-to-NED (w,x,y,z);
+    /// position/velocity are NED metres / m·s⁻¹; body-rates wx/wy/wz
+    /// are the gyro reading (rad/s) passed through for the rate loop.
+    record vehicle-state {
+        qw: f32, qx: f32, qy: f32, qz: f32,
+        pos-n: f32, pos-e: f32, pos-d: f32,
+        vel-n: f32, vel-e: f32, vel-d: f32,
+        wx: f32, wy: f32, wz: f32,
+        innovation: f32,
+    }
+
+    /// Raw IMU sample — body-frame accel (m/s²) + gyro (rad/s).
+    record imu-sample {
+        ax: f32, ay: f32, az: f32,
+        gx: f32, gy: f32, gz: f32,
+    }
+
+    /// Attitude setpoint — body-to-NED quaternion + collective thrust.
+    record attitude-setpoint {
+        qw: f32, qx: f32, qy: f32, qz: f32,
+        thrust: f32,
+    }
+
+    /// Body-rate setpoint (rad/s) + collective thrust.
+    record rate-setpoint {
+        rx: f32, ry: f32, rz: f32,
+        thrust: f32,
+    }
+
+    /// Body-frame torque setpoint (N·m) + collective thrust.
+    record torque-setpoint {
+        tx: f32, ty: f32, tz: f32,
+        thrust: f32,
+    }
+
+    /// Per-motor PWM for the falcon-quad airframe, each in [0, 1].
+    record motor-pwm {
+        m1: f32, m2: f32, m3: f32, m4: f32,
+    }
+
+    /// Mission waypoint — NED target position + heading.
+    record waypoint {
+        north: f32, east: f32, down: f32, yaw: f32,
+    }
+}
+
+/// State estimator — wraps relay-ekf (Mahony complementary filter).
+interface ekf {
+    use types.{imu-sample, vehicle-state};
+    estimate: func(imu: imu-sample) -> vehicle-state;
+}
+
+/// Position controller — wraps relay-pos.
+interface position {
+    use types.{vehicle-state, waypoint, attitude-setpoint};
+    tick: func(state: vehicle-state, target: waypoint) -> attitude-setpoint;
+}
+
+/// Attitude controller — wraps relay-att.
+interface attitude {
+    use types.{vehicle-state, attitude-setpoint, rate-setpoint};
+    tick: func(state: vehicle-state, sp: attitude-setpoint) -> rate-setpoint;
+}
+
+/// Rate controller — wraps relay-rate (body-rate PID).
+interface rate {
+    use types.{vehicle-state, rate-setpoint, torque-setpoint};
+    tick: func(state: vehicle-state, sp: rate-setpoint) -> torque-setpoint;
+}
+
+/// Control allocator — wraps relay-mix-quad (X-config mixer).
+interface mixer {
+    use types.{torque-setpoint, motor-pwm};
+    mix: func(torque: torque-setpoint) -> motor-pwm;
+}
+
+// ── leaf component worlds — one controller each ───────────────────
+world ekf-component      { export ekf; }
+world position-component { export position; }
+world attitude-component { export attitude; }
+world rate-component     { export rate; }
+world mixer-component    { export mixer; }
+
+// ── cascade orchestrator ──────────────────────────────────────────
+/// Top-level cascade entry point. A single-func interface (rather
+/// than a bare world-level export) so the cascade component is
+/// structurally uniform with the five leaf components — and so the
+/// wit-bindgen export macro is generated the same, interface-shaped
+/// way the leaf components rely on.
+interface controller {
+    use types.{imu-sample, waypoint, motor-pwm};
+    /// One full cascade pass: estimate → position → attitude → rate
+    /// → mixer.
+    step: func(imu: imu-sample, target: waypoint) -> motor-pwm;
+}
+
+/// Imports the five controller interfaces, exports `controller`.
+/// The implementation calls estimate → position → attitude → rate
+/// → mixer in order. wac satisfies the imports from the leaf
+/// components (BUILD.bazel `wac_plug`).
+world cascade {
+    import ekf;
+    import position;
+    import attitude;
+    import rate;
+    import mixer;
+    export controller;
+}

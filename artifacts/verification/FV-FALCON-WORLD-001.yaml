@@ -1,6 +1,6 @@
 artifacts:
   - id: FV-FALCON-WORLD-001
-    type: unit-verification
+    type: sw-verification
     title: "v0.1 end-to-end UDP heartbeat exchange test"
     status: approved
     description: >
@@ -45,5 +45,3 @@ artifacts:
         target: SWREQ-FALCON-WORLD-P01
       - type: verifies
         target: SWREQ-FALCON-MAVLINK-P02
-      - type: implements
-        target: FEAT-FALCON-v0.1

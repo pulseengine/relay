@@ -1,0 +1,76 @@
+name: Bazel
+
+# Builds the v0.7 Component Model cascade under Bazel.
+#
+# relay's MODULE.bazel uses local_path_override for the four
+# PulseEngine rules_* repos, so they are checked out as siblings of
+# relay under $GITHUB_WORKSPACE (relay/, rules_wasm_component/, ...).
+# The siblings track their default branch — pin them with
+# git_override in MODULE.bazel if reproducibility across drift matters.
+#
+# The build resolves the Nix-backed Rocq toolchain, so Nix is
+# installed; the first run fetches Coq from cache.nixos.org.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# github.ref is unique per branch and per PR — safe, non-injectable.
+concurrency:
+  group: bazel-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  cascade:
+    name: Component Model cascade
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@v5
+        with:
+          path: relay
+
+      - name: Checkout rules_wasm_component
+        uses: actions/checkout@v5
+        with:
+          repository: pulseengine/rules_wasm_component
+          path: rules_wasm_component
+
+      - name: Checkout rules_verus
+        uses: actions/checkout@v5
+        with:
+          repository: pulseengine/rules_verus
+          path: rules_verus
+
+      - name: Checkout rules_rocq_rust
+        uses: actions/checkout@v5
+        with:
+          repository: pulseengine/rules_rocq_rust
+          path: rules_rocq_rust
+
+      - name: Checkout rules_lean
+        uses: actions/checkout@v5
+        with:
+          repository: pulseengine/rules_lean
+          path: rules_lean
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.14.0
+        with:
+          bazelisk-cache: true
+          disk-cache: bazel
+          repository-cache: true
+
+      # CARGO_BAZEL_REPIN lets crate_universe resolve the relay_crates
+      # graph on a clean checkout. All run: steps are static — no
+      # interpolation of event-controlled input.
+      - name: Build the composed cascade
+        working-directory: relay
+        env:
+          CARGO_BAZEL_REPIN: "1"
+        run: bazel build //:falcon-cascade-composed

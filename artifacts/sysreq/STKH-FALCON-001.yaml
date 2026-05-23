@@ -22,8 +22,7 @@ artifacts:
       The chain must earn credit across DO-178C DAL-A, ISO 26262
       ASIL-D, IEC 61508 SIL-4, IEC 62304 Class C, ECSS-Q-ST-80C Cat A,
       and EN 50128 SIL-4.
-    tags: [stakeholder, falcon, flight-software, dual-dna, safety,
-           formal-verification, multi-domain]
+    tags: [stakeholder, falcon, flight-software, dual-dna, safety, formal-verification, multi-domain]
     fields:
       priority: must
       source: "Safety-critical flight software — PulseEngine Relay + Falcon"

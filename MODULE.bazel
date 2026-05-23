@@ -3,8 +3,8 @@ module(
     version = "0.1.0",
 )
 
-bazel_dep(name = "rules_rust", version = "0.61.0")
-bazel_dep(name = "rules_wasm_component", version = "0.1.0")
+bazel_dep(name = "rules_rust", version = "0.70.0")
+bazel_dep(name = "rules_wasm_component", version = "1.0.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "platforms", version = "1.0.0")
 
@@ -37,14 +37,40 @@ lean.toolchain(version = "4.27.0")
 use_repo(lean, "lean_toolchains", "mathlib")
 register_toolchains("@lean_toolchains//:all")
 
-# Override rules_rust to match rules_wasm_component's version
-git_override(
-    module_name = "rules_rust",
-    commit = "6281d27f3ffdb826df90db25c1dc66a198345d64",
-    remote = "https://github.com/bazelbuild/rules_rust.git",
+# Rocq 9.0 toolchain — Nix-backed, hermetic (Coq 9.0 + coqutil +
+# hammer + smpl). The `rocq` extension self-provisions its own
+# nixpkgs repo; the host only needs the `nix` binary on PATH.
+# 9.0 is the version for which the extension wires the separate
+# `rocq_stdlib` package — 9.1's stdlib path is not yet supported.
+# Activates the //proofs/rocq:*_test targets in proof_tests.
+rocq = use_extension("@rules_rocq_rust//rocq:extensions.bzl", "rocq")
+rocq.toolchain(
+    version = "9.0",
+    strategy = "nix",
+    with_rocq_of_rust_deps = True,
 )
+use_repo(
+    rocq,
+    "rocq_toolchains",
+    "rocq_stdlib",
+    "rocq_coqutil",
+    "rocq_hammer",
+    "rocq_hammer_tactics",
+    "rocq_smpl",
+)
+register_toolchains("@rocq_toolchains//:all")
 
-# Rust crate dependencies
+# rocq-of-rust (the Rust → Rocq translator) and its Rust-nightly
+# toolchain come inherited from rules_rocq_rust's own MODULE.bazel.
+# rules_wasm_component 1.0.0 and rules_rocq_rust both build against
+# rules_rust 0.70.0 — the old git_override (commit 6281d27, now an
+# ancestor of 0.70.0) is no longer needed.
+
+# Rust crate dependencies. NOTE: this stays on `extension.bzl` (not the
+# newer `extensions.bzl`) deliberately — Bazel identifies an extension
+# by its .bzl path, so this keeps relay's `crate` extension distinct
+# from rules_verus / rules_rocq_rust (which use `extensions.bzl`).
+# Sharing the extension would collide on the `@crates` repo name.
 crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
 crate.from_cargo(
     name = "relay_crates",
@@ -59,6 +85,32 @@ crate.from_cargo(
     ],
 )
 use_repo(crate, "relay_crates", "crates")
+
+# libm — no_std transcendentals for the falcon control crates
+# (relay-ekf, relay-pos). Pulled straight from crates.io as an
+# http_archive rather than through crate_universe. The sha256 is the
+# Cargo.lock checksum for libm 0.2.16 (a lockfile checksum is the
+# sha256 of the `.crate` tarball). libm is pure no_std Rust with no
+# build script, so a single rust_library over src/ is the whole BUILD.
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "libm_crate",
+    build_file_content = """\
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "libm",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981",
+    strip_prefix = "libm-0.2.16",
+    type = "tar.gz",
+    urls = ["https://static.crates.io/crates/libm/libm-0.2.16.crate"],
+)
 
 # WASI WIT interfaces from rules_wasm_component
 wasi_wit_ext = use_extension("@rules_wasm_component//wasm:extensions.bzl", "wasi_wit")
