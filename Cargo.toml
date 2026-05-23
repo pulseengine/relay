@@ -20,6 +20,7 @@ members = [
     "crates/relay-cfdp",
     "crates/relay-lc-diff",
     "crates/relay-mavlink",
+    "crates/relay-nid",
     "crates/relay-ekf-stub",
     "crates/relay-ekf",
     "crates/relay-rate",

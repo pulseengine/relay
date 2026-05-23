@@ -71,6 +71,11 @@ const RTL_RTS_ID: u32 = 0;
 /// by switching the position setpoint to home.
 const RTL_CMD_CODE: u16 = 0xA17C;
 
+/// relay-sc RTS id holding the v0.9 untethered multi-waypoint mission.
+const MISSION_RTS_ID: u32 = 1;
+/// Command code "set position setpoint to waypoints[payload_offset]".
+const CMD_SET_WAYPOINT: u16 = 0x5E70;
+
 /// Pseudo-random Gaussian-ish noise via two-sample averaging of an LCG.
 struct Rng(u32);
 
@@ -215,6 +220,10 @@ enum Scenario {
     /// v0.8: fault injection — EKF divergence trips the relay-hs
     /// watchdog, which triggers Return-To-Launch.
     Fault,
+    /// v0.9: untethered multi-waypoint autonomous mission — relay-sc
+    /// RTS sequences four waypoints (N → E → S → home); each leg's
+    /// SET_WAYPOINT command is dispatched by the verified engine.
+    Untethered,
     All,
 }
 
@@ -919,6 +928,152 @@ fn run_fault(noise_std: f32) -> ScenarioResult {
     }
 }
 
+/// v0.9 untethered autonomous mission. The vehicle visits four
+/// waypoints (N → E → S → home) over ~32 s; each SET_WAYPOINT
+/// transition is dispatched by the verified relay-sc engine from a
+/// single RTS sequence loaded at init — the cFS-DNA `relay-sc → POS
+/// → ATT → RATE → MIX` chain executes the whole mission without
+/// any per-leg logic in the orchestrator.
+fn run_untethered(noise_std: f32) -> ScenarioResult {
+    let mut plant = Plant::at_rest();
+    let mut ekf = Ekf::new();
+    let mut rate_pid = RatePid::new();
+    let mut att = AttController::new();
+    let mut pos = PosController::new();
+    let mut mixer = QuadMixer::new();
+    let mut rng = Rng::new(0x9CE7A1FE);
+    let mut sc = CommandStore::new();
+
+    // Waypoints table — command payload_offset indexes here.
+    let waypoints: [[f32; 3]; 4] = [
+        [10.0, 0.0, 0.0],   // 0: north 10 m
+        [0.0, 10.0, 0.0],   // 1: east 10 m
+        [-10.0, 0.0, 0.0],  // 2: south 10 m
+        [0.0, 0.0, 0.0],    // 3: home
+    ];
+    let leg_secs: u32 = 8;
+    for (k, _wp) in waypoints.iter().enumerate() {
+        sc.load_rts_command(
+            MISSION_RTS_ID,
+            RtsCommand {
+                delay_sec: (k as u32) * leg_secs,
+                command_code: CMD_SET_WAYPOINT,
+                payload_offset: k as u32,
+                payload_len: 0,
+            },
+        );
+    }
+
+    let dt = 1.0 / SAMPLE_RATE_HZ;
+    let mission_seconds = (waypoints.len() as u32 * leg_secs + 4) as f32; // +4 s settle
+    let n = (mission_seconds * SAMPLE_RATE_HZ) as usize;
+
+    let pos_decimation = 20_usize;
+    let att_decimation = 4_usize;
+    let mut current_attitude_setpoint = [1.0_f32, 0.0, 0.0, 0.0];
+    let mut current_thrust = 0.5_f32;
+    let mut current_rate_setpoint = [0.0_f32; 3];
+    let mut current_setpoint = PositionSetpoint::hover_at(waypoints[0]);
+    let mut active_wp_index: usize = 0;
+    let mut min_dist_per_wp: [f32; 4] = [f32::INFINITY; 4];
+    let mut nan_seen = false;
+
+    // Kick off the mission RTS at t = 0.
+    sc.start_rts(MISSION_RTS_ID, 0);
+
+    let t0 = Instant::now();
+    for i in 0..n {
+        let t = i as f32 * dt;
+        let time_sec = t as u64;
+
+        let (mut sample, gyro) = plant.measure(&mut rng, noise_std);
+        sample.time = ekf_ts_of(t);
+        let st = ekf.tick(sample);
+        if !st.quaternion[0].is_finite() {
+            nan_seen = true;
+        }
+
+        // Verified relay-sc dispatch: apply any SET_WAYPOINT command
+        // that came out this tick.
+        let result = sc.process_tick(time_sec);
+        for j in 0..(result.dispatch_count as usize) {
+            let d = result.dispatched[j];
+            if d.command_code == CMD_SET_WAYPOINT {
+                let idx = d.payload_offset as usize;
+                if idx < waypoints.len() {
+                    current_setpoint = PositionSetpoint::hover_at(waypoints[idx]);
+                    active_wp_index = idx;
+                }
+            }
+        }
+
+        if i % pos_decimation == 0 {
+            let att_sp = pos.tick(
+                pos_ts_of(t),
+                plant.p_ned,
+                plant.v_ned,
+                st.quaternion,
+                current_setpoint,
+            );
+            current_attitude_setpoint = att_sp.quaternion;
+            current_thrust = att_sp.thrust;
+        }
+        if i % att_decimation == 0 {
+            current_rate_setpoint =
+                att.tick(att_ts_of(t), st.quaternion, current_attitude_setpoint);
+        }
+        let torque = rate_pid.tick(rate_ts_of(t), gyro, current_rate_setpoint);
+        for k in 0..3 {
+            if !torque[k].is_finite() {
+                nan_seen = true;
+            }
+        }
+        let _motors = mixer.mix(torque, current_thrust);
+        if mixer.last_motors().iter().any(|v| !v.is_finite()) {
+            nan_seen = true;
+        }
+        plant.step_full(torque, current_thrust, dt);
+
+        // Track per-waypoint closest approach during its active leg.
+        let wp = waypoints[active_wp_index];
+        let dist = sqrtf(
+            (plant.p_ned[0] - wp[0]).powi(2)
+                + (plant.p_ned[1] - wp[1]).powi(2)
+                + (plant.p_ned[2] - wp[2]).powi(2),
+        );
+        if dist < min_dist_per_wp[active_wp_index] {
+            min_dist_per_wp[active_wp_index] = dist;
+        }
+    }
+    let elapsed = t0.elapsed().as_micros();
+
+    let visit_threshold = 2.5_f32;
+    let visited = min_dist_per_wp.iter().all(|&d| d <= visit_threshold);
+    let final_dist_home = sqrtf(
+        plant.p_ned[0].powi(2) + plant.p_ned[1].powi(2) + plant.p_ned[2].powi(2),
+    );
+    let peak_visit_err = min_dist_per_wp.iter().cloned().fold(0.0_f32, f32::max);
+
+    let pass = !nan_seen && visited && final_dist_home <= visit_threshold;
+
+    ScenarioResult {
+        label: "untethered",
+        samples: n,
+        final_omega: plant.p_ned,                 // final NED position
+        peak_omega_after_setup: peak_visit_err,   // worst-case min approach
+        rms_error_steady: 0.0,
+        convergence_time_s: if visited {
+            (waypoints.len() as f32) * (leg_secs as f32)
+        } else {
+            f32::NAN
+        },
+        overshoot_pct: final_dist_home,           // final distance home (m)
+        nan_seen,
+        elapsed_micros: elapsed,
+        pass,
+    }
+}
+
 fn print_result(r: &ScenarioResult) {
     println!("--- scenario: {} ---", r.label);
     println!("  samples              {}", r.samples);
@@ -932,6 +1087,11 @@ fn print_result(r: &ScenarioResult) {
         println!("  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
             r.final_omega[0], r.final_omega[1], r.final_omega[2]);
         println!("  peak EKF innovation  {:.4}", r.peak_omega_after_setup);
+    } else if r.label == "untethered" {
+        println!("  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        println!("  worst waypoint min   {:.3} m", r.peak_omega_after_setup);
+        println!("  final distance home  {:.3} m", r.overshoot_pct);
     } else {
         println!("  final ω (rad/s)      [{:+.4}, {:+.4}, {:+.4}]",
             r.final_omega[0], r.final_omega[1], r.final_omega[2]);
@@ -956,6 +1116,8 @@ fn print_result(r: &ScenarioResult) {
         println!("  recovery time        {:.3}s after impulse", r.convergence_time_s);
     } else if r.label == "fault" {
         println!("  RTL detection        {:.3}s after fault injection", r.convergence_time_s);
+    } else if r.label == "untethered" {
+        println!("  mission completed    in {:.1}s", r.convergence_time_s);
     } else {
         println!("  convergence time     {:.3}s", r.convergence_time_s);
     }
@@ -980,7 +1142,8 @@ fn print_help() {
            hover        rate controller settles from non-zero initial rates\n  \
            attitude     ATT→RATE→MIX cascade tilts vehicle 20° about x (v0.4)\n  \
            mission      POS→ATT→RATE→MIX cascade flies to 10m waypoint (v0.5)\n  \
-           fault        injected EKF fault trips the relay-hs watchdog → RTL (v0.8)\n"
+           fault        injected EKF fault trips the relay-hs watchdog → RTL (v0.8)\n  \
+           untethered   relay-sc RTS sequences a 4-waypoint autonomous mission (v0.9)\n"
     );
 }
 
@@ -999,9 +1162,10 @@ fn main() -> ExitCode {
                 Some("attitude") => scenario = Scenario::Attitude,
                 Some("mission") => scenario = Scenario::Mission,
                 Some("fault") => scenario = Scenario::Fault,
+                Some("untethered") => scenario = Scenario::Untethered,
                 Some("all") => scenario = Scenario::All,
                 other => {
-                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|mission|fault|all, got {:?}", other);
+                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|mission|fault|untethered|all, got {:?}", other);
                     return ExitCode::from(2);
                 }
             },
@@ -1033,6 +1197,7 @@ fn main() -> ExitCode {
             Scenario::Attitude => run_attitude(noise),
             Scenario::Mission => run_mission(noise),
             Scenario::Fault => run_fault(noise),
+            Scenario::Untethered => run_untethered(noise),
             Scenario::All => unreachable!(),
         }
     };
@@ -1046,6 +1211,7 @@ fn main() -> ExitCode {
             results.push(run_one(Scenario::Attitude));
             results.push(run_one(Scenario::Mission));
             results.push(run_one(Scenario::Fault));
+            results.push(run_one(Scenario::Untethered));
         }
         s => results.push(run_one(s)),
     }
@@ -1210,6 +1376,20 @@ mod tests {
             tripped && wd.rtl_active(),
             "sliding window should catch a 4-of-5 intermittent fault"
         );
+    }
+
+    #[test]
+    fn deterministic_untethered_mission_visits_all_waypoints() {
+        let r = run_untethered(0.0);
+        assert!(r.pass, "untethered result: {:?}", r);
+        assert!(!r.nan_seen);
+        assert!(!r.convergence_time_s.is_nan(), "mission did not complete");
+        // peak_omega_after_setup holds the worst-case min approach (m).
+        assert!(r.peak_omega_after_setup <= 2.5,
+            "worst waypoint min {:.3} m exceeded 2.5 m budget", r.peak_omega_after_setup);
+        // overshoot_pct holds the final distance home (m).
+        assert!(r.overshoot_pct <= 2.5,
+            "final distance home {:.3} m exceeded 2.5 m budget", r.overshoot_pct);
     }
 
     #[test]

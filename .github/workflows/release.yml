@@ -162,6 +162,37 @@ jobs:
           \) -exec cp {} release-files/ \;
           ls -la release-files
 
+      # v0.9: every release carries an audit-ready snapshot of the
+      # rivet artifact graph at the released commit. The snapshot is
+      # captured by `rivet snapshot capture` and uploaded as a
+      # release asset alongside the binaries.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install rivet (skip if cached)
+        shell: bash
+        run: |
+          if command -v rivet >/dev/null 2>&1; then
+            echo "rivet already on PATH: $(rivet --version)"
+          else
+            cargo install --locked \
+              --git https://github.com/pulseengine/rivet \
+              --bin rivet \
+              rivet-cli
+          fi
+
+      - name: Capture rivet snapshot
+        # TAG is bound via env: so the value never flows into shell
+        # interpolation directly — safe against tag-name injection.
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rivet snapshot capture \
+            --name "$TAG" \
+            --output "release-files/rivet-snapshot-${TAG}.json"
+          ls -la "release-files/rivet-snapshot-${TAG}.json"
+
       - name: Pick release notes body
         id: notes
         shell: bash

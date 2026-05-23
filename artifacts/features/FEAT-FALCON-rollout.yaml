@@ -459,19 +459,50 @@ artifacts:
   - id: FEAT-FALCON-v0.9
     type: feature
     title: "v0.9 — untethered waypoint mission + EASA U-space telemetry"
-    status: pending
+    status: approved
     description: >
-      First untethered autonomous mission. EASA U-space telemetry
-      profile (network identification, geofencing) implemented
-      via relay-to.
+      LANDED. Autonomous multi-waypoint mission dispatched by the
+      verified relay-sc engine, plus an EASA U-space Network
+      Identification codec.
 
-      Verification chain delta:
+      Ships:
+        - examples/falcon-sitl-hover `untethered` scenario — loads a
+          4-waypoint SET_WAYPOINT RTS (N → E → S → home, 8 s per
+          leg) into relay-sc; each transition is dispatched by the
+          verified engine, no per-leg orchestrator logic. Vehicle
+          reaches every waypoint within 2.5 m and returns home.
+        - crates/relay-nid — EASA U-space Network ID codec: Basic
+          ID and Location / Vector messages encode into a fixed
+          25-byte frame; round-trip + negative tests + proptest
+          fuzzing (decoder never panics on arbitrary input).
+        - .github/workflows/release.yml — every release tag
+          captures a `rivet snapshot capture` of the artifact
+          graph and attaches it as a release asset (audit-ready).
+        - Rivet artifacts: SYSREQ-FALCON-012 (autonomous mission),
+          SYSREQ-FALCON-013 (EASA telemetry), SWREQ-FALCON-UAM-P01,
+          SWREQ-FALCON-NID-P01, FV-FALCON-UAM-001, FV-FALCON-NID-001.
+
+      Verification:
+        - cargo test --workspace green; falcon-sitl-hover 16/16
+          (the new untethered test plus the v0.8 + earlier suite).
+        - cargo test -p relay-nid: 10/10 (7 unit + 3 proptest).
+        - rivet validate clean.
+        - bazel build //:falcon-cascade-composed and //:falcon-cascade-firmware unchanged.
+
+      Honestly deferred to v0.9.x:
+        - ASTM F3411-22 bit-packed Remote ID wire format (the v0.9
+          codec uses straight little-endian for clean Verus
+          contracts; bit-packing is a compatibility layer over the
+          same in-memory message types).
+        - Verus contracts on the relay-nid encoder.
+        - Geofence integration into relay-lc.
         - Z3 translation validation across loom optimizations
-        - EASA-conformant downlink telemetry
-        - rivet snapshot per release (audit-ready)
-    tags: [falcon, milestone, v0.9, mission, easa-u-space]
+          (loom-side work, tracked there).
+    tags: [falcon, milestone, v0.9, mission, easa-u-space, landed]
     fields:
-      release-target: "untethered mission; EASA U-space profile ready"
+      release-target: "untethered mission + EASA Network ID + rivet snapshot per release"
+      example: examples/falcon-sitl-hover
+      new-crate: crates/relay-nid
     links:
       - type: depends-on
         target: FEAT-FALCON-v0.8

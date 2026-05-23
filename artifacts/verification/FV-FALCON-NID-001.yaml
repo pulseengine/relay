@@ -1,0 +1,37 @@
+artifacts:
+  - id: FV-FALCON-NID-001
+    type: sw-verification
+    title: "Network ID codec — round-trip + fuzz tests for relay-nid (v0.9)"
+    status: approved
+    description: >
+      v0.9 verification of the EASA U-space Network Identification
+      codec (`crates/relay-nid`):
+
+      - Deterministic round-trip tests for Basic ID and
+        Location / Vector messages (representative samples).
+      - Negative tests: wrong message type, unknown protocol
+        version, out-of-range track, out-of-range timestamp.
+      - Proptest fuzz for round-trip in-range and for decoder
+        never-panics on arbitrary 25-byte input.
+
+      Total: 7 deterministic + 3 proptest cases. `no_std + no
+      alloc` — encoder writes into a caller-provided buffer.
+
+      Honestly deferred to v0.9.x:
+        - ASTM F3411-22 bit-packed wire format (the v0.9 codec
+          uses straight little-endian fields for clean Verus
+          contracts in v0.9.x; bit-packing is a compatibility
+          layer over the same in-memory types).
+        - Verus contracts on the encoder bounds (buffer length,
+          field-range invariants).
+    tags: [verification, falcon, easa, u-space, remote-id, codec, proptest, v0.9]
+    fields:
+      method: automated-test
+      test-count: 10
+      proptest-cases-default: 256
+      steps:
+        - run: cargo test -p relay-nid
+        - run: PROPTEST_CASES=4096 cargo test -p relay-nid
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-NID-P01
