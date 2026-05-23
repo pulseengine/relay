@@ -138,6 +138,65 @@ impl HealthTable {
     }
 }
 
+// =================================================================
+// EkfHealthMonitor (HS-P06, HS-P07): EKF-divergence watchdog
+// =================================================================
+//
+// Verus-stripped from ../src/engine.rs. The verified properties:
+//   HS-P06: RTL latch is monotone — once tripped, always tripped.
+//   HS-P07: observe() returns true only on the RTL transition.
+//
+// The f32 → bool gate (innovation > limit) lives in the caller; this
+// engine sees only the resulting `over_limit: bool` so the latch
+// state-machine stays pure integer/bool (Verus territory).
+
+pub struct EkfHealthMonitor {
+    pub window: u32,
+    pub trip_threshold: u32,
+    pub history: u64,
+    pub rtl_latched: bool,
+}
+
+impl EkfHealthMonitor {
+    pub fn new() -> Self {
+        EkfHealthMonitor {
+            window: 64,
+            trip_threshold: 48,
+            history: 0,
+            rtl_latched: false,
+        }
+    }
+
+    fn step_window(history: u64, window: u32, over_limit: bool) -> (u64, u32) {
+        let mask: u64 = if window >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << window) - 1
+        };
+        let new_bit: u64 = if over_limit { 1 } else { 0 };
+        let new_hist = ((history << 1) | new_bit) & mask;
+        (new_hist, new_hist.count_ones())
+    }
+
+    pub fn observe(&mut self, over_limit: bool) -> bool {
+        if self.rtl_latched {
+            return false;
+        }
+        let (new_hist, over_count) =
+            Self::step_window(self.history, self.window, over_limit);
+        self.history = new_hist;
+        if over_count >= self.trip_threshold {
+            self.rtl_latched = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn rtl_active(&self) -> bool {
+        self.rtl_latched
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

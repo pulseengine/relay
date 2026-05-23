@@ -11,6 +11,8 @@
 //!   HS-P03: alert_count <= app_count
 //!   HS-P04: Disabled apps never produce alerts
 //!   HS-P05: Alert fires only when current_miss >= max_miss
+//!   HS-P06: EkfHealthMonitor RTL latch is monotone (once tripped, always)
+//!   HS-P07: EkfHealthMonitor::observe returns true only on the RTL transition
 //!
 //! NO async, NO alloc, NO trait objects, NO closures.
 
@@ -276,6 +278,112 @@ impl HealthTable {
 }
 
 // =================================================================
+// EkfHealthMonitor (HS-P06, HS-P07): EKF-divergence watchdog
+// =================================================================
+//
+// The Mahony EKF reports a normalised `innovation` each tick (an
+// f32 angle-residual). The caller compares it to a limit and feeds
+// the resulting `over_limit: bool` here — keeping the f32 comparison
+// outside the verified engine, so the latch state-machine inside
+// stays pure integer/bool (Verus territory).
+//
+// Sliding "M-of-the-last-N over-limit" detector: RTL latches when
+// `trip_threshold` of the `window` most recent ticks were over the
+// limit. The `window − trip_threshold` dropout margin rejects
+// isolated noise spikes; an intermittent fault that dips below the
+// limit some ticks still accumulates (a strict consecutive counter
+// would reset on the dip).
+
+pub struct EkfHealthMonitor {
+    /// Sliding-window length in ticks; must be ≤ 64.
+    pub window: u32,
+    /// Over-limit ticks within the window that commit RTL.
+    pub trip_threshold: u32,
+    /// Bit `i` = "the tick `i` ago was over-limit"; bit 0 is the latest.
+    pub history: u64,
+    /// RTL latches once tripped — a safe state is never un-entered.
+    pub rtl_latched: bool,
+}
+
+impl EkfHealthMonitor {
+    pub open spec fn inv(&self) -> bool {
+        &&& self.window <= 64
+        &&& self.trip_threshold <= self.window
+    }
+
+    #[verifier::external_body]
+    pub fn new() -> (result: Self)
+        ensures
+            result.inv(),
+            !result.rtl_latched,
+            result.history == 0,
+    {
+        EkfHealthMonitor {
+            window: 64,
+            trip_threshold: 48,
+            history: 0,
+            rtl_latched: false,
+        }
+    }
+
+    /// Shift the window left by one, record `over_limit` in bit 0,
+    /// mask to `window` bits, and return the new history and its
+    /// over-limit count. Marked external_body — Verus does not reason
+    /// about bit shifts or `count_ones` natively, so the body is
+    /// trusted; the `ensures` clause gives the spec-level contract
+    /// (count bounded by `window`, which is bounded by 64) that
+    /// observe()'s proof uses.
+    #[verifier::external_body]
+    fn step_window(history: u64, window: u32, over_limit: bool) -> (result: (u64, u32))
+        requires window <= 64,
+        ensures result.1 <= 64,
+    {
+        let mask: u64 = if window >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << window) - 1
+        };
+        let new_bit: u64 = if over_limit { 1 } else { 0 };
+        let new_hist = ((history << 1) | new_bit) & mask;
+        (new_hist, new_hist.count_ones())
+    }
+
+    /// Feed one tick's over-limit signal. Returns `true` only on the
+    /// tick RTL trips, so the caller can timestamp the event.
+    pub fn observe(&mut self, over_limit: bool) -> (result: bool)
+        requires
+            old(self).inv(),
+        ensures
+            self.inv(),
+            // HS-P06: monotone latch — once RTL, always RTL.
+            old(self).rtl_latched ==> self.rtl_latched,
+            // HS-P07: result is true only on the RTL transition.
+            result == (self.rtl_latched && !old(self).rtl_latched),
+    {
+        if self.rtl_latched {
+            return false;
+        }
+        let (new_hist, over_count) =
+            Self::step_window(self.history, self.window, over_limit);
+        self.history = new_hist;
+        if over_count >= self.trip_threshold {
+            self.rtl_latched = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn rtl_active(&self) -> (result: bool)
+        requires
+            self.inv(),
+        ensures
+            result == self.rtl_latched,
+    {
+        self.rtl_latched
+    }
+}
+
+// =================================================================
 // Compositional proofs
 // =================================================================
 
@@ -284,5 +392,12 @@ impl HealthTable {
 //         in check_health; only enabled apps can reach the alert emission code.
 // HS-P05: Alert fires only when current_miss >= max_miss — proven by the
 //         `if new_miss >= app.max_miss` guard before alert emission.
+// HS-P06: EkfHealthMonitor RTL latch is monotone — the early
+//         `if self.rtl_latched` return in observe leaves state unchanged, and
+//         the only mutation to rtl_latched sets it true (false → true is the
+//         only allowed transition).
+// HS-P07: observe() returns true only on the RTL transition — the single
+//         `return true` path both sets rtl_latched = true and is reachable
+//         only from the `!rtl_latched` entry state.
 
 } // verus!

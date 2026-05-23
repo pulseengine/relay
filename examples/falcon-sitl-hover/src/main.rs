@@ -731,77 +731,35 @@ struct EkfWatchdog {
     /// clear of the ~0.29 innovation that normal mission acceleration
     /// induces, and well below the ~0.9 of a hard accelerometer fault.
     innovation_limit: f32,
-    /// Sliding-window length in ticks (must be ≤ 64).
-    window: u32,
-    /// Over-limit ticks within the window that commit RTL.
-    trip_threshold: u32,
-    /// Bit `i` = "the tick `i` ago was over-limit"; bit 0 is the
-    /// latest. A sliding window, not a consecutive counter — an
-    /// intermittent fault that dips below the limit some ticks still
-    /// accumulates, where a consecutive count would reset on the dip.
-    history: u64,
-    /// RTL latches once tripped: a safe state is never un-entered.
-    rtl_latched: bool,
+    /// The integer/bool latch state-machine lives in the verified
+    /// `relay-hs` engine (HS-P06 monotone latch, HS-P07 transition-
+    /// only). This wrapper does the f32 → bool gate (out of Verus's
+    /// reach) and forwards the resulting `over_limit` signal.
+    monitor: relay_hs::engine::EkfHealthMonitor,
 }
 
 impl EkfWatchdog {
-    /// Defaults for the 1 kHz cascade: 0.40 innovation limit; RTL when
-    /// 48 of the last 64 ms are over-limit — a 16-tick dropout margin
-    /// rejects isolated noise while still catching a fault that is
-    /// only intermittently over the limit.
+    /// Defaults for the 1 kHz cascade: 0.40 innovation limit; the
+    /// underlying relay-hs monitor latches RTL when 48 of the last 64
+    /// ms are over-limit (its `new()`).
     fn new() -> Self {
         Self {
             innovation_limit: 0.40,
-            window: 64,
-            trip_threshold: 48,
-            history: 0,
-            rtl_latched: false,
-        }
-    }
-
-    /// Mask of the `window` lowest bits.
-    fn window_mask(&self) -> u64 {
-        if self.window >= 64 {
-            u64::MAX
-        } else {
-            (1u64 << self.window) - 1
+            monitor: relay_hs::engine::EkfHealthMonitor::new(),
         }
     }
 
     /// Feed one EKF `innovation` sample. Returns `true` on the single
     /// tick RTL trips, so the caller can timestamp the event.
     fn observe(&mut self, innovation: f32) -> bool {
-        if self.rtl_latched {
-            return false;
-        }
-        // Shift the window and record this tick. A non-finite
-        // innovation is itself a divergence signal — count it over.
+        // f32 → bool: a non-finite innovation is itself divergence.
         let over_limit = !innovation.is_finite() || innovation > self.innovation_limit;
-        self.history = ((self.history << 1) | (over_limit as u64)) & self.window_mask();
-        if self.should_trigger_rtl() {
-            self.rtl_latched = true;
-            return true;
-        }
-        false
-    }
-
-    /// The RTL trigger predicate — the heart of the fault response.
-    ///
-    /// A sliding "M-of-the-last-N over limit" rule: RTL commits when
-    /// `trip_threshold` of the `window` most recent ticks were over
-    /// `innovation_limit`. Unlike a strict consecutive counter — which
-    /// a single healthy sample resets — this catches an intermittent
-    /// fault (a loose IMU connector, vibration) whose innovation dips
-    /// below the limit often enough to keep a consecutive count low,
-    /// while the `window − trip_threshold` dropout margin still
-    /// rejects isolated noise spikes.
-    fn should_trigger_rtl(&self) -> bool {
-        (self.history & self.window_mask()).count_ones() >= self.trip_threshold
+        self.monitor.observe(over_limit)
     }
 
     /// True once RTL has been committed.
     fn rtl_active(&self) -> bool {
-        self.rtl_latched
+        self.monitor.rtl_active()
     }
 }
 
