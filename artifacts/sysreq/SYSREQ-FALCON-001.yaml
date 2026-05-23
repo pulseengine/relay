@@ -249,3 +249,31 @@ artifacts:
     links:
       - type: derives-from
         target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-011
+    type: system-req
+    title: Safety — EKF divergence detection triggers Return-To-Launch
+    status: approved
+    description: >
+      The system shall detect EKF state-estimate divergence at
+      runtime and respond by triggering a Return-To-Launch (RTL)
+      stored-command sequence. The relay-hs (Health & Safety)
+      engine monitors the EKF innovation signal and latches a
+      safe-state alert; relay-sc (Stored Command) executes the
+      RTL sequence, retargeting the position controller to home.
+      The latch is monotone — once a safe state is entered, the
+      system does not exit it without an explicit operator clear.
+    tags: [falcon, safety, fault-detection, rtl, health-safety, v0.8]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        SITL fault-injection scenario in falcon-sitl-hover injects
+        an accelerometer fault; the relay-hs EkfHealthMonitor
+        latches RTL within 500 ms of fault onset, and the position
+        controller is retargeted to home. Verus discharges the
+        latch's monotonicity (HS-P06) and transition-only (HS-P07)
+        contracts.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001

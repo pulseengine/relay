@@ -50,6 +50,7 @@ use relay_ekf::{quat_mul, Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
 use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTimestamp};
 use relay_rate::{RatePid, Timestamp as RateTimestamp};
+use relay_sc::engine::{CommandStore, RtsCommand};
 
 const SAMPLE_RATE_HZ: f32 = 1000.0;
 const TRAJECTORY_SECONDS: f32 = 5.0;
@@ -63,6 +64,12 @@ const DRAG_COEFFICIENT: f32 = 0.4;
 /// injected. By 8 s the vehicle has reached and settled at the
 /// waypoint, so pre-fault EKF innovation is low.
 const FAULT_INJECT_S: f32 = 8.0;
+
+/// relay-sc RTS id holding the v0.8 RTL stored-command sequence.
+const RTL_RTS_ID: u32 = 0;
+/// Command code the RTL sequence dispatches; the SITL applies it
+/// by switching the position setpoint to home.
+const RTL_CMD_CODE: u16 = 0xA17C;
 
 /// Pseudo-random Gaussian-ish noise via two-sample averaging of an LCG.
 struct Rng(u32);
@@ -781,6 +788,20 @@ fn run_fault(noise_std: f32) -> ScenarioResult {
     let mut mixer = QuadMixer::new();
     let mut rng = Rng::new(0xFA017EED);
     let mut watchdog = EkfWatchdog::new();
+    // Verified relay-sc stored-command store. The RTL RTS is a single
+    // command (delay 0) whose dispatch the SITL applies by switching
+    // the position setpoint to home. The cFS-DNA path is then:
+    //   relay-hs (watchdog) → relay-sc (RTS dispatch) → cascade (apply).
+    let mut sc = CommandStore::new();
+    sc.load_rts_command(
+        RTL_RTS_ID,
+        RtsCommand {
+            delay_sec: 0,
+            command_code: RTL_CMD_CODE,
+            payload_offset: 0,
+            payload_len: 0,
+        },
+    );
     let dt = 1.0 / SAMPLE_RATE_HZ;
     let fault_seconds = 16.0_f32;
     let n = (fault_seconds * SAMPLE_RATE_HZ) as usize;
@@ -798,6 +819,7 @@ fn run_fault(noise_std: f32) -> ScenarioResult {
     let fault_step = (FAULT_INJECT_S * SAMPLE_RATE_HZ) as usize;
     let mut peak_innovation = 0.0_f32;
     let mut rtl_triggered_s = f32::NAN;
+    let mut rtl_dispatched = false;
     let mut nan_seen = false;
 
     let t0 = Instant::now();
@@ -822,14 +844,23 @@ fn run_fault(noise_std: f32) -> ScenarioResult {
         }
 
         // 2. Health & Safety watchdog observes the EKF innovation.
+        //    On the latch transition, trigger the relay-sc RTL RTS.
+        let time_sec = t as u64;
         if watchdog.observe(st.innovation) {
             rtl_triggered_s = t;
+            sc.start_rts(RTL_RTS_ID, time_sec);
         }
 
-        // 3. Active setpoint: the mission waypoint until RTL latches,
-        //    then home. In the cFS-DNA path this switch is a relay-sc
-        //    stored-command sequence fired by the relay-hs alert.
-        let setpoint = if watchdog.rtl_active() { rtl_sp } else { mission_sp };
+        // 3. relay-sc dispatch: if the RTL command came out this tick,
+        //    latch rtl_dispatched. The active setpoint is the mission
+        //    waypoint until the verified dispatcher has issued RTL.
+        let result = sc.process_tick(time_sec);
+        for j in 0..(result.dispatch_count as usize) {
+            if result.dispatched[j].command_code == RTL_CMD_CODE {
+                rtl_dispatched = true;
+            }
+        }
+        let setpoint = if rtl_dispatched { rtl_sp } else { mission_sp };
 
         // 4. Outer position loop (50 Hz).
         if i % pos_decimation == 0 {
@@ -865,8 +896,12 @@ fn run_fault(noise_std: f32) -> ScenarioResult {
 
     let rtl_triggered = !rtl_triggered_s.is_nan();
     let detection_latency = rtl_triggered_s - FAULT_INJECT_S;
+    // Pass: watchdog latched AND the verified relay-sc dispatcher
+    // actually issued the RTL command (the cFS-DNA path closed),
+    // within the latency budget.
     let pass = !nan_seen
         && rtl_triggered
+        && rtl_dispatched
         && detection_latency >= 0.0
         && detection_latency <= 0.5;
 

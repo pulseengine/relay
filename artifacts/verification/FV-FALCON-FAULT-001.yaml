@@ -1,0 +1,68 @@
+artifacts:
+  - id: FV-FALCON-FAULT-001
+    type: sw-verification
+    title: "EKF-divergence watchdog — Verus proofs + SITL fault-injection (v0.8)"
+    status: approved
+    description: >
+      v0.8 verification of the EKF-divergence safety path:
+      relay-hs EkfHealthMonitor + the falcon-sitl-hover `fault`
+      scenario.
+
+      Two evidence layers:
+
+      1. Verus SMT/Z3 formal verification of the latch state-machine
+         (`bazel test //:relay_hs_verus_test`):
+           - HS-P06: RTL latch is monotone — once `rtl_latched`,
+             always (proven by the early `if self.rtl_latched`
+             return and the only mutation being false → true).
+           - HS-P07: `observe()` returns true only on the RTL
+             transition (proven by the single `return true` path
+             both setting `rtl_latched` and being reachable only
+             from the `!rtl_latched` entry state).
+         The bit-shift + count_ones is factored into a
+         `step_window` helper marked `external_body` — Verus does
+         not reason about bit ops natively; the helper's
+         `ensures result.1 <= 64` is the spec contract the
+         observe() proof uses.
+
+      2. SITL fault-injection (`cargo test -p falcon-sitl-hover`):
+           - deterministic_fault_triggers_rtl: an accelerometer
+             bias at t = 8 s drives EKF innovation to ~0.95; the
+             watchdog (thin SITL wrapper over the verified
+             EkfHealthMonitor) latches RTL within ~48 ms — well
+             under the 500 ms budget.
+           - noisy_fault_still_triggers_rtl: same with σ = 0.05
+             accel/gyro noise; looser 1.0 s budget; passes.
+           - ekf_watchdog_ignores_healthy_innovation: a long run of
+             healthy innovation never trips.
+           - ekf_watchdog_debounces_transient_spikes: isolated
+             over-limit spikes (1 per 20 ticks) never accumulate
+             trip_threshold within the sliding window.
+           - ekf_watchdog_catches_intermittent_fault: a 4-of-5
+             intermittent fault (which a strict consecutive
+             counter would miss) latches RTL via the sliding
+             window.
+
+      The cFS-DNA path is closed in the SITL: on the watchdog
+      latch transition, the SITL calls relay-sc `start_rts` to
+      activate the RTL RTS; relay-sc's `process_tick` dispatches
+      the RTL command (verified properties SC-P01..P05 carry
+      through unchanged); the SITL switches the position setpoint
+      to home only after the dispatched command is observed.
+
+      Honestly deferred to a later v0.8.x:
+        - Kani bounded-overflow proof on the bit-shift / count_ones
+          path (Verus treats `step_window` as external_body).
+    tags: [verification, falcon, fault-injection, ekf, relay-hs, verus, v0.8]
+    fields:
+      method: formal-verification + automated-test
+      verus-properties: "HS-P06, HS-P07"
+      bazel-target: "//:relay_hs_verus_test"
+      test-count: 5
+      steps:
+        - run: bazel test //:relay_hs_verus_test
+        - run: cargo test -p relay-hs
+        - run: cargo test -p falcon-sitl-hover
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P01

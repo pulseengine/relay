@@ -18,4 +18,5 @@ relay-att = { path = "../../crates/relay-att" }
 relay-mix-quad = { path = "../../crates/relay-mix-quad" }
 relay-pos = { path = "../../crates/relay-pos" }
 relay-hs = { path = "../../crates/relay-hs" }
+relay-sc = { path = "../../crates/relay-sc" }
 libm = "0.2"
