@@ -359,3 +359,37 @@ artifacts:
     links:
       - type: derives-from
         target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-015
+    type: system-req
+    title: Safety — HITL evidence under RF GPS spoofing
+    status: approved
+    description: >
+      The geofence safety path (SYSREQ-FALCON-014) shall be
+      exercised end-to-end against an RF GPS-spoofing source via a
+      hardware-in-the-loop (HITL) harness. The harness drives the
+      same verified relay-lc → relay-sc chain the SITL does, only
+      the position source changes — from a synthetic spoof in the
+      SITL to a real GPS receiver tracking a transmitted spoof in
+      the HITL. The harness is also exercised in software via a
+      deterministic stub backend so the contract holds even when
+      no hardware is connected (regression protection for the
+      driver).
+    tags: [falcon, safety, hitl, gps-spoof, rf, v0.11]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-hitl-rfspoof crate provides (a) a `HitlBench` trait
+        + `run_scenario()` driver covering the verdict shape an
+        EASA reviewer reads, (b) a deterministic `StubBench`
+        backend with positive and negative-control tests
+        (`stub_bench_trips_and_dispatches`,
+        `stub_bench_no_violation_no_latch`), and (c) a `HackRfBench`
+        backend whose `gps-sdr-sim` + `hackrf_transfer` argv shapes
+        are pinned by unit tests. README documents the bench wiring,
+        legal containment, and the single `position_cm()`
+        replacement point a real telemetry source needs.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001

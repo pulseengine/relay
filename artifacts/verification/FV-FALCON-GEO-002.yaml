@@ -1,0 +1,54 @@
+artifacts:
+  - id: FV-FALCON-GEO-002
+    type: sw-verification
+    title: "Geofence::check — Kani bounded model checking (v0.11)"
+    status: approved
+    description: >
+      v0.11 Kani harness pack on `relay_lc::engine::Geofence::check`.
+      Mirrors the v0.9.1 pattern that pinned EkfHealthMonitor with
+      Kani (HS-P08/P09), giving the v0.10 Geofence the same DO-178B
+      structural-coverage evidence Verus + Kani together provide on
+      the EKF-health detector.
+
+      Pure-i32 state machine — no `external_body` gaps, so Kani
+      enumerates over the full input domain within its bounded
+      model. Five harnesses in
+      `crates/relay-lc/plain/src/engine.rs::kani_proofs`:
+
+        - LC-K01 (`geofence_latch_monotone`) — mirrors HS-P06:
+          once `violation_latched`, always `violation_latched`,
+          for arbitrary fences and arbitrary samples.
+        - LC-K02 (`geofence_check_transition_only`) — mirrors
+          HS-P07: `check()` returns `true` only at the rising
+          edge (latch was off before, on after).
+        - LC-K03 (`geofence_already_latched_silent`) — an
+          already-latched fence never re-fires.
+        - LC-K04 (`geofence_inside_never_trips`) — fresh fence,
+          any in-bounds position; latch must stay off ("no false
+          positive in the safe box").
+        - LC-K05 (`geofence_outside_always_trips`) — fresh fence,
+          any out-of-bounds position; latch must trip on the first
+          call ("no false negative outside the safe box").
+
+      LC-K04 + LC-K05 form an adequate pair: together they pin
+      `check()` to its spec on a fresh fence with no ambiguity
+      left — the "no false positive + no false negative" pair you
+      want before connecting a safety detector to an actuator
+      command path.
+
+      Kani replaces what Verus cannot easily express on slicing
+      and comparison combinations; relay-lc Geofence is now
+      covered by both technique classes the same way relay-hs
+      EkfHealthMonitor was at v0.9.1.
+    tags: [verification, falcon, geofence, kani, relay-lc, v0.11]
+    fields:
+      method: bounded-model-checking
+      kani-properties: "LC-K01, LC-K02, LC-K03, LC-K04, LC-K05"
+      kani-harness-count: 5
+      file: crates/relay-lc/plain/src/engine.rs
+      steps:
+        - run: cargo kani -p relay-lc
+        - run: cargo test -p relay-lc   # cfg(kani) is invisible to cargo; cargo path still green
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-GEO-P01

@@ -1,0 +1,71 @@
+artifacts:
+  - id: FV-FALCON-HITL-001
+    type: sw-verification
+    title: "HITL RF-spoof harness — verdict contract + stub-backend regression (v0.11)"
+    status: approved
+    description: >
+      v0.11 verification of the HITL harness that exercises the
+      formally verified geofence safety path against an RF GPS
+      spoofer.
+
+      The verified path itself (relay-lc Geofence + relay-sc RTL
+      dispatch) is unchanged from v0.10 — its proofs are
+      FV-FALCON-GEO-001 (Verus LC-P09/P10) + FV-FALCON-GEO-002
+      (Kani LC-K01..K05, added in this release). What this
+      artifact verifies is the *harness around them*: the contract,
+      the verdict shape, and the stub-backend regression that pins
+      both.
+
+      Three evidence layers:
+
+      1. Harness contract — `HitlBench` trait + `run_scenario`
+         driver in `examples/falcon-hitl-rfspoof/src/harness.rs`.
+         Four trait operations (`step`, `position_cm`,
+         `spoof_active`, `name`) plus one driver function:
+         intentionally small so a reviewer can read the entire
+         coupling between bench and verified path in under one
+         page.
+
+      2. Stub-backend regression — `cargo test -p falcon-hitl-rfspoof`:
+           - `stub_bench_trips_and_dispatches` — positive control.
+             Spoof flips on at t=2.0, snaps position to 200 m east
+             (outside the 100 m fence); harness must latch and
+             dispatch RTL within one tick of spoof onset.
+           - `stub_bench_no_violation_no_latch` — negative control.
+             "Spoof on" but spoofed coordinate still inside the
+             fence; harness must NOT latch (catches a harness that
+             passes by always firing).
+           - `hackrf_argv_shape_is_stable`,
+             `gps_sdr_sim_argv_shape_is_stable` — pin the external
+             tool command-line shapes the bench backend depends on,
+             so silent drift surfaces as a test failure.
+
+      3. Bench-setup evidence — README.md documents the bill of
+         materials, the legal/safety containment requirements
+         (shielded enclosure / cabled chain), the tool versions
+         (gps-sdr-sim, hackrf_transfer), and the single
+         `HackRfBench::position_cm()` replacement point a real
+         telemetry source needs.
+
+      Honestly deferred (and recorded here so the gap is visible):
+        - Actual live-RF execution on a HackRF — no hardware in
+          the dev loop. The HackRfBench is the *driver*; running
+          it against silicon is the user's bench job. The argv
+          tests + README + StubBench together protect the
+          driver from bit-rot in the meantime.
+        - MAVLink / NMEA parser to replace the planned-trajectory
+          stub inside HackRfBench. relay-mavlink exists in the
+          workspace and is the natural plug — wiring it is a
+          small follow-up once a target FC is chosen.
+    tags: [verification, falcon, hitl, gps-spoof, rf, v0.11]
+    fields:
+      method: automated-test + bench-evidence
+      crate: examples/falcon-hitl-rfspoof
+      test-count: 4
+      steps:
+        - run: cargo test -p falcon-hitl-rfspoof
+        - run: cargo run -p falcon-hitl-rfspoof
+        - run: cargo run -p falcon-hitl-rfspoof -- --backend=hackrf --duration=30  # bench-only
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HITL-P01
