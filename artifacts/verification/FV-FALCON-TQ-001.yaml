@@ -1,0 +1,88 @@
+artifacts:
+  - id: FV-FALCON-TQ-001
+    type: sw-verification
+    title: "Tool-qualification records for Verus / Kani / miri / witness / spar (v0.14.3)"
+    status: approved
+    description: >
+      v0.14.3 lands the cross-cutting tool-qualification dossier
+      under `docs/dossier/tool-qualification/`. Five TQ records,
+      one per verification tool falcon's stack relies on. Closes
+      one explicit GAP entry in every dossier crosswalk
+      simultaneously (the "tool qualification" gap appearing in
+      DO-178C-DAL-A, ISO-26262-ASIL-D, IEC-61508-SIL-4,
+      IEC-62304-Class-C, ECSS-Q-ST-80C-Cat-A, EN-50128-SIL-4
+      mapping documents).
+
+      Files (448 lines total):
+        - docs/dossier/tool-qualification/README.md (cross-standard
+          classification framework + per-tool TQ index)
+        - Verus-TQ.md (75 lines)
+        - Kani-TQ.md (64 lines)
+        - miri-TQ.md (82 lines)
+        - witness-TQ.md (78 lines)
+        - spar-TQ.md (85 lines)
+
+      Each TQ document records:
+        - Tool identity + pinned version + source URL.
+        - Use in falcon (what properties it discharges; bazel /
+          cargo invocations).
+        - Cross-standard classification table (IEC 61508-3
+          §7.4.4.7, ISO 26262-8 §11, ECSS-Q-ST-80C §5.4.8,
+          EN 50128 §6.7.4 — one row per standard).
+        - Qualification approach — explicit
+          **technique-class-diversity** argument: every claim a
+          single tool makes is cross-confirmed by at least one
+          independent technique class (Verus ↔ Kani ↔ miri ↔
+          proptest ↔ SITL). The diversity is the qualification
+          substitute for a formal DO-330-style TQR.
+        - Validation evidence (current operational history +
+          recipe to reproduce).
+        - Honest "out of scope" list (always includes "formal
+          assessor-signed TQR — v1.0 work" + per-tool gaps).
+
+      Tool classification summary:
+
+        | Tool     | IEC 61508 | ISO 26262 | ECSS-Q | EN 50128 |
+        |----------|-----------|-----------|--------|----------|
+        | Verus    | T2        | TCL3*     | Cat B  | T2       |
+        | Kani     | T2        | TCL3*     | Cat B  | T2       |
+        | miri     | T2        | TCL2      | Cat B  | T2       |
+        | witness  | T2        | TCL2      | Cat B  | T2       |
+        | spar     | T1        | TCL1      | Cat B  | T1       |
+
+        * TCL3 *classified*, qualified-to-TCL3 via diverse-
+          confirmation argument (not a TCL1 downgrade — the
+          tool's classification doesn't change, the qualification
+          approach handles the tool-class requirement).
+
+      What this does *not* claim:
+        - Assessor-signed Tool Qualification Plan / Report per
+          DO-330 or the equivalent IEC 61508-3 §7.4.4.9 record.
+          These TQ documents are auditable starting points; v1.0
+          is when an external assessor signs them off.
+        - Cross-tool independent re-runs (e.g. fault-tree
+          confirmation via OSATE alongside spar). Listed as
+          per-tool out-of-scope in each TQ document.
+        - Validation against intentional-fault test corpora — the
+          standard DO-330 evidence shape that requires a separate
+          fault-injection test campaign per tool.
+
+      Together these TQ records + the existing per-engine FV-*
+      artifacts form the **technique-class diversity argument**
+      that lets falcon's TCL3-classed tools (Verus, Kani) ship in
+      a safety-credit submission without a full per-tool DO-330
+      TQR — the diversity itself is the independent detection
+      mechanism the standards' qualification clauses require.
+    tags: [verification, falcon, tool-qualification, dossier, v0.14.3]
+    fields:
+      method: documentation + cross-confirmation-argument
+      tools-covered: ["Verus", "Kani", "miri", "witness", "spar"]
+      standards-mapped: ["IEC 61508-3 §7.4.4.7", "ISO 26262-8 §11", "ECSS-Q-ST-80C §5.4.8", "EN 50128 §6.7.4"]
+      directory: docs/dossier/tool-qualification/
+      lines-of-doc: 448
+      steps:
+        - run: ls docs/dossier/tool-qualification/
+        - run: wc -l docs/dossier/tool-qualification/*.md
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WORLD-P01

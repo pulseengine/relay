@@ -16,6 +16,20 @@ property, test, build target) that supports it — or to an explicit
 | ECSS-Q-ST-80C Cat A (space)     | v0.13 scaffold | [ECSS-Q-ST-80C-Cat-A-mapping.md](ECSS-Q-ST-80C-Cat-A-mapping.md) |
 | EN 50128 SIL-4 (rail)           | v0.13 scaffold | [EN-50128-SIL-4-mapping.md](EN-50128-SIL-4-mapping.md) |
 
+## Tool qualification records (v0.14.3)
+
+Cross-cutting documents under [`tool-qualification/`](tool-qualification/README.md)
+— one per verification tool — close the "tool qualification" gap
+that appears in every domain crosswalk simultaneously.
+
+| Tool | TQ record                                       |
+|------|--------------------------------------------------|
+| Verus  | [Verus-TQ.md](tool-qualification/Verus-TQ.md)   |
+| Kani   | [Kani-TQ.md](tool-qualification/Kani-TQ.md)     |
+| miri   | [miri-TQ.md](tool-qualification/miri-TQ.md)     |
+| witness| [witness-TQ.md](tool-qualification/witness-TQ.md) |
+| spar   | [spar-TQ.md](tool-qualification/spar-TQ.md)     |
+
 ## How to read a crosswalk
 
 Two-column table. Left = standard's objective ID + description. Right
