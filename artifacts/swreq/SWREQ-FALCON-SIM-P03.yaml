@@ -1,0 +1,56 @@
+artifacts:
+  - id: SWREQ-FALCON-SIM-P03
+    type: sw-req
+    title: "Gazebo SITL scaffold — Physics trait + MockPhysics + GazeboPhysics stub"
+    status: approved
+    description: >
+      v0.16.1 implements option C from docs/SIMULATOR.md (v0.15.0):
+      a pluggable `Physics` trait abstracting the SITL physics
+      layer so a real Gazebo Sim bridge can drop in without
+      touching the verified cascade.
+
+      Crate at `examples/falcon-sitl-gz/`:
+
+        - `Physics` trait — two methods (`step(motor_pwm, dt)` +
+          `measure(noise_std) -> (ImuSample, position_ned)`).
+          Same architectural pattern as the HITL harness's
+          `HitlBench` and `FrameSource` traits.
+        - `MockPhysics` — in-process reference impl; tiny 6-DoF
+          integrator port of falcon-sitl-hover's Plant. Used by
+          cargo tests; runs without external deps. Three unit
+          tests: at-rest gravity drop, full-thrust climb,
+          measure sanity.
+        - `GazeboPhysics` — stub for the real bridge.
+          `step()` and `measure()` carry `TODO(bench):` markers
+          naming the gz-transport topics (subscribe to
+          imu_sensor + navsat; publish to per-rotor cmd_vel).
+          Compiles + runs without gz-sim; verdict is FAIL when
+          used, which is the correct signal the wire-up is
+          needed.
+        - One scenario (`hover`) — commands 70 % PWM on all 4
+          motors, asserts net climb > 0.1 m. Passes under
+          MockPhysics; fails (correctly) under GazeboPhysics
+          stub.
+        - README — bench wire-up recipe (gz install, SDF world
+          shape, gz-transport binding options, frame conversion
+          ENU↔NED, time alignment).
+
+      What this does NOT claim:
+        - A working Gazebo loop. Real bridge is one bench-day
+          of work the user does; deliverable in software is the
+          scaffold + reference impl + docs.
+        - Replacement for falcon-sitl-hover. The 17 existing
+          scenarios stay; this is the scaffold for the next
+          layer.
+
+      Same pattern: scaffold + reference impl + stub + bench
+      docs, like v0.11's HackRfBench and v0.12's MavlinkBench
+      `--peer=`.
+    tags: [falcon, sim, gazebo, scaffold, v0.16.1]
+    fields:
+      req-type: documentation + scaffold
+      crate: examples/falcon-sitl-gz
+      backends: ["mock", "gazebo (stub)"]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-016
