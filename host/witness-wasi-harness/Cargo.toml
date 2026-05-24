@@ -1,0 +1,20 @@
+[package]
+name = "witness-wasi-harness"
+description = "Subprocess harness for witness, providing wasmtime + WASI preview2 imports so cascade-class WASM modules can be MC/DC-instrumented"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "witness-wasi-harness"
+path = "src/main.rs"
+
+[dependencies]
+wasmtime = "27"
+wasmtime-wasi = "27"
+anyhow = "1"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "macros"] }

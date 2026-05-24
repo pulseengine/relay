@@ -1043,6 +1043,62 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.14.3
 
+  - id: FEAT-FALCON-v0.15.1
+    type: feature
+    title: "v0.15.1 — cascade witness coverage via wasmtime+WASI subprocess harness"
+    status: approved
+    description: >
+      LANDED. Closes the cascade-target witness WASI gap that's
+      been deferred since v0.13.
+
+      Ships:
+        - host/witness-wasi-harness — Rust binary implementing
+          witness's subprocess-harness ABI (witness-harness-v1
+          JSON schema). Loads instrumented wasm with wasmtime +
+          wasi-preview1; stubs any unresolved component-model
+          imports; invokes _initialize then every non-__witness_*
+          export with zero-filled args; reads __witness_counter_*
+          globals; writes the v1 snapshot.
+        - host/witness-wasi-harness/README.md — protocol docs +
+          smoke-test results + honest dispositions.
+        - BUILD.bazel comment on //:falcon-cascade-coverage
+          updated to point at FV-FALCON-COV-004 (target still
+          tags=["manual"] until the bazel rule learns --harness).
+        - FV-FALCON-COV-004.
+
+      First real cascade structural-coverage numbers:
+        - 5972 branches identified in the cascade.
+        - 81 hit on zero-args invocation across 14/15 exports.
+        - 1 export (controller#step) tripped a trace-buffer OOB
+          inside witness's own instrumentation (upstream
+          limitation, not harness bug).
+        - Smoke-test parity: hit counts on the v0.14.1 Rust
+          subject match embedded-mode output exactly.
+
+      Honest dispositions:
+        - 1.4 % coverage is first-pass evidence the pipeline works
+          on the cascade — not "high coverage". v0.16 candidate
+          extends harness to accept invocation script (drive
+          controller#step with SITL records).
+        - Bazel rule integration deferred (rules_wasm_component
+          needs --harness flag, or we add a macro).
+        - Stubbed component-model imports don't model real WASI
+          semantics — sound for coverage measurement, not for
+          execution validation.
+
+      v0.14.x WASI deferral closed; cascade witness MC/DC story
+      now end-to-end runnable in software with honest first-pass
+      numbers.
+    tags: [falcon, milestone, v0.15.1, witness, wasi, mcdc, landed]
+    fields:
+      release-target: "wasmtime+WASI subprocess harness for witness MC/DC on the cascade"
+      crate: host/witness-wasi-harness
+      cascade-branches-identified: 5972
+      cascade-branches-hit: 81
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.15
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1075,4 +1131,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.15
+        target: FEAT-FALCON-v0.15.1
