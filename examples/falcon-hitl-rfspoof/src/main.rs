@@ -22,7 +22,7 @@ mod harness;
 mod stub;
 pub mod mavlink;
 
-use harness::{load_rtl_rts, run_scenario};
+use harness::{load_rtl_rts, run_scenario, CommandSink, NullCommandSink};
 use relay_lc::engine::Geofence;
 use relay_sc::engine::CommandStore;
 
@@ -37,6 +37,8 @@ fn main() {
             duration_s: 30.0,
             listen: Some("0.0.0.0:14550"),
             home: Some("47.3977,8.5456,488"),
+            // PX4-SITL's offboard / companion MAVLink endpoint.
+            peer: Some("127.0.0.1:14580"),
         },
         Some(other) => {
             eprintln!("unknown preset: {other}  (expected: px4-sitl)");
@@ -61,12 +63,14 @@ fn main() {
     let verdict = match backend.as_str() {
         "stub" => {
             let mut b = stub::StubBench::new(0, 0, -500, 0, 20_000, -500, 2.0);
-            run_scenario(&mut b, &mut fence, &mut sc, 0.01, duration_s, 0, 1.0)
+            let mut sink = NullCommandSink::new();
+            run_scenario(&mut b, &mut fence, &mut sc, &mut sink, 0.01, duration_s, 0, 1.0)
         }
         "hackrf" => {
             // 200 m east of the fence boundary — well outside.
             let mut b = hackrf::HackRfBench::new(2.0, 0, 0, -500, 0, 20_000, -500);
-            run_scenario(&mut b, &mut fence, &mut sc, 0.01, duration_s, 0, 1.0)
+            let mut sink = NullCommandSink::new();
+            run_scenario(&mut b, &mut fence, &mut sc, &mut sink, 0.01, duration_s, 0, 1.0)
         }
         "mavlink" => {
             // Bind UDP to whatever port the FC sends to (PX4 default 14550).
@@ -83,12 +87,31 @@ fn main() {
                 Some(s) => parse_home(&s).expect("--home=lat,lon,alt_m"),
                 None => mavlink::Home { lat_e7: 475_023_456, lon_e7: 190_401_234, alt_mm: 120_000 },
             };
+            // v0.14.2 round-trip: when the harness latches RTL it
+            // pushes a COMMAND_LONG back to the FC. --peer= picks
+            // the FC's listen address (PX4-SITL default 127.0.0.1:
+            // 14580 for the offboard MAVLink endpoint).
+            let peer_str = arg(&args, "--peer")
+                .or_else(|| defaults.peer.map(String::from))
+                .unwrap_or_else(|| "127.0.0.1:14580".into());
+            let mut sink: Box<dyn CommandSink> = match peer_str.parse() {
+                Ok(peer) => {
+                    println!("  mavlink: COMMAND_LONG sink → {peer_str}");
+                    let send_sock = std::net::UdpSocket::bind("0.0.0.0:0")
+                        .expect("bind sink socket");
+                    Box::new(mavlink::UdpCommandSink::new(send_sock, peer))
+                }
+                Err(_) => {
+                    eprintln!("warning: --peer={peer_str} is not a valid socket address; using null sink");
+                    Box::new(NullCommandSink::new())
+                }
+            };
             let src = mavlink::UdpFrameSource::new(sock);
             let mut b = mavlink::MavlinkBench::new(src, home, (0, 0, -500));
             // Real link: 10 Hz GLOBAL_POSITION_INT rate is typical;
             // 100 Hz harness tick is fine because drain_frames is
             // non-blocking and tolerates "no new frame this tick".
-            run_scenario(&mut b, &mut fence, &mut sc, 0.01, duration_s, 0, 5.0)
+            run_scenario(&mut b, &mut fence, &mut sc, sink.as_mut(), 0.01, duration_s, 0, 5.0)
         }
         other => {
             eprintln!("unknown backend: {other}  (expected: stub | hackrf | mavlink)");
@@ -112,6 +135,7 @@ struct Defaults {
     duration_s: f32,
     listen: Option<&'static str>,
     home: Option<&'static str>,
+    peer: Option<&'static str>,
 }
 
 impl Defaults {
@@ -120,6 +144,7 @@ impl Defaults {
         duration_s: 5.0,
         listen: None,
         home: None,
+        peer: None,
     };
 }
 

@@ -904,6 +904,43 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.14
 
+  - id: FEAT-FALCON-v0.14.2
+    type: feature
+    title: "v0.14.2 — MAVLink COMMAND_LONG: round-trip falcon RTL → PX4"
+    status: approved
+    description: >
+      LANDED. Closes the v0.14.0 deferred item: when the verified
+      relay-lc Geofence latches and relay-sc dispatches RTL, the
+      harness now encodes a MAVLink COMMAND_LONG with
+      MAV_CMD_NAV_RETURN_TO_LAUNCH and writes it to PX4's offboard
+      endpoint so the FC actually flies home (not just falcon's
+      own command store).
+
+      Ships:
+        - relay-mavlink COMMAND_LONG codec (id 76, 33-byte payload,
+          CRC_EXTRA = 152) in both plain and Verus trees;
+          MAVLINK-V04/V05 contracts; const RTL builder.
+          11 new cargo tests; relay-mavlink now 66 tests (was 55).
+        - examples/falcon-hitl-rfspoof: new CommandSink trait,
+          NullCommandSink (tests) + UdpCommandSink (real bench).
+          run_scenario now drives the sink on every latch trip.
+          HitlVerdict.rtl_frame_sent records the outbound evidence.
+        - --preset=px4-sitl gains --peer=127.0.0.1:14580 default
+          (PX4's offboard MAVLink endpoint).
+        - sim/px4-sitl/README.md updated with the round-trip story.
+        - SYSREQ/SWREQ/FV: SWREQ-FALCON-MAVLINK-P05, FV-FALCON-SIM-002.
+
+      Together with v0.14.0 (inbound) the loop is now end-to-end
+      closed: FC → falcon safety chain → FC.
+    tags: [falcon, milestone, v0.14.2, mavlink, command-long, round-trip, px4, landed]
+    fields:
+      release-target: "round-trip falcon RTL → PX4 via COMMAND_LONG"
+      mavlink-message: "COMMAND_LONG (id 76)"
+      default-peer: "127.0.0.1:14580"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.14.1
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -936,4 +973,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.14.1
+        target: FEAT-FALCON-v0.14.2

@@ -72,7 +72,7 @@ impl HitlBench for StubBench {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::{load_rtl_rts, run_scenario};
+    use crate::harness::{load_rtl_rts, run_scenario, NullCommandSink};
     use relay_lc::engine::Geofence;
     use relay_sc::engine::CommandStore;
 
@@ -90,10 +90,12 @@ mod tests {
         // Spoof: yanked to 200 m east — well outside the 100 m fence.
         let mut bench = StubBench::new(0, 0, -500, 0, 20_000, -500, 2.0);
 
+        let mut sink = NullCommandSink::new();
         let v = run_scenario(
             &mut bench,
             &mut fence,
             &mut sc,
+            &mut sink,
             0.01,   // 100 Hz tick
             5.0,    // 5-second scenario
             0,      // RTL RTS id
@@ -103,6 +105,8 @@ mod tests {
         assert!(v.pass(), "verdict = {:?}", v);
         assert!(v.latched);
         assert!(v.rtl_dispatched);
+        assert!(v.rtl_frame_sent, "RTL COMMAND_LONG frame should have been pushed to sink");
+        assert_eq!(sink.frames_sent, 1, "exactly one RTL frame per latch trip");
         let latched_at = v.latched_at_s.unwrap();
         let spoof_at = v.spoof_first_seen_at_s.unwrap();
         assert!(latched_at >= spoof_at, "latch before spoof: {} < {}", latched_at, spoof_at);
@@ -124,10 +128,12 @@ mod tests {
         // vehicle out. The verified `check()` should stay silent.
         let mut bench = StubBench::new(0, 0, -500, 100, 200, -500, 2.0);
 
+        let mut sink = NullCommandSink::new();
         let v = run_scenario(
             &mut bench,
             &mut fence,
             &mut sc,
+            &mut sink,
             0.01,
             5.0,
             0,
@@ -136,6 +142,8 @@ mod tests {
 
         assert!(!v.latched);
         assert!(!v.rtl_dispatched);
+        assert!(!v.rtl_frame_sent, "no frame pushed when no latch trip");
+        assert_eq!(sink.frames_sent, 0);
         assert!(v.failure.is_none(), "harness fail-stopped on a benign run: {:?}", v.failure);
     }
 }

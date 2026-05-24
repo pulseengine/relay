@@ -33,13 +33,13 @@
 //! Hardware run is the user's bench job; everything above the FC's
 //! USB/UDP boundary is exercised by `cargo test`.
 
-use crate::harness::HitlBench;
+use crate::harness::{CommandSink, HitlBench};
 use relay_mavlink::{
     parse_frame, peek_message_id, GlobalPositionInt,
     GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID,
     GLOBAL_POSITION_INT_PAYLOAD_LEN,
 };
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 
 /// Mean WGS-84 earth radius (m). Good enough for the equirectangular
 /// projection over a few-km bench range.
@@ -148,6 +148,31 @@ impl FrameSource for UdpFrameSource {
             }
             Err(_) => None,
         }
+    }
+}
+
+/// CommandSink that sends frames back over UDP to a peer address —
+/// typically PX4-SITL's GCS listen port. Used to close the v0.14.2
+/// round-trip: when relay-sc dispatches RTL, the harness encodes a
+/// COMMAND_LONG and writes it here so the FC actually acts on it.
+pub struct UdpCommandSink {
+    sock: UdpSocket,
+    peer: SocketAddr,
+}
+
+impl UdpCommandSink {
+    pub fn new(sock: UdpSocket, peer: SocketAddr) -> Self {
+        Self { sock, peer }
+    }
+}
+
+impl CommandSink for UdpCommandSink {
+    fn name(&self) -> &'static str { "udp" }
+    fn send_frame(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
+        self.sock
+            .send_to(bytes, self.peer)
+            .map(|_| ())
+            .map_err(|_| "udp send_to failed")
     }
 }
 
@@ -268,7 +293,7 @@ pub fn build_global_position_frame(seq: u8, msg: &GlobalPositionInt) -> Vec<u8> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::{load_rtl_rts, run_scenario};
+    use crate::harness::{load_rtl_rts, run_scenario, NullCommandSink};
     use relay_lc::engine::Geofence;
     use relay_sc::engine::CommandStore;
 
@@ -342,11 +367,14 @@ mod tests {
         let mut sc = CommandStore::new();
         load_rtl_rts(&mut sc, 0, 0xA17C);
 
-        let v = run_scenario(&mut bench, &mut fence, &mut sc, 1.0, 5.0, 0, 2.0);
+        let mut sink = NullCommandSink::new();
+        let v = run_scenario(&mut bench, &mut fence, &mut sc, &mut sink, 1.0, 5.0, 0, 2.0);
 
         assert!(v.pass(), "verdict = {:?}", v);
         assert!(v.latched);
         assert!(v.rtl_dispatched);
+        assert!(v.rtl_frame_sent);
+        assert_eq!(sink.frames_sent, 1);
     }
 
     /// Negative control: every frame stays inside the fence — must
@@ -365,9 +393,12 @@ mod tests {
         let mut sc = CommandStore::new();
         load_rtl_rts(&mut sc, 0, 0xA17C);
 
-        let v = run_scenario(&mut bench, &mut fence, &mut sc, 1.0, 5.0, 0, 10.0);
+        let mut sink = NullCommandSink::new();
+        let v = run_scenario(&mut bench, &mut fence, &mut sc, &mut sink, 1.0, 5.0, 0, 10.0);
         assert!(!v.latched);
         assert!(!v.rtl_dispatched);
+        assert!(!v.rtl_frame_sent);
+        assert_eq!(sink.frames_sent, 0);
         assert!(v.failure.is_none());
     }
 

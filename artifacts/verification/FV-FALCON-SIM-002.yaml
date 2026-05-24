@@ -1,0 +1,87 @@
+artifacts:
+  - id: FV-FALCON-SIM-002
+    type: sw-verification
+    title: "PX4-SITL round-trip: falcon RTL drives PX4 home via COMMAND_LONG (v0.14.2)"
+    status: approved
+    description: >
+      v0.14.2 closes the round-trip the v0.14.0 PX4-SITL loop
+      stopped one step short of: when the verified relay-lc
+      Geofence latches and relay-sc dispatches the RTL RTS, the
+      harness now encodes a MAVLink COMMAND_LONG with
+      MAV_CMD_NAV_RETURN_TO_LAUNCH and writes the frame to PX4's
+      offboard endpoint so the FC actually flies home (not just
+      falcon's own command store).
+
+      Three evidence layers:
+
+      1. relay-mavlink COMMAND_LONG codec (FV-FALCON-MAVLINK-002
+         partner; SWREQ-FALCON-MAVLINK-P05):
+           - 33-byte payload, CRC_EXTRA = 152, 7×f32 + u16 + 3×u8.
+           - 11 new tests in plain/src/command_long.rs (round-trip,
+             length-mismatch rejection, field-offset spec-check,
+             RTL-builder shape, proptest with f32::from_bits for
+             NaN coverage).
+           - Verus mirror at crates/relay-mavlink/src/command_long.rs
+             with MAVLINK-V04 (encoder size) + MAVLINK-V05 (decoder
+             Option-totality on length).
+           - //:relay_mavlink_verus_test target updated.
+
+      2. Harness round-trip wiring
+         (examples/falcon-hitl-rfspoof/src/{harness,mavlink,main}.rs):
+           - New CommandSink trait (one method: send_frame). Decouples
+             the verified safety path from the IO that pushes the
+             encoded RTL back to the FC.
+           - NullCommandSink: counts frames, used in tests.
+           - UdpCommandSink: writes the encoded COMMAND_LONG to a
+             configurable peer (PX4's offboard endpoint, default
+             127.0.0.1:14580 via the --peer= flag and the px4-sitl
+             preset).
+           - run_scenario now takes &mut dyn CommandSink; when
+             Geofence::check rises and CommandStore::start_rts
+             succeeds, the harness also calls build_rtl_frame +
+             sink.send_frame. Sink failure is recorded but non-fatal
+             (the verified safety chain has already done its job).
+           - HitlVerdict gains rtl_frame_sent: bool — round-trip
+             evidence in the verdict shape.
+
+      3. End-to-end test coverage:
+           - stub_bench_trips_and_dispatches asserts rtl_frame_sent
+             + sink.frames_sent == 1.
+           - stub_bench_no_violation_no_latch asserts !rtl_frame_sent
+             + sink.frames_sent == 0 (negative control).
+           - mavlink_bench_trips_and_dispatches_on_spoof + _no_
+             violation_no_latch carry the same assertions via the
+             MavlinkBench backend.
+
+      What this does *not* claim:
+        - PX4 actually honouring the COMMAND_LONG and flying home —
+          that's PX4's command-handler responsibility, not falcon's.
+          falcon's side is "the verified safety chain pushed the
+          right bytes to PX4's endpoint at the right time"; the FC's
+          behaviour beyond that is a black-box at this evidence
+          layer.
+        - Bench validation against a real FC (still the user's bench
+          job; the harness wires the byte stream cleanly so a real
+          PX4 + jMAVSim/Gazebo session works without further code).
+
+      Round-trip is the natural complement to v0.14.0's PX4-SITL
+      integration: v0.14.0 closed the loop *inbound* (FC's reported
+      position drives the verified safety chain); v0.14.2 closes it
+      *outbound* (the verified safety chain drives the FC).
+    tags: [verification, falcon, mavlink, command-long, round-trip, px4, v0.14.2]
+    fields:
+      method: automated-test + integration-test
+      crate: examples/falcon-hitl-rfspoof
+      mavlink-message: "COMMAND_LONG (id 76, CRC_EXTRA 152)"
+      mav-cmd: "MAV_CMD_NAV_RETURN_TO_LAUNCH (20)"
+      default-peer: "127.0.0.1:14580 (PX4 offboard endpoint)"
+      sink-implementations: ["NullCommandSink (tests)", "UdpCommandSink (real bench)"]
+      steps:
+        - run: cargo test -p relay-mavlink
+        - run: cargo test -p falcon-hitl-rfspoof
+        - run: cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl   # full inbound + outbound loop
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P01
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P05
