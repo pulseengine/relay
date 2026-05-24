@@ -1,0 +1,963 @@
+info: cargo-llvm-cov currently setting cfg(coverage); you can opt-out it by passing --no-cfg-coverage
+   Compiling relay-primitives v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-primitives)
+   Compiling relay-sc v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-sc)
+   Compiling relay-mavlink v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-mavlink)
+   Compiling relay-hs v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-hs)
+   Compiling relay-rate v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-rate)
+   Compiling relay-mix-quad v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-mix-quad)
+   Compiling relay-att v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-att)
+   Compiling relay-ekf-stub v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ekf-stub)
+   Compiling relay-ekf v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ekf)
+   Compiling relay-pos v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-pos)
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-sc/plain/src/engine.rs:392:7
+    |
+392 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-hs/plain/src/engine.rs:319:7
+    |
+319 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `relay-sc` (lib) generated 1 warning
+   Compiling relay-lc v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-lc)
+warning: `relay-hs` (lib) generated 1 warning
+   Compiling falcon-ekf-bench v0.1.0 (/Users/r/git/pulseengine/relay/examples/falcon-ekf-bench)
+   Compiling relay-nid v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-nid)
+   Compiling relay-sch v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-sch)
+   Compiling falcon-hello v0.1.0 (/Users/r/git/pulseengine/relay/examples/falcon-hello)
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-lc/plain/src/engine.rs:266:7
+    |
+266 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-nid/plain/src/lib.rs:397:7
+    |
+397 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-sch/plain/src/engine.rs:157:7
+    |
+157 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `relay-lc` (lib) generated 1 warning
+   Compiling relay-lc-diff v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-lc-diff)
+   Compiling falcon-sitl-hover v0.1.0 (/Users/r/git/pulseengine/relay/examples/falcon-sitl-hover)
+   Compiling falcon-hitl-rfspoof v0.1.0 (/Users/r/git/pulseengine/relay/examples/falcon-hitl-rfspoof)
+warning: fields `backend`, `duration_s`, and `steps` are never read
+  --> examples/falcon-hitl-rfspoof/src/harness.rs:56:9
+   |
+55 | pub struct HitlVerdict {
+   |            ----------- fields in this struct
+56 |     pub backend: &'static str,
+   |         ^^^^^^^
+57 |     /// Total simulated/wall-clock seconds the harness ran.
+58 |     pub duration_s: f32,
+   |         ^^^^^^^^^^
+59 |     /// Number of `step()` ticks issued.
+60 |     pub steps: u32,
+   |         ^^^^^
+   |
+   = note: `HitlVerdict` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `relay-sc` (lib test) generated 1 warning (1 duplicate)
+warning: `relay-sch` (lib test) generated 1 warning
+   Compiling relay-tbl v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-tbl)
+warning: `relay-lc` (lib test) generated 1 warning (1 duplicate)
+   Compiling relay-ccsds v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ccsds)
+warning: `falcon-hitl-rfspoof` (bin "falcon-hitl-rfspoof" test) generated 1 warning
+   Compiling relay-fm v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-fm)
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-tbl/plain/src/engine.rs:232:7
+    |
+232 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-ccsds/plain/src/engine.rs:252:7
+    |
+252 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+   Compiling relay-hk v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-hk)
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-fm/plain/src/engine.rs:225:7
+    |
+225 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-hk/plain/src/engine.rs:251:7
+    |
+251 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `relay-nid` (lib test) generated 1 warning
+   Compiling relay-md v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-md)
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-md/plain/src/engine.rs:221:7
+    |
+221 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `relay-tbl` (lib test) generated 1 warning
+   Compiling relay-ci v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ci)
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-ci/plain/src/engine.rs:203:7
+    |
+203 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `relay-hk` (lib test) generated 1 warning
+   Compiling relay-cs v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-cs)
+warning: `relay-fm` (lib test) generated 1 warning
+   Compiling relay-sca v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-sca)
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-cs/plain/src/engine.rs:279:7
+    |
+279 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-sca/plain/src/engine.rs:251:7
+    |
+251 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `relay-ccsds` (lib test) generated 1 warning
+warning: `relay-md` (lib test) generated 1 warning
+   Compiling relay-mm v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-mm)
+   Compiling relay-to v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-to)
+warning: `relay-ci` (lib test) generated 1 warning
+   Compiling relay-cfdp v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-cfdp)
+   Compiling relay-ds v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ds)
+   Compiling relay-es v0.1.0 (/Users/r/git/pulseengine/relay/host/relay-es)
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-mm/plain/src/engine.rs:212:7
+    |
+212 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-to/plain/src/engine.rs:162:7
+    |
+162 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-cfdp/plain/src/engine.rs:394:7
+    |
+394 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `kani`
+   --> crates/relay-ds/plain/src/engine.rs:232:7
+    |
+232 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `relay-cs` (lib test) generated 1 warning
+   Compiling relay-time v0.1.0 (/Users/r/git/pulseengine/relay/host/relay-time)
+   Compiling relay-evs v0.1.0 (/Users/r/git/pulseengine/relay/host/relay-evs)
+warning: `relay-sca` (lib test) generated 1 warning
+   Compiling relay-sb v0.1.0 (/Users/r/git/pulseengine/relay/host/relay-sb)
+warning: `relay-hs` (lib test) generated 1 warning (1 duplicate)
+warning: `relay-mm` (lib test) generated 1 warning
+warning: `relay-to` (lib test) generated 1 warning
+warning: `relay-ds` (lib test) generated 1 warning
+warning: `relay-cfdp` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.03s
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/falcon_ekf_bench-9e24bfe29e879285)
+
+running 5 tests
+test tests::phases_are_consistent_with_trajectory_duration ... ok
+test tests::rotate_ned_to_body_identity_passes_through ... ok
+test tests::quat_error_is_zero_for_identical_quaternions ... ok
+test tests::deterministic_bench_passes ... ok
+test tests::noisy_bench_passes_loose ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/falcon_hello-8bd3a4b34719e3ce)
+
+running 9 tests
+test tests::args_default_ports_for_gcs_mode ... ok
+test tests::args_default_ports_for_vehicle_mode ... ok
+test tests::args_rejects_unknown_mode ... ok
+test tests::args_rejects_missing_mode ... ok
+test tests::handle_inbound_rejects_unsupported_message ... ok
+test tests::handle_inbound_propagates_bad_crc ... ok
+test tests::handle_inbound_truncated ... ok
+test tests::current_timestamp_is_monotone_within_a_run ... ok
+test tests::vehicle_and_gcs_exchange_heartbeats_over_udp ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/falcon_hitl_rfspoof-8fcd2ff565cb0105)
+
+running 10 tests
+test hackrf::tests::hackrf_argv_shape_is_stable ... ok
+test mavlink::tests::altitude_translates_to_down ... ok
+test mavlink::tests::build_frame_carries_correct_message_id ... ok
+test hackrf::tests::gps_sdr_sim_argv_shape_is_stable ... ok
+test mavlink::tests::one_hundred_metres_north_projects_to_10000_cm_n ... ok
+test mavlink::tests::home_projects_to_origin ... ok
+test mavlink::tests::mavlink_bench_trips_and_dispatches_on_spoof ... ok
+test mavlink::tests::mavlink_bench_no_violation_no_latch ... ok
+test stub::tests::stub_bench_no_violation_no_latch ... ok
+test stub::tests::stub_bench_trips_and_dispatches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/falcon_sitl_hover-43920485b7b49659)
+
+running 17 tests
+test tests::ekf_watchdog_catches_intermittent_fault ... ok
+test tests::ekf_watchdog_debounces_transient_spikes ... ok
+test tests::ekf_watchdog_ignores_healthy_innovation ... ok
+test tests::deterministic_step_response_passes ... ok
+test tests::deterministic_disturbance_recovers ... ok
+test tests::deterministic_hover_settles ... ok
+test tests::noisy_attitude_cascade_still_passes ... ok
+test tests::plant_step_full_preserves_unit_quaternion_and_finite_state ... ok
+test tests::plant_step_preserves_unit_quaternion ... ok
+test tests::deterministic_attitude_cascade_passes ... ok
+test tests::noisy_step_response_still_passes ... ok
+test tests::deterministic_mission_passes ... ok
+test tests::noisy_mission_still_reaches_waypoint ... ok
+test tests::deterministic_geofence_catches_spoof_and_triggers_rtl ... ok
+test tests::deterministic_fault_triggers_rtl ... ok
+test tests::noisy_fault_still_triggers_rtl ... ok
+test tests::deterministic_untethered_mission_visits_all_waypoints ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_att-995d85976039ba0a)
+
+running 10 tests
+test tests::degenerate_input_does_not_propagate_nan ... ok
+test tests::att_p01_quaternion_error_is_unit_for_unit_inputs ... ok
+test tests::identity_setpoint_at_identity_gives_zero_rate ... ok
+test tests::negative_roll_setpoint_gives_negative_x_rate ... ok
+test tests::att_p01_shortest_arc_q_err_scalar_non_negative ... ok
+test tests::att_p03_small_angle_within_one_percent ... ok
+test tests::rate_command_clamped_to_rate_max ... ok
+test tests::sqrt_f32_matches_libm_within_tolerance ... ok
+test tests::twenty_deg_roll_setpoint_gives_positive_x_rate ... ok
+test tests::att_p01_property ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_ccsds-d4f4dc7f3407c3ac)
+
+running 22 tests
+test engine::tests::test_checksum_empty ... ok
+test engine::tests::test_checksum_single_byte ... ok
+test engine::tests::test_apid_masking ... ok
+test engine::tests::test_encode_decode_roundtrip_command ... ok
+test engine::tests::test_checksum_xor ... ok
+test engine::tests::test_encode_decode_roundtrip_telemetry ... ok
+test engine::tests::test_invalid_version ... ok
+test engine::tests::test_too_short_buffer ... ok
+test engine::tests::test_validate_packet_too_short ... ok
+test engine::tests::test_validate_packet_valid ... ok
+test engine::tests::test_version_always_zero_in_output ... ok
+test sensor_wire::tests::test_all_sensor_types ... ok
+test sensor_wire::tests::test_celsius_conversion ... ok
+test sensor_wire::tests::test_contact_sensor ... ok
+test sensor_wire::tests::test_encode_decode_roundtrip ... ok
+test sensor_wire::tests::test_invalid_version ... ok
+test sensor_wire::tests::test_max_device_id ... ok
+test sensor_wire::tests::test_negative_temperature ... ok
+test sensor_wire::tests::test_packet_size ... ok
+test sensor_wire::tests::test_too_short ... ok
+test sensor_wire::tests::test_water_sensor ... ok
+test sensor_wire::tests::test_watts_conversion ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_cfdp-2fa5e2d0c0f55098)
+
+running 10 tests
+test engine::tests::test_bounded_transactions ... ok
+test engine::tests::test_create_transaction ... ok
+test engine::tests::test_cancel_on_max_retransmit ... ok
+test engine::tests::test_get_state_invalid_id ... ok
+test engine::tests::test_eof_transition ... ok
+test engine::tests::test_state_progression ... ok
+test engine::tests::test_nak_in_wrong_state_ignored ... ok
+test engine::tests::test_nak_retransmit ... ok
+test engine::tests::test_max_retransmit_cancels ... ok
+test engine::tests::test_tick_idle_sends_metadata ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_ci-23a09e92d3622b75)
+
+running 8 tests
+test engine::tests::test_bad_stream_id ... ok
+test engine::tests::test_bad_checksum ... ok
+test engine::tests::test_compute_checksum_empty ... ok
+test engine::tests::test_invalid_cmd_code ... ok
+test engine::tests::test_compute_checksum_xor ... ok
+test engine::tests::test_length_mismatch ... ok
+test engine::tests::test_valid_command ... ok
+test engine::tests::test_valid_stream_id_lookup ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_cs-c78923b8fd656369)
+
+running 10 tests
+test engine::tests::test_batch_check_bounded ... ok
+test engine::tests::test_check_nonexistent_region ... ok
+test engine::tests::test_check_updates_last_checked ... ok
+test engine::tests::test_crc32_known_value ... ok
+test engine::tests::test_crc32_empty ... ok
+test engine::tests::test_empty_table ... ok
+test engine::tests::test_matching_baseline ... ok
+test engine::tests::test_mismatched_baseline ... ok
+test engine::tests::test_register_region ... ok
+test engine::tests::test_table_full ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_ds-b5a0fdf293a08168)
+
+running 8 tests
+test engine::tests::test_bounded_output ... ok
+test engine::tests::test_disabled_filter ... ok
+test engine::tests::test_empty_table ... ok
+test engine::tests::test_filter_count_bounded ... ok
+test engine::tests::test_matching_filter ... ok
+test engine::tests::test_no_match ... ok
+test engine::tests::test_multiple_destinations ... ok
+test engine::tests::test_table_full ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_ekf-0271deab0567f932)
+
+running 16 tests
+test tests::cross_of_parallel_is_zero ... ok
+test tests::ekf_p02_extreme_accel_does_not_produce_nan ... ok
+test tests::ekf_p02_zero_accel_does_not_produce_nan ... ok
+test tests::ekf_p01_tick_preserves_unit_quaternion ... ok
+test tests::ekf_p03_innovation_monotone_with_tilt_disagreement ... ok
+test tests::fresh_estimator_is_at_identity ... ok
+test tests::normalise_nan_returns_none ... ok
+test tests::normalise_zero_returns_none ... ok
+test tests::quat_mul_identity_left ... ok
+test tests::rotate_inverse_identity_passes_through ... ok
+test tests::quat_mul_identity_right ... ok
+test tests::ekf_p05_pure_yaw_gyro_does_not_destabilise_attitude ... ok
+test tests::ekf_p04_static_rest_converges_to_gravity_aligned ... ok
+test tests::bias_estimate_bounded ... ok
+test tests::ekf_p01_property ... ok
+test tests::ekf_p02_property_sequence ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_ekf_stub-963cfe8c840cac1e)
+
+running 9 tests
+test tests::deterministic_across_ticks_with_same_time ... ok
+test tests::fresh_stub_has_zero_time ... ok
+test tests::innovation_is_quiet_in_stub ... ok
+test tests::tick_returns_zero_position_and_velocity ... ok
+test tests::tick_passes_time_through ... ok
+test tests::tick_returns_identity_quaternion ... ok
+test tests::unit_quaternion_check_rejects_clearly_non_unit ... ok
+test tests::tick_innovation_within_healthy_range ... ok
+test tests::tick_always_emits_unit_quaternion ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/relay_es-1a9c012ba0cfb545)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/relay_evs-c53adda645dd2aa0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_fm-033c70f0ad61aa6d)
+
+running 10 tests
+test engine::tests::test_all_validation_variants ... ok
+test engine::tests::test_all_commands_valid ... ok
+test engine::tests::test_path_too_long ... ok
+test engine::tests::test_empty_path_rejected ... ok
+test engine::tests::test_null_byte_rejected ... ok
+test engine::tests::test_paths_equal_symmetric ... ok
+test engine::tests::test_delete_no_dest_needed ... ok
+test engine::tests::test_source_eq_dest_rejected ... ok
+test engine::tests::test_valid_copy_command ... ok
+test engine::tests::test_valid_path ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_hk-7986eb308f04952e)
+
+running 8 tests
+test engine::tests::test_output_bounds_check ... ok
+test engine::tests::test_multiple_copies ... ok
+test engine::tests::test_sequence_increments ... ok
+test engine::tests::test_source_bounds_check ... ok
+test engine::tests::test_single_copy ... ok
+test engine::tests::test_empty_table_collect_succeeds ... ok
+test engine::tests::test_source_not_found ... ok
+test engine::tests::test_table_full_returns_false ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_hs-ec5ba61fc16554cb)
+
+running 9 tests
+test engine::tests::test_alert_count_bounded ... ok
+test engine::tests::test_action_types ... ok
+test engine::tests::test_counter_reset_on_activity ... ok
+test engine::tests::test_counter_incrementing_no_alert ... ok
+test engine::tests::test_empty_table ... ok
+test engine::tests::test_multiple_apps ... ok
+test engine::tests::test_table_full ... ok
+test engine::tests::test_disabled_app_ignored ... ok
+test engine::tests::test_stalled_app_alert_after_max_miss ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_lc-415317f07656a257)
+
+running 17 tests
+test engine::tests::geofence_outside_d_trips ... ok
+test engine::tests::geofence_boundary_inclusive ... ok
+test engine::tests::geofence_inside_does_not_trip ... ok
+test engine::tests::geofence_outside_e_trips ... ok
+test engine::tests::geofence_outside_n_trips_once ... ok
+test engine::tests::test_bounded ... ok
+test engine::tests::test_disabled ... ok
+test engine::tests::test_empty ... ok
+test engine::tests::test_ops ... ok
+test engine::tests::test_gt_violation ... ok
+test engine::tests::test_persistence ... ok
+test engine::tests::test_persistence_reset ... ok
+test engine::tests::test_sensor_filter ... ok
+test engine::proptests::compare_matches_rust ... ok
+test engine::proptests::persistence_requires_consecutive ... ok
+test engine::proptests::disabled_never_fires ... ok
+test engine::proptests::output_always_bounded ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/relay_lc_diff-7df8a216607eaecf)
+
+running 3 tests
+test tests::compare_agrees ... ok
+test tests::persistence_sequence_agrees ... ok
+test tests::single_eval_agrees ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_mavlink-25e8b05ec459a928)
+
+running 44 tests
+test crc::tests::accumulate_slice_equals_individual ... ok
+test crc::tests::empty_input_keeps_seed ... ok
+test crc::tests::mavlink_reference_vector_123456789 ... ok
+test crc::tests::order_matters ... ok
+test crc::tests::single_byte_zero ... ok
+test frame::tests::encode_rejects_too_small_output ... ok
+test frame::tests::encode_rejects_payload_length_mismatch ... ok
+test frame::tests::frame_msg_id_three_bytes_little_endian ... ok
+test frame::tests::frame_payload_length_byte_matches ... ok
+test frame::tests::frame_starts_with_magic_v2 ... ok
+test frame::tests::peek_message_id_finds_heartbeat ... ok
+test frame::tests::peek_rejects_v1_magic ... ok
+test frame::tests::rejects_bad_crc ... ok
+test frame::tests::rejects_truncated_payload ... ok
+test frame::tests::rejects_truncated_header ... ok
+test frame::tests::rejects_v1_magic ... ok
+test frame::tests::rejects_wrong_crc_extra ... ok
+test frame::tests::round_trip_heartbeat_through_frame ... ok
+test global_position_int::tests::crc_extra_is_104 ... ok
+test global_position_int::tests::decode_rejects_empty ... ok
+test global_position_int::tests::decode_rejects_long_payload ... ok
+test global_position_int::tests::decode_rejects_short_payload ... ok
+test global_position_int::tests::field_offsets_match_spec ... ok
+test global_position_int::tests::msg_id_is_33 ... ok
+test global_position_int::tests::payload_length_is_28 ... ok
+test global_position_int::tests::round_trip_zero ... ok
+test global_position_int::tests::round_trip_sample ... ok
+test global_position_int::tests::round_trip_extremes ... ok
+test heartbeat::tests::crc_extra_is_fifty ... ok
+test heartbeat::tests::custom_mode_little_endian ... ok
+test heartbeat::tests::decode_rejects_long_payload ... ok
+test heartbeat::tests::decode_empty_payload ... ok
+test heartbeat::tests::field_offsets_match_spec ... ok
+test heartbeat::tests::decode_rejects_short_payload ... ok
+test heartbeat::tests::mav_mode_flag_or_and_contains ... ok
+test heartbeat::tests::payload_length_constant ... ok
+test heartbeat::tests::round_trip_gcs_default ... ok
+test heartbeat::tests::round_trip_max_values ... ok
+test heartbeat::tests::round_trip_falcon_default ... ok
+test heartbeat::tests::round_trip_zero ... ok
+test global_position_int::tests::round_trip_arbitrary ... ok
+test frame::tests::encode_parse_round_trip_arbitrary_seq ... ok
+test heartbeat::tests::round_trip_arbitrary ... ok
+test frame::tests::parser_never_panics ... ok
+
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_md-dcd16d67538b66f2)
+
+running 7 tests
+test engine::tests::test_bounded_output ... ok
+test engine::tests::test_disabled_entry ... ok
+test engine::tests::test_empty_table ... ok
+test engine::tests::test_single_dwell ... ok
+test engine::tests::test_rate_divisor_filtering ... ok
+test engine::tests::test_table_full ... ok
+test engine::tests::test_multiple_entries ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_mix_quad-c9922350778d706a)
+
+running 10 tests
+test tests::high_thrust_with_torque_saturates_gracefully ... ok
+test tests::mix_p03_pure_pitch_drives_front_and_back_motors_opposite ... ok
+test tests::mix_p02_outputs_in_unit_interval ... ok
+test tests::mix_p01_zero_command_gives_thrust_only ... ok
+test tests::mix_p03_pure_yaw_drives_cw_and_ccw_pairs_opposite ... ok
+test tests::nan_input_does_not_propagate ... ok
+test tests::negative_thrust_clipped_to_zero ... ok
+test tests::mix_p03_pure_roll_drives_diagonal_motor_pairs_opposite ... ok
+test tests::mix_p03_property_single_axis ... ok
+test tests::mix_p02_property ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_mm-5ffd5126925a7ab2)
+
+running 8 tests
+test engine::tests::test_alignment_error ... ok
+test engine::tests::test_boundary_address ... ok
+test engine::tests::test_fill_no_alignment_check ... ok
+test engine::tests::test_is_aligned ... ok
+test engine::tests::test_out_of_range ... ok
+test engine::tests::test_size_zero ... ok
+test engine::tests::test_valid_request ... ok
+test engine::tests::test_size_too_large ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_nid-225f0494fd18a7f5)
+
+running 20 tests
+test bitpack::tests::bitpack_basic_id_round_trip ... ok
+test bitpack::tests::bitpack_basic_id_packs_id_and_ua_type_in_same_byte ... ok
+test bitpack::tests::bitpack_location_round_trip_on_canonical ... ok
+test bitpack::tests::bitpack_location_rejects_wrong_message_type ... ok
+test bitpack::tests::bitpack_location_idempotent_after_canonicalize ... ok
+test bitpack::tests::bitpack_decoder_rejects_unknown_protocol_version ... ok
+test bitpack::tests::bitpack_location_rejects_oversize_track_byte ... ok
+test tests::basic_id_header_byte_is_well_formed ... ok
+test tests::basic_id_round_trip ... ok
+test tests::decoder_rejects_unknown_protocol_version ... ok
+test tests::location_rejects_out_of_range_timestamp ... ok
+test tests::location_rejects_out_of_range_track ... ok
+test tests::location_rejects_wrong_message_type ... ok
+test tests::location_round_trip ... ok
+test tests::proptest_decoder_never_panics ... ok
+test tests::proptest_location_round_trip_in_range ... ok
+test bitpack::tests::proptest_bitpack_location_round_trip_on_canonical ... ok
+test bitpack::tests::proptest_bitpack_decoder_never_panics ... ok
+test bitpack::tests::proptest_bitpack_basic_id_round_trip ... ok
+test tests::proptest_basic_id_round_trip ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_pos-0cc668def0e39f85)
+
+running 13 tests
+test tests::pos_p01_bounds_enforced ... ok
+test tests::east_position_error_rolls_right ... ok
+test tests::forward_position_error_pitches_nose_down ... ok
+test tests::at_setpoint_with_zero_velocity_gives_hover_thrust ... ok
+test tests::altitude_above_setpoint_reduces_thrust ... ok
+test tests::altitude_below_setpoint_increases_thrust ... ok
+test tests::degenerate_input_does_not_propagate ... ok
+test tests::reset_clears_integral ... ok
+test tests::yaw_held_when_setpoint_is_nan ... ok
+test tests::yaw_setpoint_is_followed ... ok
+test tests::tilt_clamped_to_tilt_max ... ok
+test tests::v_setpoint_clamped_to_v_max ... ok
+test tests::pos_p01_property ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_primitives-b1c7b88d9e0fe321)
+
+running 34 tests
+test ccsds::tests::apid_masked_to_eleven_bits ... ok
+test ccsds::tests::checksum_empty_is_zero ... ok
+test ccsds::tests::checksum_self_inverse ... ok
+test ccsds::tests::checksum_xor ... ok
+test ccsds::tests::version_bits_always_zero ... ok
+test ccsds::tests::decode_too_short ... ok
+test ccsds::tests::header_size_is_six ... ok
+test ccsds::tests::encode_then_decode_roundtrip ... ok
+test compare::tests::all_ops_total_on_zero_zero ... ok
+test compare::tests::less_than ... ok
+test crc32::tests::deterministic ... ok
+test crc32::tests::empty_is_zero ... ok
+test crc32::tests::known_value_123456789 ... ok
+test filter::tests::false_is_drop ... ok
+test filter::tests::total_deterministic ... ok
+test filter::tests::true_is_keep ... ok
+test merge::tests::alternates_under_contention ... ok
+test merge::tests::both_empty_is_none ... ok
+test merge::tests::fairness_over_four_rounds ... ok
+test merge::tests::last_flag_updates_correctly ... ok
+test merge::tests::only_right_picks_right ... ok
+test merge::tests::only_left_picks_left ... ok
+test persistence::tests::counter_saturates ... ok
+test persistence::tests::event_at_threshold_fires ... ok
+test persistence::tests::event_below_threshold_is_pending ... ok
+test persistence::tests::no_event_resets ... ok
+test persistence::tests::persistence_zero_always_fires_on_event ... ok
+test rate_divide::tests::divisor_five_emits_every_fifth ... ok
+test rate_divide::tests::divisor_one_always_emits ... ok
+test rate_divide::tests::divisor_zero_never_emits ... ok
+test time_gate::tests::absolute_due_after ... ok
+test time_gate::tests::absolute_due_at_exact ... ok
+test time_gate::tests::absolute_not_due_before ... ok
+test time_gate::tests::relative_equivalent_to_absolute ... ok
+
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_rate-02e805db9b63512c)
+
+running 13 tests
+test tests::fresh_pid_has_zero_state ... ok
+test tests::at_zero_error_output_is_zero ... ok
+test tests::negative_error_drives_negative_torque ... ok
+test tests::rate_p02_infinite_setpoint_does_not_propagate ... ok
+test tests::rate_p02_nan_input_does_not_propagate ... ok
+test tests::positive_error_drives_positive_torque ... ok
+test tests::out_of_range_dt_clamped_safely ... ok
+test tests::reset_clears_state ... ok
+test tests::rate_p03_step_response_drives_error_to_zero ... ok
+test tests::output_clamped_to_torque_max ... ok
+test tests::rate_p01_anti_windup_holds_integral_at_bound ... ok
+test tests::rate_p02_property ... ok
+test tests::rate_p01_property ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/relay_sb-ac9faa492f67f0b8)
+
+running 11 tests
+test core::tests::test_duplicate_subscribe_idempotent ... ok
+test core::tests::test_max_subscribers_per_channel ... ok
+test core::tests::test_channel_isolation ... ok
+test core::tests::test_publish_multiple_subscribers ... ok
+test core::tests::test_publish_no_subscribers ... ok
+test core::tests::test_queue_full_drops_message ... ok
+test core::tests::test_stats_after_unsubscribe ... ok
+test core::tests::test_stats_tracking ... ok
+test core::tests::test_subscribe_and_get ... ok
+test core::tests::test_unsubscribe ... ok
+test core::tests::test_unsubscribe_nonexistent ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_sc-3d39e1caa06c3c07)
+
+running 13 tests
+test engine::tests::test_ats_not_dispatched_early ... ok
+test engine::tests::test_ats_not_redispatched ... ok
+test engine::tests::test_ats_table_full_returns_false ... ok
+test engine::tests::test_ats_dispatch_at_correct_time ... ok
+test engine::tests::test_empty_store_no_dispatches ... ok
+test engine::tests::test_rts_sequence_execution ... ok
+test engine::tests::test_dispatch_count_bounded ... ok
+test engine::tests::test_rts_stop ... ok
+test engine::tests::test_start_rts_empty_sequence_returns_false ... ok
+test engine::tests::test_start_rts_invalid_id_returns_false ... ok
+test engine::proptests::dispatch_count_always_bounded ... ok
+test engine::proptests::ats_not_dispatched_early ... ok
+test engine::proptests::dispatched_commands_not_redispatched ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_sca-6624dbf7d2086ad8)
+
+running 8 tests
+test engine::tests::test_empty_table_no_dispatches ... ok
+test engine::tests::test_dispatch_at_exact_time ... ok
+test engine::tests::test_disabled_not_dispatched ... ok
+test engine::tests::test_multiple_commands_different_times ... ok
+test engine::tests::test_dispatch_count_bounded ... ok
+test engine::tests::test_not_dispatched_early ... ok
+test engine::tests::test_not_redispatched ... ok
+test engine::tests::test_table_full_returns_false ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_sch-d54e2cda0a8676e6)
+
+running 10 tests
+test engine::tests::test_disabled ... ok
+test engine::tests::test_empty ... ok
+test engine::tests::test_enable ... ok
+test engine::tests::test_major ... ok
+test engine::tests::test_match ... ok
+test engine::tests::test_full ... ok
+test engine::tests::test_bounded ... ok
+test engine::proptests::disabled_slot_never_fires ... ok
+test engine::proptests::major_frame_zero_is_wildcard ... ok
+test engine::proptests::tick_output_always_bounded ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_tbl-bbdc4abd61bf5d0a)
+
+running 8 tests
+test engine::tests::test_double_buffer_swap ... ok
+test engine::tests::test_activate_without_load_fails ... ok
+test engine::tests::test_empty_registry ... ok
+test engine::tests::test_load_and_activate ... ok
+test engine::tests::test_register_and_get ... ok
+test engine::tests::test_registry_full ... ok
+test engine::tests::test_size_mismatch ... ok
+test engine::tests::test_not_found ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/relay_time-6c3625052b95a137)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests plain/src/lib.rs (target/llvm-cov-target/debug/deps/relay_to-83d51e51540ae82d)
+
+running 7 tests
+test engine::tests::test_active_count ... ok
+test engine::tests::test_bounded_table ... ok
+test engine::tests::test_disabled_subscription ... ok
+test engine::tests::test_empty_table ... ok
+test engine::tests::test_subscribe_and_include ... ok
+test engine::tests::test_not_subscribed ... ok
+test engine::tests::test_unsubscribe ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Filename                                                  Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+crates/relay-att/plain/src/lib.rs                             380                31    91.84%          27                 6    77.78%         207                29    85.99%           0                 0         -
+crates/relay-ccsds/plain/src/engine.rs                        227                 0   100.00%          15                 0   100.00%         172                 0   100.00%           0                 0         -
+crates/relay-ccsds/plain/src/sensor_wire.rs                   209                 4    98.09%          16                 0   100.00%         174                 0   100.00%           0                 0         -
+crates/relay-cfdp/plain/src/engine.rs                         371                27    92.72%          20                 0   100.00%         240                25    89.58%           0                 0         -
+crates/relay-ci/plain/src/engine.rs                           135                 3    97.78%          14                 1    92.86%         125                 3    97.60%           0                 0         -
+crates/relay-cs/plain/src/engine.rs                           237                 1    99.58%          18                 0   100.00%         162                 1    99.38%           0                 0         -
+crates/relay-ds/plain/src/engine.rs                           157                 0   100.00%          14                 0   100.00%         156                 0   100.00%           0                 0         -
+crates/relay-ekf-stub/plain/src/lib.rs                        105                 0   100.00%          11                 0   100.00%          63                 0   100.00%           0                 0         -
+crates/relay-ekf/plain/src/lib.rs                             458                36    92.14%          38                 7    81.58%         264                37    85.98%           0                 0         -
+crates/relay-fm/plain/src/engine.rs                           231                 6    97.40%          16                 0   100.00%         141                 5    96.45%           0                 0         -
+crates/relay-hk/plain/src/engine.rs                           239                 4    98.33%          15                 1    93.33%         159                 1    99.37%           0                 0         -
+crates/relay-hs/plain/src/engine.rs                           274                 7    97.45%          20                 1    95.00%         194                 3    98.45%           0                 0         -
+crates/relay-lc-diff/src/lib.rs                                50                 1    98.00%           4                 0   100.00%          44                 1    97.73%           0                 0         -
+crates/relay-lc/plain/src/engine.rs                           270                 4    98.52%          23                 1    95.65%         106                 1    99.06%           0                 0         -
+crates/relay-mavlink/plain/src/crc.rs                          85                 3    96.47%          10                 1    90.00%          53                 3    94.34%           0                 0         -
+crates/relay-mavlink/plain/src/frame.rs                       300                 3    99.00%          18                 1    94.44%         212                 3    98.58%           0                 0         -
+crates/relay-mavlink/plain/src/global_position_int.rs         153                 0   100.00%          13                 0   100.00%         100                 0   100.00%           0                 0         -
+crates/relay-mavlink/plain/src/heartbeat.rs                   161                 3    98.14%          19                 1    94.74%         144                 3    97.92%           0                 0         -
+crates/relay-md/plain/src/engine.rs                           149                 0   100.00%          12                 0   100.00%         142                 0   100.00%           0                 0         -
+crates/relay-mix-quad/plain/src/lib.rs                        201                 2    99.00%          14                 0   100.00%         105                 1    99.05%           0                 0         -
+crates/relay-mm/plain/src/engine.rs                           124                 4    96.77%          12                 1    91.67%         125                 9    92.80%           0                 0         -
+crates/relay-nid/plain/src/bitpack.rs                         281                 8    97.15%          14                 0   100.00%         164                 1    99.39%           0                 0         -
+crates/relay-nid/plain/src/lib.rs                             275                11    96.00%          17                 0   100.00%         162                 2    98.77%           0                 0         -
+crates/relay-pos/plain/src/lib.rs                             472                26    94.49%          30                 5    83.33%         318                29    90.88%           0                 0         -
+crates/relay-primitives/plain/src/ccsds.rs                    174                 5    97.13%          12                 0   100.00%         116                 3    97.41%           0                 0         -
+crates/relay-primitives/plain/src/compare.rs                   35                 0   100.00%           4                 0   100.00%          35                 0   100.00%           0                 0         -
+crates/relay-primitives/plain/src/crc32.rs                     34                 0   100.00%           4                 0   100.00%          20                 0   100.00%           0                 0         -
+crates/relay-primitives/plain/src/filter.rs                    24                 0   100.00%           4                 0   100.00%          14                 0   100.00%           0                 0         -
+crates/relay-primitives/plain/src/merge.rs                     73                 1    98.63%           8                 0   100.00%          53                 1    98.11%           0                 0         -
+crates/relay-primitives/plain/src/persistence.rs               47                 0   100.00%           8                 0   100.00%          38                 0   100.00%           0                 0         -
+crates/relay-primitives/plain/src/rate_divide.rs               32                 0   100.00%           4                 0   100.00%          22                 0   100.00%           0                 0         -
+crates/relay-primitives/plain/src/time_gate.rs                 34                 0   100.00%           6                 0   100.00%          22                 0   100.00%           0                 0         -
+crates/relay-rate/plain/src/lib.rs                            358                30    91.62%          27                 5    81.48%         211                25    88.15%           0                 0         -
+crates/relay-sc/plain/src/engine.rs                           252                 6    97.62%          21                 1    95.24%         215                 1    99.53%           0                 0         -
+crates/relay-sca/plain/src/engine.rs                          161                 3    98.14%          14                 1    92.86%         176                 3    98.30%           0                 0         -
+crates/relay-sch/plain/src/engine.rs                          140                 3    97.86%          14                 1    92.86%          47                 1    97.87%           0                 0         -
+crates/relay-tbl/plain/src/engine.rs                          236                 5    97.88%          15                 0   100.00%         152                 5    96.71%           0                 0         -
+crates/relay-to/plain/src/engine.rs                           150                 0   100.00%          13                 0   100.00%          97                 0   100.00%           0                 0         -
+host/relay-sb/src/core.rs                                     367                 4    98.91%          28                 0   100.00%         221                 3    98.64%           0                 0         -
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                                                        7661               241    96.85%         592                34    94.26%        5171               199    96.15%           0                 0         -

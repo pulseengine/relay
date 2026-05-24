@@ -1,0 +1,45 @@
+artifacts:
+  - id: SWREQ-FALCON-SIM-P01
+    type: sw-req
+    title: "PX4-SITL end-to-end loop — MavlinkBench against a 3D physics sim"
+    status: approved
+    description: >
+      The HITL harness shall close the verified relay-lc → relay-sc
+      loop against a real PX4 flight-controller running in software-
+      in-the-loop with a 3D physics backend (jMAVSim or Gazebo),
+      using the existing v0.12 MavlinkBench backend with no new
+      code on the falcon side.
+
+      The harness shall provide:
+
+        1. A `--preset=px4-sitl` CLI flag in `falcon-hitl-rfspoof`
+           that fills in the canonical PX4 takeoff coordinate
+           (47.3977°N, 8.5456°E, 488 m AMSL — Zürich / ETH), the
+           default MAVLink listen port (UDP 14550) and a 30 s
+           duration. Explicit `--listen=`/`--home=`/`--duration=`
+           flags still override the preset.
+        2. A `sim/px4-sitl/README.md` documenting the bench recipe
+           (PX4-Autopilot install, jMAVSim/Gazebo launch, takeoff
+           command in `pxh>` console, expected verdict shape,
+           troubleshooting table).
+
+      No shell-script wrappers — the runner is the harness binary
+      itself, called via `cargo run -p falcon-hitl-rfspoof --
+      --preset=px4-sitl`.
+
+      The loop closing depends only on PX4-SITL emitting
+      GLOBAL_POSITION_INT (MAVLink id 33) on UDP 14550 (PX4's
+      stock behaviour). On every position update the verified
+      `Geofence::check` runs against the FC's reported NED
+      position; on the first violation the verified
+      `CommandStore::start_rts` dispatches the RTL command code
+      (0xA17C, same as SITL + StubBench).
+    tags: [falcon, sim, px4, mavlink, hitl, v0.14]
+    fields:
+      preset: "--preset=px4-sitl"
+      mavlink-port: 14550
+      mavlink-message: "GLOBAL_POSITION_INT (id 33)"
+      home-coord: "47.3977,8.5456,488 (PX4 default takeoff, ETH)"
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-016
