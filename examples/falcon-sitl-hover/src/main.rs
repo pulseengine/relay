@@ -49,6 +49,7 @@ use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{quat_mul, Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
 use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTimestamp};
+use relay_lc::engine::Geofence;
 use relay_rate::{RatePid, Timestamp as RateTimestamp};
 use relay_sc::engine::{CommandStore, RtsCommand};
 
@@ -224,6 +225,11 @@ enum Scenario {
     /// RTS sequences four waypoints (N → E → S → home); each leg's
     /// SET_WAYPOINT command is dispatched by the verified engine.
     Untethered,
+    /// v0.10: EW-simulated GPS spoof — the position fed to the
+    /// controller is shifted off truth; relay-lc geofence (Verus-
+    /// verified LC-P09/P10) catches the truth-position violation
+    /// and the existing relay-sc RTL RTS retargets the vehicle home.
+    Geofence,
     All,
 }
 
@@ -1074,6 +1080,164 @@ fn run_untethered(noise_std: f32) -> ScenarioResult {
     }
 }
 
+/// v0.10 geofence + EW-simulated GPS spoof scenario.
+///
+/// A continuous position-spoofing fault: the position fed to the
+/// position controller is `truth + spoof_offset` (a –10 m north
+/// shift). The cascade chases its perceived position to the
+/// commanded waypoint, so the *true* position drifts well past
+/// the geofence the spoofed sensor would slip. relay-lc's verified
+/// Geofence checks the *true* position each tick (LC-P09, LC-P10)
+/// — on the first violation it latches and the SITL triggers the
+/// same relay-sc RTL RTS the v0.8 EkfHealthMonitor uses. One
+/// safety pattern (`detect → relay-sc → cascade`), two detectors.
+///
+/// Pass: geofence latched, RTL dispatched, true position genuinely
+/// drove past the fence (proving the spoof was effective), no NaN.
+fn run_geofence(noise_std: f32) -> ScenarioResult {
+    let mut plant = Plant::at_rest();
+    let mut ekf = Ekf::new();
+    let mut rate_pid = RatePid::new();
+    let mut att = AttController::new();
+    let mut pos = PosController::new();
+    let mut mixer = QuadMixer::new();
+    let mut rng = Rng::new(0x6E0FE17C);
+    let mut sc = CommandStore::new();
+
+    // Geofence: ±15 m N/E, ±5 m D (cm units in the verified engine).
+    let mut geofence = Geofence::new(-1500, 1500, -1500, 1500, -500, 500);
+
+    sc.load_rts_command(
+        RTL_RTS_ID,
+        RtsCommand {
+            delay_sec: 0,
+            command_code: RTL_CMD_CODE,
+            payload_offset: 0,
+            payload_len: 0,
+        },
+    );
+
+    let dt = 1.0 / SAMPLE_RATE_HZ;
+    let mission_seconds = 16.0_f32;
+    let n = (mission_seconds * SAMPLE_RATE_HZ) as usize;
+
+    // Mission waypoint deliberately OUTSIDE the geofence (+25 m N) so
+    // the cascade is pushing the vehicle past +15 m. Combined with
+    // the −10 m N spoof, true position runs to ~+35 m if unhindered.
+    let waypoint = [25.0_f32, 0.0, 0.0];
+    let mission_sp = PositionSetpoint::hover_at(waypoint);
+    let rtl_sp = PositionSetpoint::hover_at([0.0, 0.0, 0.0]);
+
+    let pos_decimation = 20_usize;
+    let att_decimation = 4_usize;
+    let mut current_attitude_setpoint = [1.0_f32, 0.0, 0.0, 0.0];
+    let mut current_thrust = 0.5_f32;
+    let mut current_rate_setpoint = [0.0_f32; 3];
+
+    // EW-simulated spoof: a constant offset added to the position the
+    // controller sees. The geofence checks the *true* plant position
+    // — that's what makes the spoof useless against it.
+    let spoof_offset = [-10.0_f32, 0.0, 0.0];
+
+    let mut violation_time_s = f32::NAN;
+    let mut rtl_dispatched = false;
+    let mut peak_true_n = 0.0_f32;
+    let mut nan_seen = false;
+
+    let t0 = Instant::now();
+    for i in 0..n {
+        let t = i as f32 * dt;
+        let time_sec = t as u64;
+
+        let (mut sample, gyro) = plant.measure(&mut rng, noise_std);
+        sample.time = ekf_ts_of(t);
+        let st = ekf.tick(sample);
+        if !st.quaternion[0].is_finite() {
+            nan_seen = true;
+        }
+
+        // GPS spoof — what the controller "sees".
+        let spoofed_p_ned = [
+            plant.p_ned[0] + spoof_offset[0],
+            plant.p_ned[1] + spoof_offset[1],
+            plant.p_ned[2] + spoof_offset[2],
+        ];
+
+        // relay-lc verified geofence checks TRUE position each tick.
+        let truth_cm = [
+            (plant.p_ned[0] * 100.0) as i32,
+            (plant.p_ned[1] * 100.0) as i32,
+            (plant.p_ned[2] * 100.0) as i32,
+        ];
+        if geofence.check(truth_cm[0], truth_cm[1], truth_cm[2]) {
+            violation_time_s = t;
+            sc.start_rts(RTL_RTS_ID, time_sec);
+        }
+
+        // relay-sc dispatch — RTL command latches rtl_dispatched.
+        let result = sc.process_tick(time_sec);
+        for j in 0..(result.dispatch_count as usize) {
+            if result.dispatched[j].command_code == RTL_CMD_CODE {
+                rtl_dispatched = true;
+            }
+        }
+        let setpoint = if rtl_dispatched { rtl_sp } else { mission_sp };
+
+        if i % pos_decimation == 0 {
+            let att_sp = pos.tick(
+                pos_ts_of(t),
+                spoofed_p_ned, // SPOOFED — the controller is fooled
+                plant.v_ned,
+                st.quaternion,
+                setpoint,
+            );
+            current_attitude_setpoint = att_sp.quaternion;
+            current_thrust = att_sp.thrust;
+        }
+        if i % att_decimation == 0 {
+            current_rate_setpoint =
+                att.tick(att_ts_of(t), st.quaternion, current_attitude_setpoint);
+        }
+        let torque = rate_pid.tick(rate_ts_of(t), gyro, current_rate_setpoint);
+        for k in 0..3 {
+            if !torque[k].is_finite() {
+                nan_seen = true;
+            }
+        }
+        let _motors = mixer.mix(torque, current_thrust);
+        if mixer.last_motors().iter().any(|v| !v.is_finite()) {
+            nan_seen = true;
+        }
+        plant.step_full(torque, current_thrust, dt);
+
+        if plant.p_ned[0] > peak_true_n {
+            peak_true_n = plant.p_ned[0];
+        }
+    }
+    let elapsed = t0.elapsed().as_micros();
+
+    let geofence_latched = geofence.violation_active();
+    let pass = !nan_seen
+        && geofence_latched
+        && rtl_dispatched
+        && !violation_time_s.is_nan()
+        // Truth genuinely passed the fence — proves the spoof was effective.
+        && peak_true_n > 15.0;
+
+    ScenarioResult {
+        label: "geofence",
+        samples: n,
+        final_omega: plant.p_ned,
+        peak_omega_after_setup: peak_true_n,
+        rms_error_steady: 0.0,
+        convergence_time_s: violation_time_s,
+        overshoot_pct: 0.0,
+        nan_seen,
+        elapsed_micros: elapsed,
+        pass,
+    }
+}
+
 fn print_result(r: &ScenarioResult) {
     println!("--- scenario: {} ---", r.label);
     println!("  samples              {}", r.samples);
@@ -1092,6 +1256,10 @@ fn print_result(r: &ScenarioResult) {
             r.final_omega[0], r.final_omega[1], r.final_omega[2]);
         println!("  worst waypoint min   {:.3} m", r.peak_omega_after_setup);
         println!("  final distance home  {:.3} m", r.overshoot_pct);
+    } else if r.label == "geofence" {
+        println!("  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        println!("  peak true-N (truth)  {:+.2} m (fence at +15.00 m)", r.peak_omega_after_setup);
     } else {
         println!("  final ω (rad/s)      [{:+.4}, {:+.4}, {:+.4}]",
             r.final_omega[0], r.final_omega[1], r.final_omega[2]);
@@ -1118,6 +1286,8 @@ fn print_result(r: &ScenarioResult) {
         println!("  RTL detection        {:.3}s after fault injection", r.convergence_time_s);
     } else if r.label == "untethered" {
         println!("  mission completed    in {:.1}s", r.convergence_time_s);
+    } else if r.label == "geofence" {
+        println!("  geofence violation   at {:.3}s", r.convergence_time_s);
     } else {
         println!("  convergence time     {:.3}s", r.convergence_time_s);
     }
@@ -1143,7 +1313,8 @@ fn print_help() {
            attitude     ATT→RATE→MIX cascade tilts vehicle 20° about x (v0.4)\n  \
            mission      POS→ATT→RATE→MIX cascade flies to 10m waypoint (v0.5)\n  \
            fault        injected EKF fault trips the relay-hs watchdog → RTL (v0.8)\n  \
-           untethered   relay-sc RTS sequences a 4-waypoint autonomous mission (v0.9)\n"
+           untethered   relay-sc RTS sequences a 4-waypoint autonomous mission (v0.9)\n  \
+           geofence     EW-simulated GPS spoof → relay-lc geofence catches truth → RTL (v0.10)\n"
     );
 }
 
@@ -1163,9 +1334,10 @@ fn main() -> ExitCode {
                 Some("mission") => scenario = Scenario::Mission,
                 Some("fault") => scenario = Scenario::Fault,
                 Some("untethered") => scenario = Scenario::Untethered,
+                Some("geofence") => scenario = Scenario::Geofence,
                 Some("all") => scenario = Scenario::All,
                 other => {
-                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|mission|fault|untethered|all, got {:?}", other);
+                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|mission|fault|untethered|geofence|all, got {:?}", other);
                     return ExitCode::from(2);
                 }
             },
@@ -1198,6 +1370,7 @@ fn main() -> ExitCode {
             Scenario::Mission => run_mission(noise),
             Scenario::Fault => run_fault(noise),
             Scenario::Untethered => run_untethered(noise),
+            Scenario::Geofence => run_geofence(noise),
             Scenario::All => unreachable!(),
         }
     };
@@ -1212,6 +1385,7 @@ fn main() -> ExitCode {
             results.push(run_one(Scenario::Mission));
             results.push(run_one(Scenario::Fault));
             results.push(run_one(Scenario::Untethered));
+            results.push(run_one(Scenario::Geofence));
         }
         s => results.push(run_one(s)),
     }
@@ -1376,6 +1550,19 @@ mod tests {
             tripped && wd.rtl_active(),
             "sliding window should catch a 4-of-5 intermittent fault"
         );
+    }
+
+    #[test]
+    fn deterministic_geofence_catches_spoof_and_triggers_rtl() {
+        let r = run_geofence(0.0);
+        assert!(r.pass, "geofence result: {:?}", r);
+        assert!(!r.nan_seen);
+        // Truth genuinely drove past the +15 m fence — proves the
+        // spoof was effective (the controller can't see this).
+        assert!(r.peak_omega_after_setup > 15.0,
+            "peak true-N {:.3} m did not exceed +15 m fence",
+            r.peak_omega_after_setup);
+        assert!(!r.convergence_time_s.is_nan(), "geofence never latched");
     }
 
     #[test]

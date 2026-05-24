@@ -15,6 +15,8 @@
 //!   LC-P06: compare() is total (INHERITED from relay-primitives CMP-P01..P03)
 //!   LC-P07: Persistence counter semantics (INHERITED from relay-primitives PER-P01..P05)
 //!   LC-P08: Violation only fires when current_count >= persistence (INHERITED)
+//!   LC-P09: Geofence violation latch is monotone (once tripped, always)
+//!   LC-P10: Geofence::check returns true only on the violation transition
 //!
 //! NO async, NO alloc, NO trait objects, NO closures.
 //!
@@ -302,6 +304,105 @@ impl WatchpointTable {
 }
 
 // =================================================================
+// Geofence (LC-P09, LC-P10): position-bounds violation latch (v0.10)
+// =================================================================
+//
+// A NED-frame axis-aligned bounding box on vehicle position; the
+// caller feeds the *true* position each tick (so a spoofed sensor
+// can't slip the box). On the first tick the position exits the
+// box, `check` returns true and the latch sticks — the SITL
+// `geofence` scenario then triggers the verified relay-sc RTL RTS
+// (the same one v0.8's EkfHealthMonitor uses), so the cFS-DNA
+// safety pattern is uniform across detection sources.
+//
+// Position is in centimetres (i32) — integer arithmetic for clean
+// Verus proofs; the SITL converts from f32 metres at the boundary.
+
+pub struct Geofence {
+    pub min_n: i32,
+    pub max_n: i32,
+    pub min_e: i32,
+    pub max_e: i32,
+    pub min_d: i32,
+    pub max_d: i32,
+    /// Latches once any check fails. Monotone — never un-latches.
+    pub violation_latched: bool,
+}
+
+impl Geofence {
+    pub open spec fn inv(&self) -> bool {
+        &&& self.min_n <= self.max_n
+        &&& self.min_e <= self.max_e
+        &&& self.min_d <= self.max_d
+    }
+
+    #[verifier::external_body]
+    pub fn new(
+        min_n: i32,
+        max_n: i32,
+        min_e: i32,
+        max_e: i32,
+        min_d: i32,
+        max_d: i32,
+    ) -> (result: Self)
+        requires
+            min_n <= max_n,
+            min_e <= max_e,
+            min_d <= max_d,
+        ensures
+            result.inv(),
+            !result.violation_latched,
+    {
+        Geofence {
+            min_n,
+            max_n,
+            min_e,
+            max_e,
+            min_d,
+            max_d,
+            violation_latched: false,
+        }
+    }
+
+    /// Feed one *true* position sample (cm, NED). Returns `true`
+    /// only on the tick the latch trips.
+    pub fn check(&mut self, n: i32, e: i32, d: i32) -> (result: bool)
+        requires
+            old(self).inv(),
+        ensures
+            self.inv(),
+            // LC-P09: monotone latch — once tripped, always.
+            old(self).violation_latched ==> self.violation_latched,
+            // LC-P10: result is true only on the violation transition.
+            result == (self.violation_latched && !old(self).violation_latched),
+    {
+        if self.violation_latched {
+            return false;
+        }
+        let inside = n >= self.min_n
+            && n <= self.max_n
+            && e >= self.min_e
+            && e <= self.max_e
+            && d >= self.min_d
+            && d <= self.max_d;
+        if !inside {
+            self.violation_latched = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn violation_active(&self) -> (result: bool)
+        requires
+            self.inv(),
+        ensures
+            result == self.violation_latched,
+    {
+        self.violation_latched
+    }
+}
+
+// =================================================================
 // Compositional proofs
 // =================================================================
 
@@ -311,5 +412,12 @@ impl WatchpointTable {
 
 // LC-P06: compare() is total — proven by the ensures clause on compare() itself.
 // Each branch returns a bool, and Verus verifies the ensures for all 6 operators.
+
+// LC-P09: Geofence violation latch is monotone — proven by the early
+//         `if self.violation_latched` return (state unchanged) and the
+//         only mutation being false → true (`violation_latched = true`).
+// LC-P10: check() returns true only on the violation transition —
+//         single `return true` path both sets violation_latched and is
+//         reachable only from the `!violation_latched` entry state.
 
 } // verus!

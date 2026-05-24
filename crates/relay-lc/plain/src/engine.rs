@@ -63,6 +63,71 @@ impl WatchpointTable {
     }
 }
 
+// =================================================================
+// Geofence (LC-P09, LC-P10): position-bounds violation latch (v0.10)
+// =================================================================
+//
+// Verus-stripped from ../src/engine.rs.
+//   LC-P09: violation_latched is monotone (once true, always true).
+//   LC-P10: check() returns true only on the violation transition.
+//
+// Position is in centimetres (i32) so the engine stays pure integer
+// — the SITL converts from f32 metres at the boundary.
+
+pub struct Geofence {
+    pub min_n: i32,
+    pub max_n: i32,
+    pub min_e: i32,
+    pub max_e: i32,
+    pub min_d: i32,
+    pub max_d: i32,
+    pub violation_latched: bool,
+}
+
+impl Geofence {
+    pub fn new(
+        min_n: i32,
+        max_n: i32,
+        min_e: i32,
+        max_e: i32,
+        min_d: i32,
+        max_d: i32,
+    ) -> Self {
+        Geofence {
+            min_n,
+            max_n,
+            min_e,
+            max_e,
+            min_d,
+            max_d,
+            violation_latched: false,
+        }
+    }
+
+    /// Feed one *true* position sample (cm, NED). Returns `true`
+    /// only on the tick the latch trips.
+    pub fn check(&mut self, n: i32, e: i32, d: i32) -> bool {
+        if self.violation_latched {
+            return false;
+        }
+        let inside = n >= self.min_n
+            && n <= self.max_n
+            && e >= self.min_e
+            && e <= self.max_e
+            && d >= self.min_d
+            && d <= self.max_d;
+        if !inside {
+            self.violation_latched = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn violation_active(&self) -> bool {
+        self.violation_latched
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

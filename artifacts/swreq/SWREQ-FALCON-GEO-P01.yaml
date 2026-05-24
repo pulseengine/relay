@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-GEO-P01
+    type: sw-req
+    title: "GEO-P01 — relay-lc Geofence latches RTL on first true-position violation, monotone"
+    status: approved
+    description: >
+      The relay-lc Geofence engine shall hold an axis-aligned bounding
+      box on vehicle position (NED, centimetres) and, when fed the
+      vehicle's *true* position each tick, latch a Return-To-Launch
+      alert on the first sample outside the box. The caller is
+      responsible for feeding truth (not the spoofable sensor estimate)
+      — that's how the engine remains immune to EW-style position
+      spoofing of the cascade's sensor input.
+
+      Property summary (Verus, ASIL-D):
+        GEO-P01 = LC-P09: violation_latched is monotone — once true,
+                          stays true (the latch is the safe state).
+        GEO-P02 = LC-P10: check() returns true only on the violation
+                          transition (so the caller can timestamp the
+                          event exactly once).
+
+      The cFS-DNA path: on the latch transition the caller starts
+      the existing relay-sc RTL RTS (SYSREQ-FALCON-011's path); the
+      verified dispatcher emits the RTL command; the cascade
+      retargets to home. One safety pattern, two detection sources.
+    tags: [falcon, sw-req, safety, geofence, relay-lc, verus, v0.10]
+    fields:
+      req-type: functional
+      priority: must
+      maps-to-verified-property: "LC-P09 (monotone latch), LC-P10 (transition-only)"
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-014

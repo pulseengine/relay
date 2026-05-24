@@ -509,18 +509,54 @@ artifacts:
 
   - id: FEAT-FALCON-v0.10
     type: feature
-    title: "v0.10 — geofence + RTL under EW-simulated GPS loss"
-    status: pending
+    title: "v0.10 — geofence + RTL under EW-simulated GPS spoofing"
+    status: approved
     description: >
-      relay-lc geofence triggers relay-sc RTL sequence. Validated
-      under EW-simulated GPS loss / spoofing in HITL harness.
+      LANDED. Verus-verified geofence in relay-lc + SITL EW-spoof
+      scenario that exercises it end-to-end through the existing
+      cFS-DNA RTL path.
 
-      Verification chain delta:
-        - abstract interpretation pass via MIRAI or Charon-based
-          analyzer (closes the third DO-333 technique class)
-    tags: [falcon, milestone, v0.10, geofence, rtl, ew]
+      Ships:
+        - crates/relay-lc — verified Geofence engine: an axis-aligned
+          NED bounding box on vehicle position (i32 centimetres,
+          pure-integer arithmetic), with a check(n, e, d) method
+          that latches a monotone safe-state on the first
+          violation. Verus discharges LC-P09 (monotone latch) and
+          LC-P10 (transition-only) — same shape as the v0.8
+          EkfHealthMonitor's HS-P06 / HS-P07 contract.
+        - examples/falcon-sitl-hover `geofence` scenario — a
+          continuous −10 m N spoof on the position fed to the
+          controller, mission waypoint at +25 m N. The cascade
+          chases its perceived position so *true* position drifts
+          past the +15 m fence. relay-lc.check on truth latches;
+          the existing relay-sc RTL RTS (v0.8's path) dispatches
+          the RTL command; cascade retargets home.
+        - Rivet artifacts: SYSREQ-FALCON-014 (geofence safety),
+          SWREQ-FALCON-GEO-P01, FV-FALCON-GEO-001.
+
+      The cFS-DNA pattern is now uniform across detection sources:
+      relay-hs EkfHealthMonitor (v0.8) and relay-lc Geofence (v0.10)
+      both terminate at the same relay-sc RTL RTS. One verified
+      dispatch path, two verified detectors, end-to-end SITL.
+
+      Verification:
+        - bazel test //:relay_lc_verus_test → LC-P09 + LC-P10 ✓
+        - cargo test -p falcon-sitl-hover → 17/17 (the new
+          deterministic_geofence_catches_spoof_and_triggers_rtl
+          plus the prior 16).
+        - rivet validate clean.
+
+      Honestly deferred to v0.10.x:
+        - Kani harnesses on Geofence::check (mirrors v0.9.1's
+          EkfHealthMonitor pattern).
+        - Abstract interpretation (MIRAI / Charon) — the
+          rollout's third DO-333 technique class.
+        - HITL hardware against a real RF-spoofing source.
+    tags: [falcon, milestone, v0.10, geofence, rtl, ew, gps-spoof, landed]
     fields:
-      release-target: "geofence/RTL validated; AI in chain"
+      release-target: "geofence safety path verified + EW-spoof SITL"
+      verus-properties: "LC-P09, LC-P10"
+      example: examples/falcon-sitl-hover
     links:
       - type: depends-on
         target: FEAT-FALCON-v0.9
