@@ -1,0 +1,116 @@
+-- Falcon control cascade — periodic-thread architecture.
+--
+-- Each controller is a periodic thread on the autopilot processor.
+-- The cascade runs at 200 Hz (5 ms period); each controller's WCET
+-- is well under the period so schedulability is trivial for spar's
+-- bin-packing analysis. The data flow is feed-forward:
+--
+--     IMU → EKF → Position → Attitude → Rate → Mixer → motors
+
+package Falcon_Cascade
+public
+  with Falcon_Types;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Controller threads
+  -- ══════════════════════════════════════════════════════════════
+
+  thread EkfThread
+    features
+      imu_in: in data port Falcon_Types::ImuSample;
+      state_out: out data port Falcon_Types::VehicleState;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 5 ms;
+      Compute_Execution_Time => 0 ms .. 1 ms;
+      Deadline => 5 ms;
+      Priority => 10;
+      Stack_Size => 4096 Bytes;
+  end EkfThread;
+
+  thread PositionThread
+    features
+      state_in: in data port Falcon_Types::VehicleState;
+      waypoint_in: in data port Falcon_Types::Waypoint;
+      attitude_sp_out: out data port Falcon_Types::AttitudeSetpoint;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 5 ms;
+      Compute_Execution_Time => 0 ms .. 1 ms;
+      Deadline => 5 ms;
+      Priority => 9;
+      Stack_Size => 4096 Bytes;
+  end PositionThread;
+
+  thread AttitudeThread
+    features
+      state_in: in data port Falcon_Types::VehicleState;
+      attitude_sp_in: in data port Falcon_Types::AttitudeSetpoint;
+      rate_sp_out: out data port Falcon_Types::RateSetpoint;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 5 ms;
+      Compute_Execution_Time => 0 ms .. 1 ms;
+      Deadline => 5 ms;
+      Priority => 8;
+      Stack_Size => 4096 Bytes;
+  end AttitudeThread;
+
+  thread RateThread
+    features
+      state_in: in data port Falcon_Types::VehicleState;
+      rate_sp_in: in data port Falcon_Types::RateSetpoint;
+      torque_sp_out: out data port Falcon_Types::TorqueSetpoint;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 5 ms;
+      Compute_Execution_Time => 0 ms .. 1 ms;
+      Deadline => 5 ms;
+      Priority => 7;
+      Stack_Size => 4096 Bytes;
+  end RateThread;
+
+  thread MixerThread
+    features
+      torque_sp_in: in data port Falcon_Types::TorqueSetpoint;
+      pwm_out: out data port Falcon_Types::MotorPwm;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 5 ms;
+      Compute_Execution_Time => 0 ms .. 1 ms;
+      Deadline => 5 ms;
+      Priority => 6;
+      Stack_Size => 2048 Bytes;
+  end MixerThread;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Process — host for all cascade threads
+  -- ══════════════════════════════════════════════════════════════
+
+  process AutopilotProcess
+    features
+      imu_in: in data port Falcon_Types::ImuSample;
+      waypoint_in: in data port Falcon_Types::Waypoint;
+      pwm_out: out data port Falcon_Types::MotorPwm;
+  end AutopilotProcess;
+
+  process implementation AutopilotProcess.Cascade
+    subcomponents
+      ekf: thread EkfThread;
+      pos: thread PositionThread;
+      att: thread AttitudeThread;
+      rate: thread RateThread;
+      mix: thread MixerThread;
+    connections
+      c0: port imu_in -> ekf.imu_in;
+      c1: port ekf.state_out -> pos.state_in;
+      c2: port waypoint_in -> pos.waypoint_in;
+      c3: port pos.attitude_sp_out -> att.attitude_sp_in;
+      c4: port ekf.state_out -> att.state_in;
+      c5: port att.rate_sp_out -> rate.rate_sp_in;
+      c6: port ekf.state_out -> rate.state_in;
+      c7: port rate.torque_sp_out -> mix.torque_sp_in;
+      c8: port mix.pwm_out -> pwm_out;
+  end AutopilotProcess.Cascade;
+
+end Falcon_Cascade;

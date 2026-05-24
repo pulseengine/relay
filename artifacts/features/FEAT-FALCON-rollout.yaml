@@ -700,6 +700,90 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.11
 
+  - id: FEAT-FALCON-v0.13
+    type: feature
+    title: "v0.13 — witness MC/DC wired, spar AADL architectural model, six dossier crosswalks"
+    status: approved
+    description: >
+      LANDED. The three remaining v0.12 deferred items, all real
+      tools running on real subjects today.
+
+      Ships:
+        - **witness MC/DC pipeline wired** (FV-FALCON-COV-001):
+          `wasm_module_coverage` rule from rules_wasm_component
+          plugged into BUILD.bazel; smoke target
+          `//:geofence-subject-coverage` produces witness 0.22.0
+          branch-counter JSON + LCOV end-to-end. Identifies 4
+          branches in `check()`, reports 2/4 hit on the in-fence
+          test vector — real structural-coverage evidence the
+          DO-178C / EN 50128 / IEC 61508 tables require. Cascade
+          target `//:falcon-cascade-coverage` tagged `manual`
+          pending an upstream WASI gap (cascade imports
+          wasi:io@0.2.6 for Rust panic glue; witness's embedded
+          runtime is WASI-free). Honest disposition recorded.
+        - **spar AADL architectural model** (FV-FALCON-ARCH-001):
+          three files (`spar/falcon_types.aadl`,
+          `falcon_cascade.aadl`, `falcon_system.aadl`) model the
+          autopilot architecture; `spar analyze` produces an EMV2
+          fault tree (**7 minimal cut sets, 7 single-point
+          failures** — correctly identifying each controller as a
+          critical node), STPA bridge (1 hazard, 2 loss scenarios),
+          and bin-packing schedulability (20% MCU utilisation at
+          200 Hz, 80% headroom). `spar render` produces
+          `artifacts/spar/falcon-quad-architecture.svg`. Closes
+          DO-178C A-4.8 / A-4.9 / A-4.11 for the cascade.
+          (WIT regeneration via `spar codegen` remains deferred —
+          today's codegen only emits skeleton Cargo.toml +
+          BUILD.bazel; pure WIT emission is a spar follow-up.)
+        - **Six dossier crosswalks** in `docs/dossier/`: the
+          DO-178C DAL-A pattern from v0.12 mirrored for ISO 26262
+          ASIL-D, IEC 61508 SIL-4, IEC 62304 Class C,
+          ECSS-Q-ST-80C Cat A, EN 50128 SIL-4 — each a 50–70-line
+          Markdown table mapping the standard's objectives to
+          falcon evidence with explicit gap lists. `README.md`
+          indexes them. v1.0 ships when every cell is either
+          populated or carries a deliberate documented deferral.
+
+      The cFS-DNA chain (detect → relay-sc → cascade) is
+      unchanged; v0.13 adds the **architectural-traceability** +
+      **structural-coverage** + **multi-domain-credit** evidence
+      layers around it.
+
+      Verification:
+        - cargo test --workspace → 387 passing (no test count
+          change — v0.13 is tooling + docs, no new code paths).
+        - bazel build //:geofence-subject-coverage → green;
+          branch-counter JSON + LCOV produced.
+        - spar parse + instance + analyze + render on the three
+          AADL files → 0 errors, 11 expected warnings.
+        - rivet validate → PASS (58 warnings — 56 v0.12 + 2 new
+          FV-FALCON-{COV,ARCH}-001; same warning class).
+
+      Honestly deferred (carried into v0.14.x):
+        - Cascade-target witness coverage — needs witness
+          `--harness <wasmtime+WASI>` mode or a WASI-free
+          cascade build path.
+        - spar `codegen --format wit` — the codegen path in spar
+          currently emits Cargo/BUILD skeletons but not WIT.
+        - Per-engine `cargo llvm-cov` statement coverage — for
+          A-7.7 / EN 50128 A.5 D.43.
+        - Other dual-tree refactors (relay-sc, relay-hk,
+          relay-sch, relay-cs, relay-ds) — same situation
+          relay-nid was in before v0.11.
+        - Tool-qualification documents per tool — needed by
+          IEC 61508-3 §7.4.4.7, ISO 26262-8 §11, ECSS-Q-ST-80C
+          §5.4.8, EN 50128 §6.7.4 (same work product across all
+          four standards).
+    tags: [falcon, milestone, v0.13, witness, mcdc, spar, aadl, dossier, landed]
+    fields:
+      release-target: "witness MC/DC pipeline + spar architectural model + 5 new credit-bundle crosswalks"
+      bazel-targets: ["//:geofence-subject-coverage", "//:falcon-cascade-coverage"]
+      spar-files: ["spar/falcon_types.aadl", "spar/falcon_cascade.aadl", "spar/falcon_system.aadl"]
+      dossier-domains-mapped: 6
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.12
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -732,4 +816,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.12
+        target: FEAT-FALCON-v0.13

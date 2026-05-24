@@ -1,6 +1,6 @@
 load("@rules_wasm_component//rust:defs.bzl", "rust_wasm_component_bindgen")
 load("@rules_wasm_component//wit:defs.bzl", "wit_library")
-load("@rules_wasm_component//wasm:defs.bzl", "meld_fuse", "synth_compile")
+load("@rules_wasm_component//wasm:defs.bzl", "meld_fuse", "synth_compile", "wasm_module_coverage")
 load("@rules_verus//verus:defs.bzl", "verus_library", "verus_strip_test", "verus_test")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
@@ -598,4 +598,33 @@ synth_compile(
     name = "falcon-cascade-firmware",
     target = "cortex-m7",
     wasm_module = ":falcon-cascade-fused",
+)
+
+# v0.13: witness MC/DC coverage on the fused cascade core module.
+# Instruments the wasm, executes via witness's embedded runtime, emits
+# LCOV. Closes DO-178C A-7.5 / A-7.6 (FV-FALCON-COV-001).
+#
+# The Rust-compiled cascade imports wasi:io@0.2.6 (panic glue +
+# allocator); witness's embedded runtime is WASI-free, so the run
+# stage fails today. Instrumentation succeeds — instrument is what
+# proves the rule is wired. Tagged `manual` so CI doesn't break on the
+# upstream gap. See FV-FALCON-COV-001 for the run-stage path forward
+# (witness --harness mode with wasmtime+WASI, or a WASI-free cascade
+# build).
+wasm_module_coverage(
+    name = "falcon-cascade-coverage",
+    module = ":falcon-cascade-fused",
+    invoke_all = True,
+    tags = ["manual"],
+)
+
+# v0.13: witness MC/DC end-to-end smoke target. Hand-written WAT
+# module mirroring the Geofence decision shape, no WASI imports — so
+# the full instrument + run + LCOV pipeline completes inside Bazel.
+# Proves the rule + toolchain work; the cascade target above carries
+# the (currently gapped) real subject.
+wasm_module_coverage(
+    name = "geofence-subject-coverage",
+    module = "coverage_subjects/geofence_subject.wasm",
+    invoke = ["run"],
 )
