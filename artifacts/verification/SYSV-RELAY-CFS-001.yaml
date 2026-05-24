@@ -1,0 +1,350 @@
+artifacts:
+  - id: SYSV-RELAY-CFS-CS
+    type: sys-verification
+    title: "SYSREQ-CS-001 verification — Checksum Services evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-cs evidence
+      to SYSREQ-CS-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts CS-P01..CS-P05 discharged
+      by //:relay_cs_verus_test; cargo unit tests in
+      crates/relay-cs/plain/src/engine.rs::tests (10 tests, CRC
+      determinism, mismatch detection, region table bounds).
+      Refs: FV-CS-001 (formal), UV-CS-001 (unit tests), FV-CS-P-001
+      and SV-RELAY-006 (sw-verification roll-up).
+    tags: [verification, system, checksum, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_cs_verus_test
+        - run: cargo test -p relay-cs
+    links:
+      - type: verifies
+        target: SYSREQ-CS-001
+
+  - id: SYSV-RELAY-CFS-DS
+    type: sys-verification
+    title: "SYSREQ-DS-001 verification — Data Storage evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-ds evidence
+      to SYSREQ-DS-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts DS-P01..DS-P04 discharged
+      by //:relay_ds_verus_test; cargo unit tests in
+      crates/relay-ds/plain/src/engine.rs::tests (8 tests, filter
+      table bounds, disabled-filter skip, MAX_FILTERS bound).
+      Refs: FV-DS-001 (formal), UV-DS-001 (unit tests), SV-RELAY-008.
+    tags: [verification, system, data-storage, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_ds_verus_test
+        - run: cargo test -p relay-ds
+    links:
+      - type: verifies
+        target: SYSREQ-DS-001
+
+  - id: SYSV-RELAY-CFS-MM
+    type: sys-verification
+    title: "SYSREQ-MM-001 verification — Memory Manager evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-mm evidence
+      to SYSREQ-MM-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts MM-P01..MM-P04 discharged
+      by //:relay_mm_verus_test (validate Valid iff in-range, non-
+      zero, aligned; AddressOutOfRange, SizeZero, is_aligned
+      correct); cargo unit tests in crates/relay-mm/plain/src/
+      engine.rs::tests (8 tests).
+      Refs: FV-MM-001 (formal), UV-MM-001 (unit tests), SV-RELAY-013.
+    tags: [verification, system, memory-manager, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_mm_verus_test
+        - run: cargo test -p relay-mm
+    links:
+      - type: verifies
+        target: SYSREQ-MM-001
+
+  - id: SYSV-RELAY-CFS-HK
+    type: sys-verification
+    title: "SYSREQ-HK-001 verification — Housekeeping evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-hk evidence
+      to SYSREQ-HK-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts HK-P01..HK-P04 discharged
+      by //:relay_hk_verus_test (copy table invariant, collect
+      never writes past MAX_OUTPUT_SIZE, never reads past source
+      bounds, MAX_COPY_ENTRIES bound); cargo unit tests in
+      crates/relay-hk/plain/src/engine.rs::tests (8 tests).
+      Refs: FV-HK-001 (formal), UV-HK-001 (unit tests), SV-RELAY-005.
+    tags: [verification, system, housekeeping, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_hk_verus_test
+        - run: cargo test -p relay-hk
+    links:
+      - type: verifies
+        target: SYSREQ-HK-001
+
+  - id: SYSV-RELAY-CFS-TBL
+    type: sys-verification
+    title: "SYSREQ-TBL-001 verification — Table Services evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-tbl evidence
+      to SYSREQ-TBL-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts TBL-P01..TBL-P05 discharged
+      by //:relay_tbl_verus_test (registry invariant, load writes
+      to inactive buffer only, activate swaps active index,
+      MAX_TABLES bound); cargo unit tests in crates/relay-tbl/
+      plain/src/engine.rs::tests (8 tests covering double-buffer
+      load/activate).
+      Refs: FV-TBL-001 (formal), UV-TBL-001 (unit tests), SV-RELAY-014.
+    tags: [verification, system, table-services, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_tbl_verus_test
+        - run: cargo test -p relay-tbl
+    links:
+      - type: verifies
+        target: SYSREQ-TBL-001
+
+  - id: SYSV-RELAY-CFS-FM
+    type: sys-verification
+    title: "SYSREQ-FM-001 verification — File Manager evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-fm evidence
+      to SYSREQ-FM-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts FM-P01..FM-P04 discharged
+      by //:relay_fm_verus_test; cargo unit tests in
+      crates/relay-fm/plain/src/engine.rs::tests (10 tests).
+      Refs: FV-FM-001 (formal), UV-FM-001 (unit tests), SV-RELAY-009.
+    tags: [verification, system, file-manager, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_fm_verus_test
+        - run: cargo test -p relay-fm
+    links:
+      - type: verifies
+        target: SYSREQ-FM-001
+
+  - id: SYSV-RELAY-CFS-MD
+    type: sys-verification
+    title: "SYSREQ-MD-001 verification — Memory Dwell evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-md evidence
+      to SYSREQ-MD-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts MD-P01..MD-P04 discharged
+      by //:relay_md_verus_test; cargo unit tests in
+      crates/relay-md/plain/src/engine.rs::tests (7 tests).
+      Refs: FV-MD-001 (formal), UV-MD-001 (unit tests), SV-RELAY-012.
+    tags: [verification, system, memory-dwell, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_md_verus_test
+        - run: cargo test -p relay-md
+    links:
+      - type: verifies
+        target: SYSREQ-MD-001
+
+  - id: SYSV-RELAY-CFS-TO
+    type: sys-verification
+    title: "SYSREQ-TO-001 verification — Telemetry Output evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-to evidence
+      to SYSREQ-TO-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts TO-P01..TO-P04 discharged
+      by //:relay_to_verus_test; cargo unit tests in
+      crates/relay-to/plain/src/engine.rs::tests (7 tests).
+      Refs: FV-TO-001 (formal), UV-TO-001 (unit tests), SV-RELAY-011.
+    tags: [verification, system, telemetry-output, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_to_verus_test
+        - run: cargo test -p relay-to
+    links:
+      - type: verifies
+        target: SYSREQ-TO-001
+
+  - id: SYSV-RELAY-CFS-CI
+    type: sys-verification
+    title: "SYSREQ-CI-001 verification — Command Ingest evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-ci evidence
+      to SYSREQ-CI-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts CI-P01..CI-P04 discharged
+      by //:relay_ci_verus_test; cargo unit tests in
+      crates/relay-ci/plain/src/engine.rs::tests (8 tests).
+      Refs: FV-CI-001 (formal), UV-CI-001 (unit tests), SV-RELAY-010.
+    tags: [verification, system, command-ingest, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_ci_verus_test
+        - run: cargo test -p relay-ci
+    links:
+      - type: verifies
+        target: SYSREQ-CI-001
+
+  - id: SYSV-RELAY-CFS-SC
+    type: sys-verification
+    title: "SYSREQ-SC-001 verification — Stored Command evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-sc evidence
+      to SYSREQ-SC-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts SC-P01..SC-P05 discharged
+      by //:relay_sc_verus_test; cargo unit tests in
+      crates/relay-sc/plain/src/engine.rs::tests (13 tests).
+      Refs: FV-SC-001 (formal), UV-SC-001 (unit tests), SV-RELAY-003.
+    tags: [verification, system, stored-command, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_sc_verus_test
+        - run: cargo test -p relay-sc
+    links:
+      - type: verifies
+        target: SYSREQ-SC-001
+
+  - id: SYSV-RELAY-CFS-SCA
+    type: sys-verification
+    title: "SYSREQ-SCA-001 verification — Stored Command Absolute evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-sca evidence
+      to SYSREQ-SCA-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts SCA-P01..SCA-P04 discharged
+      by //:relay_sca_verus_test; cargo unit tests in
+      crates/relay-sca/plain/src/engine.rs::tests (8 tests).
+      Refs: FV-SCA-001 (formal), UV-SCA-001 (unit tests), SV-RELAY-004.
+    tags: [verification, system, stored-command-absolute, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_sca_verus_test
+        - run: cargo test -p relay-sca
+    links:
+      - type: verifies
+        target: SYSREQ-SCA-001
+
+  - id: SYSV-RELAY-CFS-SCH
+    type: sys-verification
+    title: "SYSREQ-SCH-001 verification — Scheduler evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-sch evidence
+      to SYSREQ-SCH-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts SCH-P01..SCH-P08 discharged
+      by //:relay_sch_verus_test; cargo unit tests in
+      crates/relay-sch/plain/src/engine.rs::tests (10 tests).
+      Refs: FV-SCH-001 (formal), UV-SCH-001 (unit tests), SV-RELAY-002.
+    tags: [verification, system, scheduler, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_sch_verus_test
+        - run: cargo test -p relay-sch
+    links:
+      - type: verifies
+        target: SYSREQ-SCH-001
+
+  - id: SYSV-RELAY-CFS-LC
+    type: sys-verification
+    title: "SYSREQ-LC-001 verification — Limit Checker evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-lc evidence
+      to SYSREQ-LC-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts LC-P01..LC-P08 (with LC-P09/
+      LC-P10 monotone-latch + transition-only Geofence contracts)
+      discharged by //:relay_lc_verus_test; cargo unit tests in
+      crates/relay-lc/plain/src/engine.rs::tests (17 tests).
+      Refs: FV-LC-001 (formal), UV-LC-001 (unit tests), SV-RELAY-001.
+    tags: [verification, system, limit-checker, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_lc_verus_test
+        - run: cargo test -p relay-lc
+    links:
+      - type: verifies
+        target: SYSREQ-LC-001
+
+  - id: SYSV-RELAY-CFS-HS
+    type: sys-verification
+    title: "SYSREQ-HS-001 verification — Health and Safety evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-hs evidence
+      to SYSREQ-HS-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts HS-P01..HS-P05 discharged
+      by //:relay_hs_verus_test (with HS-P06 monotone-latch and
+      HS-P07 transition-only contracts for the EkfHealthMonitor);
+      cargo unit tests in crates/relay-hs/plain/src/engine.rs::tests
+      (9 tests).
+      Refs: FV-HS-001 (formal), UV-HS-001 (unit tests), SV-RELAY-007.
+    tags: [verification, system, health-safety, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_hs_verus_test
+        - run: cargo test -p relay-hs
+    links:
+      - type: verifies
+        target: SYSREQ-HS-001
+
+  - id: SYSV-RELAY-CFS-CCSDS
+    type: sys-verification
+    title: "SYSREQ-CCSDS-001 verification — CCSDS codec evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-ccsds evidence
+      to SYSREQ-CCSDS-001 at the SYS.5 level. Evidence already in
+      the codebase: Verus SMT/Z3 contracts CCSDS-P01..CCSDS-P04
+      discharged by //:relay_ccsds_verus_test; cargo unit tests in
+      crates/relay-ccsds/plain/src/engine.rs::tests (11 tests).
+      Refs: FV-CCSDS-001 (formal), UV-CCSDS-001 (unit tests),
+      SV-RELAY-015.
+    tags: [verification, system, ccsds, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_ccsds_verus_test
+        - run: cargo test -p relay-ccsds
+    links:
+      - type: verifies
+        target: SYSREQ-CCSDS-001
+
+  - id: SYSV-RELAY-CFS-CFDP
+    type: sys-verification
+    title: "SYSREQ-CFDP-001 verification — CFDP protocol evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-cfdp evidence
+      to SYSREQ-CFDP-001 at the SYS.5 level. Evidence already in the
+      codebase: Verus SMT/Z3 contracts CFDP-P01..CFDP-P04 discharged
+      by //:relay_cfdp_verus_test; cargo unit tests in
+      crates/relay-cfdp/plain/src/engine.rs::tests (10 tests).
+      Refs: FV-CFDP-001 (formal), UV-CFDP-001 (unit tests), SV-RELAY-016.
+    tags: [verification, system, cfdp, cfs, trace-topology, v0.17.x]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //:relay_cfdp_verus_test
+        - run: cargo test -p relay-cfdp
+    links:
+      - type: verifies
+        target: SYSREQ-CFDP-001

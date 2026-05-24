@@ -1,0 +1,88 @@
+artifacts:
+  - id: SYSV-RELAY-FALCON-EKF
+    type: sys-verification
+    title: "SYSREQ-FALCON-001 verification — Mahony EKF evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-ekf evidence
+      to SYSREQ-FALCON-001 (state estimation) at the SYS.5 level.
+      Evidence already in the codebase (FV-FALCON-EKF-001 carries
+      the detail): cargo unit + proptest cases in crates/relay-ekf
+      (16 tests covering EKF-P01..P05 — unit-quaternion preservation,
+      no NaN/inf under adversarial accel, innovation monotone with
+      tilt disagreement, static-rest gravity alignment, yaw does not
+      destabilise tilt), bench tests in examples/falcon-ekf-bench
+      (5 cases), end-to-end binary smoke. Refs: FV-FALCON-EKF-001
+      (sw-verification with full evidence chain).
+    tags: [verification, system, falcon, ekf, trace-topology, v0.17.x]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-ekf
+        - run: cargo test -p falcon-ekf-bench
+        - run: cargo run -q -p falcon-ekf-bench --release
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-001
+
+  - id: SYSV-RELAY-FALCON-RATE
+    type: sys-verification
+    title: "SYSREQ-FALCON-002 verification — Rate controller evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-rate evidence
+      to SYSREQ-FALCON-002 (body-rate control loop at 1 kHz) at the
+      SYS.5 level. Evidence already in the codebase (FV-FALCON-RATE-001
+      carries the detail): cargo unit + proptest cases in
+      crates/relay-rate covering PID coefficient bounds, anti-windup
+      saturation, and closed-loop SITL run. Refs: FV-FALCON-RATE-001.
+    tags: [verification, system, falcon, rate-control, trace-topology, v0.17.x]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-rate
+        - run: cargo test -p relay-rate --release
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-002
+
+  - id: SYSV-RELAY-FALCON-ATT
+    type: sys-verification
+    title: "SYSREQ-FALCON-003 verification — Attitude controller evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-att evidence
+      to SYSREQ-FALCON-003 (attitude control loop at 250 Hz) at the
+      SYS.5 level. Evidence already in the codebase (FV-FALCON-ATT-001
+      carries the detail): cargo unit + proptest cases on quaternion-
+      error attitude control plus cascade hover bench. Refs:
+      FV-FALCON-ATT-001.
+    tags: [verification, system, falcon, attitude-control, trace-topology, v0.17.x]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-att
+        - run: cargo test -p relay-att --release
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-003
+
+  - id: SYSV-RELAY-FALCON-POS
+    type: sys-verification
+    title: "SYSREQ-FALCON-004 verification — Position controller evidence (v0.17.x)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring the existing relay-pos evidence
+      to SYSREQ-FALCON-004 (position control loop at 50 Hz) at the
+      SYS.5 level. Evidence already in the codebase (FV-FALCON-POS-001
+      carries the detail): cargo unit + proptest cases plus mission
+      SITL waypoint scenarios. Refs: FV-FALCON-POS-001.
+    tags: [verification, system, falcon, position-control, trace-topology, v0.17.x]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-pos
+        - run: cargo test -p relay-pos --release
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-004
