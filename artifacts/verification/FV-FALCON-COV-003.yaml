@@ -1,0 +1,85 @@
+artifacts:
+  - id: FV-FALCON-COV-003
+    type: sw-verification
+    title: "witness MC/DC on real Rust source — Geofence subject (v0.14.1)"
+    status: approved
+    description: >
+      v0.14.1 extends FV-FALCON-COV-001's witness MC/DC pipeline
+      from the v0.13 hand-written WAT smoke target to a real Rust
+      coverage subject that calls the verified
+      `relay_lc::engine::Geofence::check` directly. Closes the
+      "wasm pipeline works on actual Rust source" half of the
+      v0.13 deferred witness work; cascade-WASI harness remains
+      deferred.
+
+      What ships:
+        - `coverage_subjects/geofence_subject_rs/` — a tiny no_std
+          + `panic = "abort"` Rust crate that depends on relay-lc
+          and exposes three exports exercising three distinct
+          branches of the latch state machine: `run_inside`,
+          `run_outside`, `run_latched`. Wrapped in
+          `#[inline(never)]` + `core::hint::black_box` so the
+          optimizer can't merge functionally-equivalent run sites
+          (initial attempt had `run_latched → run_inside` aliased
+          by LLVM ICF — black_box prevents this).
+        - `coverage_subjects/geofence_subject_rs.wasm` — the
+          pre-built `wasm32-unknown-unknown` module, zero imports
+          (WASI-free, confirmed via `wasm-tools print | grep
+          import`).
+        - `//:geofence-subject-rs-coverage` Bazel target: invokes
+          the three exports under witness's embedded runtime,
+          emits branch-counter JSON + LCOV.
+
+      Evidence (from `bazel build //:geofence-subject-rs-coverage`,
+      witness 0.22.0):
+
+        Module: 1021 bytes, no imports, 3 distinct `run_*` exports.
+
+        Counter JSON: `bazel-bin/geofence-subject-rs-
+        coverage_witness-run.json` — 2 branches in the `drive`
+        wrapper function (`br_if` kind), id 0 hit 1×, id 1 hit 0×.
+
+      Honest disposition (what the pipeline *did not* preserve):
+        - `Geofence::check` itself was fully inlined into the
+          `drive` wrapper by LLVM. The 2 branches witness reports
+          are the wrapper's; the function-call boundary that
+          would let witness attribute branches *to* check()
+          disappeared during compilation.
+        - To preserve `check()` as its own measurable function,
+          `relay_lc::engine::Geofence::check` would need
+          `#[inline(never)]`. That's a verified-source change for
+          measurement-only purposes and is **deliberately not
+          made** — Verus + Kani (LC-P09/P10 + LC-K01..K05) give
+          exhaustive branch evidence on the function itself; the
+          witness role is to prove the wasm + LCOV pipeline runs
+          end-to-end on Rust source, which it does.
+        - LCOV body is empty source-line records (only header
+          `TN:wasm-bytecode`) because the release-profile wasm
+          carries no DWARF. Adding `debug = true` would emit
+          DWARF but balloons the module size and is orthogonal to
+          the MC/DC claim. Tracked as a v0.14.x follow-up.
+
+      Cascade-target WASI harness still deferred — the path
+      forward (witness `--harness <wasmtime+WASI>`) needs a
+      bespoke Rust binary that reads WITNESS_MODULE /
+      WITNESS_MANIFEST env vars, loads the instrumented module
+      with wasmtime + WASI preview2, invokes exports, and writes
+      the witness counter snapshot format. Bounded but non-
+      trivial; not in v0.14.1 scope.
+    tags: [verification, falcon, mcdc, witness, rust-source, v0.14.1]
+    fields:
+      method: structural-coverage-mcdc
+      tool: "witness 0.22.0 + cargo (wasm32-unknown-unknown, opt-level=1, panic=abort)"
+      subject-crate: "coverage_subjects/geofence_subject_rs"
+      bazel-target: "//:geofence-subject-rs-coverage"
+      module-size-bytes: 1021
+      module-imports: 0
+      branches-reported: 2
+      steps:
+        - run: cargo build -p geofence-subject-rs --target wasm32-unknown-unknown --release
+        - run: cp target/wasm32-unknown-unknown/release/geofence_subject_rs.wasm coverage_subjects/
+        - run: bazel build //:geofence-subject-rs-coverage
+        - run: cat bazel-bin/geofence-subject-rs-coverage_witness-run.json
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WORLD-P01

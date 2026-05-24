@@ -31,6 +31,7 @@ members = [
     "examples/falcon-ekf-bench",
     "examples/falcon-sitl-hover",
     "examples/falcon-hitl-rfspoof",
+    "coverage_subjects/geofence_subject_rs",
     "host/relay-sb",
     "host/relay-es",
     "host/relay-evs",
