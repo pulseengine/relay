@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-UAM-P01
+    type: sw-req
+    title: "UAM-P01 — multi-waypoint mission dispatched via relay-sc RTS"
+    status: approved
+    description: >
+      The SITL untethered mission shall load a 4-waypoint RTS
+      sequence (N → E → S → home) into the verified relay-sc
+      CommandStore at init, start it at t = 0, and rely on the
+      engine's process_tick for every waypoint transition. The
+      orchestrator side carries no per-leg logic — when a dispatched
+      command's code is SET_WAYPOINT, the SITL applies it by
+      updating the position controller's setpoint to
+      `waypoints[payload_offset]`.
+
+      Property summary:
+        UAM-P01: each waypoint is reached within 2.5 m at some
+                 point during its active leg; the vehicle's final
+                 position is within 2.5 m of home; no NaN propagates
+                 through the cascade.
+    tags: [falcon, sw-req, mission, autonomy, relay-sc, v0.9]
+    fields:
+      req-type: functional
+      priority: must
+      maps-to-verified-property: "SC-P01..P05 (relay-sc dispatch invariants carry through unchanged)"
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-012

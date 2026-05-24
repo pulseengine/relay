@@ -1,0 +1,31 @@
+artifacts:
+  - id: SWREQ-FALCON-NID-P01
+    type: sw-req
+    title: "NID-P01 — Network ID codec round-trips and rejects malformed input"
+    status: approved
+    description: >
+      The relay-nid Network Identification codec shall encode
+      Basic ID and Location / Vector messages into a fixed
+      25-byte frame and decode them back losslessly. Decoders
+      shall reject (return `None` for) wrong message type,
+      unknown protocol version, unknown enum codes, and
+      out-of-range fields (track ≥ 360°, timestamp ≥ 86 400 s).
+      Decoders shall never panic on arbitrary input (verified by
+      proptest fuzzing).
+
+      Properties:
+        NID-P01: encode + decode is the identity on every
+                 in-range message (proptest, 256+ cases).
+        NID-P02: decoder rejects header/range violations
+                 (deterministic + proptest).
+        NID-P03: decoder never panics on arbitrary 25-byte input
+                 (proptest fuzz).
+    tags: [falcon, sw-req, easa, u-space, remote-id, codec, v0.9]
+    fields:
+      req-type: functional
+      priority: must
+      crate: "crates/relay-nid"
+      frame-bytes: 25
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-013

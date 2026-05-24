@@ -277,3 +277,56 @@ artifacts:
     links:
       - type: derives-from
         target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-012
+    type: system-req
+    title: Autonomous multi-waypoint mission via stored commands
+    status: approved
+    description: >
+      The system shall execute a multi-waypoint mission
+      autonomously, sequencing waypoint transitions through the
+      verified relay-sc (Stored Command) engine rather than
+      orchestrator-side per-leg logic. The same engine that
+      executes RTL on a safety alert (SYSREQ-FALCON-011) drives
+      the nominal mission — one Stored Command path, one set of
+      ASIL-D properties (SC-P01..P05) carrying every dispatched
+      waypoint.
+    tags: [falcon, mission, autonomy, stored-command, relay-sc, v0.9]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        SITL untethered scenario in falcon-sitl-hover loads a
+        4-waypoint RTS (N → E → S → home, 8 s per leg) into
+        relay-sc; each waypoint transition is dispatched by the
+        verified engine; the vehicle reaches every waypoint
+        within 2.5 m and returns home within 2.5 m.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-013
+    type: system-req
+    title: EASA U-space Network Identification telemetry
+    status: approved
+    description: >
+      The system shall emit EASA U-space Network Identification
+      (Remote ID) beacons — UAS ID + position/vector — over a
+      network channel so U-space services (network identification,
+      geo-awareness, traffic information) can subscribe to the
+      vehicle's identity and trajectory. The Network ID codec
+      is byte-stable and round-trips; downstream encoding to a
+      specific ASTM F3411-22 bit-packed wire format is a v0.9.x
+      compatibility layer over the same in-memory message types.
+    tags: [falcon, easa, u-space, remote-id, telemetry, v0.9]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        relay-nid Basic ID and Location / Vector messages encode
+        into a fixed 25-byte frame and round-trip through decode;
+        proptest covers arbitrary in-range field values; the
+        decoder never panics on arbitrary input.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001

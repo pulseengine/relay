@@ -1,0 +1,31 @@
+artifacts:
+  - id: FV-FALCON-UAM-001
+    type: sw-verification
+    title: "Untethered multi-waypoint mission — relay-sc RTS dispatch in SITL (v0.9)"
+    status: approved
+    description: >
+      v0.9 verification of the untethered autonomous-mission path:
+      the falcon-sitl-hover `untethered` scenario.
+
+      The SITL loads a 4-waypoint SET_WAYPOINT RTS into the
+      verified relay-sc CommandStore (N → E → S → home, 8 s per
+      leg, 36 s total including settle); on each `process_tick`
+      the dispatched commands drive the position-controller
+      setpoint. The deterministic test
+      `deterministic_untethered_mission_visits_all_waypoints`
+      asserts every waypoint is reached within 2.5 m and the
+      vehicle ends within 2.5 m of home.
+
+      The relay-sc engine's ASIL-D properties (SC-P01..P05)
+      carry through unchanged — no new verified code, the
+      milestone is the orchestration pattern: cFS-DNA stored
+      commands driving the PX4-DNA cascade.
+    tags: [verification, falcon, mission, autonomy, relay-sc, sitl, v0.9]
+    fields:
+      method: automated-test
+      test-count: 1
+      steps:
+        - run: cargo test -p falcon-sitl-hover tests::deterministic_untethered_mission_visits_all_waypoints
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-UAM-P01
