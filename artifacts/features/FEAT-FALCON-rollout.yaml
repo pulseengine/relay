@@ -997,6 +997,52 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.14.2
 
+  - id: FEAT-FALCON-v0.15
+    type: feature
+    title: "v0.15.0 — spar codegen recheck + SIMULATOR.md flight-evidence analysis"
+    status: approved
+    description: >
+      LANDED. Closes the v0.13/v0.14 deferred spar codegen item
+      and adds the user-requested "would our stuff actually fly"
+      analysis document.
+
+      Ships:
+        - FV-FALCON-ARCH-002 — rechecks spar codegen after the
+          upstream fix (spar PR #232, merged 2026-05-20). spar
+          v0.10.0 `codegen --format wit` works; emits a different
+          *abstraction* than the hand-authored cascade WIT
+          (process-port view vs step-function record view).
+          Disposition: keep both as complementary artifacts;
+          hand-authored drives the build, spar-emitted is the
+          AADL-traceability artifact. Generated WIT captured at
+          `artifacts/spar/v0.15/autopilot-from-aadl.wit`.
+        - docs/SIMULATOR.md (SWREQ-FALCON-SIM-P02) — flight-
+          evidence analysis: what we have today (falcon-sitl-hover
+          + PX4-SITL via MavlinkBench), what's missing (falcon-
+          as-the-FC inside Gazebo physics), three concrete next-
+          step options (A: gz-sim bridge, B: PX4 external-EKF,
+          C: Gazebo backend for falcon-sitl-hover). Falsifiable
+          hover/step/mission/disturbance criteria recorded for
+          the "flies under real physics" claim.
+
+      Honestly deferred (v0.15.1 + v0.15.x candidates):
+        - Cascade-target witness coverage via witness --harness
+          binary (wasmtime + wasi). Bounded work; v0.15.1 lead
+          candidate.
+        - Gazebo bridge (option A from SIMULATOR.md) — user-
+          decision item.
+        - OSATE non-UI cross-confirmation of spar's EMV2 fault
+          tree — OSATE not installed locally; can be a separate
+          v0.15.x release if user has OSATE on a CI runner.
+    tags: [falcon, milestone, v0.15, spar, simulator, landed]
+    fields:
+      release-target: "spar codegen recheck + flight-evidence analysis"
+      spar-version: "v0.10.0 (was v0.6.0 at v0.13)"
+      doc: docs/SIMULATOR.md
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.14.3
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1029,4 +1075,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.14.3
+        target: FEAT-FALCON-v0.15

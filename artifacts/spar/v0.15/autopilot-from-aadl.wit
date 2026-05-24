@@ -1,0 +1,17 @@
+// Generated from AADL process: Falcon_Cascade::autopilot
+package falcon_cascade:autopilot;
+
+interface autopilot-ports {
+    imu_in: func() -> falcon_types__imusample;
+    waypoint_in: func() -> falcon_types__waypoint;
+    set-pwm_out: func(val: falcon_types__motorpwm);
+}
+
+world autopilot-world {
+    import autopilot-ports;
+    export ekf: func();
+    export pos: func();
+    export att: func();
+    export rate: func();
+    export mix: func();
+}

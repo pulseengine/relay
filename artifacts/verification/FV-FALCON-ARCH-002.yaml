@@ -1,0 +1,86 @@
+artifacts:
+  - id: FV-FALCON-ARCH-002
+    type: sw-verification
+    title: "spar codegen --format wit recheck — works at v0.10.0 (v0.15.0)"
+    status: approved
+    description: >
+      v0.15.0 reruns spar codegen against the v0.13 falcon AADL
+      model after the spar upstream fix landed (PR #232 merged
+      2026-05-20 in spar repo: "fix(codegen): --format wit emits
+      only WIT, not the Rust workspace"). v0.14.x had this listed
+      as a deferred item under FV-FALCON-ARCH-001 ("spar codegen
+      --format wit is deferred — current spar emits skeleton
+      Cargo.toml + BUILD.bazel only"). That deferral is now
+      closed at the tooling layer.
+
+      Result: spar v0.10.0 `codegen --root Falcon_System::Falcon.
+      Quad --format wit --output /tmp/falcon-spar-wit spar/*.aadl`
+      emits **one .wit file per AADL process** —
+      `artifacts/spar/v0.15/autopilot-from-aadl.wit` (449 bytes).
+
+      Honest finding — the generated WIT is a **different
+      abstraction** than the hand-authored
+      `wit/falcon-cascade/cascade.wit`:
+
+        - **Hand-authored cascade.wit** (62 lines, used today): a
+          single `controller#step` function taking + returning flat
+          record types (`vehicle-state`, `imu-sample`, …). This is
+          the *step-function record* view — natural for the cFS-DNA
+          control loop where each tick passes complete state
+          snapshots through the cascade.
+
+        - **spar-generated autopilot.wit** (15 lines): one
+          `autopilot-ports` interface with one func per AADL
+          thread, plus an `autopilot-world` exporting each thread
+          as a separate no-arg func. This is the *process-port*
+          view — natural for AADL's modal-scheduling + binding
+          analyses (each thread is a separate dispatchable entity).
+
+      Neither shape is "wrong"; they answer different questions:
+
+        | Question                                | Best shape         |
+        |-----------------------------------------|--------------------|
+        | "What does one cascade tick consume + produce?" | step-function record |
+        | "What are the dispatchable threads + their data dependencies?" | process-port |
+        | "Can wac compose the leaf components?"  | step-function record |
+        | "Can spar bin-pack threads onto MCU cores?" | process-port |
+
+      v0.15.0 disposition: keep the hand-authored
+      `wit/falcon-cascade/cascade.wit` as the build-time source of
+      truth (wac composition + meld_fuse depend on its record
+      shape), AND keep the spar-emitted
+      `artifacts/spar/v0.15/autopilot-from-aadl.wit` as an
+      auditable architectural-traceability artifact (the AADL
+      thread structure rendered as WIT, useful when an assessor
+      asks "show me your thread-port model").
+
+      What this does *not* claim:
+        - Single source of truth between AADL and the hand-WIT —
+          they're complementary, not interchangeable. v1.0
+          consideration is whether to author a step-function-shape
+          AADL model alongside the process-port one so spar can
+          regenerate both shapes, OR to make the build pipeline
+          aware that two WIT abstractions exist and which one
+          drives which downstream.
+        - Spar `codegen --format both` emits the data-record types
+          referenced by the autopilot WIT (e.g. `falcon_types__
+          imusample`) — those still need a separate generation
+          pass, not landed at v0.15.0.
+
+      Also at v0.15.0: spar repo PR #242 ("fix(codegen): per-
+      category summary + hint when WIT requested but none emitted")
+      is open in the upstream repo with that improvement queued.
+    tags: [verification, falcon, spar, aadl, wit, codegen, v0.15]
+    fields:
+      method: tooling-recheck + output-comparison
+      tool: "spar v0.10.0 (was v0.6.0 at v0.13)"
+      upstream-fix: "spar PR #232 (merged 2026-05-20)"
+      generated-wit: "artifacts/spar/v0.15/autopilot-from-aadl.wit"
+      hand-authored-wit: "wit/falcon-cascade/cascade.wit"
+      steps:
+        - run: cd /Users/r/git/pulseengine/spar && git pull --rebase && cargo install --path crates/spar-cli --locked
+        - run: spar codegen --root Falcon_System::Falcon.Quad --format wit --output /tmp/falcon-spar-wit spar/*.aadl
+        - run: diff /tmp/falcon-spar-wit/wit/autopilot.wit wit/falcon-cascade/cascade.wit  # shows abstraction divergence
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WORLD-P01
