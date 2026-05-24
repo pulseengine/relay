@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 880" width="1020" height="880">
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 8 4 L 0 8" fill="#888" />
+    </marker>
+  </defs>
+  <style>
+    .node rect, .node path, .node ellipse { stroke: #333; stroke-width: 1.5; }
+    .node text { font-family: 'Inter', 'SF Pro', system-ui, sans-serif; font-size: 13px; fill: #222; text-anchor: middle; dominant-baseline: central; }
+    .node .sublabel { font-size: 11px; fill: #666; }
+    .edge path { fill: none; stroke: #888; stroke-width: 1.8; marker-end: url(#arrowhead); }
+    .edge .label-bg { fill: #fff; opacity: 0.85; rx: 3; }
+    .edge text { font-family: 'Inter', 'SF Pro', system-ui, sans-serif; font-size: 11px; fill: #555; text-anchor: middle; dominant-baseline: central; font-weight: 500; }
+    .node.container rect, .node.container path { stroke-dasharray: 4 2; }
+    .node:hover rect, .node:hover path, .node:hover ellipse { filter: brightness(0.92); }
+    .port circle { stroke: #333; stroke-width: 0.8; }
+    .port.data circle { fill: #4a90d9; }
+    .port.event circle { fill: #e67e22; }
+    .port.event-data circle { fill: #27ae60; }
+    .port.access circle { fill: #999; }
+    .port.group circle { fill: #9b59b6; }
+    .port.abstract circle { fill: #666; }
+    .port text { font-size: 10px; fill: #333; dominant-baseline: central; font-weight: 500; }
+  </style>
+  <g transform="translate(80,80)">
+    <g class="containers">
+      <g class="node type-process container" data-id="AADL-Falcon_Cascade-autopilot">
+        <rect x="290" y="40" width="280" height="650" rx="325" ry="325" fill="#f2f9f3" stroke="#333" stroke-width="1.5" />
+        <text x="430" y="57" font-weight="bold">autopilot</text>
+        <text class="sublabel" x="430" y="70">Falcon_Cascade::AutopilotProcess.Cascade</text>
+        <g class="port data" data-port-id="imu_in">
+          <circle cx="260" cy="216.66666666666666" r="3" />
+          <path d="M 264 216.66666666666666 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="266" y="216.66666666666666" text-anchor="start">imu_in</text>
+        </g>
+        <g class="port data" data-port-id="waypoint_in">
+          <circle cx="260" cy="433.3333333333333" r="3" />
+          <path d="M 264 433.3333333333333 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="266" y="433.3333333333333" text-anchor="start">waypoint_in</text>
+        </g>
+        <g class="port data" data-port-id="pwm_out">
+          <circle cx="540" cy="325" r="3" />
+          <path d="M 544 325 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="534" y="325" text-anchor="end">pwm_out</text>
+        </g>
+        <title>AADL-Falcon_Cascade-autopilot</title>
+      </g>
+      <g class="node type-system container" data-id="AADL-Falcon_System-Falcon.Quad">
+        <path d="M 12,0 L 860,0 L 860,720 L 0,720 L 0,12 Z" fill="#f4f8fc" stroke="#333" stroke-width="1.5" />
+        <text x="430" y="17" font-weight="bold">Falcon.Quad</text>
+        <text class="sublabel" x="430" y="30">Falcon_System::Falcon.Quad</text>
+        <title>AADL-Falcon_System-Falcon.Quad</title>
+      </g>
+    </g>
+    <g class="edges">
+      <g class="edge" data-source="AADL-Falcon_Cascade-autopilot" data-target="AADL-Falcon_Cascade-ekf">
+        <path d="M 260 216.66666666666666 L 0 216.66666666666666 L 0 30" />
+        <rect class="label-bg" x="4" y="209.66666666666666" width="21" height="14" />
+        <text x="8" y="216.66666666666666" text-anchor="start">c0</text>
+      </g>
+      <g class="edge" data-source="AADL-Falcon_Cascade-ekf" data-target="AADL-Falcon_Cascade-pos">
+        <path d="M 220 30 L 0 30 L 0 150" />
+        <rect class="label-bg" x="4" y="23" width="21" height="14" />
+        <text x="8" y="30" text-anchor="start">c1</text>
+      </g>
+      <g class="edge" data-source="AADL-Falcon_Cascade-autopilot" data-target="AADL-Falcon_Cascade-pos">
+        <path d="M 260 433.3333333333333 L 0 433.3333333333333 L 0 170" />
+        <rect class="label-bg" x="4" y="426.3333333333333" width="21" height="14" />
+        <text x="8" y="433.3333333333333" text-anchor="start">c2</text>
+      </g>
+      <g class="edge" data-source="AADL-Falcon_Cascade-pos" data-target="AADL-Falcon_Cascade-att">
+        <path d="M 220 160 L 0 160 L 0 300" />
+        <rect class="label-bg" x="4" y="153" width="21" height="14" />
+        <text x="8" y="160" text-anchor="start">c3</text>
+      </g>
+      <g class="edge" data-source="AADL-Falcon_Cascade-ekf" data-target="AADL-Falcon_Cascade-att">
+        <path d="M 220 30 L 0 30 L 0 280" />
+        <rect class="label-bg" x="4" y="23" width="21" height="14" />
+        <text x="8" y="30" text-anchor="start">c4</text>
+      </g>
+      <g class="edge" data-source="AADL-Falcon_Cascade-att" data-target="AADL-Falcon_Cascade-rate">
+        <path d="M 220 290 L 0 290 L 0 430" />
+        <rect class="label-bg" x="4" y="283" width="21" height="14" />
+        <text x="8" y="290" text-anchor="start">c5</text>
+      </g>
+      <g class="edge" data-source="AADL-Falcon_Cascade-ekf" data-target="AADL-Falcon_Cascade-rate">
+        <path d="M 220 30 L 0 30 L 0 410" />
+        <rect class="label-bg" x="4" y="23" width="21" height="14" />
+        <text x="8" y="30" text-anchor="start">c6</text>
+      </g>
+      <g class="edge" data-source="AADL-Falcon_Cascade-rate" data-target="AADL-Falcon_Cascade-mix">
+        <path d="M 220 420 L 0 420 L 0 550" />
+        <rect class="label-bg" x="4" y="413" width="21" height="14" />
+        <text x="8" y="420" text-anchor="start">c7</text>
+      </g>
+      <g class="edge" data-source="AADL-Falcon_Cascade-mix" data-target="AADL-Falcon_Cascade-autopilot">
+        <path d="M 220 550 L 540 550 L 540 325" />
+        <rect class="label-bg" x="544" y="543" width="21" height="14" />
+        <text x="548" y="550" text-anchor="start">c8</text>
+      </g>
+    </g>
+    <g class="nodes">
+      <g class="node type-memory" data-id="AADL-Falcon_System-sram">
+        <path d="M 30,335 L 250,335 L 238,395 L 42,395 Z" fill="#e8dff0" stroke="#333" stroke-width="1.5" />
+        <text x="140" y="365">sram</text>
+        <title>AADL-Falcon_System-sram</title>
+      </g>
+      <g class="node type-thread" data-id="AADL-Falcon_Cascade-ekf">
+        <path d="M 330,80 L 540,80 L 530,140 L 320,140 Z" fill="#fef3d0" stroke="#333" stroke-width="1.5" />
+        <text x="430" y="110">ekf</text>
+        <g class="port data" data-port-id="imu_in">
+          <circle cx="0" cy="30" r="3" />
+          <path d="M 4 30 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="30" text-anchor="start">imu_in</text>
+        </g>
+        <g class="port data" data-port-id="state_out">
+          <circle cx="220" cy="30" r="3" />
+          <path d="M 224 30 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="214" y="30" text-anchor="end">state_out</text>
+        </g>
+        <title>AADL-Falcon_Cascade-ekf</title>
+      </g>
+      <g class="node type-thread" data-id="AADL-Falcon_Cascade-pos">
+        <path d="M 330,210 L 540,210 L 530,270 L 320,270 Z" fill="#fef3d0" stroke="#333" stroke-width="1.5" />
+        <text x="430" y="240">pos</text>
+        <g class="port data" data-port-id="state_in">
+          <circle cx="0" cy="150" r="3" />
+          <path d="M 4 150 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="150" text-anchor="start">state_in</text>
+        </g>
+        <g class="port data" data-port-id="waypoint_in">
+          <circle cx="0" cy="170" r="3" />
+          <path d="M 4 170 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="170" text-anchor="start">waypoint_in</text>
+        </g>
+        <g class="port data" data-port-id="attitude_sp_out">
+          <circle cx="220" cy="160" r="3" />
+          <path d="M 224 160 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="214" y="160" text-anchor="end">attitude_sp_out</text>
+        </g>
+        <title>AADL-Falcon_Cascade-pos</title>
+      </g>
+      <g class="node type-thread" data-id="AADL-Falcon_Cascade-att">
+        <path d="M 330,340 L 540,340 L 530,400 L 320,400 Z" fill="#fef3d0" stroke="#333" stroke-width="1.5" />
+        <text x="430" y="370">att</text>
+        <g class="port data" data-port-id="state_in">
+          <circle cx="0" cy="280" r="3" />
+          <path d="M 4 280 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="280" text-anchor="start">state_in</text>
+        </g>
+        <g class="port data" data-port-id="attitude_sp_in">
+          <circle cx="0" cy="300" r="3" />
+          <path d="M 4 300 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="300" text-anchor="start">attitude_sp_in</text>
+        </g>
+        <g class="port data" data-port-id="rate_sp_out">
+          <circle cx="220" cy="290" r="3" />
+          <path d="M 224 290 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="214" y="290" text-anchor="end">rate_sp_out</text>
+        </g>
+        <title>AADL-Falcon_Cascade-att</title>
+      </g>
+      <g class="node type-thread" data-id="AADL-Falcon_Cascade-rate">
+        <path d="M 330,470 L 540,470 L 530,530 L 320,530 Z" fill="#fef3d0" stroke="#333" stroke-width="1.5" />
+        <text x="430" y="500">rate</text>
+        <g class="port data" data-port-id="state_in">
+          <circle cx="0" cy="410" r="3" />
+          <path d="M 4 410 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="410" text-anchor="start">state_in</text>
+        </g>
+        <g class="port data" data-port-id="rate_sp_in">
+          <circle cx="0" cy="430" r="3" />
+          <path d="M 4 430 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="430" text-anchor="start">rate_sp_in</text>
+        </g>
+        <g class="port data" data-port-id="torque_sp_out">
+          <circle cx="220" cy="420" r="3" />
+          <path d="M 224 420 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="214" y="420" text-anchor="end">torque_sp_out</text>
+        </g>
+        <title>AADL-Falcon_Cascade-rate</title>
+      </g>
+      <g class="node type-thread" data-id="AADL-Falcon_Cascade-mix">
+        <path d="M 330,600 L 540,600 L 530,660 L 320,660 Z" fill="#fef3d0" stroke="#333" stroke-width="1.5" />
+        <text x="430" y="630">mix</text>
+        <g class="port data" data-port-id="torque_sp_in">
+          <circle cx="0" cy="550" r="3" />
+          <path d="M 4 550 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="550" text-anchor="start">torque_sp_in</text>
+        </g>
+        <g class="port data" data-port-id="pwm_out">
+          <circle cx="220" cy="550" r="3" />
+          <path d="M 224 550 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="214" y="550" text-anchor="end">pwm_out</text>
+        </g>
+        <title>AADL-Falcon_Cascade-mix</title>
+      </g>
+      <g class="node type-processor" data-id="AADL-Falcon_System-mcu">
+        <path d="M 620,335 L 830,335 L 820,395 L 610,395 Z" fill="#fde2e2" stroke="#333" stroke-width="1.5" />
+        <text x="720" y="365">mcu</text>
+        <title>AADL-Falcon_System-mcu</title>
+      </g>
+    </g>
+  </g>
+</svg>

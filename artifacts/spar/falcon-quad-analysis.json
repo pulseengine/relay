@@ -1,0 +1,1913 @@
+Instantiated Falcon_System::Falcon. (9 components)
+
+{
+  "root": "Falcon_System::Falcon.Quad",
+  "packages": [
+    {
+      "name": "Falcon_Cascade",
+      "with_clauses": [
+        "Falcon_Types"
+      ],
+      "component_types": [
+        {
+          "name": "EkfThread",
+          "category": "thread",
+          "extends": null,
+          "features": [
+            {
+              "name": "imu_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::ImuSample",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "state_out",
+              "kind": "DataPort",
+              "direction": "Out",
+              "access_kind": null,
+              "classifier": "Falcon_Types::VehicleState",
+              "is_refined": false,
+              "properties": []
+            }
+          ],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Dispatch_Protocol",
+              "value": "Periodic",
+              "typed_value": {
+                "Enum": "Periodic"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Period",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Compute_Execution_Time",
+              "value": "0 ms .. 1 ms",
+              "typed_value": {
+                "Range": {
+                  "min": {
+                    "Integer": [
+                      0,
+                      "ms"
+                    ]
+                  },
+                  "max": {
+                    "Integer": [
+                      1,
+                      "ms"
+                    ]
+                  },
+                  "delta": null
+                }
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Deadline",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Priority",
+              "value": "10",
+              "typed_value": {
+                "Integer": [
+                  10,
+                  null
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Stack_Size",
+              "value": "4096 Bytes",
+              "typed_value": {
+                "Integer": [
+                  4096,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "PositionThread",
+          "category": "thread",
+          "extends": null,
+          "features": [
+            {
+              "name": "state_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::VehicleState",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "waypoint_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::Waypoint",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "attitude_sp_out",
+              "kind": "DataPort",
+              "direction": "Out",
+              "access_kind": null,
+              "classifier": "Falcon_Types::AttitudeSetpoint",
+              "is_refined": false,
+              "properties": []
+            }
+          ],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Dispatch_Protocol",
+              "value": "Periodic",
+              "typed_value": {
+                "Enum": "Periodic"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Period",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Compute_Execution_Time",
+              "value": "0 ms .. 1 ms",
+              "typed_value": {
+                "Range": {
+                  "min": {
+                    "Integer": [
+                      0,
+                      "ms"
+                    ]
+                  },
+                  "max": {
+                    "Integer": [
+                      1,
+                      "ms"
+                    ]
+                  },
+                  "delta": null
+                }
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Deadline",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Priority",
+              "value": "9",
+              "typed_value": {
+                "Integer": [
+                  9,
+                  null
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Stack_Size",
+              "value": "4096 Bytes",
+              "typed_value": {
+                "Integer": [
+                  4096,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "AttitudeThread",
+          "category": "thread",
+          "extends": null,
+          "features": [
+            {
+              "name": "state_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::VehicleState",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "attitude_sp_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::AttitudeSetpoint",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "rate_sp_out",
+              "kind": "DataPort",
+              "direction": "Out",
+              "access_kind": null,
+              "classifier": "Falcon_Types::RateSetpoint",
+              "is_refined": false,
+              "properties": []
+            }
+          ],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Dispatch_Protocol",
+              "value": "Periodic",
+              "typed_value": {
+                "Enum": "Periodic"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Period",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Compute_Execution_Time",
+              "value": "0 ms .. 1 ms",
+              "typed_value": {
+                "Range": {
+                  "min": {
+                    "Integer": [
+                      0,
+                      "ms"
+                    ]
+                  },
+                  "max": {
+                    "Integer": [
+                      1,
+                      "ms"
+                    ]
+                  },
+                  "delta": null
+                }
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Deadline",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Priority",
+              "value": "8",
+              "typed_value": {
+                "Integer": [
+                  8,
+                  null
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Stack_Size",
+              "value": "4096 Bytes",
+              "typed_value": {
+                "Integer": [
+                  4096,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "RateThread",
+          "category": "thread",
+          "extends": null,
+          "features": [
+            {
+              "name": "state_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::VehicleState",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "rate_sp_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::RateSetpoint",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "torque_sp_out",
+              "kind": "DataPort",
+              "direction": "Out",
+              "access_kind": null,
+              "classifier": "Falcon_Types::TorqueSetpoint",
+              "is_refined": false,
+              "properties": []
+            }
+          ],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Dispatch_Protocol",
+              "value": "Periodic",
+              "typed_value": {
+                "Enum": "Periodic"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Period",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Compute_Execution_Time",
+              "value": "0 ms .. 1 ms",
+              "typed_value": {
+                "Range": {
+                  "min": {
+                    "Integer": [
+                      0,
+                      "ms"
+                    ]
+                  },
+                  "max": {
+                    "Integer": [
+                      1,
+                      "ms"
+                    ]
+                  },
+                  "delta": null
+                }
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Deadline",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Priority",
+              "value": "7",
+              "typed_value": {
+                "Integer": [
+                  7,
+                  null
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Stack_Size",
+              "value": "4096 Bytes",
+              "typed_value": {
+                "Integer": [
+                  4096,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "MixerThread",
+          "category": "thread",
+          "extends": null,
+          "features": [
+            {
+              "name": "torque_sp_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::TorqueSetpoint",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "pwm_out",
+              "kind": "DataPort",
+              "direction": "Out",
+              "access_kind": null,
+              "classifier": "Falcon_Types::MotorPwm",
+              "is_refined": false,
+              "properties": []
+            }
+          ],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Dispatch_Protocol",
+              "value": "Periodic",
+              "typed_value": {
+                "Enum": "Periodic"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Period",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Compute_Execution_Time",
+              "value": "0 ms .. 1 ms",
+              "typed_value": {
+                "Range": {
+                  "min": {
+                    "Integer": [
+                      0,
+                      "ms"
+                    ]
+                  },
+                  "max": {
+                    "Integer": [
+                      1,
+                      "ms"
+                    ]
+                  },
+                  "delta": null
+                }
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Deadline",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Priority",
+              "value": "6",
+              "typed_value": {
+                "Integer": [
+                  6,
+                  null
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Stack_Size",
+              "value": "2048 Bytes",
+              "typed_value": {
+                "Integer": [
+                  2048,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "AutopilotProcess",
+          "category": "process",
+          "extends": null,
+          "features": [
+            {
+              "name": "imu_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::ImuSample",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "waypoint_in",
+              "kind": "DataPort",
+              "direction": "In",
+              "access_kind": null,
+              "classifier": "Falcon_Types::Waypoint",
+              "is_refined": false,
+              "properties": []
+            },
+            {
+              "name": "pwm_out",
+              "kind": "DataPort",
+              "direction": "Out",
+              "access_kind": null,
+              "classifier": "Falcon_Types::MotorPwm",
+              "is_refined": false,
+              "properties": []
+            }
+          ],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": []
+        }
+      ],
+      "component_impls": [
+        {
+          "name": "AutopilotProcess.Cascade",
+          "category": "process",
+          "type_name": "AutopilotProcess",
+          "impl_name": "Cascade",
+          "extends": null,
+          "subcomponents": [
+            {
+              "name": "ekf",
+              "category": "thread",
+              "classifier": "EkfThread",
+              "is_refined": false,
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "pos",
+              "category": "thread",
+              "classifier": "PositionThread",
+              "is_refined": false,
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "att",
+              "category": "thread",
+              "classifier": "AttitudeThread",
+              "is_refined": false,
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "rate",
+              "category": "thread",
+              "classifier": "RateThread",
+              "is_refined": false,
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "mix",
+              "category": "thread",
+              "classifier": "MixerThread",
+              "is_refined": false,
+              "in_modes": [],
+              "properties": []
+            }
+          ],
+          "connections": [
+            {
+              "name": "c0",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "imu_in",
+              "destination": "ekf.imu_in",
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "c1",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "ekf.state_out",
+              "destination": "pos.state_in",
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "c2",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "waypoint_in",
+              "destination": "pos.waypoint_in",
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "c3",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "pos.attitude_sp_out",
+              "destination": "att.attitude_sp_in",
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "c4",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "ekf.state_out",
+              "destination": "att.state_in",
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "c5",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "att.rate_sp_out",
+              "destination": "rate.rate_sp_in",
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "c6",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "ekf.state_out",
+              "destination": "rate.state_in",
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "c7",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "rate.torque_sp_out",
+              "destination": "mix.torque_sp_in",
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "c8",
+              "kind": "Port",
+              "is_bidirectional": false,
+              "is_refined": false,
+              "source": "mix.pwm_out",
+              "destination": "pwm_out",
+              "in_modes": [],
+              "properties": []
+            }
+          ],
+          "flows": [],
+          "e2e_flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": []
+        }
+      ],
+      "feature_group_types": []
+    },
+    {
+      "name": "Falcon_System",
+      "with_clauses": [
+        "Falcon_Cascade",
+        "Falcon_Types",
+        "Memory_Properties",
+        "Deployment"
+      ],
+      "component_types": [
+        {
+          "name": "AutopilotMcu",
+          "category": "processor",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Scheduling_Protocol",
+              "value": "(RATE_MONOTONIC_PROTOCOL)",
+              "typed_value": {
+                "List": [
+                  {
+                    "Enum": "RATE_MONOTONIC_PROTOCOL"
+                  }
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Clock_Period",
+              "value": "5 ms",
+              "typed_value": {
+                "Integer": [
+                  5,
+                  "ms"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "SRAM",
+          "category": "memory",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Memory_Properties::Memory_Size",
+              "value": "1024 KByte",
+              "typed_value": {
+                "Integer": [
+                  1024,
+                  "KByte"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Word_Size",
+              "value": "4 Bytes",
+              "typed_value": {
+                "Integer": [
+                  4,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "Falcon",
+          "category": "system",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": []
+        }
+      ],
+      "component_impls": [
+        {
+          "name": "Falcon.Quad",
+          "category": "system",
+          "type_name": "Falcon",
+          "impl_name": "Quad",
+          "extends": null,
+          "subcomponents": [
+            {
+              "name": "mcu",
+              "category": "processor",
+              "classifier": "AutopilotMcu",
+              "is_refined": false,
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "sram",
+              "category": "memory",
+              "classifier": "SRAM",
+              "is_refined": false,
+              "in_modes": [],
+              "properties": []
+            },
+            {
+              "name": "autopilot",
+              "category": "process",
+              "classifier": "Falcon_Cascade::AutopilotProcess.Cascade",
+              "is_refined": false,
+              "in_modes": [],
+              "properties": []
+            }
+          ],
+          "connections": [],
+          "flows": [],
+          "e2e_flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Actual_Processor_Binding",
+              "value": "(reference (mcu))",
+              "typed_value": {
+                "List": [
+                  {
+                    "ReferenceValue": "mcu"
+                  }
+                ]
+              },
+              "is_append": false,
+              "applies_to": "autopilot",
+              "in_modes": []
+            },
+            {
+              "name": "Actual_Processor_Binding",
+              "value": "(reference (mcu))",
+              "typed_value": {
+                "List": [
+                  {
+                    "ReferenceValue": "mcu"
+                  }
+                ]
+              },
+              "is_append": false,
+              "applies_to": "autopilot.ekf",
+              "in_modes": []
+            },
+            {
+              "name": "Actual_Processor_Binding",
+              "value": "(reference (mcu))",
+              "typed_value": {
+                "List": [
+                  {
+                    "ReferenceValue": "mcu"
+                  }
+                ]
+              },
+              "is_append": false,
+              "applies_to": "autopilot.pos",
+              "in_modes": []
+            },
+            {
+              "name": "Actual_Processor_Binding",
+              "value": "(reference (mcu))",
+              "typed_value": {
+                "List": [
+                  {
+                    "ReferenceValue": "mcu"
+                  }
+                ]
+              },
+              "is_append": false,
+              "applies_to": "autopilot.att",
+              "in_modes": []
+            },
+            {
+              "name": "Actual_Processor_Binding",
+              "value": "(reference (mcu))",
+              "typed_value": {
+                "List": [
+                  {
+                    "ReferenceValue": "mcu"
+                  }
+                ]
+              },
+              "is_append": false,
+              "applies_to": "autopilot.rate",
+              "in_modes": []
+            },
+            {
+              "name": "Actual_Processor_Binding",
+              "value": "(reference (mcu))",
+              "typed_value": {
+                "List": [
+                  {
+                    "ReferenceValue": "mcu"
+                  }
+                ]
+              },
+              "is_append": false,
+              "applies_to": "autopilot.mix",
+              "in_modes": []
+            },
+            {
+              "name": "Actual_Memory_Binding",
+              "value": "(reference (sram))",
+              "typed_value": {
+                "List": [
+                  {
+                    "ReferenceValue": "sram"
+                  }
+                ]
+              },
+              "is_append": false,
+              "applies_to": "autopilot",
+              "in_modes": []
+            }
+          ]
+        }
+      ],
+      "feature_group_types": []
+    },
+    {
+      "name": "Falcon_Types",
+      "with_clauses": [
+        "Data_Model"
+      ],
+      "component_types": [
+        {
+          "name": "VehicleState",
+          "category": "data",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Data_Model::Data_Representation",
+              "value": "Struct",
+              "typed_value": {
+                "Enum": "Struct"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Data_Size",
+              "value": "56 Bytes",
+              "typed_value": {
+                "Integer": [
+                  56,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "ImuSample",
+          "category": "data",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Data_Model::Data_Representation",
+              "value": "Struct",
+              "typed_value": {
+                "Enum": "Struct"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Data_Size",
+              "value": "24 Bytes",
+              "typed_value": {
+                "Integer": [
+                  24,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "AttitudeSetpoint",
+          "category": "data",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Data_Model::Data_Representation",
+              "value": "Struct",
+              "typed_value": {
+                "Enum": "Struct"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Data_Size",
+              "value": "20 Bytes",
+              "typed_value": {
+                "Integer": [
+                  20,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "RateSetpoint",
+          "category": "data",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Data_Model::Data_Representation",
+              "value": "Struct",
+              "typed_value": {
+                "Enum": "Struct"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Data_Size",
+              "value": "16 Bytes",
+              "typed_value": {
+                "Integer": [
+                  16,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "TorqueSetpoint",
+          "category": "data",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Data_Model::Data_Representation",
+              "value": "Struct",
+              "typed_value": {
+                "Enum": "Struct"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Data_Size",
+              "value": "16 Bytes",
+              "typed_value": {
+                "Integer": [
+                  16,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "MotorPwm",
+          "category": "data",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Data_Model::Data_Representation",
+              "value": "Struct",
+              "typed_value": {
+                "Enum": "Struct"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Data_Size",
+              "value": "16 Bytes",
+              "typed_value": {
+                "Integer": [
+                  16,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        },
+        {
+          "name": "Waypoint",
+          "category": "data",
+          "extends": null,
+          "features": [],
+          "flows": [],
+          "modes": [],
+          "mode_transitions": [],
+          "properties": [
+            {
+              "name": "Data_Model::Data_Representation",
+              "value": "Struct",
+              "typed_value": {
+                "Enum": "Struct"
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            },
+            {
+              "name": "Data_Size",
+              "value": "16 Bytes",
+              "typed_value": {
+                "Integer": [
+                  16,
+                  "Bytes"
+                ]
+              },
+              "is_append": false,
+              "applies_to": null,
+              "in_modes": []
+            }
+          ]
+        }
+      ],
+      "component_impls": [],
+      "feature_group_types": []
+    }
+  ],
+  "instance": {
+    "name": "Falcon.Quad",
+    "category": "system",
+    "package": "Falcon_System",
+    "type_name": "Falcon",
+    "impl_name": "Quad",
+    "features": [],
+    "connections": [],
+    "children": [
+      {
+        "name": "mcu",
+        "category": "processor",
+        "package": "Falcon_System",
+        "type_name": "AutopilotMcu",
+        "impl_name": null,
+        "features": [],
+        "connections": [],
+        "properties": {
+          "Clock_Period": "5 ms",
+          "Scheduling_Protocol": "(RATE_MONOTONIC_PROTOCOL)"
+        },
+        "children": [],
+        "diagnostics": []
+      },
+      {
+        "name": "sram",
+        "category": "memory",
+        "package": "Falcon_System",
+        "type_name": "SRAM",
+        "impl_name": null,
+        "features": [],
+        "connections": [],
+        "properties": {
+          "Memory_Properties::Memory_Size": "1024 KByte",
+          "Word_Size": "4 Bytes"
+        },
+        "children": [],
+        "diagnostics": []
+      },
+      {
+        "name": "autopilot",
+        "category": "process",
+        "package": "Falcon_Cascade",
+        "type_name": "AutopilotProcess",
+        "impl_name": "Cascade",
+        "features": [
+          {
+            "name": "imu_in",
+            "kind": "DataPort",
+            "direction": "In"
+          },
+          {
+            "name": "waypoint_in",
+            "kind": "DataPort",
+            "direction": "In"
+          },
+          {
+            "name": "pwm_out",
+            "kind": "DataPort",
+            "direction": "Out"
+          }
+        ],
+        "connections": [
+          {
+            "name": "c1",
+            "kind": "Port",
+            "is_bidirectional": false,
+            "source": "ekf.state_out",
+            "destination": "pos.state_in"
+          },
+          {
+            "name": "c3",
+            "kind": "Port",
+            "is_bidirectional": false,
+            "source": "pos.attitude_sp_out",
+            "destination": "att.attitude_sp_in"
+          },
+          {
+            "name": "c4",
+            "kind": "Port",
+            "is_bidirectional": false,
+            "source": "ekf.state_out",
+            "destination": "att.state_in"
+          },
+          {
+            "name": "c5",
+            "kind": "Port",
+            "is_bidirectional": false,
+            "source": "att.rate_sp_out",
+            "destination": "rate.rate_sp_in"
+          },
+          {
+            "name": "c6",
+            "kind": "Port",
+            "is_bidirectional": false,
+            "source": "ekf.state_out",
+            "destination": "rate.state_in"
+          },
+          {
+            "name": "c7",
+            "kind": "Port",
+            "is_bidirectional": false,
+            "source": "rate.torque_sp_out",
+            "destination": "mix.torque_sp_in"
+          }
+        ],
+        "properties": {
+          "Actual_Memory_Binding": "(reference (sram))",
+          "Actual_Processor_Binding": "(reference (mcu))"
+        },
+        "children": [
+          {
+            "name": "ekf",
+            "category": "thread",
+            "package": "Falcon_Cascade",
+            "type_name": "EkfThread",
+            "impl_name": null,
+            "features": [
+              {
+                "name": "imu_in",
+                "kind": "DataPort",
+                "direction": "In"
+              },
+              {
+                "name": "state_out",
+                "kind": "DataPort",
+                "direction": "Out"
+              }
+            ],
+            "connections": [],
+            "properties": {
+              "Actual_Processor_Binding": "(reference (mcu))",
+              "Compute_Execution_Time": "0 ms .. 1 ms",
+              "Deadline": "5 ms",
+              "Dispatch_Protocol": "Periodic",
+              "Period": "5 ms",
+              "Priority": "10",
+              "Stack_Size": "4096 Bytes"
+            },
+            "children": [],
+            "diagnostics": []
+          },
+          {
+            "name": "pos",
+            "category": "thread",
+            "package": "Falcon_Cascade",
+            "type_name": "PositionThread",
+            "impl_name": null,
+            "features": [
+              {
+                "name": "state_in",
+                "kind": "DataPort",
+                "direction": "In"
+              },
+              {
+                "name": "waypoint_in",
+                "kind": "DataPort",
+                "direction": "In"
+              },
+              {
+                "name": "attitude_sp_out",
+                "kind": "DataPort",
+                "direction": "Out"
+              }
+            ],
+            "connections": [],
+            "properties": {
+              "Actual_Processor_Binding": "(reference (mcu))",
+              "Compute_Execution_Time": "0 ms .. 1 ms",
+              "Deadline": "5 ms",
+              "Dispatch_Protocol": "Periodic",
+              "Period": "5 ms",
+              "Priority": "9",
+              "Stack_Size": "4096 Bytes"
+            },
+            "children": [],
+            "diagnostics": []
+          },
+          {
+            "name": "att",
+            "category": "thread",
+            "package": "Falcon_Cascade",
+            "type_name": "AttitudeThread",
+            "impl_name": null,
+            "features": [
+              {
+                "name": "state_in",
+                "kind": "DataPort",
+                "direction": "In"
+              },
+              {
+                "name": "attitude_sp_in",
+                "kind": "DataPort",
+                "direction": "In"
+              },
+              {
+                "name": "rate_sp_out",
+                "kind": "DataPort",
+                "direction": "Out"
+              }
+            ],
+            "connections": [],
+            "properties": {
+              "Actual_Processor_Binding": "(reference (mcu))",
+              "Compute_Execution_Time": "0 ms .. 1 ms",
+              "Deadline": "5 ms",
+              "Dispatch_Protocol": "Periodic",
+              "Period": "5 ms",
+              "Priority": "8",
+              "Stack_Size": "4096 Bytes"
+            },
+            "children": [],
+            "diagnostics": []
+          },
+          {
+            "name": "rate",
+            "category": "thread",
+            "package": "Falcon_Cascade",
+            "type_name": "RateThread",
+            "impl_name": null,
+            "features": [
+              {
+                "name": "state_in",
+                "kind": "DataPort",
+                "direction": "In"
+              },
+              {
+                "name": "rate_sp_in",
+                "kind": "DataPort",
+                "direction": "In"
+              },
+              {
+                "name": "torque_sp_out",
+                "kind": "DataPort",
+                "direction": "Out"
+              }
+            ],
+            "connections": [],
+            "properties": {
+              "Actual_Processor_Binding": "(reference (mcu))",
+              "Compute_Execution_Time": "0 ms .. 1 ms",
+              "Deadline": "5 ms",
+              "Dispatch_Protocol": "Periodic",
+              "Period": "5 ms",
+              "Priority": "7",
+              "Stack_Size": "4096 Bytes"
+            },
+            "children": [],
+            "diagnostics": []
+          },
+          {
+            "name": "mix",
+            "category": "thread",
+            "package": "Falcon_Cascade",
+            "type_name": "MixerThread",
+            "impl_name": null,
+            "features": [
+              {
+                "name": "torque_sp_in",
+                "kind": "DataPort",
+                "direction": "In"
+              },
+              {
+                "name": "pwm_out",
+                "kind": "DataPort",
+                "direction": "Out"
+              }
+            ],
+            "connections": [],
+            "properties": {
+              "Actual_Processor_Binding": "(reference (mcu))",
+              "Compute_Execution_Time": "0 ms .. 1 ms",
+              "Deadline": "5 ms",
+              "Dispatch_Protocol": "Periodic",
+              "Period": "5 ms",
+              "Priority": "6",
+              "Stack_Size": "2048 Bytes"
+            },
+            "children": [],
+            "diagnostics": []
+          }
+        ],
+        "diagnostics": []
+      }
+    ],
+    "diagnostics": []
+  },
+  "diagnostics": [
+    {
+      "severity": "info",
+      "message": "component 'mcu' uses type 'AutopilotMcu' which has no implementation in scope",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "completeness"
+    },
+    {
+      "severity": "info",
+      "message": "component 'mcu' of type 'AutopilotMcu' has no features",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "completeness"
+    },
+    {
+      "severity": "info",
+      "message": "component 'sram' uses type 'SRAM' which has no implementation in scope",
+      "path": [
+        "Falcon.Quad",
+        "sram"
+      ],
+      "analysis": "completeness"
+    },
+    {
+      "severity": "info",
+      "message": "component 'ekf' uses type 'EkfThread' which has no implementation in scope",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "ekf"
+      ],
+      "analysis": "completeness"
+    },
+    {
+      "severity": "info",
+      "message": "component 'pos' uses type 'PositionThread' which has no implementation in scope",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "pos"
+      ],
+      "analysis": "completeness"
+    },
+    {
+      "severity": "info",
+      "message": "component 'att' uses type 'AttitudeThread' which has no implementation in scope",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "att"
+      ],
+      "analysis": "completeness"
+    },
+    {
+      "severity": "info",
+      "message": "component 'rate' uses type 'RateThread' which has no implementation in scope",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "rate"
+      ],
+      "analysis": "completeness"
+    },
+    {
+      "severity": "info",
+      "message": "component 'mix' uses type 'MixerThread' which has no implementation in scope",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "mix"
+      ],
+      "analysis": "completeness"
+    },
+    {
+      "severity": "warning",
+      "message": "processor 'mcu' utilization 100.0% exceeds RMA bound 74.3% for 5 tasks (may miss deadlines under rate monotonic scheduling)",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "scheduling"
+    },
+    {
+      "severity": "info",
+      "message": "processor 'mcu' cross-check: not guaranteed schedulable under RMA (U=100.0% > RMA bound 74.3%) but schedulable under EDF (U <= 100%); consider EDF scheduling or response-time analysis",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "scheduling"
+    },
+    {
+      "severity": "info",
+      "message": "processor 'mcu' utilization: 100.0% (5 threads, RMA bound: 74.3%)",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "scheduling"
+    },
+    {
+      "severity": "warning",
+      "message": "processor 'mcu' sensitivity: a 10% increase in execution times would exceed 100% utilization (100.0% -> 110.0%); the system has critically thin timing margins",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "scheduling"
+    },
+    {
+      "severity": "info",
+      "message": "processor 'mcu' clock drift advisory: utilization 100.0% is above 80%; clock drift between processors may cause period jitter that increases effective utilization — consider a timing margin (SPAR_Properties::Clock_Drift_Margin)",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "scheduling"
+    },
+    {
+      "severity": "info",
+      "message": "processor 'mcu' has 5 threads but no Context_Switch_Time or Interrupt_Overhead properties set; WCET values may underestimate actual execution time if overhead is not included in Compute_Execution_Time",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "scheduling"
+    },
+    {
+      "severity": "info",
+      "message": "thread 'mix' on processor 'mcu': response time 1.00 ms <= deadline 5.00 ms",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "mix"
+      ],
+      "analysis": "rta"
+    },
+    {
+      "severity": "info",
+      "message": "thread 'rate' on processor 'mcu': response time 2.00 ms <= deadline 5.00 ms",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "rate"
+      ],
+      "analysis": "rta"
+    },
+    {
+      "severity": "info",
+      "message": "thread 'att' on processor 'mcu': response time 3.00 ms <= deadline 5.00 ms",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "att"
+      ],
+      "analysis": "rta"
+    },
+    {
+      "severity": "info",
+      "message": "thread 'pos' on processor 'mcu': response time 4.00 ms <= deadline 5.00 ms",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "pos"
+      ],
+      "analysis": "rta"
+    },
+    {
+      "severity": "info",
+      "message": "thread 'ekf' on processor 'mcu': response time 5.00 ms <= deadline 5.00 ms",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "ekf"
+      ],
+      "analysis": "rta"
+    },
+    {
+      "severity": "info",
+      "message": "processor component 'mcu' has no error model annotations",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "info",
+      "message": "thread component 'ekf' has no error model annotations",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "ekf"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "info",
+      "message": "thread component 'pos' has no error model annotations",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "pos"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "info",
+      "message": "thread component 'att' has no error model annotations",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "att"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "info",
+      "message": "thread component 'rate' has no error model annotations",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "rate"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "info",
+      "message": "thread component 'mix' has no error model annotations",
+      "path": [
+        "Falcon.Quad",
+        "autopilot",
+        "mix"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "warning",
+      "message": "single point of failure: Falcon.Quad.mcu.ServiceFailure can cause top-level failure of failure of Falcon.Quad",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "warning",
+      "message": "single point of failure: Falcon.Quad.sram.ServiceFailure can cause top-level failure of failure of Falcon.Quad",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "warning",
+      "message": "single point of failure: Falcon.Quad.autopilot.ekf.ServiceFailure can cause top-level failure of failure of Falcon.Quad",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "warning",
+      "message": "single point of failure: Falcon.Quad.autopilot.pos.ServiceFailure can cause top-level failure of failure of Falcon.Quad",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "warning",
+      "message": "single point of failure: Falcon.Quad.autopilot.att.ServiceFailure can cause top-level failure of failure of Falcon.Quad",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "warning",
+      "message": "single point of failure: Falcon.Quad.autopilot.rate.ServiceFailure can cause top-level failure of failure of Falcon.Quad",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "warning",
+      "message": "single point of failure: Falcon.Quad.autopilot.mix.ServiceFailure can cause top-level failure of failure of Falcon.Quad",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "info",
+      "message": "fault tree for 'failure of Falcon.Quad': 7 minimal cut sets, 7 single-point failures",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_fault_tree"
+    },
+    {
+      "severity": "info",
+      "message": "EMV2-STPA bridge: generated 1 hazard(s), 2 loss scenario(s), 7 sub-hazard(s) from fault tree of 'Falcon.Quad'",
+      "path": [
+        "Falcon.Quad"
+      ],
+      "analysis": "emv2_stpa_bridge"
+    },
+    {
+      "severity": "warning",
+      "message": "processor 'mcu' has no virtual processor (partition) subcomponents (ARINC-PROCESSOR-HAS-PARTITIONS)",
+      "path": [
+        "Falcon.Quad",
+        "mcu"
+      ],
+      "analysis": "arinc653"
+    },
+    {
+      "severity": "warning",
+      "message": "process 'autopilot' is not bound to any virtual processor (partition) (ARINC-PARTITION-ASSIGNMENT)",
+      "path": [
+        "Falcon.Quad",
+        "autopilot"
+      ],
+      "analysis": "arinc653"
+    }
+  ]
+}

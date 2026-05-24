@@ -1,0 +1,69 @@
+-- Falcon control-cascade data types — AADL model.
+--
+-- Source of truth for the message types the cascade carries between
+-- controllers. Mirrors `wit/falcon-cascade/cascade.wit` field-for-field;
+-- spar's `codegen --format wit` will replace the hand-written WIT once
+-- the codegen path is mature. Until then this model serves as the
+-- architectural source of truth for spar's analysis passes (timing,
+-- partitioning, deployment).
+
+package Falcon_Types
+public
+  with Data_Model;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Cascade message records — every field is f32 (4 bytes).
+  -- ══════════════════════════════════════════════════════════════
+
+  data VehicleState
+    -- EKF state estimate (quaternion + NED pos/vel + body rates +
+    -- EKF innovation).
+    --   4 floats quaternion + 3 pos + 3 vel + 3 body-rate + 1 innov = 14 × 4 = 56 bytes
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 56 Bytes;
+  end VehicleState;
+
+  data ImuSample
+    -- Raw IMU: 3 accel + 3 gyro = 24 bytes.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 24 Bytes;
+  end ImuSample;
+
+  data AttitudeSetpoint
+    -- Body-to-NED quaternion + collective thrust = 5 × 4 = 20 bytes.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 20 Bytes;
+  end AttitudeSetpoint;
+
+  data RateSetpoint
+    -- Body-rate setpoint + collective thrust = 4 × 4 = 16 bytes.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 16 Bytes;
+  end RateSetpoint;
+
+  data TorqueSetpoint
+    -- Body-frame torque + collective thrust = 16 bytes.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 16 Bytes;
+  end TorqueSetpoint;
+
+  data MotorPwm
+    -- Per-motor PWM for falcon-quad = 4 × 4 = 16 bytes.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 16 Bytes;
+  end MotorPwm;
+
+  data Waypoint
+    -- NED target + heading = 4 × 4 = 16 bytes.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 16 Bytes;
+  end Waypoint;
+
+end Falcon_Types;

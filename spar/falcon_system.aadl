@@ -1,0 +1,62 @@
+-- Falcon system — autopilot processor hosting the cascade.
+--
+-- Target: STM32H743 (Cortex-M7, 480 MHz, 1 MB SRAM). The cascade
+-- runs at 200 Hz; the EKF is the dominant cost. Total cascade WCET
+-- ≤ 5 ms per the per-thread budgets in Falcon_Cascade.aadl, so the
+-- processor has roughly 4 ms/period of headroom for the FM-radio /
+-- MAVLink / telemetry sidebands.
+
+package Falcon_System
+public
+  with Falcon_Cascade;
+  with Falcon_Types;
+  with Memory_Properties;
+  with Deployment;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Processor — STM32H743 Cortex-M7
+  -- ══════════════════════════════════════════════════════════════
+
+  processor AutopilotMcu
+    properties
+      Scheduling_Protocol => (RATE_MONOTONIC_PROTOCOL);
+      Clock_Period => 5 ms;
+  end AutopilotMcu;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Memory — on-chip SRAM
+  -- ══════════════════════════════════════════════════════════════
+
+  memory SRAM
+    properties
+      Memory_Properties::Memory_Size => 1024 KByte;
+      Word_Size => 4 Bytes;
+  end SRAM;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Top-level system
+  -- ══════════════════════════════════════════════════════════════
+
+  system Falcon
+  end Falcon;
+
+  system implementation Falcon.Quad
+    subcomponents
+      mcu: processor AutopilotMcu;
+      sram: memory SRAM;
+      autopilot: process Falcon_Cascade::AutopilotProcess.Cascade;
+    properties
+      -- Bind the autopilot process + every cascade thread to the
+      -- MCU + SRAM. AS5506 §10.6 requires bindings at thread level
+      -- (process binding alone is not enough for schedulability
+      -- analysis).
+      Actual_Processor_Binding => (reference (mcu)) applies to autopilot;
+      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.ekf;
+      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.pos;
+      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.att;
+      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.rate;
+      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.mix;
+      Actual_Memory_Binding => (reference (sram)) applies to autopilot;
+  end Falcon.Quad;
+
+end Falcon_System;
