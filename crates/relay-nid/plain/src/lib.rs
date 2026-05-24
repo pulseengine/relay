@@ -31,6 +31,15 @@
 
 #![no_std]
 
+pub mod bitpack;
+
+// Kani harnesses live at the end of this file, gated on `cfg(kani)`.
+// They give relay-nid the formal-verification coverage Verus would —
+// since the encode/decode bodies are bit-level transforms (an area
+// Verus reasons about poorly), Kani's bounded model checker is the
+// better DO-178 technique class here; a full Verus refactor of the
+// crate is deferred and tracked in the v0.9.1 FV artifact.
+
 /// Frame size in bytes — every Network ID message is exactly this long.
 pub const FRAME_BYTES: usize = 25;
 
@@ -382,5 +391,60 @@ mod tests {
             let _ = decode_basic_id(&buf);
             let _ = decode_location(&buf);
         }
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::bitpack::*;
+    use super::*;
+
+    /// NID-K01: decode_basic_id never panics on arbitrary input.
+    #[kani::proof]
+    fn verify_decode_basic_id_never_panics() {
+        let buf: [u8; FRAME_BYTES] = kani::any();
+        let _ = decode_basic_id(&buf);
+    }
+
+    /// NID-K02: decode_location never panics on arbitrary input.
+    #[kani::proof]
+    fn verify_decode_location_never_panics() {
+        let buf: [u8; FRAME_BYTES] = kani::any();
+        let _ = decode_location(&buf);
+    }
+
+    /// NID-K03: bit-packed Basic ID decoder never panics.
+    #[kani::proof]
+    fn verify_decode_basic_id_bitpacked_never_panics() {
+        let buf: [u8; FRAME_BYTES] = kani::any();
+        let _ = decode_basic_id_bitpacked(&buf);
+    }
+
+    /// NID-K04: bit-packed Location decoder never panics.
+    #[kani::proof]
+    fn verify_decode_location_bitpacked_never_panics() {
+        let buf: [u8; FRAME_BYTES] = kani::any();
+        let _ = decode_location_bitpacked(&buf);
+    }
+
+    /// NID-K05: bit-packed Basic ID round-trips for any in-range
+    /// id_type / ua_type and arbitrary UAS ID bytes. Exhaustive
+    /// over the input space within Kani's bounded model.
+    #[kani::proof]
+    fn verify_basic_id_bitpacked_round_trip() {
+        let id_code: u8 = kani::any();
+        kani::assume(id_code <= 4);
+        let ua_code: u8 = kani::any();
+        kani::assume(ua_code <= 9);
+        let uas_id: [u8; UAS_ID_BYTES] = kani::any();
+        let msg = BasicId {
+            id_type: IdType::from_code(id_code).unwrap(),
+            ua_type: UaType::from_code(ua_code).unwrap(),
+            uas_id,
+        };
+        let mut buf = [0u8; FRAME_BYTES];
+        encode_basic_id_bitpacked(&msg, &mut buf);
+        let decoded = decode_basic_id_bitpacked(&buf).unwrap();
+        assert!(decoded == msg);
     }
 }

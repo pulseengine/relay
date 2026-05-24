@@ -1,7 +1,7 @@
 artifacts:
   - id: FV-FALCON-FAULT-001
     type: sw-verification
-    title: "EKF-divergence watchdog — Verus proofs + SITL fault-injection (v0.8)"
+    title: "EKF-divergence watchdog — Verus + Kani + SITL fault-injection (v0.8 + v0.9.1)"
     status: approved
     description: >
       v0.8 verification of the EKF-divergence safety path:
@@ -50,19 +50,30 @@ artifacts:
       through unchanged); the SITL switches the position setpoint
       to home only after the dispatched command is observed.
 
-      Honestly deferred to a later v0.8.x:
-        - Kani bounded-overflow proof on the bit-shift / count_ones
-          path (Verus treats `step_window` as external_body).
-    tags: [verification, falcon, fault-injection, ekf, relay-hs, verus, v0.8]
+      3. Kani bounded model-checking (`cargo kani -p relay-hs`,
+         v0.9.1) closes the trust gap Verus leaves on the
+         external_body bit-shift / count_ones helper:
+           - HS-P06 (Kani): observe() never un-latches RTL for
+             any arbitrary pre-state history + over_limit input.
+           - HS-P07 (Kani): observe() returns true only on the
+             RTL transition (and never twice).
+           - HS-P08 (Kani): step_window's over-count is bounded
+             by window for every arbitrary u64 history. This
+             closes the `external_body` gap.
+           - HS-P09 (Kani): once latched, observe() always
+             returns false — the transition fires exactly once.
+    tags: [verification, falcon, fault-injection, ekf, relay-hs, verus, kani, v0.8, v0.9.1]
     fields:
       method: formal-verification + automated-test
       verus-properties: "HS-P06, HS-P07"
+      kani-properties: "HS-P06, HS-P07, HS-P08, HS-P09"
       bazel-target: "//:relay_hs_verus_test"
       test-count: 5
       steps:
         - run: bazel test //:relay_hs_verus_test
         - run: cargo test -p relay-hs
         - run: cargo test -p falcon-sitl-hover
+        - run: cargo kani -p relay-hs
     links:
       - type: verifies
         target: SWREQ-FALCON-FAULT-P01

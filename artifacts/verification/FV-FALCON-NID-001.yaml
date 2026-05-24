@@ -1,7 +1,7 @@
 artifacts:
   - id: FV-FALCON-NID-001
     type: sw-verification
-    title: "Network ID codec — round-trip + fuzz tests for relay-nid (v0.9)"
+    title: "Network ID codec — round-trip + fuzz + Kani + ASTM bit-packing for relay-nid (v0.9 + v0.9.1)"
     status: approved
     description: >
       v0.9 verification of the EASA U-space Network Identification
@@ -14,24 +14,52 @@ artifacts:
       - Proptest fuzz for round-trip in-range and for decoder
         never-panics on arbitrary 25-byte input.
 
-      Total: 7 deterministic + 3 proptest cases. `no_std + no
-      alloc` — encoder writes into a caller-provided buffer.
+      Plain codec: 7 deterministic + 3 proptest cases.
 
-      Honestly deferred to v0.9.x:
-        - ASTM F3411-22 bit-packed wire format (the v0.9 codec
-          uses straight little-endian fields for clean Verus
-          contracts in v0.9.x; bit-packing is a compatibility
-          layer over the same in-memory types).
-        - Verus contracts on the encoder bounds (buffer length,
-          field-range invariants).
-    tags: [verification, falcon, easa, u-space, remote-id, codec, proptest, v0.9]
+      v0.9.1 — ASTM F3411-22 bit-packed wire format
+      (`relay_nid::bitpack`):
+        - encode_basic_id_bitpacked / decode_basic_id_bitpacked are
+          bit-perfect round-trip (id_type + ua_type packed into a
+          single nibble byte per the F3411-22 layout).
+        - encode_location_bitpacked / decode_location_bitpacked
+          carry the in-memory Location through F3411-22's
+          quantisation (degrees, 0.5 m, m/s, 0.5 m/s, 0.1 s).
+          `canonicalize_location` pre-rounds inputs so
+          decode(encode(canon)) == canon is the round-trip
+          identity the proptest checks.
+        - 7 deterministic + 3 proptest cases in the bitpack module.
+
+      v0.9.1 — Kani bounded model-checking
+      (`cargo kani -p relay-nid`) gives the relay-nid codec
+      formal-verification coverage in the same DO-178 technique
+      class Verus provides for the engines. Verus's value on a
+      pure codec is limited (it reasons poorly about bit ops +
+      `try_into`); Kani is the better tool here.
+        - NID-K01: decode_basic_id never panics on arbitrary input.
+        - NID-K02: decode_location never panics on arbitrary input.
+        - NID-K03: decode_basic_id_bitpacked never panics.
+        - NID-K04: decode_location_bitpacked never panics.
+        - NID-K05: bit-packed Basic ID round-trips exhaustively
+          over the bounded input space.
+
+      `no_std + no alloc` — every encoder writes into a caller-
+      provided buffer.
+
+      Honestly deferred to v0.9.2:
+        - Full Verus refactor (dual src/+plain/ tree, verus_test
+          Bazel target). Kani above covers the same property
+          class; the Verus refactor is structural and tracked
+          separately.
+    tags: [verification, falcon, easa, u-space, remote-id, codec, proptest, kani, astm-f3411, v0.9, v0.9.1]
     fields:
-      method: automated-test
-      test-count: 10
+      method: automated-test + formal-verification
+      kani-properties: "NID-K01, NID-K02, NID-K03, NID-K04, NID-K05"
+      test-count: 20
       proptest-cases-default: 256
       steps:
         - run: cargo test -p relay-nid
         - run: PROPTEST_CASES=4096 cargo test -p relay-nid
+        - run: cargo kani -p relay-nid
     links:
       - type: verifies
         target: SWREQ-FALCON-NID-P01
