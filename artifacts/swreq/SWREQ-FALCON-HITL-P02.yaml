@@ -1,0 +1,48 @@
+artifacts:
+  - id: SWREQ-FALCON-HITL-P02
+    type: sw-req
+    title: "HITL — MavlinkBench live-telemetry backend"
+    status: approved
+    description: >
+      The HITL harness shall provide a `MavlinkBench` backend that
+      reads GLOBAL_POSITION_INT frames from a real flight
+      controller — either over UDP (default) or over an in-memory
+      `FrameSource` (for tests).
+
+      The backend shall:
+
+        1. Decouple frame supply from the harness via the
+           `FrameSource` trait (one method, `next_frame`).
+        2. Project the MAVLink lat/lon/alt fields to local NED
+           centimetres via a launch-site `Home` reference using
+           an equirectangular approximation (sub-cm error within
+           the few-km bench range).
+        3. Drain every pending frame per harness tick so the
+           cached position is the freshest one available, even
+           when the MAVLink rate (10 Hz) and the harness tick
+           rate (100 Hz) differ.
+        4. Feed the verified `relay-lc::engine::Geofence::check`
+           and the verified `relay-sc::engine::CommandStore` — the
+           same chain the StubBench drives.
+
+      The wire path is exercised in software via:
+        - `InMemoryFrameSource` — pre-built scripts of MAVLink
+          frames; tests verify the bench latches on a spoof-
+          induced position jump (`mavlink_bench_trips_and_
+          dispatches_on_spoof`) and stays silent on benign motion
+          (`mavlink_bench_no_violation_no_latch`).
+        - `UdpFrameSource` — wraps `std::net::UdpSocket` in
+          non-blocking mode; tested by binding + running the CLI
+          (`falcon-hitl-rfspoof --backend=mavlink`).
+
+      On a real bench the user runs the FC with MAVLink output
+      pointed at the harness's listen port; no further code
+      changes are required to consume live position telemetry.
+    tags: [falcon, hitl, mavlink, telemetry, v0.12]
+    fields:
+      crate: examples/falcon-hitl-rfspoof
+      message: GLOBAL_POSITION_INT (MAVLink id 33)
+      consumed-by: SYSREQ-FALCON-015
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-015

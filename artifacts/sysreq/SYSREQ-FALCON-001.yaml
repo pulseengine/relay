@@ -393,3 +393,35 @@ artifacts:
     links:
       - type: derives-from
         target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-016
+    type: system-req
+    title: Safety — HITL evidence with live-FC MAVLink telemetry
+    status: approved
+    description: >
+      The HITL harness (SYSREQ-FALCON-015) shall consume position
+      telemetry from a real flight controller via the MAVLink
+      protocol — GLOBAL_POSITION_INT (id 33) over UDP — so the
+      same verified relay-lc → relay-sc chain that drives the
+      SITL and the stub-bench is driven by a live FC's view of
+      the world. The MavlinkBench backend closes the live-
+      telemetry gap recorded in FV-FALCON-HITL-001; the only
+      remaining bench-only step is the FC + SDR wiring the user
+      performs on a real lab.
+    tags: [falcon, safety, hitl, mavlink, telemetry, v0.12]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        MavlinkBench backend (examples/falcon-hitl-rfspoof/src/
+        mavlink.rs) reads GLOBAL_POSITION_INT frames via a
+        FrameSource trait (UdpFrameSource for real bench,
+        InMemoryFrameSource for tests), projects MAVLink
+        lat/lon/alt to local NED cm via an equirectangular Home
+        reference, and feeds the cached position through the
+        verified safety path each harness tick. Positive +
+        negative-control tests + relay-mavlink codec round-trip
+        tests + miri robust-testing all green.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001

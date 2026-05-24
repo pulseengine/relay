@@ -626,6 +626,80 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.10
 
+  - id: FEAT-FALCON-v0.12
+    type: feature
+    title: "v0.12 — MavlinkBench live-FC backend, miri robust-testing, v1.0 dossier scaffold"
+    status: approved
+    description: >
+      LANDED. Three of the v0.10.x/v0.11 carry-overs, plus the
+      first concrete v1.0 dossier document.
+
+      Ships:
+        - relay-mavlink GLOBAL_POSITION_INT (MAVLink id 33) codec
+          (MAVLINK-P03 / FV-FALCON-HITL-002): no_std + no_alloc,
+          28-byte payload, CRC_EXTRA = 104 pinned, round-trip
+          deterministic + proptest, field-offset spec-check, no
+          panic paths. 11 new tests.
+        - examples/falcon-hitl-rfspoof MavlinkBench (HITL-P02 /
+          FV-FALCON-HITL-002): live-FC backend reading
+          GLOBAL_POSITION_INT over UDP via a FrameSource trait;
+          equirectangular Home projection to local NED cm;
+          plugs into the existing run_scenario driver
+          unchanged. Positive + negative-control tests. 6 new
+          tests.
+        - relay-lc miri robust-testing (FV-FALCON-GEO-003):
+          5 new Geofence unit tests + 8 HITL bench tests run
+          UB-free under miri (-Zmiri-disable-isolation).
+          Documents the honest substitution for the rollout's
+          "abstract interpretation" class — MIRAI is archived,
+          Charon is research-stage; miri is what actually
+          delivers same-bug-surface evidence on stable rustc
+          today.
+        - docs/dossier/DO-178C-DAL-A-mapping.md: first credit-
+          bundle crosswalk for the v1.0 dossier. Maps every
+          DO-178C Annex A objective DAL-A requires to the
+          falcon evidence (rivet / Verus / Kani / miri / test)
+          that supports it, with **GAP** named explicitly where
+          coverage is incomplete (spar AADL pipeline,
+          structural coverage via witness, process documents).
+
+      The cFS-DNA chain (detect → relay-sc → cascade) is
+      unchanged; v0.12 widens the **detector side** with a real
+      telemetry source and the **evidence side** with a third
+      technique class plus the first credit-bundle document.
+
+      Verification:
+        - cargo test --workspace → 387 passing (was 365 at
+          v0.11; 11 mavlink + 5 geofence + 6 bench).
+        - MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri
+          test on Geofence + stub + mavlink — UB-free across 13
+          tests.
+        - rivet validate → PASS.
+        - All v0.11 invariants preserved (Verus LC-P09/P10,
+          Kani LC-K01..K05, the cFS-DNA RTL dispatch).
+
+      Honestly deferred:
+        - Live-RF execution against silicon (no hardware in the
+          dev loop). Both HackRfBench and MavlinkBench are
+          *drivers*; the bench-run is the user's job.
+        - Spar → WIT regeneration pipeline (architectural
+          traceability gap recorded in the DO-178C crosswalk
+          A-4.8/A-4.9).
+        - Witness MC/DC structural coverage (A-7.5/A-7.6).
+        - Five other credit-bundle crosswalks (ISO 26262 ASIL-D,
+          IEC 61508 SIL-4, IEC 62304 Class C, ECSS-Q-ST-80C
+          Cat A, EN 50128 SIL-4) — the DO-178C one is the
+          pattern.
+    tags: [falcon, milestone, v0.12, hitl, mavlink, miri, dossier, landed]
+    fields:
+      release-target: "MavlinkBench live-FC backend + miri robust-testing + v1.0 dossier scaffold"
+      mavlink-message: "GLOBAL_POSITION_INT (id 33, CRC_EXTRA 104)"
+      example: examples/falcon-hitl-rfspoof
+      dossier-domains-mapped: 1
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.11
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -658,4 +732,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.11
+        target: FEAT-FALCON-v0.12

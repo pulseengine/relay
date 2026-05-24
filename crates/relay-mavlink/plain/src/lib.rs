@@ -28,6 +28,7 @@
 pub mod crc;
 pub mod heartbeat;
 pub mod frame;
+pub mod global_position_int;
 
 pub use crc::Crc16X25;
 pub use frame::{
@@ -37,4 +38,8 @@ pub use frame::{
 pub use heartbeat::{
     FALCON_AUTOPILOT_ID, Heartbeat, MavAutopilot, MavModeFlag, MavState, MavType,
     HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, HEARTBEAT_PAYLOAD_LEN,
+};
+pub use global_position_int::{
+    GlobalPositionInt, GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID,
+    GLOBAL_POSITION_INT_PAYLOAD_LEN, HEADING_UNKNOWN,
 };

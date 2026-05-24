@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-FALCON-MAVLINK-P04
+    type: sw-req
+    title: "MAVLINK-P04: GLOBAL_POSITION_INT codec — round-trip + offset stability"
+    status: approved
+    description: >
+      The MAVLink codec shall encode and decode the
+      GLOBAL_POSITION_INT message (id 33, 28-byte payload, CRC_EXTRA
+      = 104) per the MAVLink XML specification.
+
+        - Field order matches the MAVLink-canonical sorted-by-size-
+          descending order: 1×u32 (time_boot_ms) + 4×i32 (lat, lon,
+          alt, relative_alt) — all five 4-byte — then 3×i16 (vx, vy,
+          vz) and 1×u16 (hdg).
+        - All fields little-endian on the wire.
+        - encode → decode preserves every field exactly over an
+          arbitrary input (proptest fuzz).
+        - Decoders reject length-mismatched payloads without panic.
+        - The spec-fixed CRC_EXTRA value (104) is pinned by a unit
+          test — silent drift in the codec surfaces as a test
+          failure.
+
+      This message is the v0.12 HITL-harness telemetry source — the
+      relay-lc Geofence is fed positions decoded from the FC's
+      GLOBAL_POSITION_INT stream.
+    tags: [falcon, mavlink, global-position-int, codec, v0.12]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        cargo test -p relay-mavlink — 11 new tests across
+        deterministic round-trip, length rejection, field-offset
+        spec-check, CRC_EXTRA pinning, proptest arbitrary-input
+        round-trip.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005

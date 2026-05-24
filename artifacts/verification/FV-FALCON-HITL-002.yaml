@@ -1,0 +1,69 @@
+artifacts:
+  - id: FV-FALCON-HITL-002
+    type: sw-verification
+    title: "HITL MavlinkBench — GLOBAL_POSITION_INT-driven backend (v0.12)"
+    status: approved
+    description: >
+      v0.12 verification of the MavlinkBench backend that closes
+      the live-FC telemetry gap recorded in FV-FALCON-HITL-001.
+
+      Two evidence layers:
+
+      1. relay-mavlink GLOBAL_POSITION_INT codec — 11 new tests
+         (FV-FALCON-NID-001-style coverage):
+           - msg_id / payload-len / CRC_EXTRA pinning (silent
+             spec drift surfaces here).
+           - Deterministic round-trip (sample + zero + extremes).
+           - Length-mismatch rejection (short, long, empty).
+           - Field-offset spec-check.
+           - proptest round-trip over arbitrary inputs.
+         All under `cargo test -p relay-mavlink`.
+
+      2. falcon-hitl-rfspoof MavlinkBench — 6 new tests:
+           - `home_projects_to_origin` — equirectangular
+             projection identity at the anchor.
+           - `one_hundred_metres_north_projects_to_10000_cm_n` —
+             projection accuracy at a real-world scale.
+           - `altitude_translates_to_down` — sign convention
+             matches NED (down positive, alt-above-home negative
+             D).
+           - `mavlink_bench_trips_and_dispatches_on_spoof` —
+             positive control: a 3-frame InMemoryFrameSource
+             (in / in / spoofed-east) trips the latch + dispatches
+             RTL within budget.
+           - `mavlink_bench_no_violation_no_latch` — negative
+             control: 5 in-fence frames must never trip.
+           - `build_frame_carries_correct_message_id` — pins the
+             MAVLink wire shape of frames the bench tooling
+             builds, so silent encoder drift in relay-mavlink
+             surfaces here.
+
+      Plus miri (FV-FALCON-GEO-003) over all 8 of the new bench
+      tests — UB-free, no overflow, no aliasing violations.
+
+      What this does *not* claim: real-bench live-RF execution
+      against a HackRF + spoofed-GPS chain. The MavlinkBench
+      codec path is fully wired (UdpFrameSource → parse_frame →
+      GlobalPositionInt::decode_payload → Home::project_ned_cm →
+      Geofence::check → CommandStore::start_rts); plugging in a
+      real FC requires only running `falcon-hitl-rfspoof
+      --backend=mavlink --listen=0.0.0.0:14550` with the FC
+      configured to send to that endpoint. The honest deferred
+      item is the bench-run itself, not the wiring.
+    tags: [verification, falcon, hitl, mavlink, telemetry, v0.12]
+    fields:
+      method: automated-test + bench-evidence
+      crate: examples/falcon-hitl-rfspoof
+      mavlink-tests: 11
+      bench-tests: 6
+      miri-tests: 8
+      steps:
+        - run: cargo test -p relay-mavlink
+        - run: cargo test -p falcon-hitl-rfspoof
+        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof mavlink::tests
+        - run: cargo run -p falcon-hitl-rfspoof -- --backend=mavlink --listen=0.0.0.0:14550  # bench-only; needs a live FC
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HITL-P02
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P04

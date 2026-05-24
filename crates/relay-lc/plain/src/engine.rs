@@ -140,6 +140,47 @@ mod tests {
     #[test] fn test_disabled() { let mut t = WatchpointTable::new(); t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0, enabled: false, persistence: 1, current_count: 0 }); assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 999 }).violation_count, 0); }
     #[test] fn test_ops() { assert!(compare(5, ComparisonOp::LessThan, 10)); assert!(compare(10, ComparisonOp::GreaterThan, 5)); assert!(compare(5, ComparisonOp::Equal, 5)); assert!(compare(5, ComparisonOp::NotEqual, 6)); }
     #[test] fn test_bounded() { let mut t = WatchpointTable::new(); for _ in 0..(MAX_VIOLATIONS_PER_CYCLE + 10) { t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0, enabled: true, persistence: 1, current_count: 0 }); } assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 100 }).violation_count, MAX_VIOLATIONS_PER_CYCLE as u32); }
+
+    // --- Geofence unit tests (v0.12) — give miri something concrete
+    // to interpret. The exhaustive arbitrary-input coverage lives in
+    // the kani_proofs module below; these are the deterministic spot
+    // checks miri walks.
+    fn fence() -> Geofence {
+        Geofence::new(-1_000, 1_000, -1_000, 1_000, -1_000, 1_000)
+    }
+
+    #[test] fn geofence_inside_does_not_trip() {
+        let mut g = fence();
+        assert!(!g.check(0, 0, 0));
+        assert!(!g.violation_active());
+    }
+
+    #[test] fn geofence_outside_n_trips_once() {
+        let mut g = fence();
+        assert!(g.check(2_000, 0, 0));   // rising edge
+        assert!(g.violation_active());
+        assert!(!g.check(3_000, 0, 0));  // already latched — silent
+        assert!(!g.check(0, 0, 0));      // even returning inside — still silent
+    }
+
+    #[test] fn geofence_outside_e_trips() {
+        let mut g = fence();
+        assert!(g.check(0, -2_000, 0));
+        assert!(g.violation_active());
+    }
+
+    #[test] fn geofence_outside_d_trips() {
+        let mut g = fence();
+        assert!(g.check(0, 0, 2_000));
+        assert!(g.violation_active());
+    }
+
+    #[test] fn geofence_boundary_inclusive() {
+        // Exact boundary values are inside per >= / <= in check().
+        let mut g = fence();
+        assert!(!g.check(1_000, 1_000, 1_000));
+        assert!(!g.check(-1_000, -1_000, -1_000));
+    }
 }
 
 #[cfg(test)]

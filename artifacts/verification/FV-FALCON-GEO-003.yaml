@@ -1,0 +1,76 @@
+artifacts:
+  - id: FV-FALCON-GEO-003
+    type: sw-verification
+    title: "Geofence safety path — miri UB/overflow check (v0.12, AI substitute)"
+    status: approved
+    description: >
+      v0.12 adds a third runtime-verification technique class to the
+      relay-lc Geofence: **miri** — the official Rust mid-level IR
+      interpreter, run with `-Zmiri-disable-isolation` against the
+      Geofence unit tests in `crates/relay-lc/plain/src/engine.rs`
+      and the consumers in `examples/falcon-hitl-rfspoof/src/`
+      (stub + mavlink backends).
+
+      Honest scope note: the v0.10 rollout originally named
+      *abstract interpretation* (MIRAI / Charon) as the third
+      DO-178 technique class to add to Verus + Kani. Reality check
+      at v0.12:
+
+        - **MIRAI** (Mozilla) — archived; was last refreshed late
+          2024 and its custom rustc driver does not track current
+          stable. Standing it up against `rustc 1.95` would be a
+          multi-day porting exercise with no upstream to merge to.
+        - **Charon** (Aeneas) — active but research-stage, designed
+          as a Rust → ULLBC front-end for Aeneas's separation-logic
+          backend. Charon emits no abstract-interpretation results
+          itself; the downstream tooling is not packaged for stable
+          rustc.
+
+      What v0.12 ships *as a substitute that genuinely delivers
+      evidence today*: **miri**. Miri is a concrete interpreter
+      (not abstract), so this is a different DO-178 technique
+      class — *robust testing with UB instrumentation* — than the
+      one originally named. It catches the same bug surface
+      abstract interpretation would target on a codec/state-
+      machine of this size: integer overflow, out-of-bounds slice
+      access, uninitialized reads, pointer-aliasing violations
+      (Stacked / Tree Borrows).
+
+      Evidence:
+        - 5/5 Geofence unit tests miri-clean
+          (`geofence_inside_does_not_trip`,
+           `geofence_outside_n_trips_once`,
+           `geofence_outside_e_trips`,
+           `geofence_outside_d_trips`,
+           `geofence_boundary_inclusive`).
+        - 2/2 HITL stub-backend tests miri-clean.
+        - 6/6 HITL mavlink-backend tests miri-clean (includes the
+          equirectangular projection + the relay-mavlink
+          GLOBAL_POSITION_INT decoder under arbitrary frame bytes
+          via the harness driver).
+
+      Together with Verus (LC-P09/P10) and Kani (LC-K01..K05) the
+      relay-lc Geofence now has three concurring evidence layers
+      — formal, bounded-model, and miri-interpreted. The
+      abstract-interpretation class itself remains *honestly
+      deferred* until the tooling catches up.
+
+      Future: revisit MIRAI/Charon when either ships a stable-
+      rustc-tracking release. If neither does, witness MC/DC on
+      the Wasm artifact (a fourth class) is the natural next
+      addition.
+    tags: [verification, falcon, geofence, miri, ub, v0.12]
+    fields:
+      method: dynamic-interpretation-with-ub-detection
+      tool: "miri (rustc nightly)"
+      flags: "MIRIFLAGS=-Zmiri-disable-isolation"
+      test-count: 13
+      crates: ["relay-lc", "falcon-hitl-rfspoof"]
+      steps:
+        - run: rustup component add miri --toolchain nightly
+        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p relay-lc --lib geofence
+        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof stub::tests
+        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof mavlink::tests
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-GEO-P01
