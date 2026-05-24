@@ -1,0 +1,22 @@
+[package]
+name = "falcon-sitl-gz"
+description = "Falcon v0.16 — Gazebo SITL scaffold: pluggable Physics trait, MockPhysics + GazeboPhysics stub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "falcon-sitl-gz"
+path = "src/main.rs"
+
+[dependencies]
+relay-ekf = { path = "../../crates/relay-ekf" }
+relay-rate = { path = "../../crates/relay-rate" }
+relay-att = { path = "../../crates/relay-att" }
+relay-mix-quad = { path = "../../crates/relay-mix-quad" }
+relay-pos = { path = "../../crates/relay-pos" }
+relay-lc = { path = "../../crates/relay-lc" }
+relay-sc = { path = "../../crates/relay-sc" }
+libm = "0.2"

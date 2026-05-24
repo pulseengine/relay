@@ -1153,6 +1153,48 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.15.1
 
+  - id: FEAT-FALCON-v0.16.1
+    type: feature
+    title: "v0.16.1 — Gazebo SITL scaffold (option C from docs/SIMULATOR.md)"
+    status: approved
+    description: >
+      LANDED. Closes the last v0.15.x deferred item — option C
+      from docs/SIMULATOR.md: pluggable Physics trait scaffold
+      for the Gazebo SITL backend.
+
+      Ships:
+        - examples/falcon-sitl-gz/ — new crate with:
+          * Physics trait (step + measure)
+          * MockPhysics — in-process reference impl
+          * GazeboPhysics — stub with TODO(bench): markers
+          * One demonstration scenario (hover with 70 % PWM)
+          * README — bench wire-up recipe
+        - SWREQ-FALCON-SIM-P03 + FV-FALCON-SIM-003.
+
+      Same scaffold + reference + stub + bench-docs pattern as
+      HackRfBench (v0.11) and MavlinkBench `--peer=` (v0.12). Real
+      bridge to gz-sim is ~one bench-day of user work; software
+      deliverable is everything below that boundary.
+
+      Honestly deferred (the user-bench step):
+        - gz-transport Rust binding choice (gz-transport-rs vs
+          prost-build direct from gz/msgs proto).
+        - SDF world authorship (`falcon-quad.sdf`).
+        - ENU↔NED frame conversion in the real impl.
+        - Real-bridge acceptance under `docs/SIMULATOR.md`'s
+          hover/step/mission/disturbance criteria.
+
+      Closes the 4-item v0.16 user pick (1+2+3 landed in
+      v0.16.0; 4 lands here).
+    tags: [falcon, milestone, v0.16.1, gazebo, scaffold, landed]
+    fields:
+      release-target: "Gazebo SITL scaffold per SIMULATOR.md option C"
+      crate: examples/falcon-sitl-gz
+      backends: ["MockPhysics (tested)", "GazeboPhysics (stub)"]
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.16
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1185,4 +1227,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.16
+        target: FEAT-FALCON-v0.16.1

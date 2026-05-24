@@ -1,0 +1,77 @@
+artifacts:
+  - id: FV-FALCON-SIM-003
+    type: sw-verification
+    title: "Gazebo SITL scaffold — Physics trait + MockPhysics + Gazebo stub (v0.16.1)"
+    status: approved
+    description: >
+      v0.16.1 lands the Gazebo SITL backend scaffold called for in
+      docs/SIMULATOR.md (v0.15.0) option C. The scaffold is the
+      software-deliverable; the gz-sim bench wire-up is the user
+      step.
+
+      Three evidence layers:
+
+      1. `examples/falcon-sitl-gz/src/physics.rs` — Physics trait
+         + MockPhysics (in-process toy integrator port from
+         falcon-sitl-hover) + GazeboPhysics stub.
+         - MockPhysics::at_rest under no thrust falls under
+           gravity (1 step at dt=0.01 → v_ned[2] ≈ 0.098 m/s).
+         - MockPhysics::at_rest under full thrust climbs
+           (v_ned[2] < 0 after 1 step).
+         - MockPhysics::measure at rest reads accel_body[2] = -g
+           (NED z-axis points down).
+         - GazeboPhysics::step / measure compile + return zeros
+           without panic (the "stub returns sentinel" contract).
+
+      2. `examples/falcon-sitl-gz/src/main.rs` — single `hover`
+         scenario that runs the Physics trait through 5 s of
+         70 % PWM. PASS criterion: net climb > 0.1 m.
+         - MockPhysics backend: PASS (test confirmed).
+         - Gazebo stub backend: FAIL with sentinel verdict
+           (the correct signal that bench wire-up is needed).
+
+      3. `examples/falcon-sitl-gz/README.md` — bench wire-up
+         recipe with concrete topic names (
+         `/world/falcon/model/quad/link/imu_link/sensor/
+         imu_sensor/imu` subscribe; `/.../joint/<rotor_n>/cmd_vel`
+         publish), gz-transport binding options
+         (gz-transport-rs OR prost-build directly from
+         `gz/msgs/*.proto`), and the ENU↔NED frame conversion
+         note. Same shape as v0.14.0's `sim/px4-sitl/README.md`.
+
+      Verification:
+        - cargo test -p falcon-sitl-gz → 6/6 (3 MockPhysics + 1
+          GazeboPhysics stub + 2 main-scenario).
+        - cargo run -p falcon-sitl-gz → PASS verdict under
+          MockPhysics.
+        - cargo run -p falcon-sitl-gz -- --backend=gazebo →
+          FAIL with the stub's sentinel; non-panicking, matches
+          the design contract.
+
+      Honest dispositions:
+        - GazeboPhysics is a stub — real bridge needs gz-sim
+          install + an SDF world + gz-transport Rust bindings.
+          ~one bench-day for the user.
+        - The Physics trait's `measure` returns a single position
+          tuple; full Gazebo would also stream IMU + NavSat
+          asynchronously. The trait abstraction would extend
+          naturally with a queue-based FrameSource (same pattern
+          as MavlinkBench's FrameSource).
+        - MockPhysics is a copy of falcon-sitl-hover's Plant
+          toy integrator; intentionally kept here so the
+          scaffold runs without modifying the v0.10/v0.13
+          scenarios. A future v0.17 candidate is to fold the
+          two into a shared crate.
+    tags: [verification, falcon, sim, gazebo, scaffold, v0.16.1]
+    fields:
+      method: scaffold-with-reference-impl + bench-evidence-recipe
+      crate: examples/falcon-sitl-gz
+      backends: ["MockPhysics (in-process; tested)", "GazeboPhysics (stub; bench)"]
+      tests: 6
+      steps:
+        - run: cargo test -p falcon-sitl-gz
+        - run: cargo run -p falcon-sitl-gz
+        - run: cargo run -p falcon-sitl-gz -- --backend=gazebo --world=falcon --model=quad  # bench-only
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P03
