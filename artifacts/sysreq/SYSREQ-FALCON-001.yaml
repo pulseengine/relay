@@ -330,3 +330,32 @@ artifacts:
     links:
       - type: derives-from
         target: STKH-FALCON-001
+
+  - id: SYSREQ-FALCON-014
+    type: system-req
+    title: Safety — geofence violation triggers RTL even under sensor spoofing
+    status: approved
+    description: >
+      The system shall enforce a geofence on the vehicle's true
+      position and trigger Return-To-Launch on the first violation.
+      The verified relay-lc Geofence engine consumes a sensor-
+      independent truth signal (per LC-P09 / LC-P10 — monotone
+      latch + transition-only) so a spoofed position feeding the
+      controller cannot mask a true-position excursion. On
+      violation, the same relay-sc RTL RTS the EkfHealthMonitor
+      uses (SYSREQ-FALCON-011) is fired — one cFS-DNA safety
+      pattern (detect → relay-sc → cascade), two detectors.
+    tags: [falcon, safety, geofence, rtl, ew, spoofing, v0.10]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        SITL geofence scenario in falcon-sitl-hover spoofs the
+        controller's position by −10 m N while commanding a
+        waypoint at +25 m N; the true position drives past the
+        +15 m fence; relay-lc latches and relay-sc dispatches the
+        RTL command. Verus discharges LC-P09 (monotone latch) and
+        LC-P10 (transition-only) on the Geofence state machine.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001

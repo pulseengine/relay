@@ -1,0 +1,69 @@
+artifacts:
+  - id: FV-FALCON-GEO-001
+    type: sw-verification
+    title: "Geofence safety path — Verus proofs + SITL EW-spoof scenario (v0.10)"
+    status: approved
+    description: >
+      v0.10 verification of the geofence safety path: the
+      relay-lc Verus-verified Geofence engine + the falcon-sitl-hover
+      `geofence` scenario that exercises it under EW-simulated GPS
+      spoofing.
+
+      Two evidence layers:
+
+      1. Verus SMT/Z3 formal verification of the Geofence state
+         machine (`bazel test //:relay_lc_verus_test`):
+           - LC-P09: violation_latched is monotone — once tripped,
+             always (proven by the early `if self.violation_latched`
+             return and the only mutation being false → true).
+           - LC-P10: check() returns true only on the violation
+             transition (single `return true` path both sets the
+             latch and is reachable only from the !latched entry
+             state).
+         Position is i32 centimetres — pure integer arithmetic, no
+         external_body trust gaps.
+
+      2. SITL `geofence` scenario (`cargo test -p falcon-sitl-hover`,
+         `deterministic_geofence_catches_spoof_and_triggers_rtl`):
+           - A −10 m N spoof is applied to the position the position
+             controller sees, while the mission waypoint sits at
+             +25 m N. The cascade chases its perceived position to
+             the waypoint, so the *true* position runs out past the
+             +15 m fence.
+           - relay-lc.check is fed the true plant position each
+             tick. On the first violation it latches and the SITL
+             starts the same relay-sc RTL RTS the v0.8 EkfHealthMonitor
+             uses (SC-P01..P05 carry through unchanged).
+           - rtl_dispatched latches when relay-sc emits the RTL
+             command; the SITL then switches the position setpoint
+             to home, ending the divergence.
+           - Test asserts: pass = !nan_seen && geofence_latched &&
+             rtl_dispatched && violation_time_s < mission_seconds
+             && peak_true_n > 15.0 (peak_true_n proves the spoof
+             genuinely drove truth past the fence — the controller
+             cannot see this on its own).
+
+      The cFS-DNA pattern is now uniform across detection sources:
+      relay-hs EkfHealthMonitor (v0.8) and relay-lc Geofence (v0.10)
+      both terminate at the same relay-sc RTL RTS. One verified
+      dispatch path, two verified detectors, end-to-end SITL.
+
+      Honestly deferred to v0.10.x:
+        - Kani harnesses on Geofence::check for arbitrary i32
+          inputs (mirrors what v0.9.1 added to EkfHealthMonitor).
+        - Abstract interpretation (MIRAI / Charon) — the third
+          DO-333 technique class the rollout notes.
+        - HITL hardware harness against a real RF-spoofing source.
+    tags: [verification, falcon, geofence, ew, gps-spoof, relay-lc, verus, v0.10]
+    fields:
+      method: formal-verification + automated-test
+      verus-properties: "LC-P09, LC-P10"
+      bazel-target: "//:relay_lc_verus_test"
+      test-count: 1
+      steps:
+        - run: bazel test //:relay_lc_verus_test
+        - run: cargo test -p relay-lc
+        - run: cargo test -p falcon-sitl-hover tests::deterministic_geofence_catches_spoof_and_triggers_rtl
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-GEO-P01
