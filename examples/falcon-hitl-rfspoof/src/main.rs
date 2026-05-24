@@ -1,14 +1,21 @@
-//! Falcon v0.11 — HITL harness CLI.
+//! Falcon HITL harness CLI.
 //!
 //! ```text
 //!   $ falcon-hitl-rfspoof --backend=stub --duration=5
 //!   $ falcon-hitl-rfspoof --backend=hackrf --iq=/tmp/spoof.iq --duration=30
+//!   $ falcon-hitl-rfspoof --preset=px4-sitl   # convenience preset (v0.14)
 //! ```
+//!
+//! `--preset=` short-circuits the per-flag wiring for canonical
+//! benches. `px4-sitl` → mavlink backend, UDP :14550, PX4 stock
+//! home coord (Zürich / ETH). Override individual fields by passing
+//! `--backend=`, `--listen=`, `--home=`, `--duration=` after the
+//! preset.
 //!
 //! The harness binary is intentionally tiny: it picks a backend,
 //! constructs the geofence + relay-sc state, and runs the scenario.
-//! See `harness.rs` for the driver and `stub.rs` / `hackrf.rs` for
-//! backends.
+//! See `harness.rs` for the driver and `stub.rs` / `hackrf.rs` /
+//! `mavlink.rs` for backends.
 
 mod hackrf;
 mod harness;
@@ -21,8 +28,27 @@ use relay_sc::engine::CommandStore;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let backend = arg(&args, "--backend").unwrap_or_else(|| "stub".into());
-    let duration_s: f32 = arg(&args, "--duration").and_then(|s| s.parse().ok()).unwrap_or(5.0);
+    // Presets fill in default flag values; explicit --foo= after the
+    // preset still wins (presets only set defaults).
+    let preset = arg(&args, "--preset");
+    let defaults = match preset.as_deref() {
+        Some("px4-sitl") => Defaults {
+            backend: "mavlink",
+            duration_s: 30.0,
+            listen: Some("0.0.0.0:14550"),
+            home: Some("47.3977,8.5456,488"),
+        },
+        Some(other) => {
+            eprintln!("unknown preset: {other}  (expected: px4-sitl)");
+            std::process::exit(2);
+        }
+        None => Defaults::EMPTY,
+    };
+
+    let backend = arg(&args, "--backend").unwrap_or_else(|| defaults.backend.into());
+    let duration_s: f32 = arg(&args, "--duration")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(defaults.duration_s);
 
     println!("falcon-hitl-rfspoof: backend={backend} duration={duration_s}s");
     println!("  fence: ±100 m × ±100 m × ±100 m (NED, centred on home)");
@@ -44,14 +70,16 @@ fn main() {
         }
         "mavlink" => {
             // Bind UDP to whatever port the FC sends to (PX4 default 14550).
-            let bind_addr = arg(&args, "--listen").unwrap_or_else(|| "0.0.0.0:14550".into());
+            let bind_addr = arg(&args, "--listen")
+                .or_else(|| defaults.listen.map(String::from))
+                .unwrap_or_else(|| "0.0.0.0:14550".into());
             let sock = std::net::UdpSocket::bind(&bind_addr).unwrap_or_else(|e| {
                 eprintln!("could not bind {bind_addr}: {e}"); std::process::exit(3);
             });
             sock.set_nonblocking(true).expect("set_nonblocking");
             println!("  mavlink: listening on {bind_addr}");
             // Default home = Budapest centre — override with --home=lat,lon,alt_m.
-            let home = match arg(&args, "--home") {
+            let home = match arg(&args, "--home").or_else(|| defaults.home.map(String::from)) {
                 Some(s) => parse_home(&s).expect("--home=lat,lon,alt_m"),
                 None => mavlink::Home { lat_e7: 475_023_456, lon_e7: 190_401_234, alt_mm: 120_000 },
             };
@@ -75,6 +103,24 @@ fn main() {
         println!("FAIL");
         std::process::exit(1);
     }
+}
+
+/// CLI defaults a preset can fill in. Empty by default; presets override
+/// fields they care about; explicit `--foo=` flags still trump everything.
+struct Defaults {
+    backend: &'static str,
+    duration_s: f32,
+    listen: Option<&'static str>,
+    home: Option<&'static str>,
+}
+
+impl Defaults {
+    const EMPTY: Self = Self {
+        backend: "stub",
+        duration_s: 5.0,
+        listen: None,
+        home: None,
+    };
 }
 
 fn arg(args: &[String], key: &str) -> Option<String> {

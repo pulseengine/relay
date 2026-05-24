@@ -1,0 +1,71 @@
+artifacts:
+  - id: FV-FALCON-COV-002
+    type: sw-verification
+    title: "cargo-llvm-cov statement coverage — workspace-wide (v0.14.0)"
+    status: approved
+    description: >
+      v0.14.0 wires `cargo-llvm-cov` over the full workspace and
+      records the per-file statement / function / region coverage
+      as an auditable build artifact. Closes the statement-coverage
+      row of the structural-coverage tables across all six dossier
+      crosswalks (DO-178C A-7.7, EN 50128 A.5 D.43, IEC 61508 B.8,
+      ISO 26262 §10, IEC 62304 §5.5.5, ECSS-Q-ST-80C §5.4.6).
+
+      Two evidence layers:
+
+      1. Workspace-wide summary, captured at v0.14.0 tag in
+         `artifacts/coverage/llvm-cov-summary-v0.14.0.txt`:
+
+            TOTAL  7661 lines / 241 missed → 96.85% line
+                    592 funcs / 34 missed → 94.26% function
+                   5171 regions / 199 missed → 96.15% region
+
+         Per-file detail in the same file. Headline coverage
+         numbers per safety-critical engine:
+
+            relay-lc        plain/src/engine.rs   98.52% line
+            relay-sc        plain/src/engine.rs   97.62% line
+            relay-hs        plain/src/engine.rs   97.45% line
+            relay-mavlink   plain/src/{crc,frame,heartbeat,global_position_int}
+                            96.47% / 99.00% / 98.14% / 100.00%
+            relay-nid       plain/src/{lib,bitpack}   95.64% / 97.51%
+
+         Several files reach 100% (relay-ccsds engine, relay-md,
+         relay-ds, relay-mavlink global_position_int, etc.).
+
+      2. CI integration — `.github/workflows/coverage.yml`:
+           - Triggers on every push to main + every PR.
+           - Installs llvm-tools-preview + cargo-llvm-cov.
+           - Runs `cargo llvm-cov --workspace --lcov --output-path
+             coverage.lcov` AND `--summary-only` so both the
+             machine-readable LCOV and the human summary land in
+             the job log.
+           - Uploads `coverage.lcov` as a 30-day-retention
+             artifact for assessor download.
+           - No shell wrappers; the workflow calls cargo directly.
+
+      What this does *not* claim:
+        - MC/DC coverage (that's witness — FV-FALCON-COV-001;
+          paired, not redundant).
+        - Branch coverage in the EN 50128 D.43 sense — `cargo
+          llvm-cov` reports regions, which is close but not
+          identical; full branch-coverage instrumentation is a
+          separate tooling step.
+        - Coverage minima as a gate (the workflow records but
+          doesn't fail on regression yet — adding a threshold is a
+          follow-up).
+    tags: [verification, falcon, llvm-cov, statement-coverage, ci, v0.14]
+    fields:
+      method: statement-coverage
+      tool: "cargo-llvm-cov 0.6.21 (rustc nightly llvm-tools-preview)"
+      workspace-line-coverage: "96.85%"
+      workspace-function-coverage: "94.26%"
+      workspace-region-coverage: "96.15%"
+      summary-artifact: "artifacts/coverage/llvm-cov-summary-v0.14.0.txt"
+      ci-workflow: ".github/workflows/coverage.yml"
+      steps:
+        - run: cargo llvm-cov --workspace --summary-only
+        - run: cargo llvm-cov --workspace --lcov --output-path coverage.lcov
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WORLD-P01

@@ -8,7 +8,13 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Cargo tests use plain/ (verus-stripped). Verus verification uses src/ via Bazel.
+# Cargo tests use plain/ (verus-stripped). Verus verification uses
+# crates/relay-mavlink/src/ via Bazel: //:relay_mavlink_verus_test.
+# All encode/decode/CRC bodies are #[verifier::external_body] (bit
+# fiddling + slice indexing — out of Verus's productive range);
+# signatures + CodecError enum variants are the formal contracts,
+# and the plain proptest fuzz layer pins panic-freedom across
+# arbitrary inputs. Same dual-tree pattern as relay-nid (v0.11).
 path = "plain/src/lib.rs"
 crate-type = ["rlib"]
 

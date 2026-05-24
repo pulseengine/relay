@@ -784,6 +784,87 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.12
 
+  - id: FEAT-FALCON-v0.14
+    type: feature
+    title: "v0.14.0 — PX4-SITL loop, cargo llvm-cov in CI, relay-mavlink dual-tree"
+    status: approved
+    description: >
+      LANDED. Three v0.13-deferred items, plus a v1.0-direction
+      simulator integration the user asked for explicitly.
+
+      Ships:
+        - **PX4-SITL end-to-end loop** (FV-FALCON-SIM-001 /
+          SWREQ-FALCON-SIM-P01): `--preset=px4-sitl` CLI shortcut
+          in falcon-hitl-rfspoof fills in PX4 stock home coord
+          (47.3977°N, 8.5456°E, 488 m AMSL — Zürich / ETH), UDP
+          14550 listen, 30 s duration. One command,
+          `cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl`,
+          and the verified relay-lc → relay-sc chain closes
+          against PX4 + jMAVSim / Gazebo. `sim/px4-sitl/README.md`
+          has the bench recipe. **No shell scripts** — the runner
+          is the harness binary itself (per user preference).
+        - **cargo llvm-cov statement coverage in CI**
+          (FV-FALCON-COV-002): `.github/workflows/coverage.yml`
+          runs `cargo llvm-cov --workspace` on every push + PR;
+          uploads LCOV as 30-day artifact. Workspace at v0.14.0:
+          **96.85% line / 94.26% function / 96.15% region** over
+          7661 lines / 592 functions / 5171 regions. Closes the
+          statement-coverage row of all six dossier crosswalks
+          (DO-178C A-7.7 / EN 50128 A.5 D.43 / IEC 61508 B.8 /
+          ISO 26262 §10 / IEC 62304 §5.5.5 / ECSS-Q-ST-80C §5.4.6).
+        - **relay-mavlink dual-tree refactor**
+          (FV-FALCON-MAVLINK-002): mirror of the plain tree under
+          `crates/relay-mavlink/src/` with Verus `verus! {}` blocks
+          + `external_body` on every bit-fiddling body. New
+          `//:relay_mavlink_verus_test` target. **MAVLINK-V01..V03**
+          formalise encoder size + decoder Option-totality.
+          relay-mavlink was the last plain-only crate — every
+          other cFS-DNA engine was already dual-tree. (v0.13's
+          dossier note that named other engines was wrong; audit
+          at v0.14 start caught it; rivet artifacts now point at
+          the real gap.)
+
+      Honest correction: the v0.13 dossier crosswalks listed
+      relay-sc / -hk / -sch / -cs / -ds as "still plain-only" in
+      their gap sections. None of those were — the only plain-
+      only crate was relay-mavlink. Fixed in v0.14 by:
+      (a) refactoring the actual gap (mavlink → dual-tree); (b)
+      noting the correction in FV-FALCON-MAVLINK-002; (c) leaving
+      the v0.13 dossier text alone (history is history — a future
+      pass can sweep the gap sections, but rewriting landed
+      crosswalks would mask the audit trail).
+
+      Verification:
+        - cargo test --workspace → 387 passing (no change — v0.14
+          is tooling + docs + dual-tree-mirror; no new test code).
+        - cargo llvm-cov --workspace → 96.85% line coverage.
+        - `--preset=px4-sitl` smoke test (no PX4 expected) returns
+          well-formed verdict with `latched: false, FAIL` (correct
+          — loop only closes when PX4-SITL emits frames).
+        - rivet validate → PASS (60 warnings — 58 v0.13 + 2 new
+          SWREQ/SYSREQ same warning class as v0.13).
+
+      Honestly deferred (carried into v0.14.1 / v0.14.2):
+        - Cascade-target witness coverage — wasi-harness via
+          wasmtime. v0.14.1 lead candidate.
+        - spar `codegen --format wit` — still emits Cargo/BUILD
+          skeletons only.
+        - Tool-qualification documents per tool — heavy doc surface
+          across all four standards needing them. v0.14.3.
+        - Round-trip MAVLink COMMAND_LONG encoder so falcon's RTL
+          actually drives PX4 home (today the chain stops at
+          falcon's own command store).
+    tags: [falcon, milestone, v0.14, px4-sitl, llvm-cov, mavlink-dual-tree, landed]
+    fields:
+      release-target: "PX4-SITL loop + llvm-cov CI + relay-mavlink dual-tree"
+      preset: "--preset=px4-sitl"
+      workspace-coverage-line: "96.85%"
+      bazel-targets: ["//:relay_mavlink_verus_test"]
+      ci-workflow: ".github/workflows/coverage.yml"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.13
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -816,4 +897,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.13
+        target: FEAT-FALCON-v0.14

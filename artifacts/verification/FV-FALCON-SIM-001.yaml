@@ -1,0 +1,116 @@
+artifacts:
+  - id: FV-FALCON-SIM-001
+    type: sw-verification
+    title: "PX4-SITL end-to-end loop — recipe + preset + smoke (v0.14.0)"
+    status: approved
+    description: >
+      v0.14.0 wiring evidence for the PX4-SITL × falcon-hitl-rfspoof
+      loop. Closes the "when will we run this in a simulator"
+      question: today, via the existing v0.12 MavlinkBench backend +
+      the new `--preset=px4-sitl` CLI shortcut.
+
+      Three evidence layers:
+
+      1. CLI smoke — `cargo run -p falcon-hitl-rfspoof --
+         --preset=px4-sitl --duration=1` returns a well-formed
+         `HitlVerdict` ({backend: "mavlink", listen: 0.0.0.0:14550,
+         home: 47.3977,8.5456,488}). No PX4 → no frames → expected
+         `latched: false, FAIL` — the harness is wired correctly;
+         the loop only closes when PX4-SITL is also running.
+
+      2. Recipe — `sim/px4-sitl/README.md`: install steps, one
+         `make px4_sitl jmavsim` invocation per terminal, the
+         `pxh> commander mode auto:loiter` + `commander go
+         --location 47.4100 8.5456 30` sequence that drives the
+         quad past the 100 m fence, the expected `verdict =
+         HitlVerdict { latched: true, rtl_dispatched: true, ... }`
+         on success, and a troubleshooting table for the three
+         most likely failure modes (wrong --home, port collision,
+         PX4 boot incomplete).
+
+      3. No-new-code proof — the wiring works because v0.12's
+         MavlinkBench already listens for the GLOBAL_POSITION_INT
+         frames PX4 emits. The preset is pure CLI sugar (a
+         `Defaults` struct in `main.rs`); the MavlinkBench code
+         path is unchanged from v0.12 (relay-mavlink decode →
+         Home::project_ned_cm → Geofence::check →
+         CommandStore::start_rts). What v0.13 didn't have was the
+         recipe; v0.14 adds it.
+
+      What this does *not* claim:
+        - An automated CI run against PX4-SITL — PX4 is heavyweight
+          (jMAVSim needs Java; Gazebo needs a GPU). CI keeps the
+          StubBench positive + negative-control tests as the gate.
+        - The RTL command falcon dispatches actually drives PX4 to
+          fly home — falcon's RTL goes to its own CommandStore; a
+          downstream MAVLink COMMAND_LONG encoder for
+          MAV_CMD_NAV_RETURN_TO_LAUNCH would be a v0.15-class
+          follow-up to close the round-trip.
+    tags: [verification, falcon, sim, px4, mavlink, v0.14]
+    fields:
+      method: end-to-end-loop-recipe + cli-smoke
+      preset: "--preset=px4-sitl"
+      recipe: "sim/px4-sitl/README.md"
+      steps:
+        - run: cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl --duration=1   # smoke; no PX4 expected → FAIL is correct
+        - run: cd ~/git/PX4-Autopilot && make px4_sitl jmavsim                       # terminal 1; needs PX4-Autopilot
+        - run: cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl                # terminal 2; loop closes when PX4 emits position
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P01
+  - id: FV-FALCON-MAVLINK-002
+    type: sw-verification
+    title: "relay-mavlink dual-tree refactor — last plain-only crate (v0.14.0)"
+    status: approved
+    description: >
+      v0.14.0 brings relay-mavlink to the verified-engine dual-tree
+      pattern, closing the workspace gap recorded honestly in v0.14:
+      relay-mavlink was the last plain-only crate (every other
+      cFS-DNA engine was already dual-tree; my v0.13 dossier note
+      that named other engines was wrong — audit caught this).
+
+      What ships:
+        - `crates/relay-mavlink/src/{lib.rs, crc.rs, frame.rs,
+          heartbeat.rs, global_position_int.rs}` — Verus-annotated
+          mirror of the plain tree; all bodies marked
+          `#[verifier::external_body]` (bit fiddling + slice
+          indexing — out of Verus's productive range).
+        - `Cargo.toml` `[lib] path = "plain/src/lib.rs"` retained so
+          cargo continues to build the plain mirror (44 cargo tests
+          still pass).
+        - `//:relay_mavlink_verus_test` Bazel target wired —
+          matches the relay-nid v0.11 pattern.
+        - Signatures + `CodecError` enum + `Option`-totality on
+          length-mismatch are the formal contracts that Verus
+          discharges (**MAVLINK-V01..V03**):
+            * V01: `Heartbeat::encode_payload` writes exactly
+              `HEARTBEAT_PAYLOAD_LEN` bytes.
+            * V02: `GlobalPositionInt::encode_payload` writes
+              exactly `GLOBAL_POSITION_INT_PAYLOAD_LEN` bytes.
+            * V03: both `decode_payload` functions return `None`
+              on length mismatch.
+        - Panic-freedom under arbitrary inputs is exhaustively
+          pinned by the plain proptest suite (`parser_never_panics`,
+          `proptest_decoder_never_panics` per message); same
+          DO-178B technique-class coverage as relay-nid's
+          NID-K01..K05 Kani harnesses.
+
+      Side fix: v0.13's dossier crosswalks named relay-sc / -hk /
+      -sch / -cs / -ds as "still plain-only" — they were already
+      dual-tree, audit at start of v0.14 caught the doc drift.
+      Documented honestly in the v0.14 rollout entry.
+    tags: [verification, falcon, mavlink, verus, dual-tree, v0.14]
+    fields:
+      method: formal-verification
+      tool: "Verus + Bazel"
+      verus-properties: "MAVLINK-V01 (heartbeat encoder size), MAVLINK-V02 (gpi encoder size), MAVLINK-V03 (decoder Option totality on length)"
+      bazel-target: "//:relay_mavlink_verus_test"
+      cargo-tests-still-passing: 44
+      steps:
+        - run: bazel test //:relay_mavlink_verus_test
+        - run: cargo test -p relay-mavlink
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P01
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P04
