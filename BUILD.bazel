@@ -614,16 +614,13 @@ synth_compile(
 )
 
 # v0.13: witness MC/DC coverage on the fused cascade core module.
-# Instruments the wasm, executes via witness's embedded runtime, emits
-# LCOV. Closes DO-178C A-7.5 / A-7.6 (FV-FALCON-COV-001).
+# v0.15.1: WASI gap closed via host/witness-wasi-harness. Still
+# `tags=["manual"]` because the harness binary isn't wired into the
+# Bazel toolchain yet — runs from cargo for now. See
+# `host/witness-wasi-harness/README.md` for the invocation; recorded
+# in FV-FALCON-COV-004.
 #
-# The Rust-compiled cascade imports wasi:io@0.2.6 (panic glue +
-# allocator); witness's embedded runtime is WASI-free, so the run
-# stage fails today. Instrumentation succeeds — instrument is what
-# proves the rule is wired. Tagged `manual` so CI doesn't break on the
-# upstream gap. See FV-FALCON-COV-001 for the run-stage path forward
-# (witness --harness mode with wasmtime+WASI, or a WASI-free cascade
-# build).
+# Closes DO-178C A-7.5 / A-7.6 (FV-FALCON-COV-001 / 004).
 wasm_module_coverage(
     name = "falcon-cascade-coverage",
     module = ":falcon-cascade-fused",

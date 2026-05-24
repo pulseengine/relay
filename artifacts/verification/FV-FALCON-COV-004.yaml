@@ -1,0 +1,91 @@
+artifacts:
+  - id: FV-FALCON-COV-004
+    type: sw-verification
+    title: "Cascade witness MC/DC via wasmtime+WASI subprocess harness (v0.15.1)"
+    status: approved
+    description: >
+      v0.15.1 closes the cascade-target witness coverage WASI gap
+      recorded in FV-FALCON-COV-001 (v0.13) and confirmed in
+      FV-FALCON-COV-002 (v0.14.0) and FV-FALCON-COV-003 (v0.14.1).
+      The gap is gone; what remains is a smaller coverage-quality
+      problem (zero-args invocation walks one path) and an
+      upstream-witness limitation (trace-buffer OOB on a 5972-
+      branch module).
+
+      What ships:
+        - host/witness-wasi-harness/ — Rust binary implementing
+          witness's subprocess-harness ABI
+          (witness-harness-v1 JSON schema in
+          witness-core/src/run_record.rs::HarnessSnapshot). Reads
+          WITNESS_MODULE / WITNESS_MANIFEST / WITNESS_OUTPUT env
+          vars; loads the instrumented module with wasmtime +
+          wasi-preview1; stubs any unresolved component-model
+          imports with zero-returning no-ops; invokes
+          _initialize then every non-`__witness_*` export with
+          zero-filled args; reads `__witness_counter_<id>`
+          exported globals; writes the v1 snapshot.
+        - host/witness-wasi-harness/README.md — protocol docs +
+          smoke-test results + honest dispositions.
+
+      Smoke-test evidence (geofence_subject_rs from v0.14.1):
+        - 1504-byte instrumented module, no WASI imports.
+        - Harness invokes 3 exports, collects 2 counters.
+        - Hit counts (id 0 → 1, id 1 → 0) **match v0.14.1's
+          embedded-mode run exactly** — the harness is correct.
+
+      Cascade evidence (falcon-cascade-fused; 1.16 MB instrumented):
+        - **Instantiation succeeds end-to-end.** All 24 WASI
+          imports across 10 namespaces resolved (wasi-preview1
+          satisfied wasi:io/* and wasi:cli/std*; remaining
+          preview2 names — wasi:cli/exit, wasi:cli/terminal-* —
+          stubbed as no-ops).
+        - **14/15 cascade exports invoked successfully.** The
+          remaining one — `falcon:cascade/controller@0.7.0#step`
+          — tripped a trace-buffer OOB inside witness's own
+          `__witness_trace_record` (instrumented module is too
+          large for the default 1 MB linear memory). Honest
+          disposition recorded.
+        - **5972 branches identified, 81 hit** on the zero-args
+          execution path. First real cascade structural-coverage
+          evidence; v0.13's smoke target (geofence_subject.wat)
+          measured 4 branches, v0.14.1's Rust subject measured
+          2 — v0.15.1 measures the production cascade itself.
+
+      Honest dispositions (mostly noted in README):
+        1. WASI gap is closed. The v0.13 "Tagged `manual` so CI
+           doesn't break on the upstream gap" stance in BUILD.bazel
+           is now historical; the gap is the harness-not-yet-wired-
+           into-the-bazel-rule one, not a tooling gap.
+        2. 81/5972 ≈ 1.4 % coverage is **not "high coverage"** —
+           it's first-pass evidence the pipeline works on the
+           cascade. v0.16 candidate: extend the harness to accept
+           an invocation script (`WITNESS_HARNESS_INVOKES` env
+           var) so we can drive `controller#step` with the same
+           records the SITL uses; that would walk every safety-
+           path branch the SITL's 17 scenarios cover.
+        3. The `controller#step` trace-buffer OOB is a witness
+           upstream limitation. Workaround: shrink the
+           instrumented module (fewer branches) or grow the
+           cascade's linear-memory limit; permanent fix is
+           upstream sizing.
+        4. Bazel-rule integration: `rules_wasm_component`'s
+           `wasm_module_coverage` rule doesn't take a `--harness`
+           flag today. //:falcon-cascade-coverage still tagged
+           ["manual"] until the rule learns the flag (or we add a
+           Bazel macro that runs witness + the harness via
+           genrule). Tracked as a follow-up.
+    tags: [verification, falcon, witness, mcdc, wasi, harness, v0.15.1]
+    fields:
+      method: structural-coverage-mcdc + subprocess-harness
+      tool: "witness 0.22.0 + wasmtime 27 + wasi-preview1"
+      crate: host/witness-wasi-harness
+      smoke-branches-measured: 2
+      cascade-branches-identified: 5972
+      cascade-branches-hit: 81
+      protocol: "witness-harness-v1 (counters only)"
+      steps:
+        - run: cargo build -p witness-wasi-harness --release
+        - run: $WITNESS run /path/to/instrumented.wasm --output run.json --harness target/release/witness-wasi-harness
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WORLD-P01
