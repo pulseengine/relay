@@ -1195,6 +1195,48 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.16
 
+  - id: FEAT-FALCON-v0.17.0
+    type: feature
+    title: "v0.17.0 — release pipeline standardised on the synth pattern"
+    status: approved
+    description: >
+      LANDED. Release-engineering only — no feature changes from
+      v0.16.1. The pipeline is now uniform with the cross-repo
+      PulseEngine standard (pulseengine/synth/.github/workflows/
+      release.yml is the reference).
+
+      Per-file `.sha256` + `.cosign.sig` + `.cosign.cert` sidecars
+      (v0.7–v0.16) are gone. Replaced by:
+        - SHA256SUMS.txt (single manifest)
+        - SHA256SUMS.txt.{sig,pem,cosign.bundle} (one cosign
+          keyless signature over the manifest)
+        - falcon-X.Y.Z.cdx.json (CycloneDX SBOM, spec 1.5,
+          generated before sums so its digest is captured)
+        - SLSA v1 build provenance attestations per archive
+          (actions/attest-build-provenance@v2)
+        - build-env.txt (rustc / cargo / cosign / rivet / runner)
+
+      Unchanged: the five cross-compiled binaries + the falcon-
+      specific rivet-snapshot-falcon-vX.Y.Z.json (reordered to run
+      BEFORE sums so its digest also enters the manifest).
+
+      Verification one-liner shipped in
+      .github/release-notes/v0.17.0.md for consumers to paste.
+      FV-FALCON-RELEASE-001 records the migration evidence.
+
+      Honest disposition: historical pre-v0.17 releases keep their
+      old sidecar shape; only v0.17.0+ uses the standardised
+      pattern. v0.17.0 itself is the first release on the new
+      shape — the GitHub Release page is the live evidence.
+    tags: [falcon, milestone, v0.17.0, release-engineering, supply-chain, landed]
+    fields:
+      release-target: "standardised release pipeline (synth pattern)"
+      reference: "pulseengine/synth/.github/workflows/release.yml"
+      workflow-permissions: ["contents: write", "id-token: write", "attestations: write"]
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.16.1
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1227,4 +1269,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.16.1
+        target: FEAT-FALCON-v0.17.0
