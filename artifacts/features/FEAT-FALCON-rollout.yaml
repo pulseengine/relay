@@ -941,6 +941,62 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.14.1
 
+  - id: FEAT-FALCON-v0.14.3
+    type: feature
+    title: "v0.14.3 — tool-qualification records (Verus / Kani / miri / witness / spar)"
+    status: approved
+    description: >
+      LANDED. Closes the explicit "tool qualification" GAP entry
+      that appears in all six dossier crosswalks simultaneously.
+
+      Ships:
+        - docs/dossier/tool-qualification/ — one README + five TQ
+          records (Verus, Kani, miri, witness, spar). 448 lines
+          total.
+        - Each TQ document carries: tool identity + pinned version,
+          use in falcon, cross-standard classification table
+          (IEC 61508 / ISO 26262 / ECSS-Q-ST-80C / EN 50128),
+          qualification approach (technique-class-diversity
+          argument), validation evidence, and honest "out of scope".
+        - Dossier README updated with TQ section.
+        - FV-FALCON-TQ-001 records the cross-cutting evidence with
+          the per-tool classification table.
+
+      Tool classification summary:
+
+        | Tool     | IEC 61508 | ISO 26262 | ECSS-Q | EN 50128 |
+        |----------|-----------|-----------|--------|----------|
+        | Verus    | T2        | TCL3      | Cat B  | T2       |
+        | Kani     | T2        | TCL3      | Cat B  | T2       |
+        | miri     | T2        | TCL2      | Cat B  | T2       |
+        | witness  | T2        | TCL2      | Cat B  | T2       |
+        | spar     | T1        | TCL1      | Cat B  | T1       |
+
+      The technique-class-diversity argument: every claim a single
+      tool makes is cross-confirmed by at least one independent
+      technique class (Verus ↔ Kani ↔ miri ↔ proptest ↔ SITL).
+      The diversity is what lets TCL3-classed tools (Verus, Kani)
+      ship in a safety-credit submission without a full per-tool
+      DO-330 TQR.
+
+      Honestly deferred:
+        - Assessor-signed Tool Qualification Plan / Report per
+          DO-330 or IEC 61508-3 §7.4.4.9 — v1.0 work; current TQ
+          docs are auditable starting points, not certified
+          deliverables.
+        - Cross-tool independent re-runs (e.g. OSATE fault-tree
+          confirmation alongside spar).
+        - Validation against intentional-fault test corpora per
+          DO-330.
+    tags: [falcon, milestone, v0.14.3, tool-qualification, dossier, landed]
+    fields:
+      release-target: "tool-qualification dossier scaffold (5 tools, 4 standards)"
+      tools: ["Verus", "Kani", "miri", "witness", "spar"]
+      standards: ["IEC 61508-3 §7.4.4.7", "ISO 26262-8 §11", "ECSS-Q-ST-80C §5.4.8", "EN 50128 §6.7.4"]
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.14.2
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -973,4 +1029,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.14.2
+        target: FEAT-FALCON-v0.14.3
