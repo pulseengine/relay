@@ -1099,6 +1099,60 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.15
 
+  - id: FEAT-FALCON-v0.16
+    type: feature
+    title: "v0.16.0 — witness harness scripting + bazel-macro design + upstream bug report"
+    status: approved
+    description: >
+      LANDED. Closes two of the v0.15.1 deferred items
+      (invocation script + bazel macro design); item 2 (trace-
+      buffer OOM) drafted as an upstream bug report for the
+      witness AI agent.
+
+      Ships:
+        - WITNESS_HARNESS_INVOKES env-var in host/witness-wasi-
+          harness: semicolon-separated `func:val1,val2,…` specs
+          mirroring witness's --invoke-with-args. Type-aware
+          parsing against the export's declared params (i32 /
+          i64 / f32 / f64). Scripted invokes layer above the
+          auto-discover zero-args path.
+        - bazel/wasm_module_coverage_wasi.bzl — new macro
+          wrapping witness instrument + run --harness + lcov in
+          a single Bazel rule. Architecturally correct;
+          //:falcon-cascade-coverage NOT YET rewired to use it
+          because witness-wasi-harness isn't a Bazel rust_binary
+          target (wasmtime+wasmtime-wasi+tokio dep tree needs
+          rules_rust crate-universe setup this workspace doesn't
+          carry). cargo-built path from FV-FALCON-COV-004 still
+          applies.
+        - Upstream witness bug report drafted (relayed to the
+          witness AI agent in the v0.15.1 release-thread
+          context): cascade's 5972 branches overflow witness's
+          default 1 MB trace inside __witness_trace_record
+          during controller#step. Fix is upstream — `witness
+          instrument --trace-bytes <N>` or branch-count-aware
+          default.
+        - FV-FALCON-COV-005.
+
+      Honest dispositions:
+        - Macro shipped + correct, but not applied to cascade
+          target yet (needs Bazel rust_binary wiring of
+          witness-wasi-harness; v0.16.x follow-up).
+        - Trace OOM unresolved locally — upstream witness
+          dependency.
+        - WITNESS_HARNESS_INVOKES smoke-tested on
+          geofence_subject_rs; value realisation depends on the
+          trace OOM fix landing so controller#step can be driven
+          with realistic record-shaped args.
+    tags: [falcon, milestone, v0.16.0, witness, bazel-macro, landed]
+    fields:
+      release-target: "witness harness scripting + bazel-macro design + upstream bug report"
+      env-var: WITNESS_HARNESS_INVOKES
+      bazel-macro: bazel/wasm_module_coverage_wasi.bzl
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.15.1
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1131,4 +1185,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.15.1
+        target: FEAT-FALCON-v0.16

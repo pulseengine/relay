@@ -1,0 +1,89 @@
+artifacts:
+  - id: FV-FALCON-COV-005
+    type: sw-verification
+    title: "witness harness improvements + bazel macro (v0.16.0)"
+    status: approved
+    description: >
+      v0.16.0 lands two harness improvements that close v0.15.1's
+      deferred items 1 + 3, plus an upstream-bug report for item 2.
+
+      What ships:
+
+      1. `WITNESS_HARNESS_INVOKES` env-var scripting in
+         host/witness-wasi-harness — semicolon-separated
+         `func:val1,val2,…` specs mirroring witness's own
+         `--invoke-with-args` syntax. Type parsing follows the
+         export's declared param types (i32 / i64 / f32 / f64
+         supported; component-model lowered exports use scalars
+         exclusively so this covers the cascade's surface).
+         Scripted invokes precede the auto-discover zero-args
+         pass; both layers contribute counters.
+
+         Smoke evidence: scripting `WITNESS_HARNESS_INVOKES=
+         run_inside` on the v0.14.1 Rust subject produces identical
+         counters to the unscripted path (the auto-discover pass
+         hits the same export). The value of the script path is
+         on subjects where zero-args would either fail or cover
+         only a single uninteresting code path — cascade
+         `controller#step` is the natural next target.
+
+      2. `bazel/wasm_module_coverage_wasi.bzl` — new Bazel macro
+         that wraps witness's three-stage pipeline (instrument →
+         run --harness=<harness> → lcov) so a single Bazel rule
+         emits LCOV for a Wasm module that pulls in WASI imports.
+         Macro is shipped and architecturally correct;
+         //:falcon-cascade-coverage NOT YET rewired to use it
+         because the harness binary (host/witness-wasi-harness)
+         isn't a Bazel `rust_binary` target — its dep tree
+         (wasmtime, wasmtime-wasi, tokio) needs rules_rust
+         crate-universe setup this workspace doesn't carry. cargo-
+         built recipe in FV-FALCON-COV-004 still applies; v0.16.x
+         follow-up wires the harness into Bazel and switches
+         //:falcon-cascade-coverage to the macro.
+
+      3. Witness trace-buffer OOM upstream bug report — written
+         up for the user to relay to the witness AI agent
+         (in v0.15.1 release-thread context). Falcon's cascade
+         (5972 branches) overflows witness's default 1 MB
+         linear-memory trace inside `__witness_trace_record`
+         during `controller#step` invocation. Fix is upstream:
+         either expose `witness instrument --trace-bytes <N>` or
+         scale the default by branch count. Workaround tried
+         (memory.grow from harness side) doesn't help — trace
+         allocation happens at module init inside the wasm.
+
+      Verification:
+        - cargo build -p witness-wasi-harness → green.
+        - cargo test --workspace → 398 passing (no change —
+          v0.16.0 adds host-binary features + a Bazel .bzl file,
+          no new test surface).
+        - bazel build //:geofence-subject-rs-coverage → green
+          (existing target unaffected).
+        - Manual: `WITNESS_HARNESS_INVOKES=run_inside witness run
+          ... --harness target/debug/witness-wasi-harness` produces
+          a v1 snapshot identical-shape to the unscripted path.
+
+      Honest dispositions:
+        - The macro isn't APPLIED to the cascade target yet (cargo
+          dependency on the harness binary). Macro lays the design;
+          the wiring is the v0.16.x follow-up.
+        - The trace-buffer OOM is upstream witness; honest bug
+          report drafted for the witness AI agent.
+        - The cascade's `controller#step` branch coverage is gated
+          on the upstream fix; once landed, scripting realistic
+          SITL records via `WITNESS_HARNESS_INVOKES` should push
+          81/5972 → much higher (the cascade's safety-path
+          branches are downstream of step).
+    tags: [verification, falcon, witness, mcdc, harness, bazel-macro, v0.16.0]
+    fields:
+      method: structural-coverage-mcdc + subprocess-harness + bazel-macro
+      tool: "witness 0.22.0 + host/witness-wasi-harness v0.16.0 + bazel macro"
+      env-var: WITNESS_HARNESS_INVOKES
+      macro: bazel/wasm_module_coverage_wasi.bzl
+      upstream-bug: "witness trace-buffer OOM on dense-branch subjects (reported to witness AI agent)"
+      steps:
+        - run: cargo build -p witness-wasi-harness
+        - run: WITNESS_HARNESS_INVOKES="run_inside" $WITNESS run /tmp/instr.wasm --harness target/debug/witness-wasi-harness -o /tmp/run.json
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WORLD-P01

@@ -1,6 +1,9 @@
 load("@rules_wasm_component//rust:defs.bzl", "rust_wasm_component_bindgen")
 load("@rules_wasm_component//wit:defs.bzl", "wit_library")
 load("@rules_wasm_component//wasm:defs.bzl", "meld_fuse", "synth_compile", "wasm_module_coverage")
+# bazel/wasm_module_coverage_wasi.bzl — defined for future use once
+# witness-wasi-harness becomes a Bazel rust_binary target; see
+# FV-FALCON-COV-005 for the wiring story.
 load("@rules_verus//verus:defs.bzl", "verus_library", "verus_strip_test", "verus_test")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
@@ -614,13 +617,16 @@ synth_compile(
 )
 
 # v0.13: witness MC/DC coverage on the fused cascade core module.
-# v0.15.1: WASI gap closed via host/witness-wasi-harness. Still
-# `tags=["manual"]` because the harness binary isn't wired into the
-# Bazel toolchain yet — runs from cargo for now. See
-# `host/witness-wasi-harness/README.md` for the invocation; recorded
-# in FV-FALCON-COV-004.
+# v0.15.1: WASI gap closed via host/witness-wasi-harness.
+# v0.16.0: bazel/wasm_module_coverage_wasi.bzl macro defined to
+#   wrap witness instrument → run --harness → lcov in one Bazel
+#   action graph. Not yet APPLIED here because the harness binary
+#   (host/witness-wasi-harness) isn't a Bazel rust_binary target
+#   — its dep tree (wasmtime, wasmtime-wasi, tokio) needs
+#   rules_rust crate-universe setup this workspace doesn't carry
+#   today. cargo-built recipe in FV-FALCON-COV-004 still applies.
 #
-# Closes DO-178C A-7.5 / A-7.6 (FV-FALCON-COV-001 / 004).
+# Closes DO-178C A-7.5 / A-7.6 (FV-FALCON-COV-001 / 004 / 005).
 wasm_module_coverage(
     name = "falcon-cascade-coverage",
     module = ":falcon-cascade-fused",
