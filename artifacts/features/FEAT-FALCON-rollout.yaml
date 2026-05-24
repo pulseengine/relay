@@ -865,6 +865,45 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.13
 
+  - id: FEAT-FALCON-v0.14.1
+    type: feature
+    title: "v0.14.1 — witness MC/DC on real Rust source (Geofence subject)"
+    status: approved
+    description: >
+      LANDED. Extends the v0.13 witness MC/DC pipeline from the
+      hand-written WAT smoke target to a real Rust coverage
+      subject calling the verified relay-lc Geofence directly.
+
+      Ships:
+        - coverage_subjects/geofence_subject_rs/ — no_std +
+          panic="abort" Rust crate depending on relay-lc; three
+          black_box-wrapped exports (run_inside / run_outside /
+          run_latched) exercise the three latch-state branches.
+        - coverage_subjects/geofence_subject_rs.wasm — pre-built
+          wasm32-unknown-unknown module (1021 bytes, zero
+          imports, WASI-free).
+        - //:geofence-subject-rs-coverage Bazel target — witness
+          0.22.0 instruments + runs + emits branch-counter JSON
+          and LCOV.
+        - FV-FALCON-COV-003 records the pipeline evidence and the
+          honest disposition: Geofence::check itself is inlined
+          into the wrapper by LLVM, so the 2 measured branches
+          belong to the wrapper; preserving check() as its own
+          measurable function would need an #[inline(never)] on
+          verified source which we deliberately do NOT make.
+
+      Cascade-target WASI harness still deferred (would need a
+      bespoke wasmtime+WASI runner binary). Tracked as a
+      v0.14.x follow-up.
+    tags: [falcon, milestone, v0.14.1, witness, mcdc, rust-source, landed]
+    fields:
+      release-target: "witness MC/DC pipeline on real Rust source"
+      bazel-target: "//:geofence-subject-rs-coverage"
+      module-imports: 0
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.14
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -897,4 +936,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.14
+        target: FEAT-FALCON-v0.14.1

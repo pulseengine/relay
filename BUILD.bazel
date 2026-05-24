@@ -640,3 +640,24 @@ wasm_module_coverage(
     module = "coverage_subjects/geofence_subject.wasm",
     invoke = ["run"],
 )
+
+# v0.14.1: witness MC/DC on a real-Rust subject that calls the
+# verified relay-lc::Geofence::check directly. Three entry points
+# exercise the three distinct branches of the latch state machine
+# (inside / outside / already-latched). WASI-free because the
+# subject crate uses panic = "abort" + #[no_std] and verified
+# Geofence::check has no panic paths (Verus LC-P09/P10 +
+# Kani LC-K01..K05).
+#
+# Rebuild: cargo build -p geofence-subject-rs --target wasm32-unknown-unknown --release
+#          cp target/wasm32-unknown-unknown/release/geofence_subject_rs.wasm coverage_subjects/
+# See FV-FALCON-COV-003 for the LCOV / branch-counter evidence.
+wasm_module_coverage(
+    name = "geofence-subject-rs-coverage",
+    module = "coverage_subjects/geofence_subject_rs.wasm",
+    invoke = [
+        "run_inside",
+        "run_outside",
+        "run_latched",
+    ],
+)

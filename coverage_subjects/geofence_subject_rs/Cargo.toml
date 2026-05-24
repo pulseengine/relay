@@ -1,0 +1,34 @@
+[package]
+name = "geofence-subject-rs"
+description = "Witness MC/DC subject — calls real relay-lc::Geofence::check, compiles WASI-free for wasm32-unknown-unknown"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# cdylib so wasm32-unknown-unknown produces a clean core module with
+# our `run` function as an export. rlib so cargo can also build it
+# host-side (useful for non-wasm test runs).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+relay-lc = { path = "../../crates/relay-lc" }
+
+[profile.release]
+# Strip default panic glue + abort instead of unwind so the resulting
+# module has no WASI imports. The verified Geofence::check has no
+# panic paths (Verus LC-P09/P10 + Kani LC-K01..K05) so this is safe.
+#
+# Keep opt-level low + LTO off — witness measures branches the
+# compiler emits. Under -Oz + LTO + 1 codegen unit the compiler
+# merges functionally-equivalent run_* entry points (e.g.
+# run_latched → run_inside, both return 0) and inlines check()
+# specialised to each call site, leaving witness nothing to
+# measure. opt-level=1 keeps the function bodies, the branches and
+# the unique entry points all present in the emitted module.
+panic = "abort"
+opt-level = 1
+lto = false
+codegen-units = 1
