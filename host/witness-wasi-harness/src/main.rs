@@ -78,16 +78,22 @@ fn main() -> Result<()> {
 
     let instance = linker.instantiate(&mut store, &module)?;
 
-    // 1. Discover invokeable exports — non-`__witness_*` funcs.
-    //    Mirrors witness's `--invoke-all` for no-arg funcs, plus
-    //    a zero-filled-args invocation for funcs with scalar
-    //    params (the canonical-ABI lowered shape of component
-    //    funcs is a long flat scalar argument list, so zero-args
-    //    walks a single execution path through the cascade).
+    // 1. Discover + invoke exports.
     //
-    //    `_initialize` is called first if present (component-model
-    //    init). `_start` is skipped because it implies WASI command-
-    //    style execution which would consume the rest of the run.
+    // `_initialize` is called first if present (component-model
+    // init). `_start` is skipped because it implies WASI command-
+    // style execution which would consume the rest of the run.
+    //
+    // After that, two precedence layers:
+    //   (a) `WITNESS_HARNESS_INVOKES` env var — semicolon-separated
+    //       list of `func_name:val1,val2,…` specs (v0.16). Lets
+    //       callers drive funcs with realistic args without
+    //       teaching the harness about each subject. Mirrors
+    //       witness's own `--invoke-with-args` syntax. Values are
+    //       parsed against the export's declared param types.
+    //   (b) auto-discover — every non-`__witness_*` export gets
+    //       called with zero-filled args. Walks at least one path
+    //       per export even when no script is supplied.
     let mut invoked: Vec<String> = Vec::new();
     let export_names: Vec<String> = module.exports().map(|e| e.name().to_string()).collect();
     if let Some(init) = instance.get_func(&mut store, "_initialize") {
@@ -95,6 +101,35 @@ fn main() -> Result<()> {
         let mut results = vec![Val::I32(0); nresults];
         if let Err(e) = init.call(&mut store, &[], &mut results) {
             eprintln!("witness-wasi-harness: _initialize failed: {e:#}");
+        }
+    }
+
+    let scripted = env::var("WITNESS_HARNESS_INVOKES").unwrap_or_default();
+    if !scripted.is_empty() {
+        for spec in scripted.split(';').filter(|s| !s.is_empty()) {
+            let (name, args_csv) = match spec.split_once(':') {
+                Some((n, a)) => (n.trim(), a),
+                None => (spec.trim(), ""),
+            };
+            let Some(func) = instance.get_func(&mut store, name) else {
+                eprintln!("witness-wasi-harness: scripted invoke {name}: export not found");
+                continue;
+            };
+            let ty = func.ty(&store);
+            let parsed = parse_args(&ty, args_csv);
+            let params = match parsed {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("witness-wasi-harness: scripted invoke {name}: parse args: {e}");
+                    continue;
+                }
+            };
+            let nresults = ty.results().len();
+            let mut results = vec![Val::I32(0); nresults];
+            match func.call(&mut store, &params, &mut results) {
+                Ok(()) => invoked.push(format!("{name} (scripted)")),
+                Err(e) => eprintln!("witness-wasi-harness: scripted invoke {name} failed: {e:#}"),
+            }
         }
     }
     for name in &export_names {
@@ -140,6 +175,44 @@ fn main() -> Result<()> {
         .with_context(|| format!("write {}", output_path.display()))?;
     eprintln!("witness-wasi-harness: wrote {}", output_path.display());
     Ok(())
+}
+
+/// Parse a CSV string of arg values against an export's declared
+/// param types. Empty string → empty Vec (callable as a no-arg
+/// func). Numeric parsing is type-aware: i32 / i64 are signed
+/// decimal; f32 / f64 use Rust's default float parser. Mirrors
+/// witness's own --invoke-with-args precedent: the spec's type
+/// comes from the export, not from annotations on the value.
+fn parse_args(ty: &wasmtime::FuncType, csv: &str) -> Result<Vec<Val>> {
+    use wasmtime::ValType;
+    let expected = ty.params().collect::<Vec<_>>();
+    let trimmed = csv.trim();
+    let parts: Vec<&str> = if trimmed.is_empty() {
+        Vec::new()
+    } else {
+        trimmed.split(',').map(str::trim).collect()
+    };
+    if parts.len() != expected.len() {
+        return Err(anyhow!(
+            "expected {} args, got {} ({:?})",
+            expected.len(),
+            parts.len(),
+            parts
+        ));
+    }
+    expected
+        .into_iter()
+        .zip(parts)
+        .map(|(ty, s)| -> Result<Val> {
+            Ok(match ty {
+                ValType::I32 => Val::I32(s.parse::<i32>().with_context(|| format!("i32 {s}"))?),
+                ValType::I64 => Val::I64(s.parse::<i64>().with_context(|| format!("i64 {s}"))?),
+                ValType::F32 => Val::F32(s.parse::<f32>().with_context(|| format!("f32 {s}"))?.to_bits()),
+                ValType::F64 => Val::F64(s.parse::<f64>().with_context(|| format!("f64 {s}"))?.to_bits()),
+                other => return Err(anyhow!("unsupported arg type {other:?}")),
+            })
+        })
+        .collect()
 }
 
 /// Zero value of the given wasm value type — used to fill out an

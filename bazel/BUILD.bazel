@@ -1,0 +1,4 @@
+# Marks `bazel/` as a Bazel package so we can load local .bzl files
+# from it via `//bazel:foo.bzl`.
+
+exports_files(["wasm_module_coverage_wasi.bzl"])
