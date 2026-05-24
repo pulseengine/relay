@@ -1,0 +1,48 @@
+artifacts:
+  - id: SWREQ-FALCON-MAVLINK-P05
+    type: sw-req
+    title: "MAVLINK-P05: COMMAND_LONG codec + RTL builder for round-trip"
+    status: approved
+    description: >
+      The MAVLink codec shall encode and decode the COMMAND_LONG
+      message (id 76, 33-byte payload, CRC_EXTRA = 152) per the
+      MAVLink XML specification.
+
+      Field order matches the MAVLink-canonical sorted-by-size
+      descending order:
+        7×f32 (param1..7) + u16 (command) + 3×u8 (target_system,
+        target_component, confirmation)
+      = 33 bytes, all little-endian.
+
+      Behaviour:
+        - encode → decode preserves every field bit-for-bit over
+          arbitrary inputs (proptest fuzz with f32::from_bits so
+          NaN payloads also round-trip).
+        - decode_payload rejects length-mismatched payloads
+          without panic.
+        - The CRC_EXTRA value (152) is pinned by a unit test.
+        - MAV_CMD_NAV_RETURN_TO_LAUNCH (20) and
+          MAV_CMD_DO_FLIGHTTERMINATION (185) are exposed as
+          constants — falcon dispatches the first when relay-sc
+          fires the RTL RTS.
+        - `CommandLong::rtl(target_system, target_component)` is a
+          const constructor for the canonical "fly home and land"
+          message with all seven param slots zero per the spec.
+
+      This message is the v0.14.2 round-trip carrier: when the
+      verified safety chain latches, the harness encodes a
+      COMMAND_LONG with this builder and writes the frame to PX4's
+      offboard MAVLink endpoint so the flight controller actually
+      acts on the command (not just falcon's own command store).
+    tags: [falcon, mavlink, command-long, rtl, v0.14.2]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        cargo test -p relay-mavlink — 11 new tests covering msg-id /
+        payload-len / CRC_EXTRA pinning, RTL-builder shape,
+        deterministic round-trip, length rejection, field-offset
+        spec-check, proptest arbitrary-input round-trip.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005

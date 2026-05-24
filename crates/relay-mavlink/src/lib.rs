@@ -30,11 +30,16 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod command_long;
 pub mod crc;
 pub mod frame;
 pub mod global_position_int;
 pub mod heartbeat;
 
+pub use command_long::{
+    CommandLong, COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID, COMMAND_LONG_PAYLOAD_LEN,
+    MAV_CMD_DO_FLIGHTTERMINATION, MAV_CMD_NAV_RETURN_TO_LAUNCH,
+};
 pub use crc::Crc16X25;
 pub use frame::{
     encode_frame, parse_frame, peek_message_id,

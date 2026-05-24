@@ -26,6 +26,7 @@
 //! observed when an RF spoofer pushed the FC outside its fence").
 
 use relay_lc::engine::Geofence;
+use relay_mavlink::{CommandLong, MAV_CMD_NAV_RETURN_TO_LAUNCH};
 use relay_sc::engine::{CommandStore, RtsCommand};
 
 /// What a HITL backend has to provide.
@@ -50,6 +51,39 @@ pub trait HitlBench {
     fn spoof_active(&self) -> bool;
 }
 
+/// What the harness does with the safety command relay-sc dispatches.
+///
+/// On a real bench this is a MAVLink `COMMAND_LONG` writer that
+/// pushes the command back to the flight controller (closing the
+/// round-trip — falcon's RTL trip becomes a real PX4 RTL command);
+/// on cargo-tests this is a `NullCommandSink` that just counts.
+///
+/// One method, takes the encoded MAVLink frame; returns ok/err.
+/// Decoupled from the verified path so the safety logic doesn't
+/// know about IO.
+pub trait CommandSink {
+    fn send_frame(&mut self, frame_bytes: &[u8]) -> Result<(), &'static str>;
+    fn name(&self) -> &'static str;
+}
+
+/// Null sink — accepts frames silently, used when the harness is
+/// not configured with a real sink (every existing test path).
+pub struct NullCommandSink {
+    pub frames_sent: u32,
+}
+
+impl NullCommandSink {
+    pub fn new() -> Self { Self { frames_sent: 0 } }
+}
+
+impl CommandSink for NullCommandSink {
+    fn send_frame(&mut self, _bytes: &[u8]) -> Result<(), &'static str> {
+        self.frames_sent += 1;
+        Ok(())
+    }
+    fn name(&self) -> &'static str { "null" }
+}
+
 /// Outcome of one HITL run — what an evidence reviewer reads.
 #[derive(Debug, Clone, Copy)]
 pub struct HitlVerdict {
@@ -64,6 +98,9 @@ pub struct HitlVerdict {
     pub latched_at_s: Option<f32>,
     /// Did the harness dispatch an RTL RTS via relay-sc?
     pub rtl_dispatched: bool,
+    /// Did the harness push a COMMAND_LONG / RTL frame to the
+    /// downstream CommandSink? (v0.14.2 round-trip evidence.)
+    pub rtl_frame_sent: bool,
     /// First step at which `spoof_active()` was observed `true`.
     pub spoof_first_seen_at_s: Option<f32>,
     /// `Some(reason)` iff the harness produced a fail-stop verdict.
@@ -74,6 +111,34 @@ impl HitlVerdict {
     pub fn pass(&self) -> bool {
         self.failure.is_none() && self.latched && self.rtl_dispatched
     }
+}
+
+/// Build the MAVLink COMMAND_LONG frame bytes for the RTL command
+/// the harness pushes back to the FC. The `target_system` /
+/// `target_component` are PX4 defaults (1/1).
+fn build_rtl_frame(seq: u8) -> Vec<u8> {
+    use relay_mavlink::{
+        encode_frame, FrameHeader, COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID,
+        COMMAND_LONG_PAYLOAD_LEN, HEADER_LEN, MAGIC_V2,
+    };
+    let cmd = CommandLong::rtl(1, 1);
+    debug_assert_eq!(cmd.command, MAV_CMD_NAV_RETURN_TO_LAUNCH);
+    let payload = cmd.encode_payload();
+    let header = FrameHeader {
+        magic: MAGIC_V2,
+        payload_len: COMMAND_LONG_PAYLOAD_LEN as u8,
+        incompat_flags: 0,
+        compat_flags: 0,
+        sequence: seq,
+        system_id: 255,        // GCS-style sender id
+        component_id: 190,
+        message_id: COMMAND_LONG_MSG_ID,
+    };
+    let mut out = vec![0u8; HEADER_LEN + COMMAND_LONG_PAYLOAD_LEN + 2];
+    let n = encode_frame(&header, &payload, COMMAND_LONG_CRC_EXTRA, &mut out)
+        .expect("encode_frame should fit in pre-sized buffer");
+    out.truncate(n);
+    out
 }
 
 /// Drive one scenario end-to-end.
@@ -91,6 +156,7 @@ pub fn run_scenario(
     bench: &mut dyn HitlBench,
     fence: &mut Geofence,
     sc: &mut CommandStore,
+    sink: &mut dyn CommandSink,
     dt: f32,
     duration_s: f32,
     rtl_rts_id: u32,
@@ -100,8 +166,10 @@ pub fn run_scenario(
     let mut steps = 0u32;
     let mut latched_at_s: Option<f32> = None;
     let mut rtl_dispatched = false;
+    let mut rtl_frame_sent = false;
     let mut spoof_first_seen_at_s: Option<f32> = None;
     let mut failure: Option<&'static str> = None;
+    let mut mavlink_seq: u8 = 0;
 
     while t < duration_s {
         bench.step(dt);
@@ -118,6 +186,23 @@ pub fn run_scenario(
             rtl_dispatched = ok;
             if !ok {
                 failure = Some("relay-sc rejected start_rts (RTS not loaded?)");
+            } else {
+                // v0.14.2 round-trip: also encode and push the
+                // MAVLink COMMAND_LONG so a real FC acts on it.
+                // Sink failure is non-fatal (failure to push the
+                // frame doesn't invalidate the latch + dispatch).
+                let frame = build_rtl_frame(mavlink_seq);
+                mavlink_seq = mavlink_seq.wrapping_add(1);
+                match sink.send_frame(&frame) {
+                    Ok(()) => rtl_frame_sent = true,
+                    Err(reason) => {
+                        // Record but don't fail-stop — the verified
+                        // safety chain has already done its job.
+                        if failure.is_none() {
+                            failure = Some(reason);
+                        }
+                    }
+                }
             }
         }
         // Tick the command store so the RTS commands actually dispatch.
@@ -142,6 +227,7 @@ pub fn run_scenario(
         latched: latched_at_s.is_some(),
         latched_at_s,
         rtl_dispatched,
+        rtl_frame_sent,
         spoof_first_seen_at_s,
         failure,
     }

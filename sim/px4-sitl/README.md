@@ -68,10 +68,18 @@ cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl
 `--preset=px4-sitl` fills in the PX4 stock takeoff coord
 (**47.3977, 8.5456, 488 m**, Zürich / ETH), the default
 listen address (`0.0.0.0:14550`), and a 30 s duration.
+
+**v0.14.2** also wires the **round-trip** — when the geofence latches,
+the harness encodes a MAVLink `COMMAND_LONG` (id 76) with
+`MAV_CMD_NAV_RETURN_TO_LAUNCH` (cmd 20) and writes it to PX4's
+offboard endpoint (`127.0.0.1:14580`). PX4 receives the command
+and actually flies home. Closes the v0.14.0 deferred item.
+
 Override individual fields after the preset, e.g.:
 
 ```bash
-cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl --duration=60 --listen=0.0.0.0:14560
+cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl \
+  --duration=60 --listen=0.0.0.0:14560 --peer=127.0.0.1:14590
 ```
 
 Fly the vehicle in PX4's `pxh>` console:

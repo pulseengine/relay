@@ -166,6 +166,7 @@ verus_test(
         "crates/relay-mavlink/src/frame.rs",
         "crates/relay-mavlink/src/heartbeat.rs",
         "crates/relay-mavlink/src/global_position_int.rs",
+        "crates/relay-mavlink/src/command_long.rs",
     ],
     crate_name = "relay_mavlink",
 )

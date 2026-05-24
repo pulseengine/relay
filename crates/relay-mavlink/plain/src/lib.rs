@@ -29,6 +29,7 @@ pub mod crc;
 pub mod heartbeat;
 pub mod frame;
 pub mod global_position_int;
+pub mod command_long;
 
 pub use crc::Crc16X25;
 pub use frame::{
@@ -42,4 +43,8 @@ pub use heartbeat::{
 pub use global_position_int::{
     GlobalPositionInt, GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID,
     GLOBAL_POSITION_INT_PAYLOAD_LEN, HEADING_UNKNOWN,
+};
+pub use command_long::{
+    CommandLong, COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID, COMMAND_LONG_PAYLOAD_LEN,
+    MAV_CMD_DO_FLIGHTTERMINATION, MAV_CMD_NAV_RETURN_TO_LAUNCH,
 };
