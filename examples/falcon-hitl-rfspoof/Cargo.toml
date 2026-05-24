@@ -14,3 +14,4 @@ path = "src/main.rs"
 [dependencies]
 relay-lc = { path = "../../crates/relay-lc" }
 relay-sc = { path = "../../crates/relay-sc" }
+relay-mavlink = { path = "../../crates/relay-mavlink" }
