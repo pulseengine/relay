@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-SIM-P02
+    type: sw-req
+    title: "Simulator landscape analysis + Gazebo-bridge path forward"
+    status: approved
+    description: >
+      The falcon dossier shall carry an explicit analysis of the
+      flight-evidence story: what evidence we have today (pure-Rust
+      SITL + PX4-SITL via MavlinkBench), what's missing
+      (falcon-as-the-FC inside real physics), and a concrete path
+      forward (Gazebo Sim bridge as `examples/falcon-sitl-gz`).
+
+      Lives at `docs/SIMULATOR.md`. Records:
+        - Falsifiable hover/step/mission/disturbance criteria for
+          "flies under real physics".
+        - Three concrete next-step options (A: full gz-sim bridge,
+          B: PX4 external-EKF integration, C: Gazebo backend for
+          falcon-sitl-hover) with relative scope.
+        - Honest scope notes: what the simulator does NOT prove,
+          what gz-sim's noise models do and don't capture.
+    tags: [falcon, sim, gazebo, px4, evidence, v0.15]
+    fields:
+      req-type: documentation
+      doc: docs/SIMULATOR.md
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-016
