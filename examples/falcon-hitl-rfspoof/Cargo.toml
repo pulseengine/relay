@@ -1,0 +1,16 @@
+[package]
+name = "falcon-hitl-rfspoof"
+description = "Falcon v0.11 — HITL harness driving the relay-lc Geofence against an RF GPS spoofer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "falcon-hitl-rfspoof"
+path = "src/main.rs"
+
+[dependencies]
+relay-lc = { path = "../../crates/relay-lc" }
+relay-sc = { path = "../../crates/relay-sc" }

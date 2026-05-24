@@ -1,0 +1,38 @@
+artifacts:
+  - id: SWREQ-FALCON-HITL-P01
+    type: sw-req
+    title: HITL harness — RF GPS-spoof driver for the geofence safety path
+    status: approved
+    description: >
+      A host-side hardware-in-the-loop driver shall exercise the
+      v0.10 geofence safety path (SYSREQ-FALCON-014) against a real
+      RF GPS spoofer. The harness shall:
+
+        1. Define a `HitlBench` trait exposing `step(dt)`,
+           `position_cm()`, `spoof_active()`, `name()` — the only
+           four operations the verified path needs from a bench.
+        2. Provide a deterministic `StubBench` backend implementing
+           the trait with no IO, so the harness contract can be
+           regression-tested without hardware.
+        3. Provide a `HackRfBench` backend that builds the
+           `gps-sdr-sim` and `hackrf_transfer` command lines required
+           for L1 C/A spoofing, with the argv shape pinned by tests.
+        4. Drive the verified relay-lc → relay-sc chain unchanged:
+           the geofence check and the RTL RTS dispatch are the same
+           Verus-discharged components the SITL uses.
+        5. Emit a verdict shape (`HitlVerdict`) carrying the latch
+           time, RTL-dispatch flag, spoof-onset time and an optional
+           fail-stop reason — the artifact an evidence reviewer reads.
+
+      The harness is the contract; the bench is what the user wires
+      to it. Only `HackRfBench::position_cm()` needs replacement to
+      read a live FC telemetry feed; everything else (verified
+      detector, verified command dispatch, scenario driver) is
+      identical between stub and live runs.
+    tags: [falcon, hitl, gps-spoof, rf, harness, v0.11]
+    fields:
+      crate: examples/falcon-hitl-rfspoof
+      consumed-by: SYSREQ-FALCON-015
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-015

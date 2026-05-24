@@ -561,6 +561,71 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.9
 
+  - id: FEAT-FALCON-v0.11
+    type: feature
+    title: "v0.11 — Kani Geofence, Verus relay-nid, HITL RF-spoof harness"
+    status: approved
+    description: >
+      LANDED. Three of the v0.10.x deferred items, picked up in
+      one focused release: Kani on Geofence::check, full Verus
+      dual-tree refactor of relay-nid, and a host-side HITL
+      harness with an RF GPS-spoof backend.
+
+      Ships:
+        - relay-lc Kani pack (FV-FALCON-GEO-002): five harnesses
+          (LC-K01..K05) exhaustively pinning Geofence::check —
+          latch monotone, transition-only, already-latched silent,
+          inside-fence never trips, outside-fence always trips.
+          LC-K04 + LC-K05 form the "no false positive + no false
+          negative" adequate pair for a safety detector. Pure-i32
+          state machine — no external_body gaps.
+        - relay-nid dual-tree refactor (FV-FALCON-NID-002):
+          crates/relay-nid/src/ now mirrors the Verus pattern the
+          verified engines use (verus! {} blocks, Option-totality
+          contracts on every `from_code` helper). Encode/decode
+          bodies are #[verifier::external_body] — bit-fiddling
+          territory; the signatures are the formal contracts and
+          Kani's NID-K01..K05 give exhaustive panic-freedom +
+          round-trip coverage. //:relay_nid_verus_test wires the
+          new Bazel target.
+        - examples/falcon-hitl-rfspoof (FV-FALCON-HITL-001): a
+          tiny HitlBench trait + run_scenario driver that
+          composes the verified relay-lc → relay-sc chain
+          unchanged. Two backends: StubBench (deterministic,
+          regression-tested with positive + negative-control
+          scenarios) and HackRfBench (real RF — wraps gps-sdr-sim
+          + hackrf_transfer; argv shapes pinned by tests). README
+          covers the lab BoM, legal containment, and the single
+          position_cm() replacement point a real telemetry source
+          needs. SYSREQ-FALCON-015 records the safety obligation.
+
+      Honestly deferred:
+        - Actual live-RF execution on a HackRF — needs hardware
+          in the dev loop. The HackRfBench is the *driver*;
+          running it against silicon is the user's bench job.
+        - MAVLink / NMEA telemetry parser inside HackRfBench
+          (relay-mavlink is the natural plug once a target FC is
+          chosen).
+        - Abstract interpretation (MIRAI / Charon) for relay-lc —
+          still open; the v0.10.x carry-over.
+
+      Verification:
+        - cargo test --workspace → green.
+        - cargo test -p falcon-hitl-rfspoof → 4/4 (positive +
+          negative + 2 argv-shape).
+        - bazel test //:relay_lc_verus_test //:relay_nid_verus_test
+          → LC-P09/P10 + NID Option-totality contracts.
+        - rivet validate → PASS (same warning class as v0.10).
+    tags: [falcon, milestone, v0.11, hitl, kani, verus, gps-spoof, landed]
+    fields:
+      release-target: "Geofence Kani + relay-nid Verus + HITL RF-spoof harness"
+      kani-properties: "LC-K01..LC-K05"
+      bazel-targets: ["//:relay_lc_verus_test", "//:relay_nid_verus_test"]
+      example: examples/falcon-hitl-rfspoof
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.10
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -593,4 +658,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.10
+        target: FEAT-FALCON-v0.11

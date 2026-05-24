@@ -150,6 +150,15 @@ verus_test(
 )
 
 verus_test(
+    name = "relay_nid_verus_test",
+    srcs = [
+        "crates/relay-nid/src/lib.rs",
+        "crates/relay-nid/src/bitpack.rs",
+    ],
+    crate_name = "relay_nid",
+)
+
+verus_test(
     name = "relay_ds_verus_test",
     srcs = [
         "crates/relay-ds/src/lib.rs",

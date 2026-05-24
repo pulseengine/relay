@@ -30,6 +30,7 @@ members = [
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
     "examples/falcon-sitl-hover",
+    "examples/falcon-hitl-rfspoof",
     "host/relay-sb",
     "host/relay-es",
     "host/relay-evs",

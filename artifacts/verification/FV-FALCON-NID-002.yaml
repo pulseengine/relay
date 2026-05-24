@@ -1,0 +1,54 @@
+artifacts:
+  - id: FV-FALCON-NID-002
+    type: sw-verification
+    title: "relay-nid — Verus dual-tree refactor + Option-totality contracts (v0.11)"
+    status: approved
+    description: >
+      v0.11 brings relay-nid in line with the verified-engine
+      pattern the rest of the workspace uses. Adds:
+
+      - `crates/relay-nid/src/lib.rs` + `bitpack.rs` — Verus-
+        annotated source of truth, wrapped in `verus! {}` blocks.
+        Source mirrors `crates/relay-nid/plain/src/` byte-for-byte
+        in plain-Rust shape; the verus tree adds the contracts.
+      - `MessageType::from_code`, `IdType::from_code`,
+        `UaType::from_code`, `OperationalStatus::from_code`
+        carry `ensures r.is_Some() <==> code in valid range`
+        contracts — Verus proves totality (every valid code is
+        accepted, every invalid code returns None, no panic
+        path). This is **NID-V01**.
+      - `MessageType`, `IdType`, `UaType`, `OperationalStatus`
+        keep `#[repr(u8)]` with explicit discriminants so the
+        `as u8` cast in encoders is well-defined (**NID-V02**).
+      - Encoder signatures take `&mut [u8; FRAME_BYTES]` so no
+        allocation and no OOB write is possible at the type level
+        (**NID-V03**).
+      - Encode/decode bodies are `#[verifier::external_body]` —
+        bit-fiddling is out of Verus's productive range. The
+        Kani harnesses (NID-K01..K05, from v0.9.1) give exhaustive
+        panic-freedom + round-trip coverage on the same code,
+        same DO-178 technique class.
+      - `//:relay_nid_verus_test` Bazel target added.
+
+      Cargo continues to build the plain mirror (`[lib] path =
+      "plain/src/lib.rs"`) — Verus verification runs via Bazel,
+      cargo tests stay untouched. 20/20 cargo tests still pass.
+
+      What this refactor does *not* claim: it does not formally
+      verify bit-perfect round-trip — that lives behind the
+      external_body wall and is the Kani harnesses' job. What it
+      *does* claim is that the workspace's verified-engine pattern
+      (dual tree + verus_test + plain mirror for cargo) is now
+      uniform across relay-hs, relay-lc, and relay-nid.
+    tags: [verification, falcon, network-id, verus, refactor, v0.11]
+    fields:
+      method: formal-verification + bounded-model-checking
+      verus-properties: "NID-V01 (from_code totality), NID-V02 (enum discriminants), NID-V03 (encoder shape)"
+      bazel-target: "//:relay_nid_verus_test"
+      kani-properties: "NID-K01..NID-K05 (from FV-FALCON-NID-001 / v0.9.1)"
+      steps:
+        - run: bazel test //:relay_nid_verus_test
+        - run: cargo test -p relay-nid
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-NID-P01

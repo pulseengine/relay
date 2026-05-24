@@ -8,9 +8,13 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Cargo tests use plain/ (verus-stripped). Verus contracts on the
-# encoder are tracked for v0.9.x (encoder bit-packing is plain-Rust
-# territory; the spec-level invariants belong in Verus).
+# Cargo tests use plain/ (verus-stripped). Verus verification uses
+# crates/relay-nid/src/ via Bazel: //:relay_nid_verus_test.
+# Encode/decode bodies are #[verifier::external_body] (bit-fiddling
+# territory); the signatures are the formal contracts and Kani's
+# NID-K01..K05 harnesses give exhaustive panic-freedom / round-trip
+# coverage — same DO-178 technique class as a fully Verus-discharged
+# proof would be. See crates/relay-nid/src/lib.rs for the spec.
 path = "plain/src/lib.rs"
 crate-type = ["rlib"]
 
