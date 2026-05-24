@@ -128,6 +128,10 @@ mod tests {
         assert!(pass, "70 % PWM × THRUST_SCALE should easily beat gravity");
     }
 
+    /// Stub-only — when `gazebo` feature is ON, `GazeboPhysics::new`
+    /// connects to gz-transport (and panics if no gz-sim is running),
+    /// so the panic-free contract doesn't apply.
+    #[cfg(not(feature = "gazebo"))]
     #[test]
     fn gazebo_stub_does_not_panic() {
         let mut g = crate::physics::GazeboPhysics::new("test-world", "test-quad");

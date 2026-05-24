@@ -1,6 +1,6 @@
 [package]
 name = "falcon-sitl-gz"
-description = "Falcon v0.16 — Gazebo SITL scaffold: pluggable Physics trait, MockPhysics + GazeboPhysics stub"
+description = "Falcon v0.16+ — Gazebo SITL: pluggable Physics trait, MockPhysics + GazeboPhysics (real bridge behind `gazebo` feature)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,15 @@ rust-version.workspace = true
 name = "falcon-sitl-gz"
 path = "src/main.rs"
 
+[features]
+# Default: stub GazeboPhysics (v0.16.1 contract) — every default build
+# stays lean. No gz-transport deps.
+default = []
+# v0.18: real gz-transport bridge. Pulls in tokio + gz-transport-rs +
+# zmq (libzmq compiled from C source via zeromq-src). ~30-60 s extra
+# build time; opt-in only.
+gazebo = ["dep:tokio", "dep:gz-transport-rs"]
+
 [dependencies]
 relay-ekf = { path = "../../crates/relay-ekf" }
 relay-rate = { path = "../../crates/relay-rate" }
@@ -20,3 +29,7 @@ relay-pos = { path = "../../crates/relay-pos" }
 relay-lc = { path = "../../crates/relay-lc" }
 relay-sc = { path = "../../crates/relay-sc" }
 libm = "0.2"
+
+# Optional — only when feature `gazebo` is on.
+tokio = { version = "1", features = ["rt", "sync", "macros"], optional = true }
+gz-transport-rs = { version = "0.1", optional = true }

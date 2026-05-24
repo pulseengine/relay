@@ -1237,6 +1237,60 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.16.1
 
+  - id: FEAT-FALCON-v0.18.0
+    type: feature
+    title: "v0.18.0 — real gz-transport-rs Gazebo bridge (`gazebo` feature)"
+    status: approved
+    description: >
+      LANDED. Closes SIMULATOR.md option A from v0.15.0: the
+      falcon-sitl-gz scaffold's GazeboPhysics is now a real
+      gz-transport bridge behind a new `gazebo` cargo feature.
+      gz-transport-rs ships pure-Rust transport (no Gazebo C++
+      install needed at build time — zeromq-src compiles libzmq
+      from C source as a build dep).
+
+      Ships:
+        - examples/falcon-sitl-gz/Cargo.toml — `gazebo` feature
+          gates optional deps (tokio + gz-transport-rs). Default
+          builds stay lean (no extra deps).
+        - examples/falcon-sitl-gz/src/physics.rs — two-branch
+          GazeboPhysics: stub (v0.16.1 contract) without the
+          feature; real impl with the feature. Real impl
+          subscribes to gz.msgs.IMU + publishes gz.msgs.Double
+          per rotor, async via tokio current_thread runtime,
+          mpsc channels bridge sync Physics trait → async pub.
+        - ENU↔NED body-frame conversion at the measure boundary,
+          unit-tested.
+        - PWM → motor RPM scale (MulticopterMotorModel-
+          compatible).
+        - README updated with the feature recipe + bench step.
+        - FV-FALCON-SIM-004 records the evidence.
+
+      Verification:
+        - cargo test -p falcon-sitl-gz → 6/6 (default; stub mode).
+        - cargo test -p falcon-sitl-gz --features gazebo → 6/6
+          (mock + ENU/NED + PWM-scale unit tests on pure functions).
+        - rivet validate → PASS (72 warnings — 70 v0.17.0 + 2 new
+          FV-* same warning class).
+
+      Honestly deferred:
+        - GPS / NavSat subscriber — currently `measure()` returns
+          (IMU, [0,0,0]) for position. v0.18.1 candidate; until
+          then the bridge supports attitude + rate control loops
+          but not position-dependent (waypoint, geofence).
+        - Bench validation against a real `gz sim` — still the
+          user's bench step (gz install + SDF world authorship).
+        - PWM → RPM scale tuning per SDF model
+          (MulticopterMotorModel.maxRotVelocity).
+    tags: [falcon, milestone, v0.18.0, gazebo, gz-transport, real-bridge, landed]
+    fields:
+      release-target: "real gz-transport-rs bridge for falcon-sitl-gz"
+      feature-flag: gazebo
+      crate: examples/falcon-sitl-gz
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.17.0
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1269,4 +1323,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.17.0
+        target: FEAT-FALCON-v0.18.0

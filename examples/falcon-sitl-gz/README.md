@@ -24,9 +24,33 @@ unchanged — same pattern as the HITL harness's `HitlBench` and
 # in-process MockPhysics (default; toy 6-DoF integrator)
 cargo run -p falcon-sitl-gz
 
-# Gazebo stub — verdict will be FAIL until the bench wire-up is done
+# Gazebo STUB — no bridge yet; verdict will be FAIL.
 cargo run -p falcon-sitl-gz -- --backend=gazebo --world=falcon --model=quad
+
+# Real Gazebo bridge (v0.18.0; needs `gz sim` running).
+cargo run -p falcon-sitl-gz --features gazebo -- \
+  --backend=gazebo --world=falcon --model=quad
 ```
+
+### v0.18 — real `gz-transport-rs` bridge
+
+Behind the `gazebo` feature, `GazeboPhysics` is a real
+[gz-transport-rs](https://crates.io/crates/gz-transport-rs)-backed
+implementation:
+
+- Subscribes to `gz.msgs.IMU` on
+  `/world/{world}/model/{model}/link/base_link/sensor/imu_sensor/imu`
+- Publishes `gz.msgs.Double` to each of four rotor joints'
+  `/world/{world}/model/{model}/joint/rotor_{0..3}_joint/cmd_vel`
+- Converts gz-sim ENU body frame ↔ falcon NED body frame at the
+  measure boundary (`(x, y, z)_ned = (x, -y, -z)_enu`)
+- PWM → motor RPM via `pwm * 1000 rad/s` (MulticopterMotorModel-
+  compatible; the exact constant depends on your SDF model — adjust
+  in `physics.rs::pwm_to_rad_per_s`)
+
+**Default cargo builds do NOT include this.** `gz-transport-rs` pulls
+in tokio + libzmq (compiled from C source via `zeromq-src`),
+~30-60 s extra build time. Opt in only when you have a bench.
 
 ## What this is NOT
 
@@ -92,12 +116,21 @@ acceptance criteria are in `docs/SIMULATOR.md` (hover within
 ±0.5 m for 30 s, step settling < 2 s + overshoot < 20 %, mission
 completion under wind, geofence-trip latency).
 
-## Why scaffold, not full implementation?
+## v0.16.1 stub → v0.18.0 real bridge
 
-`gz-transport` is C++ + Protobuf; Rust bindings are immature. A
-real bridge is ~one bench-day of work the user does. The scaffold
-+ the verified cascade together are what's deliverable in software
-(no hardware/sim install required). Pattern matches v0.11's
-`HackRfBench` (RF stub + real-bench docs) and v0.12's
-`MavlinkBench`'s `--peer=` (round-trip wired in software; PX4 +
-gz-sim are user's bench).
+v0.16.1 shipped this as a stub (the `GazeboPhysics` `step()` and
+`measure()` were TODOs that printed warnings and returned zeros).
+v0.18.0 promotes it to a real bridge behind the `gazebo` feature
+flag, using `gz-transport-rs` (pure-Rust Gazebo transport, no C++
+gz-sim install required at build time).
+
+The pattern matches v0.11's `HackRfBench` (RF stub + real-bench
+docs) and v0.12's `MavlinkBench`'s `--peer=` (round-trip wired in
+software; PX4 + gz-sim are user's bench):
+
+- **Without `--features gazebo`** — stub stays for users who just
+  want the scaffold contract; build is lean (no gz-transport deps).
+- **With `--features gazebo`** — real bridge ships, builds against
+  gz-transport-rs + tokio + zmq, ready to talk to a running
+  `gz sim`. The bench step is still installing gz-sim + authoring
+  the SDF world, but the Rust side is now real code.
