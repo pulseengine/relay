@@ -86,6 +86,13 @@ pub trait FrameSource {
     /// pending. The returned slice is valid until the next call.
     fn next_frame(&mut self) -> Option<&[u8]>;
     fn name(&self) -> &'static str;
+
+    /// `true` iff frames arrive at real-world cadence (and the
+    /// driver loop should sleep between polls so the OS can
+    /// actually deliver them). `UdpFrameSource` overrides to true;
+    /// `InMemoryFrameSource` keeps the default false so unit tests
+    /// stay fast.
+    fn is_realtime(&self) -> bool { false }
 }
 
 /// In-memory `FrameSource` — for tests + the deterministic backend.
@@ -222,6 +229,7 @@ impl UdpFrameSource {
 
 impl FrameSource for UdpFrameSource {
     fn name(&self) -> &'static str { "udp" }
+    fn is_realtime(&self) -> bool { true }
     fn next_frame(&mut self) -> Option<&[u8]> {
         // Keep the registration alive by sending a HEARTBEAT every
         // second when a peer is configured. PX4-SITL forgets peers
@@ -370,6 +378,7 @@ impl<S: FrameSource> HitlBench for MavlinkBench<S> {
     fn position_cm(&self) -> (i32, i32, i32) {
         (self.last_n_cm, self.last_e_cm, self.last_d_cm)
     }
+    fn real_time(&self) -> bool { self.source.is_realtime() }
     fn spoof_active(&self) -> bool { self.spoof_active }
 }
 
