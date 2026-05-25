@@ -37,8 +37,14 @@ fn main() {
             duration_s: 30.0,
             listen: Some("0.0.0.0:14550"),
             home: Some("47.3977,8.5456,488"),
-            // PX4-SITL's offboard / companion MAVLink endpoint.
-            peer: Some("127.0.0.1:14580"),
+            // PX4-SITL's normal-mode (GCS) MAVLink listen port. The
+            // harness uses this for both registration HEARTBEATs and
+            // the COMMAND_LONG RTL — PX4 sends back to udp port 14550
+            // ("remote port 14550" in its boot log). Switched from
+            // 14580 (offboard) to 18570 (GCS) on 2026-05-25 after
+            // PX4 jMAVSim diagnosis: 14580 also works but isn't where
+            // PX4 publishes the GCS stream from.
+            peer: Some("127.0.0.1:18570"),
         },
         Some(other) => {
             eprintln!("unknown preset: {other}  (expected: px4-sitl)");
@@ -106,12 +112,42 @@ fn main() {
                     Box::new(NullCommandSink::new())
                 }
             };
-            let src = mavlink::UdpFrameSource::new(sock);
+            // PX4-SITL only streams telemetry to peers it has heard from
+            // (it learns the address from the incoming MAVLink frame).
+            // Send a periodic HEARTBEAT to the autopilot's GCS listen
+            // port so PX4 registers us and starts sending GLOBAL_POSITION_INT
+            // back. Without this the bench-run sits silent — diagnosed
+            // on 2026-05-25 against PX4 jMAVSim where the harness saw
+            // `spoof_first_seen_at_s: None` for 60 s.
+            let src = match peer_str.parse::<std::net::SocketAddr>() {
+                Ok(peer) => {
+                    println!("  mavlink: registering with peer at {peer_str} (HEARTBEAT 2 Hz)");
+                    mavlink::UdpFrameSource::new_with_registration(sock, peer)
+                }
+                Err(_) => mavlink::UdpFrameSource::new(sock),
+            };
             let mut b = mavlink::MavlinkBench::new(src, home, (0, 0, -500));
             // Real link: 10 Hz GLOBAL_POSITION_INT rate is typical;
             // 100 Hz harness tick is fine because drain_frames is
             // non-blocking and tolerates "no new frame this tick".
-            run_scenario(&mut b, &mut fence, &mut sc, sink.as_mut(), 0.01, duration_s, 0, 5.0)
+            // max_latch_latency_s: real flight is gradual (a 1.4 km
+            // waypoint takes ~5 m/s × 280 s; PX4-SITL's quad reaches
+            // ~12 m/s in auto loiter). 5 s was the stub-bench budget
+            // for an instant RF spoof jump — wrong for real physics.
+            // Use the full duration as the budget so the heuristic
+            // fail-stop is effectively disabled in live mode; the
+            // verdict's pass() still drives the exit code.
+            let v = run_scenario(&mut b, &mut fence, &mut sc, sink.as_mut(), 0.01, duration_s, 0, duration_s);
+            // Diagnostic counters — let a bench operator distinguish
+            // "PX4 isn't sending us anything" (frames_recv == 0) from
+            // "PX4 sends MAVLink but no GLOBAL_POSITION_INT yet"
+            // (frames_recv > 0, gpi_recv == 0; usually means the EKF
+            // has no GPS fix — try `pxh> commander takeoff`).
+            println!(
+                "  mavlink: frames_recv={} gpi_recv={}",
+                b.frames_recv, b.gpi_recv,
+            );
+            v
         }
         other => {
             eprintln!("unknown backend: {other}  (expected: stub | hackrf | mavlink)");

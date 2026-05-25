@@ -1,0 +1,22 @@
+falcon-hitl-rfspoof: backend=mavlink duration=120s
+  fence: ±100 m × ±100 m × ±100 m (NED, centred on home)
+  mavlink: listening on 0.0.0.0:14550
+  mavlink: COMMAND_LONG sink → 127.0.0.1:18570
+  mavlink: registering with peer at 127.0.0.1:18570 (HEARTBEAT 2 Hz)
+  mavlink: frames_recv=8552 gpi_recv=717
+verdict = HitlVerdict {
+    backend: "mavlink",
+    duration_s: 120.0,
+    steps: 12000,
+    latched: true,
+    latched_at_s: Some(
+        32.180607,
+    ),
+    rtl_dispatched: true,
+    rtl_frame_sent: true,
+    spoof_first_seen_at_s: Some(
+        21.970407,
+    ),
+    failure: None,
+}
+PASS

@@ -45,6 +45,15 @@ pub trait HitlBench {
     /// Current bench-reported NED position in centimetres.
     fn position_cm(&self) -> (i32, i32, i32);
 
+    /// Iff `true`, `run_scenario` paces the loop in real time
+    /// (sleeps `dt` between ticks) so external real-time IO
+    /// (PX4-SITL UDP, HackRF) has wall-clock time to deliver
+    /// frames. Defaults to `false` — preserves the "complete a
+    /// 60-tick test in microseconds" contract for `StubBench`
+    /// and `InMemoryFrameSource`-backed `MavlinkBench` tests.
+    /// `UdpFrameSource`-backed `MavlinkBench` overrides to true.
+    fn real_time(&self) -> bool { false }
+
     /// `true` iff the RF spoofer is transmitting for this step.
     /// The harness uses this only for diagnostic correlation —
     /// nothing in the verified path depends on it.
@@ -171,7 +180,18 @@ pub fn run_scenario(
     let mut failure: Option<&'static str> = None;
     let mut mavlink_seq: u8 = 0;
 
+    // Real-time pacing: bench's UDP/RF sources need wall-clock
+    // time between polls so the OS delivers frames. The default
+    // `t += dt` loop completes 6 000 ticks in microseconds, way
+    // ahead of any real source. Diagnosed 2026-05-25: with no
+    // sleep, MavlinkBench against live PX4-SITL got 0 frames in
+    // 30 s of wall time even though `nc` saw 327 packets/s on
+    // the same port.
+    let pace_real_time = bench.real_time();
+    let tick_period = std::time::Duration::from_secs_f32(dt);
+
     while t < duration_s {
+        let tick_start = std::time::Instant::now();
         bench.step(dt);
         if spoof_first_seen_at_s.is_none() && bench.spoof_active() {
             spoof_first_seen_at_s = Some(t);
@@ -218,6 +238,16 @@ pub fn run_scenario(
 
         t += dt;
         steps += 1;
+
+        // Real-time pacing — sleep what's left of this tick's
+        // budget. Bench work that already exceeded the budget
+        // produces no sleep (catches up by skipping).
+        if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+        }
     }
 
     HitlVerdict {

@@ -1,0 +1,6 @@
+sent 4 GCS heartbeats to udpout:127.0.0.1:18570
+→ arm
+→ takeoff (10 m)
+  sleep 8 s for takeoff…
+→ reposition to (47.41, 8.5456, 518.0)
+  holding heartbeats for 60 s while harness observes

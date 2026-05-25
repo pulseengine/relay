@@ -1,0 +1,9 @@
+INFO  [commander] Ready for takeoff!
+INFO  [mavlink] partner IP: 127.0.0.1
+INFO  [commander] Armed by external command	
+INFO  [commander] Takeoff detected	
+INFO  [commander] Returning to launch	
+INFO  [navigator] RTL: start return at 518 m (30 m above destination)	
+INFO  [navigator] RTL: start return at 518 m (30 m above destination)	
+INFO  [navigator] RTL: land at destination	
+INFO  [commander] Disarmed by landing	
