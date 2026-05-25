@@ -36,11 +36,43 @@ verified relay-sc RTL RTS fires.
 
 | Tool        | Install                                                                |
 |-------------|------------------------------------------------------------------------|
-| PX4 + jMAVSim | `git clone --recursive https://github.com/PX4/PX4-Autopilot && cd PX4-Autopilot && make px4_sitl jmavsim` |
-| Gazebo (optional, prettier) | `make px4_sitl gz_x500` from the PX4-Autopilot directory |
+| PX4 + jMAVSim | `git clone --recursive https://github.com/PX4/PX4-Autopilot && cd PX4-Autopilot && bash Tools/setup/macos.sh` |
+| Gazebo (optional, prettier) | `brew tap osrf/simulation && brew install gz-harmonic` |
 | Rust toolchain | `rustup toolchain install stable` (≥ 1.85) |
+| Java JDK ≥ 25 (for jMAVSim *only*) | `brew install --cask temurin` — and see the JDK note below |
 
 Falcon-side: `cargo build -p falcon-hitl-rfspoof` (no extra deps).
+
+### JDK pitfall (jMAVSim only)
+
+PX4 ships `jmavsim_run.jar` pre-built with **Java 25** (class file
+version 69). If your shell's `java` is an older JDK (e.g.
+Homebrew's `openjdk@17`, class 61), the launch fails with:
+
+```text
+UnsupportedClassVersionError: me/drton/jmavsim/Simulator
+  has been compiled by a more recent version of the Java Runtime
+  (class file version 69.0), this version of the Java Runtime only
+  recognizes class file versions up to 61.0
+```
+
+Fix: install Temurin ≥ 25 (`brew install --cask temurin` gives
+the latest LTS), then export `JAVA_HOME` + put it on `PATH` **before**
+`make`:
+
+```bash
+export JAVA_HOME="$(/usr/libexec/java_home -v 25)"   # or -v 26 if installed
+export PATH="$JAVA_HOME/bin:$PATH"
+java -version    # should print "openjdk 25" or higher
+```
+
+Verified end-to-end on this repo: with `JAVA_HOME=$(/usr/libexec/
+java_home -v 26)` exported, `HEADLESS=1 make px4_sitl jmavsim`
+reaches `Ready for takeoff!` in ~13 s on this Mac.
+
+Gazebo (`make px4_sitl gz_x500`) and the headless `none_iris`
+target don't touch Java — pick one of those if you'd rather not
+chase the JDK.
 
 ## Running it
 
@@ -49,12 +81,25 @@ Two terminals.
 ### Terminal 1 — PX4-SITL with jMAVSim
 
 ```bash
+export JAVA_HOME="$(/usr/libexec/java_home -v 25)"   # see "JDK pitfall" above
+export PATH="$JAVA_HOME/bin:$PATH"
 cd ~/git/PX4-Autopilot
 make px4_sitl jmavsim
 ```
 
+Or pick one that doesn't need Java:
+
+```bash
+# Headless (no 3D viz; fastest; great for the safety-chain bench)
+cd ~/git/PX4-Autopilot && make px4_sitl none_iris
+
+# Or Gazebo (3D viz; also unlocks Path B in docs/SIMULATOR.md later)
+cd ~/git/PX4-Autopilot && make px4_sitl gz_x500
+```
+
 Wait for `INFO  [commander] Ready for takeoff!`. PX4 starts emitting
-MAVLink (HEARTBEAT, GLOBAL_POSITION_INT, …) on `0.0.0.0:14550`.
+MAVLink (HEARTBEAT, GLOBAL_POSITION_INT, …) on `0.0.0.0:14550`
+regardless of which sim backend you picked.
 
 ### Terminal 2 — falcon-hitl-rfspoof
 
