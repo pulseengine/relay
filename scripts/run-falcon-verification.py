@@ -57,6 +57,17 @@ BENCH_PATTERNS = [
     re.compile(r"/Users/[^/]+/"),                     # developer-machine absolute path
     re.compile(r"/tmp/falcon-spar-wit"),              # temp dir created only by a bench-only spar step
     re.compile(r"\bgh\s+attestation\s+verify\b"),     # needs gh sigstore TUF root init
+    # v0.18.x — gz-transport-rs's --features gazebo build pulls in
+    # libzmq via zeromq-src (C compile); the gate runner doesn't
+    # have CMake + the toolchain set up. The default-feature
+    # `cargo test -p falcon-sitl-gz` runs fine.
+    re.compile(r"--features\s+gazebo\b"),
+    # Steps that read bazel-build output (witness-run.json etc.) —
+    # the bazel build step itself is skipped, so the read fails.
+    re.compile(r"\bcat\s+bazel-bin/"),
+    # `cp target/wasm32-unknown-unknown/release/...` chains depend on
+    # the prior wasm32 build step which needs `rustup target add`.
+    re.compile(r"target/wasm32-"),
 ]
 
 

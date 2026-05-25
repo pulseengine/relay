@@ -41,7 +41,20 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
+
+      # Provision the tools FV-FALCON-COV-002 expects. The dedicated
+      # Coverage workflow uses the same install; mirror it here so
+      # `cargo llvm-cov` succeeds inside the rivet gate too. Security
+      # note: this workflow does not interpolate any github.event.*
+      # inputs into run: blocks (PR body is bound via env: + sanitised
+      # before reaching the script).
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Install rivet (skip if cached)
         shell: bash
