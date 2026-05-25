@@ -115,32 +115,121 @@ impl FrameSource for InMemoryFrameSource {
 
 /// UDP `FrameSource` — reads non-blocking from a bound socket.
 ///
+/// Important: PX4-SITL (and most MAVLink autopilots) **do not stream
+/// telemetry to a passive listener**. The autopilot only starts
+/// sending to a peer after it receives at least one MAVLink frame
+/// from that peer (it learns the peer's address from the incoming
+/// datagram). Without registration the harness's bench-run finishes
+/// with `latched: false` + `spoof_first_seen_at_s: None` even though
+/// the bind succeeded — diagnosed against PX4 jMAVSim on
+/// 2026-05-25.
+///
+/// Use `new_with_registration(sock, peer)` to send a HEARTBEAT to
+/// the autopilot's GCS listen port on construction and then a
+/// periodic HEARTBEAT every second from `next_frame()`. The plain
+/// `new(sock)` constructor keeps the old "no registration" behaviour
+/// for callers wiring their own discovery path (e.g. unit tests
+/// using `InMemoryFrameSource`-style scripts).
+///
 /// Typical use:
 ///
 /// ```no_run
 /// use std::net::UdpSocket;
 /// use falcon_hitl_rfspoof::mavlink::UdpFrameSource;
 ///
-/// // PX4 default GCS port is 14550.
+/// // PX4 sends GCS stream to UDP 14550; bind there to receive it.
 /// let sock = UdpSocket::bind("0.0.0.0:14550").unwrap();
 /// sock.set_nonblocking(true).unwrap();
-/// let src = UdpFrameSource::new(sock);
+/// // PX4-SITL's normal-mode (GCS) MAVLink listens on UDP 18570.
+/// // Sending a HEARTBEAT there registers us as a peer; PX4 then
+/// // starts streaming GLOBAL_POSITION_INT etc. back to us on 14550.
+/// let src = UdpFrameSource::new_with_registration(
+///     sock, "127.0.0.1:18570".parse().unwrap()
+/// );
 /// ```
 pub struct UdpFrameSource {
     sock: UdpSocket,
     buf: [u8; 1500],
     last_len: usize,
+    /// If `Some`, send a HEARTBEAT here every `HEARTBEAT_INTERVAL`.
+    /// Canonical MAVLink GCS behaviour — registers us with the
+    /// autopilot and keeps the registration alive.
+    register_peer: Option<std::net::SocketAddr>,
+    last_heartbeat: Option<std::time::Instant>,
+    heartbeat_seq: u8,
 }
 
 impl UdpFrameSource {
+    /// HEARTBEAT cadence (canonical MAVLink GCS: 1 Hz).
+    const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
     pub fn new(sock: UdpSocket) -> Self {
-        Self { sock, buf: [0u8; 1500], last_len: 0 }
+        Self {
+            sock,
+            buf: [0u8; 1500],
+            last_len: 0,
+            register_peer: None,
+            last_heartbeat: None,
+            heartbeat_seq: 0,
+        }
+    }
+
+    /// New `UdpFrameSource` that registers with an autopilot. Sends
+    /// a HEARTBEAT to `peer` on construction (so the autopilot learns
+    /// our address immediately) and another every second from
+    /// `next_frame()`.
+    pub fn new_with_registration(sock: UdpSocket, peer: std::net::SocketAddr) -> Self {
+        let mut s = Self::new(sock);
+        s.register_peer = Some(peer);
+        s.send_heartbeat();
+        s
+    }
+
+    /// Send one MAVLink HEARTBEAT to the registration peer. No-op if
+    /// no peer was configured. Errors are eaten silently — a missed
+    /// HEARTBEAT just means the next call retries.
+    fn send_heartbeat(&mut self) {
+        use relay_mavlink::{
+            encode_frame, FrameHeader, Heartbeat, HEADER_LEN,
+            HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, HEARTBEAT_PAYLOAD_LEN, MAGIC_V2,
+        };
+        let Some(peer) = self.register_peer else { return };
+        let payload = Heartbeat::gcs().encode_payload();
+        let header = FrameHeader {
+            magic: MAGIC_V2,
+            payload_len: payload.len() as u8,
+            incompat_flags: 0,
+            compat_flags: 0,
+            sequence: self.heartbeat_seq,
+            // GCS-conventional sysid/compid — matches QGroundControl's defaults.
+            system_id: 255,
+            component_id: 190,
+            message_id: HEARTBEAT_MSG_ID,
+        };
+        let mut frame = [0u8; HEADER_LEN + HEARTBEAT_PAYLOAD_LEN + 2];
+        if encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut frame).is_ok() {
+            let _ = self.sock.send_to(&frame, peer);
+        }
+        self.heartbeat_seq = self.heartbeat_seq.wrapping_add(1);
+        self.last_heartbeat = Some(std::time::Instant::now());
     }
 }
 
 impl FrameSource for UdpFrameSource {
     fn name(&self) -> &'static str { "udp" }
     fn next_frame(&mut self) -> Option<&[u8]> {
+        // Keep the registration alive by sending a HEARTBEAT every
+        // second when a peer is configured. PX4-SITL forgets peers
+        // that go silent for too long.
+        if self.register_peer.is_some() {
+            let due = self
+                .last_heartbeat
+                .map(|t| t.elapsed() >= Self::HEARTBEAT_INTERVAL)
+                .unwrap_or(true);
+            if due {
+                self.send_heartbeat();
+            }
+        }
         match self.sock.recv(&mut self.buf) {
             Ok(n) => {
                 self.last_len = n;

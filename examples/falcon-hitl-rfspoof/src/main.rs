@@ -37,8 +37,14 @@ fn main() {
             duration_s: 30.0,
             listen: Some("0.0.0.0:14550"),
             home: Some("47.3977,8.5456,488"),
-            // PX4-SITL's offboard / companion MAVLink endpoint.
-            peer: Some("127.0.0.1:14580"),
+            // PX4-SITL's normal-mode (GCS) MAVLink listen port. The
+            // harness uses this for both registration HEARTBEATs and
+            // the COMMAND_LONG RTL — PX4 sends back to udp port 14550
+            // ("remote port 14550" in its boot log). Switched from
+            // 14580 (offboard) to 18570 (GCS) on 2026-05-25 after
+            // PX4 jMAVSim diagnosis: 14580 also works but isn't where
+            // PX4 publishes the GCS stream from.
+            peer: Some("127.0.0.1:18570"),
         },
         Some(other) => {
             eprintln!("unknown preset: {other}  (expected: px4-sitl)");
@@ -106,7 +112,20 @@ fn main() {
                     Box::new(NullCommandSink::new())
                 }
             };
-            let src = mavlink::UdpFrameSource::new(sock);
+            // PX4-SITL only streams telemetry to peers it has heard from
+            // (it learns the address from the incoming MAVLink frame).
+            // Send a periodic HEARTBEAT to the autopilot's GCS listen
+            // port so PX4 registers us and starts sending GLOBAL_POSITION_INT
+            // back. Without this the bench-run sits silent — diagnosed
+            // on 2026-05-25 against PX4 jMAVSim where the harness saw
+            // `spoof_first_seen_at_s: None` for 60 s.
+            let src = match peer_str.parse::<std::net::SocketAddr>() {
+                Ok(peer) => {
+                    println!("  mavlink: registering with peer at {peer_str} (HEARTBEAT 1 Hz)");
+                    mavlink::UdpFrameSource::new_with_registration(sock, peer)
+                }
+                Err(_) => mavlink::UdpFrameSource::new(sock),
+            };
             let mut b = mavlink::MavlinkBench::new(src, home, (0, 0, -500));
             // Real link: 10 Hz GLOBAL_POSITION_INT rate is typical;
             // 100 Hz harness tick is fine because drain_frames is
