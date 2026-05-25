@@ -160,8 +160,13 @@ pub struct UdpFrameSource {
 }
 
 impl UdpFrameSource {
-    /// HEARTBEAT cadence (canonical MAVLink GCS: 1 Hz).
-    const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+    /// HEARTBEAT cadence. MAVLink convention is 1 Hz; PX4-SITL's
+    /// commander module treats GCS as lost after 1000 ms of silence,
+    /// so 1 Hz lives right at the boundary and we see the
+    /// `Connection lost / regained` flap once per second. 2 Hz
+    /// (500 ms) is well inside the timeout. Diagnosed against PX4
+    /// jMAVSim on 2026-05-25.
+    const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
     pub fn new(sock: UdpSocket) -> Self {
         Self {
@@ -283,6 +288,13 @@ pub struct MavlinkBench<S: FrameSource> {
     t: f32,
     /// Initial NED estimate (used while we have no real fix yet).
     seeded: bool,
+    /// Diagnostic counters — printed in the verdict so a bench
+    /// operator can tell "PX4 isn't sending at all" (`frames_recv = 0`)
+    /// from "PX4 sends MAVLink but no GLOBAL_POSITION_INT yet"
+    /// (`frames_recv > 0, gpi_recv = 0`) from "we received but the
+    /// CRC failed" (`gpi_recv > 0` but `seeded == false`).
+    pub frames_recv: u64,
+    pub gpi_recv: u64,
 }
 
 impl<S: FrameSource> MavlinkBench<S> {
@@ -296,6 +308,8 @@ impl<S: FrameSource> MavlinkBench<S> {
             spoof_active: false,
             t: 0.0,
             seeded: false,
+            frames_recv: 0,
+            gpi_recv: 0,
         }
     }
 
@@ -309,6 +323,7 @@ impl<S: FrameSource> MavlinkBench<S> {
         // GLOBAL_POSITION_INT is the only message-id this bench
         // consumes; anything else is silently skipped.
         while let Some(bytes) = self.source.next_frame() {
+            self.frames_recv += 1;
             let mid = match peek_message_id(bytes) {
                 Ok(m) => m,
                 Err(_) => continue,
@@ -316,6 +331,7 @@ impl<S: FrameSource> MavlinkBench<S> {
             if mid != GLOBAL_POSITION_INT_MSG_ID {
                 continue;
             }
+            self.gpi_recv += 1;
             let (frame, _consumed) = match parse_frame(bytes, GLOBAL_POSITION_INT_CRC_EXTRA) {
                 Ok(p) => p,
                 Err(_) => continue, // bad CRC, truncated, etc. — silent skip
