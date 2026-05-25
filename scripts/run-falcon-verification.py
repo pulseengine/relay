@@ -66,8 +66,10 @@ BENCH_PATTERNS = [
     # the bazel build step itself is skipped, so the read fails.
     re.compile(r"\bcat\s+bazel-bin/"),
     # `cp target/wasm32-unknown-unknown/release/...` chains depend on
-    # the prior wasm32 build step which needs `rustup target add`.
+    # the prior wasm32 build step which needs `rustup target add` —
+    # and the build step itself (`--target wasm32-…`) needs the same.
     re.compile(r"target/wasm32-"),
+    re.compile(r"--target\s+wasm32-"),
 ]
 
 
