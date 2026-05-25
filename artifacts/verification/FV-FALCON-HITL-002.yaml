@@ -60,7 +60,7 @@ artifacts:
       steps:
         - run: cargo test -p relay-mavlink
         - run: cargo test -p falcon-hitl-rfspoof
-        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof mavlink::tests
+        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof mavlink::tests   # bench-only — miri not on the standard CI runner
         - run: cargo run -p falcon-hitl-rfspoof -- --backend=mavlink --listen=0.0.0.0:14550  # bench-only; needs a live FC
     links:
       - type: verifies

@@ -47,7 +47,7 @@ artifacts:
       kani-harness-count: 5
       file: crates/relay-lc/plain/src/engine.rs
       steps:
-        - run: cargo kani -p relay-lc
+        - run: cargo kani -p relay-lc   # bench-only — kani-verifier + CBMC not on the standard CI runner
         - run: cargo test -p relay-lc   # cfg(kani) is invisible to cargo; cargo path still green
     links:
       - type: verifies
