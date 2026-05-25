@@ -26,3 +26,4 @@ Cargo.lock
 # Bazel's rust_wasm_component_bindgen (bindings are generated at build
 # time; the lib.rs files alias the generated crate).
 wasm/cm/*/src/bindings.rs
+coverage.lcov
