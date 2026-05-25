@@ -130,7 +130,14 @@ fn main() {
             // Real link: 10 Hz GLOBAL_POSITION_INT rate is typical;
             // 100 Hz harness tick is fine because drain_frames is
             // non-blocking and tolerates "no new frame this tick".
-            let v = run_scenario(&mut b, &mut fence, &mut sc, sink.as_mut(), 0.01, duration_s, 0, 5.0);
+            // max_latch_latency_s: real flight is gradual (a 1.4 km
+            // waypoint takes ~5 m/s × 280 s; PX4-SITL's quad reaches
+            // ~12 m/s in auto loiter). 5 s was the stub-bench budget
+            // for an instant RF spoof jump — wrong for real physics.
+            // Use the full duration as the budget so the heuristic
+            // fail-stop is effectively disabled in live mode; the
+            // verdict's pass() still drives the exit code.
+            let v = run_scenario(&mut b, &mut fence, &mut sc, sink.as_mut(), 0.01, duration_s, 0, duration_s);
             // Diagnostic counters — let a bench operator distinguish
             // "PX4 isn't sending us anything" (frames_recv == 0) from
             // "PX4 sends MAVLink but no GLOBAL_POSITION_INT yet"
