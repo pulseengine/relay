@@ -40,6 +40,13 @@ implementation:
 
 - Subscribes to `gz.msgs.IMU` on
   `/world/{world}/model/{model}/link/base_link/sensor/imu_sensor/imu`
+- **v0.18.1** — subscribes to `gz.msgs.NavSat` on
+  `/world/{world}/model/{model}/link/base_link/sensor/navsat_sensor/navsat`
+  for GPS-derived position. Use `--home=lat,lon,alt_m` to set the
+  launch-site anchor for the equirectangular lat/lon → NED
+  projection (same shape as `MavlinkBench::Home` from v0.12).
+  Without `--home`, defaults to `Home::ORIGIN` (lat=0, lon=0,
+  alt=0) — almost certainly not what you want for a real bench run.
 - Publishes `gz.msgs.Double` to each of four rotor joints'
   `/world/{world}/model/{model}/joint/rotor_{0..3}_joint/cmd_vel`
 - Converts gz-sim ENU body frame ↔ falcon NED body frame at the
@@ -47,6 +54,14 @@ implementation:
 - PWM → motor RPM via `pwm * 1000 rad/s` (MulticopterMotorModel-
   compatible; the exact constant depends on your SDF model — adjust
   in `physics.rs::pwm_to_rad_per_s`)
+
+Full bench command (v0.18.1):
+
+```bash
+cargo run -p falcon-sitl-gz --features gazebo -- \
+  --backend=gazebo --world=falcon --model=quad \
+  --home=47.3977,8.5456,488 --duration=30
+```
 
 **Default cargo builds do NOT include this.** `gz-transport-rs` pulls
 in tokio + libzmq (compiled from C source via `zeromq-src`),

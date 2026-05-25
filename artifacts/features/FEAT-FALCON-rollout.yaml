@@ -1291,6 +1291,55 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.17.0
 
+  - id: FEAT-FALCON-v0.18.1
+    type: feature
+    title: "v0.18.1 — gz-transport NavSat + Home projection"
+    status: approved
+    description: >
+      LANDED. Closes the v0.18.0 deferred item (GPS / NavSat
+      subscriber). Position-dependent control loops (waypoint
+      mission, geofence) now work in the gz-sim bridge.
+
+      Ships:
+        - Home { lat_deg, lon_deg, alt_m } + Home::ORIGIN +
+          project_to_ned_m — equirectangular projection mirroring
+          v0.12 MavlinkBench::Home.
+        - NavSat subscriber task in connect_with_home on the SDF
+          NavSat plugin topic.
+        - New connect_with_home(world, model, home) constructor;
+          connect + new keep v0.18.0 signatures (default home =
+          Home::ORIGIN).
+        - CLI --home=lat,lon,alt_m flag.
+        - 4 new tests: home_projects_to_origin,
+          altitude_translates_to_down, lat_step_translates_to_north
+          (1° lat ≈ 111_195 m sanity check on R = 6_371_000 m
+          sphere), world_origin_default_is_zero.
+        - FV-FALCON-SIM-005.
+
+      Together with v0.18.0 (IMU + Actuators) the cascade has every
+      signal it needs to fly under real gz-sim physics. Bench step
+      (gz install + SDF world authorship) is the only remaining
+      user-side work.
+
+      Verification:
+        - cargo test -p falcon-sitl-gz → 6/6 (default).
+        - cargo test -p falcon-sitl-gz --features gazebo → 10/10
+          (was 6/6 at v0.18.0; +4 projection tests).
+        - rivet validate → PASS.
+
+      Honestly deferred:
+        - NavSat velocity slot.
+        - Bench validation against a real gz sim with NavSat plugin.
+        - PX4 external-EKF (option B from docs/SIMULATOR.md).
+    tags: [falcon, milestone, v0.18.1, gazebo, navsat, landed]
+    fields:
+      release-target: "NavSat + Home projection in gz-transport bridge"
+      feature-flag: gazebo
+      cli-flag: "--home=lat,lon,alt_m"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.18.0
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1323,4 +1372,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.18.0
+        target: FEAT-FALCON-v0.18.1
