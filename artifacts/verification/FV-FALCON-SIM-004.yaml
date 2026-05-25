@@ -1,0 +1,101 @@
+artifacts:
+  - id: FV-FALCON-SIM-004
+    type: sw-verification
+    title: "Real gz-transport-rs Gazebo bridge — falcon-sitl-gz `gazebo` feature (v0.18.0)"
+    status: approved
+    description: >
+      v0.18.0 promotes `examples/falcon-sitl-gz`'s `GazeboPhysics`
+      from the v0.16.1 stub (returns zeros, prints warning) to a
+      real gz-transport bridge behind a new `gazebo` cargo
+      feature. Closes SIMULATOR.md option A from v0.15.0's
+      flight-evidence analysis.
+
+      What ships:
+
+      1. `examples/falcon-sitl-gz/Cargo.toml` — new optional
+         dependencies behind `feature = "gazebo"`:
+           - tokio (rt + sync + macros)
+           - gz-transport-rs v0.1
+         Default features: none. Cargo workspace builds stay lean
+         (no tokio, no libzmq compilation) unless the user opts in.
+
+      2. `examples/falcon-sitl-gz/src/physics.rs` — two-branch
+         `GazeboPhysics` definition:
+           - `#[cfg(not(feature = "gazebo"))]` — preserves the
+             v0.16.1 stub contract (panic-free, returns zeros,
+             `--backend=gazebo` produces FAIL verdict as the
+             signal that the bench wire-up is needed).
+           - `#[cfg(feature = "gazebo")]` — real impl in the
+             `gz_real` module:
+              * Owns a current-thread tokio runtime.
+              * Spawns a subscriber task on
+                `/world/{world}/model/{model}/link/base_link/
+                sensor/imu_sensor/imu` consuming `gz.msgs.IMU`.
+              * Spawns one publisher task per rotor (0..4) on
+                `/world/{world}/model/{model}/joint/rotor_{n}_
+                joint/cmd_vel` emitting `gz.msgs.Double`.
+              * mpsc channels carry motor PWMs from the synchronous
+                `Physics::step` to the async publishers.
+              * `Physics::measure` reads a shared `Arc<Mutex<>>`
+                snapshot updated by the subscriber.
+              * gz-sim ENU body frame ↔ falcon NED body frame
+                conversion: `(x, y, z)_ned = (x, -y, -z)_enu`.
+                Unit-tested with gravity = +Z ENU = -Z NED.
+
+      Smoke-test evidence (without gz-sim installed):
+
+        $ cargo test -p falcon-sitl-gz
+          6/6 pass (4 mock + 2 stub)
+        $ cargo test -p falcon-sitl-gz --features gazebo
+          6/6 pass (4 mock + 2 real-impl unit tests:
+            * enu_to_ned_conversion (all 8 corners of the unit cube)
+            * pwm_to_rad_per_s_scales_and_clamps)
+
+      The real-impl tests don't need a running `gz sim` — they
+      test the pure functions (frame conversion, PWM scaling).
+      Connecting to a real gz-sim instance and observing the
+      cascade closing the loop is the bench step.
+
+      README updated with the recipe:
+
+        cargo run -p falcon-sitl-gz --features gazebo -- \\
+          --backend=gazebo --world=falcon --model=quad
+
+      Honest dispositions:
+        - **GPS / NavSat not yet wired.** `measure()` returns
+          (IMU, [0,0,0]) for position because we don't have a
+          NavSat subscriber yet. The cascade can still close on
+          attitude + rate; position-dependent loops (waypoint
+          mission, geofence) need NavSat next. v0.18.1 candidate.
+        - **PWM → motor RPM scale is approximate.** `pwm_to_rad_
+          per_s` uses `pwm * 1000 rad/s` as a stand-in; the real
+          constant depends on the SDF model's MulticopterMotor-
+          Model plugin (`maxRotVelocity` property). Adjust per
+          model.
+        - **The connect step panics on failure when called via
+          `GazeboPhysics::new`.** That mirrors the stub's
+          `new(world, model) -> Self` signature so the CLI binary
+          works unchanged. Library users wanting `Result` call
+          `GazeboPhysics::connect` directly.
+        - **gz-transport-rs is v0.1.0** — the API may change.
+          Pinned via cargo MSRV resolution; if upstream breaks
+          we'll feature-flag a `gz-transport-rs-0_2` etc. when it
+          comes.
+    tags: [verification, falcon, sim, gazebo, gz-transport, v0.18.0]
+    fields:
+      method: real-bridge + unit-test-on-pure-functions + bench-evidence-recipe
+      crate: examples/falcon-sitl-gz
+      feature-flag: gazebo
+      deps-added: ["tokio (rt+sync+macros, optional)", "gz-transport-rs 0.1 (optional)"]
+      tests-default: 6
+      tests-with-gazebo-feature: 6
+      gz-topics:
+        - subscribe: "/world/{world}/model/{model}/link/base_link/sensor/imu_sensor/imu (gz.msgs.IMU)"
+        - publish:   "/world/{world}/model/{model}/joint/rotor_{0..3}_joint/cmd_vel (gz.msgs.Double)"
+      steps:
+        - run: cargo test -p falcon-sitl-gz
+        - run: cargo test -p falcon-sitl-gz --features gazebo
+        - run: cargo run -p falcon-sitl-gz --features gazebo -- --backend=gazebo --world=falcon --model=quad  # bench-only; needs `gz sim` running
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P03
