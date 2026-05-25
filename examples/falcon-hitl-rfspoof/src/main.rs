@@ -121,7 +121,7 @@ fn main() {
             // `spoof_first_seen_at_s: None` for 60 s.
             let src = match peer_str.parse::<std::net::SocketAddr>() {
                 Ok(peer) => {
-                    println!("  mavlink: registering with peer at {peer_str} (HEARTBEAT 1 Hz)");
+                    println!("  mavlink: registering with peer at {peer_str} (HEARTBEAT 2 Hz)");
                     mavlink::UdpFrameSource::new_with_registration(sock, peer)
                 }
                 Err(_) => mavlink::UdpFrameSource::new(sock),
@@ -130,7 +130,17 @@ fn main() {
             // Real link: 10 Hz GLOBAL_POSITION_INT rate is typical;
             // 100 Hz harness tick is fine because drain_frames is
             // non-blocking and tolerates "no new frame this tick".
-            run_scenario(&mut b, &mut fence, &mut sc, sink.as_mut(), 0.01, duration_s, 0, 5.0)
+            let v = run_scenario(&mut b, &mut fence, &mut sc, sink.as_mut(), 0.01, duration_s, 0, 5.0);
+            // Diagnostic counters — let a bench operator distinguish
+            // "PX4 isn't sending us anything" (frames_recv == 0) from
+            // "PX4 sends MAVLink but no GLOBAL_POSITION_INT yet"
+            // (frames_recv > 0, gpi_recv == 0; usually means the EKF
+            // has no GPS fix — try `pxh> commander takeoff`).
+            println!(
+                "  mavlink: frames_recv={} gpi_recv={}",
+                b.frames_recv, b.gpi_recv,
+            );
+            v
         }
         other => {
             eprintln!("unknown backend: {other}  (expected: stub | hackrf | mavlink)");
