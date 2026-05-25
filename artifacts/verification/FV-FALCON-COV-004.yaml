@@ -85,7 +85,7 @@ artifacts:
       protocol: "witness-harness-v1 (counters only)"
       steps:
         - run: cargo build -p witness-wasi-harness --release
-        - run: $WITNESS run /path/to/instrumented.wasm --output run.json --harness target/release/witness-wasi-harness
+        - run: $WITNESS run /path/to/instrumented.wasm --output run.json --harness target/release/witness-wasi-harness   # bench-only — template path; needs witness binary + instrumented module
     links:
       - type: verifies
         target: SWREQ-FALCON-WORLD-P01

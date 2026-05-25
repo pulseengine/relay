@@ -67,10 +67,10 @@ artifacts:
       test-count: 13
       crates: ["relay-lc", "falcon-hitl-rfspoof"]
       steps:
-        - run: rustup component add miri --toolchain nightly
-        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p relay-lc --lib geofence
-        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof stub::tests
-        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof mavlink::tests
+        - run: rustup component add miri --toolchain nightly   # bench-only — CI doesn't provision the nightly miri component
+        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p relay-lc --lib geofence   # bench-only
+        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof stub::tests   # bench-only
+        - run: MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test -p falcon-hitl-rfspoof --bin falcon-hitl-rfspoof mavlink::tests   # bench-only
     links:
       - type: verifies
         target: SWREQ-FALCON-GEO-P01

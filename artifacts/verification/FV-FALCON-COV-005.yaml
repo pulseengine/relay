@@ -83,7 +83,7 @@ artifacts:
       upstream-bug: "witness trace-buffer OOM on dense-branch subjects (reported to witness AI agent)"
       steps:
         - run: cargo build -p witness-wasi-harness
-        - run: WITNESS_HARNESS_INVOKES="run_inside" $WITNESS run /tmp/instr.wasm --harness target/debug/witness-wasi-harness -o /tmp/run.json
+        - run: WITNESS_HARNESS_INVOKES="run_inside" $WITNESS run /tmp/instr.wasm --harness target/debug/witness-wasi-harness -o /tmp/run.json   # bench-only — needs $WITNESS + pre-instrumented module
     links:
       - type: verifies
         target: SWREQ-FALCON-WORLD-P01

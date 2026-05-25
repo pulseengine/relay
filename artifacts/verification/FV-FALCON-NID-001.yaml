@@ -59,7 +59,7 @@ artifacts:
       steps:
         - run: cargo test -p relay-nid
         - run: PROPTEST_CASES=4096 cargo test -p relay-nid
-        - run: cargo kani -p relay-nid
+        - run: cargo kani -p relay-nid   # bench-only — kani not on the standard CI runner
     links:
       - type: verifies
         target: SWREQ-FALCON-NID-P01

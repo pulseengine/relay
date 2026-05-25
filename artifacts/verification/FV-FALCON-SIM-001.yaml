@@ -52,9 +52,9 @@ artifacts:
       preset: "--preset=px4-sitl"
       recipe: "sim/px4-sitl/README.md"
       steps:
-        - run: cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl --duration=1   # smoke; no PX4 expected → FAIL is correct
-        - run: cd ~/git/PX4-Autopilot && make px4_sitl jmavsim                       # terminal 1; needs PX4-Autopilot
-        - run: cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl                # terminal 2; loop closes when PX4 emits position
+        - run: cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl --duration=1   # bench-only — smoke; no PX4 → FAIL verdict (rc=1) is correct
+        - run: cd ~/git/PX4-Autopilot && make px4_sitl jmavsim                       # bench-only — terminal 1; needs PX4-Autopilot
+        - run: cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl                # bench-only — terminal 2; loop closes when PX4 emits position
     links:
       - type: verifies
         target: SWREQ-FALCON-SIM-P01
