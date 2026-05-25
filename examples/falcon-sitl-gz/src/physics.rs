@@ -239,15 +239,49 @@ mod gz_real {
         [v[0], -v[1], -v[2]]
     }
 
+    /// Launch-site anchor for NavSat lat/lon/alt → NED projection.
+    /// Same equirectangular pattern as `MavlinkBench`'s `Home` from
+    /// v0.12 — small-error within a few-km bench range.
+    #[derive(Clone, Copy, Debug)]
+    pub struct Home {
+        pub lat_deg: f64,
+        pub lon_deg: f64,
+        pub alt_m: f64,
+    }
+
+    impl Home {
+        /// World-origin default — useful for SDF worlds whose vehicle
+        /// spawns at lat/lon (0, 0) and want raw deltas without an
+        /// anchor.
+        pub const ORIGIN: Self = Self { lat_deg: 0.0, lon_deg: 0.0, alt_m: 0.0 };
+
+        /// Equirectangular projection of (lat_deg, lon_deg, alt_m)
+        /// to local NED in metres. Down is positive — alt above
+        /// home is negative D.
+        pub fn project_to_ned_m(&self, lat_deg: f64, lon_deg: f64, alt_m: f64) -> [f32; 3] {
+            const EARTH_R_M: f64 = 6_371_000.0;
+            const PI: f64 = std::f64::consts::PI;
+            let d_lat = (lat_deg - self.lat_deg) * PI / 180.0;
+            let d_lon = (lon_deg - self.lon_deg) * PI / 180.0;
+            let lat0 = self.lat_deg * PI / 180.0;
+            let north_m = d_lat * EARTH_R_M;
+            let east_m = d_lon * EARTH_R_M * lat0.cos();
+            let down_m = -(alt_m - self.alt_m);
+            [north_m as f32, east_m as f32, down_m as f32]
+        }
+    }
+
     pub struct GazeboPhysics {
         pub world_name: String,
         pub model_name: String,
+        /// Launch-site anchor for the NavSat → NED projection.
+        pub home: Home,
         /// Latest IMU sample observed on the imu_sensor topic.
         /// `None` until first frame arrives.
         latest_imu: Arc<Mutex<Option<ImuSample>>>,
-        /// Latest NED position (m) as it would be observed at the
-        /// model origin. Populated from `gz.msgs.Pose_V` on the pose
-        /// topic (a simpler stand-in for full GPS until NavSat is wired).
+        /// Latest NED position (m). v0.18.0: stub `[0,0,0]`. v0.18.1:
+        /// populated from `gz.msgs.NavSat` on the navsat topic, via
+        /// `Home::project_to_ned_m`.
         latest_position_ned_m: Arc<Mutex<[f32; 3]>>,
         /// One mpsc sender per rotor; the receiver task owns the
         /// gz-transport Publisher and emits `gz.msgs.Double` per send.
@@ -267,15 +301,30 @@ mod gz_real {
             world: impl Into<String>,
             model: impl Into<String>,
         ) -> Self {
-            Self::connect(world, model)
+            Self::connect_with_home(world, model, Home::ORIGIN)
                 .expect("GazeboPhysics::new: gz-transport connect failed; is `gz sim` running?")
         }
 
         /// Connect to the gz-transport network and start subscriber
         /// + publisher tasks. Blocks until the Node is online.
+        /// Home anchor defaults to world origin (0,0,0); use
+        /// `connect_with_home` to supply a launch-site lat/lon/alt.
         pub fn connect(
             world: impl Into<String>,
             model: impl Into<String>,
+        ) -> Result<Self, gz_transport_rs::Error> {
+            Self::connect_with_home(world, model, Home::ORIGIN)
+        }
+
+        /// v0.18.1 — connect + supply the launch-site home for the
+        /// NavSat → NED projection. Without this the NavSat
+        /// subscriber still runs but `measure()` returns positions
+        /// relative to `Home::ORIGIN` (lat=0, lon=0, alt=0), which
+        /// is almost certainly not what you want for a bench run.
+        pub fn connect_with_home(
+            world: impl Into<String>,
+            model: impl Into<String>,
+            home: Home,
         ) -> Result<Self, gz_transport_rs::Error> {
             let world = world.into();
             let model = model.into();
@@ -297,11 +346,13 @@ mod gz_real {
             // (Node + publishers) returns to the caller, errors
             // propagate.
             let imu_ref = latest_imu.clone();
+            let position_ref = latest_position_ned_m.clone();
+            let home_for_setup = home;
             let world_for_setup = world.clone();
             let model_for_setup = model.clone();
             runtime.block_on(async move {
                 use gz_transport_rs::Node;
-                use gz_transport_rs::msgs::{Double, Imu};
+                use gz_transport_rs::msgs::{Double, Imu, NavSat};
 
                 let mut node = Node::new(None).await?;
                 let imu_topic = format!(
@@ -324,6 +375,23 @@ mod gz_real {
                             gyro_body: enu_to_ned([gx, gy, gz]),
                         };
                         *imu_ref.lock().unwrap() = Some(sample);
+                    }
+                });
+
+                // v0.18.1 — NavSat subscriber: lat/lon/alt deg from
+                // the SDF NavSat plugin → local NED via Home.
+                let navsat_topic = format!(
+                    "/world/{world_for_setup}/model/{model_for_setup}/link/base_link/sensor/navsat_sensor/navsat"
+                );
+                let mut navsat_sub = node.subscribe::<NavSat>(&navsat_topic).await?;
+                tokio::spawn(async move {
+                    while let Some((msg, _meta)) = navsat_sub.recv().await {
+                        let ned = home_for_setup.project_to_ned_m(
+                            msg.latitude_deg,
+                            msg.longitude_deg,
+                            msg.altitude,
+                        );
+                        *position_ref.lock().unwrap() = ned;
                     }
                 });
 
@@ -354,6 +422,7 @@ mod gz_real {
             Ok(Self {
                 world_name: world,
                 model_name: model,
+                home,
                 latest_imu,
                 latest_position_ned_m,
                 rotor_tx: [tx0, tx1, tx2, tx3],
@@ -417,11 +486,51 @@ mod gz_real {
             // Clamps above 1.
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(2.0), 1000.0);
         }
+
+        // v0.18.1 — NavSat projection tests. Same shape as the
+        // `MavlinkBench::Home::project_ned_cm` tests in
+        // examples/falcon-hitl-rfspoof/src/mavlink.rs.
+        fn budapest_home() -> Home {
+            Home { lat_deg: 47.5023456, lon_deg: 19.0401234, alt_m: 120.0 }
+        }
+
+        #[test]
+        fn home_projects_to_origin() {
+            let h = budapest_home();
+            let p = h.project_to_ned_m(h.lat_deg, h.lon_deg, h.alt_m);
+            assert!(p[0].abs() < 0.01, "north = {}", p[0]);
+            assert!(p[1].abs() < 0.01, "east  = {}", p[1]);
+            assert!(p[2].abs() < 0.01, "down  = {}", p[2]);
+        }
+
+        #[test]
+        fn altitude_translates_to_down() {
+            let h = budapest_home();
+            // 5 m below home → down +5 m.
+            let p = h.project_to_ned_m(h.lat_deg, h.lon_deg, h.alt_m - 5.0);
+            assert!((p[2] - 5.0).abs() < 0.01, "down = {}", p[2]);
+        }
+
+        #[test]
+        fn lat_step_translates_to_north() {
+            let h = Home { lat_deg: 0.0, lon_deg: 0.0, alt_m: 0.0 };
+            // 1° of latitude ≈ 111_195 m on a 6_371_000 m-radius sphere.
+            let p = h.project_to_ned_m(1.0, 0.0, 0.0);
+            assert!((p[0] - 111_195.0).abs() < 1.0, "north = {}", p[0]);
+            assert!(p[1].abs() < 0.01, "east = {}", p[1]);
+        }
+
+        #[test]
+        fn world_origin_default_is_zero() {
+            let h = Home::ORIGIN;
+            let p = h.project_to_ned_m(0.0, 0.0, 0.0);
+            assert_eq!(p, [0.0, 0.0, 0.0]);
+        }
     }
 }
 
 #[cfg(feature = "gazebo")]
-pub use gz_real::GazeboPhysics;
+pub use gz_real::{GazeboPhysics, Home};
 
 #[cfg(test)]
 mod tests {

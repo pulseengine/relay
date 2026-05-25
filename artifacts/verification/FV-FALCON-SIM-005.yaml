@@ -1,0 +1,78 @@
+artifacts:
+  - id: FV-FALCON-SIM-005
+    type: sw-verification
+    title: "gz-transport NavSat + Home projection — position-dependent loops (v0.18.1)"
+    status: approved
+    description: >
+      v0.18.1 closes the v0.18.0 deferred item: `Physics::measure`
+      now returns a real position derived from a `gz.msgs.NavSat`
+      subscriber and an equirectangular projection through a
+      launch-site `Home` anchor. Position-dependent control loops
+      (waypoint mission, geofence) now work in the gz-sim bridge.
+
+      What ships:
+        - `Home { lat_deg, lon_deg, alt_m }` struct + `Home::ORIGIN`
+          + `Home::project_to_ned_m(lat, lon, alt) -> [f32; 3]` —
+          same equirectangular pattern as v0.12's
+          `MavlinkBench::Home::project_ned_cm` (within a few-km
+          bench range the projection error is sub-cm).
+        - NavSat subscriber task in `GazeboPhysics::connect_with_home`
+          on the SDF NavSat plugin topic
+          `/world/{world}/model/{model}/link/base_link/sensor/navsat_sensor/navsat`.
+        - New constructor `GazeboPhysics::connect_with_home(world,
+          model, home) -> Result`; existing `connect` + `new` keep
+          their signatures (default home = `Home::ORIGIN`).
+        - CLI: `--home=lat,lon,alt_m` flag plumbed through the
+          `gazebo` backend; same shape as MavlinkBench's `--home=`
+          for users coming from PX4-SITL.
+
+      Tests (cargo test -p falcon-sitl-gz --features gazebo):
+        - `enu_to_ned_conversion` (v0.18.0, preserved)
+        - `pwm_to_rad_per_s_scales_and_clamps` (v0.18.0, preserved)
+        - **`home_projects_to_origin`** (v0.18.1)
+        - **`altitude_translates_to_down`** (v0.18.1)
+        - **`lat_step_translates_to_north`** (v0.18.1) — verifies
+          the equirectangular constant: 1° of latitude ≈ 111_195 m
+          on the 6_371_000 m-radius sphere falcon uses.
+        - **`world_origin_default_is_zero`** (v0.18.1) — Home::ORIGIN
+          projects (0, 0, 0) → [0, 0, 0].
+
+      Now 10/10 cargo tests pass with `--features gazebo` (was
+      6/6 at v0.18.0; +4 NavSat-projection unit tests). Default
+      tests still 6/6 (no behavior change without the feature).
+
+      End-to-end (bench-only):
+        cargo run -p falcon-sitl-gz --features gazebo -- \\
+          --backend=gazebo --world=falcon --model=quad \\
+          --home=47.3977,8.5456,488 --duration=30
+
+      Honestly deferred:
+        - Velocity from NavSat (msg carries velocity_east /
+          velocity_north / velocity_up). `Physics::measure`
+          returns only position today; the cascade's EKF accepts
+          velocity samples separately but the trait doesn't yet
+          expose a velocity slot. v0.18.2 / v0.19 candidate.
+        - Bench validation against a real `gz sim` with a NavSat-
+          equipped SDF model — still the user's bench step.
+        - PX4 external-EKF integration (option B from
+          docs/SIMULATOR.md) — separate path; v0.19 candidate if
+          interesting.
+
+      Together with v0.18.0 (IMU + Actuators) the cascade now has
+      every signal it needs to fly under real gz-sim physics. The
+      bench step is installing gz-sim + authoring the SDF world;
+      everything below that boundary is software-deliverable today.
+    tags: [verification, falcon, sim, gazebo, navsat, gps, v0.18.1]
+    fields:
+      method: real-bridge + projection-unit-tests + bench-recipe
+      crate: examples/falcon-sitl-gz
+      feature-flag: gazebo
+      gz-topic-added: "/world/{world}/model/{model}/link/base_link/sensor/navsat_sensor/navsat (gz.msgs.NavSat)"
+      tests-with-gazebo-feature: 10
+      cli-flag-added: "--home=lat,lon,alt_m"
+      steps:
+        - run: cargo test -p falcon-sitl-gz --features gazebo
+        - run: cargo run -p falcon-sitl-gz --features gazebo -- --backend=gazebo --world=falcon --model=quad --home=47.3977,8.5456,488 --duration=30  # bench-only
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P03

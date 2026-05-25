@@ -42,8 +42,7 @@ fn main() {
         "gazebo" => {
             let world = arg(&args, "--world").unwrap_or_else(|| "falcon".into());
             let model = arg(&args, "--model").unwrap_or_else(|| "quad".into());
-            let mut p = GazeboPhysics::new(world, model);
-            println!("  (stub backend — see examples/falcon-sitl-gz/src/physics.rs for the bench wire-up)");
+            let mut p = build_gazebo(&args, world, model);
             run_hover(&mut p, duration_s)
         }
         other => {
@@ -104,6 +103,38 @@ fn run_hover(physics: &mut dyn Physics, duration_s: f32) -> bool {
     // signal the bench wire-up is needed.
     let _ = t;
     net_climb > 0.1
+}
+
+/// Construct a `GazeboPhysics` for the CLI gazebo backend. With
+/// feature `gazebo` ON, parses `--home=lat,lon,alt_m` and threads
+/// it into `connect_with_home`. Without the feature, falls back to
+/// the stub `new(world, model)`.
+#[cfg(feature = "gazebo")]
+fn build_gazebo(args: &[String], world: String, model: String) -> GazeboPhysics {
+    let home = match arg(args, "--home") {
+        Some(s) => parse_home(&s).expect("--home=lat,lon,alt_m"),
+        None => physics::Home::ORIGIN,
+    };
+    println!("  gazebo home: lat={} lon={} alt={} m", home.lat_deg, home.lon_deg, home.alt_m);
+    GazeboPhysics::connect_with_home(world, model, home)
+        .expect("connect_with_home: gz-transport connect failed; is `gz sim` running?")
+}
+
+#[cfg(not(feature = "gazebo"))]
+fn build_gazebo(_args: &[String], world: String, model: String) -> GazeboPhysics {
+    let _ = arg(_args, "--home"); // accept the flag silently in stub mode
+    println!("  (stub backend — rebuild with --features gazebo for the real bridge)");
+    GazeboPhysics::new(world, model)
+}
+
+#[cfg(feature = "gazebo")]
+fn parse_home(s: &str) -> Option<physics::Home> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() != 3 { return None; }
+    let lat_deg: f64 = parts[0].parse().ok()?;
+    let lon_deg: f64 = parts[1].parse().ok()?;
+    let alt_m: f64 = parts[2].parse().ok()?;
+    Some(physics::Home { lat_deg, lon_deg, alt_m })
 }
 
 fn arg(args: &[String], key: &str) -> Option<String> {
