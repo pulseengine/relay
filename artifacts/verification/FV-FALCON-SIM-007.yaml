@@ -1,0 +1,93 @@
+artifacts:
+  - id: FV-FALCON-SIM-007
+    type: sw-verification
+    title: "First gz-sim bench evidence — bridge connects, IMU + motor pipeline live, two concrete next-fix items (v0.19.1)"
+    status: approved
+    description: >
+      v0.19.1 lands the **first observational evidence** of the
+      gz-transport bridge running against a real `gz sim` instance.
+      Companion to v0.18.2's `bench-evidence/px4-sitl/` — the gz-direction
+      first-light run.
+
+      Setup:
+        - macOS arm64, gz Sim 8.11.0 from osrf/simulation tap.
+        - World `examples/falcon-sitl-gz/worlds/falcon-quad.sdf`,
+          v0.19.1-patched to inline `<light>` + `ground_plane`
+          (Fuel.gazebosim.org includes need network + fuel cache).
+        - `gz sim -s -r -v3 worlds/falcon-quad.sdf` (headless server).
+        - `target/debug/falcon-sitl-gz --backend=gazebo --world=falcon
+          --model=quad --home=47.3977,8.5456,488 --scenario=hover
+          --duration=10 --evidence-dir=bench-evidence/gz-sim`
+
+      Verdict: FAIL (expected — see findings).
+      Counters: imu_recv=51 navsat_recv=0 motor_send=1000
+
+      Logs captured under `bench-evidence/gz-sim/`:
+        - `1779822750-gazebo-hover-harness.log`
+        - `1779822750-gazebo-hover-ticks.csv` (1000 rows)
+        - `2026-05-26-first-bench-findings.md` (the two next-fix
+          items quantified)
+
+      What worked:
+        - gz sim loaded the v0.19.1-patched SDF cleanly; all
+          `/world/falcon/model/quad/...` topics came online ~5 s in.
+        - Bridge connected to gz-transport without intervention;
+          tokio runtime + gz-transport-rs Node + subscribers
+          + publishers all came up green.
+        - IMU subscription delivers data (`imu_recv > 0` + non-zero
+          IMU columns in the CSV).
+        - Motor publish rate exactly matches harness tick (1000
+          ticks → 1000 `motor_send` events).
+        - `--evidence-dir` artefacts schema-correct end-to-end.
+
+      Two finds (documented in
+      `bench-evidence/gz-sim/2026-05-26-first-bench-findings.md`):
+
+        1. **Motor topic format mismatch** — Harmonic's
+           `MulticopterMotorModel` plugins all subscribe to the
+           model-level topic `/quad/cmd_vel` expecting
+           `gz.msgs.Actuators` (an array of motor velocities). The
+           bridge currently publishes 4 separate `gz.msgs.Double`
+           messages to per-rotor topics. Hence `motor_send=1000` but
+           `climb=0`. v0.19.2 fix shape (one-PR work): publish a
+           single Actuators message; drop the per-rotor mpsc fanout.
+
+        2. **NavSat publisher live but no frames delivered** —
+           `gz topic` shows the publisher registered but our
+           subscriber received 0 frames in 10 s. IMU at 200 Hz also
+           under-rates (51 / 10 s ≈ 4 Hz). Same root cause likely:
+           SDF NavSat sensor body needs explicit `<navsat>` content
+           or gz-transport-rs is buffering. v0.19.3 diagnosis +
+           fix.
+
+      The diagnostic counters from v0.19.0 did exactly what they
+      were designed for: distinguish four failure modes that would
+      otherwise present as a single mute `climb=0`. Verdict-shaped
+      evidence reading "FAIL with imu_recv=51 motor_send=1000
+      navsat_recv=0" is **falsifiable**, not silent.
+
+      Honestly NOT claimed:
+        - That the gz bridge flies anything yet. Verdict is FAIL.
+        - That IMU under-rating is fully diagnosed — Finding 2 is
+          paired with NavSat for a single diagnostic pass.
+        - That this evidence run is reproducible across operating
+          systems beyond Ralf's macOS arm64 box. v0.19.x will add
+          Ubuntu evidence once the motor topic is fixed and a
+          positive verdict lands.
+    tags: [falcon, sim, gazebo, bench-evidence, first-light, v0.19.1]
+    fields:
+      bench-evidence-dir: bench-evidence/gz-sim/
+      bench-date: "2026-05-26"
+      gz-version: "8.11.0"
+      sdf: examples/falcon-sitl-gz/worlds/falcon-quad.sdf
+      counters-observed:
+        imu_recv: 51
+        navsat_recv: 0
+        motor_send: 1000
+      verdict: FAIL
+      findings:
+        - "motor topic: bridge publishes Double per-rotor; plugin expects Actuators model-level"
+        - "NavSat publisher registered but no frames; IMU also under-rating"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P04

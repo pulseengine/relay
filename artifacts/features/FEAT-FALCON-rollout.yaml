@@ -1501,6 +1501,90 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.18.2
 
+  - id: FEAT-FALCON-v0.19.1
+    type: feature
+    title: "v0.19.1 — first gz-sim bench evidence (FAIL with diagnostic-clear counters)"
+    status: approved
+    description: >
+      LANDED. First observational evidence of the gz-transport bridge
+      running against a real `gz sim` instance. Companion to v0.18.2's
+      `bench-evidence/px4-sitl/` — the gz-direction first-light run.
+      Verdict is FAIL — that is exactly what makes this a successful
+      release: the diagnostic counters from v0.19.0 produced
+      **falsifiable evidence**, not silent failure.
+
+      Setup (macOS arm64, gz Sim 8.11.0 from osrf/simulation tap):
+        - `brew install osrf/simulation/gz-harmonic` landed cleanly.
+        - SDF Fuel-includes patch: `Sun` + `Ground Plane` were fetched
+          from Fuel.gazebosim.org which needs network + cache.
+          Replaced with inline `<light>` + `ground_plane` model. SDF
+          now `gz sdf -k` validates clean.
+        - `gz sim -s -r -v3 worlds/falcon-quad.sdf` (headless server).
+        - Bridge: `target/debug/falcon-sitl-gz --backend=gazebo
+          --world=falcon --model=quad --home=47.3977,8.5456,488
+          --scenario=hover --duration=10
+          --evidence-dir=bench-evidence/gz-sim`.
+
+      Captured under `bench-evidence/gz-sim/`:
+        - `1779822750-gazebo-hover-harness.log` — verdict + counters.
+        - `1779822750-gazebo-hover-ticks.csv` — 1000 rows of IMU +
+          motor PWM + counter history.
+        - `2026-05-26-first-bench-findings.md` — root-cause writeup
+          of the two next-fix items.
+
+      Verdict + counters:
+        verdict: FAIL  (no climb)
+        imu_recv=51  navsat_recv=0  motor_send=1000
+
+      What worked end-to-end:
+        - gz sim loaded the world; topics came up.
+        - Bridge connected (tokio + gz-transport-rs + Node).
+        - IMU subscription delivers (>0).
+        - Motor publish rate matches harness tick (1000:1000).
+        - --evidence-dir produces schema-correct artefacts.
+
+      Two finds, both with concrete fix shapes:
+        1. Harmonic MulticopterMotorModel plugins subscribe to a
+           single model-level `/quad/cmd_vel` topic expecting
+           `gz.msgs.Actuators`, not 4 separate `gz.msgs.Double`
+           per-rotor topics. Hence motor_send=1000 but climb=0.
+           v0.19.2 fix: single Actuators publish + drop per-rotor
+           mpsc fanout.
+        2. NavSat publisher registered, 0 frames delivered. IMU
+           also under-rates (4 Hz observed vs 200 Hz configured).
+           Same root cause likely: sensor-body content or gz-
+           transport buffering. v0.19.3 diagnosis.
+
+      Ships:
+        - SDF patch (Fuel includes → inline sun + ground plane).
+        - bench-evidence/gz-sim/{1779822750-*,2026-05-26-*.md}.
+        - FV-FALCON-SIM-007 records the bench evidence + findings.
+
+      Verification:
+        - rivet validate → PASS.
+        - cargo build --features gazebo → green (preserved).
+        - SDF `gz sdf -k` validate → exit 0.
+
+      Honestly NOT claimed:
+        - That the gz bridge flies anything yet. Verdict is FAIL.
+        - That IMU under-rating is fully diagnosed.
+        - That the evidence is reproducible beyond Ralf's macOS
+          arm64 box. Ubuntu confirmation comes after v0.19.2.
+
+      The trait + CLI + SDF + counter pattern from v0.19.0 is now
+      **demonstrated** to be the right shape. The remaining work to
+      "completely flying" is wire-format detail, not architecture.
+    tags: [falcon, milestone, v0.19.1, gazebo, bench-evidence, first-light, landed]
+    fields:
+      release-target: "first gz-sim bench evidence (FAIL with diagnostic-clear counters)"
+      bench-date: "2026-05-26"
+      gz-version: "8.11.0"
+      counters-observed: "imu_recv=51 navsat_recv=0 motor_send=1000"
+      next-fix-items: 2
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.0
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1533,4 +1617,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.0
+        target: FEAT-FALCON-v0.19.1
