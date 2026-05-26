@@ -12,7 +12,7 @@ name = "witness-wasi-harness"
 path = "src/main.rs"
 
 [dependencies]
-wasmtime = "27"
+wasmtime = "45"
 wasmtime-wasi = "27"
 anyhow = "1"
 serde_json = "1"
