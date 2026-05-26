@@ -1,0 +1,62 @@
+artifacts:
+  - id: FV-FALCON-SIM-006
+    type: sw-verification
+    title: "gz-sim bench-evidence runner — SDF world + counters + CSV log (v0.19.0)"
+    status: approved
+    description: >
+      v0.19.0 ships the **software-side** bench-evidence path for the
+      gz-sim direction. The companion to v0.14 (PX4-SITL inbound) +
+      v0.14.2 (PX4-SITL COMMAND_LONG round-trip) + v0.18.2 (PX4-SITL
+      bench evidence captured).
+
+      Evidence:
+        - `cargo test -p falcon-sitl-gz` → 4/4 (was 3/3 at v0.18.1;
+          +1 `evidence_sink_produces_log_and_csv`).
+        - `cargo test -p falcon-sitl-gz --features gazebo` → 11/11
+          (was 10/10 at v0.18.1; +1 evidence sink, gz-real tests
+          preserved).
+        - `cargo build -p falcon-sitl-gz --features gazebo --release`
+          → green (gz-transport-rs + tokio link).
+        - `cargo run -p falcon-sitl-gz -- --evidence-dir=/tmp/fsg` →
+          PASS, log + CSV land on disk with the expected schema.
+        - rivet validate → PASS.
+
+      Diagnostic counters surfaced via `Physics::counters() ->
+      Option<(u64, u64, u64)>` — same shape as MavlinkBench's
+      `frames_recv` / `gpi_recv` from v0.18.2. A bench operator
+      reading the harness log can distinguish four failure modes:
+
+        | Pattern                          | Interpretation              |
+        |----------------------------------|-----------------------------|
+        | `imu_recv = 0`                   | gz-sim not publishing IMU   |
+        | `imu_recv > 0, navsat_recv = 0`  | NavSat plugin missing/wrong |
+        | `motor_send = 0`                 | bridge not publishing       |
+        | `motor_send > 0, no climb`       | SDF `motorConstant` tuning  |
+
+      Honestly NOT claimed:
+        - That a real gz-sim run has produced flight evidence.
+          That's v0.19.x — captured under `bench-evidence/gz-sim/`
+          once a bench session runs against an installed `gz sim`.
+        - That the SDF model is flight-tuned. Inertia + motor
+          constants are starting values; the bench step iterates.
+        - That topic format strings match every Harmonic plugin
+          version exactly. `gz topic -l` resolves remaining
+          mismatches; the bridge's format string is the
+          adjustment point.
+
+      The pipeline is end-to-end runnable in software today; the
+      bench step is the user's. Mirrors v0.18.0/v0.18.1's
+      "real bridge ships, bench evidence in v0.19.x" pattern.
+    tags: [falcon, sim, gazebo, sdf, bench-evidence, v0.19.0]
+    fields:
+      runs:
+        - "cargo test -p falcon-sitl-gz"
+        - "cargo test -p falcon-sitl-gz --features gazebo"
+        - "cargo run -p falcon-sitl-gz -- --evidence-dir=/tmp/fsg"
+        - "rivet validate"
+      sdf: examples/falcon-sitl-gz/worlds/falcon-quad.sdf
+      evidence-dir: bench-evidence/gz-sim/
+      counters: ["imu_recv", "navsat_recv", "motor_send"]
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P04

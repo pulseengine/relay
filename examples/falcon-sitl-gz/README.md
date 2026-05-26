@@ -55,13 +55,28 @@ implementation:
   compatible; the exact constant depends on your SDF model — adjust
   in `physics.rs::pwm_to_rad_per_s`)
 
-Full bench command (v0.18.1):
+Full bench command (v0.19.0 — with evidence capture):
 
 ```bash
-cargo run -p falcon-sitl-gz --features gazebo -- \
+# Terminal 1 — start gz-sim with the bundled world.
+gz sim -r -v3 examples/falcon-sitl-gz/worlds/falcon-quad.sdf
+
+# Terminal 2 — bridge the cascade in, write evidence under bench-evidence/.
+cargo run -p falcon-sitl-gz --features gazebo --release -- \
   --backend=gazebo --world=falcon --model=quad \
-  --home=47.3977,8.5456,488 --duration=30
+  --home=47.3977,8.5456,488 --duration=30 \
+  --scenario=hover \
+  --evidence-dir=bench-evidence/gz-sim
 ```
+
+Produces two files per run under `--evidence-dir`:
+
+| File | Content |
+|---|---|
+| `<ts>-gazebo-<scenario>-harness.log` | Verdict + steps + climb metrics + diagnostic counters (`imu_recv`, `navsat_recv`, `motor_send`). |
+| `<ts>-gazebo-<scenario>-ticks.csv`   | One row per 10 ms tick: position NED, IMU body accel/gyro, motor PWM, running counters. |
+
+Same shape as `bench-evidence/px4-sitl/` from v0.18.2.
 
 **Default cargo builds do NOT include this.** `gz-transport-rs` pulls
 in tokio + libzmq (compiled from C source via `zeromq-src`),
@@ -94,15 +109,21 @@ sudo apt-get install gz-harmonic
 
 ### 2. Author an SDF world
 
-A minimal `falcon-quad.sdf` needs:
+**v0.19.0 ships a starting world: `worlds/falcon-quad.sdf`.**
+Model = 700 g, ~250 mm wheelbase, 4 × `MulticopterMotorModel` with
+~5× hover-thrust headroom, world anchored to PX4-SITL's stock home
+(47.3977°N, 8.5456°E, 488 m AMSL). Bench-tune `<motorConstant>` /
+`<maxRotVelocity>` if the quad is over- or under-powered.
 
-* a `model` of a quadrotor (use `gz-sim-models/x500` as a baseline).
+The minimum the bundled world covers (and the bridge requires):
+
+* a `model` of a quadrotor.
 * an **IMU sensor plugin** on the body link, publishing to
-  `/world/falcon/model/quad/link/imu_link/sensor/imu_sensor/imu`.
+  `/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu`.
 * a **NavSat (GPS) sensor plugin**, publishing to
-  `/.../sensor/gps_sensor/navsat`.
+  `/world/falcon/model/quad/link/base_link/sensor/navsat_sensor/navsat`.
 * four **MulticopterMotorModel plugins** on the rotor joints,
-  subscribing to `/world/falcon/model/quad/joint/<rotor_n>/cmd_vel`.
+  subscribing to `/world/falcon/model/quad/joint/rotor_{0..3}_joint/cmd_vel`.
 
 ### 3. Replace the stub bodies in `src/physics.rs`
 

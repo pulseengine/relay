@@ -1340,6 +1340,167 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.18.0
 
+  - id: FEAT-FALCON-v0.18.2
+    type: feature
+    title: "v0.18.2 — first live PX4-SITL bench evidence (4 root-cause fixes)"
+    status: approved
+    description: >
+      LANDED. The first observational end-to-end evidence of the
+      verified safety chain commanding a real flight controller.
+      Closes the v0.14.2 round-trip with actual flight-data logs.
+
+      Ships:
+        - 4 fixes in `examples/falcon-hitl-rfspoof` enabling the
+          bench loop to actually close:
+            1. `UdpFrameSource::new_with_registration` — sends an
+               initial HEARTBEAT so PX4 registers us as a peer and
+               starts streaming `GLOBAL_POSITION_INT` back. Without
+               this PX4 sits silent: it only emits to peers it has
+               heard from.
+            2. HEARTBEAT cadence bumped from 1 Hz to 2 Hz
+               (`HEARTBEAT_INTERVAL = 500 ms`). 1 Hz lived right at
+               PX4 commander's 1000 ms timeout, producing the
+               `Connection lost / regained` flap once per second.
+            3. `--preset=px4-sitl` peer switched from 14580
+               (offboard) to 18570 (PX4's GCS receive port) so the
+               GCS stream flows over the right socket.
+            4. Real-time pacing in `run_scenario` — sleeps
+               `tick_period - elapsed` per tick when
+               `HitlBench::real_time()` is true. The unpaced loop
+               completed 6000 ticks in microseconds; UDP delivered
+               nothing because the OS had no wall-clock time to
+               deliver between polls. New `is_realtime` trait
+               method on `FrameSource`; `UdpFrameSource` overrides
+               true. In-memory unit tests stay synchronous.
+        - `bench-evidence/px4-sitl/20260525-134251-*.log` — first
+          captured run: harness verdict (PASS, latched at 0.27 s,
+          RTL dispatched + COMMAND_LONG frame sent), pymavlink
+          command sequence (arm → takeoff → reposition to 1.4 km),
+          PX4 events log (Armed, Takeoff, Returning to launch,
+          RTL: land, Disarmed).
+        - `sim/px4-sitl/README.md` — JDK pitfall section
+          (`UnsupportedClassVersionError`: jmavsim_run.jar built
+          with Java 25 = class 69; openjdk@17 was first on PATH at
+          class 61). Fix: `JAVA_HOME=$(/usr/libexec/java_home -v 26)`.
+          Headless `make px4_sitl none_iris` + `gz_x500`
+          alternatives documented.
+        - Diagnostic counters in `MavlinkBench`: `frames_recv` +
+          `gpi_recv`. Distinguish "PX4 not sending at all" from
+          "PX4 sending but no GPI yet" from "CRC failed". After
+          the fix: `frames_recv=5012, gpi_recv=671` in 20 s.
+
+      Honestly NOT claimed:
+        - That the bench evidence is multi-vehicle or production-
+          grade. It's one PX4 + jMAVSim run on Ralf's machine. The
+          methodology + counters + recipe + logs are the
+          reproducible artifact; running it on a fleet is the
+          v1.0 dossier work.
+
+      Verification chain delta:
+        - Run from a clean checkout against PX4 v1.18.0-alpha1-118:
+          PASS, latched at 0.27 s, RTL frame sent, PX4 events log
+          confirms physical RTL + land + disarm.
+        - cargo test --workspace → 404 passing (added counter
+          tests + real-time-pacing branch).
+        - rivet validate → PASS.
+
+      Together with v0.14.0 (PX4-SITL preset), v0.14.2 (round-trip
+      COMMAND_LONG), this is the *evidence* milestone:
+      the verified safety chain commands a real flight controller
+      home through the verified-engine pair (relay-lc::Geofence +
+      relay-sc::CommandStore) and we have the logs.
+    tags: [falcon, milestone, v0.18.2, px4-sitl, bench-evidence, landed]
+    fields:
+      release-target: "first live PX4-SITL bench evidence"
+      bench-evidence-dir: bench-evidence/px4-sitl/
+      counters: ["frames_recv", "gpi_recv"]
+      px4-version: "v1.18.0-alpha1-118"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.18.1
+
+  - id: FEAT-FALCON-v0.19.0
+    type: feature
+    title: "v0.19.0 — gz-sim bench-evidence wiring (SDF world + per-tick CSV + counters)"
+    status: approved
+    description: >
+      LANDED. Closes the software-side prerequisites for capturing
+      gz-sim flight evidence — the symmetric move to v0.18.2 in
+      the gz direction. After v0.19.0 the only remaining step is
+      a bench session: install `gz sim`, run the SDF world, capture
+      `bench-evidence/gz-sim/<ts>-*.log`.
+
+      Ships:
+        - `examples/falcon-sitl-gz/worlds/falcon-quad.sdf` — minimal
+          Gazebo Harmonic world matching the bridge's topic
+          expectations: world `falcon`, model `quad`, link `base_link`,
+          `imu_sensor` (200 Hz) + `navsat_sensor` (10 Hz), 4 ×
+          `MulticopterMotorModel` plugins on `rotor_{0..3}_joint`
+          (X-config, mixer-convention spin directions). World
+          spherical coordinates anchored to PX4-SITL's stock home
+          (47.3977°N, 8.5456°E, 488 m AMSL) for cross-bench
+          consistency.
+        - `Physics::counters() -> Option<(u64, u64, u64)>` trait
+          method — `(imu_recv, navsat_recv, motor_send)`. Real
+          gz-transport bridge increments from async tasks; stub +
+          mock backends return None. Same diagnostic pattern as
+          v0.18.2's `frames_recv` / `gpi_recv`.
+        - `--evidence-dir=<path>` CLI flag — produces
+          `<ts>-<backend>-<scenario>-harness.log` (verdict + metrics
+          + counters) + `<ts>-<backend>-<scenario>-ticks.csv`
+          (per-tick position NED, IMU body samples, motor PWM,
+          counters).
+        - `--scenario=hover` flag. `step`, `mission`, `disturbance`
+          reserved for v0.19.x — currently fall through to hover
+          with a "TODO" note.
+        - Real-time pacing in `run_hover` when `physics.counters().
+          is_some()`. Same shape as `HitlBench::real_time()` from
+          v0.18.2 — fixes the symmetric "harness completes ticks
+          in microseconds; gz transports nothing" failure mode
+          before it shows up.
+        - `bench-evidence/gz-sim/README.md` — protocol docs for
+          producing fresh evidence; companion to
+          `bench-evidence/px4-sitl/`.
+        - Rivet artifacts: SWREQ-FALCON-SIM-P04, FV-FALCON-SIM-006.
+
+      Honestly NOT claimed:
+        - That a real `gz sim` run has produced flight evidence
+          yet. That's v0.19.x — captured under
+          `bench-evidence/gz-sim/` after the user-side bench step.
+        - That the SDF's `<motorConstant>` is flight-tuned. The
+          starting value gives ~5× hover-thrust headroom for a
+          700 g body; bench iterates from there.
+        - That topic format strings match every Harmonic plugin
+          version. `gz topic -l` resolves remaining mismatches.
+
+      Verification:
+        - cargo test -p falcon-sitl-gz → 4/4 (was 3/3; +1
+          `evidence_sink_produces_log_and_csv`).
+        - cargo test -p falcon-sitl-gz --features gazebo → 11/11
+          (was 10/10; +1 evidence sink).
+        - cargo build --features gazebo → green.
+        - rivet validate → PASS.
+
+      v0.19.x deferred (the user bench step):
+        - Install `gz-harmonic` (osrf/simulation tap on macOS;
+          `apt install gz-harmonic` on Ubuntu 24.04).
+        - Run the bench: `gz sim -r worlds/falcon-quad.sdf` +
+          `cargo run -p falcon-sitl-gz --features gazebo --release
+          -- --backend=gazebo --evidence-dir=bench-evidence/gz-sim`.
+        - Capture `bench-evidence/gz-sim/<ts>-*.log` + commit.
+        - Wire `--scenario={step,mission,disturbance}` once hover
+          baseline is captured.
+    tags: [falcon, milestone, v0.19.0, gazebo, sdf, bench-evidence, landed]
+    fields:
+      release-target: "gz-sim bench-evidence runner — SDF world + counters + CSV log"
+      crate: examples/falcon-sitl-gz
+      sdf: examples/falcon-sitl-gz/worlds/falcon-quad.sdf
+      evidence-dir: bench-evidence/gz-sim/
+      counters: ["imu_recv", "navsat_recv", "motor_send"]
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.18.2
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1372,4 +1533,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.18.1
+        target: FEAT-FALCON-v0.19.0
