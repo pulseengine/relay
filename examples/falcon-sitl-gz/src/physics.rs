@@ -41,6 +41,15 @@ pub trait Physics {
     /// already have noise baked into its IMU model so the parameter
     /// becomes a no-op there.
     fn measure(&mut self, noise_std: f32) -> (ImuSample, [f32; 3]);
+
+    /// Diagnostic counters — `(imu_recv, navsat_recv, motor_send)`.
+    /// `None` for backends where the distinction is meaningless
+    /// (MockPhysics, the stub). The real gz-transport bridge
+    /// overrides this so a bench operator can distinguish
+    /// "gz isn't publishing" (`imu_recv == 0`) from "gz publishes
+    /// but our subscriber dropped frames" — same diagnostic shape
+    /// as `MavlinkBench`'s `frames_recv` / `gpi_recv` from v0.18.2.
+    fn counters(&self) -> Option<(u64, u64, u64)> { None }
 }
 
 /// In-process reference impl — same toy integrator as
@@ -229,6 +238,7 @@ impl Physics for GazeboPhysics {
 mod gz_real {
     use super::{Physics, ImuSample};
     use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tokio::sync::mpsc;
 
     /// gz-sim uses ENU body frame (X forward, Y left, Z up);
@@ -286,6 +296,14 @@ mod gz_real {
         /// One mpsc sender per rotor; the receiver task owns the
         /// gz-transport Publisher and emits `gz.msgs.Double` per send.
         rotor_tx: [mpsc::UnboundedSender<f32>; 4],
+        /// v0.19 diagnostic counters — incremented from the async
+        /// subscriber tasks (`imu_recv`, `navsat_recv`) and from
+        /// `step()` itself (`motor_send`). Surface through
+        /// `Physics::counters()` so a bench operator can read
+        /// "did gz publish anything?" without scraping logs.
+        imu_recv: Arc<AtomicU64>,
+        navsat_recv: Arc<AtomicU64>,
+        motor_send: Arc<AtomicU64>,
         /// Tokio runtime kept alive for the duration of this instance.
         /// Dropped on shutdown which joins subscriber + publisher tasks.
         _runtime: tokio::runtime::Runtime,
@@ -336,6 +354,9 @@ mod gz_real {
 
             let latest_imu: Arc<Mutex<Option<ImuSample>>> = Arc::new(Mutex::new(None));
             let latest_position_ned_m = Arc::new(Mutex::new([0.0_f32; 3]));
+            let imu_recv = Arc::new(AtomicU64::new(0));
+            let navsat_recv = Arc::new(AtomicU64::new(0));
+            let motor_send = Arc::new(AtomicU64::new(0));
 
             let (tx0, rx0) = mpsc::unbounded_channel::<f32>();
             let (tx1, rx1) = mpsc::unbounded_channel::<f32>();
@@ -347,6 +368,8 @@ mod gz_real {
             // propagate.
             let imu_ref = latest_imu.clone();
             let position_ref = latest_position_ned_m.clone();
+            let imu_recv_ref = imu_recv.clone();
+            let navsat_recv_ref = navsat_recv.clone();
             let home_for_setup = home;
             let world_for_setup = world.clone();
             let model_for_setup = model.clone();
@@ -375,6 +398,7 @@ mod gz_real {
                             gyro_body: enu_to_ned([gx, gy, gz]),
                         };
                         *imu_ref.lock().unwrap() = Some(sample);
+                        imu_recv_ref.fetch_add(1, Ordering::Relaxed);
                     }
                 });
 
@@ -392,6 +416,7 @@ mod gz_real {
                             msg.altitude,
                         );
                         *position_ref.lock().unwrap() = ned;
+                        navsat_recv_ref.fetch_add(1, Ordering::Relaxed);
                     }
                 });
 
@@ -426,6 +451,9 @@ mod gz_real {
                 latest_imu,
                 latest_position_ned_m,
                 rotor_tx: [tx0, tx1, tx2, tx3],
+                imu_recv,
+                navsat_recv,
+                motor_send,
                 _runtime: runtime,
             })
         }
@@ -447,6 +475,11 @@ mod gz_real {
             for (i, &pwm) in motor_pwm.iter().enumerate() {
                 let _ = self.rotor_tx[i].send(Self::pwm_to_rad_per_s(pwm));
             }
+            // One `motor_send` tick per call regardless of which channel
+            // returned Err — the counter is "how many publish attempts",
+            // not "how many bytes reached gz". Useful to distinguish
+            // "the bridge isn't publishing" from "gz isn't subscribing".
+            self.motor_send.fetch_add(1, Ordering::Relaxed);
         }
 
         fn measure(&mut self, _noise_std: f32) -> (ImuSample, [f32; 3]) {
@@ -457,6 +490,14 @@ mod gz_real {
             });
             let pos = *self.latest_position_ned_m.lock().unwrap();
             (sample, pos)
+        }
+
+        fn counters(&self) -> Option<(u64, u64, u64)> {
+            Some((
+                self.imu_recv.load(Ordering::Relaxed),
+                self.navsat_recv.load(Ordering::Relaxed),
+                self.motor_send.load(Ordering::Relaxed),
+            ))
         }
     }
 

@@ -1,0 +1,79 @@
+artifacts:
+  - id: SWREQ-FALCON-SIM-P04
+    type: sw-req
+    title: "gz-sim bench-evidence runner — SDF world + per-tick CSV + diagnostic counters"
+    status: approved
+    description: >
+      v0.19.0 closes the software-side prerequisites for capturing
+      gz-sim flight evidence. Mirrors the v0.14.0 PX4-SITL bench
+      wiring + v0.18.2 bench-evidence shape one-for-one in the
+      gz-sim direction.
+
+      What ships:
+        - `examples/falcon-sitl-gz/worlds/falcon-quad.sdf` — minimal
+          Gazebo Harmonic world matching the bridge's topic
+          expectations:
+            * world `falcon`, model `quad`, link `base_link`.
+            * `imu_sensor` at 200 Hz + `navsat_sensor` at 10 Hz.
+            * 4 × `MulticopterMotorModel` plugins on
+              `rotor_{0..3}_joint`, X-configuration, mixer-
+              convention spin directions (0,1 CCW; 2,3 CW).
+            * Sun + Ground Plane includes; physics defaults.
+        - `Physics::counters() -> Option<(u64, u64, u64)>` trait
+          method — `(imu_recv, navsat_recv, motor_send)`.
+          MockPhysics + stub GazeboPhysics return `None`; the real
+          gz-transport bridge increments counters from the async
+          subscriber tasks + `step()`.
+        - `--evidence-dir=<path>` CLI flag in `falcon-sitl-gz` main.
+          When set, produces two files per run:
+            * `<ts>-<backend>-<scenario>-harness.log` — verdict,
+              metrics, counters.
+            * `<ts>-<backend>-<scenario>-ticks.csv` — per-tick
+              position NED, IMU body-frame samples, motor PWM,
+              running counter values.
+        - `--scenario=hover` flag (v0.19.0 wires hover only; `step`,
+          `mission`, `disturbance` reserved for v0.19.x — fall
+          through to hover with a "TODO" note).
+        - `bench-evidence/gz-sim/README.md` — protocol docs for
+          producing fresh evidence; companion to
+          `bench-evidence/px4-sitl/`.
+        - Real-time pacing in `run_hover`: sleeps the tick budget
+          when `physics.counters().is_some()`, same shape as
+          `HitlBench::real_time()` from v0.18.2 fixing the
+          "harness completes 6000 ticks in microseconds, UDP
+          delivers nothing" bug.
+
+      Tests:
+        - `evidence_sink_produces_log_and_csv` — smoke test that
+          both files materialise under `--evidence-dir`.
+        - Existing 6/6 default + 10/10 `--features gazebo`
+          tests preserved.
+
+      What this does NOT claim:
+        - That the SDF's `<motorConstant>` is flight-tuned. It's a
+          starting value (~5× hover-thrust headroom for a 700 g
+          body); the bench may need to adjust per chosen plugin
+          version.
+        - That `<commandSubTopic>cmd_vel</commandSubTopic>` produces
+          the exact topic the bridge publishes to on every Harmonic
+          plugin version. If `motor_send > 0` but rotors don't
+          spin, `gz topic -l` resolves the mismatch (and the bridge
+          format string in `physics.rs::gz_real` is the place to
+          adjust).
+        - That a real flight evidence run has happened. That's the
+          v0.19.x release, captured under `bench-evidence/gz-sim/`.
+
+      Same pattern as v0.11 HackRfBench, v0.12 MavlinkBench,
+      v0.16.1 GazeboPhysics scaffold, v0.18 real gz-transport
+      bridge: **software ships first; the bench step captures
+      the evidence.**
+    tags: [falcon, sim, gazebo, bench-evidence, sdf, v0.19.0]
+    fields:
+      req-type: documentation + bench wiring
+      crate: examples/falcon-sitl-gz
+      sdf: examples/falcon-sitl-gz/worlds/falcon-quad.sdf
+      evidence-dir: bench-evidence/gz-sim/
+      counters: ["imu_recv", "navsat_recv", "motor_send"]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-016

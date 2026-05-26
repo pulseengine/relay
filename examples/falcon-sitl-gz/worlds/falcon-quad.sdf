@@ -1,0 +1,280 @@
+<?xml version="1.0" ?>
+<!--
+  falcon-quad.sdf — minimal Gazebo Harmonic world matching the
+  falcon-sitl-gz bridge's topic expectations.
+
+  The bridge subscribes/publishes on these topics (see
+  examples/falcon-sitl-gz/src/physics.rs::gz_real):
+
+    in  /world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+    in  /world/falcon/model/quad/link/base_link/sensor/navsat_sensor/navsat
+    out /world/falcon/model/quad/joint/rotor_{0..3}_joint/cmd_vel
+
+  Run (from this directory):
+    gz sim -r -v3 worlds/falcon-quad.sdf
+
+  Then in another shell:
+    cargo run -p falcon-sitl-gz --features gazebo --release -- \
+      --backend=gazebo --world=falcon --model=quad \
+      --duration=30 --evidence-dir=bench-evidence/gz-sim
+
+  Geometry: 5"-class quad, ~700 g, ~250 mm wheelbase. The exact
+  inertia + motor scaling is documented as bench-tunable in the
+  README; this file is a starting point, not a flight-tuned model.
+
+  TODO(bench): the four MulticopterMotorModel plugins below specify
+  the rotor topology + motor characteristics. The exact `commandSubTopic`
+  → published topic mapping in Gazebo Harmonic's
+  libgz-sim-multicopter-motor-model-system varies with plugin version;
+  if the bridge's publishes don't drive the motors, inspect the topic
+  graph with `gz topic -l` and adjust the bridge's topic format in
+  physics.rs::gz_real to match.
+-->
+<sdf version="1.9">
+  <world name="falcon">
+
+    <!-- Physics + system plugins (Harmonic defaults).  -->
+    <physics name="default_physics" default="0" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system"           name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system"     name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system"           name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system"               name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-navsat-system"            name="gz::sim::systems::NavSat"/>
+
+    <!-- World origin: lat/lon/alt that the NavSat sensor reports as (0,0,alt0).
+         Match this with the bridge's --home= flag for the equirectangular
+         projection to centre on launch. -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>47.3977</latitude_deg>
+      <longitude_deg>8.5456</longitude_deg>
+      <elevation>488.0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <!-- Sun + ground plane (off-the-shelf inserts).  -->
+    <include><uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Sun</uri></include>
+    <include><uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Ground Plane</uri></include>
+
+    <!-- ─── quad model ─────────────────────────────────────────────── -->
+    <model name="quad">
+      <pose>0 0 0.10 0 0 0</pose>
+
+      <!-- Body link.  Hosts the IMU + NavSat sensors. -->
+      <link name="base_link">
+        <inertial>
+          <!-- 700 g body. Inertia values for a ~250 mm wheelbase 5" quad,
+               diagonal-only approximation. Bench-tunable. -->
+          <mass>0.700</mass>
+          <inertia>
+            <ixx>0.0035</ixx><iyy>0.0035</iyy><izz>0.0070</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+          </inertia>
+        </inertial>
+
+        <collision name="base_collision">
+          <geometry><box><size>0.180 0.180 0.040</size></box></geometry>
+        </collision>
+        <visual name="base_visual">
+          <geometry><box><size>0.180 0.180 0.040</size></box></geometry>
+          <material>
+            <ambient>0.2 0.2 0.2 1</ambient>
+            <diffuse>0.3 0.3 0.3 1</diffuse>
+          </material>
+        </visual>
+
+        <!-- IMU sensor.  Publishes to
+             /world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu -->
+        <sensor name="imu_sensor" type="imu">
+          <always_on>1</always_on>
+          <update_rate>200</update_rate>
+          <imu>
+            <angular_velocity>
+              <x><noise type="gaussian"><mean>0</mean><stddev>0.0009</stddev></noise></x>
+              <y><noise type="gaussian"><mean>0</mean><stddev>0.0009</stddev></noise></y>
+              <z><noise type="gaussian"><mean>0</mean><stddev>0.0009</stddev></noise></z>
+            </angular_velocity>
+            <linear_acceleration>
+              <x><noise type="gaussian"><mean>0</mean><stddev>0.0021</stddev></noise></x>
+              <y><noise type="gaussian"><mean>0</mean><stddev>0.0021</stddev></noise></y>
+              <z><noise type="gaussian"><mean>0</mean><stddev>0.0021</stddev></noise></z>
+            </linear_acceleration>
+          </imu>
+        </sensor>
+
+        <!-- NavSat sensor.  Publishes to
+             /world/falcon/model/quad/link/base_link/sensor/navsat_sensor/navsat -->
+        <sensor name="navsat_sensor" type="navsat">
+          <always_on>1</always_on>
+          <update_rate>10</update_rate>
+        </sensor>
+      </link>
+
+      <!-- ─── 4 rotors (X-configuration, indices match relay-mix-quad) ─── -->
+      <!--
+        Mixer convention (crates/relay-mix-quad):
+          0 = front-right, CCW
+          1 = back-left,   CCW
+          2 = front-left,  CW
+          3 = back-right,  CW
+        Diagonal pairs share spin direction so net yaw is balanced at
+        symmetric thrust.
+      -->
+
+      <link name="rotor_0">
+        <pose>0.0884 -0.0884 0.025 0 0 0</pose>
+        <inertial><mass>0.010</mass>
+          <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="r0v"><geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+          <material><diffuse>0.9 0.2 0.2 1</diffuse></material></visual>
+      </link>
+      <joint name="rotor_0_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_0</child>
+        <axis><xyz>0 0 1</xyz><dynamics><damping>0.001</damping></dynamics></axis>
+      </joint>
+
+      <link name="rotor_1">
+        <pose>-0.0884 0.0884 0.025 0 0 0</pose>
+        <inertial><mass>0.010</mass>
+          <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="r1v"><geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+          <material><diffuse>0.2 0.9 0.2 1</diffuse></material></visual>
+      </link>
+      <joint name="rotor_1_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_1</child>
+        <axis><xyz>0 0 1</xyz><dynamics><damping>0.001</damping></dynamics></axis>
+      </joint>
+
+      <link name="rotor_2">
+        <pose>0.0884 0.0884 0.025 0 0 0</pose>
+        <inertial><mass>0.010</mass>
+          <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="r2v"><geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+          <material><diffuse>0.2 0.2 0.9 1</diffuse></material></visual>
+      </link>
+      <joint name="rotor_2_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_2</child>
+        <axis><xyz>0 0 1</xyz><dynamics><damping>0.001</damping></dynamics></axis>
+      </joint>
+
+      <link name="rotor_3">
+        <pose>-0.0884 -0.0884 0.025 0 0 0</pose>
+        <inertial><mass>0.010</mass>
+          <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="r3v"><geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+          <material><diffuse>0.9 0.9 0.2 1</diffuse></material></visual>
+      </link>
+      <joint name="rotor_3_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_3</child>
+        <axis><xyz>0 0 1</xyz><dynamics><damping>0.001</damping></dynamics></axis>
+      </joint>
+
+      <!-- ─── MulticopterMotorModel plugins ───────────────────────────── -->
+      <!--
+        commandSubTopic="cmd_vel" combined with the model + joint scope
+        produces the topic the falcon-sitl-gz bridge publishes to:
+        /world/falcon/model/quad/joint/rotor_n_joint/cmd_vel
+
+        motorConstant + maxRotVelocity together set the maximum thrust
+        per rotor at full PWM. Starting values: max ~1000 rad/s,
+        thrust coeff 8.55e-6 N·s²/rad² → ~8.5 N peak per rotor.
+        4 rotors × ~8.5 N = ~34 N ≫ 0.7 kg × 9.81 m/s² = 6.9 N, so
+        full-PWM hover headroom is ~5×. Tune motorConstant if the bench
+        shows the quad is over- or under-powered.
+      -->
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <jointName>rotor_0_joint</jointName>
+        <linkName>rotor_0</linkName>
+        <turningDirection>ccw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>1000.0</maxRotVelocity>
+        <motorConstant>8.55e-06</motorConstant>
+        <momentConstant>0.016</momentConstant>
+        <commandSubTopic>cmd_vel</commandSubTopic>
+        <motorNumber>0</motorNumber>
+        <rotorDragCoefficient>8.06e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <motorSpeedPubTopic>rotor_0_speed</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <jointName>rotor_1_joint</jointName>
+        <linkName>rotor_1</linkName>
+        <turningDirection>ccw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>1000.0</maxRotVelocity>
+        <motorConstant>8.55e-06</motorConstant>
+        <momentConstant>0.016</momentConstant>
+        <commandSubTopic>cmd_vel</commandSubTopic>
+        <motorNumber>1</motorNumber>
+        <rotorDragCoefficient>8.06e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <motorSpeedPubTopic>rotor_1_speed</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <jointName>rotor_2_joint</jointName>
+        <linkName>rotor_2</linkName>
+        <turningDirection>cw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>1000.0</maxRotVelocity>
+        <motorConstant>8.55e-06</motorConstant>
+        <momentConstant>0.016</momentConstant>
+        <commandSubTopic>cmd_vel</commandSubTopic>
+        <motorNumber>2</motorNumber>
+        <rotorDragCoefficient>8.06e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <motorSpeedPubTopic>rotor_2_speed</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <jointName>rotor_3_joint</jointName>
+        <linkName>rotor_3</linkName>
+        <turningDirection>cw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>1000.0</maxRotVelocity>
+        <motorConstant>8.55e-06</motorConstant>
+        <momentConstant>0.016</momentConstant>
+        <commandSubTopic>cmd_vel</commandSubTopic>
+        <motorNumber>3</motorNumber>
+        <rotorDragCoefficient>8.06e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <motorSpeedPubTopic>rotor_3_speed</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+
+    </model>
+  </world>
+</sdf>
