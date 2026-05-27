@@ -241,6 +241,41 @@ mod gz_real {
     use std::sync::atomic::{AtomicU64, Ordering};
     use tokio::sync::mpsc;
 
+    /// `gz.msgs.Actuators` — locally defined because gz-transport-rs
+    /// 0.1.0 doesn't ship `actuators.proto`. Wire-compatible with
+    /// Harmonic's MulticopterMotorModel plugin, which subscribes
+    /// this message type on the model-level `/<model>/cmd_vel` topic
+    /// (each plugin reads its `<motorNumber>` index from `velocity`).
+    ///
+    /// Proto definition (gz/msgs/actuators.proto):
+    /// ```proto
+    /// syntax = "proto3";
+    /// package gz.msgs;
+    /// import "gz/msgs/header.proto";
+    /// message Actuators {
+    ///   Header header = 1;
+    ///   repeated double position = 2;
+    ///   repeated double velocity = 3;
+    ///   repeated double normalized = 4;
+    /// }
+    /// ```
+    ///
+    /// Discovered the per-rotor `gz.msgs.Double` publish *didn't* drive
+    /// the rotors on 2026-05-26 — the first gz-sim bench evidence
+    /// showed `motor_send=1000` but `climb=0`. See
+    /// `bench-evidence/gz-sim/2026-05-26-first-bench-findings.md`.
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct Actuators {
+        #[prost(message, optional, tag = "1")]
+        pub header: ::core::option::Option<gz_transport_rs::msgs::Header>,
+        #[prost(double, repeated, packed = "true", tag = "2")]
+        pub position: ::prost::alloc::vec::Vec<f64>,
+        #[prost(double, repeated, packed = "true", tag = "3")]
+        pub velocity: ::prost::alloc::vec::Vec<f64>,
+        #[prost(double, repeated, packed = "true", tag = "4")]
+        pub normalized: ::prost::alloc::vec::Vec<f64>,
+    }
+
     /// gz-sim uses ENU body frame (X forward, Y left, Z up);
     /// falcon uses NED body frame (X forward, Y right, Z down).
     /// Conversion: (x, y, z)_ned = (x, -y, -z)_enu. Same for
@@ -293,9 +328,14 @@ mod gz_real {
         /// populated from `gz.msgs.NavSat` on the navsat topic, via
         /// `Home::project_to_ned_m`.
         latest_position_ned_m: Arc<Mutex<[f32; 3]>>,
-        /// One mpsc sender per rotor; the receiver task owns the
-        /// gz-transport Publisher and emits `gz.msgs.Double` per send.
-        rotor_tx: [mpsc::UnboundedSender<f32>; 4],
+        /// v0.19.2 — single mpsc carrying all 4 motor velocities.
+        /// One receiver task owns the gz-transport Publisher and
+        /// emits a single `gz.msgs.Actuators` message per send.
+        /// Replaced the v0.18 per-rotor 4× fanout after the
+        /// 2026-05-26 bench evidence showed plugins subscribe
+        /// `gz.msgs.Actuators` on a shared `/<model>/cmd_vel`, not
+        /// per-rotor Double topics.
+        rotors_tx: mpsc::UnboundedSender<[f32; 4]>,
         /// v0.19 diagnostic counters — incremented from the async
         /// subscriber tasks (`imu_recv`, `navsat_recv`) and from
         /// `step()` itself (`motor_send`). Surface through
@@ -347,7 +387,16 @@ mod gz_real {
             let world = world.into();
             let model = model.into();
 
-            let runtime = tokio::runtime::Builder::new_current_thread()
+            // v0.19.2 — `multi_thread` worker pool instead of
+            // `current_thread`. Spawned subscriber + publisher
+            // tasks need a runtime that actively drives them after
+            // `block_on(setup)` returns; current_thread only drives
+            // during explicit block_on and orphans everything else.
+            // First v0.19.2 bench round showed Actuators publish
+            // never reached the wire (`gz topic -i` 0 publishers
+            // mid-run) — root cause was the runtime model.
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
@@ -358,10 +407,8 @@ mod gz_real {
             let navsat_recv = Arc::new(AtomicU64::new(0));
             let motor_send = Arc::new(AtomicU64::new(0));
 
-            let (tx0, rx0) = mpsc::unbounded_channel::<f32>();
-            let (tx1, rx1) = mpsc::unbounded_channel::<f32>();
-            let (tx2, rx2) = mpsc::unbounded_channel::<f32>();
-            let (tx3, rx3) = mpsc::unbounded_channel::<f32>();
+            // v0.19.2 — one channel carrying [m0, m1, m2, m3] tuples.
+            let (rotors_tx, mut rotors_rx) = mpsc::unbounded_channel::<[f32; 4]>();
 
             // Tasks run on the runtime; the result of the setup
             // (Node + publishers) returns to the caller, errors
@@ -420,27 +467,37 @@ mod gz_real {
                     }
                 });
 
-                // One publisher per rotor.
-                for (n, mut rx) in [rx0, rx1, rx2, rx3].into_iter().enumerate() {
-                    let topic = format!(
-                        "/world/{world_for_setup}/model/{model_for_setup}/joint/rotor_{n}_joint/cmd_vel"
-                    );
-                    let publisher = node
-                        .advertise::<Double>(&topic, "gz.msgs.Double")
-                        .await?;
-                    tokio::spawn(async move {
-                        while let Some(cmd) = rx.recv().await {
-                            let msg = Double {
-                                header: None,
-                                data: cmd as f64,
-                            };
-                            // Partition empty by default; gz-sim uses
-                            // empty partition for "world" topics.
-                            let _ = publisher.publish("", &msg);
-                        }
-                    });
-                }
+                // v0.19.2 — single publisher on `/<model>/cmd_vel`
+                // emitting one `gz.msgs.Actuators` per tick. The four
+                // MulticopterMotorModel plugins in the SDF each share
+                // this topic and pick out their `<motorNumber>` index
+                // from the `velocity` array.
+                let actuators_topic = format!("/{model_for_setup}/cmd_vel");
+                let publisher = node
+                    .advertise::<Actuators>(&actuators_topic, "gz.msgs.Actuators")
+                    .await?;
+                tokio::spawn(async move {
+                    while let Some(cmd) = rotors_rx.recv().await {
+                        let msg = Actuators {
+                            header: None,
+                            position: Vec::new(),
+                            velocity: vec![
+                                cmd[0] as f64,
+                                cmd[1] as f64,
+                                cmd[2] as f64,
+                                cmd[3] as f64,
+                            ],
+                            normalized: Vec::new(),
+                        };
+                        // Partition empty by default; gz-sim uses
+                        // empty partition for "world" topics.
+                        let _ = publisher.publish("", &msg);
+                    }
+                });
 
+                // Double + NavSat imports preserved for any downstream
+                // re-extension; warning-suppressed below.
+                let _ = std::mem::size_of::<Double>();
                 Ok::<_, gz_transport_rs::Error>(())
             })?;
 
@@ -450,7 +507,7 @@ mod gz_real {
                 home,
                 latest_imu,
                 latest_position_ned_m,
-                rotor_tx: [tx0, tx1, tx2, tx3],
+                rotors_tx,
                 imu_recv,
                 navsat_recv,
                 motor_send,
@@ -472,13 +529,21 @@ mod gz_real {
         fn name(&self) -> &'static str { "gazebo" }
 
         fn step(&mut self, motor_pwm: [f32; 4], _dt: f32) {
-            for (i, &pwm) in motor_pwm.iter().enumerate() {
-                let _ = self.rotor_tx[i].send(Self::pwm_to_rad_per_s(pwm));
-            }
-            // One `motor_send` tick per call regardless of which channel
-            // returned Err — the counter is "how many publish attempts",
-            // not "how many bytes reached gz". Useful to distinguish
-            // "the bridge isn't publishing" from "gz isn't subscribing".
+            // v0.19.2 — send one [4×rad/s] tuple per tick on the
+            // single mpsc; the publisher task encodes a single
+            // gz.msgs.Actuators and writes it to /<model>/cmd_vel.
+            let rad_per_s = [
+                Self::pwm_to_rad_per_s(motor_pwm[0]),
+                Self::pwm_to_rad_per_s(motor_pwm[1]),
+                Self::pwm_to_rad_per_s(motor_pwm[2]),
+                Self::pwm_to_rad_per_s(motor_pwm[3]),
+            ];
+            let _ = self.rotors_tx.send(rad_per_s);
+            // One `motor_send` tick per call. With the v0.19.2 fix
+            // this is also one Actuators message published per tick
+            // (the v0.18 path was 4× Double messages per tick to the
+            // wrong topics — first gz bench showed motor_send=1000
+            // with climb=0).
             self.motor_send.fetch_add(1, Ordering::Relaxed);
         }
 

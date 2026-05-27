@@ -17,8 +17,10 @@ path = "src/main.rs"
 default = []
 # v0.18: real gz-transport bridge. Pulls in tokio + gz-transport-rs +
 # zmq (libzmq compiled from C source via zeromq-src). ~30-60 s extra
-# build time; opt-in only.
-gazebo = ["dep:tokio", "dep:gz-transport-rs"]
+# build time; opt-in only. v0.19.2 added `prost` direct dep for the
+# locally-defined gz.msgs.Actuators message (not exported by
+# gz-transport-rs 0.1.0).
+gazebo = ["dep:tokio", "dep:gz-transport-rs", "dep:prost"]
 
 [dependencies]
 relay-ekf = { path = "../../crates/relay-ekf" }
@@ -31,5 +33,9 @@ relay-sc = { path = "../../crates/relay-sc" }
 libm = "0.2"
 
 # Optional — only when feature `gazebo` is on.
-tokio = { version = "1", features = ["rt", "sync", "macros"], optional = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"], optional = true }
 gz-transport-rs = { version = "0.1", optional = true }
+# v0.19.2 — local `gz.msgs.Actuators` definition so the bridge can talk
+# to Harmonic's MulticopterMotorModel plugin (which subscribes Actuators,
+# not the per-rotor Double the v0.18 bridge published).
+prost = { version = "0.13", features = ["derive"], optional = true }
