@@ -1,0 +1,104 @@
+artifacts:
+  - id: FV-FALCON-SIM-009
+    type: sw-verification
+    title: "v0.19.3 — first PASS verdict under real gz physics (Findings 1a + 1b closed)"
+    status: approved
+    description: >
+      v0.19.3 closes both v0.19.2 sub-issues simultaneously and lands
+      the first PASS verdict of the full falcon-cascade bridge against
+      real Gazebo Harmonic physics.
+
+      v0.19.3 bench (10-second hover, constant 70 % PWM):
+        verdict: backend=gazebo steps=1000 climb=385.25 m  wall=11.62s
+        counters: imu_recv=2369 navsat_recv=117 motor_send=1000
+        PASS
+
+      Both findings closed:
+
+      **Finding 1b — SDF motor plugin tuning** (3 corrections vs v0.19.0
+      world, derived from PX4 x500's known-flying SDF):
+        - `<collision>` element on every rotor link. ODE physics
+          treats a link without `<collision>` as visual-only; motor
+          thrust applied to such a link doesn't transfer to the
+          parent body via the revolute joint. v0.19.0–v0.19.2 had this
+          gap → 0 m climb on the v0.19.2 bench.
+        - Joint axis: explicit `<limit><lower>-1e+16</lower>
+          <upper>1e+16</upper></limit>` +
+          `<spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>` replacing v0.19.2's
+          `<dynamics><damping>0.001</damping>`. x500's pattern;
+          lets the rotor joint spin freely under motor torque.
+        - `<commandSubTopic>command/motor_speed</commandSubTopic>`
+          (PX4 standard) replacing v0.19.0's `cmd_vel`. Topic is
+          `/<model>/command/motor_speed`.
+
+        Positive control: `gz topic -t /quad/command/motor_speed
+        -m gz.msgs.Actuators -p "velocity: [1000, 1000, 1000,
+        1000]"` lifted body from z=0.02 m to z=187 m in 3 s.
+
+      **Finding 1a — bridge publish-direction discovery**:
+        After Finding 1b's SDF fix, the bridge still showed
+        motor_send=1000 / climb=0.02 m. Root cause:
+        `Publisher::publish(partition, msg)` constructs the topic
+        FQN as `@<partition>@/<topic>`. The bridge was passing `""`
+        for partition (v0.18 shortcut), producing FQN
+        `@/@/quad/command/motor_speed`. gz-sim's
+        MulticopterMotorModel subscribed via gz-transport-cpp on the
+        node's effective partition (`GZ_PARTITION` env or
+        `hostname:username` default) — FQN
+        `@hostname:user@/quad/command/motor_speed`. Different FQNs,
+        no delivery.
+
+        Fix:
+        ```rust
+        let node_partition = node.partition();   // gz default
+        ...
+        publisher.publish(&node_partition, &msg)
+        ```
+        (replacing `publisher.publish("", &msg)`).
+
+      Also explains why `gz topic -i` showed our bridge un-registered
+      as a publisher despite `advertise()` returning Ok: gz CLI's
+      `gz topic -i` filters by the same default partition, so a
+      publisher under an empty/different partition is invisible.
+
+      What v0.19.3 proves:
+        - falcon-cascade bridge subscribes IMU + NavSat at configured
+          rates (203 Hz / 10 Hz; 2369 + 117 frames in 11.6 s).
+        - Bridge publishes per-tick gz.msgs.Actuators to
+          /<model>/command/motor_speed with the correct partition.
+        - Plugins receive + act on the messages → torque → rotor
+          velocity → thrust → body lift, end-to-end.
+        - 385 m climb under 70 % PWM in 10 s = ballistic ascent
+          (open loop, no closed-loop control). PASS criterion was
+          climb > 0.1 m → flight confirmed.
+
+      Honestly NOT claimed:
+        - That this is steady hover. 385 m ballistic climb is open
+          loop. Closed-loop hover (cascade) → v0.19.4 scenario.
+        - That the SDF is flight-tuned. motorConstant gives 5×
+          headroom — good for "flies vs doesn't fly", not for
+          steady disturbance rejection.
+
+      Tests:
+        - cargo test --workspace --all-targets → 405 passing.
+        - cargo test -p falcon-sitl-gz --features gazebo → 11/11.
+        - cargo build --features gazebo → green.
+        - rivet validate → PASS.
+        - gz sim + bridge bench → PASS (this run).
+    tags: [falcon, sim, gazebo, bench-evidence, pass, first-flight, v0.19.3]
+    fields:
+      bench-evidence-dir: bench-evidence/gz-sim/
+      bench-date: "2026-05-27"
+      gz-version: "8.11.0"
+      counters-observed:
+        imu_recv: 2369
+        navsat_recv: 117
+        motor_send: 1000
+      climb_m: 385.247
+      verdict: PASS
+      findings-closed: ["Finding 1a (publish partition)", "Finding 1b (SDF rotor + joint + topic)"]
+      reference-sdf: "PX4-Autopilot/Tools/simulation/gz/models/x500_base/model.sdf"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P04

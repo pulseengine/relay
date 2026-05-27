@@ -1,0 +1,14 @@
+falcon-sitl-gz bench-evidence
+backend: gazebo
+scenario: hover
+timestamp: 1779860110
+
+steps:      1000
+net_climb:  385.247 m
+min_alt:    -0.000 m
+max_alt:    385.247 m
+wall:       11.624 s
+imu_recv:   2369
+navsat_recv:117
+motor_send: 1000
+verdict:    PASS
