@@ -22,3 +22,6 @@ relay-primitives = { path = "../relay-primitives" }
 
 [dev-dependencies]
 proptest.workspace = true
+
+[lints]
+workspace = true

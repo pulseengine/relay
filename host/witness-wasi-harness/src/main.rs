@@ -27,7 +27,11 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use wasmtime::{Config, Engine, Linker, Module, Store, Val};
-use wasmtime_wasi::preview1::{self, WasiP1Ctx};
+// wasmtime-wasi 44 renamed `preview1` → `p1`; bound here as `preview1`
+// so the rest of the file keeps reading naturally. PR #44 (Dependabot
+// 27→45 upgrade) merged with main still importing the old path; v0.19.2
+// catches it up.
+use wasmtime_wasi::p1::{self as preview1, WasiP1Ctx};
 use wasmtime_wasi::WasiCtxBuilder;
 
 /// `witness-harness-v1` schema — keys are decimal branch IDs as
