@@ -1,0 +1,103 @@
+artifacts:
+  - id: FV-FALCON-SIM-010
+    type: sw-verification
+    title: "v0.19.4 — closed-loop cascade wired into falcon-sitl-gz; tuning gap surfaced"
+    status: approved
+    description: >
+      v0.19.4 wires the verified cascade (relay-ekf → relay-pos →
+      relay-att → relay-rate → relay-mix-quad) into the falcon-sitl-gz
+      bridge and runs it end-to-end against real gz Harmonic physics.
+      First time the safety-critical control surface is in the loop
+      under real physics. Verdict is FAIL on hover-stability — body
+      stays on the ground in mixer torque-saturation mode — but the
+      architectural deliverable is the wiring + the falsifiable failure
+      mode that v0.19.5 picks up.
+
+      Bench result (15-second closed-loop hover, setpoint NED (0,0,-2)):
+        verdict: FAIL
+        final_dist=2.44m  peak_dist=3.30m  rms_steady=2.16m  min_dist=1.75m
+        counters: imu_recv=3526 (203 Hz) navsat_recv=870 (50 Hz) motor_send=1500 (100 Hz)
+
+      Cascade pattern (mirrors falcon-sitl-hover::run_mission):
+        1. physics.measure() → (ImuSample, position_ned)
+        2. Ekf::tick(imu_sample) → attitude estimate
+        3. PosController::tick(pos_ned, v_ned_finite_diff, est_quat,
+           setpoint) → attitude-setpoint + thrust
+        4. AttController::tick(est_quat, att_setpoint) → rate-setpoint
+        5. RatePid::tick(gyro, rate_setpoint) → torque
+        6. QuadMixer::mix(torque, thrust) → 4× motor PWM
+        7. physics.step(motors, dt) → bridge → gz
+
+      v0.19.4 ships:
+        - examples/falcon-sitl-gz/src/main.rs::run_closed_loop_hover —
+          full cascade tick.
+        - --scenario=hover (default) → closed-loop.
+        - --scenario=open-loop-climb → v0.19.3's constant 70 % PWM
+          (preserved as a wire-level smoke test).
+        - SDF tweaks: NavSat 10 → 50 Hz; body spawn 0.1 → 1.0 m.
+        - New test `closed_loop_hover_compiles_and_ticks_on_mock`
+          pins panic-free + NaN-free contract on the mock backend.
+        - bench-evidence/gz-sim/2026-05-27-v0.19.4-*.md +
+          1779904889-gazebo-hover-{harness.log,ticks.csv}.
+
+      Failure-mode diagnosis (falsifiable):
+        - Body sits on the ground (d ≈ 0) with motors in bang-bang
+          [1.00, 0.00, 0.00, 0.00]-style torque saturation.
+        - PosController commands large attitude tilt → AttController
+          large rate → RatePid large torque → QuadMixer's
+          priority-preserving saturation sacrifices THRUST to torque
+          (per crates/relay-mix-quad's PX4-style behaviour: yaw last,
+          then thrust, when motors clip).
+        - Net: rotors spin asymmetrically with zero net thrust → body
+          stays on the ground.
+        - This is a TUNING gap, not a wiring gap. falcon-sitl-hover's
+          pure-Rust toy-plant converges in 4 s; gz delta is physics +
+          finite-diff velocity + controller-tick-rate mismatch.
+
+      v0.19.5 candidates (each separable):
+        - Re-tune PosController gains for 700 g falcon-quad (defaults
+          assume ~1 kg).
+        - Bring back the decimation pattern (RATE 1 kHz, ATT 250 Hz,
+          POS 50 Hz) by bumping harness tick rate.
+        - Use gz's body-velocity topic OR Kalman-fuse IMU+NavSat in
+          relay-ekf rather than NavSat finite-diff.
+        - Add a "minimum hover thrust" floor to QuadMixer (Verus
+          contract update).
+
+      Tests:
+        - cargo test -p falcon-sitl-gz → 8/8 (was 7/7 at v0.19.3;
+          +1 closed_loop_hover_compiles_and_ticks_on_mock).
+        - cargo build --features gazebo → green.
+        - cargo run + gz sim bench → cascade runs to completion, no
+          NaN, body responds (min_dist=1.75 m) but doesn't settle.
+
+      Honestly NOT claimed:
+        - That the cascade flies stably. v0.19.3 was open-loop
+          ballistic ascent; v0.19.4 wires safety but doesn't hover.
+        - That the failure mode is fully Verus-grade diagnosed.
+          The mixer-saturation hypothesis is consistent with the
+          bang-bang motor pattern; tick-by-tick mixer I/O trace is
+          v0.19.5 verification work.
+
+      What v0.19.4 actually closes:
+        - The v0.19.3 deferred "scenario=hover swap to closed-loop".
+        - "The verified cascade is integrable into a real-physics
+          simulator" — proven by 1500 ticks of stable execution.
+    tags: [falcon, sim, gazebo, bench-evidence, closed-loop, tuning-gap, v0.19.4]
+    fields:
+      bench-evidence-dir: bench-evidence/gz-sim/
+      bench-date: "2026-05-27"
+      gz-version: "8.11.0"
+      counters-observed:
+        imu_recv: 3526
+        navsat_recv: 870
+        motor_send: 1500
+      final_dist_m: 2.437
+      rms_steady_m: 2.156
+      min_dist_m: 1.750
+      verdict: FAIL
+      failure-mode: "mixer priority-preserving saturation starves thrust under aggressive torque demand"
+      cascade-components: ["relay-ekf", "relay-pos", "relay-att", "relay-rate", "relay-mix-quad"]
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P04

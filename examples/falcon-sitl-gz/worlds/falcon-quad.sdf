@@ -87,8 +87,12 @@
     </model>
 
     <!-- ─── falcon-quad ─────────────────────────────────────────────── -->
+    <!-- v0.19.4 — spawn at z=1.0 m (was 0.10 m). Closed-loop hover
+         setpoint is z=-2 m NED (2 m altitude). Spawning at 1.0 m gives
+         the body airspace to react before any controller initial-
+         condition kick can drive it into the ground. -->
     <model name="quad">
-      <pose>0 0 0.10 0 0 0</pose>
+      <pose>0 0 1.0 0 0 0</pose>
 
       <!-- Body link — IMU + NavSat sensors. Mass + inertia of a
            5"-class quad (~700 g, ~250 mm wheelbase). -->
@@ -132,7 +136,11 @@
 
         <sensor name="navsat_sensor" type="navsat">
           <always_on>1</always_on>
-          <update_rate>10</update_rate>
+          <!-- v0.19.4 — bumped 10 → 50 Hz so finite-diff velocity has
+               enough sample rate to feed the position controller's
+               outer loop without aliasing. Real GPS is typically
+               5–10 Hz; the simulator can give us better. -->
+          <update_rate>50</update_rate>
         </sensor>
       </link>
 

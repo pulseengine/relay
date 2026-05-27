@@ -1753,6 +1753,98 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.19.2
 
+  - id: FEAT-FALCON-v0.19.4
+    type: feature
+    title: "v0.19.4 — closed-loop cascade wired into gz-sim; tuning gap surfaced"
+    status: approved
+    description: >
+      LANDED. The verified cascade (relay-ekf → relay-pos → relay-att
+      → relay-rate → relay-mix-quad) is now wired into falcon-sitl-gz
+      and runs end-to-end against real gz Harmonic physics. First
+      time the safety-critical control surface is in the loop under
+      real physics. Verdict is FAIL on hover-stability — body stays
+      on the ground in mixer torque-saturation mode — but the
+      architectural deliverable is the wiring + the falsifiable
+      failure mode that v0.19.5 picks up.
+
+      Bench result (15-second hover, setpoint NED (0,0,-2)):
+        verdict: FAIL
+        final_dist=2.44m  peak_dist=3.30m  rms_steady=2.16m
+        min_dist=1.75m
+        counters: imu_recv=3526 (203 Hz) navsat_recv=870 (50 Hz)
+                  motor_send=1500 (100 Hz)
+
+      Cascade pattern matches falcon-sitl-hover::run_mission:
+        physics.measure → EKF → POS → ATT → RATE → MIX → physics.step.
+
+      Ships:
+        - examples/falcon-sitl-gz/src/main.rs::run_closed_loop_hover
+          — full cascade tick.
+        - --scenario=hover (default) → closed-loop;
+          --scenario=open-loop-climb → v0.19.3's constant 70 % PWM
+          (preserved as wire-level smoke test).
+        - SDF tweaks: NavSat 10 → 50 Hz (so finite-diff velocity has
+          rate); body spawn 0.1 → 1.0 m.
+        - cargo test `closed_loop_hover_compiles_and_ticks_on_mock`
+          — panic + NaN-free contract.
+        - bench-evidence/gz-sim/2026-05-27-v0.19.4-*.md +
+          1779904889-gazebo-hover-{harness.log,ticks.csv}.
+        - FV-FALCON-SIM-010 records the wiring + falsifiable failure.
+
+      Falsifiable failure mode:
+        Body sits at d≈0 with motors in bang-bang
+        [1.00, 0.00, 0.00, 0.00] torque saturation. PosController
+        commands large attitude tilt → AttController large rate →
+        RatePid large torque → QuadMixer's priority-preserving
+        saturation (PX4-style: yaw last, then thrust) starves
+        thrust. Net: rotors spin asymmetrically, zero net thrust →
+        body never lifts.
+
+      What v0.19.4 closes:
+        - v0.19.3's deferred "scenario=hover swap to closed-loop".
+        - "Verified cascade is integrable into real-physics
+          simulator" — proven by 1500 ticks of stable execution.
+
+      v0.19.5 candidates (each separable):
+        - Re-tune PosController gains for 700 g falcon-quad
+          (defaults assume ~1 kg).
+        - Bring back decimation pattern (RATE 1 kHz, ATT 250 Hz,
+          POS 50 Hz) by bumping harness tick rate.
+        - Use gz body-velocity topic OR fuse IMU+NavSat in
+          relay-ekf rather than finite-diff NavSat.
+        - Add a minimum-hover-thrust floor to QuadMixer (Verus
+          contract update).
+
+      Verification:
+        - cargo test -p falcon-sitl-gz → 8/8 (was 7/7; +1 closed-
+          loop smoke).
+        - cargo build --features gazebo → green.
+        - cargo run + gz sim → cascade runs 1500 ticks, no NaN,
+          body responds (min_dist=1.75 m), doesn't settle.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed:
+        - That the cascade flies stably. Body is on the ground.
+          "Falcon flies stably" is the v0.19.x finish line, not
+          v0.19.4.
+        - That failure mode is Verus-grade diagnosed. Mixer-
+          saturation hypothesis is consistent with bang-bang motor
+          pattern; tick-by-tick mixer I/O trace is v0.19.5 work.
+    tags: [falcon, milestone, v0.19.4, gazebo, closed-loop, bench-evidence, landed]
+    fields:
+      release-target: "closed-loop cascade wired; tuning gap surfaced"
+      bench-date: "2026-05-27"
+      gz-version: "8.11.0"
+      counters-observed: "imu_recv=3526 navsat_recv=870 motor_send=1500"
+      final_dist_m: 2.437
+      rms_steady_m: 2.156
+      verdict: FAIL
+      failure-mode: "mixer priority-preserving saturation starves thrust under aggressive torque"
+      cascade-components: ["relay-ekf", "relay-pos", "relay-att", "relay-rate", "relay-mix-quad"]
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.3
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1789,4 +1881,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.3
+        target: FEAT-FALCON-v0.19.4

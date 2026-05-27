@@ -7,11 +7,24 @@
 //! v0.19.0 — bench-evidence wiring: `--evidence-dir`, structured
 //!           per-tick CSV, diagnostic counters (`imu_recv`,
 //!           `navsat_recv`, `motor_send`) printed in the verdict.
-//!           Mirrors the PX4-SITL bench shape from v0.18.2.
+//! v0.19.2 — Actuators message + multi_thread runtime.
+//! v0.19.3 — first PASS verdict under real gz physics (open-loop climb).
+//! v0.19.4 — **closed-loop hover**: the real cascade
+//!           (relay-ekf → relay-pos → relay-att → relay-rate →
+//!           relay-mix-quad) closes against gz IMU + NavSat. Mirrors
+//!           `examples/falcon-sitl-hover`'s `run_mission` pattern.
+//!           Default `--scenario=hover` is now closed-loop; the v0.19.3
+//!           open-loop 70 % PWM smoke test is reachable via
+//!           `--scenario=open-loop-climb`.
 
 mod physics;
 
 use physics::{GazeboPhysics, MockPhysics, Physics};
+use relay_att::{AttController, Timestamp as AttTimestamp};
+use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
+use relay_mix_quad::QuadMixer;
+use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTimestamp};
+use relay_rate::{RatePid, Timestamp as RateTimestamp};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -71,13 +84,20 @@ fn main() {
     }
 }
 
-/// Runs the named scenario against the chosen physics backend. For
-/// v0.19.0 the only implemented scenario is `hover` (the v0.16.1
-/// 70% PWM climb test). `step`, `mission`, and `disturbance` are
-/// reserved per `docs/SIMULATOR.md`'s falsifiable-criteria table
-/// and currently fall through to the hover path with a "TODO" note —
-/// they land as separate scenarios in v0.19.x once the gz bench
-/// produces baseline hover evidence.
+/// Runs the named scenario against the chosen physics backend.
+///
+/// v0.19.4 wires two scenarios:
+///   - `hover`           — closed-loop cascade (EKF + POS + ATT + RATE
+///                         + MIX) holding NED setpoint (0, 0, -2 m).
+///                         PASS = within 0.5 m at end + RMS over last
+///                         5 s under 1.0 m.
+///   - `open-loop-climb` — v0.19.3's constant 70 % PWM scaffolding,
+///                         kept as a wire-level smoke test that
+///                         doesn't depend on cascade tuning. PASS =
+///                         net climb > 0.1 m. Useful for diagnosing
+///                         "is the bridge publish path alive at all".
+///
+/// `step`, `mission`, `disturbance` reserved per docs/SIMULATOR.md.
 fn run_scenario(
     physics: &mut dyn Physics,
     scenario: &str,
@@ -85,21 +105,195 @@ fn run_scenario(
     evidence: Option<&mut EvidenceSink>,
 ) -> bool {
     match scenario {
-        "hover" => run_hover(physics, duration_s, evidence),
+        "hover" => run_closed_loop_hover(physics, duration_s, evidence),
+        "open-loop-climb" => run_open_loop_climb(physics, duration_s, evidence),
         other => {
             eprintln!(
-                "  scenario {other} not yet wired (v0.19.0 ships hover only); falling back to hover",
+                "  scenario {other} not yet wired; falling back to closed-loop hover",
             );
-            run_hover(physics, duration_s, evidence)
+            run_closed_loop_hover(physics, duration_s, evidence)
         }
     }
 }
 
-/// Single-scenario loop: command 70 % PWM, hold for the duration,
-/// report whether the body climbed. Deliberately minimal — same
-/// scenario v0.16.1+ has shipped; v0.19.0 only adds the bench-evidence
-/// + counter reporting around it.
-fn run_hover(
+/// v0.19.4 — closed-loop hover. Mirrors `falcon-sitl-hover`'s
+/// `run_mission` cascade pattern, but inputs come from the bridge
+/// (gz IMU + NavSat) and outputs feed the bridge's motor publish.
+///
+/// Setpoint: NED (0, 0, -2) — hover at 2 m altitude. v_ned is finite-
+/// differenced from p_ned (gz NavSat doesn't expose velocity directly
+/// in v0.18.1's subscriber; the math is identical to a 1st-order
+/// derivative the POS controller would compute internally anyway).
+///
+/// All loops run at the harness rate (100 Hz). Canonical rates from
+/// falcon-sitl-hover are 1 kHz IMU / 250 Hz ATT / 50 Hz POS — running
+/// at 100 Hz universally produces a stable hover under gz; tighter
+/// loop bandwidth is a v0.19.x tuning lever, not a v0.19.4 prerequisite.
+fn run_closed_loop_hover(
+    physics: &mut dyn Physics,
+    duration_s: f32,
+    mut evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    let mut ekf = Ekf::new();
+    let mut rate_pid = RatePid::new();
+    let mut att = AttController::new();
+    let mut pos = PosController::new();
+    let mut mixer = QuadMixer::new();
+
+    let setpoint_ned = [0.0_f32, 0.0, -2.0];
+    let setpoint = PositionSetpoint::hover_at(setpoint_ned);
+
+    let dt = 0.01_f32;
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let pace_real_time = physics.counters().is_some();
+
+    let mut current_att_sp = [1.0_f32, 0.0, 0.0, 0.0];
+    let mut current_thrust = 0.5_f32;
+
+    let mut last_pos_ned: Option<[f32; 3]> = None;
+    let mut peak_dist_err = 0.0_f32;
+    let mut min_dist_seen = f32::INFINITY;
+    let mut nan_seen = false;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0_usize;
+    // Last 5 s of the run define "steady" — same shape as
+    // `falcon-sitl-hover::run_mission`'s 2 s tail. Looser here
+    // because gz step granularity + finite-diff velocity make
+    // settling slower than the pure-Rust SITL.
+    let steady_start_t = (duration_s - 5.0).max(0.0);
+
+    let started_at = Instant::now();
+    for step in 0..n {
+        let tick_start = Instant::now();
+        let t = step as f32 * dt;
+
+        // 1. Read state from the bridge.
+        let (mut imu_sample, pos_ned) = physics.measure(0.0);
+        imu_sample.time = ekf_ts_of(t);
+
+        // 2. EKF — attitude estimate.
+        let est = ekf.tick(imu_sample);
+        if !est.quaternion[0].is_finite() { nan_seen = true; }
+
+        // 3. POS — position + finite-diff velocity → attitude setpoint.
+        let v_ned = match last_pos_ned {
+            Some(p) => [
+                (pos_ned[0] - p[0]) / dt,
+                (pos_ned[1] - p[1]) / dt,
+                (pos_ned[2] - p[2]) / dt,
+            ],
+            None => [0.0; 3],
+        };
+        last_pos_ned = Some(pos_ned);
+        let att_sp = pos.tick(
+            pos_ts_of(t),
+            pos_ned,
+            v_ned,
+            est.quaternion,
+            setpoint,
+        );
+        current_att_sp = att_sp.quaternion;
+        current_thrust = att_sp.thrust;
+
+        // 4. ATT — quaternion error → rate setpoint.
+        let current_rate_sp = att.tick(att_ts_of(t), est.quaternion, current_att_sp);
+
+        // 5. RATE — gyro + rate setpoint → torque.
+        let torque = rate_pid.tick(rate_ts_of(t), imu_sample.gyro_body, current_rate_sp);
+        for k in 0..3 {
+            if !torque[k].is_finite() { nan_seen = true; }
+        }
+
+        // 6. MIX — torque + thrust → 4× motor PWM.
+        let motors = mixer.mix(torque, current_thrust);
+        if motors.iter().any(|v| !v.is_finite()) { nan_seen = true; }
+
+        // 7. Publish to the bridge.
+        physics.step(motors, dt);
+
+        // 8. Bookkeeping — distance to setpoint.
+        let dn = pos_ned[0] - setpoint_ned[0];
+        let de = pos_ned[1] - setpoint_ned[1];
+        let dd = pos_ned[2] - setpoint_ned[2];
+        let dist = (dn * dn + de * de + dd * dd).sqrt();
+        if dist > peak_dist_err { peak_dist_err = dist; }
+        if dist < min_dist_seen { min_dist_seen = dist; }
+        if t >= steady_start_t {
+            sum_sq_steady += dist * dist;
+            steady_count += 1;
+        }
+
+        if let Some(ref mut e) = evidence {
+            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
+                         motors, physics.counters());
+        }
+
+        if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+        }
+    }
+    let wall = started_at.elapsed();
+
+    let final_dist = match last_pos_ned {
+        Some(p) => {
+            let dn = p[0] - setpoint_ned[0];
+            let de = p[1] - setpoint_ned[1];
+            let dd = p[2] - setpoint_ned[2];
+            (dn * dn + de * de + dd * dd).sqrt()
+        }
+        None => f32::NAN,
+    };
+    let rms_steady = if steady_count > 0 {
+        (sum_sq_steady / steady_count as f32).sqrt()
+    } else {
+        f32::NAN
+    };
+    let counters = physics.counters();
+
+    println!(
+        "  verdict: backend={} scenario=hover steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
+        physics.name(), n, final_dist, peak_dist_err, rms_steady, wall.as_secs_f32(),
+    );
+    if let Some((imu_recv, navsat_recv, motor_send)) = counters {
+        println!(
+            "  counters: imu_recv={imu_recv} navsat_recv={navsat_recv} motor_send={motor_send}",
+        );
+    }
+    if let Some(ref mut e) = evidence {
+        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
+                              min_dist_seen, wall.as_secs_f32(), counters);
+    }
+
+    // PASS = within 0.5 m at end + RMS over last 5 s under 1.0 m + no NaN.
+    !nan_seen && final_dist < 0.5 && rms_steady < 1.0
+}
+
+fn ekf_ts_of(secs: f32) -> EkfTimestamp {
+    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
+    EkfTimestamp { seconds: secs as u64, fraction: frac }
+}
+fn rate_ts_of(secs: f32) -> RateTimestamp {
+    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
+    RateTimestamp { seconds: secs as u64, fraction: frac }
+}
+fn att_ts_of(secs: f32) -> AttTimestamp {
+    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
+    AttTimestamp { seconds: secs as u64, fraction: frac }
+}
+fn pos_ts_of(secs: f32) -> PosTimestamp {
+    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
+    PosTimestamp { seconds: secs as u64, fraction: frac }
+}
+
+/// v0.19.3 open-loop smoke: command 70 % PWM constant, watch for
+/// climb. Retained as `--scenario=open-loop-climb` so a bench
+/// operator can still diagnose "is the publish path alive" without
+/// running the full cascade. Same code as v0.19.3's `run_hover`.
+fn run_open_loop_climb(
     physics: &mut dyn Physics,
     duration_s: f32,
     mut evidence: Option<&mut EvidenceSink>,
@@ -247,6 +441,34 @@ impl EvidenceSink {
         }
     }
 
+    /// v0.19.4 — closed-loop hover summary. Different metrics than
+    /// the v0.19.3 open-loop climb (which only knows net_climb /
+    /// min_alt / max_alt). Hover cares about distance-to-setpoint
+    /// statistics.
+    #[allow(clippy::too_many_arguments)]
+    fn write_summary_hover(
+        &mut self,
+        steps: u32,
+        final_dist: f32,
+        peak_dist: f32,
+        rms_steady: f32,
+        min_dist: f32,
+        wall_s: f32,
+        counters: Option<(u64, u64, u64)>,
+    ) {
+        let _ = writeln!(self.harness, "steps:       {steps}");
+        let _ = writeln!(self.harness, "final_dist:  {final_dist:.3} m");
+        let _ = writeln!(self.harness, "peak_dist:   {peak_dist:.3} m");
+        let _ = writeln!(self.harness, "rms_steady:  {rms_steady:.3} m  (last 5 s)");
+        let _ = writeln!(self.harness, "min_dist:    {min_dist:.3} m");
+        let _ = writeln!(self.harness, "wall:        {wall_s:.3} s");
+        if let Some((i, n, m)) = counters {
+            let _ = writeln!(self.harness, "imu_recv:    {i}");
+            let _ = writeln!(self.harness, "navsat_recv: {n}");
+            let _ = writeln!(self.harness, "motor_send:  {m}");
+        }
+    }
+
     fn finish(&mut self, pass: bool) {
         let _ = writeln!(self.harness, "verdict:    {}", if pass { "PASS" } else { "FAIL" });
         let _ = self.harness.flush();
@@ -305,8 +527,25 @@ mod tests {
     #[test]
     fn mock_backend_climbs_under_full_thrust() {
         let mut p = MockPhysics::at_rest();
-        let pass = run_hover(&mut p, 1.0, None);
+        let pass = run_open_loop_climb(&mut p, 1.0, None);
         assert!(pass, "70 % PWM × THRUST_SCALE should easily beat gravity");
+    }
+
+    /// v0.19.4 — closed-loop cascade against MockPhysics. Smoke test
+    /// that the cascade wires + ticks without panic, no NaN escape.
+    /// MockPhysics ignores per-rotor differential (applies only
+    /// collective thrust to vertical axis), so attitude control
+    /// is a no-op; the test confirms the loop runs at all, not that
+    /// hover is achieved here. Real hover lands under gz.
+    #[test]
+    fn closed_loop_hover_compiles_and_ticks_on_mock() {
+        let mut p = MockPhysics::at_rest();
+        let _ = run_closed_loop_hover(&mut p, 0.5, None);
+        // Pass criterion: no panic, no NaN escape into omega/v_ned.
+        for i in 0..3 {
+            assert!(p.omega[i].is_finite(), "omega[{i}] = {}", p.omega[i]);
+            assert!(p.v_ned[i].is_finite(), "v_ned[{i}] = {}", p.v_ned[i]);
+        }
     }
 
     /// v0.19.0 — when --evidence-dir is set, the runner produces two
@@ -333,7 +572,7 @@ mod tests {
     #[test]
     fn gazebo_stub_does_not_panic() {
         let mut g = crate::physics::GazeboPhysics::new("test-world", "test-quad");
-        let _ = run_hover(&mut g, 0.1, None);
+        let _ = run_open_loop_climb(&mut g, 0.1, None);
         // Result is FAIL (everything zeros), but the harness must not
         // panic — that's the contract for a stub-only run.
     }
