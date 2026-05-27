@@ -1656,6 +1656,103 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.19.1
 
+  - id: FEAT-FALCON-v0.19.3
+    type: feature
+    title: "v0.19.3 — first PASS verdict under real gz physics (cascade flies)"
+    status: approved
+    description: >
+      LANDED. The closure of v0.19.1 + v0.19.2's two open findings.
+      First time the full falcon-cascade bridge produces a PASS verdict
+      under real Gazebo Harmonic physics — falcon flies under real
+      physics, not just architecturally readied.
+
+      v0.19.3 bench (10-second hover, 70 % constant PWM, open loop):
+        verdict: backend=gazebo steps=1000 climb=385.25 m  wall=11.62s
+        counters: imu_recv=2369 navsat_recv=117 motor_send=1000
+        **PASS**
+
+      Both v0.19.2 sub-issues closed:
+
+      **Finding 1b — SDF motor plugin tuning** (derived against PX4
+      x500's known-flying SDF; gz CLI positive control confirms):
+        - <collision> on every rotor link. ODE treats links without
+          collision as visual-only; thrust didn't transfer through
+          the joint. v0.19.0–v0.19.2 had this gap.
+        - Joint axis: explicit <limit> + spring style; no
+          <damping>. x500's pattern.
+        - commandSubTopic = command/motor_speed (PX4 standard),
+          replacing v0.19.0's cmd_vel.
+
+      **Finding 1a — bridge publish-partition mismatch**:
+        Publisher::publish was called with empty partition,
+        producing FQN @/@/<topic>. gz-sim subscribes on the node's
+        default partition (GZ_PARTITION env or hostname:username),
+        FQN @hostname:user@/<topic>. Different FQNs, no delivery.
+        Fix: publisher.publish(&node.partition(), &msg). One line,
+        explains v0.19.2's `gz topic -i` invisibility too.
+
+      What v0.19.3 proves:
+        - Bridge subscribes IMU + NavSat at configured rates
+          (203 Hz / 10 Hz exactly).
+        - Bridge publishes Actuators with correct partition →
+          MulticopterMotorModel receives + applies torque → thrust
+          → body lift end-to-end.
+        - 385 m climb in 10 s at 70 % PWM = open-loop ballistic
+          ascent; PASS criterion was climb > 0.1 m, well crossed.
+
+      Ships:
+        - examples/falcon-sitl-gz/worlds/falcon-quad.sdf — fully
+          revised against x500.
+        - examples/falcon-sitl-gz/src/physics.rs — partition fix,
+          one line where it matters, plus topic name update to
+          `command/motor_speed`.
+        - bench-evidence/gz-sim/1779860110-gazebo-hover-{harness.log,
+          ticks.csv} + 2026-05-27-v0.19.3-first-pass-verdict.md.
+        - FV-FALCON-SIM-009 + this rollout entry.
+
+      Honestly NOT claimed:
+        - That this is steady hover. 385 m ballistic climb at constant
+          70 % PWM is open loop, no cascade control. Closed-loop
+          hover via the real cascade lands as v0.19.4 (`--scenario=
+          hover` swaps constant PWM for relay-ekf → relay-pos →
+          relay-att → relay-rate → relay-mix-quad).
+        - That the SDF is flight-tuned. motorConstant 8.55e-6 gives
+          5× headroom — fine for flies-vs-doesn't, needs tuning for
+          steady disturbance rejection.
+
+      v0.19.4 candidates:
+        - Closed-loop hover (cascade in the loop; PASS = ±0.5 m for
+          30 s).
+        - Step response (settling < 2 s, overshoot < 20 %).
+        - Mission + geofence-RTL.
+        - Disturbance recovery (gz wind plugin).
+        Each = its own bench-evidence run + rollout entry.
+
+      Verification:
+        - cargo test --workspace --all-targets → 405 passing.
+        - cargo test -p falcon-sitl-gz --features gazebo → 11/11.
+        - cargo build --features gazebo → green.
+        - rivet validate → PASS.
+        - gz sim + bridge bench → PASS, climb=385.25 m.
+
+      Headline: 4 PRs in, the PulseEngine claim "falcon flies under
+      real physics" has positive observational evidence, not just
+      architectural readiness. The trajectory from here is tuning,
+      not unblocking.
+    tags: [falcon, milestone, v0.19.3, gazebo, bench-evidence, pass, first-flight, landed]
+    fields:
+      release-target: "first PASS verdict under real gz physics"
+      bench-date: "2026-05-27"
+      gz-version: "8.11.0"
+      counters-observed: "imu_recv=2369 navsat_recv=117 motor_send=1000"
+      climb_m: 385.247
+      verdict: PASS
+      findings-closed: ["Finding 1a (partition)", "Finding 1b (SDF rotor + joint + topic)"]
+      reference-sdf: "PX4-Autopilot/Tools/simulation/gz/models/x500_base/model.sdf"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.2
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1692,4 +1789,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.2
+        target: FEAT-FALCON-v0.19.3

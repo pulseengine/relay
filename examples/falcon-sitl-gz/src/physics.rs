@@ -425,6 +425,15 @@ mod gz_real {
                 use gz_transport_rs::msgs::{Double, Imu, NavSat};
 
                 let mut node = Node::new(None).await?;
+                // v0.19.3 — gz CLI uses the node's effective partition
+                // (GZ_PARTITION env or `hostname:username` default) in
+                // the topic FQN. Publishing with an empty partition
+                // produces a different FQN, and gz-sim's plugins —
+                // which subscribed on the default partition — never
+                // see our messages. v0.19.2 confirmed: bridge motor_send
+                // ticked 1000:1000 but body never moved while gz CLI on
+                // the same topic + msg lifted it.
+                let node_partition = node.partition();
                 let imu_topic = format!(
                     "/world/{world_for_setup}/model/{model_for_setup}/link/base_link/sensor/imu_sensor/imu"
                 );
@@ -467,15 +476,29 @@ mod gz_real {
                     }
                 });
 
-                // v0.19.2 — single publisher on `/<model>/cmd_vel`
-                // emitting one `gz.msgs.Actuators` per tick. The four
-                // MulticopterMotorModel plugins in the SDF each share
-                // this topic and pick out their `<motorNumber>` index
-                // from the `velocity` array.
-                let actuators_topic = format!("/{model_for_setup}/cmd_vel");
+                // v0.19.2 — single publisher emitting one
+                // `gz.msgs.Actuators` per tick. The four
+                // MulticopterMotorModel plugins share this topic and
+                // pick their `<motorNumber>` index from `velocity`.
+                //
+                // v0.19.3 — topic name aligned with PX4's standard
+                // (`command/motor_speed`). v0.19.2's `/<model>/cmd_vel`
+                // worked at the wire-protocol level but the v0.19.2
+                // bench evidence + first-light SDF showed the
+                // MulticopterMotorModel plugin's `<commandSubTopic>`
+                // value is what gz constructs the topic from —
+                // `<commandSubTopic>cmd_vel</commandSubTopic>` →
+                // `/<model>/cmd_vel`,
+                // `<commandSubTopic>command/motor_speed</commandSubTopic>`
+                // → `/<model>/command/motor_speed`. The SDF + bridge
+                // must agree; v0.19.3 picks PX4's standard naming so
+                // the bench world drops cleanly into PX4-x500-derived
+                // muscle memory.
+                let actuators_topic = format!("/{model_for_setup}/command/motor_speed");
                 let publisher = node
                     .advertise::<Actuators>(&actuators_topic, "gz.msgs.Actuators")
                     .await?;
+                let publish_partition = node_partition.clone();
                 tokio::spawn(async move {
                     while let Some(cmd) = rotors_rx.recv().await {
                         let msg = Actuators {
@@ -489,9 +512,9 @@ mod gz_real {
                             ],
                             normalized: Vec::new(),
                         };
-                        // Partition empty by default; gz-sim uses
-                        // empty partition for "world" topics.
-                        let _ = publisher.publish("", &msg);
+                        // v0.19.3 — pass node's effective partition so
+                        // FQN matches what gz-sim's subscribers expect.
+                        let _ = publisher.publish(&publish_partition, &msg);
                     }
                 });
 
