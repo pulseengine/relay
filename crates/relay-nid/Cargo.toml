@@ -23,3 +23,6 @@ crate-type = ["rlib"]
 
 [dev-dependencies]
 proptest.workspace = true
+
+[lints]
+workspace = true

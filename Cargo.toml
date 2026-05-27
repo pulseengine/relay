@@ -51,6 +51,15 @@ rust-version = "1.85.0"
 wit-bindgen = { version = "0.57.1", default-features = false }
 proptest = "1"
 
+# Workspace-wide lint config. Engines use `#[cfg(kani)]` for the Kani
+# model-checker harness paths (they're built only under `cargo kani`,
+# which sets the `kani` cfg). Stable rustc sees the cfg as unexpected
+# and warns by default — declare it here so all member crates inherit
+# the check-cfg whitelist without per-crate boilerplate. Member crates
+# pick this up via `[lints] workspace = true` in their own Cargo.toml.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 # All guest components are no_std + no alloc.
 # Memory comes from Kiln's capability-based allocator (safe_managed_alloc!)
 # or from Gale's mem_slab / heap on embedded targets.

@@ -1591,9 +1591,11 @@ artifacts:
     status: pending
     description: >
       Full overdo matrix green across all six safety domains in
-      rivet validate output. Check-It checkers qualified for the
-      EKF and mixer (DO-330 path). falcon-coax and falcon-hex
-      variants ship alongside falcon-quad.
+      rivet validate output. Tool-qualification records (v0.14.3
+      pattern) extended to DO-330-grade per tool. falcon-coax and
+      falcon-hex airframe variants ship alongside falcon-quad.
+      All bench-evidence artifacts (PX4-SITL + gz-sim) carry
+      reproducible setup recipes + signed manifests.
 
       Ships:
         - DO-178C DAL-A credit bundle
@@ -1604,7 +1606,9 @@ artifacts:
         - EN 50128 SIL-4 credit bundle
         - falcon-coax world spec (Ingenuity-class)
         - falcon-hex world spec (fault-tolerant)
-        - Check-It qualified checkers for EKF + mixer
+        - DO-330-grade tool qualification reports for Verus / Kani
+          / miri / witness / spar (extends v0.14.3's auditable
+          starting-point TQ docs).
 
       v1.0 is when the evidence dossier clears the bar — not when
       the features are complete. v2.x adds falcon-vtol and
