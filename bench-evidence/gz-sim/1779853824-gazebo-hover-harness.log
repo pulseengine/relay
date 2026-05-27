@@ -1,0 +1,14 @@
+falcon-sitl-gz bench-evidence
+backend: gazebo
+scenario: hover
+timestamp: 1779853824
+
+steps:      1500
+net_climb:  0.000 m
+min_alt:    0.020 m
+max_alt:    0.020 m
+wall:       17.621 s
+imu_recv:   3572
+navsat_recv:178
+motor_send: 1500
+verdict:    FAIL

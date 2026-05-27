@@ -1585,6 +1585,77 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.19.0
 
+  - id: FEAT-FALCON-v0.19.2
+    type: feature
+    title: "v0.19.2 — Actuators message + multi_thread runtime (Finding 2 closed)"
+    status: approved
+    description: >
+      LANDED. Targets v0.19.1's two findings. **Finding 2** (IMU + NavSat
+      under-rate) is fully closed by a tokio runtime model fix.
+      **Finding 1** (per-rotor Double vs single-topic Actuators) lands
+      architecturally and surfaces two sub-issues that v0.19.3 picks up.
+
+      Ships:
+        - `gz.msgs.Actuators` defined locally (gz-transport-rs 0.1.0
+          doesn't ship `actuators.proto`); prost::Message derive,
+          wire-compatible with Harmonic MulticopterMotorModel.
+          Single publish to `/<model>/cmd_vel`; per-rotor mpsc fanout
+          collapsed to one channel carrying `[4×f32]`.
+        - tokio runtime switched from `new_current_thread` to
+          `new_multi_thread(2 workers)`. Spawned subscriber + publisher
+          tasks now actually run after the setup `block_on` returns
+          (current_thread only drives during explicit block_on; the
+          51 / 4 Hz IMU rate observed at v0.19.1 was stragglers from
+          the setup window). Closes Finding 2.
+        - `prost = { version = "0.13", features = ["derive"] }` as a
+          gazebo-feature dep.
+        - bench-evidence/gz-sim/<ts>-gazebo-hover-{harness.log,ticks.csv}
+          and `2026-05-27-v0.19.2-actuators-and-multi-thread-findings.md`.
+        - FV-FALCON-SIM-008.
+
+      v0.19.2 bench (15 s hover):
+        verdict: backend=gazebo steps=1500 climb=0.00 m
+        counters: imu_recv=3572 navsat_recv=178 motor_send=1500
+        IMU rate observed 203 Hz / configured 200 Hz   ✓
+        NavSat   observed 10.1 Hz / configured 10 Hz   ✓
+        motor    observed 100 Hz exact                 ✓
+        climb    0.00 m                                ✗
+
+      Two sub-issues found, both v0.19.3 targets:
+        1a. gz-transport-rs 0.1.0's advertise-direction discovery
+            isn't reaching gz Sim 8's registry (subscribe direction
+            works; gz CLI publish on same topic does register).
+            Upstream wire-format or partition mismatch.
+        1b. Even native `gz topic -p` publishing full-rpm Actuators
+            to `/quad/cmd_vel` doesn't lift the body. SDF model
+            tuning issue (motorConstant or plugin namespace).
+
+      Verification:
+        - cargo test --workspace → 405 passing (preserved).
+        - cargo test -p falcon-sitl-gz --features gazebo → 11/11.
+        - cargo build --features gazebo → green.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed:
+        - That the cascade flies in gz physics yet. Verdict FAIL.
+        - That gz-transport-rs 0.1.0's discovery is broken in
+          general — only that gz Sim 8 doesn't see our advertise.
+
+      The headline: IMU + NavSat now stream at configured rates,
+      the counters work, and the bridge survives heavy load
+      (3572+178+1500 events in 17 s, zero errors).
+    tags: [falcon, milestone, v0.19.2, gazebo, actuators, runtime-fix, bench-evidence, landed]
+    fields:
+      release-target: "Actuators message + multi_thread runtime; Finding 2 closed"
+      bench-date: "2026-05-27"
+      gz-version: "8.11.0"
+      counters-observed: "imu_recv=3572 navsat_recv=178 motor_send=1500"
+      findings-closed: ["Finding 2 (IMU+NavSat under-rate)"]
+      findings-partial: ["Finding 1 (Actuators — sub-issues 1a + 1b open)"]
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.1
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1621,4 +1692,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.1
+        target: FEAT-FALCON-v0.19.2

@@ -1,0 +1,95 @@
+artifacts:
+  - id: FV-FALCON-SIM-008
+    type: sw-verification
+    title: "v0.19.2 — Actuators message + multi_thread runtime: Finding 2 closed, Finding 1 partially landed"
+    status: approved
+    description: >
+      v0.19.2 lands the architectural fix for v0.19.1's Finding 1
+      (per-rotor Double publishes → single Actuators publish) plus
+      a runtime-model fix that closes Finding 2 completely (IMU and
+      NavSat under-rate).
+
+      Closes:
+        - **Finding 2** (NavSat 0 frames + IMU 4 Hz / 200 Hz
+          configured): switching the tokio runtime from
+          `new_current_thread` to `new_multi_thread` with 2 workers
+          fixed it entirely. The spawned subscriber tasks were
+          orphaned after `block_on(setup)` returned — current_thread
+          only drives during explicit `block_on`. v0.19.2 bench:
+          IMU @ 203 Hz, NavSat @ 10.1 Hz (both within 1.5 % of
+          configured).
+
+      Partially lands:
+        - **Finding 1** (per-rotor Double vs single-topic Actuators):
+          Actuators message defined locally (gz-transport-rs 0.1.0
+          doesn't ship actuators.proto), single-topic publish to
+          /<model>/cmd_vel, per-rotor mpsc fanout collapsed to one
+          channel carrying [4×f32]. `publish()` succeeds
+          end-to-end (1500/1500, 0 errors). Two sub-issues block
+          actual flight:
+
+          1a. gz-transport-rs 0.1.0's advertise-direction discovery
+              isn't reaching gz Sim 8's registry. `gz topic -i`
+              mid-run doesn't list our bridge as a publisher; gz
+              CLI publishes the same topic correctly. Subscribe
+              direction works fine.
+          1b. Even native `gz topic -p` publishing to /quad/cmd_vel
+              with full-rpm Actuators doesn't lift the body.
+              SDF model tuning issue (likely motorConstant or
+              plugin namespace).
+
+      v0.19.2 bench evidence
+      (`bench-evidence/gz-sim/<ts>-gazebo-hover-{harness.log,ticks.csv}`
+      and `2026-05-27-v0.19.2-actuators-and-multi-thread-findings.md`):
+
+        verdict: backend=gazebo steps=1500 climb=0.00 m
+        counters: imu_recv=3572 navsat_recv=178 motor_send=1500
+        IMU rate     observed 203 Hz / configured 200 Hz  ✓
+        NavSat rate  observed 10.1 Hz / configured 10 Hz  ✓
+        motor_send   observed 100 Hz exact  ✓
+        climb        0.00 m  ✗ (sub-issues 1a + 1b)
+
+      Verification:
+        - cargo test --workspace → 405 passing (preserved).
+        - cargo test -p falcon-sitl-gz --features gazebo → 11/11.
+        - cargo build -p falcon-sitl-gz --features gazebo → green.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed:
+        - That the cascade flies in gz physics. It doesn't yet.
+        - That gz-transport-rs 0.1.0's discovery is broken in
+          general — only that gz Sim 8's advertise registry
+          doesn't see us. Partition mismatch, multicast group, or
+          wire-format are all candidates.
+        - That the SDF model is fully diagnosed. Native gz CLI
+          publishing the same Actuators also doesn't lift —
+          confirms the issue is below the bridge.
+
+      The runtime fix alone is the headline: IMU + NavSat now
+      stream at configured rates, the counters work end-to-end,
+      and the v0.19.1 framework is demonstrated under real load
+      (3572 IMU + 178 NavSat + 1500 publishes over 17 s with no
+      drops or errors).
+
+      v0.19.3 candidates:
+        - Audit SDF against a known-flying gz Sim 8 multicopter
+          reference (ros_gz_sim demos, PX4 gz_x500).
+        - Diagnose gz-transport-rs 0.1.0 discovery vs gz Sim 8
+          (partition + multicast + wire-format), workaround
+          options.
+    tags: [falcon, sim, gazebo, bench-evidence, actuators, runtime-fix, v0.19.2]
+    fields:
+      bench-evidence-dir: bench-evidence/gz-sim/
+      bench-date: "2026-05-27"
+      gz-version: "8.11.0"
+      counters-observed:
+        imu_recv: 3572
+        navsat_recv: 178
+        motor_send: 1500
+      verdict: FAIL
+      findings-closed: ["Finding 2 (IMU+NavSat under-rate)"]
+      findings-partial: ["Finding 1 (Actuators format — landed; sub-issues 1a + 1b open)"]
+      runtime-change: "tokio current_thread → multi_thread (2 workers)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P04
