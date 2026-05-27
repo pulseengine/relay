@@ -1,0 +1,15 @@
+falcon-sitl-gz bench-evidence
+backend: gazebo
+scenario: hover
+timestamp: 1779904889
+
+steps:       1500
+final_dist:  2.437 m
+peak_dist:   3.300 m
+rms_steady:  2.156 m  (last 5 s)
+min_dist:    1.750 m
+wall:        17.502 s
+imu_recv:    3526
+navsat_recv: 870
+motor_send:  1500
+verdict:    FAIL
