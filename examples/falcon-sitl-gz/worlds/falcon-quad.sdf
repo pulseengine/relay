@@ -152,6 +152,20 @@
         </sensor>
       </link>
 
+      <!-- v0.19.7 — OdometryPublisher gives TRUE body velocity (twist)
+           at 100 Hz on /model/quad/odometry. The v0.19.4–.6 bridge
+           finite-differenced 50 Hz NavSat position for velocity, which
+           was noisy/lagged enough to leave the altitude velocity-cascade
+           marginally stable (same gains gave 0.5 m one run, crash the
+           next). True velocity makes the inner loop deterministic. -->
+      <plugin filename="gz-sim-odometry-publisher-system"
+              name="gz::sim::systems::OdometryPublisher">
+        <odom_frame>world</odom_frame>
+        <robot_base_frame>quad</robot_base_frame>
+        <odom_publish_frequency>100</odom_publish_frequency>
+        <dimensions>3</dimensions>
+      </plugin>
+
       <!-- ─── 4 rotors (X-configuration) ─── -->
       <!-- v0.19.6 — rotor index→position+spin aligned to the ACTUAL
            verified relay-mix-quad MIXER_X convention (the v0.19.0–.5

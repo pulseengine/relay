@@ -1,0 +1,81 @@
+artifacts:
+  - id: FV-FALCON-SIM-013
+    type: sw-verification
+    title: "v0.19.7 — true-velocity odometry + hover bistability characterization (reliable tight hover NOT met)"
+    status: approved
+    description: >
+      Builds on v0.19.6's frame fix with a deterministic velocity source
+      (gz OdometryPublisher) + a velocity-cascade altitude controller.
+      HONEST OUTCOME: reliable tight hover is NOT achieved. The
+      controller demonstrably CAN hold a perfect hover (0.02 m RMS in a
+      good run) but the gz full-hover is bistable/marginally stable —
+      same config gives 0.02 m one run, grounded 1.97 m the next. Three
+      coupled root causes are characterised; closing them is control
+      co-design, not gain-tuning.
+
+      Shipped (real, reliable):
+        1. True body velocity via gz-sim-odometry-publisher-system →
+           /model/quad/odometry (100 Hz gz.msgs.Odometry). Bridge
+           defines a minimal local Odometry (twist-only; gz-transport-rs
+           0.1.0 lacks the wrapper), subscribes, ENU→NED, exposes via
+           new Physics::velocity_ned(). Replaces finite-diff-of-NavSat.
+        2. Velocity-cascade altitude (alt-rate): outer P (alt err →
+           bounded climb-rate target) + inner P (rate err → thrust) +
+           conditional windup-guarded integral + thrust clamp 0.88 to
+           reserve torque headroom.
+        3. PosController tuned for the 2 kg body (hover_thrust 0.5→0.72).
+
+      Headline finding — a perfect hover IS reachable:
+        alt-only run A: final 0.012 m, rms 0.016 m (PERFECT, ±2 cm/5 s).
+        alt-only run B: final 1.972 m (grounded).
+        The verified mixer + controller are correct; the issue is
+        RELIABILITY (startup basin), not capability.
+
+      Three coupled root causes of bistability:
+        1. Startup tip-over (alt-only, no attitude control): spawn
+           rotor-imbalance occasionally tips the body → thrust vector
+           off-vertical → sits. gz scheduling jitter picks the basin.
+        2. Mixer thrust/torque limit cycle (alt-rate): rate-PID torque
+           near thrust saturation makes relay-mix-quad's
+           priority-preserving saturation steal thrust → ±1 m altitude
+           oscillation. 0.88 clamp reduced not eliminated it.
+        3. EKF attitude during vertical accel (full cascade): Mahony
+           accel-as-gravity reference tilts during climb → att/pos
+           chase a wrong level → drift.
+
+      Each needs a DESIGN change (v0.19.8+), not a knob:
+        1. deterministic startup sequencing / attitude-hold-from-t0.
+        2. relay-mix-quad reserves a hover thrust floor (verified-
+           component change + Verus contract update — the right home
+           for it).
+        3. relay-ekf accel down-weighting at high |a| (EKF2-style gate).
+
+      Verification:
+        - cargo test --workspace → all green (no regression).
+        - cargo test -p falcon-sitl-gz --features gazebo → 9/9.
+        - frame-check oracle (v0.19.6) still AGREE on roll + pitch.
+        - Odometry subscriber delivers true velocity.
+        - rivet validate → PASS.
+
+      Honest status vs goal: v0.19.7 goal was "full verified cascade
+      sustained 30 s hover PASS" — NOT met reliably. Delivered: the
+      deterministic velocity infrastructure + a controller that can
+      hover (0.02 m good run) + a precise three-cause bistability
+      diagnosis. Claiming a gain set "works" when it passes 1 run in 3
+      would violate the project's falsification discipline.
+    tags: [falcon, sim, gazebo, odometry, hover, bistability, honest-fail, v0.19.7]
+    fields:
+      bench-evidence-dir: bench-evidence/gz-sim/
+      bench-date: "2026-05-28"
+      gz-version: "8.11.0"
+      best-run: "alt-only final=0.012 m rms=0.016 m (perfect hover)"
+      reliability: "bistable — same config gives 0.02 m or 1.97 m run-to-run"
+      velocity-source: "gz OdometryPublisher twist (true), replaces finite-diff NavSat"
+      goal-met: false
+      v0.19.8-design-items:
+        - "relay-mix-quad hover thrust floor (verified change + Verus contract)"
+        - "deterministic startup sequencing / attitude-hold-from-t0"
+        - "relay-ekf accel down-weighting at high |a|"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P04

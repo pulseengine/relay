@@ -1996,6 +1996,70 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.19.5
 
+  - id: FEAT-FALCON-v0.19.7
+    type: feature
+    title: "v0.19.7 — true-velocity odometry + hover bistability characterization"
+    status: approved
+    description: >
+      LANDED (honest partial). Builds on v0.19.6's frame fix with a
+      deterministic velocity source + velocity-cascade altitude
+      controller. HONEST OUTCOME: reliable tight hover NOT achieved.
+      The controller demonstrably CAN hold a perfect hover (0.02 m RMS
+      in a good run) but the gz full-hover is bistable — same config
+      gives 0.02 m one run, grounded 1.97 m the next. Three coupled
+      root causes characterised; closing them is control co-design,
+      not gain-tuning.
+
+      Shipped (real, reliable):
+        1. True body velocity via gz-sim-odometry-publisher-system →
+           /model/quad/odometry. Bridge defines minimal local Odometry
+           (twist-only), subscribes, ENU→NED, exposes via new
+           Physics::velocity_ned(). Replaces finite-diff-of-NavSat.
+        2. Velocity-cascade altitude (alt-rate) + thrust clamp 0.88
+           for torque headroom.
+        3. PosController tuned for 2 kg (hover_thrust 0.5→0.72).
+
+      Headline: alt-only run A = final 0.012 m / rms 0.016 m (PERFECT
+      ±2 cm hover); run B = 1.972 m (grounded). Verified mixer +
+      controller correct; the issue is RELIABILITY (startup basin).
+
+      Three coupled root causes (→ v0.19.8 design items):
+        1. startup tip-over (no attitude control) → deterministic
+           startup sequencing / attitude-hold-from-t0.
+        2. mixer thrust/torque limit cycle → relay-mix-quad reserves a
+           hover thrust floor (VERIFIED change + Verus contract).
+        3. EKF attitude during vertical accel → relay-ekf accel
+           down-weighting at high |a|.
+
+      Verification:
+        - cargo test --workspace → green; -p falcon-sitl-gz
+          --features gazebo → 9/9.
+        - frame-check oracle still AGREE; odometry true velocity
+          delivered.
+        - rivet validate → PASS.
+
+      Honest status: v0.19.7 goal ("full cascade 30 s hover PASS") NOT
+      met reliably. Delivered the velocity infrastructure + a
+      controller that can hover + a precise bistability diagnosis.
+      Claiming a 1-in-3 gain set "works" would violate the project's
+      falsification discipline. The reliable PASS is gated on the
+      three design changes, the largest (mixer thrust floor) being a
+      verified-component change deserving its own oracle-gated release.
+    tags: [falcon, milestone, v0.19.7, gazebo, odometry, hover, honest-partial, landed]
+    fields:
+      release-target: "true-velocity odometry + hover bistability characterization"
+      bench-date: "2026-05-28"
+      best-run: "alt-only final=0.012 m rms=0.016 m (perfect hover)"
+      reliability: "bistable (0.02 m or 1.97 m run-to-run)"
+      goal-met: false
+      v0.19.8-design-items:
+        - "relay-mix-quad hover thrust floor (verified + Verus contract)"
+        - "deterministic startup sequencing / attitude-hold-from-t0"
+        - "relay-ekf accel down-weighting at high |a|"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.6
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -2032,4 +2096,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.6
+        target: FEAT-FALCON-v0.19.7
