@@ -107,6 +107,8 @@ fn run_scenario(
     match scenario {
         "hover" => run_closed_loop_hover(physics, duration_s, evidence),
         "open-loop-climb" => run_open_loop_climb(physics, duration_s, evidence),
+        "alt-only" => run_alt_only_hover(physics, duration_s, evidence),
+        "alt-rate" => run_alt_rate_hover(physics, duration_s, evidence),
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -114,6 +116,232 @@ fn run_scenario(
             run_closed_loop_hover(physics, duration_s, evidence)
         }
     }
+}
+
+/// v0.19.5 — alt-only thrust + rate-pid attitude damping (zero rate
+/// setpoint = "stay level"). The minimal closed-loop hover: P+D
+/// altitude controller for thrust + relay-rate's verified PID for
+/// rotational stability, no position controller, no attitude
+/// controller. If this PASSes, the v0.19.4 cascade's instability is
+/// localised to POS+ATT (interaction of horizontal position feedback
+/// with attitude-setpoint propagation during the first transient).
+fn run_alt_rate_hover(
+    physics: &mut dyn Physics,
+    duration_s: f32,
+    mut evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    let mut rate_pid = RatePid::new();
+    let mut mixer = QuadMixer::new();
+    let setpoint_d = -2.0_f32;
+    let hover_thrust = 0.72_f32;
+    let kp_alt = 0.05_f32;
+    let kd_alt = 0.15_f32;
+    let lp_alpha = 0.05_f32;
+    let dt = 0.01_f32;
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let pace_real_time = physics.counters().is_some();
+
+    let mut peak_dist_err = 0.0_f32;
+    let mut min_dist_seen = f32::INFINITY;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0_usize;
+    let steady_start_t = (duration_s - 5.0).max(0.0);
+    let mut last_pos_d: f32 = 0.0;
+    let mut v_d_filt: f32 = 0.0;
+    let mut last_pos_d_seen: f32 = 0.0;
+
+    let started_at = Instant::now();
+    for step in 0..n {
+        let tick_start = Instant::now();
+        let t = step as f32 * dt;
+
+        let (imu_sample, pos_ned) = physics.measure(0.0);
+        last_pos_d_seen = pos_ned[2];
+        let v_d_raw = (pos_ned[2] - last_pos_d) / dt;
+        v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
+        last_pos_d = pos_ned[2];
+
+        let alt_err = setpoint_d - pos_ned[2];
+        let thrust = (hover_thrust - kp_alt * alt_err + kd_alt * v_d_filt).clamp(0.0, 1.0);
+
+        // v0.19.5 — first 0.5 s is a "spawn hold": uniform thrust,
+        // no torque. Without this the rate-pid responds to spawn
+        // transients (rotor imbalance + IMU noise) by demanding
+        // torque, which the mixer's priority-preserving saturation
+        // then converts into bang-bang motors → body tumbles off
+        // axis before steady-state can establish. After the hold,
+        // rate-pid takes over with the body already airborne + level.
+        let torque_raw = if t < 0.5 {
+            [0.0_f32; 3]
+        } else {
+            rate_pid.tick(rate_ts_of(t), imu_sample.gyro_body, [0.0_f32; 3])
+        };
+        // v0.19.5 — NEGATE torque. The bridge's enu_to_ned gyro
+        // conversion + the mixer's NED torque convention + gz's ENU
+        // plugin frame compose to an overall sign flip on the roll/
+        // pitch torque path: feeding rate-pid output straight to the
+        // mixer drove POSITIVE feedback (body spun up). Negating
+        // closes the loop with the correct damping sign. (Yaw axis
+        // unaffected in practice — diagonal pairs cancel.)
+        let torque = [-torque_raw[0], -torque_raw[1], -torque_raw[2]];
+
+        let motors = mixer.mix(torque, thrust);
+        physics.step(motors, dt);
+
+        let dist = alt_err.abs();
+        if dist > peak_dist_err { peak_dist_err = dist; }
+        if dist < min_dist_seen { min_dist_seen = dist; }
+        if t >= steady_start_t {
+            sum_sq_steady += dist * dist;
+            steady_count += 1;
+        }
+        if let Some(ref mut e) = evidence {
+            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
+                         motors, physics.counters());
+        }
+        if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+        }
+    }
+    let wall = started_at.elapsed();
+    let final_dist = (setpoint_d - last_pos_d_seen).abs();
+    let rms_steady = if steady_count > 0 {
+        (sum_sq_steady / steady_count as f32).sqrt()
+    } else {
+        f32::NAN
+    };
+    let counters = physics.counters();
+    println!(
+        "  verdict: backend={} scenario=alt-rate steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
+        physics.name(), n, final_dist, peak_dist_err, rms_steady, wall.as_secs_f32(),
+    );
+    if let Some((imu_recv, navsat_recv, motor_send)) = counters {
+        println!(
+            "  counters: imu_recv={imu_recv} navsat_recv={navsat_recv} motor_send={motor_send}",
+        );
+    }
+    if let Some(ref mut e) = evidence {
+        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
+                              min_dist_seen, wall.as_secs_f32(), counters);
+    }
+    final_dist < 0.5 && rms_steady < 1.0
+}
+
+/// v0.19.5 diagnostic — altitude-only closed loop. Skips the full
+/// cascade (no EKF, no POS, no ATT, no RATE); feeds thrust = hover +
+/// P * altitude_error to the mixer with zero torque. If THIS hovers,
+/// the v0.19.4 cascade-tuning issue is in the upper cascade layers
+/// (POS / ATT / RATE producing torque that the mixer saturates,
+/// starving thrust). If it doesn't hover, the bridge or SDF has a
+/// deeper bug.
+fn run_alt_only_hover(
+    physics: &mut dyn Physics,
+    duration_s: f32,
+    mut evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    let mut mixer = QuadMixer::new();
+    let setpoint_d = -2.0_f32;
+    let hover_thrust = 0.72_f32;
+    // v0.19.5 alt-only PD diagnostic gains. Tuned for a 700 g body
+    // with the falcon-quad SDF's hover-thrust headroom. v_d is
+    // finite-differenced from 50 Hz NavSat → noisy at 100 Hz harness
+    // tick (raw v_d spikes ±1 m/s); low-pass filter `lp_alpha`
+    // smooths it before D-feedback.
+    //
+    // PI+D: gentle kp (0.05) keeps the altitude loop from coupling
+    // into attitude (kp=0.15 destabilized → horizontal drift). A
+    // small ki integrates out the ~0.9 m steady-state error a P-only
+    // loop left below the 2 m setpoint. kd damps the climb.
+    let kp_alt = 0.05_f32;
+    let ki_alt = 0.02_f32;
+    let kd_alt = 0.15_f32;
+    let i_max = 0.30_f32; // anti-windup bound on the thrust integral
+    let lp_alpha = 0.05_f32; // heavy smoothing
+    let dt = 0.01_f32;
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let pace_real_time = physics.counters().is_some();
+
+    let mut peak_dist_err = 0.0_f32;
+    let mut min_dist_seen = f32::INFINITY;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0_usize;
+    let steady_start_t = (duration_s - 5.0).max(0.0);
+    let mut last_pos_d: f32 = 0.0;
+    let mut v_d_filt: f32 = 0.0;
+    let mut alt_integral: f32 = 0.0;
+
+    let started_at = Instant::now();
+    for step in 0..n {
+        let tick_start = Instant::now();
+        let t = step as f32 * dt;
+
+        let (imu_sample, pos_ned) = physics.measure(0.0);
+        // finite-diff vertical velocity, low-pass filtered.
+        let v_d_raw = (pos_ned[2] - last_pos_d) / dt;
+        v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
+        last_pos_d = pos_ned[2];
+
+        // altitude error in NED: alt_err = setpoint_d - body_d.
+        // setpoint_d = -2 (2 m altitude); body starts near 0.
+        // Initial alt_err = -2 (need to climb → INCREASE thrust).
+        // PI+D: thrust = hover - kp*err - ki*∫err + kd*v_d.
+        // (alt_err negative below setpoint, so -kp*err and -ki*∫err
+        //  both raise thrust to climb.)
+        let alt_err = setpoint_d - pos_ned[2];
+        alt_integral = (alt_integral + alt_err * dt).clamp(-i_max / ki_alt, i_max / ki_alt);
+        let thrust = (hover_thrust
+            - kp_alt * alt_err
+            - ki_alt * alt_integral
+            + kd_alt * v_d_filt)
+            .clamp(0.0, 1.0);
+        let motors = mixer.mix([0.0_f32; 3], thrust);
+        physics.step(motors, dt);
+
+        let dist = alt_err.abs();
+        if dist > peak_dist_err { peak_dist_err = dist; }
+        if dist < min_dist_seen { min_dist_seen = dist; }
+        if t >= steady_start_t {
+            sum_sq_steady += dist * dist;
+            steady_count += 1;
+        }
+        if let Some(ref mut e) = evidence {
+            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
+                         motors, physics.counters());
+        }
+        if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+        }
+    }
+    let wall = started_at.elapsed();
+    let final_dist = (setpoint_d - last_pos_d).abs();
+    let rms_steady = if steady_count > 0 {
+        (sum_sq_steady / steady_count as f32).sqrt()
+    } else {
+        f32::NAN
+    };
+    let counters = physics.counters();
+    println!(
+        "  verdict: backend={} scenario=alt-only steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
+        physics.name(), n, final_dist, peak_dist_err, rms_steady, wall.as_secs_f32(),
+    );
+    if let Some((imu_recv, navsat_recv, motor_send)) = counters {
+        println!(
+            "  counters: imu_recv={imu_recv} navsat_recv={navsat_recv} motor_send={motor_send}",
+        );
+    }
+    if let Some(ref mut e) = evidence {
+        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
+                              min_dist_seen, wall.as_secs_f32(), counters);
+    }
+    final_dist < 0.5 && rms_steady < 1.0
 }
 
 /// v0.19.4 — closed-loop hover. Mirrors `falcon-sitl-hover`'s

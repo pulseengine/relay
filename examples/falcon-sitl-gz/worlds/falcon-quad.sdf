@@ -99,10 +99,18 @@
       <link name="base_link">
         <gravity>true</gravity>
         <self_collide>false</self_collide>
+        <!-- v0.19.5 — body bumped from 0.7 kg / 0.0035 kg⋅m² to
+             2.0 kg / 0.0217 kg⋅m² (x500-class). v0.19.4's smaller
+             inertia made the cascade marginally stable: a single
+             motor's thrust at offset 0.0884 m gave ~150 rad/s²
+             angular acceleration, far faster than the rate-PID's
+             100 Hz damping bandwidth → positive feedback. x500
+             inertia matches the PosController/RatePid default
+             gains' implicit ~1 kg body assumption. -->
         <inertial>
-          <mass>0.700</mass>
+          <mass>2.000</mass>
           <inertia>
-            <ixx>0.0035</ixx><iyy>0.0035</iyy><izz>0.0070</izz>
+            <ixx>0.0217</ixx><iyy>0.0217</iyy><izz>0.0400</izz>
             <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
           </inertia>
         </inertial>

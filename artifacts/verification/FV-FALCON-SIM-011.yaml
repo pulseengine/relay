@@ -1,0 +1,98 @@
+artifacts:
+  - id: FV-FALCON-SIM-011
+    type: sw-verification
+    title: "v0.19.5 — first controlled-hover PASS (10 s) + flight recording"
+    status: approved
+    description: >
+      First PASS verdict for a controlled hover under real gz physics,
+      plus the first flight recording. The quad lifts off and holds the
+      2 m setpoint; a 10 s hover meets PASS criteria (final < 0.5 m,
+      RMS < 1.0 m). v0.19.3 was open-loop ballistic; v0.19.4 wired the
+      full cascade but it didn't lift; v0.19.5 closes the lift + altitude
+      hold.
+
+      Bench (10 s alt-only PI+D altitude hold):
+        steps:       1000
+        final_dist:  0.359 m
+        rms_steady:  0.390 m  (last 5 s)
+        min_dist:    0.002 m
+        counters:    imu_recv=2372 (204 Hz) navsat_recv=581 (50 Hz)
+                     motor_send=1000
+        verdict:     PASS
+
+      v0.19.4 → v0.19.5 fixes (all root-caused from the mixer
+      torque-saturation that left the body on the ground):
+        1. Body inertia 0.7 kg/0.0035 → 2.0 kg/0.0217 (x500-class).
+           Low inertia gave ~150 rad/s² angular accel from one motor's
+           offset thrust — beyond the 100 Hz rate loop's damping
+           bandwidth → positive feedback. Default controller gains
+           assume ~1 kg.
+        2. hover_thrust 0.5 → 0.72. At 2 kg the body weighs 19.6 N;
+           SDF motors give 12.3 N at 0.5 PWM (can't lift), 19.6 N at
+           ~0.72 PWM.
+        3. Altitude PI+D with anti-windup — P-only hovered 0.9 m below
+           setpoint; integral drives it to the 2 m target
+           (min_dist=0.002 m).
+
+      Recording artifacts (video published to YouTube, NOT committed —
+      mp4/mov/webm are gitignored under recordings/; the repo keeps the
+      reproducible text evidence + render scripts):
+        - recordings/1779942904-gazebo-alt-only-{harness.log,ticks.csv}
+          — the PASS run's verdict + per-tick log (the data the video
+          visualises).
+        - examples/falcon-sitl-gz/scripts/animate_flight.py — renders
+          the trajectory animation (mp4) uploaded to YouTube.
+        - examples/falcon-sitl-gz/scripts/{record_gazebo_flight.sh,
+          gui-video.config} — one-command gz VideoRecorder capture of
+          live Gazebo 3D footage (needs a display).
+
+      What the PASS is:
+        Verified relay-mix-quad maps thrust → 4 motors; gz
+        MulticopterMotorModel applies it; body holds altitude within
+        0.36 m for 10 s. The altitude controller is a hand-written
+        PI+D (the alt-only diagnostic scenario).
+
+      What it ISN'T:
+        - The full verified cascade (relay-ekf → relay-pos →
+          relay-att → relay-rate) holding hover. That path
+          (--scenario=hover) still has the v0.19.4 instability: a
+          frame-convention sign mismatch between relay's NED torque
+          and gz's ENU MulticopterMotorModel. Negating roll/pitch
+          torque stabilised the first second; sustained hover needs
+          the CW/CCW spin directions reconciled under the ENU↔NED
+          Z-flip + attitude-angle hold. v0.19.6.
+        - Sustained beyond ~12 s. Horizontal drift sets in without
+          attitude hold; the 10 s PASS window is genuine controlled
+          hover.
+        - The committed mp4 is not Gazebo's render — it's a faithful
+          trajectory animation; record_gazebo_flight.sh produces the
+          actual gz 3D footage.
+
+      Verification:
+        - cargo test --workspace --all-targets → 406 passing.
+        - cargo test -p falcon-sitl-gz --features gazebo → 8/8.
+        - gz sim + alt-only bench (10 s) → PASS.
+        - animate_flight.py → 250-frame 10 s mp4 (h264, 310 KB).
+        - rivet validate → PASS.
+
+      v0.19.6 candidates:
+        - Frame-correct the cascade torque path end-to-end (gyro
+          conversion + mixer output + rotor spin) so --scenario=hover
+          holds level.
+        - Attitude-angle hold → no horizontal drift → 30 s hover.
+        - gz VideoRecorder footage of the full-cascade hover.
+    tags: [falcon, sim, gazebo, bench-evidence, controlled-hover, pass, recording, v0.19.5]
+    fields:
+      bench-evidence-dir: bench-evidence/gz-sim/
+      bench-date: "2026-05-28"
+      gz-version: "8.11.0"
+      counters-observed: "imu_recv=2372 navsat_recv=581 motor_send=1000"
+      final_dist_m: 0.359
+      rms_steady_m: 0.390
+      verdict: PASS
+      recording: "YouTube (gitignored locally); regenerate via animate_flight.py from recordings/1779942904-*-ticks.csv"
+      controller: "alt-only PI+D (hand-written) + verified relay-mix-quad"
+      deferred-to-v0.19.6: "full verified cascade hover (NED↔ENU frame reconciliation + attitude-angle hold)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P04
