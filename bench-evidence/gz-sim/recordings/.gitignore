@@ -1,0 +1,9 @@
+# Flight recordings (mp4/mov/webm) are uploaded to YouTube, not committed —
+# they're large binaries and the trajectory CSV + harness log here are the
+# reproducible text evidence. Regenerate video with:
+#   examples/falcon-sitl-gz/scripts/animate_flight.py  (trajectory animation)
+#   examples/falcon-sitl-gz/scripts/record_gazebo_flight.sh  (gz 3D footage)
+*.mp4
+*.mov
+*.webm
+*.mkv
