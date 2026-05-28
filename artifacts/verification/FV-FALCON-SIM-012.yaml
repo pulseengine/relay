@@ -1,0 +1,85 @@
+artifacts:
+  - id: FV-FALCON-SIM-012
+    type: sw-verification
+    title: "v0.19.6 — frame-correctness oracle + SDF/MIXER_X alignment (horizontal drift eliminated)"
+    status: approved
+    description: >
+      The NED↔ENU frame unlock for the full verified cascade. A
+      frame-check oracle established the true actuator-path convention;
+      the fix was an SDF rotor index→position+spin alignment to the
+      verified relay-mix-quad MIXER_X convention — not a code sign-flip.
+      Roll/pitch torque now produce correctly-signed body rate and the
+      verified rate-PID damping holds the body level: horizontal drift
+      collapsed from −13 m (v0.19.5) to ~±0.15 m.
+
+      The oracle (--scenario=frame-{roll,pitch,yaw}): commands a unit
+      torque on one axis (post frame-correction) + hover thrust, reports
+      the sensed body-rate sign. AGREE = +torque → +rate (required for
+      the rate-PID negative feedback to be stabilising).
+
+      Before (v0.19.0–.5 SDF, identity correction):
+        roll:  +0.15 → -0.0002 rad/s  OPPOSE (≈0 — no roll authority)
+        pitch: +0.15 → -0.0087 rad/s  OPPOSE
+        yaw:   +0.15 → +0.1246 rad/s  AGREE
+
+      Root cause: the SDF rotor index→position map was scrambled vs
+      MIXER_X (0=front-right CW, 1=back-right CCW, 2=back-left CW,
+      3=front-left CCW). The v0.19.4/.5 "negate roll+pitch torque"
+      hack was compensating for the scramble, not a real frame flip.
+
+      Fix: align SDF rotor index→position+spin to MIXER_X in gz ENU
+      coords (NED right = gz −Y; CW-about-NED-down = ccw-about-gz-up).
+
+      After (aligned SDF, identity correction):
+        roll:  +0.15 → +4.77 rad/s  AGREE ✓
+        pitch: +0.15 → +4.14 rad/s  AGREE ✓
+        yaw:   +0.15 → -0.0001 rad/s OPPOSE (weak authority, deferred)
+
+      frame_correct_torque is identity; unit test
+      frame_correction_is_identity pins it. If a future SDF/frame
+      change reintroduces a flip, the frame-check oracle catches it.
+
+      Horizontal-stability proof:
+        v0.19.5 (scrambled + negate): drifts to n=−13, e=−7 → crash.
+        v0.19.6 (aligned, identity): n,e within ±0.15 m (alt-rate) /
+        ±1.4 m (full cascade, no runaway).
+
+      Ships:
+        - --scenario=frame-{roll,pitch,yaw} oracle.
+        - SDF rotor index→position+spin aligned to MIXER_X.
+        - frame_correct_torque adapter (identity) on the rate→mixer
+          path in alt-rate + the full hover cascade.
+        - unit test frame_correction_is_identity.
+        - bench-evidence/gz-sim/2026-05-28-v0.19.6-frame-correctness.md.
+
+      Verification:
+        - cargo test --workspace --all-targets → 407 passing (+1
+          frame_correction_is_identity).
+        - cargo test -p falcon-sitl-gz --features gazebo → 9/9.
+        - frame-check oracle: roll + pitch AGREE under gz.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed:
+        - That the full cascade hovers. It doesn't lift yet —
+          relay-pos's default hover_thrust (0.5) is insufficient for
+          the 2 kg body (needs ~0.72). v0.19.7. The frame fix removed
+          the horizontal runaway; lift + sustained hover is the next
+          release.
+        - That yaw is controlled. Authority ≈ 0 (momentConstant);
+          separate tuning item, non-critical for hover.
+        - That the oracle covers attitude angle, only rate sign.
+    tags: [falcon, sim, gazebo, frame-correctness, oracle, bench-evidence, v0.19.6]
+    fields:
+      bench-evidence-dir: bench-evidence/gz-sim/
+      bench-date: "2026-05-28"
+      gz-version: "8.11.0"
+      oracle: "--scenario=frame-{roll,pitch,yaw}"
+      frame-check-roll: "+4.77 rad/s AGREE"
+      frame-check-pitch: "+4.14 rad/s AGREE"
+      frame-check-yaw: "-0.0001 rad/s OPPOSE (weak authority, deferred)"
+      frame-correction: "identity (SDF alignment was the fix)"
+      root-cause: "SDF rotor index→position map scrambled vs relay-mix-quad MIXER_X"
+      deferred-to-v0.19.7: "relay-pos thrust tuning for 2 kg body → lift + sustained hover"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P04

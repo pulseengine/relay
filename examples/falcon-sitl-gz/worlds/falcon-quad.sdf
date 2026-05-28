@@ -153,12 +153,17 @@
       </link>
 
       <!-- ─── 4 rotors (X-configuration) ─── -->
-      <!-- Mixer convention (crates/relay-mix-quad):
-             0 = front-right, CCW
-             1 = back-left,   CCW
-             2 = front-left,  CW
-             3 = back-right,  CW
-           Diagonal pairs share spin for yaw balance. -->
+      <!-- v0.19.6 — rotor index→position+spin aligned to the ACTUAL
+           verified relay-mix-quad MIXER_X convention (the v0.19.0–.5
+           SDF had a scrambled index map → roll authority ≈ 0):
+             mixer 0 = front-right, CW(NED)   → gz (+X, -Y), ccw(gz)
+             mixer 1 = back-right,  CCW(NED)  → gz (-X, -Y), cw(gz)
+             mixer 2 = back-left,   CW(NED)   → gz (-X, +Y), ccw(gz)
+             mixer 3 = front-left,  CCW(NED)  → gz (+X, +Y), cw(gz)
+           gz frame is ENU (Y-left, Z-up); NED right = gz -Y, and a
+           CW-about-NED-down rotor is ccw-about-gz-up. The residual
+           per-axis torque sign is handled by frame_correct_torque
+           (derived by the frame-check oracle). -->>
 
       <link name="rotor_0">
         <gravity>true</gravity>
@@ -189,7 +194,7 @@
       <link name="rotor_1">
         <gravity>true</gravity>
         <self_collide>false</self_collide>
-        <pose>-0.0884 0.0884 0.025 0 0 0</pose>
+        <pose>-0.0884 -0.0884 0.025 0 0 0</pose>
         <inertial>
           <mass>0.010</mass>
           <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
@@ -215,7 +220,7 @@
       <link name="rotor_2">
         <gravity>true</gravity>
         <self_collide>false</self_collide>
-        <pose>0.0884 0.0884 0.025 0 0 0</pose>
+        <pose>-0.0884 0.0884 0.025 0 0 0</pose>
         <inertial>
           <mass>0.010</mass>
           <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
@@ -241,7 +246,7 @@
       <link name="rotor_3">
         <gravity>true</gravity>
         <self_collide>false</self_collide>
-        <pose>-0.0884 -0.0884 0.025 0 0 0</pose>
+        <pose>0.0884 0.0884 0.025 0 0 0</pose>
         <inertial>
           <mass>0.010</mass>
           <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
@@ -293,7 +298,7 @@
               name="gz::sim::systems::MulticopterMotorModel">
         <jointName>rotor_1_joint</jointName>
         <linkName>rotor_1</linkName>
-        <turningDirection>ccw</turningDirection>
+        <turningDirection>cw</turningDirection>
         <timeConstantUp>0.0125</timeConstantUp>
         <timeConstantDown>0.025</timeConstantDown>
         <maxRotVelocity>1000.0</maxRotVelocity>
@@ -310,7 +315,7 @@
               name="gz::sim::systems::MulticopterMotorModel">
         <jointName>rotor_2_joint</jointName>
         <linkName>rotor_2</linkName>
-        <turningDirection>cw</turningDirection>
+        <turningDirection>ccw</turningDirection>
         <timeConstantUp>0.0125</timeConstantUp>
         <timeConstantDown>0.025</timeConstantDown>
         <maxRotVelocity>1000.0</maxRotVelocity>

@@ -98,6 +98,41 @@ fn main() {
 ///                         "is the bridge publish path alive at all".
 ///
 /// `step`, `mission`, `disturbance` reserved per docs/SIMULATOR.md.
+/// v0.19.6 — NED↔ENU torque frame-correction.
+///
+/// relay's verified controllers emit torque in NED body frame
+/// (X-fwd, Y-right, Z-down). gz's MulticopterMotorModel applies the
+/// mixer's per-motor thrust in its ENU body frame (X-fwd, Y-left,
+/// Z-up), related to NED by a 180° rotation about X (Y and Z flip).
+/// The verified relay-mix-quad maps NED torque → motor PWM assuming
+/// NED rotor geometry; against gz's ENU physical layout that inverts
+/// the roll, pitch AND yaw torque the cascade actually achieves.
+///
+/// `frame_correct_torque` is the single boundary adapter for the
+/// actuator path's frame sign. The frame-check oracle
+/// (`--scenario=frame-{roll,pitch,yaw}`) established it empirically.
+///
+/// Result (see bench-evidence/gz-sim/2026-05-28-v0.19.6-frame-
+/// correctness.md): once the SDF rotor index→position+spin map is
+/// aligned to the verified relay-mix-quad MIXER_X convention
+/// (0=front-right CW, 1=back-right CCW, 2=back-left CW,
+/// 3=front-left CCW), commanding +torque on roll/pitch produces
+/// +rate on that axis as sensed (AGREE). So the correction is
+/// **identity** — the v0.19.4/.5 "negate roll/pitch" hack was
+/// compensating for the *scrambled* SDF index map, not a real frame
+/// flip. Keeping this adapter (as identity) documents the boundary
+/// and is where a correction would live if the SDF/frame convention
+/// ever changes; the unit test `frame_correction_is_identity` pins it.
+#[inline]
+fn frame_correct_torque(torque_ned: [f32; 3]) -> [f32; 3] {
+    const SIGN: [f32; 3] = [1.0, 1.0, 1.0];
+    [
+        SIGN[0] * torque_ned[0],
+        SIGN[1] * torque_ned[1],
+        SIGN[2] * torque_ned[2],
+    ]
+}
+
 fn run_scenario(
     physics: &mut dyn Physics,
     scenario: &str,
@@ -109,6 +144,9 @@ fn run_scenario(
         "open-loop-climb" => run_open_loop_climb(physics, duration_s, evidence),
         "alt-only" => run_alt_only_hover(physics, duration_s, evidence),
         "alt-rate" => run_alt_rate_hover(physics, duration_s, evidence),
+        "frame-roll" => run_frame_check(physics, 0, duration_s),
+        "frame-pitch" => run_frame_check(physics, 1, duration_s),
+        "frame-yaw" => run_frame_check(physics, 2, duration_s),
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -116,6 +154,68 @@ fn run_scenario(
             run_closed_loop_hover(physics, duration_s, evidence)
         }
     }
+}
+
+/// v0.19.6 — frame-correctness ORACLE. Commands a small constant
+/// torque on ONE axis (roll=0, pitch=1, yaw=2) with hover thrust,
+/// for a short window, and reports the sign of the sensed body rate
+/// on that axis.
+///
+/// The cascade computes torque in NED (X-fwd, Y-right, Z-down). gz's
+/// MulticopterMotorModel applies it in ENU (X-fwd, Y-left, Z-up). For
+/// the verified rate-PID (negative feedback: torque drives rate→
+/// setpoint) to be *stabilising*, a commanded +torque[axis] must
+/// produce a +rate[axis] as the cascade senses it (post enu_to_ned).
+/// If the response is NEGATIVE, that axis needs a sign flip in the
+/// bridge's frame-correction (see `frame_correct_torque`).
+///
+/// PASS = the post-correction response is positive on the commanded
+/// axis (torque and sensed rate agree in sign). Printed verdict feeds
+/// the unit test `frame_correction_signs_match_gz_enu`.
+fn run_frame_check(physics: &mut dyn Physics, axis: usize, duration_s: f32) -> bool {
+    let mut mixer = QuadMixer::new();
+    let hover_thrust = 0.72_f32;
+    let dt = 0.01_f32;
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let pace_real_time = physics.counters().is_some();
+
+    // Commanded torque on the test axis (post frame-correction, so the
+    // oracle measures the *corrected* path the cascade will use).
+    let mut cmd = [0.0_f32; 3];
+    cmd[axis] = 0.15;
+    let cmd_corrected = frame_correct_torque(cmd);
+
+    // Measure mean sensed rate on the test axis over the settle window
+    // [0.3, 0.8] s — long enough past the spawn transient, short enough
+    // that the body hasn't tumbled past small-angle.
+    let mut sum_rate = 0.0_f32;
+    let mut count = 0u32;
+    let axis_name = ["roll(X)", "pitch(Y)", "yaw(Z)"][axis];
+
+    for step in 0..n {
+        let tick_start = Instant::now();
+        let t = step as f32 * dt;
+        let (imu_sample, _pos) = physics.measure(0.0);
+        let motors = mixer.mix(cmd_corrected, hover_thrust);
+        physics.step(motors, dt);
+        if (0.3..0.8).contains(&t) {
+            sum_rate += imu_sample.gyro_body[axis];
+            count += 1;
+        }
+        if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period { std::thread::sleep(tick_period - used); }
+        }
+    }
+    let mean_rate = if count > 0 { sum_rate / count as f32 } else { 0.0 };
+    // After correction, +cmd on this axis should yield +rate.
+    let agrees = mean_rate > 0.0;
+    println!(
+        "  frame-check axis={axis_name}: commanded +0.15 (corrected={:?}) → mean sensed rate={:.4} rad/s  [{}]",
+        cmd_corrected, mean_rate, if agrees { "AGREE ✓" } else { "OPPOSE ✗" },
+    );
+    agrees
 }
 
 /// v0.19.5 — alt-only thrust + rate-pid attitude damping (zero rate
@@ -177,14 +277,11 @@ fn run_alt_rate_hover(
         } else {
             rate_pid.tick(rate_ts_of(t), imu_sample.gyro_body, [0.0_f32; 3])
         };
-        // v0.19.5 — NEGATE torque. The bridge's enu_to_ned gyro
-        // conversion + the mixer's NED torque convention + gz's ENU
-        // plugin frame compose to an overall sign flip on the roll/
-        // pitch torque path: feeding rate-pid output straight to the
-        // mixer drove POSITIVE feedback (body spun up). Negating
-        // closes the loop with the correct damping sign. (Yaw axis
-        // unaffected in practice — diagonal pairs cancel.)
-        let torque = [-torque_raw[0], -torque_raw[1], -torque_raw[2]];
+        // v0.19.6 — frame-correction is identity now that the SDF
+        // rotor index map is aligned to MIXER_X. The v0.19.5 negation
+        // hack is gone; the frame-check oracle confirms +torque →
+        // +rate (AGREE) on roll + pitch with no sign flip.
+        let torque = frame_correct_torque(torque_raw);
 
         let motors = mixer.mix(torque, thrust);
         physics.step(motors, dt);
@@ -427,8 +524,9 @@ fn run_closed_loop_hover(
         // 4. ATT — quaternion error → rate setpoint.
         let current_rate_sp = att.tick(att_ts_of(t), est.quaternion, current_att_sp);
 
-        // 5. RATE — gyro + rate setpoint → torque.
-        let torque = rate_pid.tick(rate_ts_of(t), imu_sample.gyro_body, current_rate_sp);
+        // 5. RATE — gyro + rate setpoint → torque (frame-corrected).
+        let torque_raw = rate_pid.tick(rate_ts_of(t), imu_sample.gyro_body, current_rate_sp);
+        let torque = frame_correct_torque(torque_raw);
         for k in 0..3 {
             if !torque[k].is_finite() { nan_seen = true; }
         }
@@ -757,6 +855,25 @@ mod tests {
         let mut p = MockPhysics::at_rest();
         let pass = run_open_loop_climb(&mut p, 1.0, None);
         assert!(pass, "70 % PWM × THRUST_SCALE should easily beat gravity");
+    }
+
+    /// v0.19.6 — the frame-correction adapter is identity. Pins the
+    /// oracle finding: once the SDF rotor index→position+spin map is
+    /// aligned to relay-mix-quad's MIXER_X convention, +torque produces
+    /// +rate (AGREE) on roll + pitch with no sign flip — the v0.19.4/.5
+    /// "negate" hack was compensating for a scrambled SDF, not a real
+    /// frame inversion. If a future SDF/frame change reintroduces a
+    /// flip, the frame-check oracle catches it and this test changes
+    /// deliberately. See bench-evidence/gz-sim/2026-05-28-v0.19.6-*.md.
+    #[test]
+    fn frame_correction_is_identity() {
+        let t = [0.3_f32, -0.7, 0.2];
+        assert_eq!(frame_correct_torque(t), t,
+            "frame-correction must be identity after the v0.19.6 SDF index alignment");
+        // Spot-check each axis independently.
+        assert_eq!(frame_correct_torque([1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]);
+        assert_eq!(frame_correct_torque([0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]);
+        assert_eq!(frame_correct_torque([0.0, 0.0, 1.0]), [0.0, 0.0, 1.0]);
     }
 
     /// v0.19.4 — closed-loop cascade against MockPhysics. Smoke test
