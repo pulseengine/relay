@@ -1930,6 +1930,72 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.19.4
 
+  - id: FEAT-FALCON-v0.19.6
+    type: feature
+    title: "v0.19.6 — frame-correctness oracle + SDF/MIXER_X alignment"
+    status: approved
+    description: >
+      LANDED. The NED↔ENU frame unlock for the full verified cascade.
+      A frame-check oracle established the true actuator-path
+      convention; the fix was an SDF rotor index→position+spin
+      alignment to relay-mix-quad's MIXER_X convention — not a code
+      sign-flip. Roll/pitch torque now produce correctly-signed body
+      rate; the verified rate-PID damping holds the body level.
+      Horizontal drift collapsed from −13 m (v0.19.5) to ~±0.15 m.
+
+      Oracle (--scenario=frame-{roll,pitch,yaw}): commands unit torque
+      on one axis + hover thrust, reports sensed body-rate sign.
+      AGREE = +torque→+rate (needed for rate-PID negative feedback to
+      stabilise).
+
+      Before (scrambled SDF): roll ≈ 0 (no authority!), pitch OPPOSE,
+      yaw AGREE. Root cause: SDF rotor index→position map scrambled vs
+      MIXER_X (0=front-right CW, 1=back-right CCW, 2=back-left CW,
+      3=front-left CCW). The v0.19.4/.5 negate-torque hack was
+      compensating for the scramble.
+
+      After (aligned SDF, identity correction): roll +4.77 AGREE,
+      pitch +4.14 AGREE, yaw -0.0001 (weak authority, deferred).
+      frame_correct_torque is identity; unit test
+      frame_correction_is_identity pins it.
+
+      Horizontal-stability proof: v0.19.5 drifted to n=−13/e=−7 →
+      crash; v0.19.6 holds n,e within ±0.15 m (alt-rate) / ±1.4 m
+      (full cascade, no runaway). The frame fix removed the runaway.
+
+      Ships:
+        - --scenario=frame-{roll,pitch,yaw} oracle.
+        - SDF rotor index→position+spin aligned to MIXER_X.
+        - frame_correct_torque adapter (identity) on rate→mixer path.
+        - unit test frame_correction_is_identity.
+        - bench-evidence/gz-sim/2026-05-28-v0.19.6-frame-correctness.md.
+        - FV-FALCON-SIM-012.
+
+      Verification:
+        - cargo test --workspace --all-targets → 407 passing.
+        - cargo test -p falcon-sitl-gz --features gazebo → 9/9.
+        - frame-check oracle: roll + pitch AGREE under gz.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed:
+        - Full cascade hovers. Doesn't lift yet — relay-pos default
+          hover_thrust (0.5) insufficient for the 2 kg body (~0.72
+          needed). v0.19.7. Frame fix removed horizontal runaway;
+          lift + sustained hover is next.
+        - Yaw controlled. Authority ≈ 0 (momentConstant); separate
+          tuning, non-critical for hover.
+    tags: [falcon, milestone, v0.19.6, gazebo, frame-correctness, oracle, landed]
+    fields:
+      release-target: "frame-correctness oracle + SDF/MIXER_X alignment"
+      bench-date: "2026-05-28"
+      oracle: "--scenario=frame-{roll,pitch,yaw}"
+      frame-correction: "identity (SDF alignment was the fix)"
+      horizontal-drift: "±0.15 m (was −13 m at v0.19.5)"
+      deferred-to-v0.19.7: "relay-pos thrust tuning for 2 kg → lift + sustained hover"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.5
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -1966,4 +2032,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.5
+        target: FEAT-FALCON-v0.19.6
