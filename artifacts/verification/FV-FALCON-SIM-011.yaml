@@ -90,7 +90,7 @@ artifacts:
       final_dist_m: 0.359
       rms_steady_m: 0.390
       verdict: PASS
-      recording: "YouTube (gitignored locally); regenerate via animate_flight.py from recordings/1779942904-*-ticks.csv"
+      recording: "https://youtu.be/B6JlFE8pPZ4 (mp4 gitignored locally; regenerate via animate_flight.py from recordings/1779942904-*-ticks.csv)"
       controller: "alt-only PI+D (hand-written) + verified relay-mix-quad"
       deferred-to-v0.19.6: "full verified cascade hover (NED↔ENU frame reconciliation + attitude-angle hold)"
     links:
