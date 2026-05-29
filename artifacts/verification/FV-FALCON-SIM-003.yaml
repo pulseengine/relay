@@ -70,7 +70,16 @@ artifacts:
       tests: 6
       steps:
         - run: cargo test -p falcon-sitl-gz
-        - run: cargo run -p falcon-sitl-gz
+        # v0.19.7 — explicit mock-meaningful smoke. The default
+        # scenario became closed-loop hover (v0.19.4); since the
+        # PosController is now tuned for the 2 kg gz airframe
+        # (hover_thrust 0.72), closed-loop hover correctly FAILs on
+        # MockPhysics (a ~500 g model that ignores attitude torque).
+        # open-loop-climb is the scenario MockPhysics can execute end-
+        # to-end (pure collective-thrust climb) — the right binary
+        # smoke. The closed-loop hover is exercised against real gz in
+        # FV-FALCON-SIM-013 (bench-only).
+        - run: cargo run -p falcon-sitl-gz -- --scenario=open-loop-climb
         - run: cargo run -p falcon-sitl-gz -- --backend=gazebo --world=falcon --model=quad  # bench-only
     links:
       - type: verifies
