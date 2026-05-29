@@ -1,0 +1,23 @@
+[package]
+name = "relay-arm"
+description = "Relay arming sequencer — verified startup state machine that gates attitude-torque authority until the body is confirmed level + airborne (v0.19.9)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Cargo tests + Kani use plain/ (no Verus tree: the sequencer's only
+# float touch is the tilt-threshold compare, so it follows relay-mix-quad's
+# plain+Kani+proptest posture rather than the integer-only Verus track).
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

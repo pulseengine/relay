@@ -2132,6 +2132,78 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.19.7
 
+  - id: FEAT-FALCON-v0.19.9
+    type: feature
+    title: "v0.19.9 — verified arming sequencer (ARM-P01) + tip-over localization"
+    status: approved
+    description: >
+      LANDED. Ships relay-arm, a Kani-verified startup state machine
+      (Disarmed → SpinUp → LevelHold → Armed) that gates attitude-torque
+      authority: the rate loop's torque reaches the mixer ONLY in Armed,
+      and Armed is reachable ONLY through a confirmed-level window. It
+      replaces the bench's ad-hoc time-only `t < 0.5 s` spawn-hold with
+      verified time+level gating — the "deterministic startup sequencing"
+      called for as fix (1) in the v0.19.7 bistability diagnosis.
+
+      Verification — Kani, not Verus (the tilt compare is f32; like
+      relay-mix-quad this is off the integer Verus track). The gating
+      invariant is INDUCTIVE over one tick(), so the bounded check covers
+      all input sequences:
+        cargo kani verify_arming_torque_gated → 143 checks SUCCESSFUL
+          (torque_authority ⟺ Armed; a new entry into Armed comes only
+           from LevelHold with the level gate satisfied; phase ∈ [0,3];
+           thrust_scale ∈ [0,1] finite)
+        cargo kani verify_arming_total → 137 checks SUCCESSFUL
+          (panic-free + thrust bounded for NaN/∞ tilt, zero spin-up)
+      Plus proptest + unit tests (5/5): torque-gated-until-level,
+      tilt-resets-count, NaN-never-arms, monotonic spin-up ramp.
+
+      FALSIFICATION (the empirical value): I set out to "kill RC#1
+      startup tip-over" — the gz data falsified that framing. With the
+      correct NavSat home, the gated AND ungated startups both hand off a
+      LEVEL body (0° through arming at 0.40 s); the body then holds level
+      ~3.5 s and only tips (~88°) once the position loop dominates. The
+      tip-over is a DOWNSTREAM residual (relay-pos thrust normalisation +
+      RC#3 EKF-attitude-during-accel), not a spawn transient. The arming
+      sequencer is verified, correct, and a prerequisite building block —
+      but it is NOT what unblocks position-hold. Publishing this localizes
+      the v0.19.10+ target precisely.
+
+      Ships:
+        - crates/relay-arm: ArmingSequencer + ArmingConfig + Kani
+          harnesses + tests (new workspace member).
+        - examples/falcon-sitl-gz: sequencer wired into alt-rate AND the
+          full closed-loop cascade (which also adopts mix_thrust_floor);
+          body_tilt_rad helper; `arming` / `arming-ungated` diagnostic
+          scenarios.
+        - SWREQ-FALCON-ARM-P01 + FV-FALCON-ARM-001.
+        - bench-evidence/gz-sim/2026-05-29-v0.19.9-*.md.
+
+      Verification:
+        - cargo kani (both harnesses) → SUCCESSFUL.
+        - cargo test --workspace → green; relay-arm 5/5; falcon-sitl-gz
+          10/10.
+        - gz bench REGRESSION GATE → alt-rate 3/3 PASS at ≈0.20 m (the
+          v0.19.8 reliable hover is unaffected by wiring in the sequencer).
+        - gz bench → arming clean handoff (0° through arming).
+        - rivet validate → PASS.
+
+      Honestly NOT claimed: that arming makes full position-hold hover
+      (it does not — run_peak ~88°), nor that a gz "arming-check PASS"
+      means the quad hovers (the PASS is scoped to the startup handoff).
+      Full position-hold remains the residual, now localized to relay-pos
+      thrust + RC#3 for v0.19.10+.
+    tags: [falcon, milestone, v0.19.9, arming, sequencer, kani, falsification, landed]
+    fields:
+      release-target: "verified arming sequencer + position-hold tip-over localization"
+      bench-date: "2026-05-29"
+      verification: "Kani BMC (143 + 137 checks), inductive per tick — appropriate for the f32 tilt compare"
+      bench-result: "alt-rate 3/3 PASS ≈0.20 m (no regression); arming clean handoff; tip localized to RC#3"
+      falsification: "startup tip-over does not reproduce at spawn; tip is downstream (relay-pos thrust + RC#3)"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.8
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -2168,4 +2240,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.8
+        target: FEAT-FALCON-v0.19.9

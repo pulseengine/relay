@@ -1,0 +1,87 @@
+artifacts:
+  - id: FV-FALCON-ARM-001
+    type: sw-verification
+    title: "ARM-P01 arming-sequencer gating — Kani BMC proof + gz handoff evidence + tip-over localization (v0.19.9)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-ARM-P01: the `relay-arm::ArmingSequencer`
+      gates attitude-torque authority so the rate loop's torque is
+      applied ONLY after a confirmed-level startup, never before.
+
+      Why Kani, not Verus: the only float in the machine is the tilt
+      threshold compare; the rest is integer phase/counter logic. Like
+      relay-mix-quad (f32) this is plain Rust + Kani (CBMC) + proptest,
+      not the integer-only Verus track. The gating invariant is
+      INDUCTIVE over a single tick(), so Kani's bounded check (arbitrary
+      in-invariant state + arbitrary input, prove the invariant is
+      preserved) covers all input sequences of any length.
+
+      Kani proof (cargo kani, crates/relay-arm/plain):
+        - verify_arming_torque_gated (143 checks, SUCCESSFUL):
+            torque_authority ⟺ phase==Armed; a NEW entry into Armed
+            comes only from LevelHold with level_count+1 ≥ required (the
+            RC#1-gate — torque can never engage before confirmed level);
+            phase ∈ [0,3]; thrust_scale ∈ [0,1] and finite.
+        - verify_arming_total (137 checks, SUCCESSFUL): tick() is
+            panic-free and thrust_scale stays in [0,1] finite even for
+            NaN/∞ tilt and a zero spin-up duration.
+
+      Supporting evidence:
+        - proptest arm_p01_property_torque_implies_armed (across
+          arbitrary tick/arm sequences) + unit tests: torque-gated-
+          until-level-confirmed, tilt-resets-level-count, NaN-never-arms,
+          monotonic spin-up ramp. cargo test -p relay-arm → 5/5.
+        - body_tilt_rad geometry unit test (falcon-sitl-gz) → matches
+          atan2(|horizontal|,|vertical|) at 0/45/90°.
+        - gz bench (bench-evidence/gz-sim/2026-05-29-v0.19.9-*.md):
+            * REGRESSION GATE: --scenario=alt-rate, 3/3 consecutive PASS
+              at final_dist≈0.20 m, rms≈0.21 m / 30 s — the v0.19.8
+              reliable hover is unaffected by wiring in the sequencer.
+            * --scenario=arming: clean gated handoff (handoff_peak=0.0°
+              through arming at 0.40 s); whole-run peak ~88° is the
+              DIAGNOSTIC of the downstream residual.
+
+      Falsification finding (the empirical value of this bench):
+        The v0.19.7 "startup tip-over" (RC#1) does NOT reproduce as a
+        startup transient. The gated AND ungated startups both hand off a
+        level body (0° through arming); the body then holds level for
+        ~3.5 s and only tips once the position loop dominates. The
+        tip-over is therefore a DOWNSTREAM position-hold residual
+        (relay-pos thrust normalisation + RC#3 EKF-attitude-during-accel),
+        not a spawn transient. The arming sequencer is verified, correct,
+        and a prerequisite safety building block — but it is NOT what
+        unblocks full position-hold. This sharpens the v0.19.10+ target.
+
+      Verification:
+        - cargo kani --harness verify_arming_torque_gated → SUCCESSFUL.
+        - cargo kani --harness verify_arming_total → SUCCESSFUL.
+        - cargo test -p relay-arm → 5/5.
+        - cargo test -p falcon-sitl-gz → 10/10.
+        - cargo test --workspace → green.
+        - gz bench → alt-rate 3/3 PASS; arming clean handoff.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed:
+        - That the arming sequencer makes full position-hold hover. It
+          does not (run_peak ~88°); the residual is downstream and
+          deferred to v0.19.10+.
+        - That a gz "arming-check PASS" means the quad hovers. The PASS
+          is explicitly scoped to the startup HANDOFF (label
+          "PASS ✓ (handoff)" + a NOTE reporting the whole-run tip).
+        - That Verus proves this. It can't (float tilt compare); Kani
+          does, BMC-complete over the bounded domain, inductive per tick.
+    tags: [falcon, arming, sequencer, kani, bmc, startup, falsification, v0.19.9]
+    fields:
+      runs:
+        - "cargo kani --harness verify_arming_torque_gated  (143 checks, SUCCESSFUL)"
+        - "cargo kani --harness verify_arming_total  (137 checks, SUCCESSFUL)"
+        - "cargo test -p relay-arm  (5/5)"
+        - "cargo test -p falcon-sitl-gz  (10/10)"
+        - "gz bench --scenario=alt-rate  (3/3 PASS, final≈0.20 m — regression gate)"
+        - "gz bench --scenario=arming  (clean handoff 0°; run_peak ~88° = downstream residual)  # bench-only"
+      tool: "Kani (CBMC) — inductive single-tick proof; appropriate for the f32 tilt compare; Verus is integer-only here"
+      bench-result: "alt-rate 3/3 PASS final≈0.20 m (no regression); arming clean handoff, position-hold tip-over localized to RC#3"
+      falsification: "startup tip-over does not reproduce at spawn; tip is downstream (relay-pos thrust + RC#3)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-ARM-P01
