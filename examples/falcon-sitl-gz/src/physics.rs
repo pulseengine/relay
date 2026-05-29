@@ -50,6 +50,13 @@ pub trait Physics {
     /// but our subscriber dropped frames" — same diagnostic shape
     /// as `MavlinkBench`'s `frames_recv` / `gpi_recv` from v0.18.2.
     fn counters(&self) -> Option<(u64, u64, u64)> { None }
+
+    /// v0.19.7 — true NED body velocity (m/s), if the backend supplies
+    /// one. `None` means "no true velocity source; finite-difference
+    /// position yourself". The real gz bridge overrides this with the
+    /// OdometryPublisher twist (deterministic, unlike finite-diff
+    /// NavSat which left the altitude velocity-cascade marginal).
+    fn velocity_ned(&self) -> Option<[f32; 3]> { None }
 }
 
 /// In-process reference impl — same toy integrator as
@@ -276,6 +283,17 @@ mod gz_real {
         pub normalized: ::prost::alloc::vec::Vec<f64>,
     }
 
+    /// v0.19.7 — minimal `gz.msgs.Odometry` (twist field only) for the
+    /// OdometryPublisher's true body velocity. gz-transport-rs 0.1.0
+    /// ships `Twist` but not the `Odometry` wrapper; prost skips the
+    /// unparsed `header`(1) + `pose`(2) tags, so decoding just the
+    /// `twist`(3) field is sufficient + forward-compatible.
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct Odometry {
+        #[prost(message, optional, tag = "3")]
+        pub twist: ::core::option::Option<gz_transport_rs::msgs::Twist>,
+    }
+
     /// gz-sim uses ENU body frame (X forward, Y left, Z up);
     /// falcon uses NED body frame (X forward, Y right, Z down).
     /// Conversion: (x, y, z)_ned = (x, -y, -z)_enu. Same for
@@ -328,6 +346,10 @@ mod gz_real {
         /// populated from `gz.msgs.NavSat` on the navsat topic, via
         /// `Home::project_to_ned_m`.
         latest_position_ned_m: Arc<Mutex<[f32; 3]>>,
+        /// v0.19.7 — latest TRUE NED body velocity (m/s) from the
+        /// OdometryPublisher twist. Deterministic, unlike finite-diff
+        /// NavSat. `None` until the first odometry frame.
+        latest_velocity_ned: Arc<Mutex<Option<[f32; 3]>>>,
         /// v0.19.2 — single mpsc carrying all 4 motor velocities.
         /// One receiver task owns the gz-transport Publisher and
         /// emits a single `gz.msgs.Actuators` message per send.
@@ -403,6 +425,7 @@ mod gz_real {
 
             let latest_imu: Arc<Mutex<Option<ImuSample>>> = Arc::new(Mutex::new(None));
             let latest_position_ned_m = Arc::new(Mutex::new([0.0_f32; 3]));
+            let latest_velocity_ned: Arc<Mutex<Option<[f32; 3]>>> = Arc::new(Mutex::new(None));
             let imu_recv = Arc::new(AtomicU64::new(0));
             let navsat_recv = Arc::new(AtomicU64::new(0));
             let motor_send = Arc::new(AtomicU64::new(0));
@@ -415,6 +438,7 @@ mod gz_real {
             // propagate.
             let imu_ref = latest_imu.clone();
             let position_ref = latest_position_ned_m.clone();
+            let velocity_ref = latest_velocity_ned.clone();
             let imu_recv_ref = imu_recv.clone();
             let navsat_recv_ref = navsat_recv.clone();
             let home_for_setup = home;
@@ -476,6 +500,23 @@ mod gz_real {
                     }
                 });
 
+                // v0.19.7 — Odometry subscriber: TRUE body velocity
+                // (twist.linear, ENU) → NED. Deterministic velocity for
+                // the altitude velocity-cascade; finite-diff NavSat left
+                // it marginally stable.
+                let odom_topic = format!("/model/{model_for_setup}/odometry");
+                let mut odom_sub = node.subscribe::<Odometry>(&odom_topic).await?;
+                tokio::spawn(async move {
+                    while let Some((msg, _meta)) = odom_sub.recv().await {
+                        if let Some(tw) = msg.twist.as_ref() {
+                            if let Some(lin) = tw.linear.as_ref() {
+                                let v = enu_to_ned([lin.x as f32, lin.y as f32, lin.z as f32]);
+                                *velocity_ref.lock().unwrap() = Some(v);
+                            }
+                        }
+                    }
+                });
+
                 // v0.19.2 — single publisher emitting one
                 // `gz.msgs.Actuators` per tick. The four
                 // MulticopterMotorModel plugins share this topic and
@@ -530,6 +571,7 @@ mod gz_real {
                 home,
                 latest_imu,
                 latest_position_ned_m,
+                latest_velocity_ned,
                 rotors_tx,
                 imu_recv,
                 navsat_recv,
@@ -586,6 +628,10 @@ mod gz_real {
                 self.navsat_recv.load(Ordering::Relaxed),
                 self.motor_send.load(Ordering::Relaxed),
             ))
+        }
+
+        fn velocity_ned(&self) -> Option<[f32; 3]> {
+            *self.latest_velocity_ned.lock().unwrap()
         }
     }
 
