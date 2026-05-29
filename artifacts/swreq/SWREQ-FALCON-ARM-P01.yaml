@@ -1,0 +1,60 @@
+artifacts:
+  - id: SWREQ-FALCON-ARM-P01
+    type: sw-req
+    title: "ARM-P01: Verified arming sequencer gates attitude-torque authority"
+    status: approved
+    description: >
+      The flight stack shall provide an arming sequencer
+      (`relay-arm::ArmingSequencer`) that gates attitude-torque
+      authority through an explicit startup state machine:
+
+        Disarmed → SpinUp → LevelHold → Armed
+
+      Attitude-torque authority (the rate loop's torque applied to the
+      mixer) shall be enabled ONLY in the Armed phase, and the Armed
+      phase shall be reachable ONLY through LevelHold after the measured
+      body tilt has stayed below a configured threshold for a configured
+      number of consecutive ticks (the level gate). Equivalently:
+      torque authority can never be granted unless the body was first
+      confirmed level. A NaN/non-finite tilt estimate shall never count
+      as level (it can never arm the vehicle). The collective-thrust
+      scale output shall be in [0, 1] and finite in every phase.
+
+      Rationale: this replaces the pre-v0.19.9 bench's ad-hoc, time-only
+      `t < 0.5 s` spawn-hold, which engaged the rate loop at a fixed time
+      regardless of body state (a quad that spawned tilted, or was
+      bumped during spin-up, would have torque engaged into a bad
+      attitude). The sequencer gates on time AND confirmed-level, and
+      its gating is mechanically proven. It is the "deterministic
+      startup sequencing (arm → spin-up → release)" called for as fix
+      (1) in the v0.19.7 bistability diagnosis.
+
+      Scope honesty: ARM-P01 is a startup-gating safety property. It is
+      NOT a position-hold guarantee. The v0.19.9 gz bench confirms the
+      gated startup hands off a level body (0° tilt through arming and
+      well beyond), but the full position-hold cascade still tips later
+      (~88° peak) due to a downstream residual (relay-pos thrust
+      normalisation + RC#3 EKF-attitude-during-accel). The arming
+      sequencer cannot fix a downstream cascade instability and does not
+      claim to; that residual is tracked for v0.19.10+.
+    tags: [falcon, arming, sequencer, safety, kani, startup]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Kani BMC proof (the tilt compare is f32; like relay-mix-quad the
+        sequencer is off the integer-only Verus track): the torque-gating
+        invariant is inductive over one tick(), so the bounded check
+        covers all input sequences. Harnesses verify_arming_torque_gated
+        (torque_authority ⟺ phase==Armed; a new entry into Armed comes
+        only from LevelHold with the level gate satisfied; phase ∈ [0,3];
+        thrust_scale ∈ [0,1] finite) and verify_arming_total (panic-free
+        + thrust bounded for NaN/∞ tilt and zero spin-up). Plus proptest
+        arm_p01_property_torque_implies_armed and unit tests
+        (torque-gated-until-level, tilt-resets-count, NaN-never-arms,
+        monotonic spin-up ramp). gz: alt-rate reliable hover unaffected
+        (3/3 PASS at ~0.20 m); arming-check clean handoff (0° through
+        arming).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
