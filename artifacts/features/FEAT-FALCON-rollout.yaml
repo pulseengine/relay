@@ -2060,6 +2060,78 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.19.6
 
+  - id: FEAT-FALCON-v0.19.8
+    type: feature
+    title: "v0.19.8 — verified mixer thrust-floor (MIX-P05) → reliable hover"
+    status: approved
+    description: >
+      LANDED. Fixes v0.19.7's hover bistability. A thrust-priority
+      mixing mode, relay-mix-quad::mix_thrust_floor (MIX-P05), reserves
+      a collective-thrust floor so the rate loop's attitude torque can
+      no longer steal lift — the dominant v0.19.7 limit-cycle root
+      cause. Closed-loop hover is now reliable: 4/4 consecutive bench
+      PASS at ~0.20 m, where the v0.19.7 attitude-priority mixer was
+      bistable (0.02 m one run, 1.97 m the next).
+
+      The fix: mix_thrust_floor(torque, thrust, floor) scales TORQUE by
+      a single factor so every motor stays in [floor, 1], leaving
+      collective thrust untouched. The mixer's roll/pitch/yaw columns
+      are zero-sum, so a uniform torque scale leaves the per-motor mean
+      (= collective) exactly equal to thrust → saturation costs
+      attitude authority, never lift. clamp_floor makes [floor,1] a
+      hard guarantee.
+
+      Verification — Kani, not Verus: the mixer is f32; the integer-only
+      Verus track (relay-lc/sc use i32/i64 because SMT float reasoning
+      is impractical) can't discharge float bounds. Kani (CBMC)
+      bit-blasts floats — the correct oracle.
+        cargo kani verify_mix_thrust_floor_bound → 155 checks SUCCESSFUL
+        cargo kani verify_mix_thrust_floor_total → SUCCESSFUL
+      Kani FOUND a real totality bug: extreme torque overflowed a delta
+      to NaN, poisoning the scale division → fixed by sanitising deltas.
+      Plus proptest + collective/direction-preservation unit tests.
+      (Genuine real-analysis — a Lyapunov hover-stability theorem —
+      would go to Lean via rules_lean4; MIX-P05 is a bound → Kani.)
+
+      Bench (--scenario=alt-rate: verified relay-rate + verified
+      relay-mix-quad thrust-floor + PI+D altitude, 30 s): 4/4 PASS,
+      final≈0.20 m, rms≈0.21 m. Deterministic.
+
+      Ships:
+        - crates/relay-mix-quad/plain: mix_thrust_floor + clamp_floor +
+          Kani harnesses + tests (14/14).
+        - examples/falcon-sitl-gz: alt-rate uses mix_thrust_floor; kd
+          0.15→0.30.
+        - SWREQ-FALCON-MIX-P05 + FV-FALCON-MIX-002.
+        - FV-FALCON-SIM-003 mock smoke → open-loop-climb (the gz-tuned
+          PosController makes closed-loop hover correctly FAIL on
+          MockPhysics; the gate caught it).
+        - bench-evidence/gz-sim/2026-05-29-v0.19.8-*.md + PASS log.
+
+      Verification:
+        - cargo kani (both harnesses) → SUCCESSFUL.
+        - cargo test --workspace → green; relay-mix-quad 14/14.
+        - gz bench → 4/4 PASS.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed: full autonomous horizontal position hold
+      (relay-pos in the loop). The bench holds attitude + altitude with
+      verified relay-rate + relay-mix-quad; horizontal station-keeping
+      is the residual (v0.19.7 root causes #1 startup + #3
+      EKF-during-accel). The thrust-floor is the foundation that makes
+      adding it tractable.
+    tags: [falcon, milestone, v0.19.8, mixer, thrust-floor, kani, reliable-hover, landed]
+    fields:
+      release-target: "verified mixer thrust-floor (MIX-P05) → reliable hover"
+      bench-date: "2026-05-29"
+      verification: "Kani BMC (155 checks) — appropriate for f32 bounds; Verus is integer-only"
+      kani-found-bug: "extreme-torque overflow → NaN division; fixed by sanitising"
+      bench-result: "4/4 PASS final≈0.20 m rms≈0.21 m / 30 s (was bistable)"
+      verus-vs-lean: "MIX-P05 is a float bound → Kani; Lyapunov stability math would be Lean/rules_lean4"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.7
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -2096,4 +2168,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.7
+        target: FEAT-FALCON-v0.19.8

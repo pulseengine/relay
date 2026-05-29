@@ -1,0 +1,15 @@
+falcon-sitl-gz bench-evidence
+backend: gazebo
+scenario: alt-rate
+timestamp: 1780028093
+
+steps:       3000
+final_dist:  0.205 m
+peak_dist:   2.000 m
+rms_steady:  0.214 m  (last 5 s)
+min_dist:    0.205 m
+wall:        34.904 s
+imu_recv:    7031
+navsat_recv: 1746
+motor_send:  3000
+verdict:    PASS

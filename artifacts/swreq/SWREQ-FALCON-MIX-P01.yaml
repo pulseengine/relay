@@ -62,6 +62,42 @@ artifacts:
       - type: derives-from
         target: SYSREQ-FALCON-005
 
+  - id: SWREQ-FALCON-MIX-P05
+    type: sw-req
+    title: "MIX-P05: Thrust-floor (thrust-priority) mixing mode"
+    status: approved
+    description: >
+      The mixer shall provide a thrust-priority mode
+      (`mix_thrust_floor(torque, thrust, floor)`) that reserves a
+      collective-thrust floor: for thrust ≥ floor (floor ∈ [0, 1]),
+      every per-motor PWM output is in [floor, 1] and finite, for ANY
+      torque command. Where MIX-P03's attitude-priority `mix`
+      sacrifices collective thrust to preserve torque ratios at
+      saturation, MIX-P05 scales the torque command by a single factor
+      so the collective is preserved (the mixer's torque columns are
+      zero-sum, so a uniform torque scale leaves the per-motor mean
+      equal to `thrust`). Attitude authority is sacrificed, never lift.
+
+      Rationale: against a real-physics SITL (gz, v0.19.7) the
+      attitude-priority mixer let the rate loop's torque steal thrust
+      near saturation, driving an altitude limit cycle. Reserving the
+      floor decouples attitude from altitude and makes closed-loop
+      hover reliable (v0.19.8: 4/4 bench PASS where the
+      attitude-priority mixer was bistable).
+    tags: [falcon, mixer, thrust-floor, invariant, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Kani BMC proof (the mixer is f32; the integer-only Verus track
+        can't discharge float bounds): for floor ∈ [0,1] and any finite
+        torque/thrust, forall i, motor_pwm[i] ∈ [floor, 1] and finite.
+        Harnesses verify_mix_thrust_floor_{bound,total}. Plus proptest
+        mix_p05_property_floor_holds + collective-preservation tests.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005
+
   - id: SWREQ-FALCON-MIX-P04
     type: sw-req
     title: "MIX-P04: Per-variant motor count exported correctly"

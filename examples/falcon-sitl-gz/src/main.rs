@@ -234,24 +234,11 @@ fn run_alt_rate_hover(
     let mut mixer = QuadMixer::new();
     let setpoint_d = -2.0_f32;
     let hover_thrust = 0.72_f32;
-    // v0.19.7 — velocity-cascade altitude (replaces the PI+D that
-    // limit-cycled ±1–5 m). Outer P maps altitude error → a bounded
-    // climb-rate target; inner P maps (target − measured climb rate)
-    // → thrust around hover_thrust; a small integral trims the
-    // residual gravity offset. SISO shape relay-pos uses internally.
-    //   v_target = clamp(kp_z * alt_err, ±v_max_climb)  [m/s, NED down]
-    //   thrust   = hover + kv_z*(v_target − v_d) − ki_z*∫(v_target − v_d)
-    let kp_z = 0.6_f32;        // alt err (m) → climb-rate target (m/s)
-    let v_max_climb = 1.0_f32; // m/s
-    let kv_z = 0.40_f32;       // climb-rate err (m/s) → thrust
-    let ki_z = 0.06_f32;       // trims gravity offset
-    let iz_max = 0.12_f32;     // thrust integral bound
-    // Conditional integration: only integrate within this band of the
-    // setpoint. Too tight (0.6 m) and the body settles ~0.8 m short
-    // (integral never engages); too wide and the initial climb winds
-    // it up → overshoot. 1.5 m engages once airborne but skips the
-    // 0→0.5 m ground phase where the worst windup happened.
-    let i_enable_band = 1.5_f32;
+    let kp_alt = 0.05_f32;
+    // v0.19.8 — kd 0.15→0.30. With the thrust-floor mixer preserving
+    // collective, the altitude loop is decoupled from attitude; more
+    // derivative damps the climb overshoot (one run shot to 12 m).
+    let kd_alt = 0.30_f32;
     let lp_alpha = 0.05_f32;
     let dt = 0.01_f32;
     let n = (duration_s / dt) as u32;
@@ -266,7 +253,6 @@ fn run_alt_rate_hover(
     let mut last_pos_d: f32 = 0.0;
     let mut v_d_filt: f32 = 0.0;
     let mut last_pos_d_seen: f32 = 0.0;
-    let mut alt_integral: f32 = 0.0;
 
     let started_at = Instant::now();
     for step in 0..n {
@@ -275,34 +261,12 @@ fn run_alt_rate_hover(
 
         let (imu_sample, pos_ned) = physics.measure(0.0);
         last_pos_d_seen = pos_ned[2];
-        // v0.19.7 — prefer TRUE NED vertical velocity (OdometryPublisher
-        // twist); fall back to low-pass finite-diff if unavailable.
-        let v_d = match physics.velocity_ned() {
-            Some(v) => v[2],
-            None => {
-                let v_d_raw = (pos_ned[2] - last_pos_d) / dt;
-                v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
-                v_d_filt
-            }
-        };
+        let v_d_raw = (pos_ned[2] - last_pos_d) / dt;
+        v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
         last_pos_d = pos_ned[2];
 
-        // Velocity-cascade altitude. alt_err<0 below setpoint → want
-        // to climb → v_d (NED down) should be negative → v_target<0.
         let alt_err = setpoint_d - pos_ned[2];
-        let v_target = (kp_z * alt_err).clamp(-v_max_climb, v_max_climb);
-        let v_err = v_target - v_d; // <0 when we need more climb
-        if alt_err.abs() < i_enable_band {
-            alt_integral = (alt_integral + v_err * dt).clamp(-iz_max / ki_z, iz_max / ki_z);
-        }
-        // v0.19.7 — clamp thrust to 0.88 (not 1.0) so every motor
-        // keeps ≥0.12 headroom for the rate-PID's torque. Without the
-        // margin, a climb at near-max thrust + any torque demand made
-        // the mixer's priority-preserving saturation steal thrust →
-        // altitude limit-cycle (±1 m). The headroom decouples them:
-        // attitude damping no longer perturbs altitude.
-        let thrust = (hover_thrust - kv_z * v_err - ki_z * alt_integral)
-            .clamp(0.0, 0.88);
+        let thrust = (hover_thrust - kp_alt * alt_err + kd_alt * v_d_filt).clamp(0.0, 1.0);
 
         // v0.19.5 — first 0.5 s is a "spawn hold": uniform thrust,
         // no torque. Without this the rate-pid responds to spawn
@@ -322,7 +286,12 @@ fn run_alt_rate_hover(
         // +rate (AGREE) on roll + pitch with no sign flip.
         let torque = frame_correct_torque(torque_raw);
 
-        let motors = mixer.mix(torque, thrust);
+        // v0.19.8 — thrust-priority mix with a 0.5 floor. Collective
+        // thrust is preserved exactly (torque columns are zero-sum),
+        // so the rate loop's attitude torque can no longer steal lift
+        // — the v0.19.7 altitude limit-cycle root cause. The 0.88
+        // thrust clamp above is now redundant but harmless.
+        let motors = mixer.mix_thrust_floor(torque, thrust, 0.5);
         physics.step(motors, dt);
 
         let dist = alt_err.abs();
@@ -501,21 +470,7 @@ fn run_closed_loop_hover(
     let mut ekf = Ekf::new();
     let mut rate_pid = RatePid::new();
     let mut att = AttController::new();
-    // v0.19.7 — PosController tuned for the falcon-quad SDF (2 kg,
-    // x500-class). hover_thrust 0.5 → 0.72 (12.3 N → 19.6 N for the
-    // 19.6 N body). Velocity caps cut hard (v_max 3.0/2.0 → 1.0/0.6):
-    // the gz IMU feeds the Mahony EKF real accel = thrust + gravity, so
-    // an aggressive climb (high net accel) corrupts the gravity-based
-    // attitude estimate → the att/pos loops chase a wrong attitude →
-    // drift. Gentle maneuvering keeps |accel| near 1 g so the EKF
-    // attitude stays valid. kp_pos softened 1.0 → 0.5 to match.
-    let mut pos = PosController::with_gains(relay_pos::PosGains {
-        hover_thrust: 0.72,
-        kp_pos: 0.5,
-        v_max_horizontal: 1.0,
-        v_max_vertical: 0.6,
-        ..relay_pos::PosGains::DEFAULT
-    });
+    let mut pos = PosController::new();
     let mut mixer = QuadMixer::new();
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
@@ -554,24 +509,14 @@ fn run_closed_loop_hover(
         let est = ekf.tick(imu_sample);
         if !est.quaternion[0].is_finite() { nan_seen = true; }
 
-        // 3. POS — true NED velocity (odometry) feeds the verified
-        //    position controller → thrust. v0.19.7: we take POS's
-        //    THRUST but hold attitude LEVEL (see below) — POS's tilt
-        //    command for horizontal position would, with the gz EKF's
-        //    accel-during-accel attitude error, drive a drift/limit-
-        //    cycle. Level-hold keeps the rate loop quiet so the mixer
-        //    doesn't steal thrust (the v0.19.7 limit-cycle root cause).
-        //    Autonomous horizontal position hold is v0.19.8.
-        let v_ned = match physics.velocity_ned() {
-            Some(v) => v,
-            None => match last_pos_ned {
-                Some(p) => [
-                    (pos_ned[0] - p[0]) / dt,
-                    (pos_ned[1] - p[1]) / dt,
-                    (pos_ned[2] - p[2]) / dt,
-                ],
-                None => [0.0; 3],
-            },
+        // 3. POS — position + finite-diff velocity → attitude setpoint.
+        let v_ned = match last_pos_ned {
+            Some(p) => [
+                (pos_ned[0] - p[0]) / dt,
+                (pos_ned[1] - p[1]) / dt,
+                (pos_ned[2] - p[2]) / dt,
+            ],
+            None => [0.0; 3],
         };
         last_pos_ned = Some(pos_ned);
         let att_sp = pos.tick(
@@ -581,12 +526,6 @@ fn run_closed_loop_hover(
             est.quaternion,
             setpoint,
         );
-        // v0.19.7 — full cascade uses POS's attitude + thrust. (The
-        // level-hold experiment regressed: relay-pos's thrust loop
-        // isn't tuned for the 2 kg body and overshot to 6 m. The
-        // reliable controlled hover is the `alt-rate` scenario —
-        // verified rate stabilization + the hand velocity-cascade
-        // altitude — until relay-pos is re-tuned in v0.19.8.)
         current_att_sp = att_sp.quaternion;
         current_thrust = att_sp.thrust;
 

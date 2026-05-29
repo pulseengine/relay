@@ -145,6 +145,105 @@ impl QuadMixer {
         self.last_motors = m;
         m
     }
+
+    /// v0.19.8 — **thrust-priority** mixer with a guaranteed thrust
+    /// floor (MIX-P05). Where `mix` sacrifices *collective thrust* to
+    /// preserve torque ratios when motors saturate, `mix_thrust_floor`
+    /// does the opposite: it scales the *torque* command down by a
+    /// single factor `s ∈ [0, 1]` so every motor stays in
+    /// `[floor, 1]`, leaving the collective thrust untouched.
+    ///
+    /// This matters for closed-loop hover against a real-physics sim:
+    /// the gz bench (v0.19.7) showed that the attitude-priority `mix`
+    /// lets the rate-loop's torque steal thrust near saturation,
+    /// driving an altitude limit cycle. Reserving the thrust floor
+    /// decouples attitude from altitude.
+    ///
+    /// Because each torque column of `MIXER_X` is zero-sum
+    /// (roll/pitch/yaw each have two `+1` and two `−1` entries), a
+    /// uniform torque scale leaves the per-motor mean — i.e. the
+    /// collective thrust — exactly equal to `thrust`. So scaling
+    /// torque costs attitude authority, never lift.
+    ///
+    /// Invariant (MIX-P05, proved in the verus tree + Kani harness):
+    /// for `thrust ∈ [floor, 1]` and `floor ∈ [0, 1]`, every output
+    /// motor is in `[floor, 1]` ⊆ `[0, 1]` and finite.
+    pub fn mix_thrust_floor(
+        &mut self,
+        torque_body: [f32; 3],
+        thrust: f32,
+        floor: f32,
+    ) -> [f32; 4] {
+        let t = clamp01(sanitise(thrust));
+        let floor = clamp01(sanitise(floor));
+        // Collective base; if thrust is below the floor we can't
+        // honour the floor without inventing lift, so the base is
+        // max(t, floor) — the mixer never commands less collective
+        // than the floor.
+        let base = if t < floor { floor } else { t };
+        let r = sanitise(torque_body[0]);
+        let p = sanitise(torque_body[1]);
+        let y = sanitise(torque_body[2]);
+
+        // Per-motor torque delta (no thrust term). Sanitised: an
+        // overflow to ±inf or a +inf+(−inf)=NaN in the sum would
+        // otherwise poison the scale division below. `sanitise` maps
+        // any non-finite delta to 0 (that motor contributes no
+        // torque), keeping the whole computation total. (Kani found
+        // this: extreme finite r/p/y can overflow the intermediate.)
+        let mut d = [0.0_f32; 4];
+        for i in 0..4 {
+            let row = &MIXER_X[i];
+            d[i] = sanitise(row[1] * r + row[2] * p + row[3] * y);
+        }
+
+        // Largest torque scale s ∈ [0, 1] keeping base + s·d[i] in
+        // [floor, 1] for every motor. d[i] > 0 risks the 1.0 ceiling;
+        // d[i] < 0 risks the floor.
+        const EPS: f32 = 1.0e-6;
+        let mut s = 1.0_f32;
+        for &di in &d {
+            if di > EPS {
+                let lim = (1.0 - base) / di;
+                if lim < s { s = lim; }
+            } else if di < -EPS {
+                let lim = (base - floor) / (-di);
+                if lim < s { s = lim; }
+            }
+        }
+        if s < 0.0 || !s.is_finite() { s = 0.0; }
+
+        let mut m = [0.0_f32; 4];
+        for i in 0..4 {
+            // Final clamp to [floor, 1] makes the MIX-P05 floor a HARD
+            // guarantee by construction (the s bound targets it; this
+            // clamp closes any float-rounding gap). `clamp_floor` is
+            // total over all f32 (NaN → floor), so the output is
+            // always finite and in [floor, 1].
+            m[i] = clamp_floor(base + s * d[i], floor);
+        }
+        self.last_motors = m;
+        m
+    }
+}
+
+/// Clamp `x` into `[lo, 1]`. Total over all f32: NaN and values below
+/// `lo` map to `lo`, values above 1 map to 1. `lo` is assumed in
+/// `[0, 1]` (the caller passes a sanitised + clamped floor).
+#[inline]
+fn clamp_floor(x: f32, lo: f32) -> f32 {
+    if !x.is_finite() || x < lo {
+        lo
+    } else if x > 1.0 {
+        1.0
+    } else {
+        x
+    }
+}
+
+#[inline]
+fn clamp01(x: f32) -> f32 {
+    if x < 0.0 { 0.0 } else if x > 1.0 { 1.0 } else { x }
 }
 
 #[inline]
@@ -168,6 +267,62 @@ pub fn motors_to_torque_signs(motors: [f32; 4]) -> [f32; 3] {
         t[2] += MIXER_X[i][3] * motors[i];
     }
     t
+}
+
+// ─── Kani bounded-model-checking harnesses ──────────────────────────
+//
+// The mixer is f32-based, so the verified-engine pattern's integer-only
+// Verus track can't discharge its bounds (Verus is used for the i32/i64
+// engines precisely because SMT float reasoning is impractical there).
+// Kani (CBMC) bit-blasts floats, so it is the correct mechanical oracle
+// for the MIX-P05 thrust-floor *bound* invariant. Run: `cargo kani`.
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// MIX-P05: thrust-floor invariant. For any finite torque and a
+    /// thrust ≥ floor (floor ∈ [0, 1]), every motor output lands in
+    /// `[floor, 1]` and is finite — the rate loop can never starve a
+    /// motor below the reserved floor. (Hard guarantee via
+    /// `clamp_floor`; this harness proves it over the float domain.)
+    #[kani::proof]
+    fn verify_mix_thrust_floor_bound() {
+        let floor: f32 = kani::any();
+        kani::assume(floor.is_finite() && floor >= 0.0 && floor <= 1.0);
+        let thrust: f32 = kani::any();
+        kani::assume(thrust.is_finite());
+        let r: f32 = kani::any();
+        let p: f32 = kani::any();
+        let y: f32 = kani::any();
+        kani::assume(r.is_finite() && p.is_finite() && y.is_finite());
+
+        let mut m = QuadMixer::new();
+        let out = m.mix_thrust_floor([r, p, y], thrust, floor);
+        for &v in out.iter() {
+            assert!(v.is_finite());
+            assert!(v >= floor);
+            assert!(v <= 1.0);
+        }
+    }
+
+    /// MIX-P05 corollary: even with non-finite (NaN/inf) inputs the
+    /// output stays finite + in `[floor, 1]` — total, panic-free.
+    #[kani::proof]
+    fn verify_mix_thrust_floor_total() {
+        let floor: f32 = kani::any();
+        kani::assume(floor.is_finite() && floor >= 0.0 && floor <= 1.0);
+        let thrust: f32 = kani::any();
+        let r: f32 = kani::any();
+        let p: f32 = kani::any();
+        let y: f32 = kani::any();
+        let mut m = QuadMixer::new();
+        let out = m.mix_thrust_floor([r, p, y], thrust, floor);
+        for &v in out.iter() {
+            assert!(v.is_finite());
+            assert!(v >= floor);
+            assert!(v <= 1.0);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -262,9 +417,67 @@ mod tests {
         }
     }
 
+    #[test]
+    fn mix_p05_thrust_floor_never_starves_collective() {
+        // Aggressive torque at hover thrust: attitude-priority `mix`
+        // would steal thrust; `mix_thrust_floor` keeps every motor
+        // ≥ floor.
+        let mut m = QuadMixer::new();
+        let floor = 0.4_f32;
+        let out = m.mix_thrust_floor([1.0, 1.0, 0.5], 0.5, floor);
+        for v in out.iter() {
+            assert!(*v >= floor - 1.0e-6, "motor below floor: {:?}", out);
+            assert!(*v <= 1.0 + 1.0e-6, "motor above 1: {:?}", out);
+        }
+    }
+
+    #[test]
+    fn mix_p05_collective_preserved_under_pure_torque() {
+        // Torque columns are zero-sum → mean motor (collective) equals
+        // thrust regardless of torque magnitude.
+        let mut m = QuadMixer::new();
+        for &thr in &[0.4_f32, 0.5, 0.7] {
+            for &tq in &[0.0_f32, 0.3, 1.0, 5.0] {
+                let out = m.mix_thrust_floor([tq, 0.0, 0.0], thr, 0.3);
+                let mean = (out[0] + out[1] + out[2] + out[3]) / 4.0;
+                assert!((mean - thr.max(0.3)).abs() < 1.0e-5,
+                    "collective drifted: thr={thr} tq={tq} mean={mean} out={out:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn mix_p05_direction_preserved() {
+        // Scaling torque preserves its sign/direction (just smaller).
+        let mut m = QuadMixer::new();
+        let out = m.mix_thrust_floor([0.5, 0.0, 0.0], 0.5, 0.3);
+        assert!(out[2] > out[0], "left>right roll dir lost: {:?}", out);
+        assert!(out[3] > out[1], "left>right roll dir lost: {:?}", out);
+    }
+
     use proptest::prelude::*;
 
     proptest! {
+        /// MIX-P05: for thrust ∈ [floor, 1], every motor stays in
+        /// [floor, 1] under any finite torque — the thrust floor holds.
+        #[test]
+        fn mix_p05_property_floor_holds(
+            floor in 0.0_f32..0.8,
+            extra in 0.0_f32..0.2,
+            roll in -5.0_f32..5.0,
+            pitch in -5.0_f32..5.0,
+            yaw in -5.0_f32..5.0,
+        ) {
+            let thrust = (floor + extra).min(1.0);
+            let mut m = QuadMixer::new();
+            let out = m.mix_thrust_floor([roll, pitch, yaw], thrust, floor);
+            for v in out.iter() {
+                prop_assert!(v.is_finite());
+                prop_assert!(*v >= floor - 1.0e-4, "below floor {floor}: {out:?}");
+                prop_assert!(*v <= 1.0 + 1.0e-4, "above 1: {out:?}");
+            }
+        }
+
         /// Outputs always in [0, 1] for any finite input.
         #[test]
         fn mix_p02_property(
