@@ -1,0 +1,77 @@
+artifacts:
+  - id: FV-FALCON-MIX-002
+    type: sw-verification
+    title: "MIX-P05 thrust-floor invariant — Kani BMC proof + gz reliable-hover evidence (v0.19.8)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-MIX-P05: the thrust-priority
+      `QuadMixer::mix_thrust_floor(torque, thrust, floor)` reserves a
+      collective-thrust floor so the rate loop can never starve a motor
+      below it. This is what makes closed-loop hover reliable against
+      real gz physics (the v0.19.7 attitude-priority mixer was
+      bistable — limit-cycled or crashed).
+
+      Why Kani, not Verus: the mixer is f32-based. The verified-engine
+      pattern's Verus track is integer-only (relay-lc/sc use i32/i64
+      precisely because SMT float reasoning is impractical), which is
+      why relay-mix-quad was never on the Verus track. Kani (CBMC)
+      bit-blasts floats, so it is the correct mechanical oracle for a
+      float BOUND invariant. (Genuine real-analysis math — e.g. a
+      Lyapunov hover-stability theorem — would go to Lean via
+      rules_lean4; the floor invariant is float bounds, not analysis.)
+
+      Kani proof (cargo kani, crates/relay-mix-quad/plain):
+        - verify_mix_thrust_floor_bound: for floor ∈ [0,1] and finite
+          torque/thrust, forall i motor ∈ [floor,1] and finite.
+          155 checks, VERIFICATION SUCCESSFUL.
+        - verify_mix_thrust_floor_total: same with non-finite inputs
+          allowed (NaN/inf) — total + panic-free. SUCCESSFUL.
+
+      Kani also FOUND a real totality bug: extreme finite torque could
+      overflow the per-motor delta to ±inf or +inf+(−inf)=NaN, poisoning
+      the scale division. Fixed by sanitising each delta to finite (0 if
+      not). This is the oracle-gate working — the proof attempt surfaced
+      a defect a hand-written test missed.
+
+      Supporting evidence:
+        - proptest mix_p05_property_floor_holds (1e3 cases): floor holds.
+        - unit tests: collective-preservation (mean motor == thrust
+          under pure torque, zero-sum columns), direction-preservation,
+          floor-never-starved.
+        - gz bench (bench-evidence/gz-sim/2026-05-29-v0.19.8-*.md):
+          --scenario=alt-rate, 4/4 consecutive PASS at final_dist≈0.20 m,
+          rms_steady≈0.21 m over 30 s — reliable controlled hover, where
+          the v0.19.7 attitude-priority mixer was bistable (0.02 m one
+          run, 1.97 m the next).
+
+      Verification:
+        - cargo kani --harness verify_mix_thrust_floor_bound → SUCCESSFUL.
+        - cargo kani --harness verify_mix_thrust_floor_total → SUCCESSFUL.
+        - cargo test -p relay-mix-quad → 14/14.
+        - cargo test --workspace → green.
+        - gz bench → 4/4 PASS.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed:
+        - That the FULL position-hold cascade (relay-pos horizontal
+          autonomy) hovers — the bench uses the verified relay-rate
+          attitude stabilisation + the verified relay-mix-quad
+          thrust-floor + a PI+D altitude loop. Autonomous horizontal
+          position hold (relay-pos in the loop) remains the residual
+          item (root cause #1, startup/EKF), tracked separately.
+        - That Verus proves this. It can't (floats); Kani does. The
+          claim is BMC-complete over the bounded float domain, not an
+          unbounded SMT proof.
+    tags: [falcon, mixer, thrust-floor, kani, bmc, reliable-hover, v0.19.8]
+    fields:
+      runs:
+        - "cargo kani --harness verify_mix_thrust_floor_bound  (155 checks, SUCCESSFUL)"
+        - "cargo kani --harness verify_mix_thrust_floor_total  (SUCCESSFUL)"
+        - "cargo test -p relay-mix-quad  (14/14)"
+        - "gz bench --scenario=alt-rate  (4/4 PASS, final≈0.20 m)"
+      tool: "Kani (CBMC) — appropriate for f32 bound invariants; Verus is integer-only here"
+      kani-found-bug: "extreme-torque overflow → NaN in scale division; fixed by sanitising deltas"
+      bench-result: "4/4 PASS final_dist≈0.20 m rms≈0.21 m / 30 s (was bistable pre-floor)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MIX-P05
