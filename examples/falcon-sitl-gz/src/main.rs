@@ -24,7 +24,7 @@ use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
-use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTimestamp};
+use relay_pos::{PosController, PosGains, PositionSetpoint, Timestamp as PosTimestamp};
 use relay_rate::{RatePid, Timestamp as RateTimestamp};
 use std::fs;
 use std::io::Write;
@@ -634,7 +634,11 @@ fn run_closed_loop_hover(
     let mut ekf = Ekf::new();
     let mut rate_pid = RatePid::new();
     let mut att = AttController::new();
-    let mut pos = PosController::new();
+    // v0.20 — calibrate the position controller's hover thrust for the gz
+    // 2 kg falcon-quad. The relay-pos DEFAULT (0.5, a 500 g 10-inch quad)
+    // sits AT the mixer floor, so the body could not climb. 0.72 is the
+    // measured hover collective for this airframe (matches alt-rate).
+    let mut pos = PosController::with_gains(PosGains { hover_thrust: 0.72, ..PosGains::DEFAULT });
     let mut mixer = QuadMixer::new();
     // v0.19.9 — arming sequencer gates the rate loop here too. The full
     // cascade had no spawn-hold at all (torque from t=0), so it was the
@@ -727,6 +731,18 @@ fn run_closed_loop_hover(
 
         // 7. Publish to the bridge.
         physics.step(motors, dt);
+
+        if std::env::var("POS_DEBUG").is_ok() && step % 50 == 0 {
+            // est_tilt: body-down axis rotated by the EKF quaternion vs NED-down.
+            let q = est.quaternion;
+            let bz_d = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]); // R[2][2]
+            let est_tilt = libm::acosf(bz_d.clamp(-1.0, 1.0));
+            eprintln!(
+                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° est_tilt={:.1}° thrust={:.2}",
+                pos_ned[0], pos_ned[1], pos_ned[2],
+                tilt.to_degrees(), est_tilt.to_degrees(), current_thrust,
+            );
+        }
 
         // 8. Bookkeeping — distance to setpoint.
         let dn = pos_ned[0] - setpoint_ned[0];
