@@ -2204,6 +2204,46 @@ artifacts:
       - type: depends-on
         target: FEAT-FALCON-v0.19.8
 
+  - id: FEAT-FALCON-v0.20
+    type: feature
+    title: "v0.20 — relay-pos thrust calibration + RC#3 estimator-divergence proof"
+    status: approved
+    description: >
+      LANDED. First rung of the roadmap to v1.0
+      (docs/ROADMAP-AUTONOMOUS-FLIGHT.md). Two honest outcomes:
+
+      (1) Thrust calibration (correct + necessary). relay-pos's
+      PosGains::DEFAULT.hover_thrust=0.5 targets a 500 g quad; the gz
+      falcon-quad is 2 kg and hovers at 0.72. Since the mixer floor is
+      0.5, hover_thrust=0.5 sat at the floor → the body could not climb.
+      The full-cascade bench now constructs PosController with
+      hover_thrust=0.72. The body climbs cleanly to the -2 m setpoint and
+      stays physically level (true_tilt < 2°).
+
+      (2) Decisive RC#3 proof (the falsification). With the body
+      physically level (true_tilt < 2°), the Mahony EKF attitude estimate
+      diverges to est_tilt=51° over ~5 s; the cascade tracks this phantom
+      attitude and drifts away (~206 m / 30 s). Position-hold is
+      IMPOSSIBLE on the attitude-only complementary filter — this mandates
+      the v0.21 Invariant EKF. "Estimation before control", proven not
+      asserted.
+
+      Ships: full-cascade hover_thrust calibration (0.72) + POS_DEBUG
+      true-vs-est tilt diagnostic; FV-FALCON-POS-002;
+      bench-evidence/gz-sim/2026-05-30-v0.20-*.md.
+
+      Honestly NOT claimed: position-hold (diverges). v0.20 is the thrust
+      fix + the RC#3 mandate, nothing more.
+    tags: [falcon, milestone, v0.20, pos, rc3, falsification, landed]
+    fields:
+      release-target: "relay-pos thrust calibration + RC#3 estimator-divergence proof"
+      bench-date: "2026-05-30"
+      bench-result: "body climbs + level (true_tilt<2°); EKF diverges to 51° → IEKF mandated"
+      falsification: "position-hold is not a tuning problem; Mahony filter drifts 50° from truth → needs IEKF (v0.21)"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v0.19.9
+
   - id: FEAT-FALCON-v1.0
     type: feature
     title: "v1.0 — six-domain credit dossier + airframe variants"
@@ -2240,4 +2280,4 @@ artifacts:
       - type: implements
         target: SYSREQ-FALCON-010
       - type: depends-on
-        target: FEAT-FALCON-v0.19.9
+        target: FEAT-FALCON-v0.20

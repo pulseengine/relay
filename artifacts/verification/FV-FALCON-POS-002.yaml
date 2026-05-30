@@ -1,0 +1,52 @@
+artifacts:
+  - id: FV-FALCON-POS-002
+    type: sw-verification
+    title: "POS thrust calibration (gz 2 kg) + decisive RC#3 estimator-divergence evidence (v0.20)"
+    status: approved
+    description: >
+      Partially verifies SWREQ-FALCON-POS-P01 (the position cascade drives
+      the body toward its setpoint) and establishes the falsification that
+      gates the v0.21 Invariant-EKF keystone.
+
+      Thrust calibration (correct + necessary): relay-pos's
+      PosGains::DEFAULT.hover_thrust = 0.5 targets a 500 g quad; the gz
+      falcon-quad is 2 kg and hovers at collective 0.72. Since the v0.19.8
+      mixer floor is 0.5, hover_thrust=0.5 sat at the floor and the body
+      could not climb. v0.20 constructs the full-cascade bench's
+      PosController with hover_thrust=0.72. Effect: the body climbs cleanly
+      to the -2 m setpoint and stays physically level (true_tilt < 2°,
+      measured from the accelerometer) for the whole run.
+
+      Decisive RC#3 evidence (the reason position-hold still fails): with
+      POS_DEBUG, the EKF attitude estimate (est_tilt, from the EKF
+      quaternion) diverges from the true tilt:
+        t=2.5 est_tilt=0.2°  ... t=5.0 4.2° ... t=6.5 44.5° ... t=7.0 51.3°
+      while true_tilt stays < 2°. The Mahony complementary filter
+      (relay-ekf) uses the accelerometer as its sole gravity reference and
+      drifts ~50° from truth during quasi-static hover; the cascade then
+      tracks this phantom attitude and the body drifts away (final_dist
+      ~206 m over 30 s). Position-hold is impossible on the attitude-only
+      Mahony filter — this mandates the v0.21 Invariant EKF (full-state,
+      consistency-guaranteed). bench-evidence/gz-sim/2026-05-30-v0.20-*.md.
+
+      Verification:
+        - gz hover (full cascade): body climbs to -1.8 m, true_tilt < 2°
+          → thrust calibration confirmed.
+        - gz hover: est_tilt diverges to 51° vs true 2° → RC#3 proven.
+        - cargo test --workspace → green.
+        - rivet validate → PASS.
+
+      Honestly NOT claimed:
+        - That v0.20 achieves position-hold. It does not (diverges). v0.20
+          ships only the thrust calibration + the RC#3 proof that drives
+          the IEKF.
+    tags: [falcon, pos, thrust-calibration, rc3, estimator, falsification, v0.20]
+    fields:
+      runs:
+        - "gz bench --scenario=hover  (body climbs to -1.8 m, true_tilt < 2°; est_tilt diverges to 51° → RC#3)  # bench-only"
+        - "cargo test --workspace  (green)"
+      bench-result: "thrust fix correct (climbs, level); estimator diverges 51° vs true 2° → IEKF mandated (v0.21)"
+      falsification: "position-hold is NOT a tuning problem; the attitude-only Mahony filter drifts 50° from truth → needs IEKF"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-POS-P01
