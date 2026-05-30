@@ -486,7 +486,16 @@ fn run_geo_hover(
             let m = if use_adrc {
                 // v0.25: geometric outer loop → desired body rate; ADRC
                 // inner loop → torque, robust to the actuator dynamics.
-                let omega_d = geo.desired_rate(est.q, a_cmd, yaw_d);
+                let mut omega_d = geo.desired_rate(est.q, a_cmd, yaw_d);
+                // Yaw RATE-HOLD (not heading-hold): commanding a yaw
+                // heading drove an overshoot limit-cycle (weak yaw
+                // authority). Position-hold needs only zero yaw RATE (no
+                // spin) + an accurate yaw ESTIMATE for command alignment,
+                // which the IEKF+compass provide. ADRC regulates yaw rate
+                // to 0. (HEADING_HOLD restores heading tracking.)
+                if std::env::var("HEADING_HOLD").is_err() {
+                    omega_d[2] = 0.0;
+                }
                 adrc.tick(imu_sample.gyro_body, omega_d, dt)
             } else {
                 geo.tick(est.q, imu_sample.gyro_body, a_cmd, yaw_d)

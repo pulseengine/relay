@@ -134,6 +134,12 @@ impl AdrcRate {
         Self::new([
             AdrcGains::new(40.0, 12.0, 30.0),
             AdrcGains::new(40.0, 12.0, 30.0),
+            // Yaw: moderate. NOTE (v0.25 finding): in the gz setup ANY
+            // active yaw feedback (this, slower, faster, rate-track,
+            // rate-hold, direct geometric torque) made position-hold
+            // bistable; YAW_OFF was the most stable. The yaw control loop
+            // instability is an open issue (likely gz motor-model yaw
+            // actuator dynamics) — see the v0.25 bench evidence.
             AdrcGains::new(20.0, 5.0, 6.0),
         ])
     }
