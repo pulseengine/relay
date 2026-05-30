@@ -517,7 +517,7 @@ fn run_geo_hover(
         };
         let floor = cfg.pos.mixer_floor;
         let motors =
-            mixer.mix_thrust_floor(torque, thrust * arm.thrust_scale, floor * arm.thrust_scale);
+            mixer.mix_priority(torque, thrust * arm.thrust_scale, floor * arm.thrust_scale);
         physics.step(motors, dt);
 
         let dn = pos_ned[0] - setpoint_ned[0];

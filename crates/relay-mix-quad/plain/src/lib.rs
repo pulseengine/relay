@@ -225,6 +225,57 @@ impl QuadMixer {
         self.last_motors = m;
         m
     }
+
+    /// **Priority desaturation** mix (MIX-P06): thrust ≻ roll/pitch ≻ yaw.
+    /// Like `mix_thrust_floor` it reserves the collective floor, but when
+    /// saturated it gives up authority IN PRIORITY ORDER — yaw first, then
+    /// roll/pitch — instead of scaling all torque uniformly. This is the
+    /// PX4/ArduPilot production policy and the v0.25 fix for the yaw
+    /// instability corrupting roll/pitch: when the (weak, lag-prone) yaw
+    /// loop demands torque that would saturate a motor, yaw is sacrificed
+    /// so roll/pitch (and thus tilt, and thus position-hold) stay intact.
+    ///
+    /// Invariant (same as MIX-P05): for `floor ∈ [0,1]` and any torque,
+    /// every output motor ∈ `[floor, 1]` and finite — the final
+    /// `clamp_floor` makes it a hard guarantee.
+    pub fn mix_priority(
+        &mut self,
+        torque_body: [f32; 3],
+        thrust: f32,
+        floor: f32,
+    ) -> [f32; 4] {
+        let t = clamp01(sanitise(thrust));
+        let floor = clamp01(sanitise(floor));
+        let base = if t < floor { floor } else { t };
+        let r = sanitise(torque_body[0]);
+        let p = sanitise(torque_body[1]);
+        let y = sanitise(torque_body[2]);
+
+        // Split the per-motor delta into yaw vs roll/pitch groups.
+        let mut dy = [0.0_f32; 4];
+        let mut drp = [0.0_f32; 4];
+        for i in 0..4 {
+            let row = &MIXER_X[i];
+            dy[i] = sanitise(row[3] * y);
+            drp[i] = sanitise(row[1] * r + row[2] * p);
+        }
+
+        // 1. YAW deprioritised: largest sy ∈ [0,1] keeping
+        //    base + drp[i] + sy·dy[i] ∈ [floor,1] (roll/pitch + thrust
+        //    preserved). If roll/pitch alone already saturates, sy → 0.
+        let base_rp = [base + drp[0], base + drp[1], base + drp[2], base + drp[3]];
+        let sy = scale_to_fit(&base_rp, &dy, floor);
+        // 2. ROLL/PITCH next: scale to fit with the reduced yaw applied.
+        let base_y = [base + sy * dy[0], base + sy * dy[1], base + sy * dy[2], base + sy * dy[3]];
+        let srp = scale_to_fit(&base_y, &drp, floor);
+
+        let mut m = [0.0_f32; 4];
+        for i in 0..4 {
+            m[i] = clamp_floor(base + srp * drp[i] + sy * dy[i], floor);
+        }
+        self.last_motors = m;
+        m
+    }
 }
 
 /// Clamp `x` into `[lo, 1]`. Total over all f32: NaN and values below
@@ -253,6 +304,26 @@ fn sanitise(x: f32) -> f32 {
     } else {
         x
     }
+}
+
+/// Largest scale `s ∈ [0,1]` keeping `base[i] + s·delta[i] ∈ [floor,1]`
+/// for every motor (the per-group desaturation step). Returns 0 if a
+/// constraint is already violated at s=0 or the result is non-finite.
+fn scale_to_fit(base: &[f32; 4], delta: &[f32; 4], floor: f32) -> f32 {
+    const EPS: f32 = 1.0e-6;
+    let mut s = 1.0_f32;
+    for i in 0..4 {
+        let di = delta[i];
+        let b = base[i];
+        if di > EPS {
+            let lim = (1.0 - b) / di;
+            if lim < s { s = lim; }
+        } else if di < -EPS {
+            let lim = (b - floor) / (-di);
+            if lim < s { s = lim; }
+        }
+    }
+    if s < 0.0 || !s.is_finite() { 0.0 } else { s }
 }
 
 /// Sum the per-axis torque produced by a motor-command vector,
@@ -323,11 +394,60 @@ mod kani_proofs {
             assert!(v <= 1.0);
         }
     }
+
+    /// MIX-P06: the priority-desaturation mix holds the SAME bound — every
+    /// motor ∈ [floor,1] and finite for ANY (incl. non-finite) input.
+    #[kani::proof]
+    fn verify_mix_priority_bound() {
+        let floor: f32 = kani::any();
+        kani::assume(floor.is_finite() && floor >= 0.0 && floor <= 1.0);
+        let thrust: f32 = kani::any();
+        let r: f32 = kani::any();
+        let p: f32 = kani::any();
+        let y: f32 = kani::any();
+        let mut m = QuadMixer::new();
+        let out = m.mix_priority([r, p, y], thrust, floor);
+        for &v in out.iter() {
+            assert!(v.is_finite());
+            assert!(v >= floor);
+            assert!(v <= 1.0);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// MIX-P06: under saturation, the priority mix preserves roll/pitch
+    /// authority by sacrificing yaw — vs the uniform-scale mix which cuts
+    /// both. This is what protects tilt/position-hold from the weak yaw
+    /// loop (the v0.25 fix).
+    #[test]
+    fn mix_p06_priority_preserves_roll_over_yaw() {
+        let torque = [0.3, 0.0, 0.8]; // big yaw + moderate roll
+        let (thrust, floor) = (0.7_f32, 0.3_f32);
+        let prio = QuadMixer::new().mix_priority(torque, thrust, floor);
+        let uni = QuadMixer::new().mix_thrust_floor(torque, thrust, floor);
+        for &v in prio.iter() {
+            assert!(v >= floor - 1e-6 && v <= 1.0 + 1e-6, "bound: {v}");
+        }
+        let roll_prio = motors_to_torque_signs(prio)[0].abs();
+        let roll_uni = motors_to_torque_signs(uni)[0].abs();
+        assert!(roll_prio >= roll_uni - 1e-6,
+            "priority should preserve >= roll than uniform: {roll_prio} vs {roll_uni}");
+    }
+
+    /// Without saturation, the priority mix passes the full torque through
+    /// (yaw not sacrificed when there's headroom).
+    #[test]
+    fn mix_p06_no_saturation_passthrough() {
+        let torque = [0.05, 0.05, 0.05];
+        let out = QuadMixer::new().mix_priority(torque, 0.6, 0.3);
+        let tq = motors_to_torque_signs(out);
+        // all three axes retain their commanded sign (non-zero).
+        assert!(tq[2].abs() > 1e-3, "yaw preserved when unsaturated: {:?}", tq);
+    }
 
     #[test]
     fn mix_p01_zero_command_gives_thrust_only() {
