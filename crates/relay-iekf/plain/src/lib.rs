@@ -615,6 +615,27 @@ impl Iekf {
         true
     }
 
+    /// **Magnetometer heading** update (v0.22): a tilt-compensated body
+    /// magnetometer reading fused as a yaw reference through the verified
+    /// right-invariant `update_yaw` path. `mag_body` is the raw body-frame
+    /// field (need not be unit norm — only its horizontal direction
+    /// matters), `declination` (rad) rotates magnetic→true north, and
+    /// `meas_var` is the heading variance (rad²).
+    ///
+    /// The mag reads `m_b = Rᵀ·m_world`; this is the SAME right-invariant
+    /// form as the gravity-tilt update (`Rᵀ·(known inertial vector)`), so
+    /// it preserves the IEKF's group-affine error structure. We project to
+    /// **heading-only** (`mag_heading`) so the magnetic field never
+    /// corrupts the gravity-anchored roll/pitch. No-op + `false` if the
+    /// horizontal field is degenerate (near-vertical inclination ⇒ heading
+    /// unobservable from mag).
+    pub fn update_magnetometer(&mut self, mag_body: Vec3, declination: f32, meas_var: f32) -> bool {
+        match mag_heading(mag_body, self.state.q, declination) {
+            Some(yaw_meas) => self.update_yaw(yaw_meas, meas_var),
+            None => false,
+        }
+    }
+
     /// **Adaptive gravity / tilt** update from the accelerometer. When the
     /// vehicle acceleration is low, the specific force is the gravity
     /// reaction, an excellent roll/pitch reference; this fuses it while
@@ -847,6 +868,92 @@ fn inv3(m: &[[f32; 3]; 3]) -> Option<[[f32; 3]; 3]> {
     }
 }
 
+/// Tilt-compensated magnetic heading (true yaw, rad) from a body-frame
+/// magnetometer reading and the attitude estimate `q` (body→NED), with
+/// magnetic `declination` (rad, magnetic→true north).
+///
+/// Rotating the body field back by the ESTIMATED attitude gives
+/// `R̂·m_b = ΔR·m_world` (ΔR the estimate's attitude error); its horizontal
+/// angle `atan2(mₑ, m_n)` equals the declination iff the yaw estimate is
+/// perfect, so the measured true yaw is `ŷaw + (declination − atan2)`.
+/// (Fed to `update_yaw`, the `ŷaw` term cancels in the innovation, leaving
+/// exactly `declination − atan2` — independent of the yaw-extraction
+/// convention.) Returns `None` if the horizontal field is degenerate
+/// (near-vertical inclination / zero field) ⇒ heading unobservable.
+pub fn mag_heading(mag_body: Vec3, q: Quat, declination: f32) -> Option<f32> {
+    let m = q_rotate(q, mag_body); // body→NED using the estimate
+    let h2 = m[0] * m[0] + m[1] * m[1];
+    if !h2.is_finite() || h2 < 1e-12 {
+        return None; // no horizontal field → heading unobservable from mag
+    }
+    let field_ang = libm::atan2f(m[1], m[0]); // East, North
+    let yaw_est = libm::atan2f(
+        2.0 * (q[0] * q[3] + q[1] * q[2]),
+        1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+    );
+    let yaw = yaw_est + (declination - field_ang);
+    if yaw.is_finite() {
+        Some(yaw)
+    } else {
+        None
+    }
+}
+
+/// Persistence-of-excitation gate for **magless yaw observability**
+/// (v0.22). Yaw about gravity is unobservable from IMU + GPS at rest or at
+/// constant velocity; it becomes observable only under genuine horizontal
+/// specific-force excitation — a *theorem*, not a heuristic
+/// (van Goor–Hamel–Mahony, [arXiv:2308.11124]). We prefer this checkable
+/// predicate over PX4's (unverifiable) GSF bank: yaw aiding from a
+/// GPS-velocity/heading source is trusted ONLY while the windowed
+/// horizontal acceleration exceeds a threshold.
+///
+/// `excitation` is a leaky-integrated (EMA) horizontal |a|; once it clears
+/// `threshold` the heading is observable, and it decays back below when the
+/// vehicle stops manoeuvring (e.g. returns to hover) — so stale yaw is not
+/// trusted indefinitely. no_std/no_alloc, single scalar state.
+#[derive(Clone, Copy)]
+pub struct YawObservability {
+    excitation: f32,
+    tau: f32,
+    threshold: f32,
+}
+
+impl YawObservability {
+    /// `tau` = excitation window (s); `threshold` = horizontal accel
+    /// (m/s²) that marks the heading observable. Degenerate args clamped.
+    pub fn new(tau: f32, threshold: f32) -> Self {
+        YawObservability {
+            excitation: 0.0,
+            tau: if tau.is_finite() && tau > 1e-3 { tau } else { 1.0 },
+            threshold: if threshold.is_finite() && threshold > 0.0 { threshold } else { 1.0 },
+        }
+    }
+
+    /// Feed the horizontal specific-force magnitude `a_horiz` (m/s²) over
+    /// `dt` (s); returns the current observability verdict.
+    pub fn update(&mut self, a_horiz: f32, dt: f32) -> bool {
+        let a = if a_horiz.is_finite() { a_horiz.abs() } else { 0.0 };
+        let dt = if dt.is_finite() { dt.clamp(0.0, 0.1) } else { 0.0 };
+        let alpha = (dt / self.tau).clamp(0.0, 1.0);
+        self.excitation += alpha * (a - self.excitation);
+        if !self.excitation.is_finite() {
+            self.excitation = 0.0;
+        }
+        self.is_observable()
+    }
+
+    /// Is the heading currently observable (excitation above threshold)?
+    pub fn is_observable(&self) -> bool {
+        self.excitation >= self.threshold
+    }
+
+    /// Current windowed excitation (m/s²), for diagnostics/logging.
+    pub fn excitation(&self) -> f32 {
+        self.excitation
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1072,6 +1179,89 @@ mod tests {
         assert!(f.covariance()[6][6] < 1.0, "P_pos should shrink");
         assert!(after > before, "tighter P ⇒ larger NEES for same error: {before} -> {after}");
         assert!(after.is_finite());
+    }
+
+    /// `mag_heading` recovers true yaw: with a level body the field read in
+    /// body frame is the world field rotated by −yaw, so the function must
+    /// return the body's actual heading. Checks 0°, +90°, and that magnetic
+    /// DECLINATION is correctly removed (a field pointing at declination d
+    /// with the body at true-north heading must report yaw 0).
+    #[test]
+    fn mag_heading_recovers_true_yaw_with_declination() {
+        let pi = core::f32::consts::PI;
+        // World horizontal field toward NED north (unit; inclination folded
+        // into an ignored vertical part).
+        let m_world = [1.0_f32, 0.0, 0.7]; // N, E, D
+        // Body level at true yaw 0 (q = identity) reads m_world directly.
+        let h0 = mag_heading(m_world, [1.0, 0.0, 0.0, 0.0], 0.0).unwrap();
+        assert!(h0.abs() < 1e-3, "yaw 0 expected, got {h0}");
+        // Body yawed +90° (east): q = Rz(π/2); the body reads R(−π/2)·m_world.
+        let qz90 = [libm::cosf(pi / 4.0), 0.0, 0.0, libm::sinf(pi / 4.0)];
+        let mb = q_rotate([qz90[0], -qz90[1], -qz90[2], -qz90[3]], m_world); // R(q)⁻¹·m_world
+        let h90 = mag_heading(mb, qz90, 0.0).unwrap();
+        assert!((h90 - pi / 2.0).abs() < 1e-2, "yaw +90° expected, got {h90}");
+        // Declination: field points at d=0.3 rad east of true north, body at
+        // true heading 0 → must still report 0 (declination removed).
+        let d = 0.3_f32;
+        let m_dec = [libm::cosf(d), libm::sinf(d), 0.5];
+        let hd = mag_heading(m_dec, [1.0, 0.0, 0.0, 0.0], d).unwrap();
+        assert!(hd.abs() < 1e-3, "declination should be removed, got {hd}");
+        // Degenerate near-vertical field ⇒ None.
+        assert!(mag_heading([0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 0.0], 0.0).is_none());
+    }
+
+    /// End-to-end: inject a heading error, then feed consistent
+    /// magnetometer readings — the IEKF must converge yaw back to truth via
+    /// `update_magnetometer` (the v0.22 cheat-free heading source).
+    #[test]
+    fn magnetometer_update_corrects_heading() {
+        let pi = core::f32::consts::PI;
+        let mut f = Iekf::level();
+        // Drive the estimate to ~1 rad yaw error.
+        let spin = Imu { gyro: [0.0, 0.0, 1.0], accel: [0.0, 0.0, -9.81] };
+        for _ in 0..100 {
+            f.propagate(spin, 0.01);
+        }
+        assert!(f.state().q[3].abs() > 0.2, "setup: estimate should be yawed");
+        // TRUE heading is 0; a magnetometer on the true-level-north body
+        // reads the world field directly (m_world in body frame == NED).
+        let m_world = [0.6_f32, 0.0, 0.8];
+        let still = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        for _ in 0..400 {
+            f.propagate(still, 0.01);
+            assert!(f.update_magnetometer(m_world, 0.0, 0.02));
+        }
+        let q = f.state().q;
+        let yaw = libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        assert!(yaw.abs() < 0.1, "mag update should drive heading to 0, got {yaw}");
+        let _ = pi;
+    }
+
+    /// Magless yaw observability gate: at rest (no horizontal accel) yaw is
+    /// NOT observable; sustained horizontal acceleration makes it
+    /// observable; and it decays back to unobservable when the manoeuvre
+    /// stops (so stale GPS-derived yaw is not trusted forever at hover).
+    #[test]
+    fn yaw_observability_tracks_excitation() {
+        let mut g = YawObservability::new(0.5, 1.0); // 0.5 s window, 1 m/s²
+        // At rest: stays unobservable.
+        for _ in 0..200 {
+            assert!(!g.update(0.0, 0.01));
+        }
+        // Sustained 3 m/s² horizontal accel: becomes observable.
+        let mut became = false;
+        for _ in 0..200 {
+            if g.update(3.0, 0.01) {
+                became = true;
+            }
+        }
+        assert!(became, "sustained excitation should make yaw observable");
+        assert!(g.is_observable());
+        // Manoeuvre stops → decays back to unobservable.
+        for _ in 0..400 {
+            g.update(0.0, 0.01);
+        }
+        assert!(!g.is_observable(), "should decay to unobservable at hover, exc={}", g.excitation());
     }
 
     /// Total: NEES is finite (or a clean INFINITY sentinel) for any inputs,
