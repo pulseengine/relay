@@ -187,7 +187,12 @@ impl GeoAtt {
         0.5 * (3.0 - tr)
     }
 
-    /// Attitude error `e_R = ½(R_dᵀR − RᵀR_d)^∨` (body frame).
+    /// Attitude error `e_R = (R_dᵀR − RᵀR_d)^∨` (body frame). NOTE: this is
+    /// the FULL vee, i.e. **2× Lee's `½(R_dᵀR−RᵀR_d)^∨`** — the ½ is folded
+    /// into the gain `k_R`. Consequence for the Lyapunov analysis: the
+    /// Ψ-derivative identity is `Ψ̇ = ½ e_R·Ω` and the potential coefficient
+    /// is `2 k_R` (so V = ½ Ω·JΩ + 2 k_R Ψ). See the
+    /// `lyapunov_decrease_certificate` test.
     pub fn attitude_error(r: &Mat3, r_d: &Mat3) -> Vec3 {
         let rdt_r = matmul3(&transpose3(r_d), r);
         let rt_rd = matmul3(&transpose3(r), r_d);
@@ -379,6 +384,76 @@ mod tests {
         let e1 = normalize(p1).unwrap();
         let e2 = cross(e0, e1);
         [[e0[0], e1[0], e2[0]], [e0[1], e1[1], e2[1]], [e0[2], e1[2], e2[2]]]
+    }
+
+    /// v0.23 — RUNNABLE Lyapunov certificate (the oracle backing the Lean
+    /// algebraic proof in proofs/lean/GeometricLyapunov.lean). For the
+    /// canonical SCALAR-gain Lee controller, the closed-loop Lyapunov
+    /// function V = ½ Ω·JΩ + k_R Ψ satisfies **V̇ = −k_Ω‖Ω‖² ≤ 0** on
+    /// Ψ < 2. The decrease rests on two facts we verify NUMERICALLY over a
+    /// grid (attitudes angle<180° ⇒ Ψ<2, several body rates), the rest
+    /// being exact algebra:
+    ///   FACT 1 (the moment realises the closed loop): M − Ω×JΩ = −k_R e_R
+    ///          − k_Ω Ω. A sign bug in moment() breaks this — the crux.
+    ///   FACT 2 (the Ψ-derivative identity): d/dt Ψ = ½ e_R·Ω, checked by
+    ///          finite-difference of the real psi() along the flow. (The ½
+    ///          is because this crate's e_R = (R_dᵀR−RᵀR_d)^∨ = 2× Lee's;
+    ///          the potential coefficient is correspondingly 2 k_R.)
+    /// Then V̇ = Ω·(M−Ω×JΩ) + 2k_R Ψ̇ = Ω·(−k_R e_R − k_Ω Ω) + k_R(e_R·Ω)
+    ///        = −k_Ω‖Ω‖² ≤ 0  — asserted exactly from the real moment/e_R.
+    #[test]
+    fn lyapunov_decrease_certificate() {
+        let kr = 8.0f32;
+        let kw = 2.0f32;
+        let j = [0.0217f32, 0.0217, 0.04];
+        let ctrl = GeoAtt::new(GeoGains { k_r: [kr; 3], k_omega: [kw; 3], j });
+        let r_d = identity3();
+        let dt = 1e-4f32;
+
+        let angles = [0.2f32, 0.8, 1.5, 2.4, 2.9]; // up to ~166° (Ψ<2)
+        let omegas = [
+            [1.0f32, 0.0, 0.0], [0.0, 2.0, -1.0],
+            [3.0, -2.0, 4.0], [-5.0, 1.0, 2.0],
+        ];
+        let mut checked = 0;
+        for &ax in &angles {
+            for &az in &angles {
+                let r = matmul3(&rot_x(ax), &rot_z(az));
+                let psi = GeoAtt::psi(&r, &r_d);
+                assert!(psi < 2.0, "grid point outside Ψ<2: {psi}");
+                let e_r = GeoAtt::attitude_error(&r, &r_d);
+                for &omega in &omegas {
+                    // FACT 1: M − Ω×JΩ == −k_R e_R − k_Ω Ω (exact, f32).
+                    let m = ctrl.moment(&r, omega, &r_d);
+                    let jo = [j[0]*omega[0], j[1]*omega[1], j[2]*omega[2]];
+                    let j_omega_dot = {
+                        let g = cross(omega, jo);
+                        [m[0]-g[0], m[1]-g[1], m[2]-g[2]]
+                    };
+                    for i in 0..3 {
+                        let want = -kr * e_r[i] - kw * omega[i];
+                        assert!((j_omega_dot[i] - want).abs() < 1e-3,
+                            "FACT1 axis {i}: JΩ̇={} vs {want}", j_omega_dot[i]);
+                    }
+                    // FACT 2: Ψ̇ == ½ e_R·Ω (finite-diff of real psi).
+                    let r1 = integrate_rotation(&r, omega, dt);
+                    let psi_dot = (GeoAtt::psi(&r1, &r_d) - psi) / dt;
+                    let half_e_dot_w = 0.5 * dot(e_r, omega);
+                    let tol2 = 0.02 + 0.03 * half_e_dot_w.abs();
+                    assert!((psi_dot - half_e_dot_w).abs() <= tol2,
+                        "FACT2: Ψ̇={psi_dot} vs ½e_R·Ω={half_e_dot_w}; Ψ={psi}");
+                    // Assembled V̇ from the REAL moment + e_R.
+                    let vdot = dot(omega, j_omega_dot) + kr * dot(e_r, omega);
+                    let expected = -kw * dot(omega, omega);
+                    assert!(vdot <= 0.0,
+                        "V̇ must be ≤ 0: {vdot} at Ψ={psi}, ω={omega:?}");
+                    assert!((vdot - expected).abs() < 1e-2,
+                        "V̇ ({vdot}) must equal −k_Ω‖Ω‖² ({expected}); Ψ={psi}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 80, "grid too small: {checked}");
     }
 
     proptest::proptest! {

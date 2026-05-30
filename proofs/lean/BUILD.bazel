@@ -53,3 +53,21 @@ lean_proof_test(
     srcs = ["CompositionalWcet.lean"],
     deps = [":compositional_wcet", "@mathlib//:Mathlib"],
 )
+
+# ── Geometric SE(3) Lyapunov (v0.23) ──────────────────────────────────
+# The algebraic core of geometric-controller stability: the closed-loop
+# Lyapunov derivative collapses to −k_Ω‖ω‖² ≤ 0 (vanishing iff ω=0). The
+# dynamic LaSalle step is cited (Lee 2010) pending Mathlib's stability API.
+# Paired with the runnable numerical certificate in relay-geo.
+
+lean_library(
+    name = "geometric_lyapunov",
+    srcs = ["GeometricLyapunov.lean"],
+    deps = ["@mathlib//:Mathlib"],
+)
+
+lean_proof_test(
+    name = "geometric_lyapunov_test",
+    srcs = ["GeometricLyapunov.lean"],
+    deps = [":geometric_lyapunov", "@mathlib//:Mathlib"],
+)

@@ -11197,7 +11197,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%binaryen": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "RRZv1pjuPGnpeN/Hh2gd+jZCdYR8FzWPRLAEIV+QC4s=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -11214,7 +11214,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%cpp_component": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "G/TRoNrug5NGqckpz9xO5yI8aZ/WCGiE1700EzC0bQQ=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -11232,7 +11232,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%jco": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "js+lysAAPKubciGQ9x1KOL+H8rfGzr+kRTRQIIV0H0c=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -11250,8 +11250,8 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%meld": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
-        "usagesDigest": "VwXJQuu0g5YaCll2Y35kcbjvJENkY6hhywt7Zp4bzGQ=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
+        "usagesDigest": "H7QDU1dKqxsCZrqPHA8XKztvUsWTNeO/SV6EEryi+jg=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
         ],
@@ -11259,7 +11259,7 @@
           "meld_toolchain": {
             "repoRuleId": "@@rules_wasm_component+//toolchains:meld_toolchain.bzl%meld_repository",
             "attributes": {
-              "version": "0.1.0"
+              "version": "0.10.0"
             }
           }
         }
@@ -11267,8 +11267,8 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%spar": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
-        "usagesDigest": "wjdibxlRb9LBJQIZkNjm7c9pk8ANOOXBLjUZiC1oGsQ=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
+        "usagesDigest": "i9x9v7f+u4urZP/cpHt/MVNUFCpK8/JF9NfqWX5jesE=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
         ],
@@ -11276,7 +11276,7 @@
           "spar_toolchain": {
             "repoRuleId": "@@rules_wasm_component+//toolchains:spar_toolchain.bzl%spar_repository",
             "attributes": {
-              "version": "0.9.3"
+              "version": "0.10.0"
             }
           }
         }
@@ -11284,8 +11284,8 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%synth": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
-        "usagesDigest": "fVzuczNKN9Dl9vmPgHeH96HzO0oy9vCoRUUAwDeCKYs=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
+        "usagesDigest": "xVypwjmJpetpdqik6vLWVYk5VdCM38G1Noeb2glG55k=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
         ],
@@ -11293,7 +11293,7 @@
           "synth_toolchain": {
             "repoRuleId": "@@rules_wasm_component+//toolchains:synth_toolchain.bzl%synth_repository",
             "attributes": {
-              "version": "0.3.1"
+              "version": "0.6.0"
             }
           }
         }
@@ -11301,7 +11301,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%tinygo": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "UyIl49zdecsSLmBnrNVtHQ2NJqDXeS+YNflck6WU9PQ=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -11318,7 +11318,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%wasi_sdk": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "oeqrrZVXk7XxZyczNl7J6bFQtiqscPCUkv5sCMTfyFE=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -11337,7 +11337,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%wasm_toolchain": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "gQUIjDyuQWhcgo2xwWR3qsHRHCkICd6dPYUP5AwML7k=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -11364,7 +11364,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%wasmtime": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "Boa0hy47+LZzRJvIRehjw6OeKdZUj+wWbpw5nM1iDDg=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -11382,7 +11382,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%witness": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "BQoaw++FfIY3SO6HAiWpoGYpczEnB2DkbfhAjR6gUYw=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
@@ -11399,7 +11399,7 @@
     },
     "@@rules_wasm_component+//wasm:extensions.bzl%wkg": {
       "general": {
-        "bzlTransitiveDigest": "ThQ6NIOUyHo6MhCTPbQNH254NyP3W+VHZd0cSo8gbak=",
+        "bzlTransitiveDigest": "a3BYcCnxrkhocJ5bnngwmtcu9LFiqf2zdLy16dxLyYY=",
         "usagesDigest": "au91J2C5OoE65IXAIM5SV7WZOSV8Kp4it6FO1Z09yDA=",
         "recordedInputs": [
           "REPO_MAPPING:rules_wasm_component+,bazel_tools bazel_tools"
