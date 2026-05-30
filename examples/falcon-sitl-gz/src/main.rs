@@ -644,7 +644,16 @@ fn run_closed_loop_hover(
     // 2 kg falcon-quad. The relay-pos DEFAULT (0.5, a 500 g 10-inch quad)
     // sits AT the mixer floor, so the body could not climb. 0.72 is the
     // measured hover collective for this airframe (matches alt-rate).
-    let mut pos = PosController::with_gains(PosGains { hover_thrust: 0.72, ..PosGains::DEFAULT });
+    // v0.21 — gentler position gains for the gz 2 kg body on a still-
+    // imperfect estimate: a soft kp_pos + tighter tilt limit keep the
+    // body near-stationary (in the observable regime) so the IEKF
+    // attitude estimate is not destabilised by aggressive translation.
+    let mut pos = PosController::with_gains(PosGains {
+        hover_thrust: 0.72,
+        kp_pos: 0.4,
+        tilt_max: 0.20,
+        ..PosGains::DEFAULT
+    });
     let mut mixer = QuadMixer::new();
     // v0.19.9 — arming sequencer gates the rate loop here too. The full
     // cascade had no spawn-hold at all (torque from t=0), so it was the
@@ -694,8 +703,8 @@ fn run_closed_loop_hover(
         iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
         iekf.update_position(pos_ned, 0.04); // ~0.2 m 1σ NavSat
 
-        // 3. POS — position + finite-diff velocity → attitude setpoint.
-        let v_ned = match last_pos_ned {
+        // 3. POS — position + velocity → attitude setpoint.
+        let v_fd = match last_pos_ned {
             Some(p) => [
                 (pos_ned[0] - p[0]) / dt,
                 (pos_ned[1] - p[1]) / dt,
@@ -706,12 +715,12 @@ fn run_closed_loop_hover(
         last_pos_ned = Some(pos_ned);
         // v0.21 — control attitude source: the IEKF (USE_IEKF) vs the
         // legacy Mahony filter. Closing the loop on the IEKF is the test
-        // of whether the keystone fixes RC#3 → position-hold.
-        let est_q = if std::env::var("USE_IEKF").is_ok() {
-            iekf.state().q
-        } else {
-            est.quaternion
-        };
+        // of whether the keystone fixes RC#3 → position-hold. When on the
+        // IEKF, also feed its SMOOTH velocity estimate (the finite-diff
+        // v_fd from NavSat is noisy and was destabilising the vel loop).
+        let use_iekf = std::env::var("USE_IEKF").is_ok();
+        let est_q = if use_iekf { iekf.state().q } else { est.quaternion };
+        let v_ned = if use_iekf { iekf.state().v } else { v_fd };
         let att_sp = pos.tick(
             pos_ts_of(t),
             pos_ned,
@@ -759,10 +768,12 @@ fn run_closed_loop_hover(
             let bz_d = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]); // R[2][2]
             let est_tilt = libm::acosf(bz_d.clamp(-1.0, 1.0));
             let is = iekf.state();
+            let iq = is.q;
+            let iyaw = libm::atan2f(2.0 * (iq[0] * iq[3] + iq[1] * iq[2]), 1.0 - 2.0 * (iq[2] * iq[2] + iq[3] * iq[3]));
             eprintln!(
-                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° mahony={:.1}° IEKF={:.1}° ipos=[{:.1},{:.1},{:.1}] thrust={:.2}",
+                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° IEKF_tilt={:.1}° IEKF_yaw={:.1}° ipos=[{:.1},{:.1},{:.1}] thrust={:.2}",
                 pos_ned[0], pos_ned[1], pos_ned[2],
-                tilt.to_degrees(), est_tilt.to_degrees(), is.tilt_rad().to_degrees(),
+                tilt.to_degrees(), is.tilt_rad().to_degrees(), iyaw.to_degrees(),
                 is.p[0], is.p[1], is.p[2], current_thrust,
             );
         }
