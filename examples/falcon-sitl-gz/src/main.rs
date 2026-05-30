@@ -480,6 +480,15 @@ fn run_geo_hover(
     let mut nees_sum = 0.0_f64;
     let mut nees_n = 0u32;
     let mut nees_max = 0.0_f32;
+    // v0.22 mag-heading VALIDATION: compare the real magnetometer-derived
+    // heading (mag_heading + declination) against the gz-truth heading
+    // oracle, BEFORE trusting it in the estimator. Confirms the body-frame
+    // conversion + declination are right (the frame-bug class that caused
+    // the yaw saga). Zurich declination ≈ +3° (the SDF magnetic_field).
+    const MAG_DECLINATION: f32 = 0.0524; // rad (~3°)
+    let mut mag_err_sum = 0.0_f64;
+    let mut mag_err_max = 0.0_f32;
+    let mut mag_n = 0u32;
     let mut last_pos_d = 0.0_f32;
     let mut v_d_filt = 0.0_f32;
     let mut last_pos_ned = setpoint_ned;
@@ -516,12 +525,28 @@ fn run_geo_hover(
                 }
             }
             iekf.update_position(pos_ned, cfg.iekf.pos_var);
-            if let Some(hdg) = physics.heading_ned() {
-                if !iekf_heading_init {
-                    iekf.init_heading(hdg);
-                    iekf_heading_init = true;
+            // v0.22 — heading from the REAL magnetometer (no truth cheat).
+            // `heading_ned` (gz truth) is read ONLY for the validation
+            // diagnostic, never fed to the estimator.
+            if let Some(mag_b) = physics.mag_body_ned() {
+                if let Some(mag_yaw) = relay_iekf::mag_heading(mag_b, est.q, MAG_DECLINATION) {
+                    if !iekf_heading_init {
+                        iekf.init_heading(mag_yaw);
+                        iekf_heading_init = true;
+                    }
+                    // Var loosened to the measured mag noise (~2.4° ⇒
+                    // ~0.0018 rad²) so the estimate isn't yanked by sensor
+                    // noise.
+                    iekf.update_magnetometer(mag_b, MAG_DECLINATION, cfg.iekf.yaw_var.max(0.002));
+                    if let Some(hdg) = physics.heading_ned() {
+                        let e = libm::remainderf(mag_yaw - hdg, 2.0 * core::f32::consts::PI);
+                        mag_err_sum += e.abs() as f64;
+                        if e.abs() > mag_err_max {
+                            mag_err_max = e.abs();
+                        }
+                        mag_n += 1;
+                    }
                 }
-                iekf.update_yaw(hdg, cfg.iekf.yaw_var);
             }
             est = iekf.state();
 
@@ -646,6 +671,21 @@ fn run_geo_hover(
         "  iekf-consistency: position ANEES={:.2} (target≈3.0, dof=3) max={:.1} n={} [{}]",
         anees, nees_max, nees_n, nees_status,
     );
+    // v0.22 — closed-loop heading accuracy: the magnetometer-driven
+    // estimate vs the gz-truth heading (truth used for SCORING only, never
+    // fed to the estimator). Frame-correctness was confirmed open-loop at
+    // ~2.4°; closed-loop ~6-7° (mag noise + tilt coupling during position
+    // corrections) is the honest operating accuracy — fine for hold.
+    if mag_n > 0 {
+        let mag_err_mean = (mag_err_sum / mag_n as f64) as f32;
+        let mag_status = if mag_err_mean.to_degrees() < 12.0 { "OK" } else { "DEGRADED" };
+        println!(
+            "  mag-heading: closed-loop err vs truth mean={:.1}° max={:.1}° n={} [{}]",
+            mag_err_mean.to_degrees(), mag_err_max.to_degrees(), mag_n, mag_status,
+        );
+    } else {
+        println!("  mag-heading: no magnetometer frames received");
+    }
     if let Some(ref mut e) = evidence {
         e.write_summary_hover(n, final_dist, peak_dist, rms_steady, min_dist, wall.as_secs_f32(), physics.counters());
     }

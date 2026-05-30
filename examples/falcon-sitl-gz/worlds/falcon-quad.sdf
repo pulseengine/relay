@@ -56,6 +56,13 @@
     </plugin>
     <plugin filename="gz-sim-imu-system"               name="gz::sim::systems::Imu"/>
     <plugin filename="gz-sim-navsat-system"            name="gz::sim::systems::NavSat"/>
+    <plugin filename="gz-sim-magnetometer-system"      name="gz::sim::systems::Magnetometer"/>
+
+    <!-- v0.22 — Earth field for Zurich (WMM-ish), world ENU frame
+         [East, North, Up] in Tesla. Horizontal ≈ 21.5 µT at ~3° east
+         declination; down ≈ 43 µT (inclination ~63°). The bench removes
+         the 3° declination so mag heading reads TRUE north. -->
+    <magnetic_field>1.126e-6 21.470e-6 -43.0e-6</magnetic_field>
 
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
@@ -140,6 +147,18 @@
               <z><noise type="gaussian"><mean>0</mean><stddev>0.0021</stddev></noise></z>
             </linear_acceleration>
           </imu>
+        </sensor>
+
+        <!-- v0.22 — magnetometer: the real (non-truth) heading source.
+             Reports the world magnetic_field in body frame. -->
+        <sensor name="mag_sensor" type="magnetometer">
+          <always_on>1</always_on>
+          <update_rate>100</update_rate>
+          <magnetometer>
+            <x><noise type="gaussian"><mean>0</mean><stddev>1e-7</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>1e-7</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>1e-7</stddev></noise></z>
+          </magnetometer>
         </sensor>
 
         <sensor name="navsat_sensor" type="navsat">

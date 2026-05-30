@@ -64,6 +64,10 @@ pub trait Physics {
     /// that makes yaw observable for the IEKF (yaw is unobservable from
     /// IMU+GPS alone, the v0.21 ±130° wander).
     fn heading_ned(&self) -> Option<f32> { None }
+
+    /// v0.22 — latest body-frame magnetometer reading (Tesla, NED body
+    /// frame), or `None` if no magnetometer. The real heading source.
+    fn mag_body_ned(&self) -> Option<[f32; 3]> { None }
 }
 
 /// In-process reference impl — same toy integrator as
@@ -311,6 +315,17 @@ mod gz_real {
         pub pose: ::std::vec::Vec<gz_transport_rs::msgs::Pose>,
     }
 
+    /// v0.22 — `gz.msgs.Magnetometer` on the mag_sensor topic. The REAL,
+    /// non-truth heading reference: the Earth field (world `magnetic_field`)
+    /// read in body frame. `{ Header header=1; Vector3d field_tesla=2; }` —
+    /// prost skips the unparsed header. Replaces the gz-truth `PoseV`
+    /// heading cheat once the body-frame conversion is validated.
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct Magnetometer {
+        #[prost(message, optional, tag = "2")]
+        pub field_tesla: ::core::option::Option<gz_transport_rs::msgs::Vector3d>,
+    }
+
     /// gz-sim uses ENU body frame (X forward, Y left, Z up);
     /// falcon uses NED body frame (X forward, Y right, Z down).
     /// Conversion: (x, y, z)_ned = (x, -y, -z)_enu. Same for
@@ -381,6 +396,10 @@ mod gz_real {
         /// v0.22 — latest TRUE NED heading (yaw, rad) from the
         /// OdometryPublisher pose orientation. The compass reference.
         latest_heading_ned: Arc<Mutex<Option<f32>>>,
+        /// v0.22 — latest body-frame magnetometer reading (Tesla, NED body
+        /// frame). The REAL (non-truth) heading source from the SDF
+        /// magnetometer sensor; `None` until the first frame.
+        latest_mag_body_ned: Arc<Mutex<Option<[f32; 3]>>>,
         /// v0.19.2 — single mpsc carrying all 4 motor velocities.
         /// One receiver task owns the gz-transport Publisher and
         /// emits a single `gz.msgs.Actuators` message per send.
@@ -458,6 +477,7 @@ mod gz_real {
             let latest_position_ned_m = Arc::new(Mutex::new([0.0_f32; 3]));
             let latest_velocity_ned: Arc<Mutex<Option<[f32; 3]>>> = Arc::new(Mutex::new(None));
             let latest_heading_ned: Arc<Mutex<Option<f32>>> = Arc::new(Mutex::new(None));
+            let latest_mag_body_ned: Arc<Mutex<Option<[f32; 3]>>> = Arc::new(Mutex::new(None));
             let imu_recv = Arc::new(AtomicU64::new(0));
             let navsat_recv = Arc::new(AtomicU64::new(0));
             let motor_send = Arc::new(AtomicU64::new(0));
@@ -472,6 +492,7 @@ mod gz_real {
             let position_ref = latest_position_ned_m.clone();
             let velocity_ref = latest_velocity_ned.clone();
             let heading_ref = latest_heading_ned.clone();
+            let mag_ref = latest_mag_body_ned.clone();
             let imu_recv_ref = imu_recv.clone();
             let navsat_recv_ref = navsat_recv.clone();
             let home_for_setup = home;
@@ -574,6 +595,36 @@ mod gz_real {
                     }
                 });
 
+                // v0.22 — Magnetometer subscriber: the REAL heading source.
+                // The SDF mag_sensor reports the world magnetic_field in
+                // BODY frame (gz ENU body); convert to NED body with the
+                // same flip as the IMU.
+                let mag_topic = format!(
+                    "/world/{world_for_setup}/model/{model_for_setup}/link/base_link/sensor/mag_sensor/magnetometer"
+                );
+                if let Ok(mut mag_sub) = node.subscribe::<Magnetometer>(&mag_topic).await {
+                    tokio::spawn(async move {
+                        while let Some((msg, _meta)) = mag_sub.recv().await {
+                            if let Some(f) = msg.field_tesla.as_ref() {
+                                // gz's magnetometer is NED-NATIVE (legacy
+                                // ArduPilot/PX4 heritage: it converts the
+                                // world <magnetic_field> ENU→NED internally),
+                                // UNLIKE the IMU (ENU body). Empirically (vs
+                                // the truth-heading oracle at NED yaw 90°)
+                                // the gz mag frame relates to our NED body
+                                // by Rz(−90°): (x,y,z)_ned = (y, −x, z)_gz.
+                                // [Caveat: confirmed at one heading; a
+                                // yaw-sweep oracle would fully pin it.]
+                                let (x, y, z) = (f.x as f32, f.y as f32, f.z as f32);
+                                let v = [y, -x, z];
+                                if v.iter().all(|c| c.is_finite()) {
+                                    *mag_ref.lock().unwrap() = Some(v);
+                                }
+                            }
+                        }
+                    });
+                }
+
                 // v0.19.2 — single publisher emitting one
                 // `gz.msgs.Actuators` per tick. The four
                 // MulticopterMotorModel plugins share this topic and
@@ -630,6 +681,7 @@ mod gz_real {
                 latest_position_ned_m,
                 latest_velocity_ned,
                 latest_heading_ned,
+                latest_mag_body_ned,
                 rotors_tx,
                 imu_recv,
                 navsat_recv,
@@ -702,6 +754,10 @@ mod gz_real {
 
         fn heading_ned(&self) -> Option<f32> {
             *self.latest_heading_ned.lock().unwrap()
+        }
+
+        fn mag_body_ned(&self) -> Option<[f32; 3]> {
+            *self.latest_mag_body_ned.lock().unwrap()
         }
     }
 
