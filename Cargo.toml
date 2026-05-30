@@ -27,6 +27,7 @@ members = [
     "crates/relay-att",
     "crates/relay-mix-quad",
     "crates/relay-arm",
+    "crates/relay-iekf",
     "crates/relay-pos",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",

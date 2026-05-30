@@ -1,0 +1,23 @@
+[package]
+name = "relay-iekf"
+description = "Relay navigation filter — full-state Invariant EKF on SE2(3) (rotation, velocity, position, IMU biases); fixes RC#3 by predicting attitude through the rigid-body dynamics + GPS/baro correction (v0.21 keystone)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Plain Rust + proptest + Kani (f32 filter; off the integer Verus track,
+# same posture as relay-mix-quad / relay-arm). See docs/IEKF-DESIGN.md.
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
