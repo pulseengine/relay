@@ -29,6 +29,9 @@
 // Index loops are clearer than iterator adapters for fixed-size matrix
 // algebra; the bounds are all compile-time constants.
 #![allow(clippy::needless_range_loop)]
+// `!(x > 0.0)` is deliberate NaN-rejecting validation (true for NaN), not
+// a stylistic negation — keep the guards explicit about rejecting NaN.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 /// Standard gravity in NED (down is +z), m/s².
 pub const GRAVITY_NED: [f32; 3] = [0.0, 0.0, 9.81];
@@ -333,6 +336,22 @@ impl Iekf {
         &self.p
     }
 
+    /// Initialise attitude to **level at the given NED yaw** (e.g. the
+    /// first compass reading) and collapse the heading covariance. Call
+    /// once at startup so the estimate starts ALIGNED with the body
+    /// rather than converging from a large initial mismatch — a 90°
+    /// startup error otherwise kicks the attitude controller into a yaw
+    /// oscillation.
+    pub fn init_heading(&mut self, yaw: f32) {
+        if !yaw.is_finite() {
+            return;
+        }
+        let h = 0.5 * yaw;
+        // Level body, rotation about NED-down (z) by yaw.
+        self.state.q = q_normalize([libm::cosf(h), 0.0, 0.0, libm::sinf(h)]);
+        self.p[2][2] = 0.01; // confident heading now
+    }
+
     /// IMU propagation over `dt` (clamped to a sane range). Implements
     /// the nominal dynamics from the design doc:
     /// ```text
@@ -536,6 +555,184 @@ impl Iekf {
         symmetrise(&mut self.p);
         true
     }
+
+    /// **Heading (yaw)** measurement update — a magnetometer / compass.
+    ///
+    /// With IMU + GPS only, yaw is unobservable at hover (gravity anchors
+    /// roll/pitch but nothing anchors heading), so the estimate wanders
+    /// ±130° and the position controller's commands misalign. A heading
+    /// reference fixes this — the structural requirement for position-hold.
+    ///
+    /// The world-frame yaw is rotation about NED-down (z), so under the
+    /// right-invariant error the yaw error is the z-component of δθ:
+    /// `H = e_z` (index 2). Scalar update; innovation wrapped to [−π, π].
+    pub fn update_yaw(&mut self, yaw_meas: f32, meas_var: f32) -> bool {
+        if !yaw_meas.is_finite() || !(meas_var > 0.0) {
+            return false;
+        }
+        let q = self.state.q;
+        let yaw_est = libm::atan2f(
+            2.0 * (q[0] * q[3] + q[1] * q[2]),
+            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+        );
+        // Shortest-arc innovation in [−π, π].
+        let r = libm::remainderf(yaw_meas - yaw_est, 2.0 * core::f32::consts::PI);
+
+        // H = e_z over δθ (column 2). S = P[2][2] + R (scalar).
+        let s = self.p[2][2] + meas_var;
+        if !(s > 0.0) || !s.is_finite() {
+            return false;
+        }
+        // K[i] = P[i][2] / s ; ξ = K·r.
+        let mut xi = [0.0f32; N];
+        for i in 0..N {
+            xi[i] = (self.p[i][2] / s) * r;
+        }
+
+        // Inject (right-invariant): R̂ ← Exp(ξθ)·R̂; v/p/biases additive.
+        self.state.q = sanitise_quat(q_mul(so3_exp([xi[0], xi[1], xi[2]]), self.state.q));
+        for i in 0..3 {
+            self.state.v[i] += xi[3 + i];
+            self.state.p[i] += xi[6 + i];
+            self.state.b_g[i] += xi[9 + i];
+            self.state.b_a[i] += xi[12 + i];
+        }
+
+        // P ← (I − K H) P. With H = e_zᵀ at column 2, (K H) has only
+        // column 2 nonzero = K, so row i becomes P[i][:] − (P[i][2]/s)·P[2][:].
+        let row2 = self.p[2];
+        for i in 0..N {
+            let ki = self.p[i][2] / s;
+            for j in 0..N {
+                self.p[i][j] -= ki * row2[j];
+            }
+        }
+        symmetrise(&mut self.p);
+        true
+    }
+
+    /// **Adaptive gravity / tilt** update from the accelerometer. When the
+    /// vehicle acceleration is low, the specific force is the gravity
+    /// reaction, an excellent roll/pitch reference; this fuses it while
+    /// INFLATING the measurement variance as |accel| deviates from g
+    /// (high acceleration ⇒ distrust accel-as-gravity). This is the
+    /// principled RC#3 resolution: use the accelerometer for tilt
+    /// adaptively, never as a blind gravity oracle. Yaw is untouched
+    /// (gravity is vertical, so [g]× has no z-component coupling).
+    pub fn update_gravity(&mut self, accel_body: Vec3, base_var: f32) -> bool {
+        let a = sanitise3(accel_body);
+        let amag = libm::sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+        if !(amag > 1e-3) || !(base_var > 0.0) {
+            return false;
+        }
+        // Adaptive variance: inflate when |a| deviates from g (the vehicle
+        // is accelerating, so the accel is NOT pure gravity reaction).
+        let dev = (amag - GRAVITY_NED[2]).abs();
+        let meas_var = base_var * (1.0 + 4.0 * dev);
+
+        // Predicted gravity reaction in body: ĝ_b = R̂ᵀ·(−g_ned).
+        let rmat = quat_to_rotmat(self.state.q); // body→NED
+        let g_b = [
+            -GRAVITY_NED[2] * rmat[2][0],
+            -GRAVITY_NED[2] * rmat[2][1],
+            -GRAVITY_NED[2] * rmat[2][2],
+        ];
+        let r = [a[0] - g_b[0], a[1] - g_b[1], a[2] - g_b[2]];
+
+        // H (3×15): δθ block = −R̂ᵀ·[g_ned]× (observes roll/pitch, not yaw).
+        // rt = R̂ᵀ ; sg = [g_ned]× ; block = −(rt·sg).
+        let sg = skew(GRAVITY_NED);
+        let mut h = [[0.0f32; N]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                let mut acc = 0.0;
+                for k in 0..3 {
+                    acc += rmat[k][i] * sg[k][j]; // (R̂ᵀ)[i][k]=rmat[k][i]
+                }
+                h[i][j] = -acc;
+            }
+        }
+
+        // HP = H·P (3×15).
+        let mut hp = [[0.0f32; N]; 3];
+        for i in 0..3 {
+            for k in 0..N {
+                let hik = h[i][k];
+                if hik == 0.0 {
+                    continue;
+                }
+                for j in 0..N {
+                    hp[i][j] += hik * self.p[k][j];
+                }
+            }
+        }
+        // S = HP·Hᵀ + R (3×3).
+        let mut s = [[0.0f32; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                let mut acc = 0.0;
+                for k in 0..N {
+                    acc += hp[i][k] * h[j][k];
+                }
+                s[i][j] = acc;
+            }
+            s[i][i] += meas_var;
+        }
+        let s_inv = match inv3(&s) {
+            Some(v) => v,
+            None => return false,
+        };
+        // K = P Hᵀ S⁻¹ (15×3); PHt[k][i]=hp[i][k] (P symmetric).
+        let mut k_gain = [[0.0f32; 3]; N];
+        for row in 0..N {
+            for col in 0..3 {
+                let mut acc = 0.0;
+                for m in 0..3 {
+                    acc += hp[m][row] * s_inv[m][col];
+                }
+                k_gain[row][col] = acc;
+            }
+        }
+        // ξ = K r.
+        let mut xi = [0.0f32; N];
+        for row in 0..N {
+            let mut acc = 0.0;
+            for c in 0..3 {
+                acc += k_gain[row][c] * r[c];
+            }
+            xi[row] = acc;
+        }
+        // Inject (right-invariant).
+        self.state.q = sanitise_quat(q_mul(so3_exp([xi[0], xi[1], xi[2]]), self.state.q));
+        for i in 0..3 {
+            self.state.v[i] += xi[3 + i];
+            self.state.p[i] += xi[6 + i];
+            self.state.b_g[i] += xi[9 + i];
+            self.state.b_a[i] += xi[12 + i];
+        }
+        // P ← (I − K H) P.
+        let mut kh = mat_zero();
+        for i in 0..N {
+            for c in 0..3 {
+                let kic = k_gain[i][c];
+                if kic == 0.0 {
+                    continue;
+                }
+                for j in 0..N {
+                    kh[i][j] += kic * h[c][j];
+                }
+            }
+        }
+        let mut imkh = mat_identity();
+        for i in 0..N {
+            for j in 0..N {
+                imkh[i][j] -= kh[i][j];
+            }
+        }
+        self.p = mat_mul(&imkh, &self.p);
+        symmetrise(&mut self.p);
+        true
+    }
 }
 
 #[inline]
@@ -665,6 +862,54 @@ mod tests {
             assert!((s.p[i] - truth[i]).abs() < 0.3, "p[{i}] = {} vs {}", s.p[i], truth[i]);
         }
         assert!(s.tilt_rad().to_degrees() < 5.0, "stays roughly level: {}", s.tilt_rad().to_degrees());
+    }
+
+    /// Heading update observes yaw: drive the estimate to ~1 rad of yaw,
+    /// then feed a yaw=0 reference (a compass/magnetometer) — the estimate
+    /// must converge back to 0. Without this, yaw is unobservable (the
+    /// v0.21 ±130° wander).
+    #[test]
+    fn yaw_update_corrects_heading() {
+        let mut f = Iekf::level();
+        let spin = Imu { gyro: [0.0, 0.0, 1.0], accel: [0.0, 0.0, -9.81] };
+        for _ in 0..100 {
+            f.propagate(spin, 0.01); // yaw → ~1 rad
+        }
+        let q0 = f.state().q;
+        let yaw0 = libm::atan2f(2.0 * (q0[0] * q0[3] + q0[1] * q0[2]), 1.0 - 2.0 * (q0[2] * q0[2] + q0[3] * q0[3]));
+        assert!(yaw0 > 0.5, "setup: estimate should be yawed, got {yaw0}");
+
+        let still = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        for _ in 0..300 {
+            f.propagate(still, 0.01);
+            f.update_yaw(0.0, 0.02);
+        }
+        let q = f.state().q;
+        let yaw = libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        assert!(yaw.abs() < 0.1, "heading should converge to 0, got {yaw}");
+    }
+
+    /// The adaptive gravity update corrects tilt: inject a roll error,
+    /// then feed a level gravity-reaction accel — the estimate must return
+    /// toward level. This is the tilt observability the v0.21 IMU+GPS
+    /// filter lacked (3° error → tip-over).
+    #[test]
+    fn gravity_update_corrects_tilt() {
+        let mut f = Iekf::level();
+        let roll = Imu { gyro: [0.5, 0.0, 0.0], accel: [0.0, 0.0, -9.81] };
+        for _ in 0..40 {
+            f.propagate(roll, 0.01); // ~0.2 rad ≈ 11° roll
+        }
+        let tilt0 = f.state().tilt_rad().to_degrees();
+        assert!(tilt0 > 5.0, "setup: estimate should be tilted, got {tilt0}");
+
+        let still = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        for _ in 0..400 {
+            f.propagate(still, 0.01);
+            f.update_gravity([0.0, 0.0, -9.81], 0.5); // body level per accel
+        }
+        let tilt1 = f.state().tilt_rad().to_degrees();
+        assert!(tilt1 < 2.0, "gravity update should correct tilt, got {tilt1}");
     }
 
     proptest::proptest! {

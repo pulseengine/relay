@@ -274,16 +274,34 @@ impl PosController {
             self.last_v_err[i] = v_err;
         }
 
-        // 3. Horizontal accel → tilt direction.
-        //    Convention: north-accel ⇐ nose-up pitch (negative pitch in
-        //    body convention since +pitch ≈ nose-up, accel ≈ -g sin(pitch));
-        //    east-accel ⇐ right-side-down roll (positive roll).
-        let pitch_rad = atan2f(-accel[0], GRAVITY);
-        let roll_rad = atan2f(accel[1], GRAVITY);
+        // 3. Heading (yaw): hold setpoint.yaw if finite, else the current
+        //    vehicle yaw. Needed BEFORE the tilt map to rotate the
+        //    horizontal accel command into the body-heading frame.
+        let yaw = if setpoint.yaw_setpoint.is_finite() {
+            setpoint.yaw_setpoint
+        } else {
+            quat_to_yaw(vehicle_quat)
+        };
+
+        // 4. Rotate the NED horizontal accel command into the body-heading
+        //    frame (NED yaw ψ is CW about +Down, so the body-frame
+        //    components are [N E] rotated by −ψ). Without this, "pitch to
+        //    accelerate north" is only correct when ψ = 0; for any other
+        //    heading the tilt is commanded in the wrong direction and the
+        //    vehicle accelerates the wrong way. (Surfaced v0.22 once the
+        //    IEKF + compass gave a correct non-zero yaw.)
+        let (cy, sy) = (cosf(yaw), sinf(yaw));
+        let accel_fwd = accel[0] * cy + accel[1] * sy;
+        let accel_right = -accel[0] * sy + accel[1] * cy;
+
+        // 5. Horizontal accel → tilt (in the heading frame). Forward accel
+        //    ⇐ nose-down pitch; right accel ⇐ right-side-down roll.
+        let pitch_rad = atan2f(-accel_fwd, GRAVITY);
+        let roll_rad = atan2f(accel_right, GRAVITY);
         let pitch = clamp_f32(pitch_rad, -self.gains.tilt_max, self.gains.tilt_max);
         let roll = clamp_f32(roll_rad, -self.gains.tilt_max, self.gains.tilt_max);
 
-        // 4. Vertical accel → collective thrust. In NED, +z = down,
+        // 6. Vertical accel → collective thrust. In NED, +z = down,
         //    so positive accel.down (= falling faster) means we need
         //    LESS thrust, while negative accel.down (= rising) means
         //    MORE thrust.
@@ -293,15 +311,7 @@ impl PosController {
             1.0,
         );
 
-        // 5. Hold heading: if setpoint.yaw is NaN, extract yaw from
-        //    the current vehicle quaternion; else use setpoint.yaw.
-        let yaw = if setpoint.yaw_setpoint.is_finite() {
-            setpoint.yaw_setpoint
-        } else {
-            quat_to_yaw(vehicle_quat)
-        };
-
-        // 6. Build body-to-NED setpoint quaternion from Euler (Z-Y-X).
+        // 7. Build body-to-NED setpoint quaternion from Euler (Z-Y-X).
         let q_setpoint = euler_to_quaternion(roll, pitch, yaw);
 
         let out = AttitudeSetpoint {

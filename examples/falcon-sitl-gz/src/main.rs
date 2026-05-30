@@ -638,6 +638,11 @@ fn run_closed_loop_hover(
     // est_tilt vs true_tilt. If the IEKF tracks truth where Mahony
     // diverges to 51° (v0.20 RC#3), the keystone works.
     let mut iekf = Iekf::level();
+    let mut iekf_heading_init = false;
+    // v0.22 — hold a FIXED heading (the spawn heading, NED yaw ≈ 90° =
+    // body facing East). "Hold current estimate yaw" feeds estimate noise
+    // back through the Euler setpoint and spins the body once yaw ≠ 0.
+    let yaw_hold = core::f32::consts::FRAC_PI_2;
     let mut rate_pid = RatePid::new();
     let mut att = AttController::new();
     // v0.20 — calibrate the position controller's hover thrust for the gz
@@ -661,7 +666,11 @@ fn run_closed_loop_hover(
     let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
-    let setpoint = PositionSetpoint::hover_at(setpoint_ned);
+    let setpoint = if std::env::var("USE_IEKF").is_ok() {
+        PositionSetpoint { position_ned: setpoint_ned, velocity_ned: [0.0; 3], yaw_setpoint: yaw_hold }
+    } else {
+        PositionSetpoint::hover_at(setpoint_ned)
+    };
 
     let dt = 0.01_f32;
     let n = (duration_s / dt) as u32;
@@ -696,12 +705,26 @@ fn run_closed_loop_hover(
         let est = ekf.tick(imu_sample);
         if !est.quaternion[0].is_finite() { nan_seen = true; }
 
-        // 2b. IEKF (v0.21) — propagate on IMU, correct on gz position
-        //     (the "GPS"). Runs in parallel for the diagnostic; the
-        //     measured accel is body-frame specific force, exactly the
-        //     IEKF's dynamics input.
+        // 2b. IEKF — propagate on IMU, correct on gz position (the
+        //     "GPS"), and on heading (v0.22 "compass") which makes yaw
+        //     observable (the v0.21 ±130° wander). The measured accel is
+        //     body-frame specific force, exactly the IEKF's dynamics input.
         iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
+        // Adaptive gravity/tilt fusion (variance inflates under accel) +
+        // position. Gives the roll/pitch observability the IMU+GPS-only
+        // filter lacked (3° error → tip-over).
+        iekf.update_gravity(imu_sample.accel_body, 0.5);
         iekf.update_position(pos_ned, 0.04); // ~0.2 m 1σ NavSat
+        if let Some(hdg) = physics.heading_ned() {
+            // One-time alignment: start the estimate at the body's true
+            // heading so the controller doesn't see a 90° startup yaw
+            // error (which kicked it into a spin).
+            if !iekf_heading_init {
+                iekf.init_heading(hdg);
+                iekf_heading_init = true;
+            }
+            iekf.update_yaw(hdg, 0.01); // ~6° 1σ compass
+        }
 
         // 3. POS — position + velocity → attitude setpoint.
         let v_fd = match last_pos_ned {
@@ -770,11 +793,12 @@ fn run_closed_loop_hover(
             let is = iekf.state();
             let iq = is.q;
             let iyaw = libm::atan2f(2.0 * (iq[0] * iq[3] + iq[1] * iq[2]), 1.0 - 2.0 * (iq[2] * iq[2] + iq[3] * iq[3]));
+            let chdg = physics.heading_ned().unwrap_or(f32::NAN).to_degrees();
             eprintln!(
-                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° IEKF_tilt={:.1}° IEKF_yaw={:.1}° ipos=[{:.1},{:.1},{:.1}] thrust={:.2}",
+                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° IEKF_tilt={:.1}° IEKF_yaw={:.1}° compass={:.1}° ipos=[{:.1},{:.1},{:.1}]",
                 pos_ned[0], pos_ned[1], pos_ned[2],
-                tilt.to_degrees(), is.tilt_rad().to_degrees(), iyaw.to_degrees(),
-                is.p[0], is.p[1], is.p[2], current_thrust,
+                tilt.to_degrees(), is.tilt_rad().to_degrees(), iyaw.to_degrees(), chdg,
+                is.p[0], is.p[1], is.p[2],
             );
         }
 
