@@ -128,7 +128,10 @@ impl FalconConfig {
 }
 
 impl Default for FalconConfig {
-    /// The current best-known falcon-quad tuning (the in-code defaults).
+    /// Best-known falcon-quad tuning — the A/B-investigation result that
+    /// achieves reliable position-hold (Track B: 6/6 PASS; reproduced
+    /// 3/4+ here, ~0.3 m typical). See
+    /// docs/research/v0.25-position-hold-AB-synthesis.md.
     fn default() -> Self {
         FalconConfig {
             iekf: IekfCfg {
@@ -137,7 +140,10 @@ impl Default for FalconConfig {
                 q_bias_gyro: 1e-6,
                 q_bias_accel: 1e-5,
                 p0: [0.1, 0.5, 1.0, 0.01, 0.1],
-                pos_var: 0.04,
+                // Tight position measurement: the horizontal loop damps on
+                // the IEKF velocity; loose pos_var lagged it → a ~6 s-period
+                // circular limit cycle. 0.005 cut the lag.
+                pos_var: 0.005,
                 yaw_var: 0.0005,
                 grav_var: 0.5,
             },
@@ -149,20 +155,29 @@ impl Default for FalconConfig {
             adrc: [
                 AdrcCfg { omega_o: 40.0, omega_c: 12.0, b0: 30.0, tau: 0.0125 },
                 AdrcCfg { omega_o: 40.0, omega_c: 12.0, b0: 30.0, tau: 0.0125 },
-                // Yaw: ω_o high (fast observer, below 1/τ≈40), ω_c low
-                // (control bw below the motor pole), AND the actuator lag
-                // τ=0.025 (gz spin-down) modelled in the ESO. Per the
-                // actuator-lag analysis (docs/research/v0.25-inner-loop-sota.md).
-                AdrcCfg { omega_o: 30.0, omega_c: 3.0, b0: 6.0, tau: 0.025 },
+                // Yaw: ω_o high / ω_c low (control bw below the motor pole)
+                // + actuator lag τ=0.025 in the ESO. b0 is NEGATIVE: the
+                // geo-hover yaw torque is effectively INVERTED in gz (A/B
+                // investigation — negative b0 → 3/4 PASS, positive → 1/4;
+                // the frame-yaw oracle is too noisy to pin the sign). A
+                // negative b0 flips the ADRC control AND its plant model
+                // consistently. The durable fix is a yaw-sign correction
+                // in the Rust path (TBD root cause).
+                AdrcCfg { omega_o: 30.0, omega_c: 3.0, b0: -6.0, tau: 0.025 },
             ],
             pos: PosCfg {
-                kp_pos: 0.6,
-                kd_vel: 1.2,
-                a_cmd_max: 3.0,
-                hover_thrust: 0.52, // √ PWM map hover point
+                // Gentle horizontal gains: high gains excited the limit
+                // cycle; a small kp centres the drone without exciting it.
+                kp_pos: 0.08,
+                kd_vel: 0.6,
+                a_cmd_max: 1.0,
+                // √-PWM hover point; the altitude loop has no integrator so
+                // this must match gravity (0.52 sank, >0.60 climbed).
+                hover_thrust: 0.555,
                 kp_alt: 0.05,
                 kd_alt: 0.30,
-                mixer_floor: 0.5,
+                // Low idle gives yaw headroom in the priority mixer.
+                mixer_floor: 0.2,
                 use_adrc: true,
                 yaw_mode: YawMode::RateHold,
             },

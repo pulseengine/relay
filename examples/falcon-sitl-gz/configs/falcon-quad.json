@@ -15,7 +15,7 @@
       0.01,
       0.1
     ],
-    "pos_var": 0.04,
+    "pos_var": 0.005,
     "yaw_var": 0.0005,
     "grav_var": 0.5
   },
@@ -52,18 +52,18 @@
     {
       "omega_o": 30.0,
       "omega_c": 3.0,
-      "b0": 6.0,
+      "b0": -6.0,
       "tau": 0.025
     }
   ],
   "pos": {
-    "kp_pos": 0.6,
-    "kd_vel": 1.2,
-    "a_cmd_max": 3.0,
-    "hover_thrust": 0.52,
+    "kp_pos": 0.08,
+    "kd_vel": 0.6,
+    "a_cmd_max": 1.0,
+    "hover_thrust": 0.555,
     "kp_alt": 0.05,
     "kd_alt": 0.3,
-    "mixer_floor": 0.5,
+    "mixer_floor": 0.2,
     "use_adrc": true,
     "yaw_mode": "rate_hold"
   }
