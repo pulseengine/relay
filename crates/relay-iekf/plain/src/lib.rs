@@ -737,6 +737,79 @@ impl Iekf {
         symmetrise(&mut self.p);
         true
     }
+
+    // ── Consistency monitoring (NEES) ─────────────────────────────────
+    //
+    // NEES (Normalized Estimation Error Squared) is THE filter-consistency
+    // statistic: ε = (x̂−x)ᵀ P⁻¹ (x̂−x). For a consistent linear-Gaussian
+    // filter ε is χ²-distributed with `dof` degrees of freedom, so
+    // E[ε] = dof. Too LARGE ⇒ the filter is OVER-confident (P too small,
+    // diverging — the dangerous case); too SMALL ⇒ over-conservative
+    // (P too large, sluggish). Against gz ground truth this gates whether
+    // the IEKF's *claimed* covariance is honest. It is no_std/no_alloc and
+    // cheap (one 3×3 inverse), so the same code is an ONLINE filter-health
+    // monitor on the embedded target, not merely a bench check.
+
+    /// NEES of the 3-DoF position estimate against a known-true position.
+    /// Consistent ⇒ ≈ 3 on average, within χ²₃ bounds [0.216, 9.35] (95%).
+    /// Returns `f32::INFINITY` if the position covariance is singular with
+    /// a non-zero error (the over-confident, inconsistent extreme).
+    pub fn nees_position(&self, p_true: Vec3) -> f32 {
+        let e = [
+            self.state.p[0] - p_true[0],
+            self.state.p[1] - p_true[1],
+            self.state.p[2] - p_true[2],
+        ];
+        nees_block(&self.p, 6, e)
+    }
+
+    /// NEES of the 3-DoF velocity estimate against a known-true velocity.
+    pub fn nees_velocity(&self, v_true: Vec3) -> f32 {
+        let e = [
+            self.state.v[0] - v_true[0],
+            self.state.v[1] - v_true[1],
+            self.state.v[2] - v_true[2],
+        ];
+        nees_block(&self.p, 3, e)
+    }
+}
+
+/// NEES of a 3-DoF error `e` against the 3×3 covariance block of `p`
+/// anchored at `base` (e.g. 6 for position, 3 for velocity).
+/// `eᵀ (P_block)⁻¹ e`. Singular block ⇒ INFINITY if `e≠0`, else 0.
+fn nees_block(p: &Mat, base: usize, e: Vec3) -> f32 {
+    let mut blk = [[0.0f32; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            blk[i][j] = p[base + i][base + j];
+        }
+    }
+    match inv3(&blk) {
+        Some(pinv) => {
+            // eᵀ P⁻¹ e
+            let mut acc = 0.0f32;
+            for i in 0..3 {
+                let mut row = 0.0f32;
+                for j in 0..3 {
+                    row += pinv[i][j] * e[j];
+                }
+                acc += e[i] * row;
+            }
+            if acc.is_finite() {
+                acc.max(0.0)
+            } else {
+                f32::INFINITY
+            }
+        }
+        None => {
+            let e2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+            if e2 < 1e-20 {
+                0.0
+            } else {
+                f32::INFINITY
+            }
+        }
+    }
 }
 
 #[inline]
@@ -965,5 +1038,56 @@ mod tests {
         let tr1: f32 = (0..N).map(|i| f.covariance()[i][i]).sum();
         assert!(tr1 > tr0, "covariance trace must grow: {tr0} -> {tr1}");
         assert!(tr1.is_finite());
+    }
+
+    /// NEES math: a fresh level filter has position covariance = I (p0[2]=1
+    /// ⇒ 1σ=1, no cross terms), so ε = eᵀI⁻¹e = ‖e‖². Pin the analytic
+    /// values and the zero-error case.
+    #[test]
+    fn nees_position_is_squared_error_under_identity_cov() {
+        let f = Iekf::level();
+        // covariance() position block is identity here.
+        assert!((f.covariance()[6][6] - 1.0).abs() < 1e-6);
+        assert!((f.nees_position([0.0, 0.0, 0.0]) - 0.0).abs() < 1e-5);
+        assert!((f.nees_position([1.0, 0.0, 0.0]) - 1.0).abs() < 1e-4); // ‖e‖²=1
+        assert!((f.nees_position([3.0, 0.0, 0.0]) - 9.0).abs() < 1e-3); // ‖e‖²=9
+        assert!((f.nees_position([1.0, 2.0, 2.0]) - 9.0).abs() < 1e-3); // 1+4+4
+    }
+
+    /// NEES weights the error by the INVERSE covariance: after a tight
+    /// position update shrinks P, the SAME true-offset becomes more
+    /// "surprising" ⇒ NEES grows. This is the over-confidence detector —
+    /// a small P with a real error is exactly the dangerous case.
+    #[test]
+    fn nees_grows_as_covariance_shrinks() {
+        let mut f = Iekf::level();
+        let truth = [0.5, 0.0, 0.0];
+        let before = f.nees_position(truth);
+        // Confident measurement AT the current estimate (0) shrinks P_pos
+        // without moving the estimate much off `truth`.
+        let imu = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        f.propagate(imu, 0.01);
+        f.update_position([0.0, 0.0, 0.0], 1e-3); // very tight ⇒ P_pos ↓
+        let after = f.nees_position(truth);
+        assert!(f.covariance()[6][6] < 1.0, "P_pos should shrink");
+        assert!(after > before, "tighter P ⇒ larger NEES for same error: {before} -> {after}");
+        assert!(after.is_finite());
+    }
+
+    /// Total: NEES is finite (or a clean INFINITY sentinel) for any inputs,
+    /// including velocity and after arbitrary propagation.
+    #[test]
+    fn nees_is_total() {
+        let mut f = Iekf::level();
+        let imu = Imu { gyro: [0.1, -0.2, 0.3], accel: [0.5, -0.5, -9.0] };
+        for _ in 0..50 {
+            f.propagate(imu, 0.01);
+        }
+        for &t in &[[0.0, 0.0, 0.0], [1e6, -1e6, 1e6], [-3.0, 2.0, -1.0]] {
+            let np = f.nees_position(t);
+            let nv = f.nees_velocity(t);
+            assert!(np >= 0.0 && (np.is_finite() || np == f32::INFINITY));
+            assert!(nv >= 0.0 && (nv.is_finite() || nv == f32::INFINITY));
+        }
     }
 }

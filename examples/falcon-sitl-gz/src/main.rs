@@ -474,6 +474,12 @@ fn run_geo_hover(
     let mut sum_sq_steady = 0.0_f32;
     let mut steady_count = 0usize;
     let steady_start_t = (duration_s - 5.0).max(0.0);
+    // IEKF consistency (NEES) accumulators: the pre-position-update
+    // prediction error vs gz ground truth, weighted by the filter's own
+    // predicted position covariance. Consistent ⇒ mean ≈ 3 (χ²₃).
+    let mut nees_sum = 0.0_f64;
+    let mut nees_n = 0u32;
+    let mut nees_max = 0.0_f32;
     let mut last_pos_d = 0.0_f32;
     let mut v_d_filt = 0.0_f32;
     let mut last_pos_ned = setpoint_ned;
@@ -497,6 +503,18 @@ fn run_geo_hover(
         //    geometric desired rate (held for the inner loop to track) ──
         if step % outer_decim == 0 {
             iekf.update_gravity(imu_sample.accel_body, cfg.iekf.grav_var);
+            // NEES BEFORE the position update: the predicted estimate vs
+            // gz truth `pos_ned`, weighted by the predicted P. (After the
+            // update the estimate is pulled to truth, so post-update NEES
+            // is uninformative in noiseless SITL.)
+            let nees = iekf.nees_position(pos_ned);
+            if nees.is_finite() {
+                nees_sum += nees as f64;
+                nees_n += 1;
+                if nees > nees_max {
+                    nees_max = nees;
+                }
+            }
             iekf.update_position(pos_ned, cfg.iekf.pos_var);
             if let Some(hdg) = physics.heading_ned() {
                 if !iekf_heading_init {
@@ -604,14 +622,37 @@ fn run_geo_hover(
     } else {
         f32::NAN
     };
+    let anees = if nees_n > 0 { (nees_sum / nees_n as f64) as f32 } else { f32::NAN };
     println!(
         "  verdict: backend={} scenario=geo-hover steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
         physics.name(), n, final_dist, peak_dist, rms_steady, wall.as_secs_f32(),
     );
+    // IEKF consistency report (3-DoF position, χ²₃: E=3, 95% single-sample
+    // band [0.216, 9.35]). The SAFETY-relevant direction is OVER-CONFIDENT
+    // (ANEES ≫ 3): the filter claims tighter covariance than its true
+    // error — the precursor to divergence. Below ~3 is over-conservative
+    // (safe). The gate flags only the over-confident extreme.
+    let nees_status = if !anees.is_finite() {
+        "NO-DATA"
+    } else if anees > 9.35 {
+        "OVER-CONFIDENT"
+    } else if anees < 0.216 {
+        "over-conservative"
+    } else {
+        "CONSISTENT"
+    };
+    let nees_ok = anees.is_finite() && anees <= 9.35;
+    println!(
+        "  iekf-consistency: position ANEES={:.2} (target≈3.0, dof=3) max={:.1} n={} [{}]",
+        anees, nees_max, nees_n, nees_status,
+    );
     if let Some(ref mut e) = evidence {
         e.write_summary_hover(n, final_dist, peak_dist, rms_steady, min_dist, wall.as_secs_f32(), physics.counters());
     }
-    final_dist < 0.5 && rms_steady < 1.0
+    // PASS requires BOTH position-hold AND filter consistency: an
+    // over-confident estimator is unsafe even if this run's position
+    // looked fine (it is the divergence precursor).
+    final_dist < 0.5 && rms_steady < 1.0 && nees_ok
 }
 
 fn run_alt_rate_hover(
