@@ -440,7 +440,8 @@ fn run_geo_hover(
                 iekf.init_heading(hdg);
                 iekf_heading_init = true;
             }
-            iekf.update_yaw(hdg, 0.01);
+            let yvar = std::env::var("YAWVAR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01_f32);
+            iekf.update_yaw(hdg, yvar);
         }
         let est = iekf.state();
 
@@ -477,12 +478,17 @@ fn run_geo_hover(
         let arm = seq.tick(tilt, true);
         let torque = if arm.torque_authority {
             let m = geo.tick(est.q, imu_sample.gyro_body, a_cmd, yaw_d);
-            [m[0] * torque_scale, m[1] * torque_scale, m[2] * torque_scale]
+            // Diagnostic: YAW_OFF zeros the yaw torque to separate
+            // control-induced spin (chasing a lagged estimate) from an
+            // actuator-side yaw disturbance.
+            let yaw_t = if std::env::var("YAW_OFF").is_ok() { 0.0 } else { m[2] * torque_scale };
+            [m[0] * torque_scale, m[1] * torque_scale, yaw_t]
         } else {
             [0.0_f32; 3]
         };
+        let floor = std::env::var("FLOOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.5_f32);
         let motors =
-            mixer.mix_thrust_floor(torque, thrust * arm.thrust_scale, 0.5 * arm.thrust_scale);
+            mixer.mix_thrust_floor(torque, thrust * arm.thrust_scale, floor * arm.thrust_scale);
         physics.step(motors, dt);
 
         let dn = pos_ned[0] - setpoint_ned[0];

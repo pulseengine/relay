@@ -158,8 +158,13 @@ impl GeoGains {
     /// proof requires k_R, k_Ω > 0; these are positive and roll/pitch >
     /// yaw (weak yaw authority).
     pub const FALCON_QUAD: Self = Self {
-        k_r: [0.6, 0.6, 1.0],
-        k_omega: [0.12, 0.12, 0.4],
+        // Yaw is rate-DOMINANT: low k_R (the attitude term uses the
+        // lagged estimate and, driven hard, chases estimate noise into a
+        // spin) but firm k_Ω (the rate term uses the fast raw gyro — pure
+        // damping, no lag). Roll/pitch are gravity-anchored, so attitude-
+        // dominant is fine there.
+        k_r: [0.6, 0.6, 0.15],
+        k_omega: [0.12, 0.12, 0.35],
         j: [0.0217, 0.0217, 0.04],
     };
 }
