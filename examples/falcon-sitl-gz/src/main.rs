@@ -423,7 +423,14 @@ fn run_geo_hover(
     let mut iekf = Iekf::with_config(NavState::identity(), cfg.to_iekf_config());
     let mut iekf_heading_init = false;
     let mut mixer = QuadMixer::new();
-    let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
+    // Arming ticks are wall-clock-derived (0.3 s spin-up, 0.1 s level) so
+    // it works at any loop rate (100 Hz → 30/10, 1 kHz → 300/100).
+    let arm_dt = cfg.pos.loop_dt.max(1e-4);
+    let mut seq = ArmingSequencer::new(ArmingConfig {
+        spinup_ticks: (0.3 / arm_dt) as u32,
+        level_ticks_required: (0.1 / arm_dt) as u32,
+        tilt_thresh_rad: 0.087,
+    });
     let geo = GeoAtt::new(cfg.to_geo_gains());
     let mut adrc = cfg.to_adrc();
     let use_adrc = cfg.pos.use_adrc;
@@ -438,7 +445,14 @@ fn run_geo_hover(
     let lp_alpha = 0.05_f32;
     let torque_scale = 1.0_f32; // geometric Nm → mixer normalised torque
     let yaw_d = core::f32::consts::FRAC_PI_2; // hold spawn heading (East)
-    let dt = 0.01_f32;
+    // v0.25 — CASCADE: fast inner rate loop (IEKF-predict + gyro-LPF +
+    // ADRC + mixer) at `dt` (1 kHz), slow outer loop (IEKF aiding updates
+    // + altitude + geometric/position) every `outer_decim` ticks (~100 Hz).
+    // Track A: the rate loop must run fast vs the 25 ms yaw actuator pole.
+    let dt = cfg.pos.loop_dt.max(1e-4);
+    let outer_decim = cfg.pos.outer_decim.max(1);
+    let dt_outer = dt * outer_decim as f32;
+    let mut gyro_lpf = relay_adrc::GyroLpf::new(cfg.pos.gyro_lpf_hz, 1.0 / dt);
     let n = (duration_s / dt) as u32;
     let tick_period = Duration::from_secs_f32(dt);
     let pace_real_time = physics.counters().is_some();
@@ -451,6 +465,11 @@ fn run_geo_hover(
     let mut last_pos_d = 0.0_f32;
     let mut v_d_filt = 0.0_f32;
     let mut last_pos_ned = setpoint_ned;
+    // Outer-loop outputs, held across inner ticks.
+    let mut omega_d_held = [0.0_f32; 3];
+    let mut a_cmd_held = [0.0_f32; 3];
+    let mut thrust_held = hover_thrust;
+    let mut est = iekf.state();
 
     let started_at = Instant::now();
     for step in 0..n {
@@ -458,56 +477,59 @@ fn run_geo_hover(
         let t = step as f32 * dt;
         let (imu_sample, pos_ned) = physics.measure(0.0);
 
-        // IEKF full-state estimation (measurement variances from config).
+        // ── INNER (every tick): IEKF predict + gyro low-pass ──
         iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
-        iekf.update_gravity(imu_sample.accel_body, cfg.iekf.grav_var);
-        iekf.update_position(pos_ned, cfg.iekf.pos_var);
-        if let Some(hdg) = physics.heading_ned() {
-            if !iekf_heading_init {
-                iekf.init_heading(hdg);
-                iekf_heading_init = true;
+        let gyro_f = gyro_lpf.filter(imu_sample.gyro_body);
+
+        // ── OUTER (every outer_decim ticks): aiding updates + position →
+        //    geometric desired rate (held for the inner loop to track) ──
+        if step % outer_decim == 0 {
+            iekf.update_gravity(imu_sample.accel_body, cfg.iekf.grav_var);
+            iekf.update_position(pos_ned, cfg.iekf.pos_var);
+            if let Some(hdg) = physics.heading_ned() {
+                if !iekf_heading_init {
+                    iekf.init_heading(hdg);
+                    iekf_heading_init = true;
+                }
+                iekf.update_yaw(hdg, cfg.iekf.yaw_var);
             }
-            iekf.update_yaw(hdg, cfg.iekf.yaw_var);
+            est = iekf.state();
+
+            // Altitude thrust (finite-diff v_d at the outer rate).
+            let v_d_raw = (pos_ned[2] - last_pos_d) / dt_outer;
+            v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
+            last_pos_d = pos_ned[2];
+            let alt_err = setpoint_ned[2] - pos_ned[2];
+            thrust_held = (hover_thrust - kp_alt * alt_err + kd_alt * v_d_filt).clamp(0.0, 1.0);
+
+            // Horizontal position → NED accel command (P-D on IEKF state).
+            let mut a_cmd = [
+                kp_pos * (setpoint_ned[0] - pos_ned[0]) - kd_vel * est.v[0],
+                kp_pos * (setpoint_ned[1] - pos_ned[1]) - kd_vel * est.v[1],
+                0.0,
+            ];
+            let ah = (a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]).sqrt();
+            if ah > a_cmd_max {
+                let s = a_cmd_max / ah;
+                a_cmd[0] *= s;
+                a_cmd[1] *= s;
+            }
+            a_cmd_held = a_cmd;
+            let mut omega_d = geo.desired_rate(est.q, a_cmd, yaw_d);
+            if cfg.pos.yaw_mode != YawMode::HeadingHold {
+                omega_d[2] = 0.0; // rate-hold / off: no heading tracking
+            }
+            omega_d_held = omega_d;
         }
-        let est = iekf.state();
 
-        // Altitude thrust (vertical loop), as in alt-rate.
-        let v_d_raw = (pos_ned[2] - last_pos_d) / dt;
-        v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
-        last_pos_d = pos_ned[2];
-        let alt_err = setpoint_ned[2] - pos_ned[2];
-        let thrust = (hover_thrust - kp_alt * alt_err + kd_alt * v_d_filt).clamp(0.0, 1.0);
-
-        // Horizontal position → NED acceleration command (P-D on IEKF
-        // state), clamped so the geometric thrust axis tilt stays bounded.
-        let mut a_cmd = [
-            kp_pos * (setpoint_ned[0] - pos_ned[0]) - kd_vel * est.v[0],
-            kp_pos * (setpoint_ned[1] - pos_ned[1]) - kd_vel * est.v[1],
-            0.0,
-        ];
-        let ah = (a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]).sqrt();
-        if ah > a_cmd_max {
-            let s = a_cmd_max / ah;
-            a_cmd[0] *= s;
-            a_cmd[1] *= s;
-        }
-
-        // Geometric attitude → body torque, arming-gated. Yaw mode from
-        // config: Off (no yaw torque), RateHold (ADRC yaw rate → 0), or
-        // HeadingHold (track yaw_d). RateHold is the default — position-
-        // hold needs only zero yaw RATE + an accurate yaw ESTIMATE for
-        // command alignment, not heading tracking (which limit-cycled).
+        // ── INNER torque: ADRC tracks the held rate on FILTERED gyro ──
         let tilt = body_tilt_rad(imu_sample.accel_body);
         let arm = seq.tick(tilt, true);
         let torque = if arm.torque_authority {
             let m = if use_adrc {
-                let mut omega_d = geo.desired_rate(est.q, a_cmd, yaw_d);
-                if cfg.pos.yaw_mode != YawMode::HeadingHold {
-                    omega_d[2] = 0.0;
-                }
-                adrc.tick(imu_sample.gyro_body, omega_d, dt)
+                adrc.tick(gyro_f, omega_d_held, dt)
             } else {
-                geo.tick(est.q, imu_sample.gyro_body, a_cmd, yaw_d)
+                geo.tick(est.q, gyro_f, a_cmd_held, yaw_d)
             };
             let yaw_t = if cfg.pos.yaw_mode == YawMode::Off { 0.0 } else { m[2] * torque_scale };
             [m[0] * torque_scale, m[1] * torque_scale, yaw_t]
@@ -517,7 +539,7 @@ fn run_geo_hover(
         };
         let floor = cfg.pos.mixer_floor;
         let motors =
-            mixer.mix_priority(torque, thrust * arm.thrust_scale, floor * arm.thrust_scale);
+            mixer.mix_priority(torque, thrust_held * arm.thrust_scale, floor * arm.thrust_scale);
         physics.step(motors, dt);
 
         let dn = pos_ned[0] - setpoint_ned[0];

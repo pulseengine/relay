@@ -144,6 +144,81 @@ fn sanitise(x: f32, fallback: f32) -> f32 {
     if x.is_finite() { x } else { fallback }
 }
 
+/// 2nd-order (Butterworth) low-pass biquad, direct-form-II transposed.
+/// PX4 puts exactly this ahead of its rate loop (`IMU_GYRO_CUTOFF`): a
+/// high-gain ESO that differentiates RAW gyro chases sensor/motor noise
+/// straight into the actuators, so the inner loop needs a band-limited
+/// input. The filter adds ~one-period latency, which the 1 kHz loop
+/// affords (the actuator-lag analysis: ω_c must stay below 1/τ anyway).
+#[derive(Clone, Copy)]
+pub struct Biquad {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
+}
+
+impl Biquad {
+    /// Butterworth LPF at cutoff `fc` (Hz), sample rate `fs` (Hz). RBJ
+    /// cookbook coefficients with Q = 1/√2. Degenerate args → pass-through.
+    pub fn lowpass(fc: f32, fs: f32) -> Self {
+        if !(fc > 0.0) || !(fs > 0.0) || fc >= 0.5 * fs {
+            return Self::passthrough();
+        }
+        let w0 = 2.0 * core::f32::consts::PI * fc / fs;
+        let (sw, cw) = (libm::sinf(w0), libm::cosf(w0));
+        let q = core::f32::consts::FRAC_1_SQRT_2;
+        let alpha = sw / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        Biquad {
+            b0: ((1.0 - cw) * 0.5) / a0,
+            b1: (1.0 - cw) / a0,
+            b2: ((1.0 - cw) * 0.5) / a0,
+            a1: (-2.0 * cw) / a0,
+            a2: (1.0 - alpha) / a0,
+            x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+        }
+    }
+
+    fn passthrough() -> Self {
+        Biquad { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0, x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0 }
+    }
+
+    pub fn filter(&mut self, x: f32) -> f32 {
+        let x = if x.is_finite() { x } else { 0.0 };
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
+        let y = if y.is_finite() { y } else { 0.0 };
+        self.x2 = self.x1;
+        self.x1 = x;
+        self.y2 = self.y1;
+        self.y1 = y;
+        y
+    }
+}
+
+/// Three independent LPF biquads — one per gyro axis.
+#[derive(Clone, Copy)]
+pub struct GyroLpf {
+    axes: [Biquad; 3],
+}
+
+impl GyroLpf {
+    /// Butterworth LPF at `fc` Hz on each axis; `fc <= 0` disables (pass-through).
+    pub fn new(fc: f32, fs: f32) -> Self {
+        let b = Biquad::lowpass(fc, fs);
+        GyroLpf { axes: [b, b, b] }
+    }
+
+    pub fn filter(&mut self, gyro: [f32; 3]) -> [f32; 3] {
+        [self.axes[0].filter(gyro[0]), self.axes[1].filter(gyro[1]), self.axes[2].filter(gyro[2])]
+    }
+}
+
 /// Three-axis (roll, pitch, yaw) ADRC rate controller.
 pub struct AdrcRate {
     axes: [AdrcAxis; 3],
@@ -233,6 +308,30 @@ mod tests {
         // same-sign estimate (not zero, not NaN).
         assert!(d_est.is_finite());
         assert!(d_est > 0.5, "ESO should identify a positive disturbance, got {d_est}");
+    }
+
+    /// The gyro LPF passes DC unchanged and strongly attenuates a
+    /// high-frequency tone (above the cutoff) — the noise the high-gain
+    /// ESO would otherwise pump into the motors.
+    #[test]
+    fn gyro_lpf_passes_dc_attenuates_hf() {
+        let fs = 1000.0;
+        let mut lpf = GyroLpf::new(60.0, fs);
+        // DC: settle, then output ≈ input.
+        let mut dc = 0.0;
+        for _ in 0..500 {
+            dc = lpf.filter([1.0, 0.0, 0.0])[0];
+        }
+        assert!((dc - 1.0).abs() < 0.02, "DC should pass, got {dc}");
+        // 300 Hz tone (≫60 Hz cutoff): output amplitude ≪ 1.
+        let mut lpf2 = GyroLpf::new(60.0, fs);
+        let mut peak = 0.0f32;
+        for k in 0..2000 {
+            let x = libm::sinf(2.0 * core::f32::consts::PI * 300.0 * (k as f32) / fs);
+            let y = lpf2.filter([x, 0.0, 0.0])[0].abs();
+            if k > 200 && y > peak { peak = y; }
+        }
+        assert!(peak < 0.15, "300 Hz should be attenuated, peak {peak}");
     }
 
     /// Regulating to Ω_d = 0 from a disturbance holds the rate near zero

@@ -65,6 +65,9 @@
     "kd_alt": 0.3,
     "mixer_floor": 0.2,
     "use_adrc": true,
-    "yaw_mode": "rate_hold"
+    "yaw_mode": "rate_hold",
+    "loop_dt": 0.001,
+    "outer_decim": 10,
+    "gyro_lpf_hz": 60.0
   }
 }

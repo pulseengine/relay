@@ -82,7 +82,22 @@ pub struct PosCfg {
     /// torque (false).
     pub use_adrc: bool,
     pub yaw_mode: YawMode,
+    /// Inner-loop period (s). 0.001 = 1 kHz (Track A: the rate loop must
+    /// run fast vs the 25 ms yaw actuator pole).
+    #[serde(default = "default_loop_dt")]
+    pub loop_dt: f32,
+    /// Outer-loop (estimator updates + geometric/position) decimation: run
+    /// the outer loop every Nth inner tick. 10 → 100 Hz outer at 1 kHz inner.
+    #[serde(default = "default_outer_decim")]
+    pub outer_decim: u32,
+    /// Gyro low-pass cutoff (Hz) before the ADRC. 0 disables.
+    #[serde(default = "default_gyro_lpf_hz")]
+    pub gyro_lpf_hz: f32,
 }
+
+fn default_loop_dt() -> f32 { 0.001 }
+fn default_outer_decim() -> u32 { 10 }
+fn default_gyro_lpf_hz() -> f32 { 60.0 }
 
 /// The whole falcon-quad tuning set.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -180,6 +195,9 @@ impl Default for FalconConfig {
                 mixer_floor: 0.2,
                 use_adrc: true,
                 yaw_mode: YawMode::RateHold,
+                loop_dt: default_loop_dt(),       // 1 kHz inner loop
+                outer_decim: default_outer_decim(), // 100 Hz outer loop
+                gyro_lpf_hz: default_gyro_lpf_hz(), // 60 Hz gyro LPF
             },
         }
     }
