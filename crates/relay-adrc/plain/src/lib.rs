@@ -42,13 +42,27 @@ pub struct AdrcGains {
     /// robust to b0 error (the ESO absorbs it) — only the order of
     /// magnitude matters.
     pub b0: f32,
+    /// Actuator time constant τ (s) of the first-order motor/ESC lag. When
+    /// positive, the ESO is driven by the **actual delivered** torque (the
+    /// command passed through a matching first-order filter) instead of
+    /// the raw command — the INDI "synchronization" move. This stops the
+    /// ESO mis-attributing the unmodeled actuator lag to "disturbance"
+    /// and cancelling it destabilisingly (the v0.25 yaw failure: yaw must
+    /// drive large, slow Δω through this lag, so ω_c·τ ≈ 1). Set 0 to
+    /// disable (instant-actuator assumption).
+    pub tau: f32,
 }
 
 impl AdrcGains {
-    /// Build with sane derived ESO/control gains; clamps to finite,
-    /// positive values so the controller stays total.
+    /// Build with no actuator-lag model (instant actuator).
     pub const fn new(omega_o: f32, omega_c: f32, b0: f32) -> Self {
-        AdrcGains { omega_o, omega_c, b0 }
+        AdrcGains { omega_o, omega_c, b0, tau: 0.0 }
+    }
+
+    /// Build with an explicit actuator time constant τ (the recommended
+    /// form for the lag-sensitive yaw axis).
+    pub const fn with_tau(omega_o: f32, omega_c: f32, b0: f32, tau: f32) -> Self {
+        AdrcGains { omega_o, omega_c, b0, tau }
     }
 }
 
@@ -58,12 +72,13 @@ pub struct AdrcAxis {
     z1: f32, // rate estimate
     z2: f32, // lumped-disturbance estimate
     u_prev: f32,
+    u_act: f32, // modelled delivered command (first-order actuator state)
     g: AdrcGains,
 }
 
 impl AdrcAxis {
     pub fn new(g: AdrcGains) -> Self {
-        AdrcAxis { z1: 0.0, z2: 0.0, u_prev: 0.0, g }
+        AdrcAxis { z1: 0.0, z2: 0.0, u_prev: 0.0, u_act: 0.0, g }
     }
 
     /// Disturbance estimate (rad/s²) — the lumped unmodeled torque/J the
@@ -89,10 +104,21 @@ impl AdrcAxis {
         let beta2 = omega_o * omega_o;
         let kp = omega_c;
 
-        // ESO update (uses the PREVIOUS control — the input that produced
-        // the currently-measured rate).
+        // Actuator-lag synchronisation: the ESO must be driven by the
+        // torque actually DELIVERED, not the raw command. Pass u through a
+        // first-order filter matching the actuator τ; the ESO then sees
+        // b0·u_act (the delivered torque) and stops mistaking the lag for
+        // a disturbance. τ=0 → u_act tracks u_prev instantly (no model).
+        if self.g.tau.is_finite() && self.g.tau > 1e-4 {
+            self.u_act += dt * (self.u_prev - self.u_act) / self.g.tau;
+        } else {
+            self.u_act = self.u_prev;
+        }
+        self.u_act = sanitise(self.u_act, 0.0);
+
+        // ESO update (driven by the delivered torque b0·u_act).
         let e = om - self.z1;
-        let z1_next = self.z1 + dt * (self.z2 + b0 * self.u_prev + beta1 * e);
+        let z1_next = self.z1 + dt * (self.z2 + b0 * self.u_act + beta1 * e);
         let z2_next = self.z2 + dt * (beta2 * e);
         self.z1 = sanitise(z1_next, 0.0);
         self.z2 = sanitise(z2_next, 0.0);
@@ -109,6 +135,7 @@ impl AdrcAxis {
         self.z1 = 0.0;
         self.z2 = 0.0;
         self.u_prev = 0.0;
+        self.u_act = 0.0;
     }
 }
 
@@ -132,15 +159,14 @@ impl AdrcRate {
     /// whose actuator lag ADRC is here to reject).
     pub fn falcon_quad() -> Self {
         Self::new([
-            AdrcGains::new(40.0, 12.0, 30.0),
-            AdrcGains::new(40.0, 12.0, 30.0),
-            // Yaw: moderate. NOTE (v0.25 finding): in the gz setup ANY
-            // active yaw feedback (this, slower, faster, rate-track,
-            // rate-hold, direct geometric torque) made position-hold
-            // bistable; YAW_OFF was the most stable. The yaw control loop
-            // instability is an open issue (likely gz motor-model yaw
-            // actuator dynamics) — see the v0.25 bench evidence.
-            AdrcGains::new(20.0, 5.0, 6.0),
+            AdrcGains::with_tau(40.0, 12.0, 30.0, 0.0125),
+            AdrcGains::with_tau(40.0, 12.0, 30.0, 0.0125),
+            // Yaw: ω_o high (fast observer) but ω_c low (control bw below
+            // the motor pole 1/τ≈40), AND the actuator lag τ modelled in
+            // the ESO (the dominant v0.25 fix — yaw drives large slow Δω
+            // through this lag, so it must be in the plant, not left as an
+            // "unmodeled disturbance" the ESO destabilisingly cancels).
+            AdrcGains::with_tau(30.0, 3.0, 6.0, 0.025),
         ])
     }
 

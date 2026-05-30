@@ -37,6 +37,7 @@ members = [
     "examples/falcon-hitl-rfspoof",
     "examples/falcon-sitl-gz",
     "coverage_subjects/geofence_subject_rs",
+    "host/falcon-config",
     "host/relay-sb",
     "host/relay-es",
     "host/relay-evs",

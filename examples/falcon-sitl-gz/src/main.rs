@@ -21,9 +21,9 @@ mod physics;
 
 use physics::{GazeboPhysics, MockPhysics, Physics};
 use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
-use relay_iekf::{Iekf, Imu as IekfImu};
-use relay_geo::{GeoAtt, GeoGains};
-use relay_adrc::AdrcRate;
+use relay_iekf::{Iekf, Imu as IekfImu, NavState};
+use falcon_config::YawMode;
+use relay_geo::GeoAtt;
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
@@ -36,6 +36,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Emit the default tuning as JSON (so the on-disk config always matches
+    // the struct), then exit.
+    if args.iter().any(|a| a == "--dump-config") {
+        println!("{}", falcon_config::FalconConfig::default().to_json());
+        return;
+    }
     let backend = arg(&args, "--backend").unwrap_or_else(|| "mock".into());
     let scenario = arg(&args, "--scenario").unwrap_or_else(|| "hover".into());
     let duration_s: f32 = arg(&args, "--duration").and_then(|s| s.parse().ok()).unwrap_or(5.0);
@@ -396,24 +402,39 @@ fn run_geo_hover(
     duration_s: f32,
     mut evidence: Option<&mut EvidenceSink>,
 ) -> bool {
-    let mut iekf = Iekf::level();
+    // v0.25 — config-driven (host-only falcon-config). `--config=path.json`
+    // sweeps every tuning parameter WITHOUT a rebuild; default is the
+    // best-known in-code tuning. The flight crates stay no_std; only this
+    // (std) bench loads JSON.
+    let cfg = match arg(&std::env::args().collect::<Vec<_>>(), "--config") {
+        Some(p) => match falcon_config::FalconConfig::from_json_path(&p) {
+            Ok(c) => {
+                println!("  config: loaded {p}");
+                c
+            }
+            Err(e) => {
+                eprintln!("  config: {e}; using defaults");
+                falcon_config::FalconConfig::default()
+            }
+        },
+        None => falcon_config::FalconConfig::default(),
+    };
+
+    let mut iekf = Iekf::with_config(NavState::identity(), cfg.to_iekf_config());
     let mut iekf_heading_init = false;
     let mut mixer = QuadMixer::new();
     let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
-    let geo = GeoAtt::new(GeoGains::FALCON_QUAD);
-    // v0.25 — ADRC inner rate loop (rejects the actuator-lag yaw
-    // instability). On by default; UNSET via GEO_DIRECT for the
-    // direct-torque comparison.
-    let mut adrc = AdrcRate::falcon_quad();
-    let use_adrc = std::env::var("GEO_DIRECT").is_err();
+    let geo = GeoAtt::new(cfg.to_geo_gains());
+    let mut adrc = cfg.to_adrc();
+    let use_adrc = cfg.pos.use_adrc;
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
-    let hover_thrust = 0.72_f32;
-    let kp_pos = 0.6_f32; // NED position error → accel command
-    let kd_vel = 1.2_f32; // velocity damping (uses IEKF velocity)
-    let a_cmd_max = 3.0_f32; // clamp horizontal accel ⇒ tilt ≲ 17°
-    let kp_alt = 0.05_f32;
-    let kd_alt = 0.30_f32;
+    let hover_thrust = cfg.pos.hover_thrust;
+    let kp_pos = cfg.pos.kp_pos;
+    let kd_vel = cfg.pos.kd_vel;
+    let a_cmd_max = cfg.pos.a_cmd_max;
+    let kp_alt = cfg.pos.kp_alt;
+    let kd_alt = cfg.pos.kd_alt;
     let lp_alpha = 0.05_f32;
     let torque_scale = 1.0_f32; // geometric Nm → mixer normalised torque
     let yaw_d = core::f32::consts::FRAC_PI_2; // hold spawn heading (East)
@@ -437,17 +458,16 @@ fn run_geo_hover(
         let t = step as f32 * dt;
         let (imu_sample, pos_ned) = physics.measure(0.0);
 
-        // IEKF full-state estimation.
+        // IEKF full-state estimation (measurement variances from config).
         iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
-        iekf.update_gravity(imu_sample.accel_body, 0.5);
-        iekf.update_position(pos_ned, 0.04);
+        iekf.update_gravity(imu_sample.accel_body, cfg.iekf.grav_var);
+        iekf.update_position(pos_ned, cfg.iekf.pos_var);
         if let Some(hdg) = physics.heading_ned() {
             if !iekf_heading_init {
                 iekf.init_heading(hdg);
                 iekf_heading_init = true;
             }
-            let yvar = std::env::var("YAWVAR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01_f32);
-            iekf.update_yaw(hdg, yvar);
+            iekf.update_yaw(hdg, cfg.iekf.yaw_var);
         }
         let est = iekf.state();
 
@@ -471,42 +491,31 @@ fn run_geo_hover(
             a_cmd[0] *= s;
             a_cmd[1] *= s;
         }
-        // Diagnostic: ATT_ONLY zeros the horizontal command (pure
-        // attitude+altitude hold) to isolate yaw-control from
-        // position-maneuver-induced yaw disturbance.
-        if std::env::var("ATT_ONLY").is_ok() {
-            a_cmd[0] = 0.0;
-            a_cmd[1] = 0.0;
-        }
 
-        // Geometric attitude → body torque, arming-gated.
+        // Geometric attitude → body torque, arming-gated. Yaw mode from
+        // config: Off (no yaw torque), RateHold (ADRC yaw rate → 0), or
+        // HeadingHold (track yaw_d). RateHold is the default — position-
+        // hold needs only zero yaw RATE + an accurate yaw ESTIMATE for
+        // command alignment, not heading tracking (which limit-cycled).
         let tilt = body_tilt_rad(imu_sample.accel_body);
         let arm = seq.tick(tilt, true);
         let torque = if arm.torque_authority {
             let m = if use_adrc {
-                // v0.25: geometric outer loop → desired body rate; ADRC
-                // inner loop → torque, robust to the actuator dynamics.
                 let mut omega_d = geo.desired_rate(est.q, a_cmd, yaw_d);
-                // Yaw RATE-HOLD (not heading-hold): commanding a yaw
-                // heading drove an overshoot limit-cycle (weak yaw
-                // authority). Position-hold needs only zero yaw RATE (no
-                // spin) + an accurate yaw ESTIMATE for command alignment,
-                // which the IEKF+compass provide. ADRC regulates yaw rate
-                // to 0. (HEADING_HOLD restores heading tracking.)
-                if std::env::var("HEADING_HOLD").is_err() {
+                if cfg.pos.yaw_mode != YawMode::HeadingHold {
                     omega_d[2] = 0.0;
                 }
                 adrc.tick(imu_sample.gyro_body, omega_d, dt)
             } else {
                 geo.tick(est.q, imu_sample.gyro_body, a_cmd, yaw_d)
             };
-            let yaw_t = if std::env::var("YAW_OFF").is_ok() { 0.0 } else { m[2] * torque_scale };
+            let yaw_t = if cfg.pos.yaw_mode == YawMode::Off { 0.0 } else { m[2] * torque_scale };
             [m[0] * torque_scale, m[1] * torque_scale, yaw_t]
         } else {
             adrc.reset();
             [0.0_f32; 3]
         };
-        let floor = std::env::var("FLOOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.5_f32);
+        let floor = cfg.pos.mixer_floor;
         let motors =
             mixer.mix_thrust_floor(torque, thrust * arm.thrust_scale, floor * arm.thrust_scale);
         physics.step(motors, dt);

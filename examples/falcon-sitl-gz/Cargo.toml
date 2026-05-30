@@ -31,6 +31,7 @@ relay-arm = { path = "../../crates/relay-arm" }
 relay-iekf = { path = "../../crates/relay-iekf" }
 relay-geo = { path = "../../crates/relay-geo" }
 relay-adrc = { path = "../../crates/relay-adrc" }
+falcon-config = { path = "../../host/falcon-config" }
 relay-pos = { path = "../../crates/relay-pos" }
 relay-lc = { path = "../../crates/relay-lc" }
 relay-sc = { path = "../../crates/relay-sc" }

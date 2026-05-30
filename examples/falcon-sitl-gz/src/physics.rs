@@ -638,13 +638,21 @@ mod gz_real {
             })
         }
 
-        /// Map a [0, 1] motor PWM to a Gazebo motor command (rad/s).
-        /// MulticopterMotorModel plugin's `cmd_vel` expects rad/s; a
-        /// typical scaling for a 5"-class quad is ~1000 rad/s at full
-        /// PWM. The exact constant is a property of the SDF model.
+        /// Map a [0, 1] mixer output (normalised THRUST fraction) to a
+        /// Gazebo motor command (rad/s).
+        ///
+        /// v0.25 — SQRT map. gz's MulticopterMotorModel produces
+        /// `thrust = motorConstant·ω²`, so a LINEAR `ω = pwm·max` made
+        /// actual thrust ∝ pwm², violating the mixer's linear-thrust
+        /// assumption and making the effective control gain
+        /// throttle-dependent (∂τ/∂pwm ∝ pwm) — a gain-scheduling hazard
+        /// that destabilised the (weakest, laggiest) yaw axis
+        /// conditionally/bistably. Mapping `ω = √pwm · max` makes
+        /// `thrust ∝ ω² ∝ pwm` (linear) and the gain throttle-invariant —
+        /// the "monotone thrust→PWM curve" the allocation SOTA calls for.
         fn pwm_to_rad_per_s(pwm: f32) -> f32 {
             const MAX_MOTOR_RAD_S: f32 = 1000.0;
-            pwm.clamp(0.0, 1.0) * MAX_MOTOR_RAD_S
+            libm::sqrtf(pwm.clamp(0.0, 1.0)) * MAX_MOTOR_RAD_S
         }
     }
 
@@ -715,12 +723,14 @@ mod gz_real {
 
         #[test]
         fn pwm_to_rad_per_s_scales_and_clamps() {
+            // v0.25 — SQRT map (ω = √pwm·max) so gz thrust ∝ ω² is LINEAR
+            // in the mixer's thrust command (throttle-invariant gain).
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(0.0), 0.0);
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(1.0), 1000.0);
-            assert_eq!(GazeboPhysics::pwm_to_rad_per_s(0.5), 500.0);
-            // Clamps below 0.
+            assert!((GazeboPhysics::pwm_to_rad_per_s(0.25) - 500.0).abs() < 1e-3); // √0.25=0.5
+            assert!((GazeboPhysics::pwm_to_rad_per_s(0.5) - 707.107).abs() < 1e-2);
+            // Clamps below 0 / above 1.
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(-0.5), 0.0);
-            // Clamps above 1.
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(2.0), 1000.0);
         }
 
