@@ -267,8 +267,11 @@ pub struct Imu {
 /// MEMS IMU; the gz NEES gate (step 5) tunes them.
 #[derive(Clone, Copy)]
 pub struct IekfConfig {
-    /// Gyro white-noise variance (rad²/s²) → attitude process noise.
-    pub q_gyro: f32,
+    /// Per-axis gyro/attitude process-noise variance (rad²/s²). MUST be
+    /// per-axis: roll/pitch are gravity-anchored (low) but yaw has only
+    /// the compass (high) — a single value couples them and either
+    /// destabilises tilt or lets yaw free-run.
+    pub q_gyro: [f32; 3],
     /// Accel white-noise variance (m²/s⁴) → velocity process noise.
     pub q_accel: f32,
     /// Gyro-bias random-walk variance (rad²/s⁴).
@@ -282,9 +285,12 @@ pub struct IekfConfig {
 
 impl IekfConfig {
     pub const DEFAULT: Self = Self {
-        q_gyro: 1e-4,
+        // Roll/pitch low (gravity-anchored, keep the prediction smooth);
+        // yaw high so P[2][2] keeps breathing and the compass stays
+        // effective (else the gyro free-runs → the v0.23 spin bug).
+        q_gyro: [1e-4, 1e-4, 1e-2],
         q_accel: 1e-2,
-        q_bias_gyro: 1e-7,
+        q_bias_gyro: 1e-6,
         q_bias_accel: 1e-5,
         p0: [0.1, 0.5, 1.0, 0.01, 0.1],
     };
@@ -431,15 +437,13 @@ impl Iekf {
         let pp = mat_mul(&phi, &self.p);
         self.p = mat_mul(&pp, &phi_t);
 
-        // Process noise Q·dt on the diagonal blocks.
-        let qd = [
-            self.cfg.q_gyro * dt, self.cfg.q_accel * dt, 0.0,
-            self.cfg.q_bias_gyro * dt, self.cfg.q_bias_accel * dt,
-        ];
-        for blk in 0..5 {
-            for i in 0..3 {
-                self.p[blk * 3 + i][blk * 3 + i] += qd[blk];
-            }
+        // Process noise Q·dt on the diagonal blocks. Attitude (δθ) is
+        // per-axis (roll/pitch vs yaw observability); the rest isotropic.
+        for i in 0..3 {
+            self.p[i][i] += self.cfg.q_gyro[i] * dt; // δθ
+            self.p[3 + i][3 + i] += self.cfg.q_accel * dt; // δv
+            self.p[9 + i][9 + i] += self.cfg.q_bias_gyro * dt; // δb_g
+            self.p[12 + i][12 + i] += self.cfg.q_bias_accel * dt; // δb_a
         }
         symmetrise(&mut self.p);
     }

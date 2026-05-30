@@ -22,6 +22,7 @@ mod physics;
 use physics::{GazeboPhysics, MockPhysics, Physics};
 use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
 use relay_iekf::{Iekf, Imu as IekfImu};
+use relay_geo::{GeoAtt, GeoGains};
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
@@ -163,6 +164,7 @@ fn run_scenario(
         "frame-yaw" => run_frame_check(physics, 2, duration_s),
         "arming" => run_arming_check(physics, duration_s, true),
         "arming-ungated" => run_arming_check(physics, duration_s, false),
+        "geo-hover" => run_geo_hover(physics, duration_s, evidence),
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -381,6 +383,163 @@ fn run_arming_check(physics: &mut dyn Physics, duration_s: f32, gated: bool) -> 
 /// controller. If this PASSes, the v0.19.4 cascade's instability is
 /// localised to POS+ATT (interaction of horizontal position feedback
 /// with attitude-setpoint propagation during the first transient).
+/// v0.23 — full verified cascade with the GEOMETRIC SE(3) attitude
+/// controller (relay-geo) replacing the Euler relay-att/rate path that
+/// coupled tilt into yaw. IEKF (full state) → simple P-D position→accel
+/// command → geometric attitude (accel direction + heading → torque) →
+/// thrust-floor mixer, gated by the arming sequencer. This is the v0.23
+/// position-hold validation. PASS = final_dist < 0.5 m AND rms_steady
+/// (last 5 s) < 1.0 m.
+fn run_geo_hover(
+    physics: &mut dyn Physics,
+    duration_s: f32,
+    mut evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    let mut iekf = Iekf::level();
+    let mut iekf_heading_init = false;
+    let mut mixer = QuadMixer::new();
+    let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
+    let geo = GeoAtt::new(GeoGains::FALCON_QUAD);
+
+    let setpoint_ned = [0.0_f32, 0.0, -2.0];
+    let hover_thrust = 0.72_f32;
+    let kp_pos = 0.6_f32; // NED position error → accel command
+    let kd_vel = 1.2_f32; // velocity damping (uses IEKF velocity)
+    let a_cmd_max = 3.0_f32; // clamp horizontal accel ⇒ tilt ≲ 17°
+    let kp_alt = 0.05_f32;
+    let kd_alt = 0.30_f32;
+    let lp_alpha = 0.05_f32;
+    let torque_scale = 1.0_f32; // geometric Nm → mixer normalised torque
+    let yaw_d = core::f32::consts::FRAC_PI_2; // hold spawn heading (East)
+    let dt = 0.01_f32;
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let pace_real_time = physics.counters().is_some();
+
+    let mut peak_dist = 0.0_f32;
+    let mut min_dist = f32::INFINITY;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0usize;
+    let steady_start_t = (duration_s - 5.0).max(0.0);
+    let mut last_pos_d = 0.0_f32;
+    let mut v_d_filt = 0.0_f32;
+    let mut last_pos_ned = setpoint_ned;
+
+    let started_at = Instant::now();
+    for step in 0..n {
+        let tick_start = Instant::now();
+        let t = step as f32 * dt;
+        let (imu_sample, pos_ned) = physics.measure(0.0);
+
+        // IEKF full-state estimation.
+        iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
+        iekf.update_gravity(imu_sample.accel_body, 0.5);
+        iekf.update_position(pos_ned, 0.04);
+        if let Some(hdg) = physics.heading_ned() {
+            if !iekf_heading_init {
+                iekf.init_heading(hdg);
+                iekf_heading_init = true;
+            }
+            iekf.update_yaw(hdg, 0.01);
+        }
+        let est = iekf.state();
+
+        // Altitude thrust (vertical loop), as in alt-rate.
+        let v_d_raw = (pos_ned[2] - last_pos_d) / dt;
+        v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
+        last_pos_d = pos_ned[2];
+        let alt_err = setpoint_ned[2] - pos_ned[2];
+        let thrust = (hover_thrust - kp_alt * alt_err + kd_alt * v_d_filt).clamp(0.0, 1.0);
+
+        // Horizontal position → NED acceleration command (P-D on IEKF
+        // state), clamped so the geometric thrust axis tilt stays bounded.
+        let mut a_cmd = [
+            kp_pos * (setpoint_ned[0] - pos_ned[0]) - kd_vel * est.v[0],
+            kp_pos * (setpoint_ned[1] - pos_ned[1]) - kd_vel * est.v[1],
+            0.0,
+        ];
+        let ah = (a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]).sqrt();
+        if ah > a_cmd_max {
+            let s = a_cmd_max / ah;
+            a_cmd[0] *= s;
+            a_cmd[1] *= s;
+        }
+        // Diagnostic: ATT_ONLY zeros the horizontal command (pure
+        // attitude+altitude hold) to isolate yaw-control from
+        // position-maneuver-induced yaw disturbance.
+        if std::env::var("ATT_ONLY").is_ok() {
+            a_cmd[0] = 0.0;
+            a_cmd[1] = 0.0;
+        }
+
+        // Geometric attitude → body torque, arming-gated.
+        let tilt = body_tilt_rad(imu_sample.accel_body);
+        let arm = seq.tick(tilt, true);
+        let torque = if arm.torque_authority {
+            let m = geo.tick(est.q, imu_sample.gyro_body, a_cmd, yaw_d);
+            [m[0] * torque_scale, m[1] * torque_scale, m[2] * torque_scale]
+        } else {
+            [0.0_f32; 3]
+        };
+        let motors =
+            mixer.mix_thrust_floor(torque, thrust * arm.thrust_scale, 0.5 * arm.thrust_scale);
+        physics.step(motors, dt);
+
+        let dn = pos_ned[0] - setpoint_ned[0];
+        let de = pos_ned[1] - setpoint_ned[1];
+        let dd = pos_ned[2] - setpoint_ned[2];
+        let dist = (dn * dn + de * de + dd * dd).sqrt();
+        if dist > peak_dist { peak_dist = dist; }
+        if dist < min_dist { min_dist = dist; }
+        if t >= steady_start_t {
+            sum_sq_steady += dist * dist;
+            steady_count += 1;
+        }
+        last_pos_ned = pos_ned;
+
+        if std::env::var("POS_DEBUG").is_ok() && step % 50 == 0 {
+            let iyaw = {
+                let q = est.q;
+                libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]))
+            };
+            let chdg = physics.heading_ned().unwrap_or(f32::NAN).to_degrees();
+            eprintln!(
+                "    [geo] t={t:.1} pos=[{:.1},{:.1},{:.1}] dist={dist:.2} tilt={:.1}° IEKFyaw={:.1}° compass={:.1}°",
+                pos_ned[0], pos_ned[1], pos_ned[2], tilt.to_degrees(),
+                iyaw.to_degrees(), chdg,
+            );
+        }
+        if let Some(ref mut e) = evidence {
+            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
+                         motors, physics.counters());
+        }
+        if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+        }
+    }
+    let wall = started_at.elapsed();
+    let dn = last_pos_ned[0] - setpoint_ned[0];
+    let de = last_pos_ned[1] - setpoint_ned[1];
+    let dd = last_pos_ned[2] - setpoint_ned[2];
+    let final_dist = (dn * dn + de * de + dd * dd).sqrt();
+    let rms_steady = if steady_count > 0 {
+        (sum_sq_steady / steady_count as f32).sqrt()
+    } else {
+        f32::NAN
+    };
+    println!(
+        "  verdict: backend={} scenario=geo-hover steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
+        physics.name(), n, final_dist, peak_dist, rms_steady, wall.as_secs_f32(),
+    );
+    if let Some(ref mut e) = evidence {
+        e.write_summary_hover(n, final_dist, peak_dist, rms_steady, min_dist, wall.as_secs_f32(), physics.counters());
+    }
+    final_dist < 0.5 && rms_steady < 1.0
+}
+
 fn run_alt_rate_hover(
     physics: &mut dyn Physics,
     duration_s: f32,

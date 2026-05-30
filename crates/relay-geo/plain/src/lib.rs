@@ -158,8 +158,8 @@ impl GeoGains {
     /// proof requires k_R, k_Ω > 0; these are positive and roll/pitch >
     /// yaw (weak yaw authority).
     pub const FALCON_QUAD: Self = Self {
-        k_r: [0.6, 0.6, 0.2],
-        k_omega: [0.12, 0.12, 0.06],
+        k_r: [0.6, 0.6, 1.0],
+        k_omega: [0.12, 0.12, 0.4],
         j: [0.0217, 0.0217, 0.04],
     };
 }
