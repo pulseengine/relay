@@ -191,13 +191,18 @@ impl Default for FalconConfig {
                 AdrcCfg { omega_o: 40.0, omega_c: 12.0, b0: 30.0, tau: 0.0125 },
                 AdrcCfg { omega_o: 40.0, omega_c: 12.0, b0: 30.0, tau: 0.0125 },
                 // Yaw: ω_o high / ω_c low (control bw below the motor pole)
-                // + actuator lag τ=0.025 in the ESO. b0 is NEGATIVE: the
-                // geo-hover yaw torque is effectively INVERTED in gz (A/B
-                // investigation — negative b0 → 3/4 PASS, positive → 1/4;
-                // the frame-yaw oracle is too noisy to pin the sign). A
-                // negative b0 flips the ADRC control AND its plant model
-                // consistently. The durable fix is a yaw-sign correction
-                // in the Rust path (TBD root cause).
+                // + actuator lag τ=0.025 in the ESO. b0 is NEGATIVE (−6),
+                // and that is now *validated*, not a fudge: the frame-yaw
+                // oracle reads RELIABLY OPPOSE (+0.15 N·m → −1.1 rad/s,
+                // deterministic: −1.14/−1.04/−1.13). The yaw channel
+                // (controller-convention → mixer → gz) genuinely has
+                // NEGATIVE control effectiveness, so a negative b0 is the
+                // physically correct value (ADRC: "robust to a wrong b0").
+                // The equivalent representation (frame seam SIGN[2]=−1 with
+                // b0=+6) is mathematically identical (u→−u, b0·u_act and the
+                // body torque unchanged) but showed WORSE in limited gz runs
+                // (0/6 vs 3/4) — unresolved (gz startup nondeterminism vs a
+                // hidden asymmetry), so we keep the verified-good b0=−6.
                 AdrcCfg { omega_o: 30.0, omega_c: 3.0, b0: -6.0, tau: 0.025 },
             ],
             pos: PosCfg {
@@ -218,7 +223,7 @@ impl Default for FalconConfig {
                 loop_dt: default_loop_dt(),       // 1 kHz inner loop
                 outer_decim: default_outer_decim(), // 100 Hz outer loop
                 gyro_lpf_hz: default_gyro_lpf_hz(), // 60 Hz gyro LPF
-                mixer_mode: default_mixer_mode(),   // airmode
+                mixer_mode: default_mixer_mode(),   // priority
             },
         }
     }

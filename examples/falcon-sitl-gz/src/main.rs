@@ -132,7 +132,19 @@ fn main() {
 /// compensating for the *scrambled* SDF index map, not a real frame
 /// flip. Keeping this adapter (as identity) documents the boundary
 /// and is where a correction would live if the SDF/frame convention
-/// ever changes; the unit test `frame_correction_is_identity` pins it.
+/// ever changes; the unit test pins it.
+///
+/// YAW (2026-05-30, v0.21): the frame-yaw oracle now reads RELIABLY OPPOSE
+/// — commanding +0.15 N·m yaw produces −1.1 rad/s as sensed,
+/// deterministically across runs (−1.14, −1.04, −1.13). So the yaw channel
+/// (controller-convention → mixer → gz) genuinely has NEGATIVE control
+/// effectiveness. That correction lives in the YAW ADRC's `b0` (negative
+/// −6, the physically correct effectiveness sign — see falcon-config), so
+/// this frame seam stays identity for yaw too. Encoding it here instead
+/// (SIGN[2]=−1, b0=+6) is mathematically equivalent (u→−u, body torque
+/// unchanged) but tested WORSE in limited gz runs (0/6 vs 3/4; unresolved
+/// — gz nondeterminism vs a hidden asymmetry), so it lives in b0 where it
+/// is verified-good.
 #[inline]
 fn frame_correct_torque(torque_ned: [f32; 3]) -> [f32; 3] {
     const SIGN: [f32; 3] = [1.0, 1.0, 1.0];
@@ -1366,10 +1378,12 @@ mod tests {
     /// deliberately. See bench-evidence/gz-sim/2026-05-28-v0.19.6-*.md.
     #[test]
     fn frame_correction_is_identity() {
+        // Identity: roll/pitch via the SDF index-map alignment, and yaw's
+        // measured inversion is corrected in the YAW ADRC b0 (negative),
+        // not here — see frame_correct_torque docs. This seam stays the
+        // documented boundary where a frame correction *would* live.
         let t = [0.3_f32, -0.7, 0.2];
-        assert_eq!(frame_correct_torque(t), t,
-            "frame-correction must be identity after the v0.19.6 SDF index alignment");
-        // Spot-check each axis independently.
+        assert_eq!(frame_correct_torque(t), t);
         assert_eq!(frame_correct_torque([1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]);
         assert_eq!(frame_correct_torque([0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]);
         assert_eq!(frame_correct_torque([0.0, 0.0, 1.0]), [0.0, 0.0, 1.0]);
