@@ -214,6 +214,27 @@ impl GeoAtt {
         ]
     }
 
+    /// Outer attitude loop producing a DESIRED BODY RATE (rad/s) instead
+    /// of a torque — for a robust inner loop (ADRC/INDI) to track. The
+    /// geometric attitude error maps to a rate command `Ω_d = −k_R e_R`.
+    /// This is the v0.25 split: geometry decides *where to point* (the
+    /// well-conditioned part), the inner loop handles *how to get the
+    /// torque there* through the actuator dynamics (the part that broke
+    /// the direct-torque yaw loop).
+    pub fn desired_rate(&self, q_est: [f32; 4], a_cmd_ned: Vec3, yaw_d: f32) -> Vec3 {
+        let r = quat_to_rotmat(q_est);
+        let r_d = thrust_axis_ned(sanitise3(a_cmd_ned))
+            .and_then(|b3| desired_attitude(b3, yaw_d));
+        match r_d {
+            Some(r_d) => {
+                let e = Self::attitude_error(&r, &r_d);
+                let g = &self.gains;
+                sanitise3([-g.k_r[0] * e[0], -g.k_r[1] * e[1], -g.k_r[2] * e[2]])
+            }
+            None => [0.0; 3],
+        }
+    }
+
     /// One control tick: from the estimate quaternion + body rate, the
     /// commanded NED acceleration (horizontal manoeuvre), and the desired
     /// heading, build `R_d` geometrically and return the body torque.

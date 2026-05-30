@@ -30,6 +30,7 @@ relay-mix-quad = { path = "../../crates/relay-mix-quad" }
 relay-arm = { path = "../../crates/relay-arm" }
 relay-iekf = { path = "../../crates/relay-iekf" }
 relay-geo = { path = "../../crates/relay-geo" }
+relay-adrc = { path = "../../crates/relay-adrc" }
 relay-pos = { path = "../../crates/relay-pos" }
 relay-lc = { path = "../../crates/relay-lc" }
 relay-sc = { path = "../../crates/relay-sc" }

@@ -23,6 +23,7 @@ use physics::{GazeboPhysics, MockPhysics, Physics};
 use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
 use relay_iekf::{Iekf, Imu as IekfImu};
 use relay_geo::{GeoAtt, GeoGains};
+use relay_adrc::AdrcRate;
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
@@ -400,6 +401,11 @@ fn run_geo_hover(
     let mut mixer = QuadMixer::new();
     let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
     let geo = GeoAtt::new(GeoGains::FALCON_QUAD);
+    // v0.25 — ADRC inner rate loop (rejects the actuator-lag yaw
+    // instability). On by default; UNSET via GEO_DIRECT for the
+    // direct-torque comparison.
+    let mut adrc = AdrcRate::falcon_quad();
+    let use_adrc = std::env::var("GEO_DIRECT").is_err();
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
     let hover_thrust = 0.72_f32;
@@ -477,13 +483,18 @@ fn run_geo_hover(
         let tilt = body_tilt_rad(imu_sample.accel_body);
         let arm = seq.tick(tilt, true);
         let torque = if arm.torque_authority {
-            let m = geo.tick(est.q, imu_sample.gyro_body, a_cmd, yaw_d);
-            // Diagnostic: YAW_OFF zeros the yaw torque to separate
-            // control-induced spin (chasing a lagged estimate) from an
-            // actuator-side yaw disturbance.
+            let m = if use_adrc {
+                // v0.25: geometric outer loop → desired body rate; ADRC
+                // inner loop → torque, robust to the actuator dynamics.
+                let omega_d = geo.desired_rate(est.q, a_cmd, yaw_d);
+                adrc.tick(imu_sample.gyro_body, omega_d, dt)
+            } else {
+                geo.tick(est.q, imu_sample.gyro_body, a_cmd, yaw_d)
+            };
             let yaw_t = if std::env::var("YAW_OFF").is_ok() { 0.0 } else { m[2] * torque_scale };
             [m[0] * torque_scale, m[1] * torque_scale, yaw_t]
         } else {
+            adrc.reset();
             [0.0_f32; 3]
         };
         let floor = std::env::var("FLOOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.5_f32);
