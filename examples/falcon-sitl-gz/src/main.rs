@@ -489,6 +489,13 @@ fn run_geo_hover(
     let mut mag_err_sum = 0.0_f64;
     let mut mag_err_max = 0.0_f32;
     let mut mag_n = 0u32;
+    // v0.22 magless-yaw observability gate (persistence-of-excitation). At
+    // hover the horizontal specific force ≈ 0 ⇒ yaw is unobservable WITHOUT
+    // the magnetometer — this quantifies WHY the mag (or a manoeuvre) is
+    // required. 1 s window, 1.5 m/s² threshold.
+    let mut yaw_obs = relay_iekf::YawObservability::new(1.0, 1.5);
+    let mut obs_count = 0u32;
+    let mut obs_total = 0u32;
     let mut last_pos_d = 0.0_f32;
     let mut v_d_filt = 0.0_f32;
     let mut last_pos_ned = setpoint_ned;
@@ -549,6 +556,15 @@ fn run_geo_hover(
                 }
             }
             est = iekf.state();
+
+            // Magless-yaw observability: horizontal specific force in NED
+            // (frame-correct, unlike body-axis accel which tilt pollutes).
+            let f_ned = relay_iekf::q_rotate(est.q, imu_sample.accel_body);
+            let a_horiz = (f_ned[0] * f_ned[0] + f_ned[1] * f_ned[1]).sqrt();
+            if yaw_obs.update(a_horiz, dt_outer) {
+                obs_count += 1;
+            }
+            obs_total += 1;
 
             // Altitude thrust (finite-diff v_d at the outer rate).
             let v_d_raw = (pos_ned[2] - last_pos_d) / dt_outer;
@@ -685,6 +701,17 @@ fn run_geo_hover(
         );
     } else {
         println!("  mag-heading: no magnetometer frames received");
+    }
+    // Observability gate report: at a clean hover this should be near 0%
+    // observable — i.e. yaw is unobservable without the magnetometer,
+    // confirming why v0.22's mag fusion (not GPS-only) is the heading
+    // source. (Under a manoeuvre it would rise — magless recovery window.)
+    if obs_total > 0 {
+        let obs_pct = 100.0 * obs_count as f32 / obs_total as f32;
+        println!(
+            "  yaw-observability (magless): {:.0}% of hover excited above threshold (low ⇒ mag required)",
+            obs_pct,
+        );
     }
     if let Some(ref mut e) = evidence {
         e.write_summary_hover(n, final_dist, peak_dist, rms_steady, min_dist, wall.as_secs_f32(), physics.counters());

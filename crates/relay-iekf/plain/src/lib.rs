@@ -94,7 +94,10 @@ fn so3_exp(phi: Vec3) -> Quat {
 
 /// Rotate a vector from body into NED by the quaternion (R·v).
 #[inline]
-fn q_rotate(q: Quat, v: Vec3) -> Vec3 {
+/// Rotate vector `v` by quaternion `q` (body→NED for a NavState `q`).
+/// Public utility — e.g. the bench rotates body specific force into NED to
+/// measure horizontal excitation for the [`YawObservability`] gate.
+pub fn q_rotate(q: Quat, v: Vec3) -> Vec3 {
     // v + 2 w (u×v) + 2 u×(u×v),  u = q.xyz
     let u = [q[1], q[2], q[3]];
     let uv = cross(u, v);
@@ -407,12 +410,33 @@ impl Iekf {
         // are deferred — they are higher-order and the NEES gate will say
         // if they are needed).
         //
-        //        δθ    δv    δp    δb_g   δb_a
-        //  δθ̇  [ 0     0     0    −R̂      0   ]
-        //  δv̇  [ [g]×  0     0     0      −R̂  ]
-        //  δṗ  [ 0     I     0     0       0   ]
+        //        δθ      δv    δp    δb_g   δb_a
+        //  δθ̇  [ 0       0     0    −R̂      0   ]
+        //  δv̇  [ −[f]×   0     0     0      −R̂  ]
+        //  δṗ  [ 0       I     0     0       0   ]
+        //
+        // δv̇ ← −[f_ned]× δθ uses the FULL specific force f_ned = R̂·acc_b
+        // (= acc_n_body), NOT just gravity. The horizontal specific force
+        // is what makes YAW observable under acceleration (magless yaw
+        // recovery — v0.22): with only [g]× the yaw axis is parallel to g
+        // so δyaw→δv is identically zero. At hover f_ned≈[0,0,−g] and
+        // −[f_ned]× = +[g]× (the prior hover approximation), so this is a
+        // strict generalisation, exact at hover. f_ned depends on the
+        // attitude estimate, so this is the imperfect-IEKF / error-state
+        // form (input-affine) rather than the pure group-affine [g]× — the
+        // observability is worth the small loss of state-independence.
+        let neg_sf_skew = {
+            let sf = skew(acc_n_body); // [f_ned]×
+            let mut m = [[0.0_f32; 3]; 3];
+            for i in 0..3 {
+                for j in 0..3 {
+                    m[i][j] = -sf[i][j];
+                }
+            }
+            m
+        };
         let mut phi = mat_identity();
-        set_block3(&mut phi, 3, 0, &skew(GRAVITY_NED), dt); // [g]× · dt
+        set_block3(&mut phi, 3, 0, &neg_sf_skew, dt); // −[f_ned]× · dt
         {
             let mut i3 = [[0.0; 3]; 3];
             for i in 0..3 {
@@ -1235,6 +1259,52 @@ mod tests {
         let yaw = libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
         assert!(yaw.abs() < 0.1, "mag update should drive heading to 0, got {yaw}");
         let _ = pi;
+    }
+
+    /// MAGLESS yaw recovery (v0.22): with NO magnetometer, yaw is
+    /// observable under horizontal acceleration because the predicted
+    /// position then depends on heading (the body accel is rotated by the
+    /// estimated attitude). A filter that believes the wrong yaw predicts
+    /// motion in the wrong horizontal direction; the position innovation
+    /// couples back into δθ_z through the group-affine covariance and
+    /// drives the heading toward truth — WITHOUT any compass. (At hover
+    /// this coupling vanishes — hence the YawObservability gate.)
+    #[test]
+    fn magless_yaw_recovers_under_horizontal_excitation() {
+        // Truth: level, heading 0, in a back-and-forth horizontal SHAKE
+        // (sign-alternating north accel) — sustained excitation without
+        // flying away to absurd speeds, the realistic observability driver.
+        let a_mag = 6.0_f32;
+        // Estimate STARTS with a 0.3 rad heading error (believes yaw 0.3).
+        let mut st = NavState::identity();
+        let half = 0.15_f32; // yaw/2
+        st.q = [libm::cosf(half), 0.0, 0.0, libm::sinf(half)];
+        let mut f = Iekf::new(st);
+        let yaw0 = 0.3_f32;
+
+        let (mut p_true, mut v_true) = ([0.0f32; 3], [0.0f32; 3]);
+        let dt = 0.01_f32;
+        for k in 0..6000 {
+            // Alternate the north accel every 0.5 s → a shake that keeps
+            // |a_horiz| high (observable) without runaway velocity.
+            let a_north = if (k / 50) % 2 == 0 { a_mag } else { -a_mag };
+            let sf_body = [a_north, 0.0, -9.81]; // specific force, body=NED yaw 0
+            f.propagate(Imu { gyro: [0.0; 3], accel: sf_body }, dt);
+            v_true[0] += a_north * dt;
+            p_true[0] += v_true[0] * dt;
+            if k % 2 == 0 {
+                f.update_position(p_true, 0.01);
+            }
+        }
+        let q = f.state().q;
+        let yaw = libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        // Magless recovery from position aiding is genuinely WEAK and slow
+        // (why PX4 uses a velocity-GSF and we use a magnetometer as primary
+        // — docs/research/v0.22-heading-yaw-sota.md). The provable, testable
+        // claim is that the −[f]× coupling makes yaw move CORRECTLY toward
+        // truth under excitation (vs the [g]×-only form, which left it dead
+        // at 0.4→0.399). Assert clear correct-direction recovery.
+        assert!(yaw < yaw0 - 0.03 && yaw > -0.1, "magless yaw should recover toward 0, {yaw0}→{yaw}");
     }
 
     /// Magless yaw observability gate: at rest (no horizontal accel) yaw is
