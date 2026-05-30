@@ -276,6 +276,75 @@ impl QuadMixer {
         self.last_motors = m;
         m
     }
+
+    /// **Airmode** mix (MIX-P07): preserve the full ATTITUDE differential
+    /// (roll/pitch/yaw) by shifting the whole COLLECTIVE up/down to fit
+    /// `[idle, 1]`, sacrificing thrust rather than attitude authority — the
+    /// PX4 airmode policy. Only if the attitude differential itself is
+    /// wider than the available range `(1 − idle)` is the torque scaled
+    /// down (uniformly, ratios preserved). The v0.25 fix for the yaw axis:
+    /// the hard-floor mixers scaled yaw → 0 exactly when a yaw correction
+    /// pushed a motor low; airmode keeps the yaw differential and moves
+    /// collective instead.
+    ///
+    /// Invariant (same family as MIX-P05/P06): every motor ∈ `[idle, 1]`
+    /// and finite for ANY input (final `clamp_floor`).
+    pub fn mix_airmode(&mut self, torque_body: [f32; 3], thrust: f32, idle: f32) -> [f32; 4] {
+        let t = clamp01(sanitise(thrust));
+        let idle = clamp01(sanitise(idle));
+        let r = sanitise(torque_body[0]);
+        let p = sanitise(torque_body[1]);
+        let y = sanitise(torque_body[2]);
+
+        // Per-motor attitude differential (no thrust term).
+        let mut d = [0.0_f32; 4];
+        for i in 0..4 {
+            let row = &MIXER_X[i];
+            d[i] = sanitise(row[1] * r + row[2] * p + row[3] * y);
+        }
+        let (mut dmin, mut dmax) = (d[0], d[0]);
+        for &di in &d[1..] {
+            if di < dmin { dmin = di; }
+            if di > dmax { dmax = di; }
+        }
+
+        // If the differential spread exceeds the available range, scale the
+        // whole torque down (preserving roll/pitch/yaw ratios). Guard the
+        // divisor finite + bounded-away-from-zero so the quotient is total.
+        let span = 1.0 - idle;
+        let range = sanitise(dmax - dmin); // finite (sanitise NaN/∞ → 0)
+        let mut s = 1.0_f32;
+        if range.is_finite() && range > 1e-6 && range > span {
+            s = span / range;
+        }
+        if !s.is_finite() || s < 0.0 {
+            s = 0.0;
+        }
+        for i in 0..4 {
+            d[i] *= s;
+        }
+
+        // m = collective + scaled differential, then shift collective so
+        // the lowest motor sits at idle (and the highest ≤ 1).
+        let mut m = [t + d[0], t + d[1], t + d[2], t + d[3]];
+        let (mut lo, mut hi) = (m[0], m[0]);
+        for &v in &m[1..] {
+            if v < lo { lo = v; }
+            if v > hi { hi = v; }
+        }
+        let shift = if lo < idle {
+            idle - lo
+        } else if hi > 1.0 {
+            -(hi - 1.0)
+        } else {
+            0.0
+        };
+        for i in 0..4 {
+            m[i] = clamp_floor(m[i] + shift, idle);
+        }
+        self.last_motors = m;
+        m
+    }
 }
 
 /// Clamp `x` into `[lo, 1]`. Total over all f32: NaN and values below
@@ -413,6 +482,25 @@ mod kani_proofs {
             assert!(v <= 1.0);
         }
     }
+
+    /// MIX-P07: airmode mix holds the bound — every motor ∈ [idle,1] and
+    /// finite for ANY (incl. non-finite) input.
+    #[kani::proof]
+    fn verify_mix_airmode_bound() {
+        let idle: f32 = kani::any();
+        kani::assume(idle.is_finite() && idle >= 0.0 && idle <= 1.0);
+        let thrust: f32 = kani::any();
+        let r: f32 = kani::any();
+        let p: f32 = kani::any();
+        let y: f32 = kani::any();
+        let mut m = QuadMixer::new();
+        let out = m.mix_airmode([r, p, y], thrust, idle);
+        for &v in out.iter() {
+            assert!(v.is_finite());
+            assert!(v >= idle);
+            assert!(v <= 1.0);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -447,6 +535,25 @@ mod tests {
         let tq = motors_to_torque_signs(out);
         // all three axes retain their commanded sign (non-zero).
         assert!(tq[2].abs() > 1e-3, "yaw preserved when unsaturated: {:?}", tq);
+    }
+
+    /// MIX-P07: airmode preserves the YAW differential where the priority
+    /// mixer sacrifices it — under a saturating yaw command, airmode keeps
+    /// more yaw torque (it moves collective instead of scaling yaw to 0).
+    #[test]
+    fn mix_p07_airmode_preserves_yaw_vs_floor() {
+        let torque = [0.0, 0.0, 0.6]; // pure yaw, would push motors below floor
+        let (thrust, idle) = (0.55_f32, 0.2_f32);
+        let air = QuadMixer::new().mix_airmode(torque, thrust, idle);
+        let prio = QuadMixer::new().mix_priority(torque, thrust, idle);
+        for &v in air.iter() {
+            assert!(v >= idle - 1e-6 && v <= 1.0 + 1e-6, "airmode bound: {v}");
+        }
+        let yaw_air = motors_to_torque_signs(air)[2].abs();
+        let yaw_prio = motors_to_torque_signs(prio)[2].abs();
+        assert!(yaw_air >= yaw_prio - 1e-6,
+            "airmode should preserve >= yaw than priority: {yaw_air} vs {yaw_prio}");
+        assert!(yaw_air > 1e-3, "airmode keeps real yaw authority: {yaw_air}");
     }
 
     #[test]

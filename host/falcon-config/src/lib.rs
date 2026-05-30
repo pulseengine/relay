@@ -55,6 +55,18 @@ pub struct AdrcCfg {
     pub tau: f32,
 }
 
+/// Which mixer policy the bench uses.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MixerMode {
+    /// Thrust-priority floor (MIX-P05): scales all torque uniformly.
+    ThrustFloor,
+    /// Sequential desaturation (MIX-P06): yaw sacrificed first.
+    Priority,
+    /// Airmode (MIX-P07): shift collective, preserve attitude authority.
+    Airmode,
+}
+
 /// Yaw control mode for the geo-hover position-hold.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -93,7 +105,15 @@ pub struct PosCfg {
     /// Gyro low-pass cutoff (Hz) before the ADRC. 0 disables.
     #[serde(default = "default_gyro_lpf_hz")]
     pub gyro_lpf_hz: f32,
+    /// Mixer policy (`mixer_floor` is the floor/idle).
+    #[serde(default = "default_mixer_mode")]
+    pub mixer_mode: MixerMode,
 }
+
+// Priority for now: airmode gives the yaw loop FULL authority, which the
+// negative-b0 yaw WORKAROUND can't yet handle (it diverges). Airmode
+// becomes the default once the yaw sign is properly fixed (Track A #4).
+fn default_mixer_mode() -> MixerMode { MixerMode::Priority }
 
 fn default_loop_dt() -> f32 { 0.001 }
 fn default_outer_decim() -> u32 { 10 }
@@ -198,6 +218,7 @@ impl Default for FalconConfig {
                 loop_dt: default_loop_dt(),       // 1 kHz inner loop
                 outer_decim: default_outer_decim(), // 100 Hz outer loop
                 gyro_lpf_hz: default_gyro_lpf_hz(), // 60 Hz gyro LPF
+                mixer_mode: default_mixer_mode(),   // airmode
             },
         }
     }

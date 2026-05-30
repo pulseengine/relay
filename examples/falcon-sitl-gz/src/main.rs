@@ -538,8 +538,13 @@ fn run_geo_hover(
             [0.0_f32; 3]
         };
         let floor = cfg.pos.mixer_floor;
-        let motors =
-            mixer.mix_priority(torque, thrust_held * arm.thrust_scale, floor * arm.thrust_scale);
+        let th = thrust_held * arm.thrust_scale;
+        let fl = floor * arm.thrust_scale;
+        let motors = match cfg.pos.mixer_mode {
+            falcon_config::MixerMode::ThrustFloor => mixer.mix_thrust_floor(torque, th, fl),
+            falcon_config::MixerMode::Priority => mixer.mix_priority(torque, th, fl),
+            falcon_config::MixerMode::Airmode => mixer.mix_airmode(torque, th, fl),
+        };
         physics.step(motors, dt);
 
         let dn = pos_ned[0] - setpoint_ned[0];

@@ -68,6 +68,7 @@
     "yaw_mode": "rate_hold",
     "loop_dt": 0.001,
     "outer_decim": 10,
-    "gyro_lpf_hz": 60.0
+    "gyro_lpf_hz": 60.0,
+    "mixer_mode": "priority"
   }
 }
