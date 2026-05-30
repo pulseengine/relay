@@ -21,6 +21,7 @@ mod physics;
 
 use physics::{GazeboPhysics, MockPhysics, Physics};
 use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
+use relay_iekf::{Iekf, Imu as IekfImu};
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
@@ -632,6 +633,11 @@ fn run_closed_loop_hover(
     mut evidence: Option<&mut EvidenceSink>,
 ) -> bool {
     let mut ekf = Ekf::new();
+    // v0.21 — the Invariant EKF runs in PARALLEL with the Mahony filter
+    // for the diagnostic: POS_DEBUG prints iekf_tilt vs the Mahony
+    // est_tilt vs true_tilt. If the IEKF tracks truth where Mahony
+    // diverges to 51° (v0.20 RC#3), the keystone works.
+    let mut iekf = Iekf::level();
     let mut rate_pid = RatePid::new();
     let mut att = AttController::new();
     // v0.20 — calibrate the position controller's hover thrust for the gz
@@ -681,6 +687,13 @@ fn run_closed_loop_hover(
         let est = ekf.tick(imu_sample);
         if !est.quaternion[0].is_finite() { nan_seen = true; }
 
+        // 2b. IEKF (v0.21) — propagate on IMU, correct on gz position
+        //     (the "GPS"). Runs in parallel for the diagnostic; the
+        //     measured accel is body-frame specific force, exactly the
+        //     IEKF's dynamics input.
+        iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
+        iekf.update_position(pos_ned, 0.04); // ~0.2 m 1σ NavSat
+
         // 3. POS — position + finite-diff velocity → attitude setpoint.
         let v_ned = match last_pos_ned {
             Some(p) => [
@@ -691,18 +704,26 @@ fn run_closed_loop_hover(
             None => [0.0; 3],
         };
         last_pos_ned = Some(pos_ned);
+        // v0.21 — control attitude source: the IEKF (USE_IEKF) vs the
+        // legacy Mahony filter. Closing the loop on the IEKF is the test
+        // of whether the keystone fixes RC#3 → position-hold.
+        let est_q = if std::env::var("USE_IEKF").is_ok() {
+            iekf.state().q
+        } else {
+            est.quaternion
+        };
         let att_sp = pos.tick(
             pos_ts_of(t),
             pos_ned,
             v_ned,
-            est.quaternion,
+            est_q,
             setpoint,
         );
         current_att_sp = att_sp.quaternion;
         current_thrust = att_sp.thrust;
 
         // 4. ATT — quaternion error → rate setpoint.
-        let current_rate_sp = att.tick(att_ts_of(t), est.quaternion, current_att_sp);
+        let current_rate_sp = att.tick(att_ts_of(t), est_q, current_att_sp);
 
         // 5. RATE — gyro + rate setpoint → torque (frame-corrected),
         //    gated by the arming sequencer (RC#1). Torque authority
@@ -737,10 +758,12 @@ fn run_closed_loop_hover(
             let q = est.quaternion;
             let bz_d = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]); // R[2][2]
             let est_tilt = libm::acosf(bz_d.clamp(-1.0, 1.0));
+            let is = iekf.state();
             eprintln!(
-                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° est_tilt={:.1}° thrust={:.2}",
+                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° mahony={:.1}° IEKF={:.1}° ipos=[{:.1},{:.1},{:.1}] thrust={:.2}",
                 pos_ned[0], pos_ned[1], pos_ned[2],
-                tilt.to_degrees(), est_tilt.to_degrees(), current_thrust,
+                tilt.to_degrees(), est_tilt.to_degrees(), is.tilt_rad().to_degrees(),
+                is.p[0], is.p[1], is.p[2], current_thrust,
             );
         }
 

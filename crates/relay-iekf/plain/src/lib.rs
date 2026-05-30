@@ -26,6 +26,9 @@
 //! error-state EKF; only the error/covariance treatment differs.
 
 #![no_std]
+// Index loops are clearer than iterator adapters for fixed-size matrix
+// algebra; the bounds are all compile-time constants.
+#![allow(clippy::needless_range_loop)]
 
 /// Standard gravity in NED (down is +z), m/s².
 pub const GRAVITY_NED: [f32; 3] = [0.0, 0.0, 9.81];
@@ -185,15 +188,6 @@ fn mat_transpose(a: &Mat) -> Mat {
         }
     }
     out
-}
-
-/// In-place `a += b`.
-fn mat_add_assign(a: &mut Mat, b: &Mat) {
-    for i in 0..N {
-        for j in 0..N {
-            a[i][j] += b[i][j];
-        }
-    }
 }
 
 /// Force exact symmetry `P ← ½(P + Pᵀ)` — cheap guard against f32 drift
