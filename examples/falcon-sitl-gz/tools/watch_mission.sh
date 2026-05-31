@@ -16,8 +16,13 @@ DUR="${2:-50}"
 mkdir -p /tmp/falcon-flight
 
 pkill -f 'gz sim' 2>/dev/null || true; sleep 2
-echo "Opening the Gazebo GUI window (server + GUI)…"
-gz sim -r -v1 "$WORLD" >/tmp/gz-gui.log 2>&1 &     # NO -s/-g ⇒ server + GUI
+# macOS needs the server (-s) and GUI (-g) as SEPARATE processes
+# (gazebosim/gz-sim#44); on Linux you can use a single `gz sim -r`.
+echo "Starting headless server…"
+gz sim -s -r -v1 "$WORLD" >/tmp/gz-srv.log 2>&1 &
+sleep 4
+echo "Opening the Gazebo GUI window on your screen…"
+gz sim -g >/tmp/gz-gui.log 2>&1 &
 sleep 10
 echo "Flying scenario=$SCEN for ${DUR}s — watch the drone in the GUI window."
 cargo run -q -p falcon-sitl-gz --features gazebo -- \
