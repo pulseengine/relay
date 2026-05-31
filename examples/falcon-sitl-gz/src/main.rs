@@ -24,6 +24,7 @@ use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
 use relay_iekf::{Iekf, Imu as IekfImu, NavState};
 use falcon_config::YawMode;
 use relay_geo::GeoAtt;
+use relay_traj::Segment3;
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
@@ -184,6 +185,7 @@ fn run_scenario(
         "arming" => run_arming_check(physics, duration_s, true),
         "arming-ungated" => run_arming_check(physics, duration_s, false),
         "geo-hover" => run_geo_hover(physics, duration_s, evidence),
+        "mission" => run_mission(physics, duration_s, evidence),
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -409,10 +411,77 @@ fn run_arming_check(physics: &mut dyn Physics, duration_s: f32, gated: bool) -> 
 /// thrust-floor mixer, gated by the arming sequencer. This is the v0.23
 /// position-hold validation. PASS = final_dist < 0.5 m AND rms_steady
 /// (last 5 s) < 1.0 m.
+/// v0.29 — a waypoint MISSION the geo cascade follows in real Gazebo. Each
+/// leg is a Mueller rest-to-rest quintic (relay-traj); `sample(t)` yields
+/// the position/velocity/acceleration/jerk setpoint that drives the
+/// position loop + the differential-flatness feedforward.
+struct Mission {
+    waypoints: Vec<[f32; 3]>,
+    leg_time: f32,
+}
+
+impl Mission {
+    fn total_time(&self) -> f32 {
+        ((self.waypoints.len().max(1) - 1) as f32) * self.leg_time
+    }
+    /// (pos_d, vel_d, acc_d, jerk_d) in NED at mission time `t`. Holds the
+    /// final waypoint after the mission completes.
+    fn sample(&self, t: f32) -> ([f32; 3], [f32; 3], [f32; 3], [f32; 3]) {
+        let n = self.waypoints.len();
+        if n < 2 {
+            return (self.waypoints.first().copied().unwrap_or([0.0; 3]), [0.0; 3], [0.0; 3], [0.0; 3]);
+        }
+        if t >= self.total_time() {
+            return (self.waypoints[n - 1], [0.0; 3], [0.0; 3], [0.0; 3]);
+        }
+        let leg = ((t / self.leg_time) as usize).min(n - 2);
+        let tl = t - leg as f32 * self.leg_time;
+        let s = Segment3::rest_to_rest(self.waypoints[leg], self.waypoints[leg + 1], self.leg_time).eval(tl);
+        (s.pos, s.vel, s.acc, s.jerk)
+    }
+}
+
 fn run_geo_hover(
     physics: &mut dyn Physics,
     duration_s: f32,
+    evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    run_geo_cascade(physics, duration_s, evidence, None)
+}
+
+/// v0.29 — a real-Gazebo waypoint MISSION: hold (arm + climb), fly a square,
+/// return home — through the full verified cascade with trajectory +
+/// flatness feedforward. Verdict = back within range of home (the goal).
+fn run_mission(
+    physics: &mut dyn Physics,
+    duration_s: f32,
+    evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    let mission = Mission {
+        waypoints: vec![
+            [0.0, 0.0, -2.0], // hold @ 2 m while arming + climbing
+            [0.0, 0.0, -2.0],
+            [2.0, 0.0, -2.0], // ── square (2 m side) ──
+            [2.0, 2.0, -2.0],
+            [0.0, 2.0, -2.0],
+            [0.0, 0.0, -2.0], // return home
+        ],
+        // Slow legs (0.25 m/s): the gentle, stability-limited position loop
+        // can only track a slowly-moving setpoint (faster ⇒ lag ⇒ drift).
+        leg_time: 8.0,
+    };
+    run_geo_cascade(physics, duration_s, evidence, Some(&mission))
+}
+
+/// The geo cascade, optionally following a `Mission` trajectory (v0.29). With
+/// `mission = None` this is byte-identical to the v0.21–0.28 hover (fixed
+/// setpoint, no feedforward); with `Some`, the setpoint becomes the sampled
+/// trajectory and the differential-flatness body-rate feedforward is added.
+fn run_geo_cascade(
+    physics: &mut dyn Physics,
+    duration_s: f32,
     mut evidence: Option<&mut EvidenceSink>,
+    mission: Option<&Mission>,
 ) -> bool {
     // v0.25 — config-driven (host-only falcon-config). `--config=path.json`
     // sweeps every tuning parameter WITHOUT a rebuild; default is the
@@ -431,6 +500,16 @@ fn run_geo_hover(
         },
         None => falcon_config::FalconConfig::default(),
     };
+
+    // v0.29 HONEST FINDING (real-gz): the cascade is tuned to the EDGE of
+    // stability for hover (gentle kp_pos + a_cmd_max=1.0 — high gains or a
+    // higher accel limit re-excite the v0.25 limit cycle and DIVERGE, 350+ m).
+    // So the MISSION runs on the SAME gentle/stable tuning: it follows the
+    // trajectory but LOOSELY (~2.5 m), and the IEKF goes over-confident
+    // (ANEES≫3) under motion. Tight trajectory tracking + estimator
+    // consistency under motion is the v0.30+ robustness work, not a tuning
+    // tweak. (mission = None ⇒ hover, unchanged.)
+    let cfg = cfg;
 
     let mut iekf = Iekf::with_config(NavState::identity(), cfg.to_iekf_config());
     let mut iekf_heading_init = false;
@@ -567,16 +646,24 @@ fn run_geo_hover(
             obs_total += 1;
 
             // Altitude thrust (finite-diff v_d at the outer rate).
+            // v0.29 — the setpoint is the MISSION trajectory sample (pos +
+            // vel + accel + jerk feedforward), or the fixed hover point when
+            // mission = None (then derivatives are 0 ⇒ identical to v0.28).
+            let (pos_d, vel_d, acc_d, jerk_d) = match mission {
+                Some(m) => m.sample(t),
+                None => (setpoint_ned, [0.0; 3], [0.0; 3], [0.0; 3]),
+            };
             let v_d_raw = (pos_ned[2] - last_pos_d) / dt_outer;
             v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
             last_pos_d = pos_ned[2];
-            let alt_err = setpoint_ned[2] - pos_ned[2];
+            let alt_err = pos_d[2] - pos_ned[2];
             thrust_held = (hover_thrust - kp_alt * alt_err + kd_alt * v_d_filt).clamp(0.0, 1.0);
 
-            // Horizontal position → NED accel command (P-D on IEKF state).
+            // Horizontal position → NED accel command: trajectory accel
+            // feedforward + P-D on (pos, vel) error against the moving setpoint.
             let mut a_cmd = [
-                kp_pos * (setpoint_ned[0] - pos_ned[0]) - kd_vel * est.v[0],
-                kp_pos * (setpoint_ned[1] - pos_ned[1]) - kd_vel * est.v[1],
+                acc_d[0] + kp_pos * (pos_d[0] - pos_ned[0]) - kd_vel * (est.v[0] - vel_d[0]),
+                acc_d[1] + kp_pos * (pos_d[1] - pos_ned[1]) - kd_vel * (est.v[1] - vel_d[1]),
                 0.0,
             ];
             let ah = (a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]).sqrt();
@@ -587,6 +674,14 @@ fn run_geo_hover(
             }
             a_cmd_held = a_cmd;
             let mut omega_d = geo.desired_rate(est.q, a_cmd, yaw_d);
+            // Differential-flatness body-rate FEEDFORWARD from the trajectory
+            // jerk (v0.27 → real cascade). Zero for hover (jerk_d = 0).
+            if mission.is_some() {
+                if let Some(ff) = relay_geo::flatness_omega_ff(a_cmd, jerk_d, yaw_d, 0.0) {
+                    omega_d[0] += ff[0];
+                    omega_d[1] += ff[1];
+                }
+            }
             if cfg.pos.yaw_mode != YawMode::HeadingHold {
                 omega_d[2] = 0.0; // rate-hold / off: no heading tracking
             }
@@ -654,9 +749,14 @@ fn run_geo_hover(
         }
     }
     let wall = started_at.elapsed();
-    let dn = last_pos_ned[0] - setpoint_ned[0];
-    let de = last_pos_ned[1] - setpoint_ned[1];
-    let dd = last_pos_ned[2] - setpoint_ned[2];
+    // For a mission the verdict is reaching the GOAL (final waypoint); for
+    // hover it is the fixed setpoint.
+    let goal_ned = mission
+        .and_then(|m| m.waypoints.last().copied())
+        .unwrap_or(setpoint_ned);
+    let dn = last_pos_ned[0] - goal_ned[0];
+    let de = last_pos_ned[1] - goal_ned[1];
+    let dd = last_pos_ned[2] - goal_ned[2];
     let final_dist = (dn * dn + de * de + dd * dd).sqrt();
     let rms_steady = if steady_count > 0 {
         (sum_sq_steady / steady_count as f32).sqrt()
