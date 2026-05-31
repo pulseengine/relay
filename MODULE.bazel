@@ -31,9 +31,15 @@ local_path_override(
     path = "../rules_lean",
 )
 
-# Lean 4 toolchain + Mathlib
+# Lean 4 toolchain + Mathlib. Version MUST match rules_lean's own
+# MODULE.bazel pins (lean.toolchain 4.29.1 + lean.mathlib v4.29.1): the
+# extension collects tags from all modules, and rules_lean's mathlib tag
+# (v4.29.1) is what creates the @mathlib repo. A mismatched toolchain here
+# (the prior 4.27.0) made Mathlib v4.29.1 demand a toolchain switch that
+# needs Elan mid-build → "lake update failed". Keep this aligned with
+# rules_lean. (Pinned + reproducible — see proofs/lean/README.md.)
 lean = use_extension("@rules_lean//lean:extensions.bzl", "lean")
-lean.toolchain(version = "4.27.0")
+lean.toolchain(version = "4.29.1")
 use_repo(lean, "lean_toolchains", "mathlib")
 register_toolchains("@lean_toolchains//:all")
 

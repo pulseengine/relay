@@ -320,40 +320,40 @@
     },
     "@@rules_lean+//lean:extensions.bzl%lean": {
       "general": {
-        "bzlTransitiveDigest": "HhXRTyTH78o0DIIlJsNElZdnBmhMo/qhBNpQO6ZWBGM=",
-        "usagesDigest": "BWqa0tVxCP+K5/vKNTz6vYK0WjDdO9k8/m2iJxQ8V+w=",
+        "bzlTransitiveDigest": "Vc+O46OIDuGN/pc4YTKW3U/lKLGoRbw3MYV26cxfYjU=",
+        "usagesDigest": "I50Kb4H2lVVL7mS0nXwNxVEH5A4MeriD7OMPz0SCHxE=",
         "recordedInputs": [],
         "generatedRepoSpecs": {
           "lean_darwin_aarch64": {
             "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_release",
             "attributes": {
-              "version": "4.27.0",
+              "version": "4.29.1",
               "platform": "darwin_aarch64",
-              "sha256": "01e7d9130464bc7d847baece07dfb2c4f48dd02e71b4b9a77d484914ea594efb"
+              "sha256": "73bccb392ca7d8ab3d62a1e328bb7d057815f088dbdbfb6574f194ae505797af"
             }
           },
           "lean_darwin_x86_64": {
             "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_release",
             "attributes": {
-              "version": "4.27.0",
+              "version": "4.29.1",
               "platform": "darwin_x86_64",
-              "sha256": "e4ca541d86881c35497cb6e6c1a21358f03a4b2cfb2e8d4e14e58dc2a0a805ae"
+              "sha256": "3585ab34d20c53cf915169aa5c0d2efbd9993a78b9dc08516641510eef08fab0"
             }
           },
           "lean_linux_x86_64": {
             "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_release",
             "attributes": {
-              "version": "4.27.0",
+              "version": "4.29.1",
               "platform": "linux_x86_64",
-              "sha256": "056e2dc8564fc064a801e69f3eb18c044b9b546bc8b0e5a2c00247f8a1cb8ce6"
+              "sha256": "bf062d29556d655685fb287563c249ad6a8fde34352c18b5e32568a595c1aec1"
             }
           },
           "lean_linux_aarch64": {
             "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%lean_release",
             "attributes": {
-              "version": "4.27.0",
+              "version": "4.29.1",
               "platform": "linux_aarch64",
-              "sha256": "b256eec276baaaccc3eb3fa64d7ccff64f710b7caa074f305ba95e0013ad31e7"
+              "sha256": "1ccdfb7f924901f4b73a4b4eb169e5b3dc74f6836521b47e733ea25f2abfc0dc"
             }
           },
           "lean_toolchains": {
@@ -371,7 +371,7 @@
             "repoRuleId": "@@rules_lean+//lean/private:repo.bzl%mathlib_repo",
             "attributes": {
               "host_platform": "darwin_aarch64",
-              "lean_version": "4.27.0",
+              "lean_version": "4.29.1",
               "mathlib_rev": "v4.29.1"
             }
           }
