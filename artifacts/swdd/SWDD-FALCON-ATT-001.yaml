@@ -2,7 +2,7 @@ artifacts:
   - id: SWDD-FALCON-ATT-001
     type: sw-detail-design
     title: Attitude controller detailed design
-    status: approved
+    status: implemented
     description: >
       The attitude controller is a stream transformer:
         (vehicle-state, attitude-setpoint, table-update)
@@ -40,7 +40,7 @@ artifacts:
       Kani bounded check on small-angle linearization (ATT-P03).
     tags: [falcon, attitude-control, quaternion, detailed-design, rocq]
     fields:
-      unit: crates/relay-att/src/lib.rs
+      unit: crates/relay-att/plain/src/lib.rs
       function: "AttController::tick"
       algorithm: >
         Quaternion-error proportional control with small-angle

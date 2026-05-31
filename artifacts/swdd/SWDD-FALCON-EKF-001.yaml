@@ -2,7 +2,7 @@ artifacts:
   - id: SWDD-FALCON-EKF-001
     type: sw-detail-design
     title: EKF / complementary filter detailed design
-    status: approved
+    status: implemented
     description: >
       The EKF component is a stream transformer:
         (imu, gps, mag, baro) -> stream<vehicle-state>
@@ -44,7 +44,7 @@ artifacts:
       moment of inertia tensor). Single source of truth.
     tags: [falcon, ekf, detailed-design, verus, drake]
     fields:
-      unit: crates/relay-ekf/src/lib.rs
+      unit: crates/relay-iekf/plain/src/lib.rs
       function: "EkfState::propagate, EkfState::correct"
       algorithm: >
         Multiplicative EKF on SO(3) with NED position/velocity;

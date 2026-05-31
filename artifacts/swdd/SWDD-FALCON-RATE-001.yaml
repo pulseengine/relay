@@ -2,7 +2,7 @@ artifacts:
   - id: SWDD-FALCON-RATE-001
     type: sw-detail-design
     title: Body-rate controller detailed design
-    status: approved
+    status: implemented
     description: >
       The rate controller is a stream transformer:
         (vehicle-state, rate-setpoint, table-update)
@@ -46,7 +46,7 @@ artifacts:
       derived from PX4's documented tuning range.
     tags: [falcon, rate-control, pid, detailed-design, verus, lean]
     fields:
-      unit: crates/relay-rate/src/lib.rs
+      unit: crates/relay-rate/plain/src/lib.rs
       function: "RateController::tick"
       algorithm: "Per-axis PID with anti-windup; clamped output."
       tick-rate: "1 kHz"
