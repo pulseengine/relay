@@ -348,6 +348,161 @@ fn sanitise3(v: Vec3) -> Vec3 {
     ]
 }
 
+// ──────────────────── v0.28: verified simplex shield ───────────────────
+
+/// The **recoverable set** of the certified geometric controller — exactly
+/// the Lee 2010 (Prop. 1) exponential-stability region the v0.23 Lyapunov
+/// certificate proves: `Ψ < ψ_max (≤ 2)` AND
+/// `‖e_Ω‖² < 2·k_R·(2 − Ψ)/λ_M(J)`. Inside it, the geometric controller
+/// provably drives `(e_R, e_Ω) → 0` — so it is the set the simplex shield
+/// can safely hand control back to the fallback from.
+#[derive(Clone, Copy, Debug)]
+pub struct RecoverableSet {
+    /// Attitude gain `k_R` of the Lyapunov function `V = ½Ω·JΩ + 2k_R Ψ`.
+    pub k_r: f32,
+    /// Largest eigenvalue of the body inertia `J` (`λ_M(J)`).
+    pub lambda_j: f32,
+    /// `Ψ` ceiling (< 2; a margin below the 180° boundary).
+    pub psi_max: f32,
+}
+
+impl RecoverableSet {
+    pub const fn new(k_r: f32, lambda_j: f32, psi_max: f32) -> Self {
+        RecoverableSet { k_r, lambda_j, psi_max }
+    }
+
+    /// Signed margin to the recoverable boundary: `≥ 0` ⇔ recoverable.
+    /// `margin = min(ψ_max − Ψ,  2k_R(2−Ψ)/λ_M(J) − ‖e_Ω‖²)`. Returns
+    /// `−∞` (definitely outside / fail-safe) on any non-finite input.
+    pub fn margin(&self, psi: f32, e_omega_sq: f32) -> f32 {
+        if !psi.is_finite() || !e_omega_sq.is_finite() || !(self.lambda_j > 0.0) {
+            return f32::NEG_INFINITY;
+        }
+        let psi_margin = self.psi_max - psi;
+        let rate_cap = 2.0 * self.k_r * (2.0 - psi) / self.lambda_j;
+        let rate_margin = rate_cap - e_omega_sq;
+        let m = if psi_margin < rate_margin { psi_margin } else { rate_margin };
+        if m.is_finite() { m } else { f32::NEG_INFINITY }
+    }
+
+    /// Is `(Ψ, ‖e_Ω‖²)` inside the recoverable set?
+    #[inline]
+    pub fn recoverable(&self, psi: f32, e_omega_sq: f32) -> bool {
+        self.margin(psi, e_omega_sq) >= 0.0
+    }
+}
+
+/// **Verified simplex shield** (Sha architecture, v0.28). A high-
+/// performance but UNVERIFIED `agile` command (learned/NMPC) is allowed
+/// only while the state is safely INSIDE the recoverable set; otherwise the
+/// certified geometric `fallback` takes over. Switching happens at a
+/// positive margin (`enter`) — i.e. BEFORE the recoverable boundary — so
+/// the fallback always still has the authority to recover (the simplex
+/// invariance argument). Hysteresis (`enter < exit`) prevents chatter; a
+/// non-finite margin fails safe to the fallback.
+///
+/// Safety contract (Kani `verify_shield_contract`): the output is ALWAYS
+/// exactly the (sanitised) agile or fallback command, and whenever the
+/// margin is `< enter` (or non-finite) the FALLBACK is used.
+#[derive(Clone, Copy, Debug)]
+pub struct SimplexShield {
+    set: RecoverableSet,
+    engaged: bool,
+    enter: f32,
+    exit: f32,
+}
+
+impl SimplexShield {
+    /// `enter` = margin at which to engage the fallback (small positive,
+    /// inside the set); `exit` = deeper margin at which to return to agile
+    /// (`exit > enter`). Degenerate args clamped to a safe ordering.
+    pub fn new(set: RecoverableSet, enter: f32, exit: f32) -> Self {
+        let enter = if enter.is_finite() && enter > 0.0 { enter } else { 0.1 };
+        let exit = if exit.is_finite() && exit > enter { exit } else { enter * 2.0 };
+        SimplexShield { set, engaged: true, enter, exit }
+    }
+
+    /// True while the certified fallback is in control.
+    #[inline]
+    pub fn fallback_engaged(&self) -> bool {
+        self.engaged
+    }
+
+    /// Select the command: `agile` while safely inside the recoverable set,
+    /// else the certified `fallback`. `psi`, `e_omega_sq` = current
+    /// geometric error `(Ψ, ‖Ω‖²)`. Returns `(command, used_fallback)`.
+    pub fn filter(&mut self, psi: f32, e_omega_sq: f32, agile: Vec3, fallback: Vec3) -> (Vec3, bool) {
+        self.step(self.set.margin(psi, e_omega_sq), agile, fallback)
+    }
+
+    /// The safety-critical SELECTION logic, given the recoverable-set
+    /// `margin` directly. Split from `filter` so its contract is verified
+    /// over an arbitrary margin (no division in the proof). Hysteresis:
+    /// engage the fallback when `margin < enter` (or non-finite — fail
+    /// safe), return to agile only when `margin > exit`.
+    pub fn step(&mut self, margin: f32, agile: Vec3, fallback: Vec3) -> (Vec3, bool) {
+        if self.engaged {
+            if margin.is_finite() && margin > self.exit {
+                self.engaged = false;
+            }
+        } else if !margin.is_finite() || margin < self.enter {
+            self.engaged = true;
+        }
+        if self.engaged {
+            (sanitise3(fallback), true)
+        } else {
+            (sanitise3(agile), false)
+        }
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// SAFETY CONTRACT of the simplex shield's selection logic (proven over
+    /// an ARBITRARY recoverable-set margin — the division in `margin()` is
+    /// separated out): (a) the output is ALWAYS exactly the sanitised agile
+    /// or fallback command (never a third value); (b) whenever the margin is
+    /// `< enter` or non-finite, the FALLBACK is used — the shield never lets
+    /// the agile policy run outside the safe band. Holds for ANY margin, ANY
+    /// commands (incl. non-finite), and ANY prior engaged/disengaged latch,
+    /// given the `new()` well-formedness invariant `0 < enter < exit`.
+    #[kani::proof]
+    fn verify_shield_contract() {
+        let enter: f32 = kani::any();
+        let exit: f32 = kani::any();
+        kani::assume(enter.is_finite() && enter > 0.0);
+        kani::assume(exit.is_finite() && exit > enter);
+        let engaged: bool = kani::any();
+        let mut sh = SimplexShield {
+            set: RecoverableSet::new(1.0, 1.0, 1.8),
+            engaged,
+            enter,
+            exit,
+        };
+
+        let m: f32 = kani::any(); // arbitrary margin (incl. ±∞ / NaN)
+        let agile = [kani::any(), kani::any(), kani::any()];
+        let fallback = [kani::any(), kani::any(), kani::any()];
+        let (out, used_fb) = sh.step(m, agile, fallback);
+
+        // (a) the output is exactly the command its flag names.
+        let sa = sanitise3(agile);
+        let sf = sanitise3(fallback);
+        if used_fb {
+            assert!(out[0] == sf[0] && out[1] == sf[1] && out[2] == sf[2]);
+        } else {
+            assert!(out[0] == sa[0] && out[1] == sa[1] && out[2] == sa[2]);
+        }
+
+        // (b) margin below `enter` (or non-finite) ⇒ fallback used.
+        if !(m.is_finite() && m >= enter) {
+            assert!(used_fb);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -602,6 +757,48 @@ mod tests {
             }
         }
         assert!(checked >= 80, "grid too small: {checked}");
+    }
+
+    /// v0.28 recoverable set: small (Ψ, ‖Ω‖²) is inside; near the Ψ ceiling
+    /// or with a large rate it is outside; non-finite ⇒ outside (fail-safe).
+    #[test]
+    fn recoverable_set_matches_lyapunov_region() {
+        let set = RecoverableSet::new(8.0, 0.04, 1.8); // k_R, λ_M(J), Ψ_max
+        assert!(set.recoverable(0.1, 1.0), "near-level low-rate is recoverable");
+        assert!(!set.recoverable(1.9, 0.0), "Ψ past the ceiling is not");
+        // Rate cap at Ψ=0: 2·8·2/0.04 = 800; just over ⇒ outside.
+        assert!(set.recoverable(0.0, 700.0));
+        assert!(!set.recoverable(0.0, 900.0));
+        assert!(!set.recoverable(f32::NAN, 0.0), "NaN fails safe (outside)");
+    }
+
+    /// v0.28 simplex shield: fails safe to the fallback near/outside the
+    /// recoverable boundary, runs the agile command only when comfortably
+    /// inside, with hysteresis (no chatter), and ALWAYS emits exactly one of
+    /// the two commands.
+    #[test]
+    fn simplex_shield_engages_fallback_near_boundary() {
+        let set = RecoverableSet::new(8.0, 0.04, 1.8);
+        let mut sh = SimplexShield::new(set, 0.2, 0.6);
+        let agile = [9.0f32, 9.0, 9.0];
+        let fb = [1.0f32, 2.0, 3.0];
+
+        // Deep inside (large margin) ⇒ after clearing `exit`, agile runs.
+        let (out, used) = sh.filter(0.05, 0.5, agile, fb);
+        assert!(!used && out == agile, "deep inside should run agile");
+
+        // Push to the boundary (Ψ just under the ceiling) ⇒ fallback.
+        let (out, used) = sh.filter(1.79, 0.0, agile, fb);
+        assert!(used && out == fb, "near boundary should engage fallback");
+
+        // Hysteresis: a margin between enter and exit keeps the fallback
+        // engaged (no chatter back to agile yet).
+        let (_, used) = sh.filter(1.4, 0.0, agile, fb); // margin 0.4 ∈ (0.2,0.6)
+        assert!(used, "should stay on fallback within the hysteresis band");
+
+        // NaN state ⇒ fail safe to fallback.
+        let (out, used) = sh.filter(f32::NAN, 0.0, agile, fb);
+        assert!(used && out == fb);
     }
 
     proptest::proptest! {
