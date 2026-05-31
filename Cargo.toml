@@ -30,6 +30,7 @@ members = [
     "crates/relay-iekf",
     "crates/relay-geo",
     "crates/relay-adrc",
+    "crates/relay-traj",
     "crates/relay-pos",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
