@@ -1542,4 +1542,146 @@ mod tests {
         // Result is FAIL (everything zeros), but the harness must not
         // panic — that's the contract for a stub-only run.
     }
+
+    /// v0.26 END-TO-END fault-tolerance chain (deterministic, no gz):
+    /// a hovering quad loses rotor 0 mid-flight; the FDI (RotorFaultDetector)
+    /// detects + isolates it from the commanded-vs-achieved residual, the
+    /// loop switches to the reduced-attitude (S²) law + the MIX-P08
+    /// reconfigured allocator, and the THRUST AXIS stays upright (the body
+    /// is allowed to spin in yaw). Proves the three verified components
+    /// compose into a recovery. Rigid-body attitude sim; the mixer round-
+    /// trip `motors_to_torque_signs(mix(τ)) = 4τ` (zero-sum columns) ⇒
+    /// SCALE = 0.25 makes the healthy roundtrip ≈ identity, so the failure
+    /// shows as the real allocation imbalance.
+    #[test]
+    fn fault_tolerance_chain_recovers_from_rotor_loss() {
+        use relay_geo::{GeoAtt, GeoGains};
+        use relay_iekf::RotorFaultDetector;
+        use relay_mix_quad::{motors_to_torque_signs, QuadMixer};
+
+        let ctrl = GeoAtt::new(GeoGains::FALCON_QUAD);
+        let j = GeoGains::FALCON_QUAD.j;
+        let b3_d = [0.0f32, 0.0, 1.0]; // level hover thrust axis
+        let level = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let (hover, floor) = (0.5f32, 0.15f32);
+        const SCALE: f32 = 0.25;
+        let dt = 0.002f32;
+        let (real_failed, fail_step) = (0usize, 1000u32); // rotor 0 dies at 2 s
+
+        let mut r = level;
+        let mut omega = [0.0f32; 3];
+        let mut fdi = RotorFaultDetector::new(0.5, 0.1);
+        let mut isolated: Option<usize> = None;
+        let mut max_tilt_after = 0.0f32;
+
+        for step in 0..4000u32 {
+            // Controller + allocation (full-attitude until a fault is isolated,
+            // then reduced-attitude + the reconfigured allocator).
+            let (torque, motors_cmd) = if let Some(f) = isolated {
+                let tq = ctrl.moment_reduced(&r, omega, b3_d);
+                (tq, QuadMixer::new().mix_rotor_out(f, tq, hover, floor))
+            } else {
+                let tq = ctrl.moment(&r, omega, &level);
+                (tq, QuadMixer::new().mix_thrust_floor(tq, hover, floor))
+            };
+            let _ = torque;
+
+            // MIX-P08 holds in the integrated loop: while reconfigured (the
+            // mode that PRODUCED motors_cmd this step), the failed rotor is
+            // OFF and the healthy three stay in [floor,1].
+            if let Some(f) = isolated {
+                assert_eq!(motors_cmd[f], 0.0, "failed rotor must be commanded 0");
+                for (i, &v) in motors_cmd.iter().enumerate() {
+                    if i != f {
+                        assert!(v >= floor - 1e-6 && v <= 1.0 + 1e-6, "healthy motor bound: {v}");
+                    }
+                }
+            }
+
+            // Physics: inject the rotor-0 failure (its thrust → 0).
+            let mut motors_real = motors_cmd;
+            if step >= fail_step {
+                motors_real[real_failed] = 0.0;
+            }
+            // FDI on the commanded-vs-achieved residual.
+            if isolated.is_none() {
+                let mut resid = [0.0f32; 4];
+                for i in 0..4 {
+                    resid[i] = (motors_cmd[i] - motors_real[i]).abs();
+                }
+                if let Some(f) = fdi.update(resid) {
+                    isolated = Some(f);
+                }
+            }
+            // Body torque from the ACHIEVED motors → rigid-body update.
+            let bt = motors_to_torque_signs(motors_real);
+            let body_t = [bt[0] * SCALE, bt[1] * SCALE, bt[2] * SCALE];
+            let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+            let gyro = [
+                omega[1] * jo[2] - omega[2] * jo[1],
+                omega[2] * jo[0] - omega[0] * jo[2],
+                omega[0] * jo[1] - omega[1] * jo[0],
+            ];
+            for i in 0..3 {
+                omega[i] += dt * (body_t[i] - gyro[i]) / j[i];
+            }
+            r = integ_rot(&r, omega, dt);
+
+            if step > fail_step + 300 {
+                let tilt = (r[2][2].clamp(-1.0, 1.0)).acos();
+                if tilt > max_tilt_after {
+                    max_tilt_after = tilt;
+                }
+            }
+        }
+        let final_tilt = (r[2][2].clamp(-1.0, 1.0)).acos();
+        assert_eq!(isolated, Some(real_failed), "FDI must isolate the failed rotor");
+        // The body does NOT tumble (never inverts past ~80°) and SETTLES
+        // back toward upright — the reduced-attitude law recovers the
+        // thrust axis. (Full hover incl. the periodic spin solution is the
+        // gz/SITL follow-on; here the rigid-body sim proves the chain
+        // composes + stays controlled.)
+        assert!(
+            max_tilt_after < 1.4,
+            "thrust axis must not tumble after rotor loss: peak {max_tilt_after} rad"
+        );
+        assert!(
+            final_tilt < 0.5,
+            "thrust axis must settle back upright: final {final_tilt} rad (peak {max_tilt_after})"
+        );
+    }
+
+    /// R ← R·(I + [ω]× dt) with Gram-Schmidt re-orthonormalisation.
+    #[cfg(test)]
+    fn integ_rot(r: &[[f32; 3]; 3], w: [f32; 3], dt: f32) -> [[f32; 3]; 3] {
+        let wd = [w[0] * dt, w[1] * dt, w[2] * dt];
+        let incr = [[1.0, -wd[2], wd[1]], [wd[2], 1.0, -wd[0]], [-wd[1], wd[0], 1.0]];
+        let mut m = [[0.0f32; 3]; 3];
+        for i in 0..3 {
+            for jj in 0..3 {
+                let mut s = 0.0;
+                for k in 0..3 {
+                    s += r[i][k] * incr[k][jj];
+                }
+                m[i][jj] = s;
+            }
+        }
+        // Gram-Schmidt on columns.
+        let col = |mm: &[[f32; 3]; 3], c: usize| [mm[0][c], mm[1][c], mm[2][c]];
+        let norm = |v: [f32; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let c0 = col(&m, 0);
+        let n0 = norm(c0).max(1e-9);
+        let e0 = [c0[0] / n0, c0[1] / n0, c0[2] / n0];
+        let c1 = col(&m, 1);
+        let d = e0[0] * c1[0] + e0[1] * c1[1] + e0[2] * c1[2];
+        let p1 = [c1[0] - d * e0[0], c1[1] - d * e0[1], c1[2] - d * e0[2]];
+        let n1 = norm(p1).max(1e-9);
+        let e1 = [p1[0] / n1, p1[1] / n1, p1[2] / n1];
+        let e2 = [
+            e0[1] * e1[2] - e0[2] * e1[1],
+            e0[2] * e1[0] - e0[0] * e1[2],
+            e0[0] * e1[1] - e0[1] * e1[0],
+        ];
+        [[e0[0], e1[0], e2[0]], [e0[1], e1[1], e2[1]], [e0[2], e1[2], e2[2]]]
+    }
 }
