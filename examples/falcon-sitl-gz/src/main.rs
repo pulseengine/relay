@@ -509,7 +509,14 @@ fn run_geo_cascade(
     // (ANEES≫3) under motion. Tight trajectory tracking + estimator
     // consistency under motion is the v0.30+ robustness work, not a tuning
     // tweak. (mission = None ⇒ hover, unchanged.)
-    let cfg = cfg;
+    let mut cfg = cfg;
+    if mission.is_some() {
+        // v0.30 made the estimator consistent under motion — re-test whether
+        // that unlocks firmer position tracking (gentle hover gains lag the
+        // corners). Modest bump; the accel-comp tilt keeps it stable.
+        cfg.pos.kp_pos = 0.15;
+        cfg.pos.a_cmd_max = 2.0;
+    }
 
     let mut iekf = Iekf::with_config(NavState::identity(), cfg.to_iekf_config());
     let mut iekf_heading_init = false;
