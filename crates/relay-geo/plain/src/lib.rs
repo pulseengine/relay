@@ -140,6 +140,43 @@ pub fn thrust_axis_ned(a_cmd: Vec3) -> Option<Vec3> {
     ])
 }
 
+/// Differential-flatness **feedforward body rate** (v0.27): the angular
+/// velocity that rotates the desired thrust axis as a flat trajectory
+/// demands, from the commanded NED acceleration `a_cmd` and jerk `j_cmd`.
+/// With the desired body-down axis `b3 = (g − a)/c`, `c = ‖g − a‖`, the
+/// world-frame thrust-axis rate is `ω_w = −(b3 × (−j))/c = (b3 × j)/c`;
+/// the yaw-rate `ψ̇` adds rotation about `b3`. Returned in the BODY frame
+/// of `R_d` (what the geometric controller / ADRC track as Ω_d
+/// feedforward). `None` if the thrust axis is degenerate (free-fall).
+///
+/// Validated against the finite-difference of `R_d` along a trajectory
+/// (`flatness_feedforward_matches_attitude_derivative`).
+pub fn flatness_omega_ff(a_cmd: Vec3, j_cmd: Vec3, yaw: f32, yaw_rate: f32) -> Option<Vec3> {
+    let tf = [
+        GRAVITY_NED[0] - a_cmd[0],
+        GRAVITY_NED[1] - a_cmd[1],
+        GRAVITY_NED[2] - a_cmd[2],
+    ];
+    let c = norm(tf);
+    if !c.is_finite() || c <= 1e-3 {
+        return None;
+    }
+    let b3 = [tf[0] / c, tf[1] / c, tf[2] / c];
+    // ω_world ⊥ b3 = −(b3 × j)/c  (d/dt(g−a) = −j; ω = b3 × ḃ3; sign pinned
+    // by flatness_feedforward_matches_attitude_derivative).
+    let bxj = cross(b3, j_cmd);
+    let w_world = [-bxj[0] / c, -bxj[1] / c, -bxj[2] / c];
+    let r_d = desired_attitude(b3, yaw)?;
+    // ω_body = R_dᵀ ω_world, plus the yaw rate about body-z (b3).
+    let mut w_body = [
+        r_d[0][0] * w_world[0] + r_d[1][0] * w_world[1] + r_d[2][0] * w_world[2],
+        r_d[0][1] * w_world[0] + r_d[1][1] * w_world[1] + r_d[2][1] * w_world[2],
+        r_d[0][2] * w_world[0] + r_d[1][2] * w_world[1] + r_d[2][2] * w_world[2],
+    ];
+    w_body[2] += yaw_rate;
+    Some(sanitise3(w_body))
+}
+
 // ────────────────────────────── controller ────────────────────────────
 
 /// Geometric attitude controller gains + diagonal inertia.
@@ -397,6 +434,39 @@ mod tests {
         assert!(psi1 < psi0, "Ψ must decrease: {psi0} -> {psi1}");
         assert!(psi1 < 1e-2, "should converge to level: Ψ={psi1}");
         assert!(norm(omega) < 0.05, "should settle: |ω|={}", norm(omega));
+    }
+
+    /// v0.27 differential-flatness feedforward: the analytic ω_ff from
+    /// (a, jerk) matches the finite-difference of the desired attitude R_d
+    /// along a trajectory — `ω_ff ≈ vee(R_dᵀ Ṙ_d)`. This is the oracle that
+    /// pins the feedforward's SIGN (the class of bug behind the yaw saga).
+    #[test]
+    fn flatness_feedforward_matches_attitude_derivative() {
+        let yaw = 0.0f32;
+        let dt = 1e-4f32;
+        let accel = |t: f32| [0.5 * libm::sinf(t), 0.3 * libm::cosf(0.7 * t), 0.2 * t];
+        let jerk = |t: f32| [0.5 * libm::cosf(t), -0.21 * libm::sinf(0.7 * t), 0.2];
+        for k in 1..20 {
+            let t = k as f32 * 0.15;
+            let (a, jc) = (accel(t), jerk(t));
+            let rd = desired_attitude(thrust_axis_ned(a).unwrap(), yaw).unwrap();
+            let rdb = desired_attitude(thrust_axis_ned(accel(t + dt)).unwrap(), yaw).unwrap();
+            let mut rdot = [[0.0f32; 3]; 3];
+            for i in 0..3 {
+                for jj in 0..3 {
+                    rdot[i][jj] = (rdb[i][jj] - rd[i][jj]) / dt;
+                }
+            }
+            let w_fd = vee(&matmul3(&transpose3(&rd), &rdot));
+            let w_ff = flatness_omega_ff(a, jc, yaw, 0.0).unwrap();
+            for i in 0..3 {
+                assert!(
+                    (w_ff[i] - w_fd[i]).abs() < 0.05,
+                    "axis {i} at t={t}: ff {} vs fd {}",
+                    w_ff[i], w_fd[i]
+                );
+            }
+        }
     }
 
     /// Reduced-attitude (S²) error: zero at alignment, nonzero roll/pitch
