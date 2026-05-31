@@ -457,18 +457,23 @@ fn run_mission(
     duration_s: f32,
     evidence: Option<&mut EvidenceSink>,
 ) -> bool {
+    // A HOLD at each corner (duplicate waypoint ⇒ a settle leg) gives crisp
+    // corners: the drone reaches the waypoint, settles, then moves on —
+    // instead of carrying momentum and rounding/overshooting the corner.
     let mission = Mission {
         waypoints: vec![
-            [0.0, 0.0, -2.0], // hold @ 2 m while arming + climbing
+            [0.0, 0.0, -2.0], // arm + climb
             [0.0, 0.0, -2.0],
-            [2.0, 0.0, -2.0], // ── square (2 m side) ──
-            [2.0, 2.0, -2.0],
-            [0.0, 2.0, -2.0],
-            [0.0, 0.0, -2.0], // return home
+            [2.0, 0.0, -2.0], // → corner 1
+            [2.0, 0.0, -2.0], // settle
+            [2.0, 2.0, -2.0], // → corner 2
+            [2.0, 2.0, -2.0], // settle
+            [0.0, 2.0, -2.0], // → corner 3
+            [0.0, 2.0, -2.0], // settle
+            [0.0, 0.0, -2.0], // → home
+            [0.0, 0.0, -2.0], // settle @ home
         ],
-        // Slow legs (0.25 m/s): the gentle, stability-limited position loop
-        // can only track a slowly-moving setpoint (faster ⇒ lag ⇒ drift).
-        leg_time: 8.0,
+        leg_time: 5.0,
     };
     run_geo_cascade(physics, duration_s, evidence, Some(&mission))
 }
@@ -511,11 +516,17 @@ fn run_geo_cascade(
     // tweak. (mission = None ⇒ hover, unchanged.)
     let mut cfg = cfg;
     if mission.is_some() {
-        // v0.30 made the estimator consistent under motion — re-test whether
-        // that unlocks firmer position tracking (gentle hover gains lag the
-        // corners). Modest bump; the accel-comp tilt keeps it stable.
-        cfg.pos.kp_pos = 0.15;
+        // v0.31 — crisp tracking. The accel-comp (v0.30) estimator allows
+        // firmer gains; MORE velocity damping (kd_vel) kills the loop-y
+        // oscillation, a slightly gentler kp_pos reduces the drive.
+        cfg.pos.kp_pos = 0.12;
+        cfg.pos.kd_vel = 1.5;
         cfg.pos.a_cmd_max = 2.0;
+        // HOLD the heading (not just rate-damp it): RateHold lets the body
+        // frame drift, which ROTATES the square (the drone flew to mirrored
+        // corners). With the v0.30 estimator heading now good (~4°),
+        // HeadingHold keeps the frame aligned so the square stays square.
+        cfg.pos.yaw_mode = YawMode::HeadingHold;
     }
 
     let mut iekf = Iekf::with_config(NavState::identity(), cfg.to_iekf_config());
