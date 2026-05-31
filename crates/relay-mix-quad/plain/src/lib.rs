@@ -320,8 +320,8 @@ impl QuadMixer {
         if !s.is_finite() || s < 0.0 {
             s = 0.0;
         }
-        for i in 0..4 {
-            d[i] *= s;
+        for di in d.iter_mut() {
+            *di *= s;
         }
 
         // m = collective + scaled differential, then shift collective so
@@ -339,8 +339,8 @@ impl QuadMixer {
         } else {
             0.0
         };
-        for i in 0..4 {
-            m[i] = clamp_floor(m[i] + shift, idle);
+        for mi in m.iter_mut() {
+            *mi = clamp_floor(*mi + shift, idle);
         }
         self.last_motors = m;
         m
@@ -401,7 +401,9 @@ fn clamp_floor(x: f32, lo: f32) -> f32 {
 
 #[inline]
 fn clamp01(x: f32) -> f32 {
-    if x < 0.0 { 0.0 } else if x > 1.0 { 1.0 } else { x }
+    // Behaviour-identical to the manual form (NaN → NaN); the mixer
+    // sanitises before this so NaN does not reach it.
+    x.clamp(0.0, 1.0)
 }
 
 #[inline]
