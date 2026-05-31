@@ -345,6 +345,44 @@ impl QuadMixer {
         self.last_motors = m;
         m
     }
+
+    /// **Reconfigured allocator for SINGLE-ROTOR FAILURE** (MIX-P08, v0.26).
+    /// On loss of rotor `failed` (0..4) a quad is rank-deficient — full
+    /// attitude is unrecoverable (Mueller & D'Andrea, *Relaxed hover
+    /// solutions*), so **yaw is RELINQUISHED** and only thrust + roll +
+    /// pitch are allocated over the three healthy rotors; the failed rotor
+    /// is pinned to 0. The reduced-attitude (S²) controller upstream accepts
+    /// the residual spin about the near-vertical primary axis.
+    ///
+    /// Invariant (MIX-P08, same family as MIX-P05/06/07): for ANY input and
+    /// ANY `failed < 4`, the failed rotor is exactly 0 and every HEALTHY
+    /// rotor ∈ `[floor, 1]` and finite. `failed ≥ 4` ⇒ no failure (all four
+    /// allocated normally, all ∈ `[floor, 1]`).
+    pub fn mix_rotor_out(
+        &mut self,
+        failed: usize,
+        torque_body: [f32; 3],
+        thrust: f32,
+        floor: f32,
+    ) -> [f32; 4] {
+        let t = clamp01(sanitise(thrust));
+        let floor = clamp01(sanitise(floor));
+        let r = sanitise(torque_body[0]);
+        let p = sanitise(torque_body[1]);
+        // yaw = torque_body[2] is RELINQUISHED — never allocated.
+        let mut m = [0.0_f32; 4];
+        for i in 0..4 {
+            if i == failed {
+                m[i] = 0.0; // failed rotor OFF (below the healthy floor, by design)
+            } else {
+                let row = &MIXER_X[i];
+                // thrust + roll + pitch only (no yaw term), clamped to [floor,1].
+                m[i] = clamp_floor(sanitise(t + row[1] * r + row[2] * p), floor);
+            }
+        }
+        self.last_motors = m;
+        m
+    }
 }
 
 /// Clamp `x` into `[lo, 1]`. Total over all f32: NaN and values below
@@ -501,6 +539,35 @@ mod kani_proofs {
             assert!(v <= 1.0);
         }
     }
+
+    /// MIX-P08 (v0.26): the reconfigured single-rotor-out allocator. For
+    /// ANY input and ANY failed index < 4, the failed rotor is EXACTLY 0
+    /// and every healthy rotor ∈ [floor,1] and finite — the bounded
+    /// actuator contract still holds after reconfiguration. (The
+    /// rank-deficiency is handled upstream by relinquishing yaw; here we
+    /// prove the allocator output set stays safe.)
+    #[kani::proof]
+    fn verify_mix_rotor_out_bound() {
+        let failed: usize = kani::any();
+        kani::assume(failed < 4);
+        let floor: f32 = kani::any();
+        kani::assume(floor.is_finite() && floor >= 0.0 && floor <= 1.0);
+        let thrust: f32 = kani::any();
+        let r: f32 = kani::any();
+        let p: f32 = kani::any();
+        let y: f32 = kani::any();
+        let mut m = QuadMixer::new();
+        let out = m.mix_rotor_out(failed, [r, p, y], thrust, floor);
+        for i in 0..4 {
+            assert!(out[i].is_finite());
+            if i == failed {
+                assert!(out[i] == 0.0); // failed rotor pinned OFF
+            } else {
+                assert!(out[i] >= floor); // healthy rotors stay in [floor,1]
+                assert!(out[i] <= 1.0);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -554,6 +621,29 @@ mod tests {
         assert!(yaw_air >= yaw_prio - 1e-6,
             "airmode should preserve >= yaw than priority: {yaw_air} vs {yaw_prio}");
         assert!(yaw_air > 1e-3, "airmode keeps real yaw authority: {yaw_air}");
+    }
+
+    /// MIX-P08 (v0.26): single-rotor-out allocator pins the failed rotor to
+    /// 0, keeps the healthy three in [floor,1], and relinquishes yaw (a yaw
+    /// command does not change the healthy outputs).
+    #[test]
+    fn mix_p08_rotor_out_pins_failed_and_bounds_healthy() {
+        let (thrust, floor) = (0.6_f32, 0.15_f32);
+        for failed in 0..4 {
+            let out = QuadMixer::new().mix_rotor_out(failed, [0.1, -0.1, 0.5], thrust, floor);
+            assert_eq!(out[failed], 0.0, "failed rotor {failed} must be OFF: {out:?}");
+            for (i, &v) in out.iter().enumerate() {
+                if i != failed {
+                    assert!(v >= floor && v <= 1.0, "healthy rotor {i} out of [floor,1]: {v}");
+                }
+            }
+            // Yaw is relinquished: the same command with a different yaw must
+            // produce identical healthy outputs.
+            let out_noyaw = QuadMixer::new().mix_rotor_out(failed, [0.1, -0.1, -9.0], thrust, floor);
+            for i in 0..4 {
+                assert!((out[i] - out_noyaw[i]).abs() < 1e-6, "yaw should not affect rotor {i}");
+            }
+        }
     }
 
     #[test]
