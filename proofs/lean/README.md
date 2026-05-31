@@ -34,7 +34,11 @@ bazel build //proofs/lean:geometric_lyapunov   # just the v0.23 Lyapunov core
 
 First run downloads the Lean toolchain (~hundreds of MB) and Mathlib oleans
 (~several GB) — slow. Subsequent runs reuse the repository cache
-(`~/.cache/relay-bazel`, see `.bazelrc`).
+(`~/.cache/relay-bazel`, see `.bazelrc`); a cached incremental rebuild of a
+single proof is ~10 s.
+
+`GeometricLyapunov.lean` has been **kernel-verified locally** (the
+`geometric_lyapunov_test` target passes, zero `sorry`/`axiom`).
 
 ## Offline vendoring ("redo the bazel stuff if needed")
 

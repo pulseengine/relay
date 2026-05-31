@@ -1,3 +1,4 @@
+import Mathlib.Data.Real.Basic
 import Mathlib.Tactic.Ring
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.Positivity
@@ -58,8 +59,11 @@ theorem vdot_cancellation (kR kW e1 e2 e3 w1 w2 w3 : ℝ) :
     `−k_Ω‖ω‖²` is ≤ 0 everywhere — V is non-increasing along the flow. -/
 theorem vdot_nonpos (kW w1 w2 w3 : ℝ) (hk : 0 ≤ kW) :
     -kW * (w1 ^ 2 + w2 ^ 2 + w3 ^ 2) ≤ 0 := by
-  have hsq : 0 ≤ w1 ^ 2 + w2 ^ 2 + w3 ^ 2 := by positivity
-  nlinarith [hsq, hk]
+  have hsq : (0 : ℝ) ≤ w1 ^ 2 + w2 ^ 2 + w3 ^ 2 :=
+    add_nonneg (add_nonneg (sq_nonneg w1) (sq_nonneg w2)) (sq_nonneg w3)
+  have hprod : (0 : ℝ) ≤ kW * (w1 ^ 2 + w2 ^ 2 + w3 ^ 2) := mul_nonneg hk hsq
+  rw [neg_mul]
+  linarith [hprod]
 
 /-- **Assembled `V̇ ≤ 0`.** Composing the cancellation with non-increase:
     the closed-loop Lyapunov derivative (computed from the real moment law)
@@ -84,10 +88,12 @@ theorem V_nonneg
     (hj1 : 0 ≤ j1) (hj2 : 0 ≤ j2) (hj3 : 0 ≤ j3)
     (hkR : 0 ≤ kR) (hpsi : 0 ≤ psi) :
     0 ≤ (1 / 2) * (j1 * w1 ^ 2 + j2 * w2 ^ 2 + j3 * w3 ^ 2) + 2 * kR * psi := by
-  have h1 : 0 ≤ j1 * w1 ^ 2 := by positivity
-  have h2 : 0 ≤ j2 * w2 ^ 2 := by positivity
-  have h3 : 0 ≤ j3 * w3 ^ 2 := by positivity
-  have h4 : 0 ≤ 2 * kR * psi := by positivity
+  -- `positivity` can't use the sign HYPOTHESES on j1/j2/j3/kR/psi (their
+  -- signs aren't syntactic); discharge each product with `mul_nonneg`.
+  have h1 : 0 ≤ j1 * w1 ^ 2 := mul_nonneg hj1 (sq_nonneg w1)
+  have h2 : 0 ≤ j2 * w2 ^ 2 := mul_nonneg hj2 (sq_nonneg w2)
+  have h3 : 0 ≤ j3 * w3 ^ 2 := mul_nonneg hj3 (sq_nonneg w3)
+  have h4 : 0 ≤ 2 * kR * psi := mul_nonneg (mul_nonneg (by norm_num : (0:ℝ) ≤ 2) hkR) hpsi
   linarith [h1, h2, h3, h4]
 
 end RelayGeo
