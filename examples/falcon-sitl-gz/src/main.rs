@@ -1651,6 +1651,95 @@ mod tests {
         );
     }
 
+    /// v0.27 "MISSION" scenario (deterministic, no gz): fly a square
+    /// waypoint mission with the FULL v0.27 chain — per-leg Mueller quintic
+    /// trajectory (relay-traj), differential-flatness feedforward
+    /// (relay-geo flatness_omega_ff), geometric attitude control, and a
+    /// position P-D, in a 6-DoF rigid-body sim. The thrust acts along the
+    /// ACHIEVED body axis (so attitude-tracking error shows up as position
+    /// error). Asserts the body reaches each waypoint. Demonstrates that the
+    /// trajectory generator + flatness feedforward + controller compose.
+    #[test]
+    fn mission_follows_waypoint_trajectory() {
+        use relay_geo::{desired_attitude, thrust_axis_ned, flatness_omega_ff, GeoAtt, GeoGains};
+        use relay_traj::Segment3;
+
+        let j = [0.0217f32, 0.0217, 0.04];
+        // Fast idealised attitude loop (this sim has no actuator lag / mixer
+        // scale — see the gz path for the real-airframe gains).
+        let (kr, kw) = (24.0f32, 9.0f32);
+        let (kp_pos, kd_pos) = (3.0f32, 4.0f32);
+        let g_ned = [0.0f32, 0.0, 9.81];
+        let dt = 0.001f32;
+
+        // Square mission at 2 m altitude (NED down = −2).
+        let wps = [
+            [0.0f32, 0.0, -2.0],
+            [3.0, 0.0, -2.0],
+            [3.0, 3.0, -2.0],
+            [0.0, 3.0, -2.0],
+        ];
+        let leg_t = 3.0f32;
+
+        // State: position p, velocity v, attitude R, body rate ω.
+        let mut p = wps[0];
+        let mut v = [0.0f32; 3];
+        let mut r = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut omega = [0.0f32; 3];
+
+        for leg in 0..wps.len() - 1 {
+            let seg = Segment3::rest_to_rest(wps[leg], wps[leg + 1], leg_t);
+            let steps = (leg_t / dt) as u32;
+            for k in 0..steps {
+                let t = k as f32 * dt;
+                let s = seg.eval(t);
+                // a_cmd = trajectory accel ff + position P-D.
+                let a_cmd = [
+                    s.acc[0] + kp_pos * (s.pos[0] - p[0]) + kd_pos * (s.vel[0] - v[0]),
+                    s.acc[1] + kp_pos * (s.pos[1] - p[1]) + kd_pos * (s.vel[1] - v[1]),
+                    s.acc[2] + kp_pos * (s.pos[2] - p[2]) + kd_pos * (s.vel[2] - v[2]),
+                ];
+                let b3_d = thrust_axis_ned(a_cmd).unwrap();
+                let r_d = desired_attitude(b3_d, 0.0).unwrap();
+                let c = {
+                    let d = [g_ned[0] - a_cmd[0], g_ned[1] - a_cmd[1], g_ned[2] - a_cmd[2]];
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                };
+                let off = flatness_omega_ff(a_cmd, s.jerk, 0.0, 0.0).unwrap_or([0.0; 3]);
+
+                // Attitude: geometric error + rate feedforward.
+                let e_r = GeoAtt::attitude_error(&r, &r_d);
+                let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+                let gyro = [
+                    omega[1] * jo[2] - omega[2] * jo[1],
+                    omega[2] * jo[0] - omega[0] * jo[2],
+                    omega[0] * jo[1] - omega[1] * jo[0],
+                ];
+                let mut tau = [0.0f32; 3];
+                for i in 0..3 {
+                    tau[i] = -kr * e_r[i] - kw * (omega[i] - off[i]) + gyro[i];
+                    omega[i] += dt * (tau[i] - gyro[i]) / j[i];
+                }
+                r = integ_rot(&r, omega, dt);
+
+                // Position: thrust (magnitude c, along −body-down axis) + g.
+                let b3_ach = [r[0][2], r[1][2], r[2][2]];
+                for i in 0..3 {
+                    let accel = g_ned[i] - c * b3_ach[i];
+                    v[i] += dt * accel;
+                    p[i] += dt * v[i];
+                }
+                let _ = GeoGains::FALCON_QUAD;
+            }
+            // Reached the waypoint at the end of the leg.
+            let err = {
+                let d = [p[0] - wps[leg + 1][0], p[1] - wps[leg + 1][1], p[2] - wps[leg + 1][2]];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+            };
+            assert!(err < 0.4, "leg {leg}: missed waypoint by {err} m (p={p:?})");
+        }
+    }
+
     /// R ← R·(I + [ω]× dt) with Gram-Schmidt re-orthonormalisation.
     #[cfg(test)]
     fn integ_rot(r: &[[f32; 3]; 3], w: [f32; 3], dt: f32) -> [[f32; 3]; 3] {

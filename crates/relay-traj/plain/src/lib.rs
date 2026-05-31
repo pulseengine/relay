@@ -120,6 +120,73 @@ impl Quintic {
     }
 }
 
+/// 3-vector (NED).
+pub type Vec3 = [f32; 3];
+
+/// A 3-axis trajectory segment — three independent jerk-minimizing quintics
+/// (the per-axis decoupling that makes the Mueller primitive cheap). Its
+/// `(pos, vel, acc, jerk)` sample feeds the differential-flatness map:
+/// `acc → a_cmd`, `jerk → j_cmd` for `relay_geo::flatness_omega_ff`.
+#[derive(Clone, Copy, Debug)]
+pub struct Segment3 {
+    axes: [Quintic; 3],
+}
+
+/// 3-axis trajectory sample (NED): position, velocity, acceleration, jerk.
+#[derive(Clone, Copy, Debug)]
+pub struct Sample3 {
+    pub pos: Vec3,
+    pub vel: Vec3,
+    pub acc: Vec3,
+    pub jerk: Vec3,
+}
+
+impl Segment3 {
+    /// Jerk-minimizing segment from full initial state `(p0,v0,a0)` to full
+    /// final state `(pf,vf,af)` over duration `t` (s), per axis.
+    pub fn new(p0: Vec3, v0: Vec3, a0: Vec3, pf: Vec3, vf: Vec3, af: Vec3, t: f32) -> Self {
+        Segment3 {
+            axes: [
+                Quintic::new(p0[0], v0[0], a0[0], pf[0], vf[0], af[0], t),
+                Quintic::new(p0[1], v0[1], a0[1], pf[1], vf[1], af[1], t),
+                Quintic::new(p0[2], v0[2], a0[2], pf[2], vf[2], af[2], t),
+            ],
+        }
+    }
+
+    /// Rest-to-rest segment between two positions (zero boundary velocity +
+    /// acceleration) — the building block of a waypoint mission.
+    pub fn rest_to_rest(from: Vec3, to: Vec3, t: f32) -> Self {
+        Self::new(from, [0.0; 3], [0.0; 3], to, [0.0; 3], [0.0; 3], t)
+    }
+
+    /// Duration (s).
+    #[inline]
+    pub fn duration(&self) -> f32 {
+        self.axes[0].duration()
+    }
+
+    /// Sample the trajectory at time `t` (clamped to `[0, T]`).
+    pub fn eval(&self, t: f32) -> Sample3 {
+        let s = [self.axes[0].eval(t), self.axes[1].eval(t), self.axes[2].eval(t)];
+        Sample3 {
+            pos: [s[0].p, s[1].p, s[2].p],
+            vel: [s[0].v, s[1].v, s[2].v],
+            acc: [s[0].a, s[1].a, s[2].a],
+            jerk: [s[0].j, s[1].j, s[2].j],
+        }
+    }
+
+    /// Per-axis sound jerk bound over `[0,T]` (for input-feasibility).
+    pub fn peak_abs_jerk(&self) -> Vec3 {
+        [
+            self.axes[0].peak_abs_jerk(),
+            self.axes[1].peak_abs_jerk(),
+            self.axes[2].peak_abs_jerk(),
+        ]
+    }
+}
+
 #[cfg(kani)]
 mod kani_proofs {
     use super::*;
@@ -215,6 +282,22 @@ mod tests {
             let t = frac * t_end;
             proptest::prop_assert!(q.eval(t).j.abs() <= peak * 1.001 + 0.05);
         }
+    }
+
+    /// A rest-to-rest 3-axis segment reaches the target waypoint with zero
+    /// terminal velocity + acceleration (a stable hover at the waypoint).
+    #[test]
+    fn segment3_rest_to_rest_reaches_waypoint() {
+        let seg = Segment3::rest_to_rest([0.0, 0.0, 0.0], [3.0, -2.0, 1.5], 4.0);
+        let s0 = seg.eval(0.0);
+        assert!(s0.pos.iter().all(|&p| p.abs() < 1e-3));
+        let sT = seg.eval(4.0);
+        for i in 0..3 {
+            let want = [3.0, -2.0, 1.5][i];
+            assert!((sT.pos[i] - want).abs() < 1e-2, "axis {i} pos {} vs {want}", sT.pos[i]);
+            assert!(sT.vel[i].abs() < 1e-2 && sT.acc[i].abs() < 1e-2, "axis {i} not at rest");
+        }
+        assert!(seg.peak_abs_jerk().iter().all(|&j| j.is_finite() && j >= 0.0));
     }
 
     /// Total: finite samples + finite peak for adversarial inputs.
