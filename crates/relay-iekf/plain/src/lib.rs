@@ -978,6 +978,63 @@ impl YawObservability {
     }
 }
 
+/// Per-rotor **fault detection & isolation** (FDI) for v0.26 — a CUSUM
+/// detector on per-rotor effectiveness residuals (commanded-vs-achieved
+/// thrust/torque, derived from the IEKF innovations + motor feedback). A
+/// rotor loss makes its residual jump; the CUSUM integrates it and, once a
+/// rotor's statistic clears `threshold`, **isolates and LATCHES** that
+/// rotor (failures don't un-happen) — the trigger for the reconfigured
+/// `mix_rotor_out` allocator (MIX-P08).
+///
+/// Provable contract (see tests): (1) NO FALSE ALARM below the slack —
+/// while every residual stays ≤ `drift` the CUSUM stays 0 and never fires;
+/// (2) DETECTION — a residual ≥ `drift + threshold` fires that step; (3)
+/// LATCHING + single isolation; (4) total/finite for any input.
+#[derive(Clone, Copy)]
+pub struct RotorFaultDetector {
+    cusum: [f32; 4],
+    threshold: f32,
+    drift: f32,
+    failed: Option<usize>,
+}
+
+impl RotorFaultDetector {
+    /// `threshold` = CUSUM level that declares a fault; `drift` = per-step
+    /// slack subtracted from each residual (the no-false-alarm margin —
+    /// only sustained/large residuals accumulate). Degenerate args clamped.
+    pub fn new(threshold: f32, drift: f32) -> Self {
+        RotorFaultDetector {
+            cusum: [0.0; 4],
+            threshold: if threshold.is_finite() && threshold > 0.0 { threshold } else { 1.0 },
+            drift: if drift.is_finite() && drift >= 0.0 { drift } else { 0.0 },
+            failed: None,
+        }
+    }
+
+    /// Feed the per-rotor effectiveness residuals (≥0 magnitudes). Returns
+    /// `Some(rotor)` once a fault is isolated (latched thereafter).
+    pub fn update(&mut self, residual: [f32; 4]) -> Option<usize> {
+        if self.failed.is_some() {
+            return self.failed;
+        }
+        for i in 0..4 {
+            let r = if residual[i].is_finite() { residual[i].abs() } else { 0.0 };
+            let s = self.cusum[i] + r - self.drift;
+            self.cusum[i] = if s.is_finite() && s > 0.0 { s } else { 0.0 };
+            if self.cusum[i] >= self.threshold {
+                self.failed = Some(i);
+                return self.failed;
+            }
+        }
+        None
+    }
+
+    /// The isolated failed rotor, if any (latched).
+    pub fn failed(&self) -> Option<usize> {
+        self.failed
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1305,6 +1362,57 @@ mod tests {
         // truth under excitation (vs the [g]×-only form, which left it dead
         // at 0.4→0.399). Assert clear correct-direction recovery.
         assert!(yaw < yaw0 - 0.03 && yaw > -0.1, "magless yaw should recover toward 0, {yaw0}→{yaw}");
+    }
+
+    /// Rotor-FDI contract (v0.26): (1) NO FALSE ALARM while residuals stay
+    /// within the slack; (2) DETECTION + correct isolation when one rotor's
+    /// residual spikes; (3) LATCHING; (4) totality under non-finite input.
+    #[test]
+    fn rotor_fdi_no_false_alarm_and_detects() {
+        // (1) Quiet: residuals at/below the drift slack → never fires, even
+        // over a long run.
+        let mut fdi = RotorFaultDetector::new(2.0, 0.5);
+        for _ in 0..1000 {
+            assert!(fdi.update([0.4, 0.5, 0.3, 0.45]).is_none(), "false alarm below slack");
+        }
+        assert!(fdi.failed().is_none());
+
+        // (2) Rotor 2 fails: a large residual ≥ drift+threshold fires that
+        // step and isolates rotor 2.
+        let mut fdi = RotorFaultDetector::new(2.0, 0.5);
+        let fired = fdi.update([0.1, 0.1, 3.0, 0.1]); // 3.0 ≥ 0.5+2.0
+        assert_eq!(fired, Some(2), "should isolate the failed rotor");
+
+        // (3) Latches: subsequent quiet input keeps the verdict.
+        for _ in 0..50 {
+            assert_eq!(fdi.update([0.0, 0.0, 0.0, 0.0]), Some(2), "must latch");
+        }
+
+        // (4) Totality: non-finite residuals never panic / fire spuriously.
+        let mut fdi = RotorFaultDetector::new(2.0, 0.5);
+        let _ = fdi.update([f32::NAN, f32::INFINITY, -1.0, 0.0]);
+        // NaN/inf treated as 0 residual → no fire from them.
+        for _ in 0..10 {
+            let v = fdi.update([f32::NAN; 4]);
+            assert!(v.is_none());
+        }
+    }
+
+    /// Sustained moderate excess (between slack and one-shot detection)
+    /// still accumulates to a fault — the CUSUM integration catching a slow
+    /// effectiveness decay, not just a step loss.
+    #[test]
+    fn rotor_fdi_accumulates_sustained_excess() {
+        let mut fdi = RotorFaultDetector::new(2.0, 0.5);
+        // residual 0.9 > drift 0.5 ⇒ +0.4/step; needs ≥5 steps to reach 2.0.
+        let mut fired = None;
+        for _ in 0..20 {
+            if let Some(r) = fdi.update([0.2, 0.9, 0.2, 0.2]) {
+                fired = Some(r);
+                break;
+            }
+        }
+        assert_eq!(fired, Some(1), "sustained excess on rotor 1 should isolate it");
     }
 
     /// Magless yaw observability gate: at rest (no horizontal accel) yaw is
