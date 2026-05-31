@@ -375,7 +375,7 @@ impl RecoverableSet {
     /// `margin = min(ψ_max − Ψ,  2k_R(2−Ψ)/λ_M(J) − ‖e_Ω‖²)`. Returns
     /// `−∞` (definitely outside / fail-safe) on any non-finite input.
     pub fn margin(&self, psi: f32, e_omega_sq: f32) -> f32 {
-        if !psi.is_finite() || !e_omega_sq.is_finite() || !(self.lambda_j > 0.0) {
+        if !psi.is_finite() || !e_omega_sq.is_finite() || !self.lambda_j.is_finite() || self.lambda_j <= 0.0 {
             return f32::NEG_INFINITY;
         }
         let psi_margin = self.psi_max - psi;
