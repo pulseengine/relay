@@ -205,6 +205,44 @@ impl GeoAtt {
         vee(&diff)
     }
 
+    /// **Reduced-attitude (S²) error** for fault-tolerant / thrust-axis
+    /// control (v0.26). The body-frame angular error that aligns the
+    /// body-down (thrust) axis to `b3_d`, with **no yaw component** —
+    /// rotation about b3 is unconstrained. On rotor loss a quad cannot hold
+    /// full attitude (Mueller & D'Andrea), so the controller drives only
+    /// this 2-DoF tilt and relinquishes yaw. `e = e_z × (Rᵀ b3_d)` (its
+    /// z-component is identically 0); ×2 to match the `attitude_error`
+    /// convention so the same `k_R` applies. Zero iff b3 = b3_d.
+    pub fn attitude_error_reduced(r: &Mat3, b3_d: Vec3) -> Vec3 {
+        // Rᵀ·b3_d : the desired thrust axis expressed in the body frame.
+        let v = [
+            r[0][0] * b3_d[0] + r[1][0] * b3_d[1] + r[2][0] * b3_d[2],
+            r[0][1] * b3_d[0] + r[1][1] * b3_d[1] + r[2][1] * b3_d[2],
+            r[0][2] * b3_d[0] + r[1][2] * b3_d[1] + r[2][2] * b3_d[2],
+        ];
+        // v × e_z = [v_y, −v_x, 0], scaled ×2. (Sign matches the
+        // `attitude_error` convention so −k_R·e drives b3 → b3_d, verified
+        // by `reduced_attitude_drives_thrust_axis_to_target`.)
+        [2.0 * v[1], -2.0 * v[0], 0.0]
+    }
+
+    /// Reduced-attitude (S²) moment for **single-rotor-out** flight: drive
+    /// the thrust axis to `b3_d` (roll/pitch) and **relinquish yaw** (no yaw
+    /// torque — the body spins freely about its near-vertical axis, which
+    /// `mix_rotor_out` also drops). `M = −k_R e_reduced − k_Ω Ω_xy + Ω×JΩ`,
+    /// yaw component 0.
+    pub fn moment_reduced(&self, r: &Mat3, omega: Vec3, b3_d: Vec3) -> Vec3 {
+        let e = Self::attitude_error_reduced(r, b3_d); // e[2] = 0
+        let g = &self.gains;
+        let j_omega = [g.j[0] * omega[0], g.j[1] * omega[1], g.j[2] * omega[2]];
+        let gyro = cross(omega, j_omega);
+        [
+            -g.k_r[0] * e[0] - g.k_omega[0] * omega[0] + gyro[0],
+            -g.k_r[1] * e[1] - g.k_omega[1] * omega[1] + gyro[1],
+            0.0, // yaw relinquished
+        ]
+    }
+
     /// Body moment (torque) for setpoint regulation toward `r_d` with
     /// desired body rate zero: `M = −k_R e_R − k_Ω Ω + Ω × J Ω`.
     pub fn moment(&self, r: &Mat3, omega: Vec3, r_d: &Mat3) -> Vec3 {
@@ -359,6 +397,46 @@ mod tests {
         assert!(psi1 < psi0, "Ψ must decrease: {psi0} -> {psi1}");
         assert!(psi1 < 1e-2, "should converge to level: Ψ={psi1}");
         assert!(norm(omega) < 0.05, "should settle: |ω|={}", norm(omega));
+    }
+
+    /// Reduced-attitude (S²) error: zero at alignment, nonzero roll/pitch
+    /// under tilt, and EXACTLY zero yaw component (yaw is relinquished).
+    #[test]
+    fn reduced_error_zero_at_alignment_no_yaw() {
+        let e0 = GeoAtt::attitude_error_reduced(&identity3(), [0.0, 0.0, 1.0]);
+        assert!(e0[0].abs() < 1e-6 && e0[1].abs() < 1e-6 && e0[2] == 0.0,
+            "zero at alignment: {e0:?}");
+        let e1 = GeoAtt::attitude_error_reduced(&rot_x(0.3), [0.0, 0.0, 1.0]);
+        assert_eq!(e1[2], 0.0, "no yaw component: {e1:?}");
+        assert!(e1[0].abs() + e1[1].abs() > 0.1, "tilt produces error: {e1:?}");
+    }
+
+    /// v0.26 reduced-attitude control: a tilted body under `moment_reduced`
+    /// drives its THRUST AXIS (body-down) to the target while commanding NO
+    /// yaw torque — the rotor-loss control law (the residual spin is left
+    /// free). Mirrors the full-attitude convergence test but on S².
+    #[test]
+    fn reduced_attitude_drives_thrust_axis_to_target() {
+        let ctrl = GeoAtt::new(GeoGains::FALCON_QUAD);
+        let b3_d = [0.0f32, 0.0, 1.0]; // level thrust axis (hover)
+        let mut r = rot_x(40f32.to_radians()); // tilted 40° in roll
+        let mut omega = [0.0f32; 3];
+        let j = GeoGains::FALCON_QUAD.j;
+        let dt = 0.002f32;
+        let tilt0 = libm::acosf(r[2][2].clamp(-1.0, 1.0));
+        for _ in 0..3000 {
+            let m = ctrl.moment_reduced(&r, omega, b3_d);
+            assert_eq!(m[2], 0.0, "yaw torque must be relinquished (0)");
+            let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+            let gyro = cross(omega, jo);
+            for i in 0..3 {
+                omega[i] += dt * (m[i] - gyro[i]) / j[i];
+            }
+            r = integrate_rotation(&r, omega, dt);
+        }
+        let tilt1 = libm::acosf(r[2][2].clamp(-1.0, 1.0));
+        assert!(tilt1 < tilt0, "thrust-axis tilt must decrease: {tilt0} -> {tilt1}");
+        assert!(tilt1 < 0.05, "thrust axis should align to target: tilt={tilt1}");
     }
 
     /// Integrate R by the body rate over dt, with Gram-Schmidt
