@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-TRAJ-P01
+    type: sw-req
+    title: "TRAJ-P01 — flat-space trajectory generation + differential-flatness feedforward"
+    status: implemented
+    description: >
+      The flight stack shall generate smooth, dynamically-feasible
+      trajectories between waypoints and provide the geometric
+      controller with the differential-flatness feedforward (desired
+      thrust axis, collective, and body rate). Trajectories shall be
+      generated in closed form, no_std/no_alloc, with a SOUND
+      input-feasibility bound (the jerk/body-rate demand over a
+      segment is never under-estimated). A step setpoint is the
+      degenerate (zero-higher-derivative) case.
+    tags: [falcon, trajectory, differential-flatness, motion-primitive, no_std, v0.27]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Mueller quintic meets full boundary conditions; peak_abs_jerk
+        is a sound upper bound on |j(t)| over [0,T] (proptest +
+        CI-budget Kani); the flatness feedforward matches the
+        finite-difference of the desired attitude (vee(R_dᵀṘ_d)); a
+        deterministic waypoint mission reaches each waypoint via
+        trajectory + feedforward + geometric control.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004

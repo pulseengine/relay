@@ -1,0 +1,46 @@
+artifacts:
+  - id: FV-FALCON-TRAJ-001
+    type: sw-verification
+    title: "Trajectory generation — Mueller quintic + sound jerk bound + flatness feedforward + waypoint mission (v0.27)"
+    status: implemented
+    description: >
+      Verification of the v0.27 trajectory stack:
+
+      1. relay-traj Quintic / Segment3 (Mueller-Hehn-D'Andrea per-axis
+         jerk-minimizing motion primitive, no_std/no_alloc): meets full
+         boundary conditions; derivatives consistent (finite-diff);
+         total/finite for adversarial input; rest_to_rest reaches the
+         waypoint with zero terminal velocity + acceleration.
+
+      2. Sound input-feasibility bound — peak_abs_jerk: a division-free
+         triangle-inequality upper bound on |j(t)| over [0,T] that
+         never under-estimates the demand (errs safe). proptest
+         peak_jerk_bound_is_sound (random coeffs + t, runnable gate) +
+         a grid unit test. The verify_peak_jerk_sound Kani harness is
+         the exhaustive version — f32-arithmetic-heavy, so a CI-budget
+         proof (CBMC-intractable in a normal budget, unlike MIX-P08's
+         comparison logic).
+
+      3. relay-geo flatness_omega_ff (differential-flatness body-rate
+         feedforward): validated against the finite-difference of the
+         desired attitude, ω_ff ≈ vee(R_dᵀ Ṙ_d), along a sinusoidal
+         trajectory — the oracle that pins the feedforward SIGN.
+
+      4. falcon-sitl-gz mission_follows_waypoint_trajectory: a
+         deterministic 6-DoF square waypoint mission flown with the
+         full chain (Segment3 + flatness feedforward + geometric
+         control + position P-D), thrust along the achieved body axis;
+         reaches each waypoint within 0.4 m.
+    tags: [verification, falcon, trajectory, differential-flatness, proptest, kani, v0.27]
+    fields:
+      method: automated-test
+      kani-properties: "peak_abs_jerk soundness (verify_peak_jerk_sound, CI-budget)"
+      test-count: 8
+      steps:
+        - run: cargo test -p relay-traj
+        - run: cargo test -p relay-geo flatness
+        - run: cargo test -p falcon-sitl-gz mission_follows
+        - run: cargo kani -p relay-traj --harness verify_peak_jerk_sound
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRAJ-P01
