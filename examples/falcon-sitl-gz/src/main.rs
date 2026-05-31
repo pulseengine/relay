@@ -597,7 +597,11 @@ fn run_geo_cascade(
         // ── OUTER (every outer_decim ticks): aiding updates + position →
         //    geometric desired rate (held for the inner loop to track) ──
         if step % outer_decim == 0 {
-            iekf.update_gravity(imu_sample.accel_body, cfg.iekf.grav_var);
+            // v0.30 — acceleration-compensated tilt: feed the commanded NED
+            // accel (a_cmd_held) so the accelerometer isn't mistaken for
+            // gravity while manoeuvring (keeps heading good under motion).
+            // Hover: a_cmd_held ≈ 0 ⇒ identical to the plain update.
+            iekf.update_gravity_compensated(imu_sample.accel_body, a_cmd_held, cfg.iekf.grav_var);
             // NEES BEFORE the position update: the predicted estimate vs
             // gz truth `pos_ned`, weighted by the predicted P. (After the
             // update the estimate is pulled to truth, so post-update NEES
