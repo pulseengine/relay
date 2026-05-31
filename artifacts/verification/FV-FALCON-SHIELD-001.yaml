@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-FALCON-SHIELD-001
+    type: sw-verification
+    title: "Verified simplex shield — Kani safety contract + recoverable-set predicate + containment demo (v0.28)"
+    status: implemented
+    description: >
+      Verification of the v0.28 runtime-assurance shield:
+
+      1. relay-geo SimplexShield — Kani verify_shield_contract: VERIFICATION
+         SUCCESSFUL. For ANY recoverable-set margin (incl. ±∞/NaN), ANY agile
+         + fallback commands (incl. non-finite), and ANY prior latch, given
+         the new() well-formedness invariant 0 < enter < exit: (a) the
+         output is exactly the (sanitised) command its flag names — never a
+         third value; (b) margin < enter or non-finite ⇒ the fallback is
+         used. The selection logic is split from margin()'s division so the
+         proof is division-free (CBMC-tractable).
+
+      2. relay-geo RecoverableSet — the Lee-2010 exponential-stability region
+         the v0.23 Lyapunov certificate proves: Ψ < ψ_max(≤2) AND ‖e_Ω‖² <
+         2k_R(2−Ψ)/λ_M(J). Tests: small (Ψ,‖Ω‖²) inside; past the Ψ ceiling
+         or large rate outside; non-finite ⇒ outside (fail-safe).
+
+      3. falcon-sitl-gz shield_keeps_destabilizing_policy_safe (end-to-end):
+         a stand-in policy with positive attitude feedback tumbles on its
+         own (max Ψ > 1.9, leaves {Ψ<2}); under the shield it is contained
+         inside the safe set (max Ψ < 1.9), the fallback engaging near the
+         boundary.
+
+      Honest scope: the guarantee is over the rotational recoverable set
+      (the v0.23 certificate is attitude-only).
+    tags: [verification, falcon, shield, simplex, runtime-assurance, kani, v0.28]
+    fields:
+      method: formal-verification
+      kani-properties: "shield safety contract (verify_shield_contract)"
+      test-count: 3
+      steps:
+        - run: cargo kani -p relay-geo --harness verify_shield_contract
+        - run: cargo test -p relay-geo
+        - run: cargo test -p falcon-sitl-gz shield_keeps
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SHIELD-P01
