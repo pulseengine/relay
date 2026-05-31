@@ -660,6 +660,36 @@ impl Iekf {
         }
     }
 
+    /// **Acceleration-compensated** tilt update (v0.30). The accelerometer
+    /// measures specific force `f = Rᵀ(a_kin − g)`, so under acceleration it
+    /// is NOT pure gravity — treating it as gravity tilts the estimate (the
+    /// "acceleration looks like tilt" error that degrades heading under
+    /// motion and drives the v0.29 mission drift). Given the known kinematic
+    /// acceleration `a_kin_ned` (the controller's commanded NED accel —
+    /// control-aided estimation), subtract `Rᵀ·a_kin` so the residual is the
+    /// PURE gravity reaction; tilt then stays observable while accelerating.
+    /// Falls back to the plain adaptive update for `a_kin = 0`.
+    pub fn update_gravity_compensated(
+        &mut self,
+        accel_body: Vec3,
+        a_kin_ned: Vec3,
+        base_var: f32,
+    ) -> bool {
+        let rmat = quat_to_rotmat(self.state.q); // body→NED
+        // Rᵀ · a_kin_ned  (kinematic accel expressed in body frame).
+        let ak_b = [
+            rmat[0][0] * a_kin_ned[0] + rmat[1][0] * a_kin_ned[1] + rmat[2][0] * a_kin_ned[2],
+            rmat[0][1] * a_kin_ned[0] + rmat[1][1] * a_kin_ned[1] + rmat[2][1] * a_kin_ned[2],
+            rmat[0][2] * a_kin_ned[0] + rmat[1][2] * a_kin_ned[1] + rmat[2][2] * a_kin_ned[2],
+        ];
+        let a_comp = [
+            accel_body[0] - ak_b[0],
+            accel_body[1] - ak_b[1],
+            accel_body[2] - ak_b[2],
+        ];
+        self.update_gravity(a_comp, base_var)
+    }
+
     /// **Adaptive gravity / tilt** update from the accelerometer. When the
     /// vehicle acceleration is low, the specific force is the gravity
     /// reaction, an excellent roll/pitch reference; this fuses it while
@@ -1362,6 +1392,32 @@ mod tests {
         // truth under excitation (vs the [g]×-only form, which left it dead
         // at 0.4→0.399). Assert clear correct-direction recovery.
         assert!(yaw < yaw0 - 0.03 && yaw > -0.1, "magless yaw should recover toward 0, {yaw0}→{yaw}");
+    }
+
+    /// v0.30 acceleration-compensated tilt: a LEVEL body accelerating north
+    /// reads specific force `[a,0,−g]`. The plain gravity update mistakes the
+    /// horizontal component for tilt and rotates the estimate; the
+    /// compensated update subtracts the known kinematic accel and keeps the
+    /// estimate level — the fix for heading degradation under motion.
+    #[test]
+    fn gravity_compensated_rejects_acceleration_tilt() {
+        let a_kin = [4.0f32, 0.0, 0.0]; // accelerating north, body LEVEL
+        let f_b = [4.0f32, 0.0, -9.81]; // specific force a_kin − g (level)
+
+        let mut f_un = Iekf::level();
+        for _ in 0..200 {
+            f_un.update_gravity(f_b, 0.1);
+        }
+        let tilt_uncomp = f_un.state().tilt_rad().to_degrees();
+
+        let mut f_co = Iekf::level();
+        for _ in 0..200 {
+            f_co.update_gravity_compensated(f_b, a_kin, 0.1);
+        }
+        let tilt_comp = f_co.state().tilt_rad().to_degrees();
+
+        assert!(tilt_uncomp > 5.0, "uncompensated should tilt toward the accel: {tilt_uncomp}°");
+        assert!(tilt_comp < 1.0, "compensated should stay level: {tilt_comp}°");
     }
 
     /// Rotor-FDI contract (v0.26): (1) NO FALSE ALARM while residuals stay

@@ -14,14 +14,14 @@ Lean 4 kernel against Mathlib. Built with Bazel via `rules_lean`.
 
 These are fixed inputs — the build is deterministic from them:
 
-- **Lean toolchain:** `4.29.1` (`MODULE.bazel` → `lean.toolchain(version = "4.29.1")`),
+- **Lean toolchain:** `4.27.0` (`MODULE.bazel` → `lean.toolchain(version = "4.27.0")`),
   downloaded from `github.com/leanprover/lean4/releases` with a per-platform
   SHA-256 pinned in `rules_lean` (`require_hashes = True`). This MUST match
   `rules_lean`'s own `MODULE.bazel` pin — the extension collects tags from
   all modules and `rules_lean` contributes the Mathlib tag, so a mismatched
   toolchain here forces an Elan-based toolchain switch mid-build that fails.
-- **Mathlib:** revision `v4.29.1` (pinned in `rules_lean`'s `MODULE.bazel`,
-  `lean.mathlib(rev = "v4.29.1")`). Pre-built oleans are fetched via `lake
+- **Mathlib:** revision `v4.27.0` (pinned in `rules_lean`'s `MODULE.bazel`,
+  `lean.mathlib(rev = "v4.27.0")`). Pre-built oleans are fetched via `lake
   exe cache get`; it falls back to building from source. `lake update`
   clones mathlib4 (large) — `rules_lean` allows up to 3600 s for it.
 
