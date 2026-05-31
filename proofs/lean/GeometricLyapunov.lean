@@ -65,6 +65,27 @@ theorem vdot_nonpos (kW w1 w2 w3 : ℝ) (hk : 0 ≤ kW) :
   rw [neg_mul]
   linarith [hprod]
 
+/-- **The LaSalle precondition.** With `k_Ω > 0`, the Lyapunov derivative
+    `V̇ = −k_Ω‖ω‖²` is zero *iff* the body rate `ω` is zero. So the largest
+    invariant set inside `{V̇ = 0}` has zero rate, on which the closed loop
+    forces `e_R → 0` — the hook the (deferred) LaSalle step uses to upgrade
+    `V̇ ≤ 0` to asymptotic stability. -/
+theorem vdot_zero_iff_omega_zero (kW w1 w2 w3 : ℝ) (hk : 0 < kW) :
+    (-kW * (w1 ^ 2 + w2 ^ 2 + w3 ^ 2) = 0) ↔ (w1 = 0 ∧ w2 = 0 ∧ w3 = 0) := by
+  constructor
+  · intro h
+    rw [neg_mul, neg_eq_zero] at h
+    rcases mul_eq_zero.mp h with hk0 | hsum
+    · exact absurd hk0 hk.ne'
+    · have h1 : w1 ^ 2 = 0 := by nlinarith [sq_nonneg w1, sq_nonneg w2, sq_nonneg w3, hsum]
+      have h2 : w2 ^ 2 = 0 := by nlinarith [sq_nonneg w1, sq_nonneg w2, sq_nonneg w3, hsum]
+      have h3 : w3 ^ 2 = 0 := by nlinarith [sq_nonneg w1, sq_nonneg w2, sq_nonneg w3, hsum]
+      exact ⟨pow_eq_zero_iff (by norm_num) |>.mp h1,
+             pow_eq_zero_iff (by norm_num) |>.mp h2,
+             pow_eq_zero_iff (by norm_num) |>.mp h3⟩
+  · rintro ⟨h1, h2, h3⟩
+    rw [h1, h2, h3]; ring
+
 /-- **Assembled `V̇ ≤ 0`.** Composing the cancellation with non-increase:
     the closed-loop Lyapunov derivative (computed from the real moment law)
     is ≤ 0 for any attitude error `e` and body rate `ω`, given `k_Ω ≥ 0`.
