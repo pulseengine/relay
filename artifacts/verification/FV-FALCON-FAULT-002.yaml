@@ -1,0 +1,47 @@
+artifacts:
+  - id: FV-FALCON-FAULT-002
+    type: sw-verification
+    title: "Single-rotor-loss fault tolerance — Kani MIX-P08 + FDI contract + reduced-attitude + end-to-end composition (v0.26)"
+    status: implemented
+    description: >
+      Three independently-verified components plus an end-to-end
+      composition test:
+
+      1. relay-mix-quad mix_rotor_out (MIX-P08): Kani
+         verify_mix_rotor_out_bound — VERIFICATION SUCCESSFUL. For
+         ANY input (incl. non-finite) and ANY failed index < 4 the
+         failed rotor is exactly 0 and every healthy rotor ∈
+         [floor,1] and finite. Yaw relinquished (a yaw command does
+         not change the healthy outputs).
+
+      2. relay-iekf RotorFaultDetector (CUSUM FDI on per-rotor
+         effectiveness residuals): no false alarm while residuals
+         stay within the slack; detection when a residual clears
+         drift+threshold (one-shot AND slow-decay accumulation);
+         isolation + latching; totality under non-finite input.
+
+      3. relay-geo moment_reduced / attitude_error_reduced
+         (reduced-attitude S²): error zero at alignment with no yaw
+         component; closed-loop drives a 40° thrust-axis tilt to
+         <0.05 rad with yaw torque ≡ 0.
+
+      4. falcon-sitl-gz fault_tolerance_chain_recovers_from_rotor_loss:
+         deterministic rigid-body sim — rotor-0 loss at t=2 s is
+         detected + isolated by the FDI, the loop switches to
+         reduced-attitude + MIX-P08, MIX-P08 holds every step, and
+         the body does not tumble (peak tilt <80°) and settles
+         upright (final <29°).
+    tags: [verification, falcon, fault-tolerance, rotor-loss, kani, v0.26]
+    fields:
+      method: formal-verification
+      kani-properties: "MIX-P08 (verify_mix_rotor_out_bound)"
+      test-count: 5
+      steps:
+        - run: cargo kani -p relay-mix-quad --harness verify_mix_rotor_out_bound
+        - run: cargo test -p relay-mix-quad
+        - run: cargo test -p relay-iekf
+        - run: cargo test -p relay-geo
+        - run: cargo test -p falcon-sitl-gz fault_tolerance
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P02
