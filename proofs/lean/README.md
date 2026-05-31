@@ -50,16 +50,19 @@ upstream Lean/Mathlib release ever moves), vendor the fetched external repos
 ./proofs/lean/vendor.sh        # = bazel vendor //proofs/lean:all --vendor_dir=vendor/bazel
 ```
 
-`vendor/bazel/` is **gitignored** (multi-GB Mathlib oleans are not committed)
-but is fully regeneratable from the pinned versions above. Once populated,
-build offline by adding to `.bazelrc`:
+`vendor/bazel/` is **gitignored** (it vendors the *entire* transitive dep
+set — ~24 GB apparent, though bazel hardlinks to the repository cache so
+real extra disk is far less) but is fully regeneratable from the pinned
+versions above. Once populated, build offline by adding to `.bazelrc`:
 
 ```
 common --vendor_dir=vendor/bazel
 ```
 
 This is the "redo" path: the pinned versions + `vendor.sh` reconstruct the
-exact toolchain + Mathlib the proofs were checked against.
+exact toolchain + Mathlib the proofs were checked against. **Confirmed
+working** — `bazel build //proofs/lean:geometric_lyapunov --vendor_dir=
+vendor/bazel` builds from the vendored copy without re-fetching.
 
 ## Scope note — `GeometricLyapunov.lean`
 
