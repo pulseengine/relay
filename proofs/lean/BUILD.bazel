@@ -71,3 +71,19 @@ lean_proof_test(
     srcs = ["GeometricLyapunov.lean"],
     deps = [":geometric_lyapunov", "@mathlib//:Mathlib"],
 )
+
+# v0.38 — the TRANSLATIONAL half: the closed-loop position Lyapunov collapses
+# to −k_v‖e_v‖² ≤ 0, and the FULL-STATE V̇ = −k_Ω‖ω‖² − k_v‖e_v‖² ≤ 0. Closes
+# the simplex shield's attitude-only scope gap (position safety covered).
+
+lean_library(
+    name = "position_lyapunov",
+    srcs = ["PositionLyapunov.lean"],
+    deps = ["@mathlib//:Mathlib"],
+)
+
+lean_proof_test(
+    name = "position_lyapunov_test",
+    srcs = ["PositionLyapunov.lean"],
+    deps = [":position_lyapunov", "@mathlib//:Mathlib"],
+)

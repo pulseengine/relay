@@ -15,6 +15,41 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v0.38.0] — 2026-06-03
+
+Full-state Lyapunov — closes the simplex shield's attitude-only scope gap.
+
+The v0.23 Lyapunov certificate (and so the v0.28 shield's recoverable-set
+guarantee) covered only rotation. v0.38 adds the translational half: a
+kernel-checked proof that the closed-loop position Lyapunov decreases, and
+that the combined full-state Lyapunov is non-increasing.
+
+### Added
+
+- **`proofs/lean/PositionLyapunov.lean`** — kernel-checked (0 `sorry`/`axiom`,
+  `bazel test //proofs/lean:position_lyapunov_test` PASSED). For
+  `m·ë_x = −k_x·e_x − k_v·e_v`, the `k_x·e_x·e_v` cross-terms cancel and
+  `V̇_pos = −k_v‖e_v‖² ≤ 0` (`vdot_cancellation_pos`, `vdot_nonpos_pos`, the
+  LaSalle precondition `vdot_zero_iff_ev_zero`, `V_pos_nonneg`), plus the
+  **combined `fullstate_vdot_nonpos`**: `V̇ = −k_Ω‖ω‖² − k_v‖e_v‖² ≤ 0`.
+  Algebraically identical to the attitude proof — the same `ring` identity.
+- **`relay-geo::position_lyapunov_decrease_certificate`** — runnable
+  companion verifying `V̇_pos = −k_v‖e_v‖² ≤ 0` and the combined full-state
+  `V̇ ≤ 0` over a grid.
+
+### Impact
+
+The simplex shield's certified safe set now rests on a **full-state**
+non-increasing Lyapunov, so its guarantee covers position as well as
+attitude. The position subsystem is globally stable, so it adds no new
+safe-set boundary (the attitude `Ψ < 2` remains binding).
+
+### Honest scope
+
+The dynamic "trajectory ⇒ converges" step is the classical Lee 2010 Prop. 2
+result, cited and deferred pending Mathlib's Lyapunov/LaSalle API (same
+caveat as the v0.23 attitude proof).
+
 ## [falcon-v0.37.0] — 2026-06-02
 
 Position-fix fault / GPS-spoof robustness — the estimator can no longer be

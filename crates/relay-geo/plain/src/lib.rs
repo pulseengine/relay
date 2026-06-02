@@ -759,6 +759,53 @@ mod tests {
         assert!(checked >= 80, "grid too small: {checked}");
     }
 
+    /// v0.38 — the TRANSLATIONAL Lyapunov certificate, the runnable companion
+    /// to `proofs/lean/PositionLyapunov.lean`. For the closed-loop position
+    /// law `m·ë_x = −k_x·e_x − k_v·e_v` (ė_x = e_v), the position Lyapunov
+    /// derivative `V̇_pos = Σ[m·e_v·ë_x + k_x·e_x·ė_x]` collapses to
+    /// `−k_v‖e_v‖² ≤ 0` over a grid — the same cancellation the Lean `ring`
+    /// identity proves, plus the combined full-state `V̇ = −k_Ω‖ω‖² − k_v‖e_v‖²
+    /// ≤ 0`. This is the algebraic core that extends the simplex shield's
+    /// guarantee from attitude-only to full state.
+    #[test]
+    fn position_lyapunov_decrease_certificate() {
+        let (m, kx, kv) = (1.0f32, 4.0, 2.5);
+        let grid = [-5.0f32, -2.0, -0.5, 0.0, 0.5, 2.0, 5.0];
+        let mut checked = 0;
+        for &ex0 in &grid {
+            for &ev0 in &grid {
+                for &ev1 in &[-3.0f32, 0.0, 3.0] {
+                    let e_x = [ex0, 0.5 * ex0, -ex0];
+                    let e_v = [ev0, ev1, -0.5 * ev0];
+                    // closed-loop accel: m·ë_x = −k_x·e_x − k_v·e_v
+                    let e_a = [
+                        (-kx * e_x[0] - kv * e_v[0]) / m,
+                        (-kx * e_x[1] - kv * e_v[1]) / m,
+                        (-kx * e_x[2] - kv * e_v[2]) / m,
+                    ];
+                    // V̇_pos = Σ[m·e_v·ë_x + k_x·e_x·e_v]   (ė_x = e_v)
+                    let mut vdot = 0.0f32;
+                    for i in 0..3 {
+                        vdot += m * e_v[i] * e_a[i] + kx * e_x[i] * e_v[i];
+                    }
+                    let ev_sq = e_v[0] * e_v[0] + e_v[1] * e_v[1] + e_v[2] * e_v[2];
+                    let expected = -kv * ev_sq;
+                    // cross-terms cancel ⇒ V̇_pos == −k_v‖e_v‖² ≤ 0
+                    assert!((vdot - expected).abs() < 1e-3, "V̇_pos {vdot} ≠ −k_v‖e_v‖² {expected}");
+                    assert!(vdot <= 1e-4, "V̇_pos must be ≤ 0, got {vdot}");
+                    // combined full-state with a sample attitude term
+                    let omega = [1.0f32, -2.0, 0.5];
+                    let kw = 2.0f32;
+                    let w_sq = omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2];
+                    let vdot_full = -kw * w_sq + vdot;
+                    assert!(vdot_full <= 1e-4, "full-state V̇ must be ≤ 0, got {vdot_full}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 100, "grid too small: {checked}");
+    }
+
     /// v0.28 recoverable set: small (Ψ, ‖Ω‖²) is inside; near the Ψ ceiling
     /// or with a large rate it is outside; non-finite ⇒ outside (fail-safe).
     #[test]

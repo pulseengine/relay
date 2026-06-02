@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-FALCON-LYAP-P01
+    type: sw-req
+    title: "LYAP-P01 — full-state Lyapunov: the combined position+attitude closed loop is non-increasing (closes the shield's attitude-only gap)"
+    status: implemented
+    description: >
+      The geometric cascade shall have a machine-checked full-state Lyapunov
+      certificate, extending the v0.23 attitude-only result to translation.
+      For the closed-loop position law m·ë_x = −k_x·e_x − k_v·e_v (ė_x = e_v)
+      and Lyapunov V_pos = ½m‖e_v‖² + ½k_x‖e_x‖², the k_x·e_x·e_v cross-terms
+      cancel and V̇_pos = −k_v‖e_v‖² ≤ 0 — algebraically identical to the
+      attitude derivative −k_Ω‖ω‖². The COMBINED full-state derivative shall
+      satisfy V̇ = V̇_att + V̇_pos = −k_Ω‖ω‖² − k_v‖e_v‖² ≤ 0.
+
+      Consequence: the v0.28 simplex shield's recoverable-set guarantee, which
+      the v0.23 certificate limited to the ROTATIONAL set, is now backed by a
+      full-state non-increasing Lyapunov — so the certified safe set covers
+      position as well as attitude. (The position subsystem is globally
+      stable, so it adds no new boundary; the attitude Ψ < 2 remains the
+      binding constraint.) The dynamic LaSalle step (trajectory ⇒ converges)
+      stays cited to Lee 2010 Prop. 2 pending Mathlib's stability API.
+    tags: [falcon, lyapunov, full-state, position, shield, lean, v0.38]
+    fields:
+      req-type: safety
+      priority: should
+      verification-criteria: >
+        Lean (kernel-checked, 0 sorry/axiom): vdot_cancellation_pos (the ring
+        identity), vdot_nonpos_pos (≤0 for k_v≥0), vdot_zero_iff_ev_zero (the
+        LaSalle precondition), lyapunov_vdot_nonpos_pos, V_pos_nonneg, and
+        fullstate_vdot_nonpos (the combined −k_Ω‖ω‖²−k_v‖e_v‖² ≤ 0). Runnable
+        companion: relay-geo position_lyapunov_decrease_certificate checks
+        V̇_pos = −k_v‖e_v‖² ≤ 0 and the combined full-state ≤ 0 over a grid.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-003
+      - type: derives-from
+        target: SYSREQ-FALCON-004
