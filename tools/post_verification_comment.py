@@ -56,21 +56,25 @@ def upsert(pr_number: str, body: str) -> None:
     if existing:
         comment_id = existing["id"]
         print(f"updating sticky comment id={comment_id}", file=sys.stderr)
+        # Pass the body via STDIN (`-F body=@-`), not a CLI arg — a large
+        # report exceeds the OS argument-length limit (Errno 7).
         subprocess.run(
             [
                 "gh", "api", "--method", "PATCH",
                 f"repos/{repo_slug()}/issues/comments/{comment_id}",
-                "-f", f"body={body_with_marker}",
+                "-F", "body=@-",
             ],
+            input=body_with_marker,
+            text=True,
             check=True,
         )
     else:
         print("creating new sticky comment", file=sys.stderr)
+        # `--body-file -` reads the body from STDIN (size-safe).
         subprocess.run(
-            [
-                "gh", "pr", "comment", pr_number,
-                "--body", body_with_marker,
-            ],
+            ["gh", "pr", "comment", pr_number, "--body-file", "-"],
+            input=body_with_marker,
+            text=True,
             check=True,
         )
 

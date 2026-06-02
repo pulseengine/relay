@@ -123,8 +123,15 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         shell: bash
         run: |
+          # Comment ONLY the markdown summary (the per-step log + full cargo
+          # output is the uploaded artifact, not the PR comment).
+          if grep -q '^## .*Rivet verification gate' verification-output.md; then
+            sed -n '/^## .*Rivet verification gate/,$p' verification-output.md > verification-summary.md
+          else
+            cp verification-output.md verification-summary.md
+          fi
           python3 tools/post_verification_comment.py "$PR_NUMBER" \
-            --body-file verification-output.md
+            --body-file verification-summary.md
 
       - name: Fail job if any verification artifact failed
         if: steps.verify.outcome != 'success'
