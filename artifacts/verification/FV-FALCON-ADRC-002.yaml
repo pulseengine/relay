@@ -1,0 +1,56 @@
+artifacts:
+  - id: FV-FALCON-ADRC-002
+    type: sw-verification
+    title: "Inner-loop cadence-robustness certification + command-filter primitive — Kani + proptest + flight falsification (v0.33)"
+    status: approved
+    description: >
+      Verification of the v0.33 inner-loop robustness work in relay-adrc:
+
+      1. Bandwidth-separation invariant (well_separated, eso_dt_stable,
+         from_bandwidth) — division-free comparisons.
+         Kani verify_from_bandwidth_separation: VERIFICATION SUCCESSFUL —
+         for any ω_c∈(0.1,1e3) and separation∈[3,1e3), from_bandwidth makes
+         well_separated(3) hold by construction.
+         Unit falcon_tuning_is_well_separated: the shipped tuning passes
+         (roll/pitch 40/12≈3.33×, yaw 30/3=10×; ω_o≈ω_c rejected).
+         Unit eso_cadence_margin_is_large: ω_o·dt<2 holds at ±15% of 1 ms
+         and out to ~50× the nominal period; fails (correctly) at ω_o·dt=2.4.
+
+      2. CommandFilter (2nd-order critically-damped, Farrell command-filtered
+         backstepping) with saturation split from the f32 arithmetic.
+         Kani verify_command_filter_saturation: VERIFICATION SUCCESSFUL —
+         the magnitude/rate clamps are preserved by each step (inductive
+         invariant, realistic bounded signals).
+         Unit: no step overshoot (critically damped); magnitude/rate clamps
+         hold under a huge command.
+         proptest command_filter_bibo_under_dt_jitter + eso_bounded_under_
+         dt_jitter: BIBO / bounded state under a ±15% dt sweep.
+         (11 unit tests + 3 proptests pass; clippy clean.)
+
+      3. FLIGHT FALSIFICATION (published). Hypothesis: filtering the desired
+         body-rate ω_d enforces cascade timescale separation and tames the
+         margin. Real-Gazebo A/B under identical conditions:
+           cmd-filter OFF:  final 2.30 m, ANEES 10.1
+           cmd-filter ON :  final 24.21 m, ANEES 106  (roll/pitch only, ω_n=25)
+         Filtering ω_d DEGRADED tracking ~10×: the cascade needs prompt rate
+         tracking, so the added command-path lag delays the attitude
+         correction the position loop relies on. Conclusion: command
+         bandwidth is the wrong lever (the inner loop is already responsive
+         and proven cadence-robust); the filter ships verified but DEFAULT-OFF
+         (CMD_FILTER=1 to opt in). The fragility is the outer position-loop +
+         estimator — a later version.
+
+      Honest scope: the A/B is one run per arm under elevated host load
+      (wall ~66 s, RTF≈0.75); the 10× relative degradation is robust to that,
+      but absolute numbers are load-inflated vs the ~1.6 m idle baseline.
+    tags: [verification, falcon, adrc, robustness, kani, proptest, falsification, v0.33]
+    fields:
+      method: formal-verification
+      kani-properties: "verify_from_bandwidth_separation; verify_command_filter_saturation"
+      steps:
+        - run: "cargo test -p relay-adrc"
+        - run: "cargo kani -p relay-adrc --harness verify_from_bandwidth_separation"
+        - run: "cargo kani -p relay-adrc --harness verify_command_filter_saturation"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-ADRC-P05

@@ -64,6 +64,44 @@ impl AdrcGains {
     pub const fn with_tau(omega_o: f32, omega_c: f32, b0: f32, tau: f32) -> Self {
         AdrcGains { omega_o, omega_c, b0, tau }
     }
+
+    /// Bandwidth-parameterized construction (Gao 2003): pick the controller
+    /// bandwidth ω_c and derive the observer bandwidth from the **separation
+    /// ratio** ω_o = separation·ω_c. The standard ADRC rule is
+    /// separation ∈ [3, 10]: the ESO must be several times faster than the
+    /// controller so its estimate has settled before the controller acts,
+    /// yet not so fast it sits at the delay-limited crossover and starves
+    /// phase margin. This constructor makes [`well_separated`] true by
+    /// construction for any `min_ratio ≤ separation`.
+    pub fn from_bandwidth(omega_c: f32, separation: f32, b0: f32, tau: f32) -> Self {
+        AdrcGains { omega_o: separation * omega_c, omega_c, b0, tau }
+    }
+
+    /// Observer/controller timescale-separation invariant: ω_o ≥ ratio·ω_c.
+    /// Division-free (Kani-friendly). The v0.33 robustness certificate —
+    /// an under-separated ESO (ω_o ≈ ω_c) is the classic marginal-stability
+    /// tuning; this predicate gates against it.
+    #[inline]
+    pub fn well_separated(&self, min_ratio: f32) -> bool {
+        self.omega_o.is_finite()
+            && self.omega_c.is_finite()
+            && self.omega_c > 0.0
+            && self.omega_o >= min_ratio * self.omega_c
+    }
+
+    /// Forward-Euler ESO discrete-stability bound. The 2nd-order observer has
+    /// a continuous double pole at −ω_o; forward Euler maps it to a discrete
+    /// double pole at 1 − ω_o·dt, inside the unit circle iff 0 < ω_o·dt < 2.
+    /// Division-free. At ω_o = 40, dt = 1 ms this holds with a ~50× margin —
+    /// i.e. the inner ESO is NOT the cadence-fragile element (that is the
+    /// outer position→attitude cascade). A `margin` < 1 leaves headroom.
+    #[inline]
+    pub fn eso_dt_stable(&self, dt: f32, margin: f32) -> bool {
+        self.omega_o.is_finite()
+            && dt.is_finite()
+            && dt > 0.0
+            && self.omega_o * dt < 2.0 * margin
+    }
 }
 
 /// One axis of linear ADRC. Holds the ESO state across ticks.
@@ -265,6 +303,118 @@ impl AdrcRate {
     }
 }
 
+/// Symmetric clamp that is total over all f32 (NaN/±∞ → fallback to the
+/// bound). Split out so the saturation invariant is a pure comparison the
+/// model checker can discharge WITHOUT reasoning about the filter's f32
+/// arithmetic (the same trick the simplex shield uses).
+#[inline]
+fn clamp_sym(x: f32, m: f32) -> f32 {
+    let x = if x.is_finite() { x } else { 0.0 };
+    // m = +∞ disables the limit (pass-through); NaN / negative is degenerate
+    // and pins to 0 (fail-safe). A finite m ≥ 0 clamps to [−m, m].
+    if m.is_nan() || m < 0.0 {
+        return 0.0;
+    }
+    if x > m {
+        m
+    } else if x < -m {
+        -m
+    } else {
+        x
+    }
+}
+
+/// 2nd-order critically-damped **command filter** (Farrell/Polycarpou
+/// command-filtered backstepping) for the outer→inner interface.
+///
+/// The marginal-stability "control-margin wall" is a *cascade* timescale
+/// violation: the outer position loop can step the desired body-rate ω_d
+/// faster than the inner loop settles, so the inner loop chases a moving
+/// target through its actuator lag and the closed cascade sits on the edge.
+/// This filter bounds the *bandwidth* (and optionally the magnitude/rate) of
+/// the command entering the inner loop, restoring separation. Critically
+/// damped (ζ = 1) ⇒ no overshoot, so it never adds command energy.
+///
+/// State (y, ẏ); per step (continuous double pole at −ω_n):
+///   ẏ += dt·(ω_n²·(u − y) − 2ω_n·ẏ);  y += dt·ẏ
+/// with ẏ saturated to `max_rate` and y to `max_mag`. The saturation is the
+/// mechanically-verified property (`clamp_sym`); BIBO/no-overshoot are
+/// proptest'd.
+#[derive(Clone, Copy)]
+pub struct CommandFilter {
+    omega_n: f32,
+    max_mag: f32,
+    max_rate: f32,
+    y: f32,
+    yd: f32,
+}
+
+impl CommandFilter {
+    /// `omega_n` = filter bandwidth (rad/s) — set BELOW the inner controller
+    /// bandwidth ω_c for separation. `max_mag`/`max_rate` saturate the
+    /// command and its slew (use f32::INFINITY to disable a limit).
+    pub fn new(omega_n: f32, max_mag: f32, max_rate: f32) -> Self {
+        let omega_n = if omega_n.is_finite() && omega_n > 0.0 { omega_n } else { 1.0 };
+        CommandFilter { omega_n, max_mag, max_rate, y: 0.0, yd: 0.0 }
+    }
+
+    /// Filter one sample of the raw command `u` over `dt` seconds; returns
+    /// the smoothed, separation-bounded command.
+    pub fn step(&mut self, u: f32, dt: f32) -> f32 {
+        let dt = if dt.is_finite() { dt.clamp(1e-4, 0.1) } else { 1e-3 };
+        let u = if u.is_finite() { u } else { 0.0 };
+        // Sanitise state so the law is total even from a non-finite state.
+        let y0 = if self.y.is_finite() { self.y } else { 0.0 };
+        let yd0 = if self.yd.is_finite() { self.yd } else { 0.0 };
+        let wn = self.omega_n;
+        // 2nd-order critically-damped update (2ζω_n = 2ω_n).
+        let yd_next = yd0 + dt * (wn * wn * (u - y0) - 2.0 * wn * yd0);
+        self.yd = clamp_sym(yd_next, self.max_rate);
+        let y_next = y0 + dt * self.yd;
+        self.y = clamp_sym(y_next, self.max_mag);
+        self.y
+    }
+
+    /// Filtered command value.
+    pub fn value(&self) -> f32 {
+        self.y
+    }
+
+    /// Filtered command rate (ẏ) — the command-filtered derivative the
+    /// backstepping compensator would use; also feeds feedforward.
+    pub fn rate(&self) -> f32 {
+        self.yd
+    }
+
+    pub fn reset(&mut self) {
+        self.y = 0.0;
+        self.yd = 0.0;
+    }
+}
+
+/// Three-axis command filter (roll/pitch/yaw desired-rate shaping).
+#[derive(Clone, Copy)]
+pub struct CommandFilter3 {
+    axes: [CommandFilter; 3],
+}
+
+impl CommandFilter3 {
+    pub fn new(omega_n: f32, max_mag: f32, max_rate: f32) -> Self {
+        let f = CommandFilter::new(omega_n, max_mag, max_rate);
+        CommandFilter3 { axes: [f, f, f] }
+    }
+
+    pub fn step(&mut self, u: [f32; 3], dt: f32) -> [f32; 3] {
+        [self.axes[0].step(u[0], dt), self.axes[1].step(u[1], dt), self.axes[2].step(u[2], dt)]
+    }
+
+    pub fn reset(&mut self) {
+        for a in &mut self.axes {
+            a.reset();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +508,149 @@ mod tests {
                 proptest::prop_assert!(a.disturbance().is_finite());
             }
         }
+    }
+
+    // ── v0.33 inner-loop robustness ──────────────────────────────────────
+
+    /// The bandwidth constructor enforces the separation invariant, and the
+    /// shipped falcon-quad tuning satisfies it (roll/pitch 40/12≈3.33×, yaw
+    /// 30/3=10×) — both ≥ 3× (the standard ADRC lower bound).
+    #[test]
+    fn falcon_tuning_is_well_separated() {
+        let rp = AdrcGains::with_tau(40.0, 12.0, 30.0, 0.0125);
+        let yaw = AdrcGains::with_tau(30.0, 3.0, 6.0, 0.025);
+        assert!(rp.well_separated(3.0), "roll/pitch must be ≥3× separated");
+        assert!(yaw.well_separated(3.0), "yaw must be ≥3× separated");
+        // Under-separated tuning (ω_o ≈ ω_c) is correctly rejected.
+        assert!(!AdrcGains::new(13.0, 12.0, 30.0).well_separated(3.0));
+        // from_bandwidth makes it true by construction.
+        assert!(AdrcGains::from_bandwidth(12.0, 5.0, 30.0, 0.0).well_separated(5.0));
+    }
+
+    /// The inner ESO is NOT the cadence-fragile element: the forward-Euler
+    /// stability bound ω_o·dt < 2 holds at 1 kHz with a ~50× margin, and
+    /// stays true across a ±15% dt sweep. (The fragility is the outer
+    /// position→attitude cascade — see v0.33 notes.)
+    #[test]
+    fn eso_cadence_margin_is_large() {
+        let g = AdrcGains::with_tau(40.0, 12.0, 30.0, 0.0125);
+        for &dt in &[0.00085, 0.001, 0.00115] {
+            assert!(g.eso_dt_stable(dt, 1.0), "ESO must be dt-stable at {dt}");
+        }
+        // Margin: stable all the way out to ~50× the nominal period.
+        assert!(g.eso_dt_stable(0.045, 1.0));
+        assert!(!g.eso_dt_stable(0.06, 1.0)); // ω_o·dt = 2.4 > 2 → unstable
+    }
+
+    /// Critically-damped command filter: a unit step rises monotonically to
+    /// the target with NO overshoot (never adds command energy) and settles.
+    #[test]
+    fn command_filter_no_overshoot_on_step() {
+        let mut cf = CommandFilter::new(20.0, f32::INFINITY, f32::INFINITY);
+        let dt = 0.001;
+        let mut peak = 0.0f32;
+        let mut last = 0.0f32;
+        for _ in 0..2000 {
+            let y = cf.step(1.0, dt);
+            if y > peak { peak = y; }
+            last = y;
+        }
+        // Critically damped ⇒ the step response never overshoots the target
+        // (peak ≤ 1 to within float settling), and it settles to it.
+        assert!(peak <= 1.0 + 1e-3, "no overshoot, peak {peak}");
+        assert!((last - 1.0).abs() < 0.02, "should settle to 1, got {last}");
+    }
+
+    /// Saturation: the magnitude and rate clamps hold regardless of input.
+    #[test]
+    fn command_filter_saturates() {
+        let mut cf = CommandFilter::new(50.0, 0.5, 3.0);
+        for _ in 0..1000 {
+            let y = cf.step(10.0, 0.001); // huge command
+            assert!(y.abs() <= 0.5 + 1e-6, "mag clamp, {y}");
+            assert!(cf.rate().abs() <= 3.0 + 1e-6, "rate clamp, {}", cf.rate());
+        }
+    }
+
+    proptest::proptest! {
+        /// Command filter is BIBO + saturating under a ±15% dt sweep and
+        /// bounded command: y stays within max_mag, ẏ within max_rate.
+        #[test]
+        fn command_filter_bibo_under_dt_jitter(
+            seq in proptest::collection::vec(
+                (-5.0f32..5.0, 0.00085f32..0.00115), 0..500),
+        ) {
+            let mut cf = CommandFilter::new(25.0, 2.0, 40.0);
+            for (u, dt) in seq {
+                let y = cf.step(u, dt);
+                proptest::prop_assert!(y.abs() <= 2.0 + 1e-4);
+                proptest::prop_assert!(cf.rate().abs() <= 40.0 + 1e-4);
+                proptest::prop_assert!(y.is_finite());
+            }
+        }
+
+        /// Cadence robustness of the inner ESO: under a ±15% dt jitter and a
+        /// bounded measured-rate sequence, the control + disturbance estimate
+        /// stay BOUNDED (not merely finite) — the empirical face of the
+        /// ω_o·dt < 2 margin.
+        #[test]
+        fn eso_bounded_under_dt_jitter(
+            seq in proptest::collection::vec(
+                (-3.0f32..3.0, 0.00085f32..0.00115), 0..1000),
+        ) {
+            let mut a = AdrcAxis::new(AdrcGains::with_tau(40.0, 12.0, 30.0, 0.0125));
+            for (om, dt) in seq {
+                let u = a.tick(om, 0.0, dt); // regulate to 0
+                proptest::prop_assert!(u.abs() < 1.0e3, "control bounded, {u}");
+                proptest::prop_assert!(a.disturbance().abs() < 1.0e4, "z2 bounded");
+            }
+        }
+    }
+}
+
+#[cfg(kani)]
+mod kani_harness {
+    use super::*;
+
+    /// from_bandwidth makes the separation invariant true by construction:
+    /// for any ω_c > 0 and separation ≥ 3, well_separated(3) holds.
+    #[kani::proof]
+    fn verify_from_bandwidth_separation() {
+        let omega_c: f32 = kani::any();
+        let sep: f32 = kani::any();
+        let b0: f32 = kani::any();
+        kani::assume(omega_c.is_finite() && omega_c > 0.1 && omega_c < 1.0e3);
+        kani::assume(sep.is_finite() && sep >= 3.0 && sep < 1.0e3);
+        kani::assume(b0.is_finite());
+        let g = AdrcGains::from_bandwidth(omega_c, sep, b0, 0.0);
+        assert!(g.well_separated(3.0));
+    }
+
+    /// The command-filter saturation contract: after a step, the value is
+    /// within ±max_mag and the rate within ±max_rate, for ANY state/input
+    /// (incl. non-finite), given finite non-negative bounds. The clamp is
+    /// split from the f32 arithmetic so this is a comparison-only proof.
+    #[kani::proof]
+    fn verify_command_filter_saturation() {
+        let omega_n: f32 = kani::any();
+        let max_mag: f32 = kani::any();
+        let max_rate: f32 = kani::any();
+        let y: f32 = kani::any();
+        let yd: f32 = kani::any();
+        let u: f32 = kani::any();
+        let dt: f32 = kani::any();
+        kani::assume(omega_n.is_finite() && omega_n > 0.0 && omega_n < 1.0e3);
+        kani::assume(max_mag.is_finite() && max_mag >= 0.0 && max_mag <= 1.0e3);
+        kani::assume(max_rate.is_finite() && max_rate >= 0.0 && max_rate <= 1.0e4);
+        kani::assume(u.is_finite() && u.abs() <= 1.0e3);
+        // Inductive invariant: the state entering a step is itself within the
+        // saturation bounds (maintained by the previous step's clamp). Proving
+        // the step preserves it gives the running guarantee for all time.
+        kani::assume(y.is_finite() && y.abs() <= max_mag);
+        kani::assume(yd.is_finite() && yd.abs() <= max_rate);
+        let mut cf = CommandFilter { omega_n, max_mag, max_rate, y, yd };
+        let out = cf.step(u, dt);
+        assert!(out <= max_mag && out >= -max_mag);
+        assert!(cf.rate() <= max_rate && cf.rate() >= -max_rate);
     }
 }

@@ -1,0 +1,45 @@
+artifacts:
+  - id: SWREQ-FALCON-ADRC-P05
+    type: sw-req
+    title: "ADRC-P05 — inner-loop cadence robustness: the ESO is well-separated and discrete-stable with large margin"
+    status: implemented
+    description: >
+      The inner ADRC rate loop shall be tuned for robustness, not marginal
+      stability:
+
+      (a) Timescale separation — the observer bandwidth shall exceed the
+          controller bandwidth by the standard ADRC ratio: ω_o ≥ 3·ω_c
+          (Gao 2003 bandwidth parameterization). An under-separated ESO
+          (ω_o ≈ ω_c) is the classic marginal tuning and shall be rejected.
+
+      (b) Forward-Euler discrete stability with margin — the 2nd-order ESO
+          (continuous double pole at −ω_o, discrete pole 1−ω_o·dt) shall
+          satisfy ω_o·dt < 2 at the operating cadence, with the shipped
+          tuning leaving a large margin (ω_o=40, dt=1 ms ⇒ ω_o·dt=0.04, a
+          ~50× margin).
+
+      Consequence (localization): because (b) holds with ~50× margin, the
+      inner loop is NOT the cadence-fragile element of the cascade — a ±15%
+      dt jitter leaves its state bounded. The control-margin fragility lives
+      in the OUTER position→attitude cascade (position-loop gains +
+      estimator under load), which this requirement does not cover.
+
+      A 2nd-order critically-damped command filter (Farrell command-filtered
+      backstepping) is provided as a verified, OPT-IN primitive for shaping
+      the outer→inner command; it is default-OFF because filtering ω_d was
+      falsified in flight (it degrades tracking — see FV-FALCON-ADRC-002).
+    tags: [falcon, adrc, inner-loop, robustness, bandwidth-separation, v0.33]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Kani: from_bandwidth(ω_c, sep≥3) ⇒ well_separated(3) for all ω_c>0;
+        the command filter's magnitude/rate saturation is preserved by each
+        step (inductive). Unit: the shipped falcon-quad tuning satisfies
+        well_separated(3) (roll/pitch 3.33×, yaw 10×) and eso_dt_stable at
+        ±15% of 1 ms; the command filter is critically damped (no step
+        overshoot). proptest: ESO state stays bounded and the command filter
+        stays within saturation under a ±15% dt jitter.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002

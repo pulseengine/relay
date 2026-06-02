@@ -544,6 +544,19 @@ fn run_geo_cascade(
     let geo = GeoAtt::new(cfg.to_geo_gains());
     let mut adrc = cfg.to_adrc();
     let use_adrc = cfg.pos.use_adrc;
+    // v0.33: command filter on the desired body-rate (Farrell command-
+    // filtered backstepping). Hypothesis: bounding the outer→inner command
+    // bandwidth enforces cascade timescale separation and tames the margin.
+    // FALSIFIED IN FLIGHT: filtering ω_d (even roll/pitch only, ω_n=25 rad/s)
+    // DEGRADED tracking ~10× (2.3 m → 24 m, ANEES 10 → 106) under identical
+    // conditions — the cascade needs PROMPT rate tracking, so the added
+    // command-path lag delays the attitude correction the position loop relies
+    // on. The inner loop is already responsive + proven cadence-robust (50×
+    // margin), so command bandwidth is the wrong lever. Kept as a verified,
+    // OPT-IN primitive (CMD_FILTER=1); default OFF. The real fragility is the
+    // outer position-loop gains + estimator under load (a later version).
+    let cmd_filter_on = std::env::var("CMD_FILTER").is_ok();
+    let mut cmd_filter = relay_adrc::CommandFilter3::new(25.0, 30.0, 800.0);
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
     let hover_thrust = cfg.pos.hover_thrust;
@@ -721,8 +734,16 @@ fn run_geo_cascade(
         let tilt = body_tilt_rad(imu_sample.accel_body);
         let arm = seq.tick(tilt, true);
         let torque = if arm.torque_authority {
+            // Filter ROLL/PITCH desired-rate only; leave YAW (axis 2)
+            // unfiltered — the heading-tracking yaw rate must not lag.
+            let mut omega_d_cmd = omega_d_held;
+            if cmd_filter_on {
+                let f = cmd_filter.step(omega_d_held, dt);
+                omega_d_cmd[0] = f[0];
+                omega_d_cmd[1] = f[1];
+            }
             let m = if use_adrc {
-                adrc.tick(gyro_f, omega_d_held, dt)
+                adrc.tick(gyro_f, omega_d_cmd, dt)
             } else {
                 geo.tick(est.q, gyro_f, a_cmd_held, yaw_d)
             };
@@ -730,6 +751,7 @@ fn run_geo_cascade(
             [m[0] * torque_scale, m[1] * torque_scale, yaw_t]
         } else {
             adrc.reset();
+            cmd_filter.reset();
             [0.0_f32; 3]
         };
         let floor = cfg.pos.mixer_floor;
