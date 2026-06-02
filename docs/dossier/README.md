@@ -7,6 +7,23 @@ falcon evidence (rivet artifact, Verus / Kani / miri / witness
 property, test, build target) that supports it — or to an explicit
 **GAP** entry naming what's still missing.
 
+## v1.0.0 — what this dossier certifies (honest boundary)
+
+`falcon-v1.0.0` is the **SITL-complete** verified flight stack (the
+v0.21 → v0.39 arc): every cascade layer — IEKF estimation, geometric
+SE(3) + ADRC control, a full-state-Lyapunov-backed simplex shield,
+airframe-agnostic allocation, spoof/fault FDI — pairs an algorithm
+with a mechanical gate (Kani, two kernel-checked Lean Lyapunov proofs
+with **0 `sorry`/`axiom`**, proptest, rivet traceability at 100%). A
+clean-room sweep of 13 headline claims confirmed it independently.
+
+**It is verified in Gazebo SITL + Lean/Kani — NOT on hardware/HIL.**
+The dossier therefore certifies a *building block* with the
+traceability + attestation a regulated programme needs to **start** a
+hardware campaign — the GAP entries name the HIL/hardware objectives
+that a shippable product still owes. Five falsifications are published
+in the CHANGELOG (wrong predictions are evidence too).
+
 | Domain                          | Status        | File                                            |
 |---------------------------------|---------------|-------------------------------------------------|
 | DO-178C DAL-A (avionics)        | v0.12 scaffold | [DO-178C-DAL-A-mapping.md](DO-178C-DAL-A-mapping.md) |
