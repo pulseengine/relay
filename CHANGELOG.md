@@ -15,6 +15,35 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v0.36.0] — 2026-06-02
+
+A **falsification release** (the methodology values these): the setpoint-side
+reference governor was meant to tame aggressive missions; real-gz flight shows
+it backfires — and that v0.35 already made the aggressive envelope good.
+
+### Added
+
+- **`relay-traj::RefGovernor`** — a verified "virtual-time" reference
+  governor: sample a trajectory at a governed time `s` whose advance
+  `ṡ = g·dt` is gated by the tracking error (`g = 1` on-track → `g_min` once
+  the error exceeds a band), bounded `[g_min, 1]`. **Kani**
+  `verify_gate_factor_bounded` SUCCESSFUL (the gate ∈ [g_min, 1] for any
+  input; clamp split from the division). 9 tests + proptest: monotone,
+  bounded-rate advance.
+
+### Falsified (published — the result)
+
+- **Wiring the governor into the cascade DIVERGES it.** Real-gz A/B at
+  leg-time 3.0 s (1.67× nominal): governor **OFF = 3.35 m, ANEES 3.97
+  CONSISTENT**; governor **ON = 394 m, ANEES 114 OVER-CONFIDENT**. The
+  error→clock→setpoint feedback coupling induces a limit cycle — the same
+  failure class as the v0.33 ω_d command filter. The governor ships as a
+  verified primitive but **default-OFF** (opt-in `REF_GOV=1`).
+- **Positive finding:** the governor is *unnecessary* — v0.35's adaptive
+  process noise already flies the 1.67×-nominal mission **consistently with
+  no governor** (3.35 m). The genuinely-infeasible regime (leg 2.0 s)
+  diverges with or without it (control-limited, not reference-limited).
+
 ## [falcon-v0.35.0] — 2026-06-02
 
 The mission is now **crisp**. v0.34 shipped a *recognizable* waypoint

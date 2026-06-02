@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-FALCON-TRAJ-P02
+    type: sw-req
+    title: "TRAJ-P02 — reference governor: a verified virtual-time gate (FALSIFIED as a flight default; primitive only)"
+    status: implemented
+    description: >
+      A setpoint-side reference governor shall be available that samples a
+      trajectory at a governed virtual time s whose advance ṡ = g·dt is
+      gated by the tracking error: g = 1 on-track, ramping to g_min once the
+      error exceeds a band, bounded to [g_min, 1] so s is monotone and never
+      advances faster than nominal (nor, with g_min > 0, deadlocks). The gate
+      and the advance shall be total (non-finite inputs fail safe to the
+      slowest advance).
+
+      HONEST SCOPE (the falsification is the result): the hypothesis that
+      governing the reference clock tames aggressive missions was FALSIFIED in
+      real-gz flight. The error→clock→setpoint feedback coupling induces a
+      limit cycle that DIVERGES the cascade (leg-time 3.0 s: governor OFF =
+      3.35 m CONSISTENT, governor ON = 394 m OVER-CONFIDENT). It is also
+      unnecessary — v0.35 adaptive process noise already flies the 1.67×-
+      nominal mission consistently with no governor. The governor therefore
+      ships ONLY as a verified, default-OFF primitive (opt-in REF_GOV=1); the
+      flight path does not use it.
+    tags: [falcon, trajectory, reference-governor, falsification, kani, v0.36]
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Kani: the error gate is within [g_min, 1] for ANY error (incl.
+        non-finite) and any band given g_min ∈ [0,1] (clamp split from the
+        division). Unit/proptest: the gate ramps monotonically and is bounded;
+        advance is monotone with rate ≤ dt. Flight (the falsification): a
+        real-gz A/B shows the governor DIVERGES an aggressive mission that
+        flies consistently without it — so it stays default-OFF.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004

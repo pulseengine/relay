@@ -187,9 +187,112 @@ impl Segment3 {
     }
 }
 
+/// Clamp `x` to `[lo, 1]` (lo assumed in `[0, 1]`); total over non-finite.
+/// Split from the gate arithmetic so the governor's bound is a
+/// comparison-only proof.
+#[inline]
+fn clamp_to(x: f32, lo: f32) -> f32 {
+    let lo = if (0.0..=1.0).contains(&lo) { lo } else { 0.0 };
+    if !x.is_finite() || x < lo {
+        lo
+    } else if x > 1.0 {
+        1.0
+    } else {
+        x
+    }
+}
+
+/// Error-gate factor g ∈ [g_min, 1]: full speed (1) when the tracking error
+/// is ≤ `lo`, slowest (`g_min`) when ≥ `hi`, linear between. Total: a
+/// non-finite error or a degenerate band fails safe to `g_min` (slow down).
+fn gate_factor(err: f32, lo: f32, hi: f32, g_min: f32) -> f32 {
+    let g_min = clamp_to(g_min, 0.0); // → [0, 1]
+    if !err.is_finite() || !lo.is_finite() || !hi.is_finite() || hi <= lo {
+        return g_min;
+    }
+    let g = if err <= lo {
+        1.0
+    } else if err >= hi {
+        g_min
+    } else {
+        let frac = (err - lo) / (hi - lo); // ∈ (0, 1)
+        1.0 - frac * (1.0 - g_min)
+    };
+    clamp_to(g, g_min)
+}
+
+/// Setpoint-side reference governor (v0.36 — "virtual-time" / path governor).
+///
+/// A cascaded controller diverges when the outer loop's REFERENCE outruns
+/// what the inner loop can track. The fix that does NOT lag the feedback
+/// (unlike command-filtering ω_d, falsified in v0.33): slow the *reference
+/// clock* when the vehicle falls behind. The trajectory is sampled at a
+/// governed virtual time `s` whose advance `ṡ = g·dt` is gated by the
+/// tracking error — `g = 1` on-track, ramping to `g_min` once the error
+/// exceeds a band — so the reference stays within reach. An aggressive
+/// nominal trajectory then degrades GRACEFULLY (slows) instead of diverging.
+#[derive(Clone, Copy)]
+pub struct RefGovernor {
+    s: f32,
+    err_lo: f32,
+    err_hi: f32,
+    g_min: f32,
+}
+
+impl RefGovernor {
+    /// `err_lo`/`err_hi`: the tracking-error band (m) over which the advance
+    /// ramps 1 → `g_min`. `g_min` ∈ (0, 1]: the slowest advance fraction
+    /// (> 0 so the mission never permanently deadlocks).
+    pub fn new(err_lo: f32, err_hi: f32, g_min: f32) -> Self {
+        RefGovernor { s: 0.0, err_lo, err_hi, g_min }
+    }
+
+    /// The error-gate factor g ∈ [g_min, 1] for a tracking error.
+    #[inline]
+    pub fn gate(&self, track_err: f32) -> f32 {
+        gate_factor(track_err, self.err_lo, self.err_hi, self.g_min)
+    }
+
+    /// Advance the governed virtual time by `dt` scaled by the error gate;
+    /// returns the new time at which to sample the trajectory. Monotone
+    /// non-decreasing, with `g_min·dt ≤ ṡ ≤ dt`.
+    pub fn advance(&mut self, track_err: f32, dt: f32) -> f32 {
+        let dt = if dt.is_finite() && dt > 0.0 { dt } else { 0.0 };
+        self.s += self.gate(track_err) * dt;
+        self.s
+    }
+
+    /// Current governed virtual time.
+    pub fn time(&self) -> f32 {
+        self.s
+    }
+
+    pub fn reset(&mut self) {
+        self.s = 0.0;
+    }
+}
+
 #[cfg(kani)]
 mod kani_proofs {
     use super::*;
+
+    /// The governor's error gate is always within [g_min, 1] for ANY error
+    /// (incl. non-finite) and any band, given g_min ∈ [0,1] — so the
+    /// reference advances monotonically and never faster than nominal nor
+    /// (with g_min>0) deadlocks. The clamp is split from the division so this
+    /// is a comparison-only proof.
+    #[kani::proof]
+    fn verify_gate_factor_bounded() {
+        let err: f32 = kani::any();
+        let lo: f32 = kani::any();
+        let hi: f32 = kani::any();
+        let g_min: f32 = kani::any();
+        kani::assume(lo.is_finite() && libm::fabsf(lo) <= 1e3);
+        kani::assume(hi.is_finite() && libm::fabsf(hi) <= 1e3);
+        kani::assume(g_min.is_finite() && g_min >= 0.0 && g_min <= 1.0);
+        let g = gate_factor(err, lo, hi, g_min);
+        assert!(g >= g_min && g <= 1.0);
+    }
 
     /// SOUNDNESS of the jerk bound: for ANY quintic (arbitrary finite
     /// coefficients + duration) and ANY `t ∈ [0, T]`, `|j(t)| ≤
@@ -264,6 +367,76 @@ mod tests {
             assert!(q.eval(t).j.abs() <= peak + 1e-3, "jerk exceeds peak at {t}");
         }
         assert!(peak > 0.0 && peak.is_finite());
+    }
+
+    // ── v0.36 reference governor ─────────────────────────────────────────
+
+    /// The error gate: full speed on-track, slowest off-track, monotone
+    /// non-increasing in the error, and bounded [g_min, 1].
+    #[test]
+    fn gate_factor_ramps_and_bounds() {
+        let (lo, hi, gmin) = (0.3, 1.5, 0.05);
+        assert_eq!(gate_factor(0.0, lo, hi, gmin), 1.0); // on-track
+        assert_eq!(gate_factor(0.3, lo, hi, gmin), 1.0); // at lo
+        assert_eq!(gate_factor(2.0, lo, hi, gmin), gmin); // past hi
+        let mid = gate_factor(0.9, lo, hi, gmin); // halfway
+        assert!((mid - 0.525).abs() < 1e-3, "mid ramp = {mid}");
+        // monotone non-increasing in error
+        let mut last = 1.0;
+        for k in 0..=20 {
+            let e = k as f32 * 0.1;
+            let g = gate_factor(e, lo, hi, gmin);
+            assert!(g <= last + 1e-6 && g >= gmin - 1e-6, "g={g} at e={e}");
+            last = g;
+        }
+        // fail-safe: non-finite error / degenerate band ⇒ slowest
+        assert_eq!(gate_factor(f32::NAN, lo, hi, gmin), gmin);
+        assert_eq!(gate_factor(0.0, 1.0, 0.5, gmin), gmin); // hi ≤ lo
+    }
+
+    /// Advance is monotone with a bounded rate g_min·dt ≤ ṡ ≤ dt, and slows
+    /// the reference clock when the vehicle falls behind.
+    #[test]
+    fn governor_slows_reference_when_behind() {
+        let dt = 0.02;
+        // On-track: advances at full rate (≈ wall time).
+        let mut on = RefGovernor::new(0.3, 1.5, 0.05);
+        for _ in 0..500 {
+            on.advance(0.0, dt);
+        }
+        assert!((on.time() - 10.0).abs() < 1e-3, "on-track ≈ wall time, {}", on.time());
+        // Persistently behind (error past hi): advances at g_min rate only.
+        let mut behind = RefGovernor::new(0.3, 1.5, 0.05);
+        let mut prev = 0.0;
+        for _ in 0..500 {
+            let s = behind.advance(3.0, dt);
+            assert!(s >= prev, "monotone"); // never goes backward
+            assert!(s - prev <= dt + 1e-6, "rate ≤ dt"); // never faster than nominal
+            prev = s;
+        }
+        assert!((behind.time() - 0.05 * 10.0).abs() < 1e-2, "behind ≈ g_min·wall, {}", behind.time());
+        assert!(behind.time() < on.time(), "governed clock lags the wall clock when behind");
+    }
+
+    proptest::proptest! {
+        /// The gate is in [g_min,1] and advance is monotone with rate ≤ dt
+        /// for any error/band/dt sequence.
+        #[test]
+        fn governor_bounded_and_monotone(
+            seq in proptest::collection::vec((-5.0f32..5.0, 0.0f32..0.05), 0..400),
+            gmin in 0.0f32..1.0,
+        ) {
+            let mut gov = RefGovernor::new(0.2, 1.0, gmin);
+            let mut prev = 0.0;
+            for (e, dt) in seq {
+                let g = gov.gate(e);
+                proptest::prop_assert!(g >= gmin - 1e-6 && g <= 1.0 + 1e-6);
+                let s = gov.advance(e, dt);
+                proptest::prop_assert!(s >= prev - 1e-9);
+                proptest::prop_assert!(s - prev <= dt + 1e-6);
+                prev = s;
+            }
+        }
     }
 
     proptest::proptest! {

@@ -25,7 +25,7 @@ use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
 use relay_iekf::{Iekf, Imu as IekfImu, NavState};
 use falcon_config::YawMode;
 use relay_geo::GeoAtt;
-use relay_traj::Segment3;
+use relay_traj::{RefGovernor, Segment3};
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
@@ -474,7 +474,12 @@ fn run_mission(
             [0.0, 0.0, -2.0], // → home
             [0.0, 0.0, -2.0], // settle @ home
         ],
-        leg_time: 5.0,
+        // v0.36 A/B: MISSION_LEG_TIME overrides the per-leg time (lower =
+        // more aggressive, to exercise the reference governor).
+        leg_time: std::env::var("MISSION_LEG_TIME")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5.0),
     };
     run_geo_cascade(physics, duration_s, evidence, Some(&mission))
 }
@@ -565,6 +570,18 @@ fn run_geo_cascade(
     // outer position-loop gains + estimator under load (a later version).
     let cmd_filter_on = std::env::var("CMD_FILTER").is_ok();
     let mut cmd_filter = relay_adrc::CommandFilter3::new(25.0, 30.0, 800.0);
+    // v0.36 reference governor (FALSIFIED IN FLIGHT — default OFF, opt-in via
+    // REF_GOV=1). Hypothesis: sampling the mission at a governed virtual time
+    // that slows when tracking error grows lets an aggressive trajectory
+    // degrade gracefully. Real-gz A/B at leg=3.0 (1.67× nominal): governor OFF
+    // = 3.35 m CONSISTENT; governor ON = 394 m DIVERGED. The error→clock→
+    // setpoint feedback coupling induces a limit cycle (same class as the
+    // v0.33 ω_d command filter). AND it is unnecessary: v0.35 adaptive Q
+    // already flies leg=3.0 consistently with no governor. Kept as a verified
+    // (Kani-proven gate bound) primitive only.
+    let ref_gov_on = mission.is_some() && std::env::var("REF_GOV").is_ok();
+    let mut ref_gov = RefGovernor::new(0.25, 1.0, 0.05);
+    let mut last_pos_d_h = [0.0_f32, 0.0]; // previous horizontal setpoint
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
     let hover_thrust = cfg.pos.hover_thrust;
@@ -700,7 +717,24 @@ fn run_geo_cascade(
             // vel + accel + jerk feedforward), or the fixed hover point when
             // mission = None (then derivatives are 0 ⇒ identical to v0.28).
             let (pos_d, vel_d, acc_d, jerk_d) = match mission {
-                Some(m) => m.sample(t),
+                Some(m) => {
+                    // v0.36: advance the governed virtual time by the gate on
+                    // the PREVIOUS horizontal tracking error, then sample
+                    // there. NO_REF_GOV (ref_gov_on=false) samples at wall t.
+                    let s = if ref_gov_on {
+                        let e = {
+                            let dx = last_pos_d_h[0] - pos_ned[0];
+                            let dy = last_pos_d_h[1] - pos_ned[1];
+                            (dx * dx + dy * dy).sqrt()
+                        };
+                        ref_gov.advance(e, dt_outer)
+                    } else {
+                        t
+                    };
+                    let s = m.sample(s);
+                    last_pos_d_h = [s.0[0], s.0[1]];
+                    s
+                }
                 None => (setpoint_ned, [0.0; 3], [0.0; 3], [0.0; 3]),
             };
             let v_d_raw = (pos_ned[2] - last_pos_d) / dt_outer;
