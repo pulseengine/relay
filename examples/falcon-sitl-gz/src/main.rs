@@ -1918,6 +1918,78 @@ mod tests {
         );
     }
 
+    /// v0.39 — the SAME verified geometric cascade controls a 6-rotor HEXA
+    /// airframe through the whole loop: GeoAtt computes the torque, the
+    /// airframe-agnostic MixerN::hexa_x() allocates it across 6 rotors, the
+    /// rotors produce the achieved wrench (MixerN::achieved_wrench, the plant
+    /// input), and a rigid-body sim integrates it. Starting tilted ~30°, the
+    /// hexa converges to level — substantiating the "build into any drone"
+    /// claim at the closed-loop level (not just the v0.34 allocation algebra).
+    ///
+    /// Honest scope: SITL/analytic (the forward effectiveness shares MixerN's
+    /// geometry); the gz-physics / HIL hexa flight is future work.
+    #[test]
+    fn hexa_cascade_stabilizes_attitude() {
+        use relay_geo::{GeoAtt, GeoGains};
+        use relay_mix_quad::MixerN;
+
+        let ctrl = GeoAtt::new(GeoGains::FALCON_QUAD);
+        let j = GeoGains::FALCON_QUAD.j;
+        let level = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let hexa = MixerN::hexa_x();
+        let hover = 0.35f32; // 6 rotors share the collective ⇒ lower per-rotor
+        const SCALE: f32 = 0.3;
+        let dt = 0.002f32;
+
+        // start tilted: ~28° about x then ~17° about y
+        let (cx, sx) = (0.5f32.cos(), 0.5f32.sin());
+        let (cy, sy) = (0.3f32.cos(), 0.3f32.sin());
+        let rx = [[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]];
+        let ry = [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]];
+        let mut r = {
+            let mut m = [[0.0f32; 3]; 3];
+            for i in 0..3 {
+                for jj in 0..3 {
+                    for k in 0..3 {
+                        m[i][jj] += rx[i][k] * ry[k][jj];
+                    }
+                }
+            }
+            m
+        };
+        let mut omega = [0.0f32; 3];
+        let tilt0 = r[2][2].clamp(-1.0, 1.0).acos();
+        assert!(tilt0 > 0.5, "should start meaningfully tilted: {tilt0} rad");
+
+        for _ in 0..4000u32 {
+            let tq = ctrl.moment(&r, omega, &level);
+            // airframe-agnostic allocation across 6 rotors, then the wrench the
+            // 6 rotors actually produce (the plant input).
+            let motors = hexa.mix(tq, hover);
+            for &m in motors.iter().take(6) {
+                assert!((0.0..=1.0).contains(&m), "hexa motor out of range: {m}");
+            }
+            let w = hexa.achieved_wrench(&motors);
+            let body_t = [w[1] * SCALE, w[2] * SCALE, w[3] * SCALE];
+            let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+            let gyro = [
+                omega[1] * jo[2] - omega[2] * jo[1],
+                omega[2] * jo[0] - omega[0] * jo[2],
+                omega[0] * jo[1] - omega[1] * jo[0],
+            ];
+            for i in 0..3 {
+                omega[i] += dt * (body_t[i] - gyro[i]) / j[i];
+            }
+            r = integ_rot(&r, omega, dt);
+        }
+        let final_tilt = r[2][2].clamp(-1.0, 1.0).acos();
+        // the hexa converges to level under the same verified cascade
+        assert!(
+            final_tilt < 0.1,
+            "hexa attitude must converge to level: {final_tilt} rad (start {tilt0})"
+        );
+    }
+
     /// v0.27 "MISSION" scenario (deterministic, no gz): fly a square
     /// waypoint mission with the FULL v0.27 chain — per-leg Mueller quintic
     /// trajectory (relay-traj), differential-flatness feedforward

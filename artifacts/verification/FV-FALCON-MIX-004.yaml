@@ -1,0 +1,36 @@
+artifacts:
+  - id: FV-FALCON-MIX-004
+    type: sw-verification
+    title: "Airframe-agnostic closed loop — hexa cascade stabilization (SITL) (v0.39)"
+    status: approved
+    description: >
+      Verification of the v0.39 closed-loop "any drone" substantiation:
+
+      1. relay-mix-quad MixerN::achieved_wrench — the forward effectiveness
+         (wrench = Mᵀ·motors), dual of mix. 23 relay-mix-quad tests pass
+         (incl. the existing airframe-agnostic Kani bound + quad equivalence).
+
+      2. falcon-sitl-gz hexa_cascade_stabilizes_attitude (closed-loop, no gz):
+         the SAME geometric cascade (GeoAtt, FALCON_QUAD gains) + the
+         airframe-agnostic MixerN::hexa_x() allocator + achieved_wrench (the
+         plant input) + a rigid-body integrator, starting tilted ~0.5 rad,
+         converges to < 0.1 rad — every hexa rotor command staying in [0,1].
+         The verified controller + the airframe-agnostic allocator compose
+         into a stable closed loop for a 6-rotor airframe.
+
+      Honest scope: SITL/analytic — the forward effectiveness shares MixerN's
+      geometry, and the demonstrated result is attitude convergence in a
+      rigid-body model. The independent-physics gz hexa flight (a 6-rotor SDF +
+      generalizing the [f32;4] motor path to N rotors) and HIL are future. This
+      lifts the "any drone" claim from the v0.34 allocation algebra (Kani
+      bound + quad bit-equivalence + hexa symmetry) to a closed-loop
+      demonstration that the cascade flies a hexa.
+    tags: [verification, falcon, mixer, airframe-agnostic, hexa, closed-loop, v0.39]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p relay-mix-quad"
+        - run: "cargo test -p falcon-sitl-gz hexa_cascade_stabilizes_attitude"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MIX-P10
