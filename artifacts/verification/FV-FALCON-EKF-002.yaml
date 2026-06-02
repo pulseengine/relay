@@ -41,7 +41,7 @@ artifacts:
       steps:
         - run: "cargo test -p relay-iekf"
         - run: "cargo kani -p relay-iekf --harness verify_clamp_factor_bounded"
-        - run: "gz mission A/B: NO_ADAPTIVE_Q vs default, compare iekf-consistency ANEES"
+        - run: "gz sim -s -r worlds/falcon-quad.sdf & cargo run -p falcon-sitl-gz --features gazebo -- --backend=gazebo --scenario=mission --duration=50  # A/B with vs without NO_ADAPTIVE_Q; compare iekf-consistency ANEES (1581 vs ~3)"
     links:
       - type: verifies
         target: SWREQ-FALCON-EKF-P05
