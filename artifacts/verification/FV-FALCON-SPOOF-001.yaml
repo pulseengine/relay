@@ -1,0 +1,45 @@
+artifacts:
+  - id: FV-FALCON-SPOOF-001
+    type: sw-verification
+    title: "Position-fix spoof/fault FDI — Kani gate+CUSUM contracts + deterministic spoof tests + real-gz hold demo (v0.37)"
+    status: approved
+    description: >
+      Verification of the v0.37 position-fix fault/spoof robustness:
+
+      1. Kani (relay-iekf): verify_nis3_total SUCCESSFUL — the NIS helper is
+         non-negative and finite-or-+∞ for any innovation (so a non-finite fix
+         is always rejected). verify_spoof_monitor_no_false_alarm SUCCESSFUL —
+         the spoof CUSUM cannot alarm on the first step when every-axis
+         innovation ≤ the drift slack (no-false-alarm contract), and is total.
+
+      2. Unit (relay-iekf, 26 tests): nis_gate_rejects_jump_state_unchanged
+         (a 50 m jump is gated; the state is bytewise UNCHANGED); nis_gate_
+         passes_honest_fixes (0 of 1000 honest fixes rejected — no false
+         reject); spoof_monitor_catches_walkoff_not_noise (a +0.3 m/step
+         walk-off latches within ~10 steps; zero-mean noise never alarms);
+         spoof_monitor_total (non-finite innovation never trips it).
+
+      3. END-TO-END real-gz (geo-hover, a 3 m/s GPS walk-off injected at 15 s):
+           FDI ON : detected at 15.1 s → updates FROZEN → final 1.27 m,
+                    ANEES 2.90 [CONSISTENT] — the vehicle HOLDS.
+           FDI OFF: not held → final 17.40 m, ANEES 3.98e6 [OVER-CONFIDENT]
+                    — the filter follows the spoof and is walked off.
+         The NIS gate (default χ²₃ 25) caused no nominal-mission regression.
+
+      HONEST SCOPE (recorded): innovation-based FDI catches jumps and
+      walk-offs above the noise floor (rate ≳ 1.5 m/s in noiseless SITL). A
+      slower covert spoof that the tightly-trusted filter follows keeps the
+      innovation below the floor and evades the CUSUM (confirmed: a 0.5 m/s
+      walk-off was NOT detected while the filter was walked 12.5 m). That
+      regime needs an independent cross-check sensor — deferred.
+    tags: [verification, falcon, fdi, gps-spoof, nis, cusum, kani, v0.37]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-iekf"
+        - run: "cargo kani -p relay-iekf --harness verify_nis3_total"
+        - run: "cargo kani -p relay-iekf --harness verify_spoof_monitor_no_false_alarm"
+        - run: "gz sim -s -r worlds/falcon-quad.sdf & SPOOF_WALKOFF=3.0 cargo run -p falcon-sitl-gz --features gazebo -- --backend=gazebo --scenario=geo-hover  # FDI on vs FDI_OFF=1"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SPOOF-P01

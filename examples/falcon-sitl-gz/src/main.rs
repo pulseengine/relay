@@ -582,6 +582,20 @@ fn run_geo_cascade(
     let ref_gov_on = mission.is_some() && std::env::var("REF_GOV").is_ok();
     let mut ref_gov = RefGovernor::new(0.25, 1.0, 0.05);
     let mut last_pos_d_h = [0.0_f32, 0.0]; // previous horizontal setpoint
+    // v0.37 spoof/fault robustness: the NIS gate inside update_position
+    // rejects outlier fixes; this CUSUM monitor catches a slow walk-off and,
+    // on detection, the cascade FREEZES position updates (dead-reckon) so the
+    // spoofer cannot steer the vehicle. FDI_OFF disables (A/B); SPOOF_WALKOFF
+    // = bias rate (m/s) injects a growing position-measurement bias after 15 s.
+    let fdi_on = std::env::var("FDI_OFF").is_err();
+    let spoof_rate: f32 = std::env::var("SPOOF_WALKOFF").ok().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    // drift slack 0.03 m ≈ the noiseless-SITL innovation floor; detects a
+    // walk-off whose per-fix innovation exceeds it (rate ≳ 1.5 m/s at the
+    // ~50 Hz outer rate). A slower covert spoof that the filter follows keeps
+    // the innovation below the floor — that regime needs an independent
+    // cross-check sensor (deferred), an honest limitation of innovation FDI.
+    let mut spoof_mon = relay_iekf::SpoofMonitor::new(2.0, 0.03);
+    let mut spoof_detected_at = f32::NAN;
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
     let hover_thrust = cfg.pos.hover_thrust;
@@ -677,7 +691,24 @@ fn run_geo_cascade(
                     nees_max = nees;
                 }
             }
-            iekf.update_position(pos_ned, cfg.iekf.pos_var);
+            // v0.37: optionally inject a slow walk-off spoof into the fix,
+            // run the monitor on the innovation, and FREEZE updates once a
+            // spoof is declared (dead-reckon) so it cannot steer us.
+            let mut z = pos_ned;
+            if spoof_rate > 0.0 && t > 15.0 {
+                z[0] += spoof_rate * (t - 15.0);
+            }
+            let pe = iekf.state().p;
+            let innov = [z[0] - pe[0], z[1] - pe[1], z[2] - pe[2]];
+            let spoof = spoof_mon.update(innov);
+            if fdi_on && spoof {
+                if spoof_detected_at.is_nan() {
+                    spoof_detected_at = t;
+                }
+                // hold: do not trust the (spoofed) fix — dead-reckon on IMU.
+            } else {
+                iekf.update_position(z, cfg.iekf.pos_var); // NIS gate inside
+            }
             // v0.22 — heading from the REAL magnetometer (no truth cheat).
             // `heading_ned` (gz truth) is read ONLY for the validation
             // diagnostic, never fed to the estimator.
@@ -904,6 +935,25 @@ fn run_geo_cascade(
         "  iekf-consistency: position ANEES={:.2} (target≈3.0, dof=3) max={:.1} n={} [{}]",
         anees, nees_max, nees_n, nees_status,
     );
+    // v0.37 spoof/fault FDI report.
+    if spoof_rate > 0.0 || spoof_mon.spoofed() {
+        let status = if spoof_mon.spoofed() {
+            if spoof_detected_at.is_finite() {
+                "DETECTED+HELD"
+            } else {
+                "DETECTED"
+            }
+        } else {
+            "clear"
+        };
+        println!(
+            "  spoof-fdi: walkoff_rate={:.2}m/s detected_at={:.1}s fdi={} [{}]",
+            spoof_rate,
+            spoof_detected_at,
+            if fdi_on { "on" } else { "off" },
+            status,
+        );
+    }
     // v0.22 — closed-loop heading accuracy: the magnetometer-driven
     // estimate vs the gz-truth heading (truth used for SCORING only, never
     // fed to the estimator). Frame-correctness was confirmed open-loop at

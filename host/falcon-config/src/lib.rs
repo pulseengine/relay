@@ -40,6 +40,8 @@ pub struct IekfCfg {
     pub q_motion_accel: f32,
     /// Upper bound on the inflation factor (≥ 1).
     pub q_motion_max: f32,
+    /// v0.37 position-fix χ²₃ validation-gate threshold (0 disables).
+    pub pos_gate_nis: f32,
 }
 
 /// Geometric SE(3) attitude tuning. Mirrors `relay_geo::GeoGains`.
@@ -158,6 +160,7 @@ impl FalconConfig {
             q_motion_gyro: self.iekf.q_motion_gyro,
             q_motion_accel: self.iekf.q_motion_accel,
             q_motion_max: self.iekf.q_motion_max,
+            pos_gate_nis: self.iekf.pos_gate_nis,
         }
     }
 
@@ -192,6 +195,7 @@ impl Default for FalconConfig {
                 q_motion_gyro: 0.5,
                 q_motion_accel: 0.25,
                 q_motion_max: 50.0,
+                pos_gate_nis: 25.0,
                 grav_var: 0.5,
             },
             geo: GeoCfg {

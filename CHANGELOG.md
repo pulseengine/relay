@@ -15,6 +15,43 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v0.37.0] — 2026-06-02
+
+Position-fix fault / GPS-spoof robustness — the estimator can no longer be
+walked off course by a bad or hostile position measurement.
+
+### Added
+
+- **NIS validation gate** in `relay-iekf::update_position` — reject a fix
+  whose normalized innovation squared `d² = rᵀS⁻¹r` exceeds a χ²₃ threshold
+  (jump / outlier / gross-bias spoof); on reject the state + covariance are
+  **unchanged**. Reuses the already-computed `S⁻¹` (no new inversion). Total
+  (non-finite fix ⇒ +∞ ⇒ rejected). Default χ²₃ 25 (no nominal regression).
+- **`relay-iekf::SpoofMonitor`** — a two-sided per-axis CUSUM (Page) on the
+  position innovation that latches on a sustained directional walk-off (the
+  covert spoof that keeps each fix inside the NIS gate). On declaration the
+  cascade **freezes** position updates (dead-reckon) so the spoofer can't
+  steer the vehicle.
+
+### Verified
+
+- **Kani**: `verify_nis3_total` SUCCESSFUL (non-finite fix ⇒ +∞ ⇒ rejected);
+  `verify_spoof_monitor_no_false_alarm` SUCCESSFUL (no alarm below the drift
+  slack; latching; total). 26 relay-iekf tests incl. *50 m jump gated with
+  state unchanged*, *0/1000 honest fixes rejected*, *walk-off latches in ~10
+  steps, no false alarm on noise*.
+- **Real-gz** (geo-hover, 3 m/s GPS walk-off at 15 s): FDI **on** → detected
+  @15.1 s → held: **1.27 m, ANEES 2.90 CONSISTENT**; FDI **off** → walked:
+  **17.4 m, ANEES 3.9e6 OVER-CONFIDENT**.
+
+### Honest scope
+
+Innovation-based FDI catches jumps + walk-offs above the noise floor (rate
+≳ 1.5 m/s in noiseless SITL). A slower *covert* spoof the tightly-trusted
+filter simply follows keeps the innovation below the floor and evades the
+CUSUM (confirmed: a 0.5 m/s walk-off was not detected). That regime needs an
+**independent cross-check sensor** (baro/flow) — deferred. SITL, not HIL.
+
 ## [falcon-v0.36.0] — 2026-06-02
 
 A **falsification release** (the methodology values these): the setpoint-side
