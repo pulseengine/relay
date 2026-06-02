@@ -15,6 +15,49 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v0.35.0] — 2026-06-02
+
+The mission is now **crisp**. v0.34 shipped a *recognizable* waypoint
+mission; v0.35 fixes its root cause and delivers sub-metre, NEES-consistent
+tracking.
+
+The v0.33 analysis localized the mission fragility to the **estimator**:
+under motion/load the fixed-process-noise IEKF grows over-confident
+(position ANEES 50–1581), feeding a wrong state into the controller →
+divergence. Per a state-of-the-art research memo (Mehra adaptive filtering
+beat anti-windup / reference-governor / nested-saturation because the NEES
+monitor is the ready oracle), the fix is **motion-adaptive process noise**.
+
+### Added
+
+- **`relay-iekf` adaptive process noise** — `propagate` inflates Q by the
+  motion magnitude: `q_gyro·(1 + q_motion_gyro·‖ω‖²)` and
+  `q_accel·(1 + q_motion_accel·‖a_ned‖²)`, each bounded to `[1, q_motion_max]`
+  by `clamp_factor` (split from the arithmetic for a comparison-only proof).
+  At rest (ω≈0, a≈0) the factor is exactly 1 — **hover is provably
+  unchanged**. The propagation-side twin of the verified measurement-variance
+  inflation. `q_motion_* = 0` reverts to legacy fixed Q.
+- Bench A/B toggle `NO_ADAPTIVE_Q`.
+
+### Verified
+
+- **Kani** `verify_clamp_factor_bounded` SUCCESSFUL — the inflation factor is
+  in `[1, max]` for any input (covariance can never shrink or explode).
+- Unit (22 tests): `at_rest_inflation_is_identity` (hover unchanged),
+  `motion_adaptive_q_adds_conservatism_under_motion` (NEES strictly down
+  under motion, bounded), `clamp_factor_is_bounded`.
+- **Decisive real-gz mission A/B** (the metric that diagnosed the failure is
+  the gate): fixed Q → ANEES **1581 OVER-CONFIDENT, 35.5 m diverged**;
+  adaptive Q → ANEES **0.87–2.92 CONSISTENT, 0.48–0.87 m**, reproducibly.
+
+### Honest scope
+
+In *clean synthetic* motion the fixed-Q filter is already conservative
+(NEES ≈ 1.3, not over-confident) — the over-confidence is a real-gz coupling,
+so the synthetic test certifies the *mechanism* and the gz ANEES A/B
+certifies the *fix*. Still SITL (Gazebo), not hardware/HIL. The setpoint-side
+reference governor (research runner-up) is deferred to a later version.
+
 ## [falcon-v0.34.0] — 2026-06-02
 
 The verified autonomous-flight stack: a formally-gated IEKF → geometric
