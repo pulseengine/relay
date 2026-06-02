@@ -1,0 +1,41 @@
+artifacts:
+  - id: FV-FALCON-LYAP-001
+    type: sw-verification
+    title: "Full-state Lyapunov — kernel-checked Lean position+combined proof + runnable certificate (v0.38)"
+    status: approved
+    description: >
+      Verification of the v0.38 full-state Lyapunov certificate:
+
+      1. Lean (proofs/lean/PositionLyapunov.lean) — KERNEL-CHECKED, 0
+         sorry/axiom (bazel test //proofs/lean:position_lyapunov_test PASSED):
+           vdot_cancellation_pos   — V̇_pos collapses to −k_v‖e_v‖² (ring).
+           vdot_nonpos_pos         — −k_v‖e_v‖² ≤ 0 for k_v ≥ 0.
+           vdot_zero_iff_ev_zero   — the LaSalle precondition (V̇_pos=0 ⇔ e_v=0).
+           lyapunov_vdot_nonpos_pos — assembled V̇_pos ≤ 0.
+           V_pos_nonneg            — V_pos ≥ 0 for m,k_x ≥ 0.
+           fullstate_vdot_nonpos   — the COMBINED V̇ = −k_Ω‖ω‖²−k_v‖e_v‖² ≤ 0.
+
+      2. relay-geo position_lyapunov_decrease_certificate (runnable companion,
+         12 tests pass): over a grid of (e_x, e_v) the closed-loop V̇_pos
+         equals −k_v‖e_v‖² to f32 tolerance and is ≤ 0, and the combined
+         full-state V̇ ≤ 0 — the same cancellation the Lean ring identity
+         proves.
+
+      This closes the v0.28 simplex-shield scope gap: the recoverable-set
+      guarantee, previously rotational-only (the v0.23 attitude certificate),
+      now rests on a full-state non-increasing Lyapunov, so the certified safe
+      set covers position too.
+
+      Honest scope: the dynamic "trajectory ⇒ converges" step is the classical
+      Lee 2010 Prop. 2 result, cited and deferred pending Mathlib's Lyapunov/
+      LaSalle API (same caveat as the v0.23 attitude proof). The position
+      subsystem is globally stable so it adds no new safe-set boundary.
+    tags: [verification, falcon, lyapunov, full-state, lean, v0.38]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "bazel test //proofs/lean:position_lyapunov_test --vendor_dir=vendor/bazel"
+        - run: "cargo test -p relay-geo position_lyapunov_decrease_certificate"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LYAP-P01
