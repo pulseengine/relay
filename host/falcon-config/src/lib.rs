@@ -34,6 +34,12 @@ pub struct IekfCfg {
     pub yaw_var: f32,
     /// Gravity/accel-tilt base measurement variance.
     pub grav_var: f32,
+    /// v0.35 adaptive process noise: attitude-Q motion gain (per (rad/s)²).
+    pub q_motion_gyro: f32,
+    /// Velocity-Q motion gain (per (m/s²)²).
+    pub q_motion_accel: f32,
+    /// Upper bound on the inflation factor (≥ 1).
+    pub q_motion_max: f32,
 }
 
 /// Geometric SE(3) attitude tuning. Mirrors `relay_geo::GeoGains`.
@@ -149,6 +155,9 @@ impl FalconConfig {
             q_bias_gyro: self.iekf.q_bias_gyro,
             q_bias_accel: self.iekf.q_bias_accel,
             p0: self.iekf.p0,
+            q_motion_gyro: self.iekf.q_motion_gyro,
+            q_motion_accel: self.iekf.q_motion_accel,
+            q_motion_max: self.iekf.q_motion_max,
         }
     }
 
@@ -180,6 +189,9 @@ impl Default for FalconConfig {
                 // circular limit cycle. 0.005 cut the lag.
                 pos_var: 0.005,
                 yaw_var: 0.0005,
+                q_motion_gyro: 0.5,
+                q_motion_accel: 0.25,
+                q_motion_max: 50.0,
                 grav_var: 0.5,
             },
             geo: GeoCfg {

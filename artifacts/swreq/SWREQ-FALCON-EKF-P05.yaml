@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWREQ-FALCON-EKF-P05
+    type: sw-req
+    title: "EKF-P05 — adaptive process noise: the IEKF stays NEES-consistent under motion/load instead of over-confident"
+    status: implemented
+    description: >
+      The Invariant-EKF shall inflate its process noise by the vehicle motion
+      magnitude so the filter does not grow over-confident when the fixed
+      process model under-counts unmodeled dynamics (vibration, accelerometer
+      scale/bias error, timing/load jitter, heading-under-motion coupling):
+
+        q_gyro_eff  = q_gyro  · clamp(1 + q_motion_gyro·‖ω‖²,  1, q_motion_max)
+        q_accel_eff = q_accel · clamp(1 + q_motion_accel·‖a_ned‖², 1, q_motion_max)
+
+      where ω is the bias-corrected body rate and a_ned the inertial
+      acceleration. At rest/hover (ω≈0, a_ned≈0) the factor is exactly 1, so
+      hover behaviour is unchanged. The inflation factor is bounded to
+      [1, q_motion_max] — it can never shrink Q nor explode the covariance.
+      This is the propagation-side twin of the verified measurement-variance
+      inflation in update_gravity. q_motion_* = 0 reverts to legacy fixed Q.
+
+      Rationale (Mehra adaptive filtering; Bar-Shalom NEES consistency): the
+      over-confidence is the root cause feeding a wrong state into the
+      controller — fixing it (NEES → ≈3) is the single highest-leverage,
+      most-verifiable outer-loop robustness increment.
+    tags: [falcon, iekf, estimation, adaptive-process-noise, nees, consistency, v0.35]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Kani: the inflation factor is always within [1, q_motion_max] for any
+        input (clamp_factor bound). Unit: at rest the propagated covariance is
+        identical with/without the term (hover unchanged); under motion the
+        adaptive term strictly increases conservatism (NEES decreases) without
+        collapsing. End-to-end (the diagnosing metric IS the gate): on a real
+        gz mission the position ANEES goes from ~1581 OVER-CONFIDENT (fixed Q,
+        diverges 35 m) to ≈0.9–2.9 CONSISTENT (adaptive Q, holds <1 m).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-001

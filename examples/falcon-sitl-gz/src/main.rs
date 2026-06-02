@@ -530,7 +530,15 @@ fn run_geo_cascade(
         cfg.pos.yaw_mode = YawMode::HeadingHold;
     }
 
-    let mut iekf = Iekf::with_config(NavState::identity(), cfg.to_iekf_config());
+    let mut iekf_cfg = cfg.to_iekf_config();
+    // v0.35 A/B toggle: NO_ADAPTIVE_Q reverts to the legacy fixed process
+    // noise (zero the motion-inflation gains) so the adaptive-Q win is
+    // measurable against the same flight.
+    if std::env::var("NO_ADAPTIVE_Q").is_ok() {
+        iekf_cfg.q_motion_gyro = 0.0;
+        iekf_cfg.q_motion_accel = 0.0;
+    }
+    let mut iekf = Iekf::with_config(NavState::identity(), iekf_cfg);
     let mut iekf_heading_init = false;
     let mut mixer = QuadMixer::new();
     // Arming ticks are wall-clock-derived (0.3 s spin-up, 0.1 s level) so
