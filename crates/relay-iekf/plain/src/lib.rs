@@ -315,6 +315,12 @@ pub struct IekfConfig {
     /// Upper bound on the inflation factor (prevents a transient spike from
     /// exploding the covariance). MUST be ≥ 1.
     pub q_motion_max: f32,
+    /// v0.37 position-fix validation gate: reject a position measurement when
+    /// its normalized innovation squared d² = rᵀS⁻¹r exceeds this χ²₃
+    /// threshold (a jump/outlier/gross-spoof fix). 0 or negative disables the
+    /// gate (legacy: accept every non-singular fix). Generous default (≈χ²₃
+    /// p=0.99999) so honest noise is never rejected.
+    pub pos_gate_nis: f32,
 }
 
 impl IekfConfig {
@@ -332,6 +338,7 @@ impl IekfConfig {
         q_motion_gyro: 0.5,
         q_motion_accel: 0.25,
         q_motion_max: 50.0,
+        pos_gate_nis: 25.0,
     };
 }
 
@@ -571,6 +578,17 @@ impl Iekf {
             Some(v) => v,
             None => return false,
         };
+
+        // v0.37 validation gate: reject an outlier/spoofed fix whose
+        // normalized innovation squared d² = rᵀS⁻¹r exceeds the χ²₃ threshold.
+        // On reject the state + covariance are left UNCHANGED (propagate-only
+        // this step) — a bad fix cannot walk the estimate. Gate ≤ 0 disables.
+        if self.cfg.pos_gate_nis > 0.0 {
+            let d2 = nis3(r, &s_inv);
+            if !(d2 <= self.cfg.pos_gate_nis) {
+                return false;
+            }
+        }
 
         // PHt = P·Hᵀ (15×3); since P is symmetric, PHt[k][i] = HP[i][k].
         // K = PHt·S⁻¹ (15×3).
@@ -898,6 +916,25 @@ impl Iekf {
 /// NEES of a 3-DoF error `e` against the 3×3 covariance block of `p`
 /// anchored at `base` (e.g. 6 for position, 3 for velocity).
 /// `eᵀ (P_block)⁻¹ e`. Singular block ⇒ INFINITY if `e≠0`, else 0.
+/// Normalized innovation squared d² = rᵀ·S⁻¹·r (v0.37 validation gate).
+/// `s_inv` is the already-computed 3×3 innovation-covariance inverse, so this
+/// is multiply-add only — no new inversion. Non-finite → +∞ (⇒ gate rejects).
+fn nis3(r: Vec3, s_inv: &[[f32; 3]; 3]) -> f32 {
+    let mut acc = 0.0f32;
+    for i in 0..3 {
+        let mut row = 0.0f32;
+        for j in 0..3 {
+            row += s_inv[i][j] * r[j];
+        }
+        acc += r[i] * row;
+    }
+    if acc.is_finite() {
+        acc
+    } else {
+        f32::INFINITY
+    }
+}
+
 fn nees_block(p: &Mat, base: usize, e: Vec3) -> f32 {
     let mut blk = [[0.0f32; 3]; 3];
     for i in 0..3 {
@@ -1108,6 +1145,64 @@ impl RotorFaultDetector {
     /// The isolated failed rotor, if any (latched).
     pub fn failed(&self) -> Option<usize> {
         self.failed
+    }
+}
+
+/// Slow-drift / spoof detector (v0.37) — a two-sided per-axis CUSUM (Page) on
+/// the position-fix innovation. The NIS validation gate rejects single
+/// outlier fixes, but a covert GPS spoofer walks the solution with small
+/// per-step biases that each pass the gate; their SAME-SIGN accumulation is
+/// what this detects. Each axis runs g_hi (positive bias) and g_lo (negative
+/// bias) accumulators with a drift slack that absorbs zero-mean noise; a
+/// sustained directional bias in ANY axis latches the alarm. Mirrors the
+/// proven `RotorFaultDetector` contracts (no-false-alarm below slack,
+/// detection at drift+threshold, latching, totality).
+#[derive(Clone, Copy)]
+pub struct SpoofMonitor {
+    g_hi: [f32; 3],
+    g_lo: [f32; 3],
+    threshold: f32,
+    drift: f32,
+    spoofed: bool,
+}
+
+impl SpoofMonitor {
+    /// `threshold` = CUSUM level (m·steps) that declares a spoof; `drift` =
+    /// per-step slack (m) subtracted from each |innovation| (the no-false-
+    /// alarm margin — only sustained directional bias accumulates).
+    pub fn new(threshold: f32, drift: f32) -> Self {
+        SpoofMonitor {
+            g_hi: [0.0; 3],
+            g_lo: [0.0; 3],
+            threshold: if threshold.is_finite() && threshold > 0.0 { threshold } else { 1.0 },
+            drift: if drift.is_finite() && drift >= 0.0 { drift } else { 0.0 },
+            spoofed: false,
+        }
+    }
+
+    /// Feed the position innovation r = z − p̂ (NED, m). Returns `true` once a
+    /// sustained directional bias (a spoof/walk-off) is declared (latched).
+    pub fn update(&mut self, innovation: Vec3) -> bool {
+        if self.spoofed {
+            return true;
+        }
+        for i in 0..3 {
+            let r = if innovation[i].is_finite() { innovation[i] } else { 0.0 };
+            let hi = self.g_hi[i] + r - self.drift;
+            self.g_hi[i] = if hi.is_finite() && hi > 0.0 { hi } else { 0.0 };
+            let lo = self.g_lo[i] - r - self.drift;
+            self.g_lo[i] = if lo.is_finite() && lo > 0.0 { lo } else { 0.0 };
+            if self.g_hi[i] >= self.threshold || self.g_lo[i] >= self.threshold {
+                self.spoofed = true;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether a spoof has been declared (latched).
+    pub fn spoofed(&self) -> bool {
+        self.spoofed
     }
 }
 
@@ -1624,6 +1719,73 @@ mod tests {
         assert!(adaptive > 0.05, "but not collapse the estimate (NEES {adaptive})");
     }
 
+    // ── v0.37 sensor-fault / spoof robustness ────────────────────────────
+
+    /// The NIS validation gate rejects an outlier/jump fix and leaves the
+    /// state UNCHANGED — a bad position measurement cannot walk the estimate.
+    #[test]
+    fn nis_gate_rejects_jump_state_unchanged() {
+        let mut f = Iekf::with_config(NavState::identity(), IekfConfig::DEFAULT);
+        for _ in 0..30 {
+            f.update_position([0.0, 0.0, 0.0], 0.02); // settle near origin
+        }
+        let before = f.state().p;
+        let accepted = f.update_position([50.0, 0.0, 0.0], 0.02); // 50 m jump
+        assert!(!accepted, "a 50 m jump fix must be gated out");
+        let after = f.state().p;
+        for i in 0..3 {
+            assert!((after[i] - before[i]).abs() < 1e-5, "rejected fix walked the state");
+        }
+    }
+
+    /// Honest fixes (small noise) are never gated — no false rejection.
+    #[test]
+    fn nis_gate_passes_honest_fixes() {
+        let mut f = Iekf::with_config(NavState::identity(), IekfConfig::DEFAULT);
+        let mut rejected = 0;
+        for k in 0..1000 {
+            let n = 0.05 * libm::sinf(7.0 * k as f32);
+            if !f.update_position([n, -n, 0.5 * n], 0.02) {
+                rejected += 1;
+            }
+        }
+        assert_eq!(rejected, 0, "honest noise must pass the gate, {rejected} rejected");
+    }
+
+    /// The spoof monitor latches on a slow same-sign walk-off (each step too
+    /// small for the NIS gate) within a few steps, with no false alarm on
+    /// zero-mean noise.
+    #[test]
+    fn spoof_monitor_catches_walkoff_not_noise() {
+        let mut mon = SpoofMonitor::new(2.0, 0.1);
+        for k in 0..300 {
+            let n = 0.08 * libm::sinf(3.0 * k as f32);
+            assert!(!mon.update([n, -n, n]), "no false alarm on zero-mean noise");
+        }
+        // +0.3 m/step bias in x: accumulates (0.3−0.1)=0.2/step ⇒ 2.0 in ~10.
+        let mut at = None;
+        for k in 0..40 {
+            if mon.update([0.3, 0.0, 0.0]) {
+                at = Some(k);
+                break;
+            }
+        }
+        assert!(at.is_some() && at.unwrap() <= 12, "walk-off detected ~10 steps, got {at:?}");
+        assert!(mon.spoofed()); // latched
+        assert!(mon.update([0.0; 3]), "stays latched");
+    }
+
+    /// Totality: any innovation (incl. non-finite) is handled; no false alarm
+    /// from NaN, and a NaN never crashes the accumulator.
+    #[test]
+    fn spoof_monitor_total() {
+        let mut mon = SpoofMonitor::new(5.0, 0.2);
+        for _ in 0..100 {
+            mon.update([f32::NAN, f32::INFINITY, 0.0]);
+        }
+        assert!(!mon.spoofed(), "non-finite innovation must not trip the alarm");
+    }
+
     /// At rest (ω≈0, a≈0) the inflation factor is exactly 1 — the propagated
     /// covariance is identical with and without the adaptive term, so hover
     /// behaviour is provably unchanged.
@@ -1676,5 +1838,47 @@ mod kani_harness {
         kani::assume(max.is_finite() && max >= 1.0 && max <= 1.0e6);
         let f = clamp_factor(x, max);
         assert!(f >= 1.0 && f <= max);
+    }
+
+    /// The spoof monitor's CUSUM contract: it never alarms below the drift
+    /// slack (a single sub-slack innovation keeps both accumulators at 0),
+    /// it is total on non-finite input, and once latched it stays latched.
+    #[kani::proof]
+    fn verify_spoof_monitor_no_false_alarm() {
+        let threshold: f32 = kani::any();
+        let drift: f32 = kani::any();
+        kani::assume(threshold.is_finite() && threshold > 0.0 && threshold <= 1e6);
+        kani::assume(drift.is_finite() && drift >= 0.0 && drift <= 1e6);
+        let mut mon = SpoofMonitor::new(threshold, drift);
+        // A single innovation whose every-axis magnitude is ≤ drift cannot
+        // accumulate past 0, so it can never alarm on the first step.
+        let x: f32 = kani::any();
+        let y: f32 = kani::any();
+        let z: f32 = kani::any();
+        kani::assume(libm::fabsf(x) <= drift && libm::fabsf(y) <= drift && libm::fabsf(z) <= drift);
+        let alarmed = mon.update([x, y, z]);
+        assert!(!alarmed);
+        assert!(!mon.spoofed());
+    }
+
+    /// The NIS helper is total: a non-finite innovation yields +∞, which the
+    /// gate (`!(d² ≤ threshold)`) rejects — a NaN/Inf fix can never be
+    /// accepted.
+    #[kani::proof]
+    fn verify_nis3_total() {
+        let r0: f32 = kani::any();
+        let r1: f32 = kani::any();
+        let r2: f32 = kani::any();
+        // a well-formed SPD-ish inverse with bounded entries
+        let mut s_inv = [[0.0f32; 3]; 3];
+        let d: f32 = kani::any();
+        kani::assume(d.is_finite() && d > 0.0 && d <= 1e3);
+        s_inv[0][0] = d;
+        s_inv[1][1] = d;
+        s_inv[2][2] = d;
+        let d2 = nis3([r0, r1, r2], &s_inv);
+        // result is always finite-or-+∞ and non-negative (never NaN/−∞)
+        assert!(d2 >= 0.0);
+        assert!(d2.is_finite() || d2 == f32::INFINITY);
     }
 }

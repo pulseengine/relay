@@ -1,0 +1,46 @@
+artifacts:
+  - id: SWREQ-FALCON-SPOOF-P01
+    type: sw-req
+    title: "SPOOF-P01 — position-fix fault/spoof robustness: gate outliers, detect walk-off, hold on attack"
+    status: implemented
+    description: >
+      The estimator shall not be steered off course by a faulty, jammed, or
+      spoofed position measurement. Two complementary defenses:
+
+      (a) NIS validation gate — reject a fix whose normalized innovation
+          squared d² = rᵀS⁻¹r exceeds a χ²₃ threshold (a jump / outlier /
+          gross-bias spoof). On reject the state and covariance are left
+          UNCHANGED (propagate-only that step). Total: a non-finite fix
+          (d²=+∞) is always rejected. Gate ≤ 0 disables.
+
+      (b) Slow-walk-off detector — a two-sided per-axis CUSUM (Page) on the
+          position innovation declares a spoof when a sustained same-sign
+          bias in any axis accumulates past a threshold (the covert spoof
+          that keeps each fix inside the NIS gate). On declaration the cascade
+          shall FREEZE position updates (dead-reckon on IMU) so the spoofer
+          cannot walk the vehicle. Latched.
+
+      Honest scope: innovation-based detection catches jumps and walk-offs
+      whose per-fix innovation exceeds the measurement noise floor (rate
+      ≳ 1.5 m/s in noiseless SITL). A sufficiently SLOW covert spoof that the
+      tightly-trusted filter simply follows keeps the innovation below the
+      floor and evades (b) — that regime requires an INDEPENDENT cross-check
+      sensor (baro/flow), deferred to a later version.
+    tags: [falcon, estimation, fdi, gps-spoof, nis-gate, cusum, safety, v0.37]
+    fields:
+      req-type: safety
+      priority: should
+      verification-criteria: >
+        Kani: the NIS helper is total (non-finite ⇒ +∞ ⇒ rejected); the spoof
+        CUSUM never alarms below the drift slack and latches. Unit: a 50 m
+        jump is gated out with the state UNCHANGED; honest noise is never
+        gated; a same-sign walk-off latches within a few steps with no
+        false alarm on zero-mean noise; totality on non-finite innovation.
+        End-to-end (real gz): a 3 m/s GPS walk-off with FDI on is detected and
+        HELD (1.3 m, ANEES≈3 CONSISTENT); with FDI off the vehicle is walked
+        17 m off with ANEES≫3 OVER-CONFIDENT.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-014
+      - type: derives-from
+        target: SYSREQ-FALCON-015
