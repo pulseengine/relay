@@ -52,6 +52,11 @@ BENCH_PATTERNS = [
     re.compile(r"\bgz\s+sim\b"),                      # Gazebo Sim install
     re.compile(r"\bmake\s+px4_sitl\b"),               # PX4-Autopilot install
     re.compile(r"\bbazel\s+(test|build|run)\b"),      # bazel not provisioned in the gate job
+    # `cargo llvm-cov --workspace` has its OWN dedicated CI job (the `llvm-cov`
+    # check); running it again inside the gate is redundant and flaky (heavy
+    # full-workspace instrumentation intermittently rc=101). Skip here — the
+    # dedicated job is the coverage gate.
+    re.compile(r"\bcargo\s+llvm-cov\b"),
     re.compile(r"\bspar\s+\w"),                       # spar not on the gate runner
     re.compile(r"^\s*cd\s+~"),                        # tilde-expanded path = not portable
     re.compile(r"/Users/[^/]+/"),                     # developer-machine absolute path
