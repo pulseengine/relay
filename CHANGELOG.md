@@ -15,6 +15,54 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.0.0] — 2026-06-03
+
+**The formally-verified flight stack — SITL-complete.** A capstone, not new
+flight code: it consolidates the v0.21 → v0.39 arc into a 1.0 release and
+states honestly what is proven and what is not.
+
+What v1.0 IS — every layer of an autonomous multirotor cascade with a
+**mechanical gate**, flying real Gazebo SITL on `no_std`/`no_alloc` flight
+crates:
+
+- **Estimation** — Invariant-EKF on SE₂(3): full-state nav, online NEES
+  consistency, acceleration-compensated tilt, **motion-adaptive process
+  noise** (the crisp-mission fix), rotor-fault FDI, and **position-fix
+  spoof/fault FDI** (NIS gate + innovation CUSUM).
+- **Control** — geometric SE(3) (Lee 2010) + ADRC inner loop (proven ~50×
+  cadence margin) + differential-flatness feedforward + a **simplex safety
+  shield** with a **full-state** (position+attitude) Lyapunov backing.
+- **Allocation** — airframe-agnostic `MixerN` (quad/hexa/coax), proven
+  bit-identical to the quad mixer and shown to **close the loop on a
+  6-rotor hexa**.
+- **Scheduling** — gyro-synchronized loop pacing (robust to sim/host load).
+
+Verification (all re-run green; independently confirmed by a clean-room
+sweep of 13 headline claims):
+- **Lean** — two kernel-checked Lyapunov proofs, **0 `sorry`/`axiom`**
+  (attitude + position/combined).
+- **Kani** — bounded model checking for the shield contract, the allocator
+  bounds (incl. single-rotor-out + airframe-agnostic), ADRC/command-filter
+  saturation, the spoof CUSUM, and the NIS gate.
+- **proptest + rivet** — traceability `PASS`, 100% across all trace rules.
+- **Five published falsifications** (the methodology's core): airmode mixer,
+  single-stage gyro-sync, the ω_d command filter, the reference governor,
+  and the honest slow-covert-spoof limitation.
+
+What v1.0 is NOT (read this — it is the honest boundary):
+- **SITL, not hardware/HIL.** Everything is verified in Gazebo + unit/Kani/
+  Lean; nothing has flown on real hardware. HIL is the post-1.0 frontier.
+- The **gz hexa flight** (independent physics) is future; "any drone" is
+  proven at the allocation + SITL closed-loop level, not yet in gz physics.
+- **Slow covert GPS spoofs** the filter follows evade innovation FDI — they
+  need an independent cross-check sensor (future).
+- The dynamic **LaSalle** "trajectory ⇒ converges" step is cited (Lee 2010)
+  pending Mathlib's stability API; the algebraic core is machine-checked.
+
+"Build into any drone and working" means: the verified building block is
+complete in SITL, with the traceability + attestation a regulated programme
+needs to *start* a hardware campaign — not a hardware-proven product.
+
 ## [falcon-v0.39.0] — 2026-06-03
 
 "Build into any drone" — at the closed-loop level. v0.34 proved the allocator
