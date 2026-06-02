@@ -1,0 +1,21 @@
+[package]
+name = "falcon-config"
+description = "HOST-ONLY tuning config for the falcon cascade — serde/JSON sweepable, converts to the plain no_std/no_alloc structs the flight crates consume. Flight + embedded code must NOT depend on this crate (it pulls std + alloc); they use the plain structs directly (const) or a no_std format."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Host-side only: serde + JSON live HERE, never in the flight path.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The flight crates are no_std/no_alloc; this host crate maps JSON → their
+# plain config structs.
+relay-iekf = { path = "../../crates/relay-iekf" }
+relay-geo = { path = "../../crates/relay-geo" }
+relay-adrc = { path = "../../crates/relay-adrc" }
+
+[lints]
+workspace = true

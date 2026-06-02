@@ -1,0 +1,44 @@
+artifacts:
+  - id: FV-FALCON-PACE-001
+    type: sw-verification
+    title: "Gyro-synchronized loop pacing — pure-logic unit tests + A/B/C/D real-Gazebo load matrix (v0.32)"
+    status: approved
+    description: >
+      Verification of the v0.32 two-stage gyro-synchronized loop scheduler:
+
+      1. pace::pace_decision (pure, microsecond-integer, Duration-free) —
+         5 unit tests: one-sample-per-tick is always Fresh with the watermark
+         tracking the stream (identical cadence to wall-clock); stale inside
+         the window → Wait; stale past the deadline → Deadline with the
+         watermark unchanged (bounded, never hangs); Fresh beats Deadline when
+         both hold; an accumulated multi-sample jump resolves to the latest.
+
+      2. End-to-end A/B/C/D on real Gazebo Harmonic (mission scenario, fresh
+         server per run to avoid pose carry-over):
+           A  sim-lock ON,  idle      : final 1.58 m, ANEES 2.12 [CONSISTENT]
+           B  wall-clock,   idle      : final 1.67 m, ANEES 2.33 [CONSISTENT]
+           C  wall-clock,   CPU load  : final 769.8 m, ANEES 291  [OVER-CONFIDENT, DIVERGED]
+           D  sim-lock ON,  CPU load  : final 2.39 m, ANEES 2.98 [CONSISTENT], wall 81 s
+         A≈B ⇒ no regression at RTF≈1; C vs D ⇒ under identical CPU contention
+         (8 of 10 cores hogged) wall-clock pacing over-drives and diverges
+         while two-stage sim-lock paces to the slowed sim (wall stretches
+         60→81 s) and holds the mission. This reproduces and fixes the v0.31
+         GUI+recorder recording-divergence at its root.
+
+      Falsification published: the single-stage gyro-sync first tried
+      diverged to 524 m (cadence jitter on the marginal inner loop); the
+      two-stage anti-burst+anti-stale form is the corrected design.
+
+      Honest scope: the under-load guarantee is empirical (one run per cell),
+      not a proof; the deadline fallback can still proceed on stale state at
+      extreme RTF (< ~0.12). The inner loop's underlying cadence-fragility is
+      the v0.33 robustness target.
+    tags: [verification, falcon, scheduling, gyro-sync, real-time, sitl, v0.32]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-sitl-gz --bin falcon-sitl-gz pace::"
+        - run: "gz sim -s -r worlds/falcon-quad.sdf ; then mission A/B/C/D with and without NO_SIM_LOCK under CPU load"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PACE-P01

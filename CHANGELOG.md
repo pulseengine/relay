@@ -9,6 +9,83 @@ Tags use a per-track prefix:
 - `falcon-v<semver>` — the falcon dual-DNA flight stack
 - (future) `relay-v<semver>` — the relay substrate itself
 
+> Note: the per-version CHANGELOG drifted during the v0.7–v0.20 run (those
+> shipped as git tags `falcon-v0.7`…`falcon-v0.20` but were not written up
+> here). This `v0.34.0` entry covers the full **v0.21 → v0.34 autonomous-
+> flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
+> it was verified end-to-end and the kernel-checked Lyapunov proof built.
+
+## [falcon-v0.34.0] — 2026-06-02
+
+The verified autonomous-flight stack: a formally-gated IEKF → geometric
+SE(3) → ADRC → mixer cascade flying real Gazebo Harmonic SITL, landed from
+the `falcon-v0.21-iekf` branch. Every layer pairs an algorithm with a
+**mechanical gate** (Kani bounded model checking, a kernel-checked Lean
+Lyapunov proof, proptest, or rivet traceability).
+
+**Honest scope (read this):** reliable SITL *hover* (~1.6 m) and a
+*recognizable* waypoint mission. The mission is **not yet razor-crisp** —
+the residual control-margin fragility is localized (v0.33) to the outer
+position-loop + estimator under load, the v0.35 target. This is SITL
+(Gazebo), not yet hardware/HIL.
+
+### Added
+
+- **`relay-iekf`** — Invariant-EKF on SE₂(3): full-state nav, 15×15
+  group-affine covariance, invariant magnetometer heading update, online
+  **NEES consistency monitor**, acceleration-compensated tilt, and a
+  CUSUM **rotor-fault detector** (FDI).
+- **`relay-geo`** — geometric SE(3) controller (Lee 2010): desired-attitude
+  / attitude-error / moment, reduced-attitude S² recovery, differential-
+  flatness body-rate feedforward, a **RecoverableSet** + **SimplexShield**
+  (Black-Box Simplex runtime assurance — the moat).
+- **`relay-adrc`** — linear ADRC inner rate loop (ESO disturbance
+  rejection), bandwidth-separation invariant + ESO discrete-stability
+  bound, and a 2nd-order critically-damped **CommandFilter** (v0.33).
+- **`relay-traj`** — Mueller–Hehn–D'Andrea jerk-minimizing quintic motion
+  primitive (closed-form, no_std) with a sound peak-jerk bound.
+- **`relay-mix-quad`** — verified mixers (thrust-floor, priority, airmode,
+  single-rotor-out reconfig) and **`MixerN`**, the airframe-agnostic N×4
+  allocator (quad/hexa/`from_geometry`, ≤8 rotors) — the "any drone" seam
+  (v0.34).
+- **Gazebo SITL bench** (`examples/falcon-sitl-gz`) — real-gz hover +
+  waypoint-mission scenarios on the no_std/no_alloc flight crates, with
+  **gyro-synchronized loop scheduling** (`pace.rs`, v0.32) that paces the
+  loop to the IMU stream so a low sim real-time factor can't desync it.
+- **Verification**: kernel-checked Lean Lyapunov proof
+  (`proofs/lean/GeometricLyapunov.lean`, 0 `sorry`/`axiom` — V̇≤0, V
+  pos-def, LaSalle precondition); Kani harnesses for the shield contract,
+  the single-rotor-out allocator (MIX-P08), the airframe-agnostic bound
+  (MIX-P09), the bandwidth-separation invariant, and the command-filter
+  saturation; rivet traceability `PASS`.
+
+### Changed
+
+- Mixer default reverted to **priority** desaturation (airmode re-excites
+  the marginal yaw loop). Pacing default is **on** (sim-time locked).
+
+### Fixed
+
+- Lean toolchain pin realigned **4.27.0 → 4.29.1** to match `rules_lean`;
+  the geometric Lyapunov proof builds + passes again (offline via
+  `--vendor_dir=vendor/bazel`).
+- Acceleration-compensated tilt fixed estimator over-confidence under
+  motion (ANEES 64 → 3.4); HeadingHold fixed waypoint corner-mirroring.
+
+### Falsifications (published — wrong predictions are informative)
+
+- **Single-stage gyro-sync diverged (524 m)** — cadence jitter tips the
+  marginal loop; the two-stage anti-burst+anti-stale form is the fix (the
+  A/B/C/D matrix: under CPU load wall-clock pacing diverges 770 m while
+  sim-lock holds 2.39 m).
+- **Command-filtering ω_d degraded tracking 10× (2.3 → 24 m)** — the
+  cascade needs prompt rate tracking; the inner loop is already responsive
+  and proven cadence-robust (~50× ESO margin), so command bandwidth is the
+  wrong lever. The filter ships verified but **default-off**.
+- The cascade was tuned to the **edge of stability for hover**; firmer
+  gains to track a moving setpoint diverge — the localized outer-loop
+  fragility, owned as the v0.35 target.
+
 ## [falcon-v0.6.0] — 2026-05-20
 
 The WASM component pipeline. Control crates compile to WASM, fuse

@@ -57,6 +57,17 @@ pub trait Physics {
     /// OdometryPublisher twist (deterministic, unlike finite-diff
     /// NavSat which left the altitude velocity-cascade marginal).
     fn velocity_ned(&self) -> Option<[f32; 3]> { None }
+
+    /// v0.22 — true NED heading (yaw, rad), if the backend supplies one.
+    /// `None` means "no heading reference". The real gz bridge overrides
+    /// this from the OdometryPublisher pose orientation — the "compass"
+    /// that makes yaw observable for the IEKF (yaw is unobservable from
+    /// IMU+GPS alone, the v0.21 ±130° wander).
+    fn heading_ned(&self) -> Option<f32> { None }
+
+    /// v0.22 — latest body-frame magnetometer reading (Tesla, NED body
+    /// frame), or `None` if no magnetometer. The real heading source.
+    fn mag_body_ned(&self) -> Option<[f32; 3]> { None }
 }
 
 /// In-process reference impl — same toy integrator as
@@ -283,15 +294,36 @@ mod gz_real {
         pub normalized: ::prost::alloc::vec::Vec<f64>,
     }
 
-    /// v0.19.7 — minimal `gz.msgs.Odometry` (twist field only) for the
-    /// OdometryPublisher's true body velocity. gz-transport-rs 0.1.0
-    /// ships `Twist` but not the `Odometry` wrapper; prost skips the
-    /// unparsed `header`(1) + `pose`(2) tags, so decoding just the
-    /// `twist`(3) field is sufficient + forward-compatible.
+    /// v0.19.7 — minimal `gz.msgs.Odometry` (twist only) for the true body
+    /// velocity. (The OdometryPublisher leaves `pose.orientation` unset =
+    /// zero, so heading comes from the `/model/.../pose` Pose_V instead —
+    /// see `PoseV`.) prost skips the unparsed `header`(1)/`pose`(2) tags.
     #[derive(Clone, PartialEq, prost::Message)]
     pub struct Odometry {
         #[prost(message, optional, tag = "3")]
         pub twist: ::core::option::Option<gz_transport_rs::msgs::Twist>,
+    }
+
+    /// v0.22 — `gz.msgs.Pose_V` (repeated Pose) on `/model/<m>/pose`. The
+    /// model root pose carries the TRUE orientation (the OdometryPublisher
+    /// does not), our heading reference / "compass" — yaw is unobservable
+    /// from IMU+GPS alone.
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct PoseV {
+        // gz.msgs.Pose_V = { Header header = 1; repeated Pose pose = 2; }
+        #[prost(message, repeated, tag = "2")]
+        pub pose: ::std::vec::Vec<gz_transport_rs::msgs::Pose>,
+    }
+
+    /// v0.22 — `gz.msgs.Magnetometer` on the mag_sensor topic. The REAL,
+    /// non-truth heading reference: the Earth field (world `magnetic_field`)
+    /// read in body frame. `{ Header header=1; Vector3d field_tesla=2; }` —
+    /// prost skips the unparsed header. Replaces the gz-truth `PoseV`
+    /// heading cheat once the body-frame conversion is validated.
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct Magnetometer {
+        #[prost(message, optional, tag = "2")]
+        pub field_tesla: ::core::option::Option<gz_transport_rs::msgs::Vector3d>,
     }
 
     /// gz-sim uses ENU body frame (X forward, Y left, Z up);
@@ -300,6 +332,17 @@ mod gz_real {
     /// accel + gyro since both are body-frame vectors.
     fn enu_to_ned(v: [f32; 3]) -> [f32; 3] {
         [v[0], -v[1], -v[2]]
+    }
+
+    /// NED heading (yaw, rad) from a body→ENU orientation quaternion
+    /// (Hamilton, w,x,y,z). The ENU heading of body-X is CCW from East;
+    /// NED yaw is CW from North, so `ψ_ned = π/2 − ψ_enu`. This is the
+    /// v0.22 "compass" reference that makes yaw observable.
+    fn enu_quat_to_ned_yaw(w: f64, x: f64, y: f64, z: f64) -> f32 {
+        let psi_enu = libm::atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
+        let psi_ned = core::f64::consts::FRAC_PI_2 - psi_enu;
+        // wrap to [−π, π]
+        libm::remainder(psi_ned, 2.0 * core::f64::consts::PI) as f32
     }
 
     /// Launch-site anchor for NavSat lat/lon/alt → NED projection.
@@ -350,6 +393,13 @@ mod gz_real {
         /// OdometryPublisher twist. Deterministic, unlike finite-diff
         /// NavSat. `None` until the first odometry frame.
         latest_velocity_ned: Arc<Mutex<Option<[f32; 3]>>>,
+        /// v0.22 — latest TRUE NED heading (yaw, rad) from the
+        /// OdometryPublisher pose orientation. The compass reference.
+        latest_heading_ned: Arc<Mutex<Option<f32>>>,
+        /// v0.22 — latest body-frame magnetometer reading (Tesla, NED body
+        /// frame). The REAL (non-truth) heading source from the SDF
+        /// magnetometer sensor; `None` until the first frame.
+        latest_mag_body_ned: Arc<Mutex<Option<[f32; 3]>>>,
         /// v0.19.2 — single mpsc carrying all 4 motor velocities.
         /// One receiver task owns the gz-transport Publisher and
         /// emits a single `gz.msgs.Actuators` message per send.
@@ -426,6 +476,8 @@ mod gz_real {
             let latest_imu: Arc<Mutex<Option<ImuSample>>> = Arc::new(Mutex::new(None));
             let latest_position_ned_m = Arc::new(Mutex::new([0.0_f32; 3]));
             let latest_velocity_ned: Arc<Mutex<Option<[f32; 3]>>> = Arc::new(Mutex::new(None));
+            let latest_heading_ned: Arc<Mutex<Option<f32>>> = Arc::new(Mutex::new(None));
+            let latest_mag_body_ned: Arc<Mutex<Option<[f32; 3]>>> = Arc::new(Mutex::new(None));
             let imu_recv = Arc::new(AtomicU64::new(0));
             let navsat_recv = Arc::new(AtomicU64::new(0));
             let motor_send = Arc::new(AtomicU64::new(0));
@@ -439,6 +491,8 @@ mod gz_real {
             let imu_ref = latest_imu.clone();
             let position_ref = latest_position_ned_m.clone();
             let velocity_ref = latest_velocity_ned.clone();
+            let heading_ref = latest_heading_ned.clone();
+            let mag_ref = latest_mag_body_ned.clone();
             let imu_recv_ref = imu_recv.clone();
             let navsat_recv_ref = navsat_recv.clone();
             let home_for_setup = home;
@@ -517,6 +571,60 @@ mod gz_real {
                     }
                 });
 
+                // v0.22 — Pose_V subscriber for the TRUE heading. The
+                // model root pose's ENU orientation → NED yaw. (The
+                // OdometryPublisher leaves orientation unset.)
+                let pose_topic = format!("/model/{model_for_setup}/pose");
+                let mut pose_sub = node.subscribe::<PoseV>(&pose_topic).await?;
+                tokio::spawn(async move {
+                    while let Some((msg, _meta)) = pose_sub.recv().await {
+                        // Model root pose: the first entry with a non-zero
+                        // (set) orientation quaternion.
+                        for p in &msg.pose {
+                            if let Some(o) = p.orientation.as_ref() {
+                                let n2 = o.w * o.w + o.x * o.x + o.y * o.y + o.z * o.z;
+                                if n2 > 0.5 {
+                                    let yaw = enu_quat_to_ned_yaw(o.w, o.x, o.y, o.z);
+                                    if yaw.is_finite() {
+                                        *heading_ref.lock().unwrap() = Some(yaw);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // v0.22 — Magnetometer subscriber: the REAL heading source.
+                // The SDF mag_sensor reports the world magnetic_field in
+                // BODY frame (gz ENU body); convert to NED body with the
+                // same flip as the IMU.
+                let mag_topic = format!(
+                    "/world/{world_for_setup}/model/{model_for_setup}/link/base_link/sensor/mag_sensor/magnetometer"
+                );
+                if let Ok(mut mag_sub) = node.subscribe::<Magnetometer>(&mag_topic).await {
+                    tokio::spawn(async move {
+                        while let Some((msg, _meta)) = mag_sub.recv().await {
+                            if let Some(f) = msg.field_tesla.as_ref() {
+                                // gz's magnetometer is NED-NATIVE (legacy
+                                // ArduPilot/PX4 heritage: it converts the
+                                // world <magnetic_field> ENU→NED internally),
+                                // UNLIKE the IMU (ENU body). Empirically (vs
+                                // the truth-heading oracle at NED yaw 90°)
+                                // the gz mag frame relates to our NED body
+                                // by Rz(−90°): (x,y,z)_ned = (y, −x, z)_gz.
+                                // [Caveat: confirmed at one heading; a
+                                // yaw-sweep oracle would fully pin it.]
+                                let (x, y, z) = (f.x as f32, f.y as f32, f.z as f32);
+                                let v = [y, -x, z];
+                                if v.iter().all(|c| c.is_finite()) {
+                                    *mag_ref.lock().unwrap() = Some(v);
+                                }
+                            }
+                        }
+                    });
+                }
+
                 // v0.19.2 — single publisher emitting one
                 // `gz.msgs.Actuators` per tick. The four
                 // MulticopterMotorModel plugins share this topic and
@@ -572,6 +680,8 @@ mod gz_real {
                 latest_imu,
                 latest_position_ned_m,
                 latest_velocity_ned,
+                latest_heading_ned,
+                latest_mag_body_ned,
                 rotors_tx,
                 imu_recv,
                 navsat_recv,
@@ -580,13 +690,21 @@ mod gz_real {
             })
         }
 
-        /// Map a [0, 1] motor PWM to a Gazebo motor command (rad/s).
-        /// MulticopterMotorModel plugin's `cmd_vel` expects rad/s; a
-        /// typical scaling for a 5"-class quad is ~1000 rad/s at full
-        /// PWM. The exact constant is a property of the SDF model.
+        /// Map a [0, 1] mixer output (normalised THRUST fraction) to a
+        /// Gazebo motor command (rad/s).
+        ///
+        /// v0.25 — SQRT map. gz's MulticopterMotorModel produces
+        /// `thrust = motorConstant·ω²`, so a LINEAR `ω = pwm·max` made
+        /// actual thrust ∝ pwm², violating the mixer's linear-thrust
+        /// assumption and making the effective control gain
+        /// throttle-dependent (∂τ/∂pwm ∝ pwm) — a gain-scheduling hazard
+        /// that destabilised the (weakest, laggiest) yaw axis
+        /// conditionally/bistably. Mapping `ω = √pwm · max` makes
+        /// `thrust ∝ ω² ∝ pwm` (linear) and the gain throttle-invariant —
+        /// the "monotone thrust→PWM curve" the allocation SOTA calls for.
         fn pwm_to_rad_per_s(pwm: f32) -> f32 {
             const MAX_MOTOR_RAD_S: f32 = 1000.0;
-            pwm.clamp(0.0, 1.0) * MAX_MOTOR_RAD_S
+            libm::sqrtf(pwm.clamp(0.0, 1.0)) * MAX_MOTOR_RAD_S
         }
     }
 
@@ -633,6 +751,14 @@ mod gz_real {
         fn velocity_ned(&self) -> Option<[f32; 3]> {
             *self.latest_velocity_ned.lock().unwrap()
         }
+
+        fn heading_ned(&self) -> Option<f32> {
+            *self.latest_heading_ned.lock().unwrap()
+        }
+
+        fn mag_body_ned(&self) -> Option<[f32; 3]> {
+            *self.latest_mag_body_ned.lock().unwrap()
+        }
     }
 
     #[cfg(test)]
@@ -653,12 +779,14 @@ mod gz_real {
 
         #[test]
         fn pwm_to_rad_per_s_scales_and_clamps() {
+            // v0.25 — SQRT map (ω = √pwm·max) so gz thrust ∝ ω² is LINEAR
+            // in the mixer's thrust command (throttle-invariant gain).
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(0.0), 0.0);
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(1.0), 1000.0);
-            assert_eq!(GazeboPhysics::pwm_to_rad_per_s(0.5), 500.0);
-            // Clamps below 0.
+            assert!((GazeboPhysics::pwm_to_rad_per_s(0.25) - 500.0).abs() < 1e-3); // √0.25=0.5
+            assert!((GazeboPhysics::pwm_to_rad_per_s(0.5) - 707.107).abs() < 1e-2);
+            // Clamps below 0 / above 1.
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(-0.5), 0.0);
-            // Clamps above 1.
             assert_eq!(GazeboPhysics::pwm_to_rad_per_s(2.0), 1000.0);
         }
 

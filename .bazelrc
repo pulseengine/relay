@@ -1,0 +1,19 @@
+# Relay Bazel configuration.
+
+# ── Reproducible external deps (Lean toolchain, Mathlib, …) ───────────
+# Downloaded archives (e.g. the Lean 4 toolchain tarball) are cached here
+# so rebuilds / CI reuse them instead of re-downloading. Machine-local
+# (not in git); the *inputs* are pinned (see MODULE.bazel + proofs/lean).
+common --repository_cache=~/.cache/relay-bazel/repo
+
+# Build-output cache (incl. compiled Mathlib-dependent proofs).
+build --disk_cache=~/.cache/relay-bazel/disk
+
+# ── Offline vendoring (redo the Lean/Mathlib build without network) ───
+# Populate the vendor dir (Lean toolchain + Mathlib oleans + repos) with:
+#   bazel vendor //proofs/lean:all --vendor_dir=vendor/bazel
+# (or run proofs/lean/vendor.sh). Then build fully offline by adding:
+#   common --vendor_dir=vendor/bazel
+# The vendor dir is gitignored (multi-GB Mathlib oleans); it is
+# regeneratable from the pinned versions, so "redo if needed" = re-run
+# the vendor command. See proofs/lean/README.md.

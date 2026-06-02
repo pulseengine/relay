@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-FAULT-P02
+    type: sw-req
+    title: "FAULT-P02 — single-rotor-loss tolerance: detect, isolate, reconfigure to reduced-attitude"
+    status: implemented
+    description: >
+      On loss of a single rotor the flight stack shall detect and
+      isolate the failed rotor, reconfigure the control allocation
+      to drop that rotor and relinquish yaw (the quad is then
+      rank-deficient — Mueller & D'Andrea), and stabilise the
+      thrust axis on S² so the airframe does not tumble. The
+      reconfigured allocator's output set shall stay bounded: the
+      failed rotor commanded to 0, every healthy rotor in
+      [floor, 1].
+    tags: [falcon, fault-tolerance, rotor-loss, control-allocation, reduced-attitude, kani, v0.26]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Kani: reconfigured allocator output ∈ [floor,1] with the
+        failed rotor at 0 for any input + any failed index
+        (MIX-P08). FDI: no false alarm below slack, detection above
+        threshold, latching. Reduced-attitude: thrust axis
+        converges, yaw torque ≡ 0. End-to-end: an injected rotor
+        loss is isolated and the body settles upright (no tumble).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005

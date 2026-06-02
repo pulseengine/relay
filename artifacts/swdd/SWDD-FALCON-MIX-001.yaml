@@ -2,7 +2,7 @@ artifacts:
   - id: SWDD-FALCON-MIX-001
     type: sw-detail-design
     title: Control allocator (mixer) detailed design — falcon-quad
-    status: approved
+    status: implemented
     description: >
       The mixer is a stream transformer:
         (torque-setpoint, thrust-setpoint) -> stream<motor-pwm>
@@ -38,7 +38,7 @@ artifacts:
       the variant-specific matrix derivation.
     tags: [falcon, mixer, control-allocation, drake, falcon-quad]
     fields:
-      unit: crates/relay-mix-quad/src/lib.rs
+      unit: crates/relay-mix-quad/plain/src/lib.rs
       function: "MixerQuad::allocate"
       algorithm: "Static 4x4 matrix multiply + priority-preserving saturation."
       tick-rate: "1 kHz"

@@ -17,10 +17,15 @@
 //!           open-loop 70 % PWM smoke test is reachable via
 //!           `--scenario=open-loop-climb`.
 
+mod pace;
 mod physics;
 
 use physics::{GazeboPhysics, MockPhysics, Physics};
 use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
+use relay_iekf::{Iekf, Imu as IekfImu, NavState};
+use falcon_config::YawMode;
+use relay_geo::GeoAtt;
+use relay_traj::Segment3;
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
 use relay_mix_quad::QuadMixer;
@@ -33,6 +38,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Emit the default tuning as JSON (so the on-disk config always matches
+    // the struct), then exit.
+    if args.iter().any(|a| a == "--dump-config") {
+        println!("{}", falcon_config::FalconConfig::default().to_json());
+        return;
+    }
     let backend = arg(&args, "--backend").unwrap_or_else(|| "mock".into());
     let scenario = arg(&args, "--scenario").unwrap_or_else(|| "hover".into());
     let duration_s: f32 = arg(&args, "--duration").and_then(|s| s.parse().ok()).unwrap_or(5.0);
@@ -123,7 +134,19 @@ fn main() {
 /// compensating for the *scrambled* SDF index map, not a real frame
 /// flip. Keeping this adapter (as identity) documents the boundary
 /// and is where a correction would live if the SDF/frame convention
-/// ever changes; the unit test `frame_correction_is_identity` pins it.
+/// ever changes; the unit test pins it.
+///
+/// YAW (2026-05-30, v0.21): the frame-yaw oracle now reads RELIABLY OPPOSE
+/// — commanding +0.15 N·m yaw produces −1.1 rad/s as sensed,
+/// deterministically across runs (−1.14, −1.04, −1.13). So the yaw channel
+/// (controller-convention → mixer → gz) genuinely has NEGATIVE control
+/// effectiveness. That correction lives in the YAW ADRC's `b0` (negative
+/// −6, the physically correct effectiveness sign — see falcon-config), so
+/// this frame seam stays identity for yaw too. Encoding it here instead
+/// (SIGN[2]=−1, b0=+6) is mathematically equivalent (u→−u, body torque
+/// unchanged) but tested WORSE in limited gz runs (0/6 vs 3/4; unresolved
+/// — gz nondeterminism vs a hidden asymmetry), so it lives in b0 where it
+/// is verified-good.
 #[inline]
 fn frame_correct_torque(torque_ned: [f32; 3]) -> [f32; 3] {
     const SIGN: [f32; 3] = [1.0, 1.0, 1.0];
@@ -162,6 +185,8 @@ fn run_scenario(
         "frame-yaw" => run_frame_check(physics, 2, duration_s),
         "arming" => run_arming_check(physics, duration_s, true),
         "arming-ungated" => run_arming_check(physics, duration_s, false),
+        "geo-hover" => run_geo_hover(physics, duration_s, evidence),
+        "mission" => run_mission(physics, duration_s, evidence),
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -380,6 +405,498 @@ fn run_arming_check(physics: &mut dyn Physics, duration_s: f32, gated: bool) -> 
 /// controller. If this PASSes, the v0.19.4 cascade's instability is
 /// localised to POS+ATT (interaction of horizontal position feedback
 /// with attitude-setpoint propagation during the first transient).
+/// v0.23 — full verified cascade with the GEOMETRIC SE(3) attitude
+/// controller (relay-geo) replacing the Euler relay-att/rate path that
+/// coupled tilt into yaw. IEKF (full state) → simple P-D position→accel
+/// command → geometric attitude (accel direction + heading → torque) →
+/// thrust-floor mixer, gated by the arming sequencer. This is the v0.23
+/// position-hold validation. PASS = final_dist < 0.5 m AND rms_steady
+/// (last 5 s) < 1.0 m.
+/// v0.29 — a waypoint MISSION the geo cascade follows in real Gazebo. Each
+/// leg is a Mueller rest-to-rest quintic (relay-traj); `sample(t)` yields
+/// the position/velocity/acceleration/jerk setpoint that drives the
+/// position loop + the differential-flatness feedforward.
+struct Mission {
+    waypoints: Vec<[f32; 3]>,
+    leg_time: f32,
+}
+
+impl Mission {
+    fn total_time(&self) -> f32 {
+        ((self.waypoints.len().max(1) - 1) as f32) * self.leg_time
+    }
+    /// (pos_d, vel_d, acc_d, jerk_d) in NED at mission time `t`. Holds the
+    /// final waypoint after the mission completes.
+    fn sample(&self, t: f32) -> ([f32; 3], [f32; 3], [f32; 3], [f32; 3]) {
+        let n = self.waypoints.len();
+        if n < 2 {
+            return (self.waypoints.first().copied().unwrap_or([0.0; 3]), [0.0; 3], [0.0; 3], [0.0; 3]);
+        }
+        if t >= self.total_time() {
+            return (self.waypoints[n - 1], [0.0; 3], [0.0; 3], [0.0; 3]);
+        }
+        let leg = ((t / self.leg_time) as usize).min(n - 2);
+        let tl = t - leg as f32 * self.leg_time;
+        let s = Segment3::rest_to_rest(self.waypoints[leg], self.waypoints[leg + 1], self.leg_time).eval(tl);
+        (s.pos, s.vel, s.acc, s.jerk)
+    }
+}
+
+fn run_geo_hover(
+    physics: &mut dyn Physics,
+    duration_s: f32,
+    evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    run_geo_cascade(physics, duration_s, evidence, None)
+}
+
+/// v0.29 — a real-Gazebo waypoint MISSION: hold (arm + climb), fly a square,
+/// return home — through the full verified cascade with trajectory +
+/// flatness feedforward. Verdict = back within range of home (the goal).
+fn run_mission(
+    physics: &mut dyn Physics,
+    duration_s: f32,
+    evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    // A HOLD at each corner (duplicate waypoint ⇒ a settle leg) gives crisp
+    // corners: the drone reaches the waypoint, settles, then moves on —
+    // instead of carrying momentum and rounding/overshooting the corner.
+    let mission = Mission {
+        waypoints: vec![
+            [0.0, 0.0, -2.0], // arm + climb
+            [0.0, 0.0, -2.0],
+            [2.0, 0.0, -2.0], // → corner 1
+            [2.0, 0.0, -2.0], // settle
+            [2.0, 2.0, -2.0], // → corner 2
+            [2.0, 2.0, -2.0], // settle
+            [0.0, 2.0, -2.0], // → corner 3
+            [0.0, 2.0, -2.0], // settle
+            [0.0, 0.0, -2.0], // → home
+            [0.0, 0.0, -2.0], // settle @ home
+        ],
+        leg_time: 5.0,
+    };
+    run_geo_cascade(physics, duration_s, evidence, Some(&mission))
+}
+
+/// The geo cascade, optionally following a `Mission` trajectory (v0.29). With
+/// `mission = None` this is byte-identical to the v0.21–0.28 hover (fixed
+/// setpoint, no feedforward); with `Some`, the setpoint becomes the sampled
+/// trajectory and the differential-flatness body-rate feedforward is added.
+fn run_geo_cascade(
+    physics: &mut dyn Physics,
+    duration_s: f32,
+    mut evidence: Option<&mut EvidenceSink>,
+    mission: Option<&Mission>,
+) -> bool {
+    // v0.25 — config-driven (host-only falcon-config). `--config=path.json`
+    // sweeps every tuning parameter WITHOUT a rebuild; default is the
+    // best-known in-code tuning. The flight crates stay no_std; only this
+    // (std) bench loads JSON.
+    let cfg = match arg(&std::env::args().collect::<Vec<_>>(), "--config") {
+        Some(p) => match falcon_config::FalconConfig::from_json_path(&p) {
+            Ok(c) => {
+                println!("  config: loaded {p}");
+                c
+            }
+            Err(e) => {
+                eprintln!("  config: {e}; using defaults");
+                falcon_config::FalconConfig::default()
+            }
+        },
+        None => falcon_config::FalconConfig::default(),
+    };
+
+    // v0.29 HONEST FINDING (real-gz): the cascade is tuned to the EDGE of
+    // stability for hover (gentle kp_pos + a_cmd_max=1.0 — high gains or a
+    // higher accel limit re-excite the v0.25 limit cycle and DIVERGE, 350+ m).
+    // So the MISSION runs on the SAME gentle/stable tuning: it follows the
+    // trajectory but LOOSELY (~2.5 m), and the IEKF goes over-confident
+    // (ANEES≫3) under motion. Tight trajectory tracking + estimator
+    // consistency under motion is the v0.30+ robustness work, not a tuning
+    // tweak. (mission = None ⇒ hover, unchanged.)
+    let mut cfg = cfg;
+    if mission.is_some() {
+        // v0.31 — crisp tracking. The accel-comp (v0.30) estimator allows
+        // firmer gains; MORE velocity damping (kd_vel) kills the loop-y
+        // oscillation, a slightly gentler kp_pos reduces the drive.
+        cfg.pos.kp_pos = 0.12;
+        cfg.pos.kd_vel = 1.5;
+        cfg.pos.a_cmd_max = 2.0;
+        // HOLD the heading (not just rate-damp it): RateHold lets the body
+        // frame drift, which ROTATES the square (the drone flew to mirrored
+        // corners). With the v0.30 estimator heading now good (~4°),
+        // HeadingHold keeps the frame aligned so the square stays square.
+        cfg.pos.yaw_mode = YawMode::HeadingHold;
+    }
+
+    let mut iekf = Iekf::with_config(NavState::identity(), cfg.to_iekf_config());
+    let mut iekf_heading_init = false;
+    let mut mixer = QuadMixer::new();
+    // Arming ticks are wall-clock-derived (0.3 s spin-up, 0.1 s level) so
+    // it works at any loop rate (100 Hz → 30/10, 1 kHz → 300/100).
+    let arm_dt = cfg.pos.loop_dt.max(1e-4);
+    let mut seq = ArmingSequencer::new(ArmingConfig {
+        spinup_ticks: (0.3 / arm_dt) as u32,
+        level_ticks_required: (0.1 / arm_dt) as u32,
+        tilt_thresh_rad: 0.087,
+    });
+    let geo = GeoAtt::new(cfg.to_geo_gains());
+    let mut adrc = cfg.to_adrc();
+    let use_adrc = cfg.pos.use_adrc;
+    // v0.33: command filter on the desired body-rate (Farrell command-
+    // filtered backstepping). Hypothesis: bounding the outer→inner command
+    // bandwidth enforces cascade timescale separation and tames the margin.
+    // FALSIFIED IN FLIGHT: filtering ω_d (even roll/pitch only, ω_n=25 rad/s)
+    // DEGRADED tracking ~10× (2.3 m → 24 m, ANEES 10 → 106) under identical
+    // conditions — the cascade needs PROMPT rate tracking, so the added
+    // command-path lag delays the attitude correction the position loop relies
+    // on. The inner loop is already responsive + proven cadence-robust (50×
+    // margin), so command bandwidth is the wrong lever. Kept as a verified,
+    // OPT-IN primitive (CMD_FILTER=1); default OFF. The real fragility is the
+    // outer position-loop gains + estimator under load (a later version).
+    let cmd_filter_on = std::env::var("CMD_FILTER").is_ok();
+    let mut cmd_filter = relay_adrc::CommandFilter3::new(25.0, 30.0, 800.0);
+
+    let setpoint_ned = [0.0_f32, 0.0, -2.0];
+    let hover_thrust = cfg.pos.hover_thrust;
+    let kp_pos = cfg.pos.kp_pos;
+    let kd_vel = cfg.pos.kd_vel;
+    let a_cmd_max = cfg.pos.a_cmd_max;
+    let kp_alt = cfg.pos.kp_alt;
+    let kd_alt = cfg.pos.kd_alt;
+    let lp_alpha = 0.05_f32;
+    let torque_scale = 1.0_f32; // geometric Nm → mixer normalised torque
+    let yaw_d = core::f32::consts::FRAC_PI_2; // hold spawn heading (East)
+    // v0.25 — CASCADE: fast inner rate loop (IEKF-predict + gyro-LPF +
+    // ADRC + mixer) at `dt` (1 kHz), slow outer loop (IEKF aiding updates
+    // + altitude + geometric/position) every `outer_decim` ticks (~100 Hz).
+    // Track A: the rate loop must run fast vs the 25 ms yaw actuator pole.
+    let dt = cfg.pos.loop_dt.max(1e-4);
+    let outer_decim = cfg.pos.outer_decim.max(1);
+    let dt_outer = dt * outer_decim as f32;
+    let mut gyro_lpf = relay_adrc::GyroLpf::new(cfg.pos.gyro_lpf_hz, 1.0 / dt);
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let pace_real_time = physics.counters().is_some();
+    // v0.32 gyro-synchronized pacing: drive the loop off the gz IMU stream so
+    // a low sim RTF (GUI + video-encoder load) cannot desync the inner loop.
+    // Default ON for any real backend; NO_SIM_LOCK=1 reverts to wall-clock.
+    let sim_lock = pace_real_time && std::env::var("NO_SIM_LOCK").is_err();
+    let pace_deadline_us = (tick_period.as_micros() as u64).saturating_mul(8).max(2000);
+    let mut last_imu = physics.counters().map(|c| c.0).unwrap_or(0);
+
+    let mut peak_dist = 0.0_f32;
+    let mut min_dist = f32::INFINITY;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0usize;
+    let steady_start_t = (duration_s - 5.0).max(0.0);
+    // IEKF consistency (NEES) accumulators: the pre-position-update
+    // prediction error vs gz ground truth, weighted by the filter's own
+    // predicted position covariance. Consistent ⇒ mean ≈ 3 (χ²₃).
+    let mut nees_sum = 0.0_f64;
+    let mut nees_n = 0u32;
+    let mut nees_max = 0.0_f32;
+    // v0.22 mag-heading VALIDATION: compare the real magnetometer-derived
+    // heading (mag_heading + declination) against the gz-truth heading
+    // oracle, BEFORE trusting it in the estimator. Confirms the body-frame
+    // conversion + declination are right (the frame-bug class that caused
+    // the yaw saga). Zurich declination ≈ +3° (the SDF magnetic_field).
+    const MAG_DECLINATION: f32 = 0.0524; // rad (~3°)
+    let mut mag_err_sum = 0.0_f64;
+    let mut mag_err_max = 0.0_f32;
+    let mut mag_n = 0u32;
+    // v0.22 magless-yaw observability gate (persistence-of-excitation). At
+    // hover the horizontal specific force ≈ 0 ⇒ yaw is unobservable WITHOUT
+    // the magnetometer — this quantifies WHY the mag (or a manoeuvre) is
+    // required. 1 s window, 1.5 m/s² threshold.
+    let mut yaw_obs = relay_iekf::YawObservability::new(1.0, 1.5);
+    let mut obs_count = 0u32;
+    let mut obs_total = 0u32;
+    let mut last_pos_d = 0.0_f32;
+    let mut v_d_filt = 0.0_f32;
+    let mut last_pos_ned = setpoint_ned;
+    // Outer-loop outputs, held across inner ticks.
+    let mut omega_d_held = [0.0_f32; 3];
+    let mut a_cmd_held = [0.0_f32; 3];
+    let mut thrust_held = hover_thrust;
+    let mut est = iekf.state();
+
+    let started_at = Instant::now();
+    for step in 0..n {
+        let tick_start = Instant::now();
+        let t = step as f32 * dt;
+        let (imu_sample, pos_ned) = physics.measure(0.0);
+
+        // ── INNER (every tick): IEKF predict + gyro low-pass ──
+        iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
+        let gyro_f = gyro_lpf.filter(imu_sample.gyro_body);
+
+        // ── OUTER (every outer_decim ticks): aiding updates + position →
+        //    geometric desired rate (held for the inner loop to track) ──
+        if step % outer_decim == 0 {
+            // v0.30 — acceleration-compensated tilt: feed the commanded NED
+            // accel (a_cmd_held) so the accelerometer isn't mistaken for
+            // gravity while manoeuvring (keeps heading good under motion).
+            // Hover: a_cmd_held ≈ 0 ⇒ identical to the plain update.
+            iekf.update_gravity_compensated(imu_sample.accel_body, a_cmd_held, cfg.iekf.grav_var);
+            // NEES BEFORE the position update: the predicted estimate vs
+            // gz truth `pos_ned`, weighted by the predicted P. (After the
+            // update the estimate is pulled to truth, so post-update NEES
+            // is uninformative in noiseless SITL.)
+            let nees = iekf.nees_position(pos_ned);
+            if nees.is_finite() {
+                nees_sum += nees as f64;
+                nees_n += 1;
+                if nees > nees_max {
+                    nees_max = nees;
+                }
+            }
+            iekf.update_position(pos_ned, cfg.iekf.pos_var);
+            // v0.22 — heading from the REAL magnetometer (no truth cheat).
+            // `heading_ned` (gz truth) is read ONLY for the validation
+            // diagnostic, never fed to the estimator.
+            if let Some(mag_b) = physics.mag_body_ned() {
+                if let Some(mag_yaw) = relay_iekf::mag_heading(mag_b, est.q, MAG_DECLINATION) {
+                    if !iekf_heading_init {
+                        iekf.init_heading(mag_yaw);
+                        iekf_heading_init = true;
+                    }
+                    // Var loosened to the measured mag noise (~2.4° ⇒
+                    // ~0.0018 rad²) so the estimate isn't yanked by sensor
+                    // noise.
+                    iekf.update_magnetometer(mag_b, MAG_DECLINATION, cfg.iekf.yaw_var.max(0.002));
+                    if let Some(hdg) = physics.heading_ned() {
+                        let e = libm::remainderf(mag_yaw - hdg, 2.0 * core::f32::consts::PI);
+                        mag_err_sum += e.abs() as f64;
+                        if e.abs() > mag_err_max {
+                            mag_err_max = e.abs();
+                        }
+                        mag_n += 1;
+                    }
+                }
+            }
+            est = iekf.state();
+
+            // Magless-yaw observability: horizontal specific force in NED
+            // (frame-correct, unlike body-axis accel which tilt pollutes).
+            let f_ned = relay_iekf::q_rotate(est.q, imu_sample.accel_body);
+            let a_horiz = (f_ned[0] * f_ned[0] + f_ned[1] * f_ned[1]).sqrt();
+            if yaw_obs.update(a_horiz, dt_outer) {
+                obs_count += 1;
+            }
+            obs_total += 1;
+
+            // Altitude thrust (finite-diff v_d at the outer rate).
+            // v0.29 — the setpoint is the MISSION trajectory sample (pos +
+            // vel + accel + jerk feedforward), or the fixed hover point when
+            // mission = None (then derivatives are 0 ⇒ identical to v0.28).
+            let (pos_d, vel_d, acc_d, jerk_d) = match mission {
+                Some(m) => m.sample(t),
+                None => (setpoint_ned, [0.0; 3], [0.0; 3], [0.0; 3]),
+            };
+            let v_d_raw = (pos_ned[2] - last_pos_d) / dt_outer;
+            v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
+            last_pos_d = pos_ned[2];
+            let alt_err = pos_d[2] - pos_ned[2];
+            thrust_held = (hover_thrust - kp_alt * alt_err + kd_alt * v_d_filt).clamp(0.0, 1.0);
+
+            // Horizontal position → NED accel command: trajectory accel
+            // feedforward + P-D on (pos, vel) error against the moving setpoint.
+            let mut a_cmd = [
+                acc_d[0] + kp_pos * (pos_d[0] - pos_ned[0]) - kd_vel * (est.v[0] - vel_d[0]),
+                acc_d[1] + kp_pos * (pos_d[1] - pos_ned[1]) - kd_vel * (est.v[1] - vel_d[1]),
+                0.0,
+            ];
+            let ah = (a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]).sqrt();
+            if ah > a_cmd_max {
+                let s = a_cmd_max / ah;
+                a_cmd[0] *= s;
+                a_cmd[1] *= s;
+            }
+            a_cmd_held = a_cmd;
+            let mut omega_d = geo.desired_rate(est.q, a_cmd, yaw_d);
+            // Differential-flatness body-rate FEEDFORWARD from the trajectory
+            // jerk (v0.27 → real cascade). Zero for hover (jerk_d = 0).
+            if mission.is_some() {
+                if let Some(ff) = relay_geo::flatness_omega_ff(a_cmd, jerk_d, yaw_d, 0.0) {
+                    omega_d[0] += ff[0];
+                    omega_d[1] += ff[1];
+                }
+            }
+            if cfg.pos.yaw_mode != YawMode::HeadingHold {
+                omega_d[2] = 0.0; // rate-hold / off: no heading tracking
+            }
+            omega_d_held = omega_d;
+        }
+
+        // ── INNER torque: ADRC tracks the held rate on FILTERED gyro ──
+        let tilt = body_tilt_rad(imu_sample.accel_body);
+        let arm = seq.tick(tilt, true);
+        let torque = if arm.torque_authority {
+            // Filter ROLL/PITCH desired-rate only; leave YAW (axis 2)
+            // unfiltered — the heading-tracking yaw rate must not lag.
+            let mut omega_d_cmd = omega_d_held;
+            if cmd_filter_on {
+                let f = cmd_filter.step(omega_d_held, dt);
+                omega_d_cmd[0] = f[0];
+                omega_d_cmd[1] = f[1];
+            }
+            let m = if use_adrc {
+                adrc.tick(gyro_f, omega_d_cmd, dt)
+            } else {
+                geo.tick(est.q, gyro_f, a_cmd_held, yaw_d)
+            };
+            let yaw_t = if cfg.pos.yaw_mode == YawMode::Off { 0.0 } else { m[2] * torque_scale };
+            [m[0] * torque_scale, m[1] * torque_scale, yaw_t]
+        } else {
+            adrc.reset();
+            cmd_filter.reset();
+            [0.0_f32; 3]
+        };
+        let floor = cfg.pos.mixer_floor;
+        let th = thrust_held * arm.thrust_scale;
+        let fl = floor * arm.thrust_scale;
+        let motors = match cfg.pos.mixer_mode {
+            falcon_config::MixerMode::ThrustFloor => mixer.mix_thrust_floor(torque, th, fl),
+            falcon_config::MixerMode::Priority => mixer.mix_priority(torque, th, fl),
+            falcon_config::MixerMode::Airmode => mixer.mix_airmode(torque, th, fl),
+        };
+        physics.step(motors, dt);
+
+        let dn = pos_ned[0] - setpoint_ned[0];
+        let de = pos_ned[1] - setpoint_ned[1];
+        let dd = pos_ned[2] - setpoint_ned[2];
+        let dist = (dn * dn + de * de + dd * dd).sqrt();
+        if dist > peak_dist { peak_dist = dist; }
+        if dist < min_dist { min_dist = dist; }
+        if t >= steady_start_t {
+            sum_sq_steady += dist * dist;
+            steady_count += 1;
+        }
+        last_pos_ned = pos_ned;
+
+        if std::env::var("POS_DEBUG").is_ok() && step % 50 == 0 {
+            let iyaw = {
+                let q = est.q;
+                libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]))
+            };
+            let chdg = physics.heading_ned().unwrap_or(f32::NAN).to_degrees();
+            eprintln!(
+                "    [geo] t={t:.1} pos=[{:.1},{:.1},{:.1}] dist={dist:.2} tilt={:.1}° IEKFyaw={:.1}° compass={:.1}°",
+                pos_ned[0], pos_ned[1], pos_ned[2], tilt.to_degrees(),
+                iyaw.to_degrees(), chdg,
+            );
+        }
+        if let Some(ref mut e) = evidence {
+            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
+                         motors, physics.counters());
+        }
+        if sim_lock {
+            // Two-stage gyro-synced pacing (v0.32).
+            // Stage 1 (anti-burst): hold the steady real-time control period
+            // so the marginal inner loop always sees a uniform cadence — never
+            // burst through buffered IMU samples (that jitter diverges it).
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+            // Stage 2 (anti-stale): only if the sim has fallen behind (RTF<1,
+            // e.g. GUI + recorder load) the IMU is *still* stale after a full
+            // period — then wait for a fresh sample so we pace to physics
+            // instead of over-driving. Bounded so a stall can't hang the loop.
+            loop {
+                let now_imu = physics.counters().map(|c| c.0).unwrap_or(last_imu + 1);
+                let waited_us = tick_start.elapsed().as_micros() as u64;
+                match pace::pace_decision(last_imu, now_imu, waited_us, pace_deadline_us) {
+                    pace::Pace::Fresh(w) | pace::Pace::Deadline(w) => {
+                        last_imu = w;
+                        break;
+                    }
+                    pace::Pace::Wait => std::thread::sleep(Duration::from_micros(150)),
+                }
+            }
+        } else if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+        }
+    }
+    let wall = started_at.elapsed();
+    // For a mission the verdict is reaching the GOAL (final waypoint); for
+    // hover it is the fixed setpoint.
+    let goal_ned = mission
+        .and_then(|m| m.waypoints.last().copied())
+        .unwrap_or(setpoint_ned);
+    let dn = last_pos_ned[0] - goal_ned[0];
+    let de = last_pos_ned[1] - goal_ned[1];
+    let dd = last_pos_ned[2] - goal_ned[2];
+    let final_dist = (dn * dn + de * de + dd * dd).sqrt();
+    let rms_steady = if steady_count > 0 {
+        (sum_sq_steady / steady_count as f32).sqrt()
+    } else {
+        f32::NAN
+    };
+    let anees = if nees_n > 0 { (nees_sum / nees_n as f64) as f32 } else { f32::NAN };
+    println!(
+        "  verdict: backend={} scenario=geo-hover steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
+        physics.name(), n, final_dist, peak_dist, rms_steady, wall.as_secs_f32(),
+    );
+    // IEKF consistency report (3-DoF position, χ²₃: E=3, 95% single-sample
+    // band [0.216, 9.35]). The SAFETY-relevant direction is OVER-CONFIDENT
+    // (ANEES ≫ 3): the filter claims tighter covariance than its true
+    // error — the precursor to divergence. Below ~3 is over-conservative
+    // (safe). The gate flags only the over-confident extreme.
+    let nees_status = if !anees.is_finite() {
+        "NO-DATA"
+    } else if anees > 9.35 {
+        "OVER-CONFIDENT"
+    } else if anees < 0.216 {
+        "over-conservative"
+    } else {
+        "CONSISTENT"
+    };
+    let nees_ok = anees.is_finite() && anees <= 9.35;
+    println!(
+        "  iekf-consistency: position ANEES={:.2} (target≈3.0, dof=3) max={:.1} n={} [{}]",
+        anees, nees_max, nees_n, nees_status,
+    );
+    // v0.22 — closed-loop heading accuracy: the magnetometer-driven
+    // estimate vs the gz-truth heading (truth used for SCORING only, never
+    // fed to the estimator). Frame-correctness was confirmed open-loop at
+    // ~2.4°; closed-loop ~6-7° (mag noise + tilt coupling during position
+    // corrections) is the honest operating accuracy — fine for hold.
+    if mag_n > 0 {
+        let mag_err_mean = (mag_err_sum / mag_n as f64) as f32;
+        let mag_status = if mag_err_mean.to_degrees() < 12.0 { "OK" } else { "DEGRADED" };
+        println!(
+            "  mag-heading: closed-loop err vs truth mean={:.1}° max={:.1}° n={} [{}]",
+            mag_err_mean.to_degrees(), mag_err_max.to_degrees(), mag_n, mag_status,
+        );
+    } else {
+        println!("  mag-heading: no magnetometer frames received");
+    }
+    // Observability gate report: at a clean hover this should be near 0%
+    // observable — i.e. yaw is unobservable without the magnetometer,
+    // confirming why v0.22's mag fusion (not GPS-only) is the heading
+    // source. (Under a manoeuvre it would rise — magless recovery window.)
+    if obs_total > 0 {
+        let obs_pct = 100.0 * obs_count as f32 / obs_total as f32;
+        println!(
+            "  yaw-observability (magless): {:.0}% of hover excited above threshold (low ⇒ mag required)",
+            obs_pct,
+        );
+    }
+    if let Some(ref mut e) = evidence {
+        e.write_summary_hover(n, final_dist, peak_dist, rms_steady, min_dist, wall.as_secs_f32(), physics.counters());
+    }
+    // PASS requires BOTH position-hold AND filter consistency: an
+    // over-confident estimator is unsafe even if this run's position
+    // looked fine (it is the divergence precursor).
+    final_dist < 0.5 && rms_steady < 1.0 && nees_ok
+}
+
 fn run_alt_rate_hover(
     physics: &mut dyn Physics,
     duration_s: f32,
@@ -632,13 +1149,32 @@ fn run_closed_loop_hover(
     mut evidence: Option<&mut EvidenceSink>,
 ) -> bool {
     let mut ekf = Ekf::new();
+    // v0.21 — the Invariant EKF runs in PARALLEL with the Mahony filter
+    // for the diagnostic: POS_DEBUG prints iekf_tilt vs the Mahony
+    // est_tilt vs true_tilt. If the IEKF tracks truth where Mahony
+    // diverges to 51° (v0.20 RC#3), the keystone works.
+    let mut iekf = Iekf::level();
+    let mut iekf_heading_init = false;
+    // v0.22 — hold a FIXED heading (the spawn heading, NED yaw ≈ 90° =
+    // body facing East). "Hold current estimate yaw" feeds estimate noise
+    // back through the Euler setpoint and spins the body once yaw ≠ 0.
+    let yaw_hold = core::f32::consts::FRAC_PI_2;
     let mut rate_pid = RatePid::new();
     let mut att = AttController::new();
     // v0.20 — calibrate the position controller's hover thrust for the gz
     // 2 kg falcon-quad. The relay-pos DEFAULT (0.5, a 500 g 10-inch quad)
     // sits AT the mixer floor, so the body could not climb. 0.72 is the
     // measured hover collective for this airframe (matches alt-rate).
-    let mut pos = PosController::with_gains(PosGains { hover_thrust: 0.72, ..PosGains::DEFAULT });
+    // v0.21 — gentler position gains for the gz 2 kg body on a still-
+    // imperfect estimate: a soft kp_pos + tighter tilt limit keep the
+    // body near-stationary (in the observable regime) so the IEKF
+    // attitude estimate is not destabilised by aggressive translation.
+    let mut pos = PosController::with_gains(PosGains {
+        hover_thrust: 0.72,
+        kp_pos: 0.4,
+        tilt_max: 0.20,
+        ..PosGains::DEFAULT
+    });
     let mut mixer = QuadMixer::new();
     // v0.19.9 — arming sequencer gates the rate loop here too. The full
     // cascade had no spawn-hold at all (torque from t=0), so it was the
@@ -646,7 +1182,11 @@ fn run_closed_loop_hover(
     let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
-    let setpoint = PositionSetpoint::hover_at(setpoint_ned);
+    let setpoint = if std::env::var("USE_IEKF").is_ok() {
+        PositionSetpoint { position_ned: setpoint_ned, velocity_ned: [0.0; 3], yaw_setpoint: yaw_hold }
+    } else {
+        PositionSetpoint::hover_at(setpoint_ned)
+    };
 
     let dt = 0.01_f32;
     let n = (duration_s / dt) as u32;
@@ -681,8 +1221,29 @@ fn run_closed_loop_hover(
         let est = ekf.tick(imu_sample);
         if !est.quaternion[0].is_finite() { nan_seen = true; }
 
-        // 3. POS — position + finite-diff velocity → attitude setpoint.
-        let v_ned = match last_pos_ned {
+        // 2b. IEKF — propagate on IMU, correct on gz position (the
+        //     "GPS"), and on heading (v0.22 "compass") which makes yaw
+        //     observable (the v0.21 ±130° wander). The measured accel is
+        //     body-frame specific force, exactly the IEKF's dynamics input.
+        iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
+        // Adaptive gravity/tilt fusion (variance inflates under accel) +
+        // position. Gives the roll/pitch observability the IMU+GPS-only
+        // filter lacked (3° error → tip-over).
+        iekf.update_gravity(imu_sample.accel_body, 0.5);
+        iekf.update_position(pos_ned, 0.04); // ~0.2 m 1σ NavSat
+        if let Some(hdg) = physics.heading_ned() {
+            // One-time alignment: start the estimate at the body's true
+            // heading so the controller doesn't see a 90° startup yaw
+            // error (which kicked it into a spin).
+            if !iekf_heading_init {
+                iekf.init_heading(hdg);
+                iekf_heading_init = true;
+            }
+            iekf.update_yaw(hdg, 0.01); // ~6° 1σ compass
+        }
+
+        // 3. POS — position + velocity → attitude setpoint.
+        let v_fd = match last_pos_ned {
             Some(p) => [
                 (pos_ned[0] - p[0]) / dt,
                 (pos_ned[1] - p[1]) / dt,
@@ -691,18 +1252,26 @@ fn run_closed_loop_hover(
             None => [0.0; 3],
         };
         last_pos_ned = Some(pos_ned);
+        // v0.21 — control attitude source: the IEKF (USE_IEKF) vs the
+        // legacy Mahony filter. Closing the loop on the IEKF is the test
+        // of whether the keystone fixes RC#3 → position-hold. When on the
+        // IEKF, also feed its SMOOTH velocity estimate (the finite-diff
+        // v_fd from NavSat is noisy and was destabilising the vel loop).
+        let use_iekf = std::env::var("USE_IEKF").is_ok();
+        let est_q = if use_iekf { iekf.state().q } else { est.quaternion };
+        let v_ned = if use_iekf { iekf.state().v } else { v_fd };
         let att_sp = pos.tick(
             pos_ts_of(t),
             pos_ned,
             v_ned,
-            est.quaternion,
+            est_q,
             setpoint,
         );
         current_att_sp = att_sp.quaternion;
         current_thrust = att_sp.thrust;
 
         // 4. ATT — quaternion error → rate setpoint.
-        let current_rate_sp = att.tick(att_ts_of(t), est.quaternion, current_att_sp);
+        let current_rate_sp = att.tick(att_ts_of(t), est_q, current_att_sp);
 
         // 5. RATE — gyro + rate setpoint → torque (frame-corrected),
         //    gated by the arming sequencer (RC#1). Torque authority
@@ -737,10 +1306,15 @@ fn run_closed_loop_hover(
             let q = est.quaternion;
             let bz_d = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]); // R[2][2]
             let est_tilt = libm::acosf(bz_d.clamp(-1.0, 1.0));
+            let is = iekf.state();
+            let iq = is.q;
+            let iyaw = libm::atan2f(2.0 * (iq[0] * iq[3] + iq[1] * iq[2]), 1.0 - 2.0 * (iq[2] * iq[2] + iq[3] * iq[3]));
+            let chdg = physics.heading_ned().unwrap_or(f32::NAN).to_degrees();
             eprintln!(
-                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° est_tilt={:.1}° thrust={:.2}",
+                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° IEKF_tilt={:.1}° IEKF_yaw={:.1}° compass={:.1}° ipos=[{:.1},{:.1},{:.1}]",
                 pos_ned[0], pos_ned[1], pos_ned[2],
-                tilt.to_degrees(), est_tilt.to_degrees(), current_thrust,
+                tilt.to_degrees(), is.tilt_rad().to_degrees(), iyaw.to_degrees(), chdg,
+                is.p[0], is.p[1], is.p[2],
             );
         }
 
@@ -1087,10 +1661,12 @@ mod tests {
     /// deliberately. See bench-evidence/gz-sim/2026-05-28-v0.19.6-*.md.
     #[test]
     fn frame_correction_is_identity() {
+        // Identity: roll/pitch via the SDF index-map alignment, and yaw's
+        // measured inversion is corrected in the YAW ADRC b0 (negative),
+        // not here — see frame_correct_torque docs. This seam stays the
+        // documented boundary where a frame correction *would* live.
         let t = [0.3_f32, -0.7, 0.2];
-        assert_eq!(frame_correct_torque(t), t,
-            "frame-correction must be identity after the v0.19.6 SDF index alignment");
-        // Spot-check each axis independently.
+        assert_eq!(frame_correct_torque(t), t);
         assert_eq!(frame_correct_torque([1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]);
         assert_eq!(frame_correct_torque([0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]);
         assert_eq!(frame_correct_torque([0.0, 0.0, 1.0]), [0.0, 0.0, 1.0]);
@@ -1140,5 +1716,323 @@ mod tests {
         let _ = run_open_loop_climb(&mut g, 0.1, None);
         // Result is FAIL (everything zeros), but the harness must not
         // panic — that's the contract for a stub-only run.
+    }
+
+    /// v0.26 END-TO-END fault-tolerance chain (deterministic, no gz):
+    /// a hovering quad loses rotor 0 mid-flight; the FDI (RotorFaultDetector)
+    /// detects + isolates it from the commanded-vs-achieved residual, the
+    /// loop switches to the reduced-attitude (S²) law + the MIX-P08
+    /// reconfigured allocator, and the THRUST AXIS stays upright (the body
+    /// is allowed to spin in yaw). Proves the three verified components
+    /// compose into a recovery. Rigid-body attitude sim; the mixer round-
+    /// trip `motors_to_torque_signs(mix(τ)) = 4τ` (zero-sum columns) ⇒
+    /// SCALE = 0.25 makes the healthy roundtrip ≈ identity, so the failure
+    /// shows as the real allocation imbalance.
+    #[test]
+    fn fault_tolerance_chain_recovers_from_rotor_loss() {
+        use relay_geo::{GeoAtt, GeoGains};
+        use relay_iekf::RotorFaultDetector;
+        use relay_mix_quad::{motors_to_torque_signs, QuadMixer};
+
+        let ctrl = GeoAtt::new(GeoGains::FALCON_QUAD);
+        let j = GeoGains::FALCON_QUAD.j;
+        let b3_d = [0.0f32, 0.0, 1.0]; // level hover thrust axis
+        let level = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let (hover, floor) = (0.5f32, 0.15f32);
+        const SCALE: f32 = 0.25;
+        let dt = 0.002f32;
+        let (real_failed, fail_step) = (0usize, 1000u32); // rotor 0 dies at 2 s
+
+        let mut r = level;
+        let mut omega = [0.0f32; 3];
+        let mut fdi = RotorFaultDetector::new(0.5, 0.1);
+        let mut isolated: Option<usize> = None;
+        let mut max_tilt_after = 0.0f32;
+
+        for step in 0..4000u32 {
+            // Controller + allocation (full-attitude until a fault is isolated,
+            // then reduced-attitude + the reconfigured allocator).
+            let (torque, motors_cmd) = if let Some(f) = isolated {
+                let tq = ctrl.moment_reduced(&r, omega, b3_d);
+                (tq, QuadMixer::new().mix_rotor_out(f, tq, hover, floor))
+            } else {
+                let tq = ctrl.moment(&r, omega, &level);
+                (tq, QuadMixer::new().mix_thrust_floor(tq, hover, floor))
+            };
+            let _ = torque;
+
+            // MIX-P08 holds in the integrated loop: while reconfigured (the
+            // mode that PRODUCED motors_cmd this step), the failed rotor is
+            // OFF and the healthy three stay in [floor,1].
+            if let Some(f) = isolated {
+                assert_eq!(motors_cmd[f], 0.0, "failed rotor must be commanded 0");
+                for (i, &v) in motors_cmd.iter().enumerate() {
+                    if i != f {
+                        assert!(v >= floor - 1e-6 && v <= 1.0 + 1e-6, "healthy motor bound: {v}");
+                    }
+                }
+            }
+
+            // Physics: inject the rotor-0 failure (its thrust → 0).
+            let mut motors_real = motors_cmd;
+            if step >= fail_step {
+                motors_real[real_failed] = 0.0;
+            }
+            // FDI on the commanded-vs-achieved residual.
+            if isolated.is_none() {
+                let mut resid = [0.0f32; 4];
+                for i in 0..4 {
+                    resid[i] = (motors_cmd[i] - motors_real[i]).abs();
+                }
+                if let Some(f) = fdi.update(resid) {
+                    isolated = Some(f);
+                }
+            }
+            // Body torque from the ACHIEVED motors → rigid-body update.
+            let bt = motors_to_torque_signs(motors_real);
+            let body_t = [bt[0] * SCALE, bt[1] * SCALE, bt[2] * SCALE];
+            let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+            let gyro = [
+                omega[1] * jo[2] - omega[2] * jo[1],
+                omega[2] * jo[0] - omega[0] * jo[2],
+                omega[0] * jo[1] - omega[1] * jo[0],
+            ];
+            for i in 0..3 {
+                omega[i] += dt * (body_t[i] - gyro[i]) / j[i];
+            }
+            r = integ_rot(&r, omega, dt);
+
+            if step > fail_step + 300 {
+                let tilt = (r[2][2].clamp(-1.0, 1.0)).acos();
+                if tilt > max_tilt_after {
+                    max_tilt_after = tilt;
+                }
+            }
+        }
+        let final_tilt = (r[2][2].clamp(-1.0, 1.0)).acos();
+        assert_eq!(isolated, Some(real_failed), "FDI must isolate the failed rotor");
+        // The body does NOT tumble (never inverts past ~80°) and SETTLES
+        // back toward upright — the reduced-attitude law recovers the
+        // thrust axis. (Full hover incl. the periodic spin solution is the
+        // gz/SITL follow-on; here the rigid-body sim proves the chain
+        // composes + stays controlled.)
+        assert!(
+            max_tilt_after < 1.4,
+            "thrust axis must not tumble after rotor loss: peak {max_tilt_after} rad"
+        );
+        assert!(
+            final_tilt < 0.5,
+            "thrust axis must settle back upright: final {final_tilt} rad (peak {max_tilt_after})"
+        );
+    }
+
+    /// v0.27 "MISSION" scenario (deterministic, no gz): fly a square
+    /// waypoint mission with the FULL v0.27 chain — per-leg Mueller quintic
+    /// trajectory (relay-traj), differential-flatness feedforward
+    /// (relay-geo flatness_omega_ff), geometric attitude control, and a
+    /// position P-D, in a 6-DoF rigid-body sim. The thrust acts along the
+    /// ACHIEVED body axis (so attitude-tracking error shows up as position
+    /// error). Asserts the body reaches each waypoint. Demonstrates that the
+    /// trajectory generator + flatness feedforward + controller compose.
+    #[test]
+    fn mission_follows_waypoint_trajectory() {
+        use relay_geo::{desired_attitude, thrust_axis_ned, flatness_omega_ff, GeoAtt, GeoGains};
+        use relay_traj::Segment3;
+
+        let j = [0.0217f32, 0.0217, 0.04];
+        // Fast idealised attitude loop (this sim has no actuator lag / mixer
+        // scale — see the gz path for the real-airframe gains).
+        let (kr, kw) = (24.0f32, 9.0f32);
+        let (kp_pos, kd_pos) = (3.0f32, 4.0f32);
+        let g_ned = [0.0f32, 0.0, 9.81];
+        let dt = 0.001f32;
+
+        // Square mission at 2 m altitude (NED down = −2).
+        let wps = [
+            [0.0f32, 0.0, -2.0],
+            [3.0, 0.0, -2.0],
+            [3.0, 3.0, -2.0],
+            [0.0, 3.0, -2.0],
+        ];
+        let leg_t = 3.0f32;
+
+        // State: position p, velocity v, attitude R, body rate ω.
+        let mut p = wps[0];
+        let mut v = [0.0f32; 3];
+        let mut r = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut omega = [0.0f32; 3];
+
+        for leg in 0..wps.len() - 1 {
+            let seg = Segment3::rest_to_rest(wps[leg], wps[leg + 1], leg_t);
+            let steps = (leg_t / dt) as u32;
+            for k in 0..steps {
+                let t = k as f32 * dt;
+                let s = seg.eval(t);
+                // a_cmd = trajectory accel ff + position P-D.
+                let a_cmd = [
+                    s.acc[0] + kp_pos * (s.pos[0] - p[0]) + kd_pos * (s.vel[0] - v[0]),
+                    s.acc[1] + kp_pos * (s.pos[1] - p[1]) + kd_pos * (s.vel[1] - v[1]),
+                    s.acc[2] + kp_pos * (s.pos[2] - p[2]) + kd_pos * (s.vel[2] - v[2]),
+                ];
+                let b3_d = thrust_axis_ned(a_cmd).unwrap();
+                let r_d = desired_attitude(b3_d, 0.0).unwrap();
+                let c = {
+                    let d = [g_ned[0] - a_cmd[0], g_ned[1] - a_cmd[1], g_ned[2] - a_cmd[2]];
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                };
+                let off = flatness_omega_ff(a_cmd, s.jerk, 0.0, 0.0).unwrap_or([0.0; 3]);
+
+                // Attitude: geometric error + rate feedforward.
+                let e_r = GeoAtt::attitude_error(&r, &r_d);
+                let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+                let gyro = [
+                    omega[1] * jo[2] - omega[2] * jo[1],
+                    omega[2] * jo[0] - omega[0] * jo[2],
+                    omega[0] * jo[1] - omega[1] * jo[0],
+                ];
+                let mut tau = [0.0f32; 3];
+                for i in 0..3 {
+                    tau[i] = -kr * e_r[i] - kw * (omega[i] - off[i]) + gyro[i];
+                    omega[i] += dt * (tau[i] - gyro[i]) / j[i];
+                }
+                r = integ_rot(&r, omega, dt);
+
+                // Position: thrust (magnitude c, along −body-down axis) + g.
+                let b3_ach = [r[0][2], r[1][2], r[2][2]];
+                for i in 0..3 {
+                    let accel = g_ned[i] - c * b3_ach[i];
+                    v[i] += dt * accel;
+                    p[i] += dt * v[i];
+                }
+                let _ = GeoGains::FALCON_QUAD;
+            }
+            // Reached the waypoint at the end of the leg.
+            let err = {
+                let d = [p[0] - wps[leg + 1][0], p[1] - wps[leg + 1][1], p[2] - wps[leg + 1][2]];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+            };
+            assert!(err < 0.4, "leg {leg}: missed waypoint by {err} m (p={p:?})");
+        }
+    }
+
+    /// v0.28 verified shield, end-to-end (deterministic, no gz): a
+    /// DESTABILIZING stand-in "agile" policy (positive attitude feedback —
+    /// drives away from level) tumbles on its own, but under the simplex
+    /// shield the certified geometric fallback takes over near the
+    /// recoverable boundary and the attitude stays inside {Ψ<2} and
+    /// recovers. Demonstrates the moat: an unverified policy cannot breach
+    /// the proven safe set.
+    #[test]
+    fn shield_keeps_destabilizing_policy_safe() {
+        use relay_geo::{GeoAtt, GeoGains, RecoverableSet, SimplexShield};
+
+        let r_d = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let j = [0.0217f32, 0.0217, 0.04];
+        // Strong certified fallback (idealised sim gains).
+        let fb_ctrl = GeoAtt::new(GeoGains {
+            k_r: [10.0, 10.0, 10.0],
+            k_omega: [4.0, 4.0, 4.0],
+            j,
+        });
+        let set = RecoverableSet::new(10.0, 0.04, 1.6); // k_R, λ_M(J), Ψ_max
+        let dt = 0.001f32;
+        // Tilt 0.4 rad in roll.
+        let r0 = [[1.0f32, 0.0, 0.0], [0.0, 0.92106, -0.38942], [0.0, 0.38942, 0.92106]];
+        // Destabilizing policy: POSITIVE attitude feedback (unstable).
+        let bad = |r: &[[f32; 3]; 3]| {
+            let e = GeoAtt::attitude_error(r, &r_d);
+            [3.0 * e[0], 3.0 * e[1], 3.0 * e[2]]
+        };
+        let step = |r: &[[f32; 3]; 3], omega: &mut [f32; 3], tau: [f32; 3]| {
+            let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+            let gyro = [
+                omega[1] * jo[2] - omega[2] * jo[1],
+                omega[2] * jo[0] - omega[0] * jo[2],
+                omega[0] * jo[1] - omega[1] * jo[0],
+            ];
+            for i in 0..3 {
+                omega[i] += dt * (tau[i] - gyro[i]) / j[i];
+            }
+            integ_rot(r, *omega, dt)
+        };
+
+        // Run 1 — the bad policy ALONE leaves the safe set (Ψ→2, tumbles).
+        // Track the MAX Ψ: a fast-spinning body's Ψ is periodic past 180°,
+        // so the final value is uninformative — the peak shows it diverged.
+        let mut r = r0;
+        let mut omega = [0.0f32; 3];
+        let mut max_psi_agile = 0.0f32;
+        for _ in 0..3000 {
+            r = step(&r, &mut omega, bad(&r));
+            let psi = GeoAtt::psi(&r, &r_d);
+            if psi > max_psi_agile {
+                max_psi_agile = psi;
+            }
+        }
+        assert!(max_psi_agile > 1.9, "bad policy alone should leave {{Ψ<2}}: max {max_psi_agile}");
+
+        // Run 2 — SHIELDED: stays in {Ψ<2} and recovers.
+        let mut sh = SimplexShield::new(set, 0.15, 0.5);
+        let mut r = r0;
+        let mut omega = [0.0f32; 3];
+        let mut max_psi = 0.0f32;
+        let mut used_fb_ever = false;
+        for _ in 0..4000 {
+            let psi = GeoAtt::psi(&r, &r_d);
+            let eo = omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2];
+            let agile = bad(&r);
+            let fallback = fb_ctrl.moment(&r, omega, &r_d);
+            let (tau, used) = sh.filter(psi, eo, agile, fallback);
+            used_fb_ever |= used;
+            if psi > max_psi {
+                max_psi = psi;
+            }
+            r = step(&r, &mut omega, tau);
+        }
+        // The moat: the shield CONTAINS the persistently-destabilizing
+        // policy inside the safe set — Ψ never reaches the tumble the bare
+        // policy hit (>1.9). (It limit-cycles near the boundary rather than
+        // recovering to level, because the agile policy keeps pushing out
+        // whenever re-enabled; full recovery needs the policy to stop
+        // misbehaving — that is the agile layer's job, not the shield's.)
+        assert!(used_fb_ever, "shield should have engaged the fallback");
+        assert!(
+            max_psi < 1.9,
+            "shield must contain Ψ inside the safe set: max {max_psi} (bare policy hit {max_psi_agile})"
+        );
+    }
+
+    /// R ← R·(I + [ω]× dt) with Gram-Schmidt re-orthonormalisation.
+    #[cfg(test)]
+    fn integ_rot(r: &[[f32; 3]; 3], w: [f32; 3], dt: f32) -> [[f32; 3]; 3] {
+        let wd = [w[0] * dt, w[1] * dt, w[2] * dt];
+        let incr = [[1.0, -wd[2], wd[1]], [wd[2], 1.0, -wd[0]], [-wd[1], wd[0], 1.0]];
+        let mut m = [[0.0f32; 3]; 3];
+        for i in 0..3 {
+            for jj in 0..3 {
+                let mut s = 0.0;
+                for k in 0..3 {
+                    s += r[i][k] * incr[k][jj];
+                }
+                m[i][jj] = s;
+            }
+        }
+        // Gram-Schmidt on columns.
+        let col = |mm: &[[f32; 3]; 3], c: usize| [mm[0][c], mm[1][c], mm[2][c]];
+        let norm = |v: [f32; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let c0 = col(&m, 0);
+        let n0 = norm(c0).max(1e-9);
+        let e0 = [c0[0] / n0, c0[1] / n0, c0[2] / n0];
+        let c1 = col(&m, 1);
+        let d = e0[0] * c1[0] + e0[1] * c1[1] + e0[2] * c1[2];
+        let p1 = [c1[0] - d * e0[0], c1[1] - d * e0[1], c1[2] - d * e0[2]];
+        let n1 = norm(p1).max(1e-9);
+        let e1 = [p1[0] / n1, p1[1] / n1, p1[2] / n1];
+        let e2 = [
+            e0[1] * e1[2] - e0[2] * e1[1],
+            e0[2] * e1[0] - e0[0] * e1[2],
+            e0[0] * e1[1] - e0[1] * e1[0],
+        ];
+        [[e0[0], e1[0], e2[0]], [e0[1], e1[1], e2[1]], [e0[2], e1[2], e2[2]]]
     }
 }

@@ -1,0 +1,25 @@
+[package]
+name = "relay-traj"
+description = "Relay quadrotor trajectory generation — Mueller-Hehn-D'Andrea per-axis jerk-minimizing quintic motion primitives (closed-form, no_std/no_alloc) + closed-form input-feasibility tests. Feeds the relay-geo geometric controller via the differential-flatness feedforward (v0.27)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Plain Rust + proptest + Kani (f32). The highest-value oracle is a
+# Kani proof that the input-feasibility predicate is SOUND (a "feasible"
+# verdict implies the thrust/body-rate bound truly holds over the
+# segment). See docs/research/v0.27-trajectory-sota.md.
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

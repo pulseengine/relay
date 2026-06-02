@@ -1,0 +1,25 @@
+[package]
+name = "relay-geo"
+description = "Relay geometric SE(3) attitude controller (Lee/Leok/McClamroch) — coordinate-free attitude control on SO(3), no Euler tilt-yaw coupling. Almost-global exponential stability with an explicit Lyapunov certificate (v0.23)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Plain Rust + proptest + Kani (f32; off the integer Verus track, like
+# relay-iekf / relay-mix-quad). The almost-global Lyapunov proof targets
+# Lean/rules_lean4 (the explicit closed-form certificate) — see
+# docs/research/v0.23-control-sota.md.
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -27,3 +27,7 @@ Cargo.lock
 # time; the lib.rs files alias the generated crate).
 wasm/cm/*/src/bindings.rs
 coverage.lcov
+
+# Bazel vendored external deps (Lean toolchain + Mathlib oleans, multi-GB;
+# regeneratable via proofs/lean/vendor.sh — see proofs/lean/README.md)
+/vendor/bazel/

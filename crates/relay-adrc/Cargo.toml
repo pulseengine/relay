@@ -1,0 +1,25 @@
+[package]
+name = "relay-adrc"
+description = "Relay robust inner rate loop — linear Active Disturbance Rejection Control (ADRC). Per-axis extended-state observer estimates + cancels the lumped disturbance (actuator lag, effectiveness uncertainty, rotor drag). Robust to unmodeled actuator dynamics — the v0.25 fix for the yaw-loop instability (v0.25)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Plain Rust + proptest + Kani (f32; off the integer Verus track). The
+# ESO observer-error Lyapunov bound targets Lean/rules_lean4 — the most
+# mechanizable inner-loop guarantee (algebraic, not singular-perturbation;
+# see docs/research/v0.25-inner-loop-sota.md).
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

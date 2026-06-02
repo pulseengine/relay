@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-SHIELD-P01
+    type: sw-req
+    title: "SHIELD-P01 — verified simplex shield: an unverified agile policy never leaves the certified safe set"
+    status: implemented
+    description: >
+      An unverified high-performance (learned/NMPC) attitude policy may
+      command the vehicle ONLY while the geometric error state is safely
+      inside the certified recoverable set; otherwise the runtime shield
+      shall hand control to the v0.23 Lyapunov-certified geometric
+      controller, which provably recovers. The shield shall switch BEFORE
+      the recoverable boundary (positive margin) so the fallback always
+      retains recovery authority (Sha simplex / Black-Box Simplex), shall
+      always emit exactly one of the two controllers' commands, and shall
+      fail safe to the fallback on a non-finite state.
+
+      Scope (honest): the v0.23 certificate is attitude/rotational, so the
+      guarantee is over the rotational recoverable set
+      {Ψ < ψ_max ≤ 2 ∧ ‖e_Ω‖² < 2k_R(2−Ψ)/λ_M(J)}. Full-state (position)
+      safety needs the combined Lee proposition (future).
+    tags: [falcon, runtime-assurance, simplex, shield, lyapunov, safety, kani, v0.28]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Kani: the shield output is always exactly one of {agile, fallback},
+        and a margin < enter (or non-finite) ⇒ the fallback is used.
+        Recoverable-set predicate matches the Lee-2010 region and fails safe
+        on non-finite input. End-to-end: a destabilizing stand-in policy
+        that tumbles on its own is CONTAINED inside {Ψ<2} under the shield.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-003

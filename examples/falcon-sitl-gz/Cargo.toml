@@ -28,6 +28,11 @@ relay-rate = { path = "../../crates/relay-rate" }
 relay-att = { path = "../../crates/relay-att" }
 relay-mix-quad = { path = "../../crates/relay-mix-quad" }
 relay-arm = { path = "../../crates/relay-arm" }
+relay-iekf = { path = "../../crates/relay-iekf" }
+relay-geo = { path = "../../crates/relay-geo" }
+relay-traj = { path = "../../crates/relay-traj" }
+relay-adrc = { path = "../../crates/relay-adrc" }
+falcon-config = { path = "../../host/falcon-config" }
 relay-pos = { path = "../../crates/relay-pos" }
 relay-lc = { path = "../../crates/relay-lc" }
 relay-sc = { path = "../../crates/relay-sc" }

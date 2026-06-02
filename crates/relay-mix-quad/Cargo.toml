@@ -13,6 +13,10 @@ path = "plain/src/lib.rs"
 crate-type = ["rlib"]
 
 [dependencies]
+libm = "0.2"
 
 [dev-dependencies]
 proptest.workspace = true
+
+[lints]
+workspace = true
