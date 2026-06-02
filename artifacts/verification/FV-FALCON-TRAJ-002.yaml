@@ -1,0 +1,44 @@
+artifacts:
+  - id: FV-FALCON-TRAJ-002
+    type: sw-verification
+    title: "Reference governor — Kani gate bound + monotone-advance tests + flight falsification (v0.36)"
+    status: approved
+    description: >
+      Verification of the v0.36 reference governor (relay-traj RefGovernor):
+
+      1. Kani verify_gate_factor_bounded: VERIFICATION SUCCESSFUL — the error
+         gate is within [g_min, 1] for ANY error (incl. non-finite) and any
+         band, given g_min ∈ [0,1]. The clamp is split from the (err-lo)/
+         (hi-lo) division so the bound is a comparison-only proof.
+
+      2. Unit/proptest (relay-traj, 9 tests): gate_factor_ramps_and_bounds
+         (full speed on-track, slowest off-track, monotone non-increasing in
+         error, fail-safe on non-finite/degenerate band); governor_slows_
+         reference_when_behind (advance monotone, rate g_min·dt ≤ ṡ ≤ dt, the
+         governed clock lags wall time when behind); governor_bounded_and_
+         monotone proptest over random error/dt/g_min.
+
+      3. FLIGHT FALSIFICATION (published). Real-gz mission A/B, aggressive
+         leg-time 3.0 s (1.67× nominal):
+           governor OFF: final 3.35 m, ANEES 3.97 [CONSISTENT]
+           governor ON : final 394.5 m, ANEES 114 [OVER-CONFIDENT, diverged]
+         The governor DIVERGES a mission that flies fine without it — the
+         error→clock→setpoint feedback coupling induces a limit cycle (same
+         failure class as the v0.33 ω_d command filter). And it is
+         unnecessary: v0.35 adaptive Q already handles this aggression. The
+         governor ships verified but DEFAULT-OFF (opt-in REF_GOV=1).
+
+      Positive finding recorded: post-v0.35 the aggressive-mission envelope is
+      already good (leg 3.0 s = 1.67× nominal flies CONSISTENT, 3.35 m) with
+      no new control. The genuinely-infeasible regime (leg 2.0 s) diverges
+      with or without the governor (control-limited, not reference-limited).
+    tags: [verification, falcon, trajectory, reference-governor, kani, falsification, v0.36]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-traj"
+        - run: "cargo kani -p relay-traj --harness verify_gate_factor_bounded"
+        - run: "gz sim -s -r worlds/falcon-quad.sdf & MISSION_LEG_TIME=3.0 cargo run -p falcon-sitl-gz --features gazebo -- --backend=gazebo --scenario=mission  # A/B with/without REF_GOV"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRAJ-P02
