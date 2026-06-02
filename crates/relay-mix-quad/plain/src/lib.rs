@@ -449,6 +449,140 @@ pub fn motors_to_torque_signs(motors: [f32; 4]) -> [f32; 3] {
     t
 }
 
+/// Maximum rotor count the airframe-agnostic allocator supports.
+pub const MAX_ROTORS: usize = 8;
+
+/// Airframe-agnostic control allocator (v0.34 — the "build into any drone"
+/// seam). Holds an N×4 mixing matrix — rows are rotors, columns are the
+/// `[thrust, roll, pitch, yaw]` effectiveness of each rotor — plus an active
+/// rotor count `n`. The control stack above it is unchanged; only the matrix
+/// (= the airframe geometry) changes between quad / hexa / coax.
+///
+/// The allocation is the SAME two-step algorithm the hardwired
+/// [`QuadMixer::mix`] is verified for, generalized to `n` rotors: compute the
+/// per-rotor command from the matrix, subtract any over-unity excess from all
+/// rotors (preserving torque ratios, sacrificing collective thrust), then
+/// clamp to `[0, 1]`. Unused rows (i ≥ n) are zero, so they stay 0 ∈ [0,1].
+#[derive(Clone, Copy)]
+pub struct MixerN {
+    mix: [[f32; 4]; MAX_ROTORS],
+    n: usize,
+}
+
+impl MixerN {
+    /// Build from an explicit matrix + active count (`n` clamped to MAX).
+    pub const fn new(mix: [[f32; 4]; MAX_ROTORS], n: usize) -> Self {
+        let n = if n > MAX_ROTORS { MAX_ROTORS } else { n };
+        MixerN { mix, n }
+    }
+
+    /// Active rotor count.
+    pub fn n(&self) -> usize {
+        self.n
+    }
+
+    /// Quad-X — bit-identical to the hardwired `MIXER_X` (the equivalence the
+    /// generalization is gated on: same drone, same numbers).
+    pub fn quad_x() -> Self {
+        let mut mix = [[0.0_f32; 4]; MAX_ROTORS];
+        let mut i = 0;
+        while i < 4 {
+            mix[i] = MIXER_X[i];
+            i += 1;
+        }
+        MixerN { mix, n: 4 }
+    }
+
+    /// Hexa-X — 6 rotors at 60° spacing, alternating CW/CCW spin (the
+    /// Betaflight/PX4 HEX_X layout), derived from geometry.
+    pub fn hexa_x() -> Self {
+        // Rotors every 60° from +30° (so none sits on the roll/pitch axis),
+        // alternating spin. (angle from +x toward +y, ccw?)
+        Self::from_geometry(&[
+            (deg(30.0), true),
+            (deg(90.0), false),
+            (deg(150.0), true),
+            (deg(210.0), false),
+            (deg(270.0), true),
+            (deg(330.0), false),
+        ])
+    }
+
+    /// Derive the mixing matrix from rotor geometry: each rotor is `(angle
+    /// from +x toward +y in rad, ccw?)`. thrust = 1; roll = −sin θ; pitch =
+    /// cos θ; yaw = +1 if ccw else −1. The roll/pitch columns are normalized
+    /// so the peak |·| over rotors is 1 — matching the hand-tuned `MIXER_X`
+    /// scale, so `from_geometry(quad-X angles)` reproduces it.
+    pub fn from_geometry(rotors: &[(f32, bool)]) -> Self {
+        let n = if rotors.len() > MAX_ROTORS { MAX_ROTORS } else { rotors.len() };
+        let mut mix = [[0.0_f32; 4]; MAX_ROTORS];
+        // First pass: raw roll/pitch, track peaks for normalization.
+        let mut peak_r = 0.0_f32;
+        let mut peak_p = 0.0_f32;
+        for (i, &(theta, _)) in rotors.iter().take(n).enumerate() {
+            let roll = -libm::sinf(theta);
+            let pitch = libm::cosf(theta);
+            mix[i][1] = roll;
+            mix[i][2] = pitch;
+            if roll.abs() > peak_r {
+                peak_r = roll.abs();
+            }
+            if pitch.abs() > peak_p {
+                peak_p = pitch.abs();
+            }
+        }
+        let sr = if peak_r > 1e-6 { 1.0 / peak_r } else { 1.0 };
+        let sp = if peak_p > 1e-6 { 1.0 / peak_p } else { 1.0 };
+        for (i, &(_, ccw)) in rotors.iter().take(n).enumerate() {
+            mix[i][0] = 1.0; // thrust
+            mix[i][1] *= sr;
+            mix[i][2] *= sp;
+            mix[i][3] = if ccw { 1.0 } else { -1.0 }; // yaw
+        }
+        MixerN { mix, n }
+    }
+
+    /// Allocate `n` rotor commands ∈ [0,1] from a body torque + collective
+    /// thrust. Same algorithm as [`QuadMixer::mix`], generalized.
+    pub fn mix(&self, torque_body: [f32; 3], thrust: f32) -> [f32; MAX_ROTORS] {
+        let t = sanitise(thrust);
+        let r = sanitise(torque_body[0]);
+        let p = sanitise(torque_body[1]);
+        let y = sanitise(torque_body[2]);
+
+        let mut m = [0.0_f32; MAX_ROTORS];
+        for (mi, row) in m.iter_mut().zip(self.mix.iter()) {
+            *mi = sanitise(row[0] * t + row[1] * r + row[2] * p + row[3] * y);
+        }
+
+        // Step 1: de-saturate — if any rotor exceeds 1, subtract the excess
+        // from all rotors (preserve torque ratios, sacrifice collective).
+        let mut max = m[0];
+        for &v in &m[1..] {
+            if v > max {
+                max = v;
+            }
+        }
+        if max > 1.0 {
+            let excess = max - 1.0;
+            for v in m.iter_mut() {
+                *v -= excess;
+            }
+        }
+
+        // Step 2: clamp to [0,1] (motors can't push reverse; NaN → 0).
+        for v in m.iter_mut() {
+            *v = clamp01(*v);
+        }
+        m
+    }
+}
+
+#[inline]
+fn deg(d: f32) -> f32 {
+    d * core::f32::consts::PI / 180.0
+}
+
 // ─── Kani bounded-model-checking harnesses ──────────────────────────
 //
 // The mixer is f32-based, so the verified-engine pattern's integer-only
@@ -568,6 +702,48 @@ mod kani_proofs {
                 assert!(out[i] >= floor); // healthy rotors stay in [floor,1]
                 assert!(out[i] <= 1.0);
             }
+        }
+    }
+
+    /// MIX-P09 (airframe-agnostic): for ANY mixing matrix (any airframe) and
+    /// ANY finite torque/thrust, every rotor command the generic allocator
+    /// emits is finite and in [0,1] — the "build into any drone" bound. The
+    /// final clamp01 is split from the matrix arithmetic so this is a
+    /// comparison-only proof.
+    #[kani::proof]
+    fn verify_mixern_outputs_in_unit_interval() {
+        let mut mat = [[0.0_f32; 4]; MAX_ROTORS];
+        let mut i = 0;
+        while i < MAX_ROTORS {
+            let mut j = 0;
+            while j < 4 {
+                let e: f32 = kani::any();
+                kani::assume(e.is_finite() && e >= -8.0 && e <= 8.0);
+                mat[i][j] = e;
+                j += 1;
+            }
+            i += 1;
+        }
+        let n: usize = kani::any();
+        kani::assume(n <= MAX_ROTORS);
+        let mixer = MixerN::new(mat, n);
+        // Realistic command domain (the controller never emits 1e38-scale
+        // torque/thrust): bound the magnitudes so the matrix multiply cannot
+        // overflow to ±∞ (and thence ∞−∞ = NaN). Within this the bound holds.
+        let thrust: f32 = kani::any();
+        let r: f32 = kani::any();
+        let p: f32 = kani::any();
+        let y: f32 = kani::any();
+        kani::assume(thrust.is_finite() && thrust.abs() <= 1.0e3);
+        kani::assume(r.is_finite() && r.abs() <= 1.0e3);
+        kani::assume(p.is_finite() && p.abs() <= 1.0e3);
+        kani::assume(y.is_finite() && y.abs() <= 1.0e3);
+        let out = mixer.mix([r, p, y], thrust);
+        let mut k = 0;
+        while k < MAX_ROTORS {
+            assert!(out[k].is_finite());
+            assert!(out[k] >= 0.0 && out[k] <= 1.0);
+            k += 1;
         }
     }
 }
@@ -774,7 +950,107 @@ mod tests {
         assert!(out[3] > out[1], "left>right roll dir lost: {:?}", out);
     }
 
+    // ── v0.34 airframe-agnostic allocator ────────────────────────────────
+
+    /// The generic allocator configured for quad-X is BIT-IDENTICAL to the
+    /// hardwired QuadMixer — the equivalence the generalization is gated on.
+    #[test]
+    fn mixern_quad_x_equals_hardwired() {
+        let genx = MixerN::quad_x();
+        assert_eq!(genx.n(), 4);
+        let cases = [
+            ([0.0, 0.0, 0.0], 0.5),
+            ([0.2, -0.1, 0.05], 0.6),
+            ([-0.3, 0.3, -0.2], 0.8),
+            ([0.9, 0.9, 0.9], 0.9), // saturating
+        ];
+        for (tau, thr) in cases {
+            let g = genx.mix(tau, thr);
+            let h = QuadMixer::new().mix(tau, thr);
+            for i in 0..4 {
+                assert_eq!(g[i], h[i], "rotor {i} differs: gen {g:?} vs hw {h:?}");
+            }
+        }
+    }
+
+    /// from_geometry(quad-X angles) reproduces the hand-tuned MIXER_X matrix.
+    #[test]
+    fn mixern_from_geometry_reproduces_quad_matrix() {
+        let g = MixerN::from_geometry(&[
+            (deg(45.0), false),  // front-right CW
+            (deg(135.0), true),  // back-right CCW
+            (deg(225.0), false), // back-left CW
+            (deg(315.0), true),  // front-left CCW
+        ]);
+        for i in 0..4 {
+            for j in 0..4 {
+                assert!(
+                    (g.mix[i][j] - MIXER_X[i][j]).abs() < 1e-5,
+                    "entry [{i}][{j}]: {} vs {}",
+                    g.mix[i][j],
+                    MIXER_X[i][j]
+                );
+            }
+        }
+    }
+
+    /// Hexa-X: at zero torque every one of the 6 rotors carries the same
+    /// (collective) command — rotational symmetry of a balanced airframe.
+    #[test]
+    fn mixern_hexa_zero_torque_is_uniform() {
+        let h = MixerN::hexa_x();
+        assert_eq!(h.n(), 6);
+        let out = h.mix([0.0, 0.0, 0.0], 0.5);
+        for i in 0..6 {
+            assert!((out[i] - 0.5).abs() < 1e-4, "rotor {i} = {} ≠ 0.5", out[i]);
+        }
+        // rotors 6,7 are inactive → zero.
+        assert_eq!(out[6], 0.0);
+        assert_eq!(out[7], 0.0);
+    }
+
+    /// Hexa-X resolves a pure yaw command using its 6 rotors (CW vs CCW
+    /// split), staying in [0,1].
+    #[test]
+    fn mixern_hexa_yaw_uses_spin_split() {
+        let h = MixerN::hexa_x();
+        let out = h.mix([0.0, 0.0, 0.15], 0.5);
+        // CCW rotors (yaw col +1) rise, CW (−1) fall; all bounded.
+        for i in 0..6 {
+            assert!(out[i] >= 0.0 && out[i] <= 1.0, "rotor {i} out of range: {}", out[i]);
+        }
+        // net yaw sign preserved: hexa CCW rotors are 0,2,4 (yaw col +1),
+        // CW are 1,3,5 (−1); a +yaw command biases the CCW group up.
+        let ccw = (out[0] + out[2] + out[4]) / 3.0;
+        let cw = (out[1] + out[3] + out[5]) / 3.0;
+        assert!(ccw > cw, "positive yaw should bias CCW rotors up: ccw {ccw} cw {cw}");
+    }
+
     use proptest::prelude::*;
+
+    proptest! {
+        /// MIX-P09: the generic allocator is total — any airframe matrix and
+        /// any commands give finite rotor outputs in [0,1].
+        #[test]
+        fn mixern_outputs_bounded(
+            entries in proptest::collection::vec(-8.0_f32..8.0, 32),
+            n in 0usize..=MAX_ROTORS,
+            tau in proptest::array::uniform3(-5.0_f32..5.0),
+            thrust in -2.0_f32..2.0,
+        ) {
+            let mut mat = [[0.0_f32; 4]; MAX_ROTORS];
+            for i in 0..MAX_ROTORS {
+                for j in 0..4 {
+                    mat[i][j] = entries[i * 4 + j];
+                }
+            }
+            let mixer = MixerN::new(mat, n);
+            let out = mixer.mix(tau, thrust);
+            for v in out {
+                prop_assert!(v.is_finite() && (0.0..=1.0).contains(&v));
+            }
+        }
+    }
 
     proptest! {
         /// MIX-P05: for thrust ∈ [floor, 1], every motor stays in

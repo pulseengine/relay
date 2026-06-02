@@ -1,0 +1,45 @@
+artifacts:
+  - id: FV-FALCON-MIX-003
+    type: sw-verification
+    title: "Airframe-agnostic allocator — Kani unit-interval bound + quad-X bit-equivalence + hexa symmetry (v0.34)"
+    status: approved
+    description: >
+      Verification of the v0.34 MixerN airframe-agnostic control allocator
+      (relay-mix-quad):
+
+      1. Kani verify_mixern_outputs_in_unit_interval: VERIFICATION SUCCESSFUL.
+         For ANY mixing matrix (|entry| ≤ 8), ANY active rotor count ≤ 8, and
+         ANY command in the operating domain (|torque|,|thrust| ≤ 1e3), all 8
+         rotor outputs are finite and within [0,1]. The final clamp01 is split
+         from the matrix arithmetic so the proof is comparison-only. (The
+         input domain is bounded to the realistic command range — a 1e38-scale
+         command would overflow the matrix multiply; the controller never
+         emits one.)
+
+      2. Equivalence (the generalization gate): mixern_quad_x_equals_hardwired
+         — MixerN::quad_x().mix is BIT-IDENTICAL to QuadMixer::mix across hover,
+         mixed-torque, and saturating cases (asserted with ==, not a
+         tolerance). mixern_from_geometry_reproduces_quad_matrix — deriving the
+         matrix from rotor (angle, spin) reproduces the hand-tuned MIXER_X.
+
+      3. Multi-airframe behaviour: mixern_hexa_zero_torque_is_uniform — a
+         6-rotor hexa-X carries equal collective on all rotors at zero torque
+         (rotational symmetry), inactive rows 0. mixern_hexa_yaw_uses_spin_
+         split — a pure yaw command biases the CCW rotor group up vs the CW
+         group, all in [0,1].
+
+      (23 unit tests + proptest mixern_outputs_bounded pass; clippy clean.)
+
+      Honest scope: the bound is over the realistic bounded command domain
+      (not all of f32); per-airframe FLIGHT (hexa/coax) needs the matching
+      Gazebo airframe models + configs — the allocator generalizes, the SITL
+      worlds do not yet. Quad-X flight is unchanged (bit-identical).
+    tags: [verification, falcon, mixer, allocation, airframe-agnostic, kani, v0.34]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-mix-quad"
+        - run: "cargo kani -p relay-mix-quad --harness verify_mixern_outputs_in_unit_interval"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MIX-P09

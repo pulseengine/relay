@@ -1,0 +1,42 @@
+artifacts:
+  - id: SWREQ-FALCON-MIX-P09
+    type: sw-req
+    title: "MIX-P09 — airframe-agnostic control allocation: the same stack flies any rotor geometry, with bounded commands"
+    status: implemented
+    description: >
+      Control allocation shall not be hardwired to one airframe. A generic
+      allocator (MixerN) shall hold an N×4 effectiveness matrix — per rotor,
+      the [thrust, roll, pitch, yaw] contribution — plus an active rotor
+      count, and run the SAME allocation algorithm as the verified quad
+      mixer (compute per-rotor command, de-saturate by subtracting the
+      over-unity excess from all rotors to preserve torque ratios, then clamp
+      to [0,1]) for any rotor count up to MAX_ROTORS = 8.
+
+      The geometry seam shall be a `from_geometry` constructor: each rotor is
+      (angle, spin), the matrix derived as thrust=1, roll=−sin θ, pitch=cos θ,
+      yaw=±1, with roll/pitch normalized to the quad-X scale.
+
+      Equivalence gate: the generic allocator configured for quad-X shall be
+      BIT-IDENTICAL to the shipped hardwired quad mixer (MIXER_X) — same
+      drone, same numbers — so the generalization is provably non-regressive.
+
+      Bound (the "build into any drone" safety property): for ANY airframe
+      matrix and ANY command in the operating domain, every rotor output is
+      finite and within [0,1] — a swapped geometry can never produce an
+      out-of-range actuator command.
+    tags: [falcon, mixer, allocation, airframe-agnostic, hexa, kani, v0.34]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Kani verify_mixern_outputs_in_unit_interval: for any matrix (|entry|
+        ≤ 8), any active count ≤ 8, and any bounded command, all 8 outputs
+        are finite and in [0,1]. Unit: quad-X via MixerN is bit-identical to
+        QuadMixer; from_geometry(quad angles) reproduces MIXER_X; hexa-X has
+        uniform rotors at zero torque (symmetry) and a correct CW/CCW yaw
+        split. proptest: outputs bounded for any matrix + commands.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005
+      - type: derives-from
+        target: SYSREQ-FALCON-007
