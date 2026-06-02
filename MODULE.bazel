@@ -39,7 +39,7 @@ local_path_override(
 # needs Elan mid-build → "lake update failed". Keep this aligned with
 # rules_lean. (Pinned + reproducible — see proofs/lean/README.md.)
 lean = use_extension("@rules_lean//lean:extensions.bzl", "lean")
-lean.toolchain(version = "4.27.0")
+lean.toolchain(version = "4.29.1")
 use_repo(lean, "lean_toolchains", "mathlib")
 register_toolchains("@lean_toolchains//:all")
 
