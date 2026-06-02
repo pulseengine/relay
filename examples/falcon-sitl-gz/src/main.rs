@@ -17,6 +17,7 @@
 //!           open-loop 70 % PWM smoke test is reachable via
 //!           `--scenario=open-loop-climb`.
 
+mod pace;
 mod physics;
 
 use physics::{GazeboPhysics, MockPhysics, Physics};
@@ -565,6 +566,12 @@ fn run_geo_cascade(
     let n = (duration_s / dt) as u32;
     let tick_period = Duration::from_secs_f32(dt);
     let pace_real_time = physics.counters().is_some();
+    // v0.32 gyro-synchronized pacing: drive the loop off the gz IMU stream so
+    // a low sim RTF (GUI + video-encoder load) cannot desync the inner loop.
+    // Default ON for any real backend; NO_SIM_LOCK=1 reverts to wall-clock.
+    let sim_lock = pace_real_time && std::env::var("NO_SIM_LOCK").is_err();
+    let pace_deadline_us = (tick_period.as_micros() as u64).saturating_mul(8).max(2000);
+    let mut last_imu = physics.counters().map(|c| c.0).unwrap_or(0);
 
     let mut peak_dist = 0.0_f32;
     let mut min_dist = f32::INFINITY;
@@ -763,7 +770,31 @@ fn run_geo_cascade(
             e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
                          motors, physics.counters());
         }
-        if pace_real_time {
+        if sim_lock {
+            // Two-stage gyro-synced pacing (v0.32).
+            // Stage 1 (anti-burst): hold the steady real-time control period
+            // so the marginal inner loop always sees a uniform cadence — never
+            // burst through buffered IMU samples (that jitter diverges it).
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+            // Stage 2 (anti-stale): only if the sim has fallen behind (RTF<1,
+            // e.g. GUI + recorder load) the IMU is *still* stale after a full
+            // period — then wait for a fresh sample so we pace to physics
+            // instead of over-driving. Bounded so a stall can't hang the loop.
+            loop {
+                let now_imu = physics.counters().map(|c| c.0).unwrap_or(last_imu + 1);
+                let waited_us = tick_start.elapsed().as_micros() as u64;
+                match pace::pace_decision(last_imu, now_imu, waited_us, pace_deadline_us) {
+                    pace::Pace::Fresh(w) | pace::Pace::Deadline(w) => {
+                        last_imu = w;
+                        break;
+                    }
+                    pace::Pace::Wait => std::thread::sleep(Duration::from_micros(150)),
+                }
+            }
+        } else if pace_real_time {
             let used = tick_start.elapsed();
             if used < tick_period {
                 std::thread::sleep(tick_period - used);

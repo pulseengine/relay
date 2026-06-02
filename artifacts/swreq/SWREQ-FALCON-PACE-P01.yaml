@@ -1,0 +1,43 @@
+artifacts:
+  - id: SWREQ-FALCON-PACE-P01
+    type: sw-req
+    title: "PACE-P01 — gyro-synchronized loop scheduling: the control loop paces to the IMU stream, robust to sim/host slowdown"
+    status: implemented
+    description: >
+      The SITL control loop shall be scheduled off the IMU sample stream
+      (the gyro data-ready model real flight controllers use), not a free-
+      running wall-clock timer, so that when the simulator's real-time
+      factor drops below 1 (e.g. GUI + video-encoder or host CPU contention)
+      the loop paces to physics instead of over-driving stale state and
+      desynchronising the inner loop.
+
+      The pacing shall be TWO-STAGE: (1) anti-burst — hold the steady real-
+      time control period so the loop never runs faster than real-time and
+      the cadence stays uniform; (2) anti-stale — if after a full period the
+      sim has still not delivered a fresh IMU sample (RTF < 1), wait for one,
+      bounded by a deadline so a sensor stall can never hang the loop. At
+      RTF ≈ 1 stage 2 is a no-op, so behaviour is identical to wall-clock
+      pacing (no regression).
+
+      Falsification on record (v0.32): single-stage gyro-sync (anti-stale
+      only) DIVERGED the mission (524 m vs 1.67 m wall-clock) because it
+      bursts through buffered samples and the resulting cadence jitter tips
+      the marginally-stable inner loop. The two-stage form is the fix.
+    tags: [falcon, scheduling, gyro-sync, sitl, real-time, robustness, v0.32]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Unit: the pure pace decision returns Fresh when a new IMU sample
+        exists (preferred even past the deadline), Wait when stale inside the
+        window, Deadline (bounded fallback, watermark unchanged) when stale
+        past the window; at one-sample-per-tick it is always Fresh and the
+        watermark tracks the stream. Empirical A/B/C/D on real Gazebo: at
+        RTF≈1 sim-lock matches wall-clock (≈1.6 m, ANEES consistent); under
+        CPU load wall-clock diverges (≈770 m, ANEES≫3) while two-stage
+        sim-lock holds (≈2.4 m, ANEES≈3) by stretching wall-time, not error.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: derives-from
+        target: SYSREQ-FALCON-009

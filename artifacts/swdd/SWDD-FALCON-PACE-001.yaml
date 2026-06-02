@@ -1,0 +1,38 @@
+artifacts:
+  - id: SWDD-FALCON-PACE-001
+    type: sw-detail-design
+    title: Gyro-synchronized loop scheduler detailed design
+    status: implemented
+    description: >
+      The SITL control loop's pacing is a pure decision plus a two-stage
+      wait, modelling the gyro data-ready scheduling real flight controllers
+      use.
+
+      Pure decision (pace::pace_decision), microsecond-integer, no Duration:
+        inputs:  last_imu, now_imu (IMU receive-counts), waited_us, deadline_us
+        output:  Fresh(now_imu)  if now_imu > last_imu           (new sample)
+                 Deadline(last_imu) if waited_us >= deadline_us   (bounded fallback)
+                 Wait            otherwise
+        Fresh is preferred over Deadline when both hold.
+
+      Two-stage driver (run_geo_cascade, gated by sim_lock = real backend &&
+      !NO_SIM_LOCK):
+        stage 1 (anti-burst): sleep(tick_period - used) — hold the steady
+          real-time period; never run faster than real-time, so the marginal
+          inner loop sees a uniform cadence.
+        stage 2 (anti-stale): loop pace_decision until Fresh/Deadline; only
+          bites when the sim has fallen behind (RTF < 1). Poll sleep 150 µs.
+        deadline_us = tick_period * 8 (≥ 2 ms), so a sensor stall can never
+          hang the loop.
+
+      At RTF ≈ 1 stage 2 is a no-op ⇒ identical to wall-clock pacing.
+    tags: [falcon, scheduling, gyro-sync, sitl, detailed-design, v0.32]
+    fields:
+      unit: examples/falcon-sitl-gz/src/pace.rs
+      function: "pace::pace_decision"
+      algorithm: "Two-stage: anti-burst steady period, then bounded anti-stale IMU wait."
+    links:
+      - type: refines
+        target: SWARCH-FALCON-001
+      - type: satisfies
+        target: SWREQ-FALCON-PACE-P01
