@@ -521,6 +521,9 @@ rust_library(
     name = "relay-mix-quad",
     srcs = glob(["crates/relay-mix-quad/plain/src/**/*.rs"]),
     edition = "2024",
+    # v0.34 MixerN::from_geometry uses libm sinf/cosf (no_std). Mirrors the
+    # Cargo.toml dep; the bazel build needs it declared explicitly.
+    deps = ["@libm_crate//:libm"],
 )
 
 # ── leaf CM components — one WIT interface each ───────────────────
