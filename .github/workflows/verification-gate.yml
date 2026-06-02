@@ -96,12 +96,17 @@ jobs:
           FILTER: ${{ steps.pick.outputs.filter }}
         shell: bash
         run: |
+          # Run ONCE: the script's exit code already reflects whether every
+          # executed step passed (main() returns overall_pass), so re-running
+          # in a second invocation was both wasteful AND incorrect — it made
+          # non-idempotent steps (e.g. `cargo llvm-cov`, which leaves stale
+          # .profraw the second run trips over) fail on the second pass.
+          # `tee` keeps the per-step + markdown output on the console AND in
+          # the file; `pipefail` makes the python exit code drive the gate.
+          set -o pipefail
           python3 scripts/run-falcon-verification.py \
             --filter "$FILTER" \
-            --markdown > verification-output.md
-          # Re-run in non-markdown mode so exit code drives the
-          # continue-on-error gate.
-          python3 scripts/run-falcon-verification.py --filter "$FILTER"
+            --markdown | tee verification-output.md
 
       - name: Upload verification output
         if: always()

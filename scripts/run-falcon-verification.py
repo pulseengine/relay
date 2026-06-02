@@ -137,7 +137,10 @@ def emit_markdown(report: list[dict]) -> str:
         executed = [s for s in r["steps"] if not s.get("skipped")]
         if r["steps"] and not executed:
             bench_only_artifacts += 1
-        elif r["pass"]:
+        elif executed and r["pass"]:
+            # only artifacts that actually RAN a step count as "passed" — a
+            # no-steps artifact is tallied under skipped_no_steps, not here
+            # (counting it in both made `failed` go negative ⇒ a false ❌).
             passed += 1
     failed = total - passed - skipped_no_steps - bench_only_artifacts
     icon = "✅" if failed == 0 else "❌"
