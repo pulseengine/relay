@@ -1,0 +1,39 @@
+artifacts:
+  - id: SWREQ-FALCON-MIX-P10
+    type: sw-req
+    title: "MIX-P10 — airframe-agnostic CLOSED LOOP: the verified cascade controls a 6-rotor hexa through the full loop"
+    status: implemented
+    description: >
+      The "build into any drone" claim shall be substantiated at the
+      closed-loop level, not just the v0.34 allocation algebra: the SAME
+      verified geometric cascade (relay-geo GeoAtt) shall stabilize a
+      non-quad airframe when paired with the airframe-agnostic allocator
+      (MixerN::hexa_x()) — the controller computes the body torque, MixerN
+      allocates it across the 6 rotors, the rotors produce the achieved
+      wrench (MixerN::achieved_wrench, the dual of mix), and a rigid-body sim
+      integrates it. Starting meaningfully tilted, the hexa shall converge to
+      level under the unchanged cascade.
+
+      Honest scope: this is a SITL/analytic closed-loop demonstration — the
+      forward effectiveness (achieved_wrench) shares MixerN's geometry, and
+      the result is attitude convergence in a rigid-body model. The
+      independent-physics gz hexa flight (a new 6-rotor SDF + generalizing the
+      [f32;4] motor path to N rotors) and HIL are future work. What IS shown:
+      the verified controller + the airframe-agnostic allocator compose into a
+      stable closed loop for a 6-rotor airframe — the allocation generalizes
+      through the control loop, not only in isolation.
+    tags: [falcon, mixer, allocation, airframe-agnostic, hexa, closed-loop, v0.39]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        MixerN::achieved_wrench returns the wrench Mᵀ·motors produced by a
+        rotor-command vector (dual of mix). Closed-loop test
+        (hexa_cascade_stabilizes_attitude): GeoAtt + MixerN::hexa_x() +
+        achieved_wrench + a rigid-body integrator, starting tilted > 0.5 rad,
+        converges to < 0.1 rad, with every hexa rotor command in [0,1].
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005
+      - type: derives-from
+        target: SYSREQ-FALCON-007

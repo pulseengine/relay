@@ -15,6 +15,32 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v0.39.0] — 2026-06-03
+
+"Build into any drone" — at the closed-loop level. v0.34 proved the allocator
+is airframe-agnostic in isolation (Kani bound + quad bit-equivalence + hexa
+symmetry). v0.39 shows the *whole verified cascade* controls a 6-rotor hexa.
+
+### Added
+
+- **`relay-mix-quad::MixerN::achieved_wrench`** — the forward effectiveness
+  (`wrench = Mᵀ·motors`), the dual of `mix` (wrench → motors).
+- **`hexa_cascade_stabilizes_attitude`** (closed-loop, no gz) — the *same*
+  geometric cascade (`GeoAtt`, FALCON_QUAD gains) + the airframe-agnostic
+  `MixerN::hexa_x()` allocator + `achieved_wrench` (the plant input) + a
+  rigid-body integrator: starting tilted ~0.5 rad, the hexa converges to
+  < 0.1 rad with every rotor command in [0,1]. The verified controller and
+  the airframe-agnostic allocator compose into a stable closed loop for a
+  6-rotor airframe.
+
+### Honest scope
+
+SITL/analytic — the forward effectiveness shares `MixerN`'s geometry, and the
+demonstrated result is attitude convergence in a rigid-body model. The
+**independent-physics gz hexa flight** (a new 6-rotor SDF + generalizing the
+`[f32; 4]` motor path to N rotors) and **HIL** are future work. This lifts
+"any drone" from allocation algebra to a closed-loop cascade demonstration.
+
 ## [falcon-v0.38.0] — 2026-06-03
 
 Full-state Lyapunov — closes the simplex shield's attitude-only scope gap.

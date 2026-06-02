@@ -576,6 +576,22 @@ impl MixerN {
         }
         m
     }
+
+    /// Forward effectiveness — the wrench `[thrust, roll, pitch, yaw]` actually
+    /// produced by a set of rotor commands: `wrench = Mᵀ·motors` (each rotor's
+    /// contribution summed). The dual of [`mix`] (which maps wrench → motors);
+    /// the round-trip realises a commanded wrench up to per-axis effectiveness
+    /// (the closed-loop hexa/quad demo uses this as the plant's input map).
+    pub fn achieved_wrench(&self, motors: &[f32; MAX_ROTORS]) -> [f32; 4] {
+        let mut w = [0.0_f32; 4];
+        for (row, &mi) in self.mix.iter().zip(motors.iter()) {
+            let mi = sanitise(mi);
+            for k in 0..4 {
+                w[k] += row[k] * mi;
+            }
+        }
+        w
+    }
 }
 
 #[inline]
