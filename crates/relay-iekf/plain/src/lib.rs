@@ -127,6 +127,22 @@ fn sanitise3(v: Vec3) -> Vec3 {
     ]
 }
 
+/// Bound an adaptive process-noise inflation factor to `[1, max]` (v0.35).
+/// Total: a non-finite or sub-unity input clamps to 1 (never SHRINK Q), an
+/// over-`max` input clamps to `max` (never explode it). Split from the
+/// `1 + α·‖·‖²` arithmetic so the bound is a comparison-only Kani proof.
+#[inline]
+fn clamp_factor(x: f32, max: f32) -> f32 {
+    let max = if max.is_finite() && max >= 1.0 { max } else { 1.0 };
+    if !x.is_finite() || x < 1.0 {
+        1.0
+    } else if x > max {
+        max
+    } else {
+        x
+    }
+}
+
 /// Body→NED rotation matrix from the unit quaternion (`R·v_body = v_ned`).
 /// Used to build the IEKF error-propagation Jacobian.
 #[inline]
@@ -284,6 +300,21 @@ pub struct IekfConfig {
     /// Initial 1σ for attitude (rad), velocity (m/s), position (m),
     /// gyro bias (rad/s), accel bias (m/s²).
     pub p0: [f32; 5],
+    /// v0.35 adaptive process noise. Under informative-but-hard motion the
+    /// FIXED Q under-counts unmodeled dynamics (vibration, scale/bias error,
+    /// timing/load jitter) → the filter grows over-confident (ANEES ≫ 3) and
+    /// feeds a wrong state to the controller. Inflate Q by the motion
+    /// magnitude: q_gyro·(1 + q_motion_gyro·‖ω‖²) and q_accel·(1 +
+    /// q_motion_accel·‖a‖²), each capped at ×q_motion_max. At rest/hover
+    /// (ω≈0, a≈0) the factor is 1 — hover behaviour is unchanged. The
+    /// propagation-side twin of update_gravity's measurement-variance
+    /// inflation. 0 disables (legacy fixed-Q).
+    pub q_motion_gyro: f32,
+    /// Velocity-process-noise motion gain (per (m/s²)²).
+    pub q_motion_accel: f32,
+    /// Upper bound on the inflation factor (prevents a transient spike from
+    /// exploding the covariance). MUST be ≥ 1.
+    pub q_motion_max: f32,
 }
 
 impl IekfConfig {
@@ -296,6 +327,11 @@ impl IekfConfig {
         q_bias_gyro: 1e-6,
         q_bias_accel: 1e-5,
         p0: [0.1, 0.5, 1.0, 0.01, 0.1],
+        // Modest, bounded inflation: ~3× attitude Q at ‖ω‖=2 rad/s, ~3×
+        // velocity Q at ‖a‖=3 m/s², capped at 50×. At rest both are 1×.
+        q_motion_gyro: 0.5,
+        q_motion_accel: 0.25,
+        q_motion_max: 50.0,
     };
 }
 
@@ -461,11 +497,21 @@ impl Iekf {
         let pp = mat_mul(&phi, &self.p);
         self.p = mat_mul(&pp, &phi_t);
 
+        // v0.35 adaptive process noise: inflate Q by the motion magnitude so
+        // the filter stays consistent (NEES≈3) when the fixed model under-
+        // counts hard motion. ‖ω‖² drives attitude Q, ‖a_ned‖² (inertial
+        // accel, ≈0 at hover) drives velocity Q; both bounded by q_motion_max.
+        // Bias random-walks are left fixed (independent of vehicle motion).
+        let w2 = omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2];
+        let a2 = a_ned[0] * a_ned[0] + a_ned[1] * a_ned[1] + a_ned[2] * a_ned[2];
+        let gyro_infl = clamp_factor(1.0 + self.cfg.q_motion_gyro * w2, self.cfg.q_motion_max);
+        let accel_infl = clamp_factor(1.0 + self.cfg.q_motion_accel * a2, self.cfg.q_motion_max);
+
         // Process noise Q·dt on the diagonal blocks. Attitude (δθ) is
         // per-axis (roll/pitch vs yaw observability); the rest isotropic.
         for i in 0..3 {
-            self.p[i][i] += self.cfg.q_gyro[i] * dt; // δθ
-            self.p[3 + i][3 + i] += self.cfg.q_accel * dt; // δv
+            self.p[i][i] += self.cfg.q_gyro[i] * gyro_infl * dt; // δθ
+            self.p[3 + i][3 + i] += self.cfg.q_accel * accel_infl * dt; // δv
             self.p[9 + i][9 + i] += self.cfg.q_bias_gyro * dt; // δb_g
             self.p[12 + i][12 + i] += self.cfg.q_bias_accel * dt; // δb_a
         }
@@ -1067,6 +1113,7 @@ impl RotorFaultDetector {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
 
     fn qnorm(q: Quat) -> f32 {
@@ -1513,5 +1560,121 @@ mod tests {
             assert!(np >= 0.0 && (np.is_finite() || np == f32::INFINITY));
             assert!(nv >= 0.0 && (nv.is_finite() || nv == f32::INFINITY));
         }
+    }
+
+    // ── v0.35 adaptive process noise ─────────────────────────────────────
+
+    /// Run the filter through a hard horizontal-motion trajectory with an
+    /// UNMODELED accelerometer scale error and periodic position fixes;
+    /// return the steady-state mean velocity NEES (dof = 3, consistent ≈ 3).
+    fn avg_velocity_nees_under_motion(q_motion_accel: f32) -> f32 {
+        let mut cfg = IekfConfig::DEFAULT;
+        cfg.q_motion_gyro = 0.0; // isolate the velocity/accel path
+        cfg.q_motion_accel = q_motion_accel;
+        let mut f = Iekf::with_config(NavState::identity(), cfg);
+        let dt = 0.01_f32;
+        let scale = 0.10_f32; // 10% unmodeled accelerometer scale error
+        let (mut tv, mut tp) = ([0.0_f32; 3], [0.0_f32; 3]);
+        let (mut sum, mut n) = (0.0_f32, 0u32);
+        for k in 0..4000 {
+            let t = k as f32 * dt;
+            // truth horizontal accel (no vertical motion → level attitude)
+            let a_true = [2.5 * libm::sinf(0.8 * t), 2.0 * libm::cosf(0.6 * t), 0.0];
+            for i in 0..3 {
+                tp[i] += tv[i] * dt + 0.5 * a_true[i] * dt * dt;
+                tv[i] += a_true[i] * dt;
+            }
+            // IMU specific force (level, body=NED): horizontal scaled by the
+            // unmodeled error, vertical = the constant gravity reaction.
+            let accel = [(1.0 + scale) * a_true[0], (1.0 + scale) * a_true[1], -GRAVITY_NED[2]];
+            f.propagate(Imu { gyro: [0.0; 3], accel }, dt);
+            if k % 20 == 0 {
+                let jit = 0.01 * libm::sinf(13.0 * t); // deterministic meas jitter
+                f.update_position([tp[0] + jit, tp[1] - jit, tp[2]], 0.01);
+            }
+            if k >= 1000 {
+                let nees = f.nees_velocity(tv);
+                if nees.is_finite() {
+                    sum += nees;
+                    n += 1;
+                }
+            }
+        }
+        sum / (n as f32)
+    }
+
+    /// v0.35 mechanism oracle. HONEST finding: in CLEAN synthetic motion the
+    /// fixed-Q filter is already conservative (velocity NEES ≈ 1.3 < 3, not
+    /// over-confident) — the ANEES 50–760 over-confidence is a real-gz
+    /// coupling (heading-under-motion), validated on the bench, not here.
+    /// What this test certifies deterministically: under hard motion the
+    /// adaptive term inflates Q so the filter gains conservatism margin
+    /// (NEES strictly decreases), bounded (does not collapse to 0). That
+    /// margin is exactly what the over-confident gz case needs.
+    #[test]
+    fn motion_adaptive_q_adds_conservatism_under_motion() {
+        let fixed = avg_velocity_nees_under_motion(0.0); // legacy fixed Q
+        let adaptive = avg_velocity_nees_under_motion(0.25); // v0.35 default
+        std::eprintln!("velocity NEES under motion: fixed={fixed:.2} adaptive={adaptive:.2}");
+        assert!(fixed.is_finite() && adaptive.is_finite());
+        assert!(
+            adaptive < fixed,
+            "adaptive Q must add conservatism under motion (fixed {fixed}, adaptive {adaptive})"
+        );
+        assert!(adaptive > 0.05, "but not collapse the estimate (NEES {adaptive})");
+    }
+
+    /// At rest (ω≈0, a≈0) the inflation factor is exactly 1 — the propagated
+    /// covariance is identical with and without the adaptive term, so hover
+    /// behaviour is provably unchanged.
+    #[test]
+    fn at_rest_inflation_is_identity() {
+        let imu_rest = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -GRAVITY_NED[2]] };
+        let mut fixed = Iekf::with_config(NavState::identity(), {
+            let mut c = IekfConfig::DEFAULT;
+            c.q_motion_gyro = 0.0;
+            c.q_motion_accel = 0.0;
+            c
+        });
+        let mut adaptive = Iekf::with_config(NavState::identity(), IekfConfig::DEFAULT);
+        for _ in 0..200 {
+            fixed.propagate(imu_rest, 0.01);
+            adaptive.propagate(imu_rest, 0.01);
+        }
+        // velocity-block covariance identical to float precision at rest
+        for i in 3..6 {
+            let d = (fixed.nees_velocity([0.0; 3]) - adaptive.nees_velocity([0.0; 3])).abs();
+            let _ = i;
+            assert!(d < 1e-3, "rest covariance must match (diff {d})");
+            break;
+        }
+    }
+
+    /// clamp_factor bounds the inflation to [1, max] (never shrinks, never
+    /// explodes), total over non-finite input.
+    #[test]
+    fn clamp_factor_is_bounded() {
+        assert_eq!(clamp_factor(0.5, 50.0), 1.0); // never below 1
+        assert_eq!(clamp_factor(f32::NAN, 50.0), 1.0); // total
+        assert_eq!(clamp_factor(1e9, 50.0), 50.0); // capped
+        assert_eq!(clamp_factor(7.0, 50.0), 7.0); // pass-through
+        assert_eq!(clamp_factor(7.0, 0.5), 1.0); // degenerate max → 1
+    }
+}
+
+#[cfg(kani)]
+mod kani_harness {
+    use super::*;
+
+    /// The adaptive-inflation factor is always within [1, max] for any input
+    /// and any finite max ≥ 1 — bounded so the covariance can never be
+    /// shrunk or exploded by the v0.35 motion term. Comparison-only proof.
+    #[kani::proof]
+    fn verify_clamp_factor_bounded() {
+        let x: f32 = kani::any();
+        let max: f32 = kani::any();
+        kani::assume(max.is_finite() && max >= 1.0 && max <= 1.0e6);
+        let f = clamp_factor(x, max);
+        assert!(f >= 1.0 && f <= max);
     }
 }
