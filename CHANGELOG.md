@@ -15,6 +15,45 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.15.0] — 2026-06-03
+
+The **capstone** of the v1.8 → v1.15 hardware-abstraction arc: the
+v1.0-practical readiness review, with an **independent clean-room
+re-verification** of the whole arc.
+
+### Added
+
+- **`docs/dossier/v1.0-practical-readiness.md`** — the honest readiness
+  statement: a capability-vs-gap matrix (proven / verified-in-SITL / emulated /
+  seam-only vs needs-hardware), the verification-evidence inventory, and a
+  seven-item hardware **gap register** (real driver bodies + on-silicon
+  validation, calibration, flight tuning, WCET leaf measurement, libm
+  qualification, physical HITL transport, first flight).
+
+### Clean-room re-verification
+
+A subagent briefed **cold** — no narrative, only falsifiable claims and
+read/exec tools — checked the arc's headline claims against the working tree by
+running the cargo tests, grepping the sources, and reading the proof:
+
+> **11 CONFIRM / 0 REFUTE / 0 CANNOT-VERIFY.**
+
+Confirmed independently: `relay-math` is the cascade's only `libm` consumer (0
+`libm::` in the five migrated crates); `CompositionalWcet.lean` has **0 `sorry`**
+and defines `falcon_cascade_schedulable_1khz`; falcon-core defines the
+supervisor + hardware seam + `Pathology` with **12 passing tests**; the IMU
+driver (4 tests) implements `ImuDriver`; the HITL crate (2 tests) defines
+`LinkBackend`; the FSM Kani harnesses exist; the embedded crate targets
+`thumbv7em-none-eabihf`; `rivet validate` PASS; and the GPS-dropout test asserts
+**bounded drift + recovery, not zero drift**.
+
+### Verdict
+
+For a research / SITL / emulation v1.0, the arc is **complete and the claims
+hold under independent check**. For a hardware-flying v1.0, the seven gap-register
+items remain — every one on the *hardware* side of the abstraction seam this arc
+was built to make swappable. Nothing in the tree claims flight.
+
 ## [falcon-v1.14.0] — 2026-06-03
 
 The **hardware-in-the-loop link** — the third backend, and the one that realises
