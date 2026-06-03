@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-PATH-P01
+    type: sw-req
+    title: "PATH-P01 — robustness under injected sensor pathologies through the HAL"
+    status: implemented
+    description: >
+      The simulation backend shall be able to inject the four sensor
+      pathologies the clean-room audit found untested (the sim previously fed
+      the estimator a perfect world): broadband accelerometer vibration, a slow
+      gyro-bias drift, a GPS-dropout window, and magnetometer interference — all
+      deterministic (counter-seeded) so a robustness result is reproducible.
+      Driven through the backend-agnostic FlightBackend seam, the SAME verified
+      cascade (relay-iekf → relay-geo → relay-adrc → relay-mix-quad) shall HOLD
+      (bounded tilt / altitude / position) under each pathology, or degrade
+      gracefully and RECOVER (GPS dropout: bounded dead-reckoning drift, then
+      re-convergence when the fix returns).
+    tags: [falcon, robustness, pathology, vibration, gps-dropout, mag, v1.9]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend with each pathology
+        injected: (1) accelerometer vibration 1.5 m/s²/axis → peak tilt < 0.15
+        rad, altitude held within 0.4 m; (2) gyro-bias drift 0.004 rad/s² → the
+        IEKF bias state tracks it, peak tilt < 0.15 rad; (3) a 2 s GPS dropout →
+        drift bounded < 2 m, position re-converges < 0.5 m after the fix
+        returns; (4) mag interference 0.3 → attitude does not destabilise, peak
+        tilt < 0.15 rad, altitude held.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011
+      - type: derives-from
+        target: SYSREQ-FALCON-014
