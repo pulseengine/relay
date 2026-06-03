@@ -1,0 +1,18 @@
+[package]
+name = "relay-math"
+description = "Relay flight-math seam — the SINGLE qualification boundary for transcendental math in the flight path. Every sqrt/sin/cos/atan2/acos/fabs/remainder the verified cascade uses routes through here, so swapping libm for a qualified implementation (CMSIS-DSP, a proven polynomial core, a hardware CORDIC) is a one-file change instead of ~45 scattered call-site edits. libm is a flight-path qualification item; this crate is where it gets qualified. (v1.12.0)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+libm = "0.2"
+
+[lints]
+workspace = true

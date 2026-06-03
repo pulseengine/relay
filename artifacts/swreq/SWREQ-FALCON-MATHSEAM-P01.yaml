@@ -1,0 +1,31 @@
+artifacts:
+  - id: SWREQ-FALCON-MATHSEAM-P01
+    type: sw-req
+    title: "MATHSEAM-P01 — single qualification boundary for flight-path transcendental math"
+    status: implemented
+    description: >
+      All transcendental math evaluated in the verified flight path
+      (sqrt, sin, cos, atan2, acos, fabs, remainder) shall route through a
+      single seam crate (relay-math), so libm — a flight-path qualification
+      item — can be qualified or replaced (a proven polynomial core, CMSIS-DSP,
+      a hardware CORDIC, a qualified libm build) at ONE site rather than ~45
+      scattered call sites across relay-iekf, relay-geo, relay-adrc,
+      relay-mix-quad, and falcon-core. The seam wrappers shall be
+      zero-cost (#[inline(always)]) so the indirection is source-level only.
+      The verified cascade and the bazel Component-Model build shall consume the
+      seam, with no direct libm reference remaining in the migrated crates.
+    tags: [falcon, math, libm, qualification, seam, v1.12]
+    fields:
+      req-type: qualification
+      priority: must
+      verification-criteria: >
+        relay-math exposes sqrtf/sinf/cosf/atan2f/acosf/fabsf/remainderf and is
+        the only libm consumer in the verified cascade; grep finds zero `libm::`
+        references in relay-iekf/relay-geo/relay-adrc/relay-mix-quad/falcon-core
+        source; all cascade tests pass unchanged (the seam forwards faithfully,
+        asserted by relay-math's seam_forwards_to_reference test); clippy clean;
+        the embedded Cortex-M crate still builds; the bazel relay-iekf /
+        relay-mix-quad libraries build through the :relay-math dep.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011

@@ -149,7 +149,7 @@ impl FlightCore {
             self.kp_pos * (self.setpoint[1] - est.p[1]) - self.kd_vel * est.v[1],
             0.0,
         ];
-        let ah = libm::sqrtf(a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]);
+        let ah = relay_math::sqrtf(a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]);
         if ah > self.a_cmd_max {
             let s = self.a_cmd_max / ah;
             a_cmd[0] *= s;
@@ -227,7 +227,7 @@ impl FlightSupervisor {
         let est = self.core.state();
         let dx = est.p[0] - self.home[0];
         let dy = est.p[1] - self.home[1];
-        let dist_home = libm::sqrtf(dx * dx + dy * dy);
+        let dist_home = relay_math::sqrtf(dx * dx + dy * dy);
         let alt_agl = -est.p[2]; // NED z negative = up
         let g = Gates { level: true, throttle_low: true, have_position: true };
 
@@ -457,7 +457,7 @@ impl SimBackend {
 
     /// Body-frame tilt from level (rad): the angle of the body z-axis from NED down.
     pub fn tilt(&self) -> f32 {
-        libm::acosf(self.r[2][2].clamp(-1.0, 1.0))
+        relay_math::acosf(self.r[2][2].clamp(-1.0, 1.0))
     }
 
     /// One deterministic broadband sample in [−1, 1] (LCG; no `rand`, no_std).
@@ -600,7 +600,7 @@ mod tests {
         let dt = 0.002f32;
         // start tilted ~23° about x
         let th = 0.4f32;
-        let (c, s) = (libm::cosf(th), libm::sinf(th));
+        let (c, s) = (relay_math::cosf(th), relay_math::sinf(th));
         let r0 = [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]];
         let mut backend = SimBackend::new(r0, dt);
         let mut core = FlightCore::new(0.5, 1.0 / dt);
@@ -689,7 +689,7 @@ mod tests {
             backend.pos[1] + 1.5,
             backend.pos[2] + 2.0,
         ];
-        let err = libm::sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        let err = relay_math::sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
         assert!(err < 0.5, "must reach the position setpoint through the HAL: {err} m, pos {:?}", backend.pos);
         assert!(backend.tilt() < 0.15, "settle near level: {} rad", backend.tilt());
     }
@@ -748,7 +748,7 @@ mod tests {
                 break;
             }
         }
-        let dh = libm::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
+        let dh = relay_math::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
         assert!(dh < 1.0, "RTL must bring it home, not to [4,0]: horiz {dh} m, pos {:?}", backend.pos);
         assert!(
             matches!(sup.mode(), Mode::Land | Mode::Disarmed),
@@ -856,11 +856,11 @@ mod tests {
         for k in 0..15000 {
             core.step(&mut backend);
             if (6000..8000).contains(&k) {
-                let d = libm::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
+                let d = relay_math::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
                 peak_drift = peak_drift.max(d);
             }
         }
-        let final_d = libm::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
+        let final_d = relay_math::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
         assert!(peak_drift < 2.0, "dropout drift must stay bounded: {peak_drift} m");
         assert!(final_d < 0.5, "position must re-converge after the fix returns: {final_d} m");
     }
@@ -931,7 +931,7 @@ mod tests {
         let dt = 0.002f32;
         // start tilted ~23° about x — same plant as the SimBackend HAL test
         let th = 0.4f32;
-        let (c, s) = (libm::cosf(th), libm::sinf(th));
+        let (c, s) = (relay_math::cosf(th), relay_math::sinf(th));
         let r0 = [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]];
         let plant = RefCell::new(SimBackend::new(r0, dt));
 

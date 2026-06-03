@@ -63,7 +63,7 @@ fn q_mul(a: Quat, b: Quat) -> Quat {
 fn q_normalize(q: Quat) -> Quat {
     let n2 = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
     if n2.is_finite() && n2 > 1e-12 {
-        let inv = 1.0 / libm::sqrtf(n2);
+        let inv = 1.0 / relay_math::sqrtf(n2);
         let r = [q[0] * inv, q[1] * inv, q[2] * inv, q[3] * inv];
         if r.iter().all(|c| c.is_finite()) {
             return r;
@@ -80,14 +80,14 @@ fn so3_exp(phi: Vec3) -> Quat {
     if !t2.is_finite() {
         return [1.0, 0.0, 0.0, 0.0];
     }
-    let theta = libm::sqrtf(t2);
+    let theta = relay_math::sqrtf(t2);
     // half-angle; sinc(θ/2)/2 with a Taylor fallback for small θ.
     let (w, k) = if theta < 1e-6 {
         // cos(θ/2) ≈ 1 − θ²/8 ; (sin(θ/2)/θ) ≈ ½ − θ²/48
         (1.0 - t2 / 8.0, 0.5 - t2 / 48.0)
     } else {
         let h = 0.5 * theta;
-        (libm::cosf(h), libm::sinf(h) / theta)
+        (relay_math::cosf(h), relay_math::sinf(h) / theta)
     };
     q_normalize([w, k * phi[0], k * phi[1], k * phi[2]])
 }
@@ -268,7 +268,7 @@ impl NavState {
     pub fn tilt_rad(&self) -> f32 {
         let q = self.q;
         let r22 = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]);
-        libm::acosf(r22.clamp(-1.0, 1.0))
+        relay_math::acosf(r22.clamp(-1.0, 1.0))
     }
 }
 
@@ -400,7 +400,7 @@ impl Iekf {
         }
         let h = 0.5 * yaw;
         // Level body, rotation about NED-down (z) by yaw.
-        self.state.q = q_normalize([libm::cosf(h), 0.0, 0.0, libm::sinf(h)]);
+        self.state.q = q_normalize([relay_math::cosf(h), 0.0, 0.0, relay_math::sinf(h)]);
         self.p[2][2] = 0.01; // confident heading now
     }
 
@@ -663,12 +663,12 @@ impl Iekf {
             return false;
         }
         let q = self.state.q;
-        let yaw_est = libm::atan2f(
+        let yaw_est = relay_math::atan2f(
             2.0 * (q[0] * q[3] + q[1] * q[2]),
             1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
         );
         // Shortest-arc innovation in [−π, π].
-        let r = libm::remainderf(yaw_meas - yaw_est, 2.0 * core::f32::consts::PI);
+        let r = relay_math::remainderf(yaw_meas - yaw_est, 2.0 * core::f32::consts::PI);
 
         // H = e_z over δθ (column 2). S = P[2][2] + R (scalar).
         let s = self.p[2][2] + meas_var;
@@ -764,7 +764,7 @@ impl Iekf {
     /// (gravity is vertical, so [g]× has no z-component coupling).
     pub fn update_gravity(&mut self, accel_body: Vec3, base_var: f32) -> bool {
         let a = sanitise3(accel_body);
-        let amag = libm::sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+        let amag = relay_math::sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
         if !(amag > 1e-3) || !(base_var > 0.0) {
             return false;
         }
@@ -1023,8 +1023,8 @@ pub fn mag_heading(mag_body: Vec3, q: Quat, declination: f32) -> Option<f32> {
     if !h2.is_finite() || h2 < 1e-12 {
         return None; // no horizontal field → heading unobservable from mag
     }
-    let field_ang = libm::atan2f(m[1], m[0]); // East, North
-    let yaw_est = libm::atan2f(
+    let field_ang = relay_math::atan2f(m[1], m[0]); // East, North
+    let yaw_est = relay_math::atan2f(
         2.0 * (q[0] * q[3] + q[1] * q[2]),
         1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
     );
@@ -1212,7 +1212,7 @@ mod tests {
     use super::*;
 
     fn qnorm(q: Quat) -> f32 {
-        libm::sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])
+        relay_math::sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])
     }
 
     /// At rest and level, the specific force a quad's accelerometer reads
@@ -1246,7 +1246,7 @@ mod tests {
         assert!(s.tilt_rad().to_degrees() < 0.5, "yaw should not tilt: {}", s.tilt_rad());
         // yaw ≈ atan2(2(wz+xy), 1−2(y²+z²)) ≈ 1 rad
         let q = s.q;
-        let yaw = libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        let yaw = relay_math::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
         assert!((yaw - 1.0).abs() < 0.05, "yaw {yaw}");
     }
 
@@ -1313,7 +1313,7 @@ mod tests {
             f.propagate(spin, 0.01); // yaw → ~1 rad
         }
         let q0 = f.state().q;
-        let yaw0 = libm::atan2f(2.0 * (q0[0] * q0[3] + q0[1] * q0[2]), 1.0 - 2.0 * (q0[2] * q0[2] + q0[3] * q0[3]));
+        let yaw0 = relay_math::atan2f(2.0 * (q0[0] * q0[3] + q0[1] * q0[2]), 1.0 - 2.0 * (q0[2] * q0[2] + q0[3] * q0[3]));
         assert!(yaw0 > 0.5, "setup: estimate should be yawed, got {yaw0}");
 
         let still = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
@@ -1322,7 +1322,7 @@ mod tests {
             f.update_yaw(0.0, 0.02);
         }
         let q = f.state().q;
-        let yaw = libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        let yaw = relay_math::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
         assert!(yaw.abs() < 0.1, "heading should converge to 0, got {yaw}");
     }
 
@@ -1449,14 +1449,14 @@ mod tests {
         let h0 = mag_heading(m_world, [1.0, 0.0, 0.0, 0.0], 0.0).unwrap();
         assert!(h0.abs() < 1e-3, "yaw 0 expected, got {h0}");
         // Body yawed +90° (east): q = Rz(π/2); the body reads R(−π/2)·m_world.
-        let qz90 = [libm::cosf(pi / 4.0), 0.0, 0.0, libm::sinf(pi / 4.0)];
+        let qz90 = [relay_math::cosf(pi / 4.0), 0.0, 0.0, relay_math::sinf(pi / 4.0)];
         let mb = q_rotate([qz90[0], -qz90[1], -qz90[2], -qz90[3]], m_world); // R(q)⁻¹·m_world
         let h90 = mag_heading(mb, qz90, 0.0).unwrap();
         assert!((h90 - pi / 2.0).abs() < 1e-2, "yaw +90° expected, got {h90}");
         // Declination: field points at d=0.3 rad east of true north, body at
         // true heading 0 → must still report 0 (declination removed).
         let d = 0.3_f32;
-        let m_dec = [libm::cosf(d), libm::sinf(d), 0.5];
+        let m_dec = [relay_math::cosf(d), relay_math::sinf(d), 0.5];
         let hd = mag_heading(m_dec, [1.0, 0.0, 0.0, 0.0], d).unwrap();
         assert!(hd.abs() < 1e-3, "declination should be removed, got {hd}");
         // Degenerate near-vertical field ⇒ None.
@@ -1485,7 +1485,7 @@ mod tests {
             assert!(f.update_magnetometer(m_world, 0.0, 0.02));
         }
         let q = f.state().q;
-        let yaw = libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        let yaw = relay_math::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
         assert!(yaw.abs() < 0.1, "mag update should drive heading to 0, got {yaw}");
         let _ = pi;
     }
@@ -1507,7 +1507,7 @@ mod tests {
         // Estimate STARTS with a 0.3 rad heading error (believes yaw 0.3).
         let mut st = NavState::identity();
         let half = 0.15_f32; // yaw/2
-        st.q = [libm::cosf(half), 0.0, 0.0, libm::sinf(half)];
+        st.q = [relay_math::cosf(half), 0.0, 0.0, relay_math::sinf(half)];
         let mut f = Iekf::new(st);
         let yaw0 = 0.3_f32;
 
@@ -1526,7 +1526,7 @@ mod tests {
             }
         }
         let q = f.state().q;
-        let yaw = libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        let yaw = relay_math::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
         // Magless recovery from position aiding is genuinely WEAK and slow
         // (why PX4 uses a velocity-GSF and we use a magnetometer as primary
         // — docs/research/v0.22-heading-yaw-sota.md). The provable, testable
@@ -1674,7 +1674,7 @@ mod tests {
         for k in 0..4000 {
             let t = k as f32 * dt;
             // truth horizontal accel (no vertical motion → level attitude)
-            let a_true = [2.5 * libm::sinf(0.8 * t), 2.0 * libm::cosf(0.6 * t), 0.0];
+            let a_true = [2.5 * relay_math::sinf(0.8 * t), 2.0 * relay_math::cosf(0.6 * t), 0.0];
             for i in 0..3 {
                 tp[i] += tv[i] * dt + 0.5 * a_true[i] * dt * dt;
                 tv[i] += a_true[i] * dt;
@@ -1684,7 +1684,7 @@ mod tests {
             let accel = [(1.0 + scale) * a_true[0], (1.0 + scale) * a_true[1], -GRAVITY_NED[2]];
             f.propagate(Imu { gyro: [0.0; 3], accel }, dt);
             if k % 20 == 0 {
-                let jit = 0.01 * libm::sinf(13.0 * t); // deterministic meas jitter
+                let jit = 0.01 * relay_math::sinf(13.0 * t); // deterministic meas jitter
                 f.update_position([tp[0] + jit, tp[1] - jit, tp[2]], 0.01);
             }
             if k >= 1000 {
@@ -1744,7 +1744,7 @@ mod tests {
         let mut f = Iekf::with_config(NavState::identity(), IekfConfig::DEFAULT);
         let mut rejected = 0;
         for k in 0..1000 {
-            let n = 0.05 * libm::sinf(7.0 * k as f32);
+            let n = 0.05 * relay_math::sinf(7.0 * k as f32);
             if !f.update_position([n, -n, 0.5 * n], 0.02) {
                 rejected += 1;
             }
@@ -1759,7 +1759,7 @@ mod tests {
     fn spoof_monitor_catches_walkoff_not_noise() {
         let mut mon = SpoofMonitor::new(2.0, 0.1);
         for k in 0..300 {
-            let n = 0.08 * libm::sinf(3.0 * k as f32);
+            let n = 0.08 * relay_math::sinf(3.0 * k as f32);
             assert!(!mon.update([n, -n, n]), "no false alarm on zero-mean noise");
         }
         // +0.3 m/step bias in x: accumulates (0.3−0.1)=0.2/step ⇒ 2.0 in ~10.
@@ -1855,7 +1855,7 @@ mod kani_harness {
         let x: f32 = kani::any();
         let y: f32 = kani::any();
         let z: f32 = kani::any();
-        kani::assume(libm::fabsf(x) <= drift && libm::fabsf(y) <= drift && libm::fabsf(z) <= drift);
+        kani::assume(relay_math::fabsf(x) <= drift && relay_math::fabsf(y) <= drift && relay_math::fabsf(z) <= drift);
         let alarmed = mon.update([x, y, z]);
         assert!(!alarmed);
         assert!(!mon.spoofed());

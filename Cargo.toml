@@ -33,6 +33,7 @@ members = [
     "crates/relay-traj",
     "crates/relay-pos",
     "crates/relay-fsm",
+    "crates/relay-math",
     "crates/falcon-core",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",

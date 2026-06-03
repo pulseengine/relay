@@ -209,7 +209,7 @@ impl Biquad {
             return Self::passthrough();
         }
         let w0 = 2.0 * core::f32::consts::PI * fc / fs;
-        let (sw, cw) = (libm::sinf(w0), libm::cosf(w0));
+        let (sw, cw) = (relay_math::sinf(w0), relay_math::cosf(w0));
         let q = core::f32::consts::FRAC_1_SQRT_2;
         let alpha = sw / (2.0 * q);
         let a0 = 1.0 + alpha;
@@ -477,7 +477,7 @@ mod tests {
         let mut lpf2 = GyroLpf::new(60.0, fs);
         let mut peak = 0.0f32;
         for k in 0..2000 {
-            let x = libm::sinf(2.0 * core::f32::consts::PI * 300.0 * (k as f32) / fs);
+            let x = relay_math::sinf(2.0 * core::f32::consts::PI * 300.0 * (k as f32) / fs);
             let y = lpf2.filter([x, 0.0, 0.0])[0].abs();
             if k > 200 && y > peak { peak = y; }
         }

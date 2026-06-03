@@ -12,7 +12,7 @@ path = "plain/src/lib.rs"
 crate-type = ["rlib"]
 
 [dependencies]
-libm = "0.2"
+relay-math = { path = "../relay-math" }
 relay-iekf = { path = "../relay-iekf" }
 relay-geo = { path = "../relay-geo" }
 relay-adrc = { path = "../relay-adrc" }

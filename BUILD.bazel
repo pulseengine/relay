@@ -498,14 +498,26 @@ rust_library(
     deps = ["@libm_crate//:libm"],
 )
 
+# v1.12 — the flight-math qualification seam. relay-iekf / relay-mix-quad route
+# their transcendentals through this single boundary instead of @libm_crate
+# directly, so qualifying (or replacing) libm in the flight path is a one-crate
+# change. The seam itself is the only libm consumer in the verified cascade.
+rust_library(
+    name = "relay-math",
+    srcs = glob(["crates/relay-math/src/**/*.rs"]),
+    edition = "2024",
+    deps = ["@libm_crate//:libm"],
+)
+
 # v1.4 — the VERIFIED Invariant-EKF as a bazel rust_library, so it can be
 # wrapped as the `falcon-iekf` Component Model component (replacing the v0.6
-# Mahony cascade with the verified stack).
+# Mahony cascade with the verified stack). v1.12: transcendentals via the
+# relay-math seam.
 rust_library(
     name = "relay-iekf",
     srcs = glob(["crates/relay-iekf/plain/src/**/*.rs"]),
     edition = "2024",
-    deps = ["@libm_crate//:libm"],
+    deps = [":relay-math"],
 )
 
 rust_library(
@@ -531,9 +543,10 @@ rust_library(
     name = "relay-mix-quad",
     srcs = glob(["crates/relay-mix-quad/plain/src/**/*.rs"]),
     edition = "2024",
-    # v0.34 MixerN::from_geometry uses libm sinf/cosf (no_std). Mirrors the
-    # Cargo.toml dep; the bazel build needs it declared explicitly.
-    deps = ["@libm_crate//:libm"],
+    # v0.34 MixerN::from_geometry uses sinf/cosf (no_std); v1.12 routes them
+    # through the relay-math qualification seam. Mirrors the Cargo.toml dep;
+    # the bazel build needs it declared explicitly.
+    deps = [":relay-math"],
 )
 
 # ── leaf CM components — one WIT interface each ───────────────────
