@@ -7,3 +7,6 @@
 *.mov
 *.webm
 *.mkv
+*.png
+*.jpg
+frames/
