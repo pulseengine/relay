@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-FALCON-WIT-P01
+    type: sw-req
+    title: "WIT-P01 — the verified IEKF is a Component Model component in the composed cascade"
+    status: implemented
+    description: >
+      The verified Invariant-EKF (relay-iekf) shall be packaged as a WIT
+      Component Model component exporting the falcon:cascade/ekf interface, and
+      plugged into the composed cascade (falcon-cascade-composed) in place of
+      the v0.6 Mahony falcon-ekf component. A clean-room audit found the
+      composed cascade used the OLD crates (Mahony ekf, small-angle att) while
+      the verified v0.21→v1.0 stack was plain cargo crates outside the
+      Component Model graph; this requirement begins closing that gap — the
+      verified stack becomes the composed stack, starting with the estimator.
+
+      The component wraps Iekf in a thread-local cell, propagating the SE₂(3)
+      state and running the gravity (tilt) update per estimate() call — the
+      attitude-estimate role the cascade ekf slot fills. It is a drop-in (same
+      WIT interface) so wac composes it into the existing socket. The
+      position/attitude/rate components migrating to relay-geo/relay-adrc, and
+      meld-fusing the result, are v1.5+.
+    tags: [falcon, wit, component-model, iekf, composition, v1.4]
+    fields:
+      req-type: architecture
+      priority: should
+      verification-criteria: >
+        bazel build //:falcon-iekf produces the WASM component; bazel build
+        //:falcon-cascade-composed composes the cascade with falcon-iekf
+        plugged into the ekf socket (the verified IEKF, not Mahony). Built by
+        the Component Model cascade CI job.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008
+      - type: derives-from
+        target: SYSREQ-FALCON-001

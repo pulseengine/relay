@@ -498,6 +498,16 @@ rust_library(
     deps = ["@libm_crate//:libm"],
 )
 
+# v1.4 — the VERIFIED Invariant-EKF as a bazel rust_library, so it can be
+# wrapped as the `falcon-iekf` Component Model component (replacing the v0.6
+# Mahony cascade with the verified stack).
+rust_library(
+    name = "relay-iekf",
+    srcs = glob(["crates/relay-iekf/plain/src/**/*.rs"]),
+    edition = "2024",
+    deps = ["@libm_crate//:libm"],
+)
+
 rust_library(
     name = "relay-pos",
     srcs = glob(["crates/relay-pos/plain/src/**/*.rs"]),
@@ -536,6 +546,16 @@ rust_wasm_component_bindgen(
     srcs = ["wasm/cm/ekf/src/lib.rs"],
     wit = ":falcon_ekf_wit",
     deps = [":relay-ekf"],
+    profiles = ["release"],
+)
+
+# v1.4 — the verified IEKF exports the SAME falcon:cascade/ekf interface, so
+# it is a drop-in Component Model replacement for the Mahony falcon-ekf.
+rust_wasm_component_bindgen(
+    name = "falcon-iekf",
+    srcs = ["wasm/cm/iekf/src/lib.rs"],
+    wit = ":falcon_ekf_wit",
+    deps = [":relay-iekf"],
     profiles = ["release"],
 )
 
@@ -585,8 +605,11 @@ rust_wasm_component_bindgen(
 # plug (exports one). wac matches imports to exports by interface.
 wac_plug(
     name = "falcon-cascade-composed",
+    # v1.4 — the composed cascade now plugs the VERIFIED IEKF (falcon-iekf)
+    # into the ekf socket instead of the v0.6 Mahony falcon-ekf. The verified
+    # stack is the composed stack.
     plugs = [
-        ":falcon-ekf",
+        ":falcon-iekf",
         ":falcon-position",
         ":falcon-attitude",
         ":falcon-rate",

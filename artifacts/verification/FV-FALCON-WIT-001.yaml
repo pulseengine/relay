@@ -1,0 +1,31 @@
+artifacts:
+  - id: FV-FALCON-WIT-001
+    type: sw-verification
+    title: "Verified IEKF componentized + plugged into the composed cascade (v1.4.0)"
+    status: approved
+    description: >
+      Verification of the v1.4.0 componentization of the verified IEKF:
+
+      1. relay-iekf is a bazel rust_library (//:relay-iekf builds).
+      2. wasm/cm/iekf wraps it as the falcon-iekf Component Model component
+         exporting falcon:cascade/ekf; //:falcon-iekf builds to a WASM
+         component (falcon_iekf_wasm_lib_release_wasm_base.wasm).
+      3. //:falcon-cascade-composed composes the cascade with falcon-iekf
+         plugged into the ekf socket (replacing the v0.6 Mahony falcon-ekf) —
+         wac wires it (same interface), producing falcon-cascade-composed.wasm.
+         The composed cascade now uses the VERIFIED IEKF.
+
+      Built locally against the vendored deps and by the Component Model
+      cascade CI job. This is the first step of replacing the old composed
+      cascade with the verified stack (the clean-room audit's finding that the
+      composed cascade used the old crates). The position/attitude/rate
+      components migrating to relay-geo/relay-adrc + meld-fusing are v1.5+.
+    tags: [verification, falcon, wit, component-model, iekf, v1.4]
+    fields:
+      method: build
+      steps:
+        - run: "bazel build //:falcon-iekf"
+        - run: "bazel build //:falcon-cascade-composed"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WIT-P01

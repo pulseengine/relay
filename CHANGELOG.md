@@ -15,6 +15,34 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.4.0] — 2026-06-03
+
+The verified stack starts **becoming the composed stack**. The clean-room
+audit found the Component-Model cascade wrapped the *old* crates (Mahony ekf,
+small-angle att) while the verified v0.21→v1.0 work was plain cargo crates
+outside the graph. v1.4 closes that gap for the estimator.
+
+### Added
+
+- **`relay-iekf` as a bazel `rust_library`** + **`falcon-iekf`** — the
+  verified Invariant-EKF wrapped as a Component Model component
+  (`wasm/cm/iekf`) exporting the same `falcon:cascade/ekf` interface as the
+  v0.6 Mahony `falcon-ekf`.
+
+### Changed
+
+- **`falcon-cascade-composed` now plugs the verified `falcon-iekf`** into the
+  ekf socket instead of the Mahony `falcon-ekf` — `wac` wires it (same
+  interface), producing `falcon-cascade-composed.wasm`. **The composed
+  cascade now uses the verified IEKF.**
+
+### Scope
+
+The estimator is migrated; position/attitude/rate → relay-geo/relay-adrc and
+**meld-fusing** the composed cascade into a single deployable module are
+v1.5+. Built locally against the vendored deps + by the Component Model
+cascade CI job.
+
 ## [falcon-v1.3.0] — 2026-06-03
 
 The **complete verified hover stack** now runs backend-agnostically through
