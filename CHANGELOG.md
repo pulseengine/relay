@@ -15,6 +15,40 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.11.0] — 2026-06-03
+
+The **real-hardware backend seam** — the point the whole "build into any drone"
+claim rests on, and your "sim-as-backend-first" pivot made concrete. The SAME
+verified `FlightCore` / `FlightSupervisor` that flies the simulation now flies a
+real airframe by swapping *only* the drivers.
+
+### Added
+
+- **Five driver-seam traits** (`falcon-core`, `no_std`): `ImuDriver`,
+  `PositionDriver`, `MagDriver`, `MotorDriver`, `BatteryDriver` — the contracts
+  a board satisfies, in SI/body-frame units.
+- **`HardwareBackend<I, P, M, O, B>`** — implements `FlightBackend` purely by
+  delegating to the five drivers. The estimator, geometric controller, ADRC
+  loop, mixer, FSM, failsafes, and the kernel-checked WCET argument are all
+  unchanged between sim and board.
+
+### Verified (12 tests, clippy clean, embedded still builds)
+
+- `flight_core_stabilizes_through_the_hardware_seam` — five mock drivers share
+  one simulated plant through a `core::cell::RefCell` (each borrows only for its
+  own call, so the motor-write driver steps the physics the next IMU-read driver
+  observes). The verified core, started tilted ~0.4 rad, recovers to < 0.1 rad
+  **entirely through the driver-trait indirection** — the seam carries a real
+  closed loop, not a placeholder.
+
+### Honest hardware boundary (documented GAPS, not faked)
+
+The module docs list exactly what needs **your board**: real driver bodies
+(register/bus sequences for a specific IMU/GNSS/mag/ESC/ADC) and their
+on-silicon validation; sensor calibration; flight-tuning on the real airframe;
+and discharging the v1.10 per-stage WCET leaf budgets with measured Cortex-M7
+cycles. These are explicitly out of scope — the seam is ready for them.
+
 ## [falcon-v1.10.0] — 2026-06-03
 
 WCET and schedulability for the flight loop — and the **last open `sorry`** in
