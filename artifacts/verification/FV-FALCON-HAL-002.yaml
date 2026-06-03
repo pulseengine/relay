@@ -1,0 +1,33 @@
+artifacts:
+  - id: FV-FALCON-HAL-002
+    type: sw-verification
+    title: "Altitude hold + disturbance rejection through the HAL (v1.2.0)"
+    status: approved
+    description: >
+      Verification of the v1.2.0 altitude/thrust loop + disturbance rejection
+      in falcon-core (4 tests pass, clippy clean):
+
+      1. altitude_hold_climbs_to_setpoint — through the FlightBackend seam, the
+         backend-agnostic core climbs to a −2 m altitude setpoint (within
+         0.25 m) and stays level (<0.1 rad). The SimBackend gained vertical
+         dynamics (thrust → altitude); the accelerometer keeps modelling the
+         gravity reaction so attitude stays observable.
+
+      2. disturbance_rejected_holds_level — under a sustained [0.25,−0.15,0]
+         body-torque disturbance the verified ADRC extended-state observer
+         cancels it and the steady tilt stays <0.12 rad (a plain proportional
+         loop would sit at an offset). Disturbance rejection demonstrated
+         backend-agnostically.
+
+      The v1.1 tests still pass with the added vertical dynamics. Honest scope:
+      a vertical+attitude sim backend (horizontal pinned); full 6-DoF
+      horizontal position is v1.3.
+    tags: [verification, falcon, hal, altitude, disturbance-rejection, v1.2]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HAL-P02
