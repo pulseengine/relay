@@ -1,0 +1,18 @@
+[package]
+name = "falcon-imu-icm42688"
+description = "Falcon reference IMU driver — a TDK InvenSense ICM-42688-P 6-axis driver implementing falcon-core's ImuDriver seam over a minimal, dependency-free register bus. The register protocol + unit-scaling math are exercised against a mock bus; the on-silicon validation (real SPI timing, error handling, calibration) is the documented hardware gap. (v1.13.0)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+falcon-core = { path = "../falcon-core" }
+
+[lints]
+workspace = true

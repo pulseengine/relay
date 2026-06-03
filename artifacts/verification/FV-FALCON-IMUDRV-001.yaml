@@ -1,0 +1,39 @@
+artifacts:
+  - id: FV-FALCON-IMUDRV-001
+    type: sw-verification
+    title: "Reference ICM-42688 IMU driver: protocol + scaling against a mock bus (v1.13.0)"
+    status: approved
+    description: >
+      Verification of the v1.13.0 falcon-imu-icm42688 driver (4 tests pass,
+      clippy clean), the first concrete driver against the v1.11 ImuDriver seam:
+
+      1. decodes_register_block_to_si — against a mock RegBus, init() checks the
+         WHO_AM_I identity and writes the documented PWR_MGMT0=0x0F,
+         GYRO_CONFIG0=0x06 (±2000 dps), ACCEL_CONFIG0=0x06 (±16 g); read()
+         burst-reads the 12-byte data block and decodes big-endian i16 counts to
+         SI — AZ=2048 LSB → 9.80665 m/s², GX=164 LSB → 0.174533 rad/s.
+
+      2. rejects_wrong_chip — a wrong WHO_AM_I returns DriverError::WrongWhoAmI
+         (the chip is not silently flown).
+
+      3. decodes_negative_counts — AZ=−2048 → −9.80665 m/s² (sign bit correct).
+
+      4. satisfies_imu_driver_seam — the driver plugs into a HardwareBackend as
+         the IMU and reports through the ImuDriver trait boundary.
+
+      Honest hardware GAPS (documented in the crate, NOT faked): a real
+      embedded-hal SPI RegBus (CS timing, mode 3, address-MSB convention) and
+      its on-silicon validation; sensor calibration (bias/scale/board-mounting
+      remap — the driver uses an identity remap placeholder); FIFO/data-ready
+      timing; bus-fault / NaN handling; temperature compensation. The register
+      protocol and scaling math are real and verified; the bus and its
+      validation need the chip.
+    tags: [verification, falcon, driver, imu, icm42688, v1.13]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-imu-icm42688"
+        - run: "cargo clippy -p falcon-imu-icm42688"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-IMUDRV-P01

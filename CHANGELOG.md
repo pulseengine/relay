@@ -15,6 +15,38 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.13.0] — 2026-06-03
+
+The **first real driver** against the v1.11 hardware seam — what "implement five
+drivers and the same verified core flies your board" looks like for one of them.
+
+### Added
+
+- **`falcon-imu-icm42688`** (`no_std`) — a TDK InvenSense **ICM-42688-P** 6-axis
+  driver implementing `falcon-core::ImuDriver` over a minimal, dependency-free
+  `RegBus` trait (the thin contract your SPI peripheral satisfies). It verifies
+  the `WHO_AM_I` identity, configures ±16 g / ±2000 dps, burst-reads the
+  big-endian accel+gyro data block, and scales raw `i16` counts to SI
+  body-frame units.
+
+### Verified (4 tests, clippy clean)
+
+- `decodes_register_block_to_si` — against a mock bus, the documented config
+  registers are written and a canned block decodes to SI (AZ = 2048 LSB →
+  9.80665 m/s², GX = 164 LSB → 0.174533 rad/s).
+- `rejects_wrong_chip` — a wrong `WHO_AM_I` returns `DriverError::WrongWhoAmI`
+  (the chip is **not** silently flown).
+- `decodes_negative_counts` — the sign bit decodes (AZ = −1 g).
+- `satisfies_imu_driver_seam` — it plugs into a `HardwareBackend` as the IMU.
+
+### Honest hardware GAPS (need the chip, not faked)
+
+A real `embedded-hal` SPI `RegBus` (CS timing, mode 3, address-MSB convention)
+and its **on-silicon validation**; calibration (bias/scale/board-mounting remap
+— the driver uses an identity-remap placeholder); FIFO/data-ready timing; bus-
+fault handling. The register protocol + scaling math are real and verified; the
+bus and its validation are yours.
+
 ## [falcon-v1.12.0] — 2026-06-03
 
 The **flight-math qualification seam**. `libm` is in the flight path (the
