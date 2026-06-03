@@ -36,6 +36,7 @@ members = [
     "crates/relay-math",
     "crates/falcon-core",
     "crates/falcon-imu-icm42688",
+    "crates/falcon-hitl",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
     "examples/falcon-sitl-hover",

@@ -1,0 +1,21 @@
+[package]
+name = "falcon-hitl"
+description = "Falcon hardware-in-the-loop link — a FlightBackend (LinkBackend) that exchanges sensors/actuators with a simulator (or a real-vehicle bridge) over a byte-framed wire protocol, plus the SimServer that answers it. Realises 'the hardware with the simulation as the backend': the flight computer runs the verified core with a LinkBackend; the sim answers over the link. (v1.14.0)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+falcon-core = { path = "../falcon-core" }
+
+[dev-dependencies]
+libm = "0.2"
+
+[lints]
+workspace = true

@@ -15,6 +15,45 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.14.0] — 2026-06-03
+
+The **hardware-in-the-loop link** — the third backend, and the one that realises
+your "**hardware with the simulation as the backend**" topology. The same
+verified core runs on the flight computer; the simulator answers over a wire.
+
+### Added
+
+- **`falcon-hitl`** (`no_std`) — a `LinkBackend` (a `FlightBackend`) that, each
+  control step, sends a 16-byte **actuator frame** (four motor commands) and
+  receives a 54-byte **sensor frame** (accel, gyro, position+valid, mag+valid,
+  battery) over a `Transport`; and a `SimServer` that decodes the actuator
+  frame, steps a `SimBackend`, and encodes the sensor frame back. The wire
+  format is fixed-layout little-endian `f32` — no `serde`, no `alloc` — so it
+  runs unchanged on the MCU.
+
+  | backend | sensors/actuators from |
+  |---|---|
+  | `SimBackend` (v1.1) | simulation, in-process |
+  | `HardwareBackend` (v1.11) | real sensors, via driver traits |
+  | **`LinkBackend` (v1.14)** | **a remote simulator / vehicle over a framed link** |
+
+### Verified (2 tests, clippy clean)
+
+- `frames_round_trip` — the codec encodes/decodes both frames exactly (valid
+  flags included).
+- `flight_core_stabilizes_over_the_hitl_link` — the verified core levels a
+  vehicle started tilted ~0.4 rad **entirely over the link** (every sensor read
+  and motor write crosses the byte protocol to a `SimServer`), ending near level
+  (accel z-fraction > 0.99).
+
+### Honest scope
+
+The `Transport` is exercised by an in-process loopback (the closed loop flies
+over the real frame encode/decode). The documented GAP is the *physical*
+transport — a real UART/USB/UDP link and its latency, jitter, framing-error and
+reconnect handling. The protocol and the closed-loop contract are real; the wire
+underneath is the integration step.
+
 ## [falcon-v1.13.0] — 2026-06-03
 
 The **first real driver** against the v1.11 hardware seam — what "implement five
