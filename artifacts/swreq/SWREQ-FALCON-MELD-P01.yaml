@@ -1,0 +1,30 @@
+artifacts:
+  - id: SWREQ-FALCON-MELD-P01
+    type: sw-req
+    title: "MELD-P01 — the verified cascade fuses into a single deployable module via meld"
+    status: implemented
+    description: >
+      The verified control cascade (the five Component Model leaves, including
+      the verified IEKF from v1.4) shall fuse into a single WebAssembly core
+      module via `meld fuse` — the PulseEngine static-fusion step the CLAUDE.md
+      names ("Meld fuses components, wires streams at build time") that a
+      clean-room audit found UNUSED (composition was via wac only; meld was
+      never invoked). This is the embedded deployable artifact: one module →
+      loom → synth → gale on a real target.
+
+      Honest scope: meld is not provisioned in the CI gate runner, so the
+      fusion runs locally / on a bench (like the gz flights) via
+      scripts/meld-fuse-cascade.sh, not inside the gate. The fused module + the
+      meld stats + meld inspect are the evidence.
+    tags: [falcon, meld, fusion, embedded, component-model, v1.5]
+    fields:
+      req-type: architecture
+      priority: should
+      verification-criteria: >
+        scripts/meld-fuse-cascade.sh builds the five verified cascade
+        components and `meld fuse`s them into a single core WebAssembly module:
+        58 exports, 1495 functions, ~354 KB (97.3% reduction from the inputs),
+        confirmed by `meld inspect` as "Core WebAssembly Module".
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

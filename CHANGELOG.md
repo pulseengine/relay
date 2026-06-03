@@ -15,6 +15,31 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.5.0] — 2026-06-03
+
+**`meld` is wired** — the PulseEngine fusion tool the `CLAUDE.md` names but a
+clean-room audit found **never invoked** (composition was `wac`-only). The
+verified cascade now fuses into a single deployable module.
+
+### Added
+
+- **`scripts/meld-fuse-cascade.sh`** — builds the five verified Component
+  Model leaves (`falcon-iekf` — the verified IEKF — + position/attitude/rate/
+  mixer) and `meld fuse`s them into a **single WebAssembly core module**:
+  - 58 exports, 1495 functions, **354 KB** (97.3% reduction from 13.2 MB)
+  - `meld inspect` → "Format: Core WebAssembly Module"
+
+  This is the embedded deployable artifact (one module → loom → synth → gale
+  on a target) — and it makes the `CLAUDE.md` "Meld fuses components" claim
+  true for the first time.
+
+### Scope
+
+`meld` is not provisioned in the CI gate runner, so the fusion is a bench step
+(skipped in the gate like the bazel/gz steps), demonstrated locally via the
+script. Running the **fused module on an emulated Cortex-M with the sim
+backend** is v1.6.
+
 ## [falcon-v1.4.0] — 2026-06-03
 
 The verified stack starts **becoming the composed stack**. The clean-room

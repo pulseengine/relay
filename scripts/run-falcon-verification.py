@@ -57,6 +57,10 @@ BENCH_PATTERNS = [
     # full-workspace instrumentation intermittently rc=101). Skip here — the
     # dedicated job is the coverage gate.
     re.compile(r"\bcargo\s+llvm-cov\b"),
+    # `meld` (the PulseEngine fusion tool) is a bench tool, not provisioned in
+    # the CI gate runner; its fuse/inspect demos run locally (like gz).
+    re.compile(r"\bmeld\s+(fuse|inspect)\b"),
+    re.compile(r"\bmeld-fuse-cascade\b"),
     re.compile(r"\bspar\s+\w"),                       # spar not on the gate runner
     re.compile(r"^\s*cd\s+~"),                        # tilde-expanded path = not portable
     re.compile(r"/Users/[^/]+/"),                     # developer-machine absolute path
