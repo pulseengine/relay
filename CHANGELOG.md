@@ -15,6 +15,35 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.8.0] — 2026-06-03
+
+The FSM wired into the loop, and the failsafes the audit found **detected but
+never actuated** now actuate.
+
+### Added
+
+- **`falcon-core::FlightSupervisor`** — wraps the verified cascade with the
+  `relay-fsm` FSM and the failsafe monitors. Each step: read the estimate;
+  on a **geofence breach** or **low battery** while airborne, fire `Failsafe`
+  → the FSM commands **RTL**; fire milestone events; map mode → setpoint
+  (Takeoff/Loiter → hold, Mission → target, RTL → home, Land → descend); step
+  the core. All through the `FlightBackend` seam (battery via `read_battery_v`).
+
+### Verified (7 tests, clippy clean)
+
+- `geofence_breach_actuates_rtl_home` — commanded to `[4,0]` *outside* the
+  1.5 m fence, the vehicle crosses it, the supervisor fires `Failsafe` → RTL
+  → flies home and lands (within 1 m of home, **not** at `[4,0]`). The
+  geofence **actuation** the audit found missing.
+- `low_battery_actuates_failsafe` — a sag below 14 V while loitering triggers
+  a failsafe recovery. The battery failsafe the audit found absent.
+
+### Scope
+
+Composes relay-iekf + relay-geo + relay-adrc + relay-mix-quad + the proven
+relay-fsm + geofence/battery monitors behind the seam. Next: injected sensor
+pathologies (v1.9), WCET (v1.10), the real-sensor backend seam (v1.11).
+
 ## [falcon-v1.7.0] — 2026-06-03
 
 The **autonomy layer** the clean-room audit found missing — a real flight-mode
