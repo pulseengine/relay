@@ -1,0 +1,31 @@
+artifacts:
+  - id: SWREQ-FALCON-IMUDRV-P01
+    type: sw-req
+    title: "IMUDRV-P01 — reference ICM-42688 IMU driver against the hardware seam"
+    status: implemented
+    description: >
+      A reference IMU driver shall implement the v1.11 ImuDriver seam for a real
+      sensor (TDK InvenSense ICM-42688-P) over a minimal, dependency-free
+      register bus, so the verified FlightCore drives it unchanged. The driver
+      shall: verify the WHO_AM_I identity (rejecting a wrong chip rather than
+      flying it); configure the documented full-scale ranges (±16 g, ±2000 dps);
+      burst-read the big-endian accel+gyro data block; and scale raw i16 counts
+      to SI body-frame units (m/s², rad/s). The register protocol and scaling
+      math shall be verified against a mock bus. The on-silicon parts — a real
+      embedded-hal SPI bus and its validation, calibration, axis/board remap,
+      FIFO/timing, bus-fault handling — are the documented hardware gap and are
+      NOT faked.
+    tags: [falcon, driver, imu, icm42688, hal, v1.13]
+    fields:
+      req-type: architecture
+      priority: must
+      verification-criteria: >
+        Against a mock RegBus: init() rejects a wrong WHO_AM_I
+        (DriverError::WrongWhoAmI) and on the correct identity writes the
+        documented PWR_MGMT0/GYRO_CONFIG0/ACCEL_CONFIG0 values; read() decodes a
+        canned data block to SI (AZ=2048 LSB → 9.80665 m/s², GX=164 LSB →
+        0.174533 rad/s) including negative counts through the sign bit; and the
+        driver satisfies ImuDriver (plugs into HardwareBackend). clippy clean.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011
