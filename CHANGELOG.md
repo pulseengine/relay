@@ -15,6 +15,31 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.7.0] — 2026-06-03
+
+The **autonomy layer** the clean-room audit found missing — a real flight-mode
+state machine with **formally-proven safety**.
+
+### Added
+
+- **`relay-fsm`** — `Disarmed → Armed → Takeoff → Loiter ↔ Mission → Land →
+  Disarmed`, with `Rtl` reachable from any flying state, over the `relay-arm`
+  arming gate. Transitions are safety-guarded and total.
+
+### Verified (4 tests, clippy clean, 2 Kani harnesses SUCCESSFUL)
+
+- **Kani `verify_never_disarm_airborne`** — for *any* state/event/gates, a
+  result of `Disarmed` implies the prior state was `Disarmed`/`Armed`/`Land`.
+  **Motors can never be cut in flight by a disarm request.**
+- **Kani `verify_failsafe_recovers`** — a `Failsafe` from any flying state
+  commands `Rtl` (or `Land` without a fix), never `Disarmed`, never a no-op.
+- Arming refused while tilted or throttle-up; the nominal mission lifecycle.
+
+### Scope
+
+Wiring the FSM into the integrated flight loop (driving takeoff/land/RTL
+setpoints) + the geofence→RTL *actuation* is v1.8.
+
 ## [falcon-v1.6.0] — 2026-06-03
 
 **The verified flight core, bare-metal on an ARM Cortex-M, with the sim as the

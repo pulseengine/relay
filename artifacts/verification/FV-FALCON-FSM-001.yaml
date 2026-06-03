@@ -1,0 +1,34 @@
+artifacts:
+  - id: FV-FALCON-FSM-001
+    type: sw-verification
+    title: "Flight-mode FSM — Kani disarm-safety + failsafe-recovery + lifecycle tests (v1.7.0)"
+    status: approved
+    description: >
+      Verification of the v1.7.0 flight-mode state machine (relay-fsm):
+
+      1. Kani verify_never_disarm_airborne: VERIFICATION SUCCESSFUL — for ANY
+         start state, event, and gates, if FlightFsm::on returns Disarmed then
+         the prior state was Disarmed, Armed, or Land (never an airborne flight
+         state). Motors can never be cut in flight by a disarm request.
+      2. Kani verify_failsafe_recovers: VERIFICATION SUCCESSFUL — a Failsafe
+         event from any flying state (Takeoff/Loiter/Mission/Rtl) commands a
+         recovery mode (Rtl or Land), never Disarmed and never a no-op.
+
+      3. Unit (4 tests, clippy clean): the nominal arm→takeoff→loiter→mission→
+         land→disarm lifecycle; arming refused while tilted or throttle-up;
+         disarm no-ops in each airborne state; failsafe → Rtl with a position
+         fix, Land without.
+
+      This is the autonomy layer the clean-room audit found missing, sitting
+      over the relay-arm arming gate. Wiring it into the integrated flight loop
+      (driving takeoff/land/RTL setpoints) + the geofence→RTL actuation is v1.8.
+    tags: [verification, falcon, fsm, autonomy, safety, kani, v1.7]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-fsm"
+        - run: "cargo kani -p relay-fsm --harness verify_never_disarm_airborne"
+        - run: "cargo kani -p relay-fsm --harness verify_failsafe_recovers"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FSM-P01
