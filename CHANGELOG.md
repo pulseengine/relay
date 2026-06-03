@@ -15,6 +15,40 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.1.0] — 2026-06-03
+
+The first step of the **road from "SITL-verified core" (v1.0.0) to
+"deployable on real hardware"** — and it starts with the seam everything
+else hangs off. A clean-room audit confirmed v1.0.0 is a *verified controller
+in a simulator*, not a flyable drone; the v1.1.x series builds the
+abstraction layer, composition, and on-target path toward a hardware
+release. The plan: run the same verified code on a real board with the
+**simulation as the backend first**, then swap the backend to real sensors —
+which is exactly why the abstraction layer is the centerpiece.
+
+### Added
+
+- **`falcon-core`** (new crate) — the verified cascade (IEKF → geometric
+  SE(3) → ADRC → mixer) factored out of the Gazebo bench into a
+  **backend-agnostic** core behind a hardware-abstraction-layer seam,
+  **`FlightBackend`** (`read_imu` / `read_position` / `read_mag` /
+  `write_motors` / `dt`). The same `no_std` flight code runs unchanged
+  whether the backend is a simulator or a real flight controller — a drone is
+  "supported" exactly when someone implements `FlightBackend` for its sensors
+  + actuators.
+- **`SimBackend`** — the first backend behind the seam (analytic rigid-body
+  attitude plant), and a deterministic test: the verified cascade, driven
+  *only* through `FlightBackend`, recovers a ~0.4 rad tilt to **<0.1 rad** —
+  the seam carries the real estimator + controllers, not a stub. A second
+  test shows an arbitrary backend drives the core with motors in [0,1].
+
+### Scope
+
+v1.1 is the seam + the inner attitude-stabilization core. The position/
+mission outer loop, a gz `FlightBackend`, on-target (emulated Cortex-M)
+execution, meld-fused deployment, autonomy/safety, and a real-hardware
+backend are the v1.2 → v1.11 releases.
+
 ## [falcon-v1.0.0] — 2026-06-03
 
 **The formally-verified flight stack — SITL-complete.** A capstone, not new

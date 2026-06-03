@@ -32,6 +32,7 @@ members = [
     "crates/relay-adrc",
     "crates/relay-traj",
     "crates/relay-pos",
+    "crates/falcon-core",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
     "examples/falcon-sitl-hover",

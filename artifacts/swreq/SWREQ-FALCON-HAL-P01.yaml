@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWREQ-FALCON-HAL-P01
+    type: sw-req
+    title: "HAL-P01 — backend-agnostic flight core: the verified cascade runs against a swappable FlightBackend seam"
+    status: implemented
+    description: >
+      The verified flight cascade (IEKF estimator → geometric SE(3) attitude
+      → ADRC inner loop → mixer) shall be factored out of the Gazebo bench
+      into a backend-agnostic core that consumes sensors and drives actuators
+      ONLY through a hardware-abstraction-layer seam — `FlightBackend`
+      (read_imu / read_position / read_mag / write_motors / dt). The SAME
+      no_std flight code shall run unchanged whether the backend is a
+      simulation (gz / analytic) or a real flight controller; a drone is
+      "supported" exactly when someone implements `FlightBackend` for its
+      sensor + actuator suite.
+
+      This is the seam the "build into any drone" claim rests on, and the
+      enabler for the planned "run on a real board with the simulation as the
+      backend first" bring-up (the abstraction lets the backend be swapped
+      from sim to hardware without touching the verified core).
+
+      v1.1 scope: the seam + the verified INNER attitude-stabilization core
+      running through it against a SimBackend. The position/mission outer
+      loop, a gz `FlightBackend`, on-target execution, and a real-hardware
+      backend are the subsequent v1.x releases.
+    tags: [falcon, hal, abstraction, backend-agnostic, portability, v1.1]
+    fields:
+      req-type: architecture
+      priority: must
+      verification-criteria: >
+        The verified cascade, run through the FlightBackend seam against a
+        deterministic SimBackend, recovers a tilted body (>0.35 rad) to level
+        (<0.1 rad) — proving the seam carries the real IEKF + geometric + ADRC
+        + mixer, not a stub. An arbitrary FlightBackend impl drives the core
+        with no panics and motor commands in [0,1].
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-007
+      - type: derives-from
+        target: SYSREQ-FALCON-008
