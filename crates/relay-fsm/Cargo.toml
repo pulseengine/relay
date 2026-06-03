@@ -1,0 +1,17 @@
+[package]
+name = "relay-fsm"
+description = "Falcon flight-mode state machine — arm/takeoff/loiter/mission/land/RTL/disarm with SAFETY-GUARDED transitions (you can never disarm airborne; a failsafe always commands a recovery mode). no_std, Kani-verified invariants. The autonomy layer over the relay-arm gate (v1.7)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-FALCON-FSM-P01
+    type: sw-req
+    title: "FSM-P01 — flight-mode state machine with proven disarm-safety + failsafe-recovery"
+    status: implemented
+    description: >
+      The flight stack shall have a flight-mode state machine — Disarmed →
+      Armed → Takeoff → Loiter ↔ Mission → Land → Disarmed, with Rtl reachable
+      from any flying state — over the relay-arm arming gate (the clean-room
+      audit found no such FSM, only fixed scenario dispatch). Transitions are
+      safety-guarded and total. Two safety invariants shall hold for ANY
+      (state, event, gates):
+
+        1. You can NEVER disarm airborne — Disarmed is reachable only from
+           Armed (on the ground) or Land after Touchdown, never from Takeoff/
+           Loiter/Mission/Rtl. A spurious disarm request in flight is a no-op.
+        2. A failsafe always recovers — from any flying state a Failsafe event
+           commands Rtl (or Land with no position), never Disarmed, never a
+           no-op.
+
+      Arming is gated: Armed only from Disarmed when level AND throttle idle.
+    tags: [falcon, fsm, flight-mode, autonomy, safety, kani, v1.7]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Kani verify_never_disarm_airborne: for any state/event/gates, result =
+        Disarmed ⇒ prior ∈ {Disarmed, Armed, Land}. Kani verify_failsafe_
+        recovers: Failsafe from any flying state ⇒ result ∈ {Rtl, Land}. Unit:
+        the nominal arm→takeoff→loiter→mission→land→disarm lifecycle; arming is
+        refused while tilted or throttle-up; disarm no-ops airborne; failsafe →
+        Rtl (with position) / Land (without).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-012
+      - type: derives-from
+        target: SYSREQ-FALCON-011
