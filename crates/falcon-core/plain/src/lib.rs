@@ -66,10 +66,14 @@ pub struct FlightCore {
     grav_var: f32,
     pos_var: f32,
     mag_var: f32,
-    /// Target altitude (NED z, metres; negative = up). v1.2 altitude hold.
-    alt_setpoint: f32,
+    /// Target position (NED metres; z negative = up). v1.2 altitude + v1.3
+    /// horizontal hold.
+    setpoint: Vec3,
     kp_alt: f32,
     kd_alt: f32,
+    kp_pos: f32,
+    kd_vel: f32,
+    a_cmd_max: f32,
 }
 
 impl FlightCore {
@@ -85,15 +89,23 @@ impl FlightCore {
             grav_var: 0.5,
             pos_var: 0.01,
             mag_var: 0.1,
-            alt_setpoint: 0.0,
+            setpoint: [0.0; 3],
             kp_alt: 0.05,
             kd_alt: 0.30,
+            kp_pos: 0.08,
+            kd_vel: 0.6,
+            a_cmd_max: 1.0,
         }
     }
 
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
     pub fn set_altitude(&mut self, ned_z: f32) {
-        self.alt_setpoint = ned_z;
+        self.setpoint[2] = ned_z;
+    }
+
+    /// Command a full NED position target (metres; z negative = up). v1.3.
+    pub fn set_position(&mut self, ned: Vec3) {
+        self.setpoint = ned;
     }
 
     /// The estimated nav state (for telemetry / tests).
@@ -121,13 +133,28 @@ impl FlightCore {
         // ── Altitude loop (v1.2) ── thrust = hover − kp·alt_err + kd·v_z,
         // clamped. Vertical is decoupled from the tilt/accel ambiguity, so the
         // estimate's z/vz drive it directly. alt_err = setpoint − estimate.
-        let alt_err = self.alt_setpoint - est.p[2];
+        let alt_err = self.setpoint[2] - est.p[2];
         let thrust = (self.hover_thrust - self.kp_alt * alt_err + self.kd_alt * est.v[2]).clamp(0.0, 1.0);
 
-        // ── Attitude ── stabilize to level (zero horizontal accel cmd), hold
-        // heading 0: geometric desired-rate → ADRC torque on filtered gyro.
+        // ── Horizontal position loop (v1.3) ── P-D on (pos, vel) error →
+        // commanded NED acceleration, magnitude-saturated. The vehicle TILTS
+        // to realise a_cmd; the geometric desired-rate maps it to a body rate.
+        let mut a_cmd = [
+            self.kp_pos * (self.setpoint[0] - est.p[0]) - self.kd_vel * est.v[0],
+            self.kp_pos * (self.setpoint[1] - est.p[1]) - self.kd_vel * est.v[1],
+            0.0,
+        ];
+        let ah = libm::sqrtf(a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]);
+        if ah > self.a_cmd_max {
+            let s = self.a_cmd_max / ah;
+            a_cmd[0] *= s;
+            a_cmd[1] *= s;
+        }
+
+        // ── Attitude ── geometric desired-rate from a_cmd (hold heading 0) →
+        // ADRC torque on filtered gyro.
         let gyro_f = self.gyro_lpf.filter(imu.gyro);
-        let omega_d = self.geo.desired_rate(est.q, [0.0, 0.0, 0.0], 0.0);
+        let omega_d = self.geo.desired_rate(est.q, a_cmd, 0.0);
         let torque = self.adrc.tick(gyro_f, omega_d, dt);
 
         // ── Allocate + actuate ──
@@ -146,9 +173,9 @@ pub struct SimBackend {
     pub r: [[f32; 3]; 3],
     /// Body rate (rad/s).
     pub omega: Vec3,
-    /// Altitude (NED z, m; negative = up) and vertical velocity (NED z, m/s).
-    pub alt: f32,
-    pub vz: f32,
+    /// Position and velocity in NED (m, m/s). pos[2] is altitude (negative up).
+    pub pos: Vec3,
+    pub vel: Vec3,
     j: Vec3,
     dt: f32,
     torque_scale: f32,
@@ -167,8 +194,8 @@ impl SimBackend {
         SimBackend {
             r: r0,
             omega: [0.0; 3],
-            alt: 0.0,
-            vz: 0.0,
+            pos: [0.0; 3],
+            vel: [0.0; 3],
             j: GeoGains::FALCON_QUAD.j,
             dt,
             torque_scale: 0.25,
@@ -224,7 +251,7 @@ impl FlightBackend for SimBackend {
         ImuSample { accel, gyro: self.omega }
     }
     fn read_position(&mut self) -> Option<Vec3> {
-        Some([0.0, 0.0, self.alt]) // horizontal pinned (vertical+attitude sim); 6-DoF is v1.3
+        Some(self.pos) // full 6-DoF NED position (v1.3)
     }
     fn read_mag(&mut self) -> Option<Vec3> {
         Some(self.to_body([1.0, 0.0, 0.0])) // NED north, body frame → yaw observable
@@ -244,11 +271,18 @@ impl FlightBackend for SimBackend {
             tq[2] * self.torque_scale + self.disturbance[2],
         ];
         self.integrate(torque);
-        // vertical: thrust (along −body-z) projected onto NED-z, minus gravity.
+        // translation: thrust acts along −body-z; in NED that is
+        // −T·(R·ẑ) = −T·[r02, r12, r22]; add gravity (+g on NED-z). m = 1.
         let thrust = collective * self.k_thrust;
-        let accel_z = (-thrust * self.r[2][2] + GRAVITY) / 1.0; // m = 1
-        self.vz += self.dt * accel_z;
-        self.alt += self.dt * self.vz;
+        let accel = [
+            -thrust * self.r[0][2],
+            -thrust * self.r[1][2],
+            -thrust * self.r[2][2] + GRAVITY,
+        ];
+        for i in 0..3 {
+            self.vel[i] += self.dt * accel[i];
+            self.pos[i] += self.dt * self.vel[i];
+        }
     }
     fn dt(&self) -> f32 {
         self.dt
@@ -333,8 +367,33 @@ mod tests {
         for _ in 0..15000 {
             core.step(&mut backend);
         }
-        assert!((backend.alt + 2.0).abs() < 0.25, "altitude must reach −2 m: {}", backend.alt);
+        assert!((backend.pos[2] + 2.0).abs() < 0.25, "altitude must reach −2 m: {}", backend.pos[2]);
         assert!(backend.tilt() < 0.1, "should stay level while holding altitude: {}", backend.tilt());
+    }
+
+    /// v1.3 — full 6-DoF: the backend-agnostic core flies to and holds a
+    /// horizontal position setpoint through the HAL (tilts to translate, the
+    /// estimator + position loop bring it home). Honest scope: the SimBackend
+    /// uses the near-hover accelerometer model; the realistic specific-force +
+    /// acceleration-compensated path is exercised in the gz bench (v0.30–35).
+    #[test]
+    fn position_hold_flies_to_setpoint() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_position([2.0, -1.5, -2.0]); // 2 m N, 1.5 m W, 2 m up
+        for _ in 0..30000 {
+            core.step(&mut backend);
+        }
+        let e = [
+            backend.pos[0] - 2.0,
+            backend.pos[1] + 1.5,
+            backend.pos[2] + 2.0,
+        ];
+        let err = libm::sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        assert!(err < 0.5, "must reach the position setpoint through the HAL: {err} m, pos {:?}", backend.pos);
+        assert!(backend.tilt() < 0.15, "settle near level: {} rad", backend.tilt());
     }
 
     /// The verified ADRC inner loop REJECTS a sustained body-torque

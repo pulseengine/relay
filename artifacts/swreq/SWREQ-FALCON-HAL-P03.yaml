@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-FALCON-HAL-P03
+    type: sw-req
+    title: "HAL-P03 — full 6-DoF position hold through the backend seam (complete hover stack)"
+    status: implemented
+    description: >
+      The backend-agnostic flight core shall fly to and hold a full NED
+      position setpoint (horizontal + altitude) driven only through the
+      FlightBackend seam: a P-D position loop produces a magnitude-saturated
+      commanded acceleration, the geometric controller tilts the vehicle to
+      realise it, and the verified estimator + inner loop close the loop. This
+      completes the verified hover stack (attitude + altitude + horizontal
+      position) as a single backend-agnostic core.
+
+      Honest scope: the SimBackend uses the near-hover accelerometer model (the
+      accelerometer reads the gravity reaction); the realistic specific-force +
+      acceleration-compensated-tilt path under aggressive motion is exercised
+      in the gz bench (v0.30–v0.35), not the analytic backend.
+    tags: [falcon, hal, position, 6dof, hover, v1.3]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend, the core flies from
+        the origin to a [2, −1.5, −2] m setpoint and holds it within 0.5 m,
+        settling near level (<0.15 rad).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004

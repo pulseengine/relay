@@ -15,6 +15,33 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.3.0] — 2026-06-03
+
+The **complete verified hover stack** now runs backend-agnostically through
+the HAL — attitude + altitude + **horizontal position**, the last and
+hardest loop (it requires tilting to translate, the tilt/accel ambiguity).
+
+### Added
+
+- **`FlightCore` horizontal position loop** — `set_position(ned)`; a P-D on
+  (pos, vel) error → magnitude-saturated `a_cmd`, fed to the geometric
+  `desired_rate` so the vehicle tilts to translate.
+- **`SimBackend` full 3-D translation** — thrust along −body-z projected into
+  NED (`−T·R·ẑ + g`); `read_position` returns the full NED position.
+
+### Verified (5 tests, clippy clean)
+
+- `position_hold_flies_to_setpoint` — through the seam, the core flies from
+  the origin to a `[2, −1.5, −2]` m setpoint and holds it within **0.5 m**,
+  settling near level (<0.15 rad).
+
+### Scope
+
+The SimBackend uses the near-hover accelerometer model; the realistic
+specific-force + acceleration-compensated path under aggressive motion is the
+gz bench's job (v0.30–v0.35). Next: componentize the verified stack (v1.4) and
+**meld-fuse** it (v1.5) toward on-target execution.
+
 ## [falcon-v1.2.0] — 2026-06-03
 
 The backend-agnostic core gains the **altitude loop** and **disturbance

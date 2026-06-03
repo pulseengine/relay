@@ -1,0 +1,30 @@
+artifacts:
+  - id: FV-FALCON-HAL-003
+    type: sw-verification
+    title: "Full 6-DoF position hold through the HAL — complete hover stack (v1.3.0)"
+    status: approved
+    description: >
+      Verification of the v1.3.0 horizontal position loop in falcon-core
+      (5 tests pass, clippy clean):
+
+      position_hold_flies_to_setpoint — through the FlightBackend seam, the
+      backend-agnostic core flies from the origin to a [2, −1.5, −2] m position
+      setpoint and holds it within 0.5 m, settling near level (<0.15 rad). The
+      P-D position loop produces a saturated a_cmd; the geometric controller
+      tilts to realise it; the SimBackend gained full 3-D translation (thrust
+      along −body-z projected into NED). The verified hover stack (attitude +
+      altitude + horizontal) is now a single backend-agnostic core.
+
+      The v1.1/v1.2 tests still pass with the added horizontal dynamics. Honest
+      scope: the SimBackend uses the near-hover accelerometer model; the
+      realistic specific-force + accel-compensated path is the gz bench's job
+      (v0.30–v0.35).
+    tags: [verification, falcon, hal, position, 6dof, v1.3]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HAL-P03
