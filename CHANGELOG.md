@@ -15,6 +15,34 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.10.0] — 2026-06-03
+
+WCET and schedulability for the flight loop — and the **last open `sorry`** in
+the proof tree, closed.
+
+### Proven (Lean 4 + Mathlib, kernel-checked, **0 sorry, 0 axioms**)
+
+- **`pipeline_wcet_monotone_in_stages`** — the general compositional bound
+  (append an arbitrary *list* of stages → WCET grows by at most their sum plus
+  one fused hand-off each) was a `sorry` (a punted induction). Replaced with a
+  direct closed-form proof: `List.sum_append` / `List.length_append` + a `Nat`
+  case-split on the original length (empty pipeline → one-hand-off slack;
+  non-empty → equality). **The proof tree has no `sorry` left.**
+- **`falcon_cascade_pipeline` / `falcon_cascade_wcet_value`** — the actual
+  `FlightCore::step` loop (IEKF propagate + 3 updates → geo → gyro-LPF → ADRC →
+  mixer, fused) modelled as a `Pipeline`; summed budget **11507 cycles**.
+- **`falcon_cascade_schedulable_1khz`** — that WCET ≤ **480000 cycles** (1 kHz
+  on a 480 MHz Cortex-M7): schedulable with **>40× margin**.
+- **`falcon_cascade_extensible`** — adding a stage grows the loop WCET by at
+  most its budget + one hand-off; re-tuning never re-opens schedulability.
+
+### Honest scope
+
+The per-stage leaf budgets are **conservative declarations, not yet on-target
+measurements**. The *structural* schedulability argument is complete and
+kernel-checked now; discharging each leaf budget with measured Cortex-M7 cycle
+counts is the v1.11 hardware-backend deliverable.
+
 ## [falcon-v1.9.0] — 2026-06-03
 
 The audit found the estimator was only ever shown against a **perfect world**.
