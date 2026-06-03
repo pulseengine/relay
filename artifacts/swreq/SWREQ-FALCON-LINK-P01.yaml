@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-FALCON-LINK-P01
+    type: sw-req
+    title: "LINK-P01 — HITL link backend: same verified core over a framed wire protocol"
+    status: implemented
+    description: >
+      The flight stack shall provide a hardware-in-the-loop link backend
+      (LinkBackend) so the SAME verified FlightCore / FlightSupervisor runs
+      against a remote simulator (or a real-vehicle bridge) over a byte-framed
+      wire protocol — realising "the hardware with the simulation as the
+      backend". Each control step the LinkBackend shall send a fixed-layout
+      actuator frame (the four motor commands) and receive a fixed-layout sensor
+      frame (accel, gyro, position+valid, mag+valid, battery); a SimServer shall
+      decode the actuator frame, step a SimBackend, and encode the sensor frame
+      back. The wire format shall be no_std / no-alloc (little-endian f32s, no
+      serde) so it runs unchanged on the MCU. The documented GAP is the physical
+      transport (a real UART/USB/UDP link and its latency / jitter /
+      framing-error / reconnect handling); the protocol and the closed-loop
+      contract are in scope and verified.
+    tags: [falcon, hitl, link, backend, protocol, v1.14]
+    fields:
+      req-type: architecture
+      priority: must
+      verification-criteria: >
+        The codec round-trips actuator and sensor frames exactly
+        (frames_round_trip). The verified FlightCore stabilises a vehicle
+        started tilted ~0.4 rad ENTIRELY over the link — every sensor read and
+        motor write crosses the byte-framed protocol to a SimServer — ending
+        near level (gravity-reaction accel z-fraction > 0.99)
+        (flight_core_stabilizes_over_the_hitl_link). clippy clean.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011
+      - type: derives-from
+        target: SYSREQ-FALCON-014

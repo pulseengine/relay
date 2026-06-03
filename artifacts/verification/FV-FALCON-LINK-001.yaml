@@ -1,0 +1,38 @@
+artifacts:
+  - id: FV-FALCON-LINK-001
+    type: sw-verification
+    title: "HITL link backend: closed loop over the framed wire protocol (v1.14.0)"
+    status: approved
+    description: >
+      Verification of the v1.14.0 falcon-hitl LinkBackend (2 tests pass, clippy
+      clean), the third backend behind the HAL seam:
+
+      1. frames_round_trip — the no_std/no-alloc codec encodes and decodes
+         actuator frames (4 motor f32s, 16 bytes) and sensor frames (accel,
+         gyro, pos+valid, mag+valid, battery, 54 bytes) exactly, including the
+         valid flags.
+
+      2. flight_core_stabilizes_over_the_hitl_link — the verified FlightCore
+         stabilises a vehicle started tilted ~0.4 rad ENTIRELY over the link:
+         a LinkBackend sends actuator frames and receives sensor frames from a
+         SimServer wrapping a SimBackend, so every sensor read and motor write
+         crosses the byte-framed protocol. The vehicle ends near level
+         (gravity-reaction accel z-fraction > 0.99), proving the link backend
+         carries the real closed loop.
+
+      This realises "the hardware with the simulation as the backend": the
+      flight computer runs the verified core with a LinkBackend; the simulator
+      answers over the link. Honest GAP (documented in the crate, NOT faked):
+      the physical transport — a real UART/USB/UDP link and its latency, jitter,
+      framing-error and reconnect handling. The protocol and the closed-loop
+      contract are real and verified; the wire underneath is the integration
+      step.
+    tags: [verification, falcon, hitl, link, v1.14]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-hitl"
+        - run: "cargo clippy -p falcon-hitl"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LINK-P01
