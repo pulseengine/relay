@@ -1,0 +1,36 @@
+artifacts:
+  - id: FV-FALCON-HWSEAM-001
+    type: sw-verification
+    title: "Real-hardware backend seam composed end-to-end (v1.11.0)"
+    status: approved
+    description: >
+      Verification of the v1.11.0 hardware seam (12 falcon-core tests pass,
+      clippy clean, embedded Cortex-M crate still builds):
+
+      flight_core_stabilizes_through_the_hardware_seam — five mock drivers
+      (MockImu/MockPos/MockMag/MockEsc/MockBatt — the exact ImuDriver,
+      PositionDriver, MagDriver, MotorDriver, BatteryDriver contracts a board
+      implements) share a single SimBackend plant through a core::cell::RefCell.
+      Each borrows the plant only for its own call, so the motor-write driver
+      steps the physics the next IMU-read driver observes. A HardwareBackend
+      wired from the five mocks drives the verified FlightCore: starting tilted
+      ~0.4 rad, the core recovers to < 0.1 rad ENTIRELY through the driver-trait
+      indirection — proving the seam carries a real closed control loop, not a
+      type-checking placeholder. The battery seam is also exercised through the
+      trait (default healthy-pack voltage).
+
+      Honest hardware boundary (documented in the seam's module docs as GAPS,
+      NOT faked): real driver bodies (register sequences / bus transactions for
+      a specific IMU/GNSS/mag/ESC/ADC) and their on-silicon validation; sensor
+      calibration; flight-tuning on the real airframe; and discharging the v1.10
+      per-stage WCET leaf budgets with measured Cortex-M7 cycle counts. These
+      require the user's board and are explicitly out of scope for this release.
+    tags: [verification, falcon, hal, hardware, seam, v1.11]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HWSEAM-P01

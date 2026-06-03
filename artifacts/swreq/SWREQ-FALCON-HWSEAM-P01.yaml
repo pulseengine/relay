@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-FALCON-HWSEAM-P01
+    type: sw-req
+    title: "HWSEAM-P01 — real-hardware backend seam: same verified core, swappable drivers"
+    status: implemented
+    description: >
+      The flight stack shall expose a real-hardware backend seam so the SAME
+      verified FlightCore / FlightSupervisor that runs against the simulation
+      backend runs unchanged against a real airframe. The seam shall be five
+      driver contracts in SI/body-frame units — ImuDriver, PositionDriver,
+      MagDriver, MotorDriver, BatteryDriver — and a HardwareBackend generic over
+      them that implements FlightBackend purely by delegation. To support a
+      board, one implements the five drivers (over embedded-hal SPI/UART/PWM/ADC)
+      and the flight code, estimator, controllers, FSM, failsafes and WCET
+      argument are all unchanged. The seam shall be demonstrated composed
+      end-to-end (the verified core stabilising through HardwareBackend), with
+      the silicon-dependent parts — real driver bodies, on-chip validation,
+      calibration, flight tuning, and the measured WCET leaf budgets — documented
+      as the hardware boundary, NOT faked.
+    tags: [falcon, hal, hardware, seam, drivers, v1.11]
+    fields:
+      req-type: architecture
+      priority: must
+      verification-criteria: >
+        Through the HardwareBackend seam: five mock drivers sharing one
+        simulated plant via core::cell::RefCell drive the verified FlightCore;
+        starting tilted ~0.4 rad, the core recovers to < 0.1 rad entirely
+        through the driver-trait indirection (the motor-write driver steps the
+        plant the IMU-read driver then observes). falcon-core builds no_std, the
+        embedded Cortex-M crate still builds, clippy clean. The documented GAPS
+        list (real drivers, validation, calibration, tuning, WCET measurement)
+        is present in the seam's module docs.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011
+      - type: derives-from
+        target: SYSREQ-FALCON-014

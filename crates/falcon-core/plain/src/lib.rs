@@ -290,6 +290,109 @@ pub struct Pathology {
     pub mag_interference: f32,
 }
 
+// ── v1.11 — the real-hardware backend SEAM ───────────────────────────────
+//
+// This is the honest hardware boundary. Everything ABOVE runs the verified
+// flight core against a simulated plant. To fly the SAME `FlightCore` /
+// `FlightSupervisor` on a real airframe, you implement the five driver seams
+// below (over `embedded-hal` SPI/UART/PWM/ADC for your specific sensors) and
+// hand them to a [`HardwareBackend`]. Nothing in the flight code changes — the
+// estimator, the geometric controller, the ADRC loop, the mixer, the FSM, the
+// failsafes, and the kernel-checked WCET argument are all backend-agnostic.
+//
+// What this seam DOES give you, here and now (verified by the v1.11 test):
+//   • the five driver contracts a board must satisfy, in SI/body-frame units;
+//   • a `HardwareBackend` that implements `FlightBackend` purely by delegating
+//     to them — so the composition is type-checked end-to-end;
+//   • a closed-loop demonstration: the verified core STABILISES through the
+//     `HardwareBackend` trait indirection against a shared simulated plant,
+//     proving the seam carries a real control loop (not a placeholder).
+//
+// What it deliberately does NOT claim (the documented GAPS — these need YOUR
+// board and must not be faked):
+//   • real driver bodies: the register sequences / bus transactions for a
+//     specific IMU (e.g. ICM-42688 over SPI), GNSS (UBX over UART), mag, ESC
+//     (DShot), and battery ADC — and their on-silicon validation;
+//   • sensor calibration (bias/scale/axis alignment) on the real units;
+//   • flight-tuning of the control gains on the real airframe;
+//   • discharging the v1.10 per-stage WCET leaf budgets with measured
+//     Cortex-M7 cycle counts.
+
+/// A 6-axis IMU driver: returns the latest accelerometer + gyro sample already
+/// converted to SI body-frame units (m/s², rad/s). Your impl does the SPI/I²C
+/// read + unit scaling + axis remap for your specific chip.
+pub trait ImuDriver {
+    fn read(&mut self) -> ImuSample;
+}
+
+/// A position-source driver (GNSS / UWB / VIO): NED metres, or `None` when there
+/// is no fresh fix this tick. Your impl parses the receiver and applies the
+/// datum/origin transform.
+pub trait PositionDriver {
+    fn read(&mut self) -> Option<Vec3>;
+}
+
+/// A magnetometer driver: body-frame field direction, or `None` when
+/// unavailable. Your impl does the read + hard/soft-iron correction.
+pub trait MagDriver {
+    fn read(&mut self) -> Option<Vec3>;
+}
+
+/// The actuator driver: write per-rotor throttles ∈ [0,1] to the ESCs. Your
+/// impl maps to DShot / OneShot / PWM.
+pub trait MotorDriver {
+    fn write(&mut self, motors: &[f32]);
+}
+
+/// A battery-voltage driver (ADC), volts. Default keeps a healthy pack so a
+/// board without a monitor still flies; override to read the real divider.
+pub trait BatteryDriver {
+    fn voltage(&mut self) -> f32 {
+        16.0
+    }
+}
+
+/// The real-hardware [`FlightBackend`], generic over the five driver seams. The
+/// SAME `FlightCore` / `FlightSupervisor` that flies [`SimBackend`] flies this —
+/// the ONLY difference between simulation and a real board is which driver
+/// impls sit behind these traits. `dt` is the fixed control period.
+pub struct HardwareBackend<I, P, M, O, B> {
+    pub imu: I,
+    pub gnss: P,
+    pub mag: M,
+    pub motors: O,
+    pub battery: B,
+    pub dt: f32,
+}
+
+impl<I, P, M, O, B> FlightBackend for HardwareBackend<I, P, M, O, B>
+where
+    I: ImuDriver,
+    P: PositionDriver,
+    M: MagDriver,
+    O: MotorDriver,
+    B: BatteryDriver,
+{
+    fn read_imu(&mut self) -> ImuSample {
+        self.imu.read()
+    }
+    fn read_position(&mut self) -> Option<Vec3> {
+        self.gnss.read()
+    }
+    fn read_mag(&mut self) -> Option<Vec3> {
+        self.mag.read()
+    }
+    fn write_motors(&mut self, motors: &[f32]) {
+        self.motors.write(motors)
+    }
+    fn dt(&self) -> f32 {
+        self.dt
+    }
+    fn read_battery_v(&mut self) -> f32 {
+        self.battery.voltage()
+    }
+}
+
 /// A deterministic SIMULATION backend (analytic rigid-body attitude plant) —
 /// the FIRST backend behind the HAL seam. The motor commands drive the body
 /// torque (through the same mixer geometry), the attitude integrates, and the
@@ -782,5 +885,77 @@ mod tests {
         }
         assert!(peak < 0.15, "mag interference must not destabilise attitude: peak tilt {peak} rad");
         assert!((backend.pos[2] + 2.0).abs() < 0.4, "altitude held under mag interference: {}", backend.pos[2]);
+    }
+
+    // ── v1.11 — the real-hardware backend SEAM, composed end-to-end ───────
+
+    /// The verified flight core stabilises through the **`HardwareBackend`**
+    /// (the real-board seam), not just `SimBackend`. Five mock drivers — the
+    /// exact contracts a real board implements (IMU/GNSS/mag/ESC/battery) —
+    /// share one simulated plant through a `core::cell::RefCell`; each borrows
+    /// it only for its own call, so the motor write steps the physics that the
+    /// next IMU read observes. The closed loop runs entirely through the driver
+    /// traits, proving the seam carries a real control loop. The ONLY thing
+    /// that changes to fly a board is swapping these mocks for silicon drivers.
+    #[test]
+    fn flight_core_stabilizes_through_the_hardware_seam() {
+        use core::cell::RefCell;
+
+        struct MockImu<'a>(&'a RefCell<SimBackend>);
+        impl ImuDriver for MockImu<'_> {
+            fn read(&mut self) -> ImuSample {
+                self.0.borrow_mut().read_imu()
+            }
+        }
+        struct MockPos<'a>(&'a RefCell<SimBackend>);
+        impl PositionDriver for MockPos<'_> {
+            fn read(&mut self) -> Option<Vec3> {
+                self.0.borrow_mut().read_position()
+            }
+        }
+        struct MockMag<'a>(&'a RefCell<SimBackend>);
+        impl MagDriver for MockMag<'_> {
+            fn read(&mut self) -> Option<Vec3> {
+                self.0.borrow_mut().read_mag()
+            }
+        }
+        struct MockEsc<'a>(&'a RefCell<SimBackend>);
+        impl MotorDriver for MockEsc<'_> {
+            fn write(&mut self, motors: &[f32]) {
+                self.0.borrow_mut().write_motors(motors) // steps the shared plant
+            }
+        }
+        struct MockBatt; // uses the default healthy-pack voltage
+        impl BatteryDriver for MockBatt {}
+
+        let dt = 0.002f32;
+        // start tilted ~23° about x — same plant as the SimBackend HAL test
+        let th = 0.4f32;
+        let (c, s) = (libm::cosf(th), libm::sinf(th));
+        let r0 = [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]];
+        let plant = RefCell::new(SimBackend::new(r0, dt));
+
+        let mut hw = HardwareBackend {
+            imu: MockImu(&plant),
+            gnss: MockPos(&plant),
+            mag: MockMag(&plant),
+            motors: MockEsc(&plant),
+            battery: MockBatt,
+            dt,
+        };
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+
+        let tilt0 = plant.borrow().tilt();
+        assert!(tilt0 > 0.35, "should start tilted, {tilt0}");
+        for _ in 0..6000 {
+            core.step(&mut hw); // the WHOLE loop runs through the driver traits
+        }
+        // the battery seam answered through the trait too (default healthy pack)
+        assert!((hw.read_battery_v() - 16.0).abs() < 1e-6);
+        let tilt = plant.borrow().tilt();
+        assert!(
+            tilt < 0.1,
+            "core must recover to level through the HARDWARE seam: {tilt} rad (start {tilt0})"
+        );
     }
 }
