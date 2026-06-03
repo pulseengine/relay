@@ -1,0 +1,22 @@
+[package]
+name = "falcon-core"
+description = "Falcon backend-agnostic flight core — the verified IEKF → geometric SE(3) → ADRC → mixer cascade behind a hardware-abstraction-layer seam (FlightBackend: IMU/GNSS/mag in, motors out, clock). The SAME no_std flight code runs against a simulation backend or a real-hardware backend; this is the seam the 'build into any drone' claim rests on (v1.1.0)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+libm = "0.2"
+relay-iekf = { path = "../relay-iekf" }
+relay-geo = { path = "../relay-geo" }
+relay-adrc = { path = "../relay-adrc" }
+relay-mix-quad = { path = "../relay-mix-quad" }
+
+[lints]
+workspace = true

@@ -1,0 +1,39 @@
+artifacts:
+  - id: FV-FALCON-HAL-001
+    type: sw-verification
+    title: "Backend-agnostic flight core — HAL seam + verified cascade stabilizes through it (v1.1.0)"
+    status: approved
+    description: >
+      Verification of the v1.1.0 hardware-abstraction-layer seam (new crate
+      falcon-core):
+
+      1. falcon-core::FlightBackend — the seam (read_imu / read_position /
+         read_mag / write_motors / dt). falcon-core::FlightCore<B> runs the
+         verified cascade (relay-iekf + relay-geo + relay-adrc + relay-mix-quad)
+         against any backend; SimBackend is the first (analytic rigid-body)
+         backend.
+
+      2. Tests (2, pass): flight_core_stabilizes_through_the_hal — the verified
+         cascade, driven only through the FlightBackend seam against the
+         SimBackend, recovers a tilt of ~0.4 rad to <0.1 rad (the seam carries
+         the real estimator + controllers, not a stub). arbitrary_backend_
+         drives_the_core — a trivial stand-in FlightBackend drives the core
+         with no panic and motor commands staying in [0,1].
+
+      Significance: the verified flight stack is now decoupled from Gazebo and
+      runs against a swappable backend — the architectural prerequisite for
+      running the SAME code on a real board with the simulation as the backend
+      (HIL-with-sim-backend), and ultimately on real sensors.
+
+      Honest scope: v1.1 covers the seam + the inner attitude-stabilization
+      core. The position/mission outer loop, the gz backend impl, on-target
+      execution, and a real-hardware backend are subsequent releases.
+    tags: [verification, falcon, hal, abstraction, backend-agnostic, v1.1]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HAL-P01
