@@ -1,0 +1,34 @@
+artifacts:
+  - id: SWREQ-FALCON-TARGET-P01
+    type: sw-req
+    title: "TARGET-P01 — the verified flight core runs bare-metal on an ARM Cortex-M with the sim backend"
+    status: implemented
+    description: >
+      The verified flight core shall build into a bare-metal ARM Cortex-M
+      (STM32H743) ELF that runs the FlightCore + SimBackend loop ON the MCU —
+      the "run on a board with the simulation as the backend first" milestone,
+      on an emulated target. The same no_std FlightCore + FlightBackend that
+      flies in the SITL bench compiles for thumbv7em-none-eabihf (with
+      cortex-m-rt + an STM32H743 memory map) into a real, statically-linked ARM
+      ELF; swapping the SimBackend for a real-hardware FlightBackend (the v1.11
+      seam) flies the same ELF on a real drone.
+
+      Honest scope: the embedded toolchain (thumbv7em target + linker) and the
+      emulator (Renode/QEMU) are bench tools, not provisioned in the CI gate.
+      The ELF is built + staged for Renode locally; the on-target RUN (boot +
+      execute on the emulated STM32H743) needs Renode installed and is the
+      bench step.
+    tags: [falcon, target, embedded, cortex-m, renode, sim-backend, v1.6]
+    fields:
+      req-type: architecture
+      priority: should
+      verification-criteria: >
+        scripts/build-cortex-m.sh builds embedded/falcon-cortex-m for
+        thumbv7em-none-eabihf into a statically-linked ARM ELF (~142 KB) that
+        runs the verified FlightCore + SimBackend (fly to a position setpoint),
+        staged at the path renode/falcon-cortex-m.resc loads. The ELF reports
+        ON-TARGET PASS via semihosting when the core reaches the setpoint and
+        settles level.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-007

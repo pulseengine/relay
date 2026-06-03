@@ -31,3 +31,7 @@ coverage.lcov
 # Bazel vendored external deps (Lean toolchain + Mathlib oleans, multi-GB;
 # regeneratable via proofs/lean/vendor.sh — see proofs/lean/README.md)
 /vendor/bazel/
+
+# embedded cortex-m build artifacts
+embedded/falcon-cortex-m/target/
+target/falcon-pipeline/
