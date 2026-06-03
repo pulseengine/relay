@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-WCET-P01
+    type: sw-req
+    title: "WCET-P01 — compositional WCET + schedulability for the flight cascade"
+    status: implemented
+    description: >
+      The worst-case execution time of the Falcon flight cascade
+      (FlightCore::step: IEKF propagate + measurement updates → geometric
+      desired-rate → gyro low-pass → ADRC inner loop → mixer) shall be bounded
+      by a kernel-checked compositional argument: the cascade modelled as a
+      Pipeline of per-stage budgets, its WCET the sum of stage budgets plus a
+      fused hand-off per transition, and that WCET proven to fit the control
+      period at the loop rate. The compositional bound shall be proven for an
+      arbitrary list of appended stages (no per-stage hand re-derivation when
+      the pipeline is re-tuned). The per-stage leaf budgets are conservative
+      declarations pending on-target (Cortex-M7) cycle measurement (v1.11);
+      the structural schedulability argument shall be complete and sorry-free
+      now.
+    tags: [falcon, wcet, schedulability, lean, timing, v1.10]
+    fields:
+      req-type: timing
+      priority: must
+      verification-criteria: >
+        proofs/lean/CompositionalWcet.lean builds kernel-checked with ZERO
+        sorry and zero axioms: pipeline_wcet_monotone_in_stages (the
+        general append-a-list compositional bound, previously a sorry) is
+        proven; falcon_cascade_wcet_value computes the cascade budget (11507
+        cycles); falcon_cascade_schedulable_1khz proves it ≤ the 1 kHz / 480 MHz
+        M7 period budget (480000 cycles); falcon_cascade_extensible instantiates
+        the compositional theorem for the cascade.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011

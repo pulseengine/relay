@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-FALCON-WCET-001
+    type: sw-verification
+    title: "Compositional WCET + flight-cascade schedulability, kernel-checked (v1.10.0)"
+    status: approved
+    description: >
+      Verification of the v1.10.0 WCET work in proofs/lean/CompositionalWcet.lean
+      (Lean 4 + Mathlib, kernel-checked via bazel //proofs/lean:compositional_wcet_test,
+      ZERO sorry, zero axioms):
+
+      1. pipeline_wcet_monotone_in_stages — the general compositional bound
+         (appending an arbitrary LIST of stages grows the WCET by at most the
+         stages' sum plus one fused hand-off each) is now PROVEN. It was a
+         `sorry` (a punted induction); replaced with a direct closed-form proof
+         (List.sum_append / List.length_append + a Nat case-split on the
+         original pipeline length — the empty pipeline yields the one-hand-off
+         slack, the non-empty case equality).
+
+      2. falcon_cascade_pipeline / falcon_cascade_wcet_value — the ACTUAL flight
+         loop modelled as a Pipeline (propagate + 3 updates + geo + lpf + adrc +
+         mixer, fused), summed budget = 11507 cycles.
+
+      3. falcon_cascade_schedulable_1khz — that 11507-cycle WCET ≤ 480000 cycles
+         (the 1 kHz control period on a 480 MHz Cortex-M7): schedulable with
+         >40x margin.
+
+      4. falcon_cascade_extensible — adding a stage to the cascade grows the loop
+         WCET by at most its budget plus one hand-off, a direct instance of the
+         compositional theorem (re-tuning never re-opens schedulability).
+
+      Honest scope: the per-stage leaf budgets are conservative DECLARATIONS,
+      not yet on-target measurements; discharging them with measured Cortex-M7
+      cycle counts is the v1.11 hardware-backend deliverable. The structural
+      schedulability argument is complete and kernel-checked now.
+    tags: [verification, falcon, wcet, lean, timing, v1.10]
+    fields:
+      method: formal-proof
+      steps:
+        - run: "bazel test //proofs/lean:compositional_wcet_test --vendor_dir=vendor/bazel"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WCET-P01
