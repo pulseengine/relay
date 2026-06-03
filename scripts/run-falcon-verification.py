@@ -61,6 +61,11 @@ BENCH_PATTERNS = [
     # the CI gate runner; its fuse/inspect demos run locally (like gz).
     re.compile(r"\bmeld\s+(fuse|inspect)\b"),
     re.compile(r"\bmeld-fuse-cascade\b"),
+    # the embedded ARM build + emulator are bench tools: the thumbv7em target
+    # toolchain/linker and Renode/QEMU are not provisioned in the CI gate.
+    re.compile(r"thumbv7em"),
+    re.compile(r"\bbuild-cortex-m\b"),
+    re.compile(r"\brenode\b"),
     re.compile(r"\bspar\s+\w"),                       # spar not on the gate runner
     re.compile(r"^\s*cd\s+~"),                        # tilde-expanded path = not portable
     re.compile(r"/Users/[^/]+/"),                     # developer-machine absolute path

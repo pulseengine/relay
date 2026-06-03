@@ -1,0 +1,25 @@
+# Standalone (own [workspace]) so the host workspace never tries to build this
+# thumbv7-only binary — it links cortex-m-rt + a memory.x and only compiles
+# for the MCU target.
+[package]
+name = "falcon-cortex-m"
+version = "0.1.0"
+edition = "2021"
+description = "The verified falcon flight core running bare-metal on an ARM Cortex-M (STM32H743) with the SIMULATION backend — the 'run on a board with the sim as the backend first' milestone, on an emulated target."
+
+[[bin]]
+name = "falcon-cortex-m"
+path = "src/main.rs"
+
+[dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+cortex-m-semihosting = "0.5"
+panic-halt = "0.2"
+falcon-core = { path = "../../crates/falcon-core" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+[workspace]

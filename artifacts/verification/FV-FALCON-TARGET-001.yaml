@@ -1,0 +1,37 @@
+artifacts:
+  - id: FV-FALCON-TARGET-001
+    type: sw-verification
+    title: "Verified flight core as a bare-metal ARM Cortex-M ELF + sim backend (v1.6.0)"
+    status: approved
+    description: >
+      Verification of the v1.6.0 on-target build (embedded/falcon-cortex-m):
+
+      The verified flight core (relay-iekf + relay-geo + relay-adrc +
+      relay-mix-quad via falcon-core) + the SimBackend build into a
+      statically-linked ARM Cortex-M (STM32H743) ELF for thumbv7em-none-eabihf
+      with cortex-m-rt + an STM32H743 memory map. `file` reports
+      "ELF 32-bit LSB executable, ARM, EABI5"; ~142 KB. The #[entry] runs the
+      verified FlightCore + SimBackend loop (fly to a [2,−1.5,−2] m setpoint)
+      ON the MCU and reports ON-TARGET PASS / EXIT_SUCCESS via semihosting.
+      scripts/build-cortex-m.sh builds + stages it at the path
+      renode/falcon-cortex-m.resc loads.
+
+      This is the verified stack as a real flashable embedded binary, running
+      the SIMULATION backend on the target — the architectural milestone for
+      "run on a board with the sim as the backend first." Swapping SimBackend
+      for a real-hardware FlightBackend (v1.11 seam) flies the same ELF.
+
+      Honest scope: the thumbv7em toolchain + Renode/QEMU are bench tools (not
+      in the CI gate; the build + run steps are bench-only). The ELF builds +
+      stages locally; the on-target RUN (Renode boot + execute) needs Renode
+      installed.
+    tags: [verification, falcon, target, embedded, cortex-m, v1.6]
+    fields:
+      method: build
+      steps:
+        - run: "bash scripts/build-cortex-m.sh  # bench-only: thumbv7em toolchain + Renode not in CI"
+        - run: "cd embedded/falcon-cortex-m && cargo build --release --target thumbv7em-none-eabihf"
+        - run: "renode renode/falcon-cortex-m.resc  # boot the ELF on the emulated STM32H743 (bench)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TARGET-P01

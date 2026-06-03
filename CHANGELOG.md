@@ -15,6 +15,34 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.6.0] — 2026-06-03
+
+**The verified flight core, bare-metal on an ARM Cortex-M, with the sim as the
+backend** — your exact "run on a board with the simulation as the backend
+first" milestone, on an emulated target.
+
+### Added
+
+- **`embedded/falcon-cortex-m`** — the verified flight core (IEKF →
+  geometric → ADRC → mixer via `falcon-core`) + the `SimBackend`, built into a
+  bare-metal **ARM Cortex-M (STM32H743) ELF** (`thumbv7em-none-eabihf`,
+  `cortex-m-rt` + an STM32H743 memory map). `file` → *"ELF 32-bit LSB
+  executable, ARM, EABI5"*, ~142 KB. The `#[entry]` runs the verified
+  `FlightCore` + `SimBackend` loop on the MCU (fly to a `[2,−1.5,−2]` m
+  setpoint) and reports **ON-TARGET PASS** via semihosting.
+- **`scripts/build-cortex-m.sh`** — builds + stages the ELF at the path
+  `renode/falcon-cortex-m.resc` loads (the emulated STM32H743 harness).
+
+The same `no_std` code that flies in the SITL bench now compiles + links for a
+real MCU and runs the **sim backend on the target**. Swap `SimBackend` for a
+real-hardware `FlightBackend` (the v1.11 seam) and the same ELF flies a drone.
+
+### Scope
+
+The thumbv7em toolchain + Renode/QEMU are bench tools (not in CI; the build +
+run steps are bench-only). The ELF builds + stages locally; the on-target RUN
+(Renode boot + execute) needs Renode installed.
+
 ## [falcon-v1.5.0] — 2026-06-03
 
 **`meld` is wired** — the PulseEngine fusion tool the `CLAUDE.md` names but a
