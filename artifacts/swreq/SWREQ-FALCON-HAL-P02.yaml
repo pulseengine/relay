@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-FALCON-HAL-P02
+    type: sw-req
+    title: "HAL-P02 — altitude hold + disturbance rejection through the backend seam"
+    status: implemented
+    description: >
+      The backend-agnostic flight core shall hold a commanded altitude and
+      reject a sustained body-torque disturbance, both driven only through the
+      FlightBackend seam. Altitude: thrust = hover − k_p·alt_err + k_d·v_z
+      (clamped), using the estimator's z/vz (decoupled from the tilt/accel
+      ambiguity). Disturbance rejection: the verified ADRC inner loop's
+      extended-state observer estimates and cancels a sustained disturbance so
+      the body holds near level (no steady-state offset a plain proportional
+      loop would leave). v1.2 models a vertical+attitude sim backend; full
+      6-DoF horizontal position is v1.3.
+    tags: [falcon, hal, altitude, disturbance-rejection, adrc, v1.2]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: the core climbs to a
+        −2 m altitude setpoint (within 0.25 m) while staying level (<0.1 rad);
+        and under a sustained [0.25,−0.15,0] body-torque disturbance the steady
+        tilt stays <0.12 rad (the ESO cancels it).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004
+      - type: derives-from
+        target: SYSREQ-FALCON-002

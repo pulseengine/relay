@@ -66,6 +66,10 @@ pub struct FlightCore {
     grav_var: f32,
     pos_var: f32,
     mag_var: f32,
+    /// Target altitude (NED z, metres; negative = up). v1.2 altitude hold.
+    alt_setpoint: f32,
+    kp_alt: f32,
+    kd_alt: f32,
 }
 
 impl FlightCore {
@@ -81,7 +85,15 @@ impl FlightCore {
             grav_var: 0.5,
             pos_var: 0.01,
             mag_var: 0.1,
+            alt_setpoint: 0.0,
+            kp_alt: 0.05,
+            kd_alt: 0.30,
         }
+    }
+
+    /// Command a target altitude (NED z, metres; negative = up). v1.2.
+    pub fn set_altitude(&mut self, ned_z: f32) {
+        self.alt_setpoint = ned_z;
     }
 
     /// The estimated nav state (for telemetry / tests).
@@ -106,14 +118,20 @@ impl FlightCore {
         }
         let est = self.iekf.state();
 
-        // ── Control ── stabilize to level (zero horizontal accel cmd),
-        // hold heading 0: geometric desired-rate → ADRC torque on filtered gyro.
+        // ── Altitude loop (v1.2) ── thrust = hover − kp·alt_err + kd·v_z,
+        // clamped. Vertical is decoupled from the tilt/accel ambiguity, so the
+        // estimate's z/vz drive it directly. alt_err = setpoint − estimate.
+        let alt_err = self.alt_setpoint - est.p[2];
+        let thrust = (self.hover_thrust - self.kp_alt * alt_err + self.kd_alt * est.v[2]).clamp(0.0, 1.0);
+
+        // ── Attitude ── stabilize to level (zero horizontal accel cmd), hold
+        // heading 0: geometric desired-rate → ADRC torque on filtered gyro.
         let gyro_f = self.gyro_lpf.filter(imu.gyro);
         let omega_d = self.geo.desired_rate(est.q, [0.0, 0.0, 0.0], 0.0);
         let torque = self.adrc.tick(gyro_f, omega_d, dt);
 
         // ── Allocate + actuate ──
-        let motors = self.mixer.mix(torque, self.hover_thrust);
+        let motors = self.mixer.mix(torque, thrust);
         b.write_motors(&motors);
     }
 }
@@ -128,17 +146,35 @@ pub struct SimBackend {
     pub r: [[f32; 3]; 3],
     /// Body rate (rad/s).
     pub omega: Vec3,
+    /// Altitude (NED z, m; negative = up) and vertical velocity (NED z, m/s).
+    pub alt: f32,
+    pub vz: f32,
     j: Vec3,
     dt: f32,
     torque_scale: f32,
+    /// Thrust coefficient: total thrust = Σmotors · k_thrust, tuned so that at
+    /// the hover collective (4 × 0.5) the thrust equals gravity.
+    k_thrust: f32,
+    /// A constant body-torque disturbance the verified ESO must reject (v1.2).
+    pub disturbance: Vec3,
 }
 
 const GRAVITY: f32 = 9.81;
 
 impl SimBackend {
-    /// Start at attitude `r0`, at rest. `dt` = control period.
+    /// Start at attitude `r0`, at rest, at altitude 0. `dt` = control period.
     pub fn new(r0: [[f32; 3]; 3], dt: f32) -> Self {
-        SimBackend { r: r0, omega: [0.0; 3], j: GeoGains::FALCON_QUAD.j, dt, torque_scale: 0.25 }
+        SimBackend {
+            r: r0,
+            omega: [0.0; 3],
+            alt: 0.0,
+            vz: 0.0,
+            j: GeoGains::FALCON_QUAD.j,
+            dt,
+            torque_scale: 0.25,
+            k_thrust: GRAVITY / (4.0 * 0.5), // hover collective 4×0.5 ⇒ T = g
+            disturbance: [0.0; 3],
+        }
     }
 
     /// Body-frame tilt from level (rad): the angle of the body z-axis from NED down.
@@ -188,19 +224,31 @@ impl FlightBackend for SimBackend {
         ImuSample { accel, gyro: self.omega }
     }
     fn read_position(&mut self) -> Option<Vec3> {
-        Some([0.0, 0.0, 0.0]) // station-keeping; attitude is the loop under test
+        Some([0.0, 0.0, self.alt]) // horizontal pinned (vertical+attitude sim); 6-DoF is v1.3
     }
     fn read_mag(&mut self) -> Option<Vec3> {
         Some(self.to_body([1.0, 0.0, 0.0])) // NED north, body frame → yaw observable
     }
     fn write_motors(&mut self, motors: &[f32]) {
         let mut m4 = [0.0f32; 4];
+        let mut collective = 0.0f32;
         for (d, &s) in m4.iter_mut().zip(motors.iter()) {
             *d = s;
+            collective += s;
         }
+        // attitude: allocated torque + the injected disturbance the ESO rejects
         let tq = motors_to_torque_signs(m4);
-        let torque = [tq[0] * self.torque_scale, tq[1] * self.torque_scale, tq[2] * self.torque_scale];
+        let torque = [
+            tq[0] * self.torque_scale + self.disturbance[0],
+            tq[1] * self.torque_scale + self.disturbance[1],
+            tq[2] * self.torque_scale + self.disturbance[2],
+        ];
         self.integrate(torque);
+        // vertical: thrust (along −body-z) projected onto NED-z, minus gravity.
+        let thrust = collective * self.k_thrust;
+        let accel_z = (-thrust * self.r[2][2] + GRAVITY) / 1.0; // m = 1
+        self.vz += self.dt * accel_z;
+        self.alt += self.dt * self.vz;
     }
     fn dt(&self) -> f32 {
         self.dt
@@ -269,5 +317,49 @@ mod tests {
         for &m in &b.motors {
             assert!((0.0..=1.0).contains(&m), "motor out of range: {m}");
         }
+    }
+
+    // ── v1.2 altitude hold + disturbance rejection ───────────────────────
+
+    /// The backend-agnostic core climbs to and holds a commanded altitude
+    /// through the HAL (the thrust/altitude loop, decoupled from tilt).
+    #[test]
+    fn altitude_hold_climbs_to_setpoint() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-2.0); // 2 m up (NED z negative)
+        for _ in 0..15000 {
+            core.step(&mut backend);
+        }
+        assert!((backend.alt + 2.0).abs() < 0.25, "altitude must reach −2 m: {}", backend.alt);
+        assert!(backend.tilt() < 0.1, "should stay level while holding altitude: {}", backend.tilt());
+    }
+
+    /// The verified ADRC inner loop REJECTS a sustained body-torque
+    /// disturbance and holds the body near level — through the HAL. The ESO
+    /// estimates and cancels the disturbance, so the tilt stays bounded.
+    #[test]
+    fn disturbance_rejected_holds_level() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        backend.disturbance = [0.25, -0.15, 0.0]; // sustained roll+pitch disturbance
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        let mut peak_after = 0.0f32;
+        for k in 0..8000 {
+            core.step(&mut backend);
+            if k > 4000 {
+                let t = backend.tilt();
+                if t > peak_after {
+                    peak_after = t;
+                }
+            }
+        }
+        // after the ESO converges, the disturbance is cancelled and the body
+        // holds near level (a plain proportional loop would sit at a steady
+        // offset; ADRC drives it out).
+        assert!(peak_after < 0.12, "ESO must reject the disturbance: steady tilt {peak_after} rad");
     }
 }

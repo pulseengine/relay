@@ -15,6 +15,32 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.2.0] — 2026-06-03
+
+The backend-agnostic core gains the **altitude loop** and **disturbance
+rejection** — both demonstrated entirely through the `FlightBackend` seam.
+
+### Added
+
+- **`FlightCore` altitude hold** — `thrust = hover − k_p·alt_err + k_d·v_z`
+  (clamped), driven by the estimator's z/vz (decoupled from the tilt/accel
+  ambiguity). `set_altitude(ned_z)` commands it.
+- **`SimBackend` vertical dynamics** (thrust → altitude) + an injectable
+  body-torque **`disturbance`** field; the accelerometer keeps modelling the
+  gravity reaction so attitude stays observable.
+
+### Verified (4 tests, clippy clean)
+
+- `altitude_hold_climbs_to_setpoint` — through the seam, the core climbs to a
+  −2 m setpoint (within 0.25 m) and stays level (<0.1 rad).
+- `disturbance_rejected_holds_level` — under a sustained `[0.25,−0.15,0]`
+  torque disturbance the verified ADRC ESO cancels it; steady tilt <0.12 rad.
+
+### Scope
+
+A vertical+attitude sim backend (horizontal pinned). Full 6-DoF horizontal
+position is v1.3; the gz backend, on-target run, and meld-fused deploy follow.
+
 ## [falcon-v1.1.0] — 2026-06-03
 
 The first step of the **road from "SITL-verified core" (v1.0.0) to
