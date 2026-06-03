@@ -1,0 +1,39 @@
+artifacts:
+  - id: FV-FALCON-PATH-001
+    type: sw-verification
+    title: "Robustness under injected sensor pathologies through the HAL (v1.9.0)"
+    status: approved
+    description: >
+      Verification of the v1.9.0 sensor-pathology robustness (11 falcon-core
+      tests pass, clippy clean). The SimBackend gained a deterministic
+      Pathology injector (LCG noise, tick-driven dropout window, accumulated
+      gyro-bias ramp); four new tests drive the SAME verified cascade through
+      the FlightBackend seam under each pathology:
+
+      1. holds_through_accelerometer_vibration — 1.5 m/s²/axis broadband on the
+         specific force; the IEKF gravity update rejects the zero-mean noise,
+         peak tilt < 0.15 rad, altitude held within 0.4 m of −2 m.
+
+      2. iekf_tracks_gyro_bias_drift — a 0.004 rad/s² gyro-bias ramp (≈0.12 rad/s
+         after the run); the IEKF gyro-bias state tracks it so the attitude does
+         not walk off, peak tilt < 0.15 rad.
+
+      3. survives_gps_dropout_and_recovers — a 2 s fix dropout mid-flight; the
+         IEKF dead-reckons (drift bounded < 2 m), then the position update
+         re-converges to < 0.5 m once the fix returns. Honest graceful
+         degradation, not "no drift".
+
+      4. tolerates_mag_interference — 0.3 per-axis heading-reference corruption;
+         the mag-update variance tolerates it, attitude does not destabilise,
+         peak tilt < 0.15 rad, altitude held.
+
+      All deterministic (fixed LCG seed) → reproducible PASS or falsification.
+    tags: [verification, falcon, robustness, pathology, v1.9]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PATH-P01

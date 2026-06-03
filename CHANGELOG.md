@@ -15,6 +15,38 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.9.0] — 2026-06-03
+
+The audit found the estimator was only ever shown against a **perfect world**.
+This injects the four pathologies that actually break estimators and shows the
+verified cascade holds — or degrades gracefully — through the HAL under each.
+
+### Added
+
+- **`falcon-core::Pathology`** + `SimBackend::with_pathology` — a deterministic
+  (counter-seeded LCG, no `rand`, `no_std`) injector for: broadband
+  accelerometer **vibration**, a slow **gyro-bias drift**, a **GPS-dropout**
+  window, and **magnetometer interference**. Deterministic ⇒ a robustness PASS
+  *or a falsification* is reproducible.
+
+### Verified (11 tests, clippy clean)
+
+- `holds_through_accelerometer_vibration` — 1.5 m/s²/axis broadband; the IEKF
+  gravity update rejects it, peak tilt < 0.15 rad, altitude held.
+- `iekf_tracks_gyro_bias_drift` — a 0.004 rad/s² ramp; the IEKF gyro-bias state
+  tracks it so the attitude does not walk off (peak tilt < 0.15 rad).
+- `survives_gps_dropout_and_recovers` — a 2 s fix dropout; the IEKF dead-reckons
+  (drift bounded < 2 m) and **re-converges < 0.5 m** when the fix returns.
+  Honest graceful degradation, **not** "no drift".
+- `tolerates_mag_interference` — 0.3/axis heading-reference corruption; attitude
+  does not destabilise.
+
+### Scope
+
+The robustness the audit flagged untested is now evidence-backed against the
+sim backend. Real-sensor noise characterisation belongs to the hardware
+backend (v1.11) — this is the sim-side falsification harness for it.
+
 ## [falcon-v1.8.0] — 2026-06-03
 
 The FSM wired into the loop, and the failsafes the audit found **detected but
