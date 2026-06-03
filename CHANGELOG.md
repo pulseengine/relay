@@ -15,6 +15,45 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.12.0] — 2026-06-03
+
+The **flight-math qualification seam**. `libm` is in the flight path (the
+estimator's quaternion/gravity math, the geometric controller's `atan2`/`acos`,
+the mixer geometry) and is therefore a qualification item. This collapses that
+qualification surface from ~45 scattered call sites to **one crate**.
+
+### Added
+
+- **`relay-math`** (`no_std`) — the single boundary for every transcendental
+  the verified cascade evaluates: `sqrtf`, `sinf`, `cosf`, `atan2f`, `acosf`,
+  `fabsf`, `remainderf`, as `#[inline(always)]` wrappers (zero runtime cost; a
+  *source-level* indirection). To qualify or replace `libm` — a proven
+  polynomial core, CMSIS-DSP, a hardware CORDIC, a qualified `libm` build — you
+  change this one file and the whole cascade inherits it.
+
+### Changed
+
+- **`relay-iekf`, `relay-geo`, `relay-adrc`, `relay-mix-quad`, `falcon-core`**
+  migrated to route through the seam — **zero `libm::` references remain** in
+  any of them; their direct `libm` deps (cargo *and* the bazel
+  `relay-iekf`/`relay-mix-quad` libraries) are replaced by `relay-math`, which
+  is now the cascade's only `libm` consumer.
+
+### Verified
+
+- `relay-math::seam_forwards_to_reference` asserts each wrapper agrees with
+  `libm` (the conformance hook for a future qualified core). All cascade tests
+  pass **unchanged** (behaviour identical); clippy clean; the embedded Cortex-M
+  crate still builds; `bazel build //:relay-iekf //:relay-mix-quad //:relay-math`
+  completes (the Component-Model path consumes the seam).
+
+### Honest scope
+
+The seam routes to `libm` **today — the unqualified default**. It makes
+qualification a one-crate change; it does **not** by itself qualify `libm`.
+Discharging that (a proven core / measured conformance) stays a tracked program
+item — now with a single place to do it.
+
 ## [falcon-v1.11.0] — 2026-06-03
 
 The **real-hardware backend seam** — the point the whole "build into any drone"

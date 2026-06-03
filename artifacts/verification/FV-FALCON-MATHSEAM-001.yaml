@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-FALCON-MATHSEAM-001
+    type: sw-verification
+    title: "Flight-math qualification seam: cascade migrated, faithful, builds (v1.12.0)"
+    status: approved
+    description: >
+      Verification of the v1.12.0 relay-math qualification seam:
+
+      1. The seam exists and forwards faithfully — relay-math wraps the seven
+         transcendentals the flight path uses (sqrtf/sinf/cosf/atan2f/acosf/
+         fabsf/remainderf) as #[inline(always)] functions; its
+         seam_forwards_to_reference test asserts each agrees with libm on
+         representative arguments (the conformance hook for a future qualified
+         core).
+
+      2. The cascade is fully migrated — zero `libm::` references remain in
+         relay-iekf, relay-geo, relay-adrc, relay-mix-quad, falcon-core; their
+         Cargo.toml libm deps are replaced by relay-math; relay-math is the only
+         libm consumer in the verified cascade.
+
+      3. Behaviour is unchanged — all cascade tests pass identically after the
+         migration (relay-iekf, relay-geo, relay-adrc 12, relay-mix-quad 26,
+         falcon-core 12, plus relay-math's own); clippy clean; the embedded
+         Cortex-M crate still builds.
+
+      4. The Component-Model path is consistent — the bazel relay-iekf and
+         relay-mix-quad rust_libraries build through a new :relay-math bazel
+         library (the cargo + bazel deps mirror, per the v0.34/v1.4 lesson).
+
+      Honest scope: the seam routes to libm today (the UNQUALIFIED default). It
+      makes the qualification a one-crate change; it does not by itself qualify
+      libm. Discharging the qualification (proven core / measured conformance)
+      remains a tracked program item.
+    tags: [verification, falcon, math, qualification, seam, v1.12]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p relay-math -p relay-iekf -p relay-geo -p relay-adrc -p relay-mix-quad -p falcon-core"
+        - run: "cargo clippy -p relay-math -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MATHSEAM-P01

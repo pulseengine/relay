@@ -14,7 +14,7 @@ path = "plain/src/lib.rs"
 crate-type = ["rlib"]
 
 [dependencies]
-libm = "0.2"
+relay-math = { path = "../relay-math" }
 
 [dev-dependencies]
 proptest.workspace = true

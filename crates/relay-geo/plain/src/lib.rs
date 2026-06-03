@@ -46,7 +46,7 @@ fn dot(a: Vec3, b: Vec3) -> f32 {
 }
 #[inline]
 fn norm(a: Vec3) -> f32 {
-    libm::sqrtf(dot(a, a))
+    relay_math::sqrtf(dot(a, a))
 }
 #[inline]
 fn normalize(a: Vec3) -> Option<Vec3> {
@@ -116,7 +116,7 @@ pub fn desired_attitude(b3_d: Vec3, yaw: f32) -> Option<Mat3> {
     let b3 = normalize(b3_d)?;
     // Desired heading direction in the horizontal NED plane (body-x points
     // at the heading). NED yaw is CW from North.
-    let b1_des = [libm::cosf(yaw), libm::sinf(yaw), 0.0];
+    let b1_des = [relay_math::cosf(yaw), relay_math::sinf(yaw), 0.0];
     // b2 ⟂ b3 and b1_des; b1 = b2 × b3 (re-orthogonalised).
     let b2 = normalize(cross(b3, b1_des))?;
     let b1 = cross(b2, b3);
@@ -508,11 +508,11 @@ mod tests {
     use super::*;
 
     fn rot_z(yaw: f32) -> Mat3 {
-        let (c, s) = (libm::cosf(yaw), libm::sinf(yaw));
+        let (c, s) = (relay_math::cosf(yaw), relay_math::sinf(yaw));
         [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]
     }
     fn rot_x(roll: f32) -> Mat3 {
-        let (c, s) = (libm::cosf(roll), libm::sinf(roll));
+        let (c, s) = (relay_math::cosf(roll), relay_math::sinf(roll));
         [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]]
     }
 
@@ -599,8 +599,8 @@ mod tests {
     fn flatness_feedforward_matches_attitude_derivative() {
         let yaw = 0.0f32;
         let dt = 1e-4f32;
-        let accel = |t: f32| [0.5 * libm::sinf(t), 0.3 * libm::cosf(0.7 * t), 0.2 * t];
-        let jerk = |t: f32| [0.5 * libm::cosf(t), -0.21 * libm::sinf(0.7 * t), 0.2];
+        let accel = |t: f32| [0.5 * relay_math::sinf(t), 0.3 * relay_math::cosf(0.7 * t), 0.2 * t];
+        let jerk = |t: f32| [0.5 * relay_math::cosf(t), -0.21 * relay_math::sinf(0.7 * t), 0.2];
         for k in 1..20 {
             let t = k as f32 * 0.15;
             let (a, jc) = (accel(t), jerk(t));
@@ -648,7 +648,7 @@ mod tests {
         let mut omega = [0.0f32; 3];
         let j = GeoGains::FALCON_QUAD.j;
         let dt = 0.002f32;
-        let tilt0 = libm::acosf(r[2][2].clamp(-1.0, 1.0));
+        let tilt0 = relay_math::acosf(r[2][2].clamp(-1.0, 1.0));
         for _ in 0..3000 {
             let m = ctrl.moment_reduced(&r, omega, b3_d);
             assert_eq!(m[2], 0.0, "yaw torque must be relinquished (0)");
@@ -659,7 +659,7 @@ mod tests {
             }
             r = integrate_rotation(&r, omega, dt);
         }
-        let tilt1 = libm::acosf(r[2][2].clamp(-1.0, 1.0));
+        let tilt1 = relay_math::acosf(r[2][2].clamp(-1.0, 1.0));
         assert!(tilt1 < tilt0, "thrust-axis tilt must decrease: {tilt0} -> {tilt1}");
         assert!(tilt1 < 0.05, "thrust axis should align to target: tilt={tilt1}");
     }

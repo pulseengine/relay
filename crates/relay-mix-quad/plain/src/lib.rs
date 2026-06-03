@@ -520,8 +520,8 @@ impl MixerN {
         let mut peak_r = 0.0_f32;
         let mut peak_p = 0.0_f32;
         for (i, &(theta, _)) in rotors.iter().take(n).enumerate() {
-            let roll = -libm::sinf(theta);
-            let pitch = libm::cosf(theta);
+            let roll = -relay_math::sinf(theta);
+            let pitch = relay_math::cosf(theta);
             mix[i][1] = roll;
             mix[i][2] = pitch;
             if roll.abs() > peak_r {
