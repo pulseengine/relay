@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-SUPV-P01
+    type: sw-req
+    title: "SUPV-P01 — autonomy supervisor: FSM-driven loop + geofence→RTL ACTUATION + battery failsafe"
+    status: implemented
+    description: >
+      A flight supervisor shall wrap the verified flight core with the
+      relay-fsm flight-mode state machine and ACTUATE the failsafes the
+      clean-room audit found missing (a geofence that only detected, and no
+      battery failsafe). Each step it shall: read the estimate; on a geofence
+      breach (position beyond the fence radius from home) OR a low battery
+      (below threshold) while airborne, fire a Failsafe event so the FSM
+      commands RTL; fire milestone events (ReachedAltitude/ReachedHome/
+      Touchdown); map the FSM mode to a position setpoint (Takeoff/Loiter →
+      hold at cruise alt, Mission → mission point, RTL → home, Land → descend);
+      and step the verified core. All through the backend-agnostic
+      FlightBackend seam (battery via read_battery_v).
+    tags: [falcon, supervisor, fsm, geofence, rtl, failsafe, autonomy, v1.8]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: commanded to a
+        mission point OUTSIDE the geofence, the vehicle crosses the fence, the
+        supervisor fires Failsafe → the FSM commands RTL → it flies home and
+        lands (ending within 1 m of home, never at the out-of-bounds target). A
+        battery sag below threshold while loitering triggers a failsafe
+        recovery (RTL/Land).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011
+      - type: derives-from
+        target: SYSREQ-FALCON-014

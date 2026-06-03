@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-FALCON-SUPV-001
+    type: sw-verification
+    title: "Autonomy supervisor — geofence→RTL actuation + battery failsafe through the HAL (v1.8.0)"
+    status: approved
+    description: >
+      Verification of the v1.8.0 FlightSupervisor (falcon-core) wiring the
+      relay-fsm FSM into the loop with actuated failsafes (7 falcon-core tests
+      pass, clippy clean):
+
+      1. geofence_breach_actuates_rtl_home — through the FlightBackend seam, the
+         supervisor arms → takes off → loiters, then is commanded to a mission
+         point [4,0] OUTSIDE the 1.5 m geofence. The vehicle crosses the fence,
+         the supervisor fires Failsafe → the FSM commands RTL → it flies home
+         and lands, ending within 1 m of home (NOT at [4,0]), mode Land/Disarmed.
+         This is the geofence ACTUATION the audit found missing (the geofence
+         previously only detected).
+
+      2. low_battery_actuates_failsafe — while loitering, the battery sags below
+         the 14 V threshold (read via the FlightBackend read_battery_v seam);
+         the supervisor fires Failsafe → a recovery mode (RTL/Land). The
+         battery failsafe the audit found absent.
+
+      Composes the verified pieces: relay-iekf + relay-geo + relay-adrc +
+      relay-mix-quad (the cascade) + relay-fsm (the proven FSM) + the geofence/
+      battery monitors, all behind the backend-agnostic seam.
+    tags: [verification, falcon, supervisor, geofence, rtl, failsafe, v1.8]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SUPV-P01

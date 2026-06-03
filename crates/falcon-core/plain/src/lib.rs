@@ -50,6 +50,11 @@ pub trait FlightBackend {
     fn write_motors(&mut self, motors: &[f32]);
     /// Control period (s) for this tick.
     fn dt(&self) -> f32;
+    /// Battery voltage (V). Default = a healthy pack; real backends read the
+    /// ADC. Used by the supervisor's low-battery failsafe (v1.8).
+    fn read_battery_v(&mut self) -> f32 {
+        16.0
+    }
 }
 
 /// The verified flight core, generic over the backend. Holds the estimator +
@@ -163,6 +168,105 @@ impl FlightCore {
     }
 }
 
+/// The autonomy supervisor (v1.8): wraps the verified [`FlightCore`] with the
+/// [`relay_fsm`] flight-mode state machine and the failsafe monitors the
+/// clean-room audit found missing — a geofence that ACTUATES RTL (not just
+/// detects) and a low-battery failsafe. Each step it reads the estimate, fires
+/// failsafe + milestone events into the FSM, maps the resulting mode to a
+/// position setpoint, and steps the verified core. The same backend-agnostic
+/// seam carries it.
+pub struct FlightSupervisor {
+    core: FlightCore,
+    fsm: relay_fsm::FlightFsm,
+    home: Vec3,
+    fence_radius: f32,
+    cruise_alt: f32,
+    low_batt_v: f32,
+    mission: Vec3,
+    rtl_latched: bool,
+}
+
+impl FlightSupervisor {
+    /// `home` NED, `fence_radius` m (breach ⇒ RTL), `cruise_alt` m AGL,
+    /// `low_batt_v` V (below ⇒ failsafe).
+    pub fn new(home: Vec3, fence_radius: f32, cruise_alt: f32, low_batt_v: f32) -> Self {
+        FlightSupervisor {
+            core: FlightCore::new(0.5, 1000.0),
+            fsm: relay_fsm::FlightFsm::new(),
+            home,
+            fence_radius,
+            cruise_alt,
+            low_batt_v,
+            mission: home,
+            rtl_latched: false,
+        }
+    }
+
+    pub fn mode(&self) -> relay_fsm::Mode {
+        self.fsm.mode()
+    }
+
+    pub fn state(&self) -> NavState {
+        self.core.state()
+    }
+
+    /// Inject an external command/event (Arm, RequestTakeoff, RequestMission…).
+    pub fn command(&mut self, ev: relay_fsm::Event, level: bool, throttle_low: bool) {
+        let g = relay_fsm::Gates { level, throttle_low, have_position: true };
+        self.fsm.on(ev, g);
+    }
+
+    /// Set the mission target (used when in Mission mode).
+    pub fn set_mission(&mut self, ned: Vec3) {
+        self.mission = ned;
+    }
+
+    /// One supervised control step.
+    pub fn step<B: FlightBackend>(&mut self, b: &mut B) {
+        use relay_fsm::{Event, Gates, Mode};
+        let est = self.core.state();
+        let dx = est.p[0] - self.home[0];
+        let dy = est.p[1] - self.home[1];
+        let dist_home = libm::sqrtf(dx * dx + dy * dy);
+        let alt_agl = -est.p[2]; // NED z negative = up
+        let g = Gates { level: true, throttle_low: true, have_position: true };
+
+        // ── FAILSAFE actuation (the audit's gap): geofence breach OR low
+        // battery from any flying state ⇒ Failsafe ⇒ the FSM commands RTL. ──
+        let batt = b.read_battery_v();
+        let breach = dist_home > self.fence_radius || batt < self.low_batt_v;
+        if breach && self.fsm.is_airborne() && self.fsm.mode() != Mode::Land {
+            self.fsm.on(Event::Failsafe, g);
+            self.rtl_latched = true;
+        }
+
+        // ── milestone events ──
+        match self.fsm.mode() {
+            Mode::Takeoff if alt_agl > self.cruise_alt - 0.2 => {
+                self.fsm.on(Event::ReachedAltitude, g);
+            }
+            Mode::Rtl if dist_home < 0.4 => {
+                self.fsm.on(Event::ReachedHome, g); // ⇒ Land
+            }
+            Mode::Land if alt_agl < 0.15 => {
+                self.fsm.on(Event::Touchdown, g); // ⇒ Disarmed
+            }
+            _ => {}
+        }
+
+        // ── mode → setpoint ──
+        let sp = match self.fsm.mode() {
+            Mode::Takeoff | Mode::Loiter => [est.p[0], est.p[1], -self.cruise_alt],
+            Mode::Mission => [self.mission[0], self.mission[1], -self.cruise_alt],
+            Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
+            Mode::Land => [self.home[0], self.home[1], 0.0], // descend to ground
+            Mode::Disarmed | Mode::Armed => [est.p[0], est.p[1], est.p[2]], // hold (idle)
+        };
+        self.core.set_position(sp);
+        self.core.step(b);
+    }
+}
+
 /// A deterministic SIMULATION backend (analytic rigid-body attitude plant) —
 /// the FIRST backend behind the HAL seam. The motor commands drive the body
 /// torque (through the same mixer geometry), the attitude integrates, and the
@@ -184,6 +288,8 @@ pub struct SimBackend {
     k_thrust: f32,
     /// A constant body-torque disturbance the verified ESO must reject (v1.2).
     pub disturbance: Vec3,
+    /// Battery voltage reported to the supervisor's failsafe (v1.8).
+    pub battery_v: f32,
 }
 
 const GRAVITY: f32 = 9.81;
@@ -201,6 +307,7 @@ impl SimBackend {
             torque_scale: 0.25,
             k_thrust: GRAVITY / (4.0 * 0.5), // hover collective 4×0.5 ⇒ T = g
             disturbance: [0.0; 3],
+            battery_v: 16.0,
         }
     }
 
@@ -286,6 +393,9 @@ impl FlightBackend for SimBackend {
     }
     fn dt(&self) -> f32 {
         self.dt
+    }
+    fn read_battery_v(&mut self) -> f32 {
+        self.battery_v
     }
 }
 
@@ -420,5 +530,68 @@ mod tests {
         // holds near level (a plain proportional loop would sit at a steady
         // offset; ADRC drives it out).
         assert!(peak_after < 0.12, "ESO must reject the disturbance: steady tilt {peak_after} rad");
+    }
+
+    // ── v1.8 supervisor: geofence→RTL actuation + battery failsafe ────────
+
+    /// A geofence breach ACTUATES a return-to-launch (the audit's gap: the
+    /// geofence detected but never commanded the vehicle home). Commanded to a
+    /// mission point OUTSIDE the fence, the drone crosses it, the supervisor
+    /// fires Failsafe → the FSM commands RTL → it flies home and lands — never
+    /// reaching the out-of-bounds target.
+    #[test]
+    fn geofence_breach_actuates_rtl_home() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 1.5, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut backend);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter after takeoff");
+        sup.set_mission([4.0, 0.0, -2.0]); // OUTSIDE the 1.5 m fence
+        sup.command(Event::RequestMission, true, false);
+        for _ in 0..40000 {
+            sup.step(&mut backend);
+            if sup.mode() == Mode::Disarmed {
+                break;
+            }
+        }
+        let dh = libm::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
+        assert!(dh < 1.0, "RTL must bring it home, not to [4,0]: horiz {dh} m, pos {:?}", backend.pos);
+        assert!(
+            matches!(sup.mode(), Mode::Land | Mode::Disarmed),
+            "RTL should be landing/landed, mode {:?}",
+            sup.mode()
+        );
+    }
+
+    /// A low battery actuates a failsafe (the audit's "no battery failsafe"):
+    /// while loitering, the pack sags below threshold → Failsafe → RTL.
+    #[test]
+    fn low_battery_actuates_failsafe() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut backend);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter);
+        backend.battery_v = 13.2; // sag below the 14 V threshold
+        for _ in 0..200 {
+            sup.step(&mut backend);
+        }
+        assert!(
+            matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
+            "low battery must trigger a failsafe recovery, mode {:?}",
+            sup.mode()
+        );
     }
 }
