@@ -1,0 +1,37 @@
+artifacts:
+  - id: FV-FALCON-READINESS-001
+    type: sw-verification
+    title: "v1.0-practical readiness review + clean-room re-verification of the v1.8–v1.14 arc (v1.15.0)"
+    status: approved
+    description: >
+      The capstone readiness review for the v1.8 -> v1.14 hardware-abstraction
+      arc, recorded in docs/dossier/v1.0-practical-readiness.md: a
+      capability-vs-gap matrix (what is proven / verified-in-SITL / emulated /
+      seam-only vs what needs real hardware), the verification-evidence
+      inventory (Rust tests through the HAL, Kani harnesses, kernel-checked Lean
+      proofs with 0 sorry/axiom, rivet traceability, the CI gate), and the
+      honest seven-item hardware gap register (real driver bodies + on-silicon
+      validation, calibration, flight tuning, WCET leaf measurement, libm
+      qualification, physical HITL transport, first flight).
+
+      Independent clean-room re-verification: a subagent briefed cold (no
+      narrative, only falsifiable claims + read/exec tools) checked the arc's
+      headline claims against the working tree by running the cargo tests,
+      grepping the sources, and reading the proof. Result: 11 CONFIRM / 0 REFUTE
+      / 0 CANNOT-VERIFY — including that relay-math is the cascade's only libm
+      consumer, CompositionalWcet.lean has zero sorry tactics and defines
+      falcon_cascade_schedulable_1khz, falcon-core's 12 tests pass, and the
+      GPS-dropout test asserts bounded drift + recovery (not zero drift).
+
+      Verdict: for a research / SITL / emulation v1.0 the arc is complete and
+      the claims hold under independent check; for a hardware-flying v1.0 the
+      seven gap-register items remain, every one on the hardware side of the
+      abstraction seam. Nothing in the tree claims flight.
+    tags: [verification, falcon, readiness, clean-room, dossier, v1.15]
+    fields:
+      method: review
+      steps:
+        - run: "rivet validate"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HWSEAM-P01
