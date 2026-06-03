@@ -1,0 +1,32 @@
+artifacts:
+  - id: FV-FALCON-MELD-001
+    type: sw-verification
+    title: "meld-fuse the verified cascade into a single module (v1.5.0)"
+    status: approved
+    description: >
+      Verification of the v1.5.0 meld fusion step (scripts/meld-fuse-cascade.sh):
+
+      The five verified Component Model leaves (falcon-iekf — the verified IEKF
+      — plus falcon-position/attitude/rate/mixer) are built via bazel and fused
+      with `meld fuse` into a single WebAssembly core module:
+        Total exports:   58
+        Total functions: 1495
+        Output size:     354 372 bytes (97.3% reduction from 13.2 MB inputs)
+        meld inspect:    "Format: Core WebAssembly Module"
+      This is the embedded deployable artifact (one module → loom → synth →
+      gale on a target), and it WIRES meld — the PulseEngine fusion tool a
+      clean-room audit found unused (composition was wac-only).
+
+      Honest scope: meld is not provisioned in the CI gate runner (the step is
+      bench-only, skipped in the gate like the bazel/gz steps); the fusion is
+      demonstrated locally via the script. Running the FUSED module on an
+      emulated Cortex-M with the sim backend is v1.6.
+    tags: [verification, falcon, meld, fusion, embedded, v1.5]
+    fields:
+      method: build
+      steps:
+        - run: "bash scripts/meld-fuse-cascade.sh  # meld fuse the verified cascade (bench-only: meld not in CI)"
+        - run: "meld fuse falcon-iekf.wasm falcon-position.wasm falcon-attitude.wasm falcon-rate.wasm falcon-mixer.wasm -o falcon-fused.wasm --stats"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MELD-P01
