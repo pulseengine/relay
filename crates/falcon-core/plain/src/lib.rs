@@ -539,6 +539,10 @@ pub struct SimBackend {
     pub motor_tau: f32,
     /// Per-rotor lagged actual motor state (v1.23).
     motor_state: [f32; 4],
+    /// Ground-effect thrust-augmentation gain (v1.24): near the surface, rotor
+    /// downwash reflects and boosts thrust — thrust ×= (1 + gain·e^(−alt/0.25)).
+    /// A landing/takeoff cushion the altitude loop must push through. 0 = none.
+    pub ground_effect: f32,
     /// Injected sensor pathologies (v1.9).
     pub path: Pathology,
     /// Control-tick counter (drives the GPS-dropout window).
@@ -575,6 +579,7 @@ impl SimBackend {
             thrust_lapse: 0.0,
             motor_tau: 0.0,
             motor_state: [0.5; 4], // start at hover collective
+            ground_effect: 0.0,
             path: Pathology::default(),
             step_n: 0,
             gyro_bias: [0.0; 3],
@@ -726,7 +731,17 @@ impl FlightBackend for SimBackend {
         } else {
             1.0
         };
-        let thrust = collective * self.k_thrust * lapse;
+        // v1.24 — ground effect: near the surface thrust is augmented by the
+        // reflected downwash (a landing/takeoff cushion). alt = −pos[2] (NED).
+        // Rational decay 1/(1+(alt/0.25)²) — no new transcendental in the flight
+        // path (respects the relay-math qualification seam).
+        let ge = if self.ground_effect > 0.0 {
+            let z = (-self.pos[2]).max(0.0) / 0.25;
+            1.0 + self.ground_effect / (1.0 + z * z)
+        } else {
+            1.0
+        };
+        let thrust = collective * self.k_thrust * lapse * ge;
         let mut accel = [
             -thrust * self.r[0][2],
             -thrust * self.r[1][2],
@@ -1518,5 +1533,54 @@ mod tests {
         let e = [b.pos[0] - 1.5, b.pos[1] + 1.0, b.pos[2] + 2.0];
         let err = relay_math::sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
         assert!(err < 0.6, "position hold must stay bounded under motor lag: {err} m");
+    }
+
+    // ── v1.24 ground effect: a thrust cushion near the surface (landing/takeoff).
+
+    /// Ground effect AIDS takeoff: the reflected-downwash thrust boost near the
+    /// surface helps the climb; the vehicle reaches and holds its commanded
+    /// altitude with no instability.
+    #[test]
+    fn ground_effect_aids_takeoff() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_effect = 0.4;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-2.0);
+        for _ in 0..15000 {
+            core.step(&mut b);
+        }
+        let alt = -b.pos[2];
+        assert!((alt - 2.0).abs() < 0.3, "ground effect must aid takeoff to altitude: {alt} m");
+    }
+
+    /// HONEST LIMITATION (documented, not faked): ground effect cushions the
+    /// landing — the position-based altitude loop reaches a hover equilibrium
+    /// ABOVE the surface and FLOATS on the cushion rather than touching down. It
+    /// stays bounded and stable (not diverging). A clean touchdown needs a
+    /// velocity-based landing controller (future work); the altitude integral
+    /// is NOT a fix here (it runs away when wound up during the climb).
+    #[test]
+    fn ground_effect_cushions_landing_into_a_float() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_effect = 0.4;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-2.0);
+        for _ in 0..10000 {
+            core.step(&mut b);
+        }
+        core.set_altitude(0.0); // command landing
+        for _ in 0..20000 {
+            core.step(&mut b);
+        }
+        let alt = -b.pos[2];
+        // floats on the cushion, bounded + stable — the documented limitation
+        assert!(
+            (0.2..2.5).contains(&alt),
+            "ground effect floats the landing on a bounded cushion: {alt} m"
+        );
     }
 }

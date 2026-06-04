@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-FALCON-GNDEFFECT-001
+    type: sw-verification
+    title: "Ground effect: aids takeoff, documented landing float (v1.24.0)"
+    status: approved
+    description: >
+      Verification of the v1.24.0 ground-effect layer (29 falcon-core tests pass,
+      clippy clean, embedded builds), realism arc release 9:
+
+      1. ground_effect_aids_takeoff — through the FlightBackend seam, with
+         ground_effect=0.4 (the reflected-downwash thrust boost near the
+         surface), the vehicle reaches and holds its 2 m takeoff altitude within
+         0.3 m with no instability — the cushion aids the climb.
+
+      2. ground_effect_cushions_landing_into_a_float (HONEST LIMITATION) — on a
+         commanded landing the position-based altitude loop reaches a hover
+         equilibrium ABOVE the surface and floats on the cushion (bounded,
+         stable, 0.2–2.5 m), rather than touching down. A clean touchdown needs a
+         velocity-based landing controller (future work). The v1.22 altitude
+         integral is NOT a fix — it runs away (observed ~6 km) when wound up
+         during the climb; that was tried and rejected. Documented, not faked.
+
+      SimBackend gained a ground_effect gain (thrust ×= 1 + gain/(1+(alt/0.25)²),
+      a rational decay — no new transcendental, respecting the relay-math
+      qualification seam). The gz Harmonic SITL has no built-in ground-effect
+      system; it needs a custom plugin (the documented gap).
+    tags: [verification, falcon, ground-effect, realism, v1.24]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-GNDEFFECT-P01

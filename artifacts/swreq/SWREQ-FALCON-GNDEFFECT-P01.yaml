@@ -1,0 +1,30 @@
+artifacts:
+  - id: SWREQ-FALCON-GNDEFFECT-P01
+    type: sw-req
+    title: "GNDEFFECT-P01 — ground-effect thrust cushion: aids takeoff, documented landing float"
+    status: implemented
+    description: >
+      The flight stack shall model ground effect — near the surface, rotor
+      downwash reflects and augments thrust (thrust ×= 1 + gain/(1 + (alt/0.25)²),
+      a rational decay, no new transcendental in the flight path). It shall AID
+      takeoff (the boost helps the climb with no instability). On landing it
+      creates a thrust cushion: the position-based altitude loop reaches a hover
+      equilibrium above the surface and FLOATS rather than touching down — a
+      bounded, stable, DOCUMENTED limitation (a clean touchdown needs a
+      velocity-based landing controller, future work; the altitude integral is
+      not a fix — it runs away when wound up during the climb). Modelled in the
+      no_std SimBackend (ground_effect gain); the gz Harmonic SITL has no
+      built-in ground-effect system — it needs a custom plugin (the honest gap).
+    tags: [falcon, ground-effect, thrust, takeoff, landing, realism, v1.24]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: with ground_effect=0.4
+        the vehicle reaches its 2 m takeoff altitude within 0.3 m (the boost
+        aids, no instability); commanding a landing, it floats on the cushion at
+        a bounded altitude (0.2–2.5 m) without diverging — the documented
+        limitation. clippy clean; embedded builds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-017
