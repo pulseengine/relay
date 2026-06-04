@@ -62,8 +62,11 @@ rust-version = "1.85.0"
 wit-bindgen = { version = "0.57.1", default-features = false }
 # Pinned below 1.11: proptest 1.11.0 regressed its f32 range sampler
 # (float_samplers.rs:466 internal assertion fails on narrow ranges), which
-# flakily failed the dt-jitter proptests on Linux CI. Re-allow 1.11+ once fixed.
-proptest = ">=1.7, <1.12"
+# failed eso_bounded_under_dt_jitter. The pin briefly drifted to <1.12 (which
+# re-admitted 1.11.0 since Cargo.lock is untracked + CI resolves fresh without
+# --locked → it picked 1.11.0 and Windows CI failed). 1.11.0 is CONFIRMED still
+# broken; keep <1.11 until a fixed 1.11.x is verified.
+proptest = ">=1.7, <1.11"
 
 # Workspace-wide lint config. Engines use `#[cfg(kani)]` for the Kani
 # model-checker harness paths (they're built only under `cargo kani`,
