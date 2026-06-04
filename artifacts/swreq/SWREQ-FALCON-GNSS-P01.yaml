@@ -22,7 +22,7 @@ artifacts:
         a recurring 0.6 s outage every 3 s: a variance-matched filter
         (pos_var=0.09=(0.3 m)²) holds peak drift < 1.5 m; the optimistic default
         (pos_var=0.01=1 cm²) DIVERGES (> 10 m), and matching is > 10x better —
-        the published falsification→fix. clippy clean; the falcon-quad-gnss.sdf
+        the published falsification→fix. clippy clean; the gen-realism-world.py gnss
         gz world (navsat position/velocity noise) validates.
     links:
       - type: derives-from

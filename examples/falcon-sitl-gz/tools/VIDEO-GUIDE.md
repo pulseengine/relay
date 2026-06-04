@@ -4,10 +4,12 @@ The story: **every layer of an autonomous drone, formally proven — flying a
 real mission in physics.** The flight footage is genuine (real Gazebo
 physics, real control, no scripting); the *proofs* are the star.
 
-Honest framing — say it out loud, it's a strength: the mission tracking is
-*recognizable but not razor-crisp* (the inner loop is marginally stable —
-v0.32+ work). What IS crisp: the altitude hold, the estimator consistency,
-the fault recovery, and the **machine-checked proofs**.
+Honest framing — say it out loud, it's a strength: the mission is now **crisp**
+(returns home <1 m) since the v0.35 adaptive process-noise fix and the v1.16
+position-loop integral; the earlier "recognizable but not razor-crisp" caveat
+is retired. What's also crisp: the altitude hold, the estimator consistency,
+the fault recovery, the realism robustness (wind/drag/sensor-noise, v1.16+),
+and the **machine-checked proofs**.
 
 ---
 
@@ -22,10 +24,11 @@ flies a 2 m square (corner-by-corner, holds heading), returns home. Record
 the window. (Re-run if a run looks off — gz has run-to-run variance.)
 
 ### 2. The data view (overlay / cut-away)
-Already rendered in `/tmp/falcon-video/`:
-- `01-mission-path.png` — top-down East–North path coloured by time +
-  waypoints + **home error ~0.2 m**, and the **crisp altitude hold**.
-Regenerate from any flight: `./tools/plot_flight.py <ticks.csv> out.png`.
+Generate from any flight's ticks CSV: `./tools/plot_flight.py <ticks.csv> out.png`
+— a top-down East–North path coloured by time + waypoints + **home error
+<1 m**, and the **crisp altitude hold**. (Headless 3D capture that works on
+macOS — no GUI/screen-record needed: `./scripts/record_headless.sh markers
+mission 55`.)
 
 ### 3. Fault tolerance — rotor loss (data / terminal)
 ```bash
@@ -59,8 +62,9 @@ rivet validate | tail -1                 #  Result: PASS
 
 ## Narration facts (all true, all checkable)
 
-- A **formally-verified flight stack**, v0.21 → v0.31, each layer with a
-  **mechanical gate**.
+- A **formally-verified flight stack**, v0.21 → v1.21, each layer with a
+  **mechanical gate** (estimator, control, allocation, FSM, failsafes,
+  realism robustness).
 - **Kani (bounded model checking) proofs, re-run green:** the control
   allocator + its single-rotor-out reconfiguration (MIX-P08) + the rotor
   fault detector + the **simplex safety shield**.
@@ -78,8 +82,9 @@ rivet validate | tail -1                 #  Result: PASS
   ~0.2 m, rock-steady altitude — on the same `no_std`/`no_alloc` flight code.
 
 ## Honest caveats (own them on camera)
-- Horizontal tracking is recognizable, not razor-crisp (inner-loop margin —
-  v0.32+). Altitude/estimator/proofs are crisp.
-- Hover has a ~1-in-5 yaw-bistability bad run (a known, documented gap) —
-  prefer the mission for the live shot, re-run if needed.
-- It is SITL (Gazebo), not yet hardware/HIL.
+- gz has run-to-run variance — a fraction of runs drift or diverge (the
+  marginal-yaw/mag instability); prefer the best-of-N take (`record_headless.sh
+  markers` does this automatically), re-run if a run looks off.
+- It is **SITL (Gazebo) + proof + emulation**, not yet hardware/HIL — the
+  honest gap matrix is in `docs/dossier/v1.0-practical-readiness.md`. The
+  remaining gaps are on the hardware side of the abstraction seam.

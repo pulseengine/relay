@@ -9,11 +9,31 @@ Tags use a per-track prefix:
 - `falcon-v<semver>` — the falcon dual-DNA flight stack
 - (future) `relay-v<semver>` — the relay substrate itself
 
-> Note: the per-version CHANGELOG drifted during the v0.7–v0.20 run (those
-> shipped as git tags `falcon-v0.7`…`falcon-v0.20` but were not written up
-> here). This `v0.34.0` entry covers the full **v0.21 → v0.34 autonomous-
-> flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
-> it was verified end-to-end and the kernel-checked Lyapunov proof built.
+> Note: the per-version CHANGELOG drifted during the early `falcon-v0.7`…
+> `falcon-v0.20` tags (shipped but not written up here). The `falcon-v0.34.0`
+> entry below covers the full **v0.21 → v0.34 autonomous-flight arc** (developed
+> unmerged on `falcon-v0.21-iekf` until verified end-to-end with the
+> kernel-checked Lyapunov proof). Every release from `falcon-v0.34.0` onward —
+> including the v1.x HAL arc and the v1.16+ realism arc — has its own entry.
+
+## Repo hygiene — 2026-06-04
+
+A maintainer-flagged cleanup pass (cold audit confirmed the drift):
+
+- **gz worlds consolidated** — the six near-duplicate `falcon-quad-*.sdf`
+  (~89 KB of duplicated SDF, maintained 6×) replaced by `falcon-quad.sdf` + a
+  `worlds/gen-realism-world.py` generator (overlay per realism layer; `all`
+  combines them). The five variants are deleted; rivet artifacts reference the
+  generator.
+- **Docs re-baselined** — top-level `README.md` (was frozen at v0.1, named a
+  nonexistent `relay-mix` crate, omitted the whole v0.21→v1.21 flight stack);
+  `VIDEO-GUIDE.md` (dropped the stale "not razor-crisp"/"v0.32+"/`/tmp/falcon-
+  video` claims — the mission is crisp now); `falcon-sitl-gz/README.md` (the gz
+  bridge *flies*, it is not a FAIL-printing stub); the CHANGELOG phantom-v0.34.0
+  header note.
+- **Flagged, not changed:** the `relay-ekf`/`relay-ekf-stub` crates are
+  load-bearing (shared utility types in the gz bench), so full retirement is a
+  larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
 ## [falcon-v1.21.0] — 2026-06-04
 
@@ -52,7 +72,7 @@ altitude survives a GNSS-vertical outage.
 - The baro is **fed into the verified IEKF as a vertical anchor** (a position
   update with horizontal = current estimate, z = baro), so altitude *and* its
   rate stay bounded through a GPS loss.
-- **`worlds/falcon-quad-baro.sdf`** — gz realism: an `air_pressure` sensor + the
+- **the gz `baro` realism world (via `gen-realism-world.py`)** — gz realism: an `air_pressure` sensor + the
   `<atmosphere type="adiabatic">` model (validates).
 
 ### Design note (an honest internal falsification)
@@ -90,7 +110,7 @@ to the actual sensor** (`set_pos_var`).
   `gps_dropout_period` (recurring intermittent outage — beyond v1.9's single
   window).
 - **`FlightCore::set_pos_var`** — tune the filter to the receiver.
-- **`worlds/falcon-quad-gnss.sdf`** — gz realism: the `navsat` sensor's
+- **the gz `gnss` realism world (via `gen-realism-world.py`)** — gz realism: the `navsat` sensor's
   position/velocity `<noise>` (the base world had **none**; validates).
 
 ### Verified (20 tests, clippy clean, embedded builds)
@@ -113,7 +133,7 @@ richer than v1.9's constant ramp. The question: does the IEKF stay locked on?
 
 - **`Pathology`** gains `gyro_bias_rw` (random-walk bias, `bias += σ_rw·√dt·N`)
   and `gyro_white` (white gyro noise).
-- **`worlds/falcon-quad-imubias.sdf`** — gz Harmonic realism: the IMU
+- **the gz `imubias` realism world (via `gen-realism-world.py`)** — gz Harmonic realism: the IMU
   `angular_velocity` `<noise>` augmented with `bias_mean` /
   `dynamic_bias_stddev` / `dynamic_bias_correlation_time` (the random-walk bias
   the base world omits; validates with `gz sdf`).
@@ -138,7 +158,7 @@ caps drift speed, and *damps* the vehicle.
 - **`SimBackend`** gains a `drag_quad` coefficient applying
   `F = −Cd·|v_air|·v_air` on the horizontal relative airspeed
   (`v_body − v_wind`).
-- **`worlds/falcon-quad-drag.sdf`** — gz Harmonic realism via `LiftDrag` on
+- **the gz `drag` realism world (via `gen-realism-world.py`)** — gz Harmonic realism via `LiftDrag` on
   `base_link` (validates with `gz sdf`). *Honest note:* LiftDrag models a single
   lifting surface — a crude stand-in for an omnidirectional quad body; gz's
   better body-drag path is `WindEffects` (v1.16) + the motor
@@ -176,7 +196,7 @@ counter-command at zero error.
 - **`SimBackend`** gains a wind model — `wind` (NED m/s) + `gust_amp` — applied
   as a relative-velocity drag `F = K_WIND·(v_wind − v_body)` with deterministic
   gusts (the gz WindEffects form).
-- **`worlds/falcon-quad-wind.sdf`** — the gz Harmonic realism: `WindEffects` +
+- **the gz `wind` realism world (via `gen-realism-world.py`)** — the gz Harmonic realism: `WindEffects` +
   `<wind>` + `<enable_wind>` on `base_link` (validates with `gz sdf`).
 
 ### Verified (15 tests, clippy clean, embedded builds)
