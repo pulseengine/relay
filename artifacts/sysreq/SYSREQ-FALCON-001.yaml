@@ -425,3 +425,78 @@ artifacts:
     links:
       - type: derives-from
         target: STKH-FALCON-001
+  - id: SYSREQ-FALCON-017
+    type: system-req
+    title: Environmental disturbance rejection — wind, gusts, drag, turbulence
+    status: approved
+    description: >
+      The flight stack shall maintain stable, bounded control under
+      realistic environmental disturbances: a sustained wind, time-varying
+      gusts, aerodynamic body drag, altitude-dependent air density (thrust
+      lapse), ground effect near the surface, and a turbulence spectrum
+      (Dryden/von Karman). Each disturbance shall be modelled BOTH in the
+      verifiable no_std SimBackend (a CI-gated bounded-drift test) AND in the
+      gz Harmonic SITL (WindEffects / LiftDrag / <atmosphere> / a turbulence
+      feeder) for physical realism. The ADRC ESO rejects the torque component;
+      the position loop must reject the translational force component — this
+      requirement makes that an explicit, tested obligation rather than an
+      untested assumption.
+    tags: [falcon, environment, wind, drag, turbulence, realism, v1.16]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam: position hold and mission tracking stay
+        bounded (documented drift limit) under a sustained wind + gusts, body
+        drag, and a turbulence spectrum; the gz SITL reproduces each with the
+        built-in systems. Holds or falsifies — published either way.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+  - id: SYSREQ-FALCON-018
+    type: system-req
+    title: Sensor-fidelity robustness — bias drift, GNSS noise/outage, barometer
+    status: approved
+    description: >
+      The estimator shall remain consistent (NEES/ANEES within bound) and the
+      vehicle controllable under realistic sensor models richer than white
+      Gaussian noise: IMU bias-instability (static bias + random-walk dynamic
+      bias), magnetometer bias, GNSS position/velocity noise and intermittent
+      outage, and a barometric altitude source fused for vertical robustness.
+      Modelled in both the no_std SimBackend (CI-gated consistency tests) and
+      the gz Harmonic sensors (the <noise> bias_mean/dynamic_bias parameters
+      the current world omits; a barometer air_pressure sensor).
+    tags: [falcon, sensors, bias, gnss, barometer, fidelity, v1.18]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        The IEKF stays consistent (ANEES near dof, no over-confidence) under
+        IMU random-walk bias drift and noisy/intermittent GNSS; altitude hold
+        survives GPS-vertical loss via a fused barometer. Bench + unit tests.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
+  - id: SYSREQ-FALCON-019
+    type: system-req
+    title: Energy realism — battery drain, voltage sag, endurance-driven failsafe
+    status: approved
+    description: >
+      The low-battery failsafe (SYSREQ-FALCON-011 family) shall be exercised
+      against a realistic energy model rather than a set voltage: battery
+      charge drains with motor power draw and terminal voltage sags under load.
+      Modelled in the no_std SimBackend (a draining pack whose voltage is a
+      function of charge and current) and in the gz SITL via the
+      LinearBatteryPlugin with a motor power-load bridge, so the failsafe fires
+      on a genuine endurance limit.
+    tags: [falcon, battery, energy, endurance, failsafe, realism, v1.21]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        With a draining battery model, terminal voltage sags under hover/
+        manoeuvre load and crosses the failsafe threshold at a realistic
+        endurance; the supervisor actuates RTL/Land. SimBackend test + gz run.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
