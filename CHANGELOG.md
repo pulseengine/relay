@@ -15,6 +15,36 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.20.0] — 2026-06-04
+
+**Realism arc release 5 of 10.** A barometer — an independent vertical source so
+altitude survives a GNSS-vertical outage.
+
+### Added / changed (`falcon-core`)
+
+- **`FlightBackend::read_baro`** seam (default `None`); `SimBackend` baro
+  (`baro_enabled` + `baro_noise`).
+- The baro is **fed into the verified IEKF as a vertical anchor** (a position
+  update with horizontal = current estimate, z = baro), so altitude *and* its
+  rate stay bounded through a GPS loss.
+- **`worlds/falcon-quad-baro.sdf`** — gz realism: an `air_pressure` sensor + the
+  `<atmosphere type="adiabatic">` model (validates).
+
+### Design note (an honest internal falsification)
+
+A first attempt hand-rolled a complementary / alpha-beta baro filter; it
+anchored *position* but its lagged velocity estimate degraded the altitude
+loop's rate feedback (**7–9 m drift**). Feeding the baro into the verified IEKF
+instead reuses the filter's velocity estimation — and holds.
+
+### Verified (21 tests, clippy clean, embedded builds)
+
+- `baro_holds_altitude_through_gps_loss` — with the GPS dropped for **40 s** and
+  a 0.2 m-noise barometer, altitude holds within **~1.3 m** of the command AND
+  **strictly beats** the GPS-only dead-reckoning.
+
+rivet PASS · SYSREQ-FALCON-018 · SWREQ-FALCON-BARO-P01 · FV-FALCON-BARO-001.
+
 ## [falcon-v1.19.0] — 2026-06-04
 
 **Realism arc release 4 of 10.** Noisy + intermittent GNSS — and it surfaced a

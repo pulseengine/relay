@@ -55,6 +55,12 @@ pub trait FlightBackend {
     fn read_battery_v(&mut self) -> f32 {
         16.0
     }
+    /// Barometric altitude (NED z, metres; negative = up), or `None` if no
+    /// barometer. An INDEPENDENT vertical source the core fuses so altitude
+    /// survives GPS-vertical loss (v1.20). Default `None`.
+    fn read_baro(&mut self) -> Option<f32> {
+        None
+    }
 }
 
 /// The verified flight core, generic over the backend. Holds the estimator +
@@ -85,6 +91,10 @@ pub struct FlightCore {
     /// as a position offset. Anti-windup clamps its acceleration contribution.
     pos_int: [f32; 2],
     pos_int_max: f32,
+    /// Barometric-altitude measurement variance (m²) (v1.20). The baro is fed
+    /// into the verified IEKF as a vertical anchor (a position update whose z is
+    /// the baro), so altitude AND its rate survive GPS-vertical loss.
+    baro_var: f32,
 }
 
 impl FlightCore {
@@ -109,6 +119,7 @@ impl FlightCore {
             a_cmd_max: 1.0,
             pos_int: [0.0; 2],
             pos_int_max: 1.5,
+            baro_var: 0.05, // ≈ (0.2 m)² baro noise; trusted less than a clean GPS-z
         }
     }
 
@@ -158,11 +169,19 @@ impl FlightCore {
         if let Some(m) = b.read_mag() {
             self.iekf.update_magnetometer(m, 0.0, self.mag_var);
         }
+        // v1.20 — barometer: feed it into the verified IEKF as a vertical anchor
+        // (a position update whose horizontal is the current estimate, a no-op,
+        // and whose z is the baro). This keeps the IEKF's altitude AND vertical
+        // velocity bounded through a GPS-vertical outage, reusing the filter's
+        // estimation rather than a hand-rolled complementary filter.
+        if let Some(bz) = b.read_baro() {
+            let e = self.iekf.state();
+            self.iekf.update_position([e.p[0], e.p[1], bz], self.baro_var);
+        }
         let est = self.iekf.state();
 
-        // ── Altitude loop (v1.2) ── thrust = hover − kp·alt_err + kd·v_z,
-        // clamped. Vertical is decoupled from the tilt/accel ambiguity, so the
-        // estimate's z/vz drive it directly. alt_err = setpoint − estimate.
+        // ── Altitude loop (v1.2; v1.20 the estimate's z/vz are baro-anchored) ──
+        // thrust = hover − kp·alt_err + kd·v_z, clamped.
         let alt_err = self.setpoint[2] - est.p[2];
         let thrust = (self.hover_thrust - self.kp_alt * alt_err + self.kd_alt * est.v[2]).clamp(0.0, 1.0);
 
@@ -472,6 +491,10 @@ pub struct SimBackend {
     /// wind term it grows with v², so it dominates during fast motion (mission
     /// legs) and caps the drift speed; it is also a stabilising damping force.
     pub drag_quad: f32,
+    /// Barometer present? (v1.20) When true, `read_baro` returns the altitude.
+    pub baro_enabled: bool,
+    /// Barometric altitude noise stddev (m) (v1.20).
+    pub baro_noise: f32,
     /// Battery voltage reported to the supervisor's failsafe (v1.8).
     pub battery_v: f32,
     /// Injected sensor pathologies (v1.9).
@@ -502,6 +525,8 @@ impl SimBackend {
             wind: [0.0; 3],
             gust_amp: 0.0,
             drag_quad: 0.0,
+            baro_enabled: false,
+            baro_noise: 0.0,
             battery_v: 16.0,
             path: Pathology::default(),
             step_n: 0,
@@ -686,6 +711,13 @@ impl FlightBackend for SimBackend {
     }
     fn read_battery_v(&mut self) -> f32 {
         self.battery_v
+    }
+    fn read_baro(&mut self) -> Option<f32> {
+        if self.baro_enabled {
+            Some(self.pos[2] + self.baro_noise * self.noise_unit()) // NED z, noisy
+        } else {
+            None
+        }
     }
 }
 
@@ -1239,5 +1271,43 @@ mod tests {
         let peak_matched = fly_noisy_gps(0.09); // matched
         assert!(peak_optimistic > 10.0, "over-trust should diverge: {peak_optimistic} m");
         assert!(peak_matched < peak_optimistic * 0.1, "matched must be far better: {peak_matched} vs {peak_optimistic} m");
+    }
+
+    // ── v1.20 barometer fusion: an independent vertical source so altitude
+    // survives GPS-vertical loss.
+
+    /// Max altitude error during/after a long GPS outage, with baro on/off.
+    fn alt_err_through_gps_loss(baro: bool) -> f32 {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.baro_enabled = baro;
+        b.baro_noise = 0.2;
+        b.path.gps_dropout_start = 8000; // GPS drops after settling …
+        b.path.gps_dropout_len = 20000; // … for 40 s
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-3.0);
+        let mut maxerr = 0.0f32;
+        for k in 0..30000 {
+            core.step(&mut b);
+            if k > 9000 {
+                maxerr = maxerr.max((b.pos[2] + 3.0).abs());
+            }
+        }
+        maxerr
+    }
+
+    /// Barometer fusion keeps altitude through a 40 s GPS-vertical outage: the
+    /// baro (an independent vertical source) anchors the altitude loop, holding
+    /// the commanded altitude — and is no worse than the GPS-only dead-reckoning.
+    #[test]
+    fn baro_holds_altitude_through_gps_loss() {
+        let err_baro = alt_err_through_gps_loss(true);
+        let err_nobaro = alt_err_through_gps_loss(false);
+        assert!(err_baro < 1.5, "baro must hold altitude through GPS loss: {err_baro} m");
+        assert!(
+            err_baro < err_nobaro,
+            "baro must beat GPS-only dead-reckoning: baro {err_baro} vs no-baro {err_nobaro} m"
+        );
     }
 }

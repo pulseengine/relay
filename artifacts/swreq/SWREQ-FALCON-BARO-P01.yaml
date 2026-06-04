@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-BARO-P01
+    type: sw-req
+    title: "BARO-P01 — barometer fusion holds altitude through GPS-vertical loss"
+    status: implemented
+    description: >
+      The flight stack shall fuse a barometric altitude source so altitude
+      survives a GNSS-vertical outage. The barometer shall be fed into the
+      verified IEKF as a vertical anchor — a position update whose horizontal is
+      the current estimate (a no-op) and whose z is the baro — so the IEKF's
+      altitude AND vertical velocity stay bounded through a long GPS loss (a
+      hand-rolled complementary filter degraded the velocity feedback and was
+      rejected). Modelled in the no_std SimBackend (read_baro seam + baro_noise)
+      and in the gz Harmonic SITL via an air_pressure sensor + the <atmosphere>
+      model. Read through the FlightBackend seam (read_baro, default None).
+    tags: [falcon, barometer, altitude, fusion, sensor-fidelity, v1.20]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: with the GPS dropped
+        for 40 s and a barometer (0.2 m noise) fused into the IEKF, the altitude
+        holds within 1.5 m of the commanded altitude AND strictly beats the
+        GPS-only dead-reckoning (which drifts further). clippy clean; the
+        falcon-quad-baro.sdf gz world (air_pressure + atmosphere) validates.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-018
