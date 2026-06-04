@@ -1,0 +1,385 @@
+<?xml version="1.0" ?>
+<!--
+  falcon-quad.sdf — Gazebo Harmonic world matching the falcon-sitl-gz
+  bridge's topic expectations.
+
+  v0.19.3 — re-derived against PX4 x500's known-flying SDF
+  (`Tools/simulation/gz/models/x500_base/model.sdf`) after the v0.19.1
+  + v0.19.2 bench evidence revealed:
+
+    - Per-rotor `gz.msgs.Double` topics don't drive the rotors
+      (Harmonic MulticopterMotorModel subscribes a SINGLE model-level
+      `gz.msgs.Actuators` topic, indexed by `<motorNumber>`).
+    - Even native `gz topic -p .../cmd_vel Actuators` against the
+      v0.19.2 SDF didn't produce climb — the v0.19.2 SDF's rotor
+      links lacked `<collision>` + had `<damping>` set, and
+      `commandSubTopic` was `cmd_vel` (PX4 uses `command/motor_speed`).
+
+  v0.19.3 changes from v0.19.2:
+    - Each rotor link now has `<collision>` (ODE physics needs this
+      to treat the link as load-bearing — without it the link is
+      visual-only and motor thrust doesn't transfer to the body).
+    - Joint definitions follow x500: explicit `<limit><lower>-1e16</lower>
+      <upper>1e16</upper></limit>` + `<spring_reference>0</spring_reference>
+      <spring_stiffness>0</spring_stiffness>`. No `<damping>` (motor's
+      torque-vs-drag balance should land the steady-state spin without
+      joint friction).
+    - `<commandSubTopic>command/motor_speed</commandSubTopic>` —
+      matches PX4 x500 and lets falcon-sitl-gz's `/<model>/{cmd_subtopic}`
+      format work consistently across PX4 + falcon worlds.
+
+  Bridge topic the bridge publishes to:
+    /<model>/command/motor_speed   (gz.msgs.Actuators)
+  Update `physics::gz_real::GazeboPhysics` if the SDF subtopic changes.
+
+  Bench:
+    gz sim -s -r -v3 examples/falcon-sitl-gz/worlds/falcon-quad.sdf
+    cargo run -p falcon-sitl-gz --features gazebo -- \
+      --backend=gazebo --world=falcon --model=quad \
+      --home=47.3977,8.5456,488 --duration=15 \
+      --evidence-dir=bench-evidence/gz-sim
+-->
+<sdf version="1.9">
+  <world name="falcon">
+
+    <physics name="default_physics" default="0" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system"           name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system"     name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system"           name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system"               name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-navsat-system"            name="gz::sim::systems::NavSat"/>
+    <plugin filename="gz-sim-magnetometer-system"      name="gz::sim::systems::Magnetometer"/>
+
+    <!-- v0.22 — Earth field for Zurich (WMM-ish), world ENU frame
+         [East, North, Up] in Tesla. Horizontal ≈ 21.5 µT at ~3° east
+         declination; down ≈ 43 µT (inclination ~63°). The bench removes
+         the 3° declination so mag heading reads TRUE north. -->
+    <magnetic_field>1.126e-6 21.470e-6 -43.0e-6</magnetic_field>
+
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>47.3977</latitude_deg>
+      <longitude_deg>8.5456</longitude_deg>
+      <elevation>488.0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <light name="sun" type="directional">
+      <pose>0 0 10 0 0 0</pose>
+      <cast_shadows>1</cast_shadows>
+      <direction>-0.5 0.1 -0.9</direction>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+    </light>
+
+    <model name="ground_plane">
+      <static>1</static>
+      <link name="ground_link">
+        <collision name="c"><geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry></collision>
+        <visual name="v"><geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.5 0.5 0.5 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ─── falcon-quad ─────────────────────────────────────────────── -->
+    <!-- v0.19.4 — spawn at z=1.0 m (was 0.10 m). Closed-loop hover
+         setpoint is z=-2 m NED (2 m altitude). Spawning at 1.0 m gives
+         the body airspace to react before any controller initial-
+         condition kick can drive it into the ground. -->
+    <model name="quad">
+      <pose>0 0 1.0 0 0 0</pose>
+
+      <!-- Body link — IMU + NavSat sensors. Mass + inertia of a
+           5"-class quad (~700 g, ~250 mm wheelbase). -->
+      <link name="base_link">
+        <gravity>true</gravity>
+        <self_collide>false</self_collide>
+        <!-- v0.19.5 — body bumped from 0.7 kg / 0.0035 kg⋅m² to
+             2.0 kg / 0.0217 kg⋅m² (x500-class). v0.19.4's smaller
+             inertia made the cascade marginally stable: a single
+             motor's thrust at offset 0.0884 m gave ~150 rad/s²
+             angular acceleration, far faster than the rate-PID's
+             100 Hz damping bandwidth → positive feedback. x500
+             inertia matches the PosController/RatePid default
+             gains' implicit ~1 kg body assumption. -->
+        <inertial>
+          <mass>2.000</mass>
+          <inertia>
+            <ixx>0.0217</ixx><iyy>0.0217</iyy><izz>0.0400</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name="base_collision">
+          <geometry><box><size>0.180 0.180 0.040</size></box></geometry>
+        </collision>
+        <visual name="base_visual">
+          <geometry><box><size>0.180 0.180 0.040</size></box></geometry>
+          <material>
+            <ambient>0.2 0.2 0.2 1</ambient>
+            <diffuse>0.3 0.3 0.3 1</diffuse>
+          </material>
+        </visual>
+
+        <sensor name="imu_sensor" type="imu">
+          <always_on>1</always_on>
+          <update_rate>1000</update_rate>
+          <imu>
+            <!-- v1.18 IMU bias-instability: static + random-walk dynamic bias -->
+              <angular_velocity>
+              <x><noise type="gaussian"><mean>0</mean><stddev>0.0009</stddev><bias_mean>7.5e-6</bias_mean><bias_stddev>8e-7</bias_stddev><dynamic_bias_stddev>2e-5</dynamic_bias_stddev><dynamic_bias_correlation_time>400</dynamic_bias_correlation_time></noise></x>
+              <y><noise type="gaussian"><mean>0</mean><stddev>0.0009</stddev><bias_mean>7.5e-6</bias_mean><bias_stddev>8e-7</bias_stddev><dynamic_bias_stddev>2e-5</dynamic_bias_stddev><dynamic_bias_correlation_time>400</dynamic_bias_correlation_time></noise></y>
+              <z><noise type="gaussian"><mean>0</mean><stddev>0.0009</stddev><bias_mean>7.5e-6</bias_mean><bias_stddev>8e-7</bias_stddev><dynamic_bias_stddev>2e-5</dynamic_bias_stddev><dynamic_bias_correlation_time>400</dynamic_bias_correlation_time></noise></z>
+            </angular_velocity>
+            <linear_acceleration>
+              <x><noise type="gaussian"><mean>0</mean><stddev>0.0021</stddev></noise></x>
+              <y><noise type="gaussian"><mean>0</mean><stddev>0.0021</stddev></noise></y>
+              <z><noise type="gaussian"><mean>0</mean><stddev>0.0021</stddev></noise></z>
+            </linear_acceleration>
+          </imu>
+        </sensor>
+
+        <!-- v0.22 — magnetometer: the real (non-truth) heading source.
+             Reports the world magnetic_field in body frame. -->
+        <sensor name="mag_sensor" type="magnetometer">
+          <always_on>1</always_on>
+          <update_rate>100</update_rate>
+          <magnetometer>
+            <x><noise type="gaussian"><mean>0</mean><stddev>1e-7</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>1e-7</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>1e-7</stddev></noise></z>
+          </magnetometer>
+        </sensor>
+
+        <sensor name="navsat_sensor" type="navsat">
+          <always_on>1</always_on>
+          <!-- v0.19.4 — bumped 10 → 50 Hz so finite-diff velocity has
+               enough sample rate to feed the position controller's
+               outer loop without aliasing. Real GPS is typically
+               5–10 Hz; the simulator can give us better. -->
+          <update_rate>50</update_rate>
+        </sensor>
+      </link>
+
+      <!-- v0.19.7 — OdometryPublisher gives TRUE body velocity (twist)
+           at 100 Hz on /model/quad/odometry. The v0.19.4–.6 bridge
+           finite-differenced 50 Hz NavSat position for velocity, which
+           was noisy/lagged enough to leave the altitude velocity-cascade
+           marginally stable (same gains gave 0.5 m one run, crash the
+           next). True velocity makes the inner loop deterministic. -->
+      <plugin filename="gz-sim-odometry-publisher-system"
+              name="gz::sim::systems::OdometryPublisher">
+        <odom_frame>world</odom_frame>
+        <robot_base_frame>quad</robot_base_frame>
+        <odom_publish_frequency>100</odom_publish_frequency>
+        <dimensions>3</dimensions>
+      </plugin>
+
+      <!-- ─── 4 rotors (X-configuration) ─── -->
+      <!-- v0.19.6 — rotor index→position+spin aligned to the ACTUAL
+           verified relay-mix-quad MIXER_X convention (the v0.19.0–.5
+           SDF had a scrambled index map → roll authority ≈ 0):
+             mixer 0 = front-right, CW(NED)   → gz (+X, -Y), ccw(gz)
+             mixer 1 = back-right,  CCW(NED)  → gz (-X, -Y), cw(gz)
+             mixer 2 = back-left,   CW(NED)   → gz (-X, +Y), ccw(gz)
+             mixer 3 = front-left,  CCW(NED)  → gz (+X, +Y), cw(gz)
+           gz frame is ENU (Y-left, Z-up); NED right = gz -Y, and a
+           CW-about-NED-down rotor is ccw-about-gz-up. The residual
+           per-axis torque sign is handled by frame_correct_torque
+           (derived by the frame-check oracle). -->>
+
+      <link name="rotor_0">
+        <gravity>true</gravity>
+        <self_collide>false</self_collide>
+        <pose>0.0884 -0.0884 0.025 0 0 0</pose>
+        <inertial>
+          <mass>0.010</mass>
+          <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <collision name="rc0">
+          <geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+        </collision>
+        <visual name="r0v">
+          <geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+          <material><diffuse>0.9 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+      <joint name="rotor_0_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_0</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+          <dynamics><spring_reference>0</spring_reference><spring_stiffness>0</spring_stiffness></dynamics>
+        </axis>
+      </joint>
+
+      <link name="rotor_1">
+        <gravity>true</gravity>
+        <self_collide>false</self_collide>
+        <pose>-0.0884 -0.0884 0.025 0 0 0</pose>
+        <inertial>
+          <mass>0.010</mass>
+          <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <collision name="rc1">
+          <geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+        </collision>
+        <visual name="r1v">
+          <geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+          <material><diffuse>0.2 0.9 0.2 1</diffuse></material>
+        </visual>
+      </link>
+      <joint name="rotor_1_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+          <dynamics><spring_reference>0</spring_reference><spring_stiffness>0</spring_stiffness></dynamics>
+        </axis>
+      </joint>
+
+      <link name="rotor_2">
+        <gravity>true</gravity>
+        <self_collide>false</self_collide>
+        <pose>-0.0884 0.0884 0.025 0 0 0</pose>
+        <inertial>
+          <mass>0.010</mass>
+          <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <collision name="rc2">
+          <geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+        </collision>
+        <visual name="r2v">
+          <geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+          <material><diffuse>0.2 0.2 0.9 1</diffuse></material>
+        </visual>
+      </link>
+      <joint name="rotor_2_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_2</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+          <dynamics><spring_reference>0</spring_reference><spring_stiffness>0</spring_stiffness></dynamics>
+        </axis>
+      </joint>
+
+      <link name="rotor_3">
+        <gravity>true</gravity>
+        <self_collide>false</self_collide>
+        <pose>0.0884 0.0884 0.025 0 0 0</pose>
+        <inertial>
+          <mass>0.010</mass>
+          <inertia><ixx>5e-7</ixx><iyy>5e-7</iyy><izz>1e-6</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <collision name="rc3">
+          <geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+        </collision>
+        <visual name="r3v">
+          <geometry><cylinder><radius>0.06</radius><length>0.005</length></cylinder></geometry>
+          <material><diffuse>0.9 0.9 0.2 1</diffuse></material>
+        </visual>
+      </link>
+      <joint name="rotor_3_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_3</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+          <dynamics><spring_reference>0</spring_reference><spring_stiffness>0</spring_stiffness></dynamics>
+        </axis>
+      </joint>
+
+      <!-- ─── MulticopterMotorModel plugins ─────────────────────────────
+        commandSubTopic = `command/motor_speed` (PX4 standard) →
+        full topic `/quad/command/motor_speed` (`gz.msgs.Actuators`).
+        Bridge publishes here in `physics::gz_real::GazeboPhysics`.
+
+        motorConstant 8.55e-6 N·s²/rad² × (1000 rad/s)² = ~8.55 N peak
+        per rotor → 4 rotors × 8.55 = 34.2 N peak. Body weight
+        0.7 kg × 9.81 = 6.87 N → ~5× hover-thrust headroom. -->
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <jointName>rotor_0_joint</jointName>
+        <linkName>rotor_0</linkName>
+        <turningDirection>ccw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>1000.0</maxRotVelocity>
+        <motorConstant>8.55e-06</motorConstant>
+        <momentConstant>0.016</momentConstant>
+        <commandSubTopic>command/motor_speed</commandSubTopic>
+        <motorNumber>0</motorNumber>
+        <rotorDragCoefficient>8.06e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <jointName>rotor_1_joint</jointName>
+        <linkName>rotor_1</linkName>
+        <turningDirection>cw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>1000.0</maxRotVelocity>
+        <motorConstant>8.55e-06</motorConstant>
+        <momentConstant>0.016</momentConstant>
+        <commandSubTopic>command/motor_speed</commandSubTopic>
+        <motorNumber>1</motorNumber>
+        <rotorDragCoefficient>8.06e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <jointName>rotor_2_joint</jointName>
+        <linkName>rotor_2</linkName>
+        <turningDirection>ccw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>1000.0</maxRotVelocity>
+        <motorConstant>8.55e-06</motorConstant>
+        <momentConstant>0.016</momentConstant>
+        <commandSubTopic>command/motor_speed</commandSubTopic>
+        <motorNumber>2</motorNumber>
+        <rotorDragCoefficient>8.06e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <jointName>rotor_3_joint</jointName>
+        <linkName>rotor_3</linkName>
+        <turningDirection>cw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>1000.0</maxRotVelocity>
+        <motorConstant>8.55e-06</motorConstant>
+        <momentConstant>0.016</momentConstant>
+        <commandSubTopic>command/motor_speed</commandSubTopic>
+        <motorNumber>3</motorNumber>
+        <rotorDragCoefficient>8.06e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+
+    </model>
+  </world>
+</sdf>

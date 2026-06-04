@@ -1,0 +1,32 @@
+artifacts:
+  - id: FV-FALCON-IMUBIAS-001
+    type: sw-verification
+    title: "IEKF under random-walk gyro bias-instability (v1.18.0)"
+    status: approved
+    description: >
+      Verification of the v1.18.0 IMU bias-instability layer (18 falcon-core
+      tests pass, clippy clean), realism arc release 3 (first sensor-fidelity
+      release):
+
+      iekf_holds_under_random_walk_gyro_bias — through the FlightBackend seam,
+      the IEKF holds attitude under a STOCHASTIC random-walk gyro bias
+      (gyro_bias_rw=0.01 rad/s/√s, which random-walks to ≈0.06 rad/s over the
+      ~40 s run) plus white gyro noise (0.01 rad/s). The IEKF gyro-bias state
+      continuously re-tracks the wandering bias (a moving target, unlike v1.9's
+      constant ramp), so the steady tilt stays < 0.15 rad.
+
+      SimBackend gained Pathology.gyro_bias_rw (random-walk bias-instability,
+      bias += σ_rw·√dt·noise) and gyro_white (white gyro noise). The gz Harmonic
+      realism is examples/falcon-sitl-gz/worlds/falcon-quad-imubias.sdf — the
+      IMU angular_velocity <noise> augmented with bias_mean / dynamic_bias_stddev
+      / dynamic_bias_correlation_time (the random-walk bias the base world omits;
+      validates with gz sdf).
+    tags: [verification, falcon, imu, bias, sensor-fidelity, v1.18]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-IMUBIAS-P01

@@ -314,6 +314,12 @@ pub struct Pathology {
     /// Magnetometer interference amplitude (added per-axis, body frame). A
     /// heading perturbation the mag-update variance must tolerate.
     pub mag_interference: f32,
+    /// Gyro bias random-walk rate (rad/s per √s) — a STOCHASTIC, wandering bias
+    /// (bias-instability), richer than the constant `gyro_bias_drift` ramp. The
+    /// IEKF must continuously re-track a moving target (v1.18).
+    pub gyro_bias_rw: f32,
+    /// Gyro white-noise stddev (rad/s) added to each measured rate (v1.18).
+    pub gyro_white: f32,
 }
 
 // ── v1.11 — the real-hardware backend SEAM ───────────────────────────────
@@ -554,11 +560,12 @@ impl FlightBackend for SimBackend {
             accel[2] += v * self.noise_unit();
         }
         // v1.9 — the measured gyro carries the accumulated (drifting) bias the
-        // IEKF bias state must estimate out.
+        // IEKF bias state must estimate out. v1.18 — plus optional white noise.
+        let gw = self.path.gyro_white;
         let gyro = [
-            self.omega[0] + self.gyro_bias[0],
-            self.omega[1] + self.gyro_bias[1],
-            self.omega[2] + self.gyro_bias[2],
+            self.omega[0] + self.gyro_bias[0] + gw * self.noise_unit(),
+            self.omega[1] + self.gyro_bias[1] + gw * self.noise_unit(),
+            self.omega[2] + self.gyro_bias[2] + gw * self.noise_unit(),
         ];
         ImuSample { accel, gyro }
     }
@@ -639,8 +646,11 @@ impl FlightBackend for SimBackend {
         // (once per control step; write_motors is the tail of FlightCore::step).
         self.step_n = self.step_n.wrapping_add(1);
         let db = self.path.gyro_bias_drift * self.dt;
+        // v1.18 — stochastic random-walk component: bias += σ_rw·√dt·N(0,1). A
+        // wandering bias the IEKF must continuously re-track (vs the ramp).
+        let rw = self.path.gyro_bias_rw * relay_math::sqrtf(self.dt);
         for i in 0..3 {
-            self.gyro_bias[i] += db;
+            self.gyro_bias[i] += db + rw * self.noise_unit();
         }
     }
     fn dt(&self) -> f32 {
@@ -1121,5 +1131,35 @@ mod tests {
             peak_drag < peak_no_drag,
             "drag must damp the kick: peak {peak_drag} m vs no-drag {peak_no_drag} m"
         );
+    }
+
+    // ── v1.18 IMU bias-instability: a STOCHASTIC random-walk gyro bias + white
+    // noise (richer than v1.9's constant ramp). The IEKF must continuously
+    // re-track the wandering bias.
+
+    /// The IEKF holds attitude under a random-walk gyro bias-instability +
+    /// white gyro noise — it tracks the wandering bias (a moving target) so the
+    /// body stays level through a long hover, not just a fixed-ramp bias.
+    #[test]
+    fn iekf_holds_under_random_walk_gyro_bias() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt).with_pathology(Pathology {
+            gyro_bias_rw: 0.01, // bias-instability random walk (rad/s/√s)
+            gyro_white: 0.01,   // white gyro noise (rad/s)
+            ..Default::default()
+        });
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-2.0);
+        let mut peak = 0.0f32;
+        for k in 0..20000 {
+            core.step(&mut b);
+            if k > 6000 {
+                peak = peak.max(b.tilt());
+            }
+        }
+        // after ~40 s the injected bias has random-walked to ≈0.01·√40 ≈ 0.06
+        // rad/s; the IEKF tracks it, so the steady tilt stays bounded.
+        assert!(peak < 0.15, "IEKF must hold under random-walk gyro bias: peak tilt {peak} rad");
     }
 }

@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-IMUBIAS-P01
+    type: sw-req
+    title: "IMUBIAS-P01 — IEKF holds under random-walk gyro bias-instability"
+    status: implemented
+    description: >
+      The estimator shall remain stable and the attitude bounded under a
+      realistic IMU bias-instability model — a STOCHASTIC random-walk gyro bias
+      (bias += σ_rw·√dt·N) plus white gyro noise — richer than the v1.9 constant
+      bias ramp. The IEKF's gyro-bias state must continuously re-track the
+      wandering bias (a moving target). Modelled in the no_std SimBackend
+      (Pathology gyro_bias_rw + gyro_white) and in the gz Harmonic IMU via the
+      <noise> bias_mean / dynamic_bias_stddev / dynamic_bias_correlation_time
+      parameters the base world omits.
+    tags: [falcon, imu, bias, random-walk, sensor-fidelity, v1.18]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: under a random-walk
+        gyro bias (gyro_bias_rw=0.01 rad/s/√s, ~0.06 rad/s wander over 40 s) +
+        white noise (0.01 rad/s), the IEKF tracks the wandering bias and the
+        steady tilt stays < 0.15 rad through a long hover. clippy clean; the
+        falcon-quad-imubias.sdf gz world (IMU dynamic_bias params) validates.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-018
