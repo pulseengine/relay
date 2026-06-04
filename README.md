@@ -22,36 +22,36 @@ Part of the [pulseengine](https://github.com/pulseengine) toolchain.
 | layer | what it is | crates |
 |---|---|---|
 | **cFS-DNA** (mission/ops) | A formally verified port of NASA cFS apps and core services. Drop-in replacements for the cFS framework that flew JWST, Artemis, OSIRIS-REx. | `relay-{sch, sc, sca, lc, hk, cs, ds, fm, hs, tbl, ci, to, md, mm, ccsds, cfdp}` |
-| **PX4-DNA** (control/dynamics) | A formally verifiable port of the PX4 multicopter control cascade as WIT components. **New in v0.1.** | `relay-{ekf, ekf-stub, rate, att, pos, mix, mavlink}` |
+| **PX4-DNA** (control/dynamics) | A formally verifiable multicopter control cascade as `no_std` crates + WIT components: an **Invariant-EKF** estimator (SE₂(3)), **geometric SE(3)** attitude control (Lean-proven Lyapunov), an **ADRC** inner loop, control allocation, trajectory generation, a flight-mode FSM, and a backend-agnostic flight core. | `relay-{iekf, geo, adrc, mix-quad, traj, fsm, math, mavlink}`, `falcon-core` |
 
 Composition is through stream wiring via `meld` (build-time static
 fusion), not runtime topic-name lookup. No router thread, no
 shared mutable state.
 
-## falcon — the dual-DNA showcase
+## falcon — the dual-DNA flight stack
 
-falcon is the application world that fuses cFS-DNA mission semantics
-with PX4-DNA control cascade for real airframes. **v0.1 ships
-today** — see [`falcon/README.md`](falcon/README.md).
+falcon fuses cFS-DNA mission semantics with the PX4-DNA control cascade.
+The verified cascade (**IEKF → geometric SE(3) → ADRC → mixer**) flies
+autonomous waypoint missions in **Gazebo Harmonic SITL**, runs bare-metal on
+an emulated **Cortex-M (STM32H743)**, and sits behind a backend-agnostic
+hardware-abstraction seam (`FlightBackend`) so the *same* `no_std` code runs
+against a simulator, real sensors, or a HITL link.
+
+Current focus (the `v1.16+` realism arc) hardens it against the physics a clean
+sim hides — wind, aerodynamic drag, IMU bias-instability, noisy/intermittent
+GNSS, barometer fusion, battery drain — each a CI-gated test plus the matching
+gz Harmonic realism. See [`CHANGELOG.md`](CHANGELOG.md) for the release history
+and [`docs/dossier/v1.0-practical-readiness.md`](docs/dossier/v1.0-practical-readiness.md)
+for the honest capability-vs-gap matrix (SITL/proof/emulation-complete; the
+remaining gaps are on the hardware side of the seam).
 
 ```sh
-# Terminal A — ground control station
-cargo run -p falcon-hello -- --mode gcs
+# Fly an autonomous waypoint mission in Gazebo Harmonic SITL
+examples/falcon-sitl-gz/tools/watch_mission.sh mission 55
 
-# Terminal B — vehicle
-cargo run -p falcon-hello -- --mode vehicle
+# Minimal MAVLink heartbeat demo (no sim required)
+cargo run -p falcon-hello -- --mode vehicle    # + --mode gcs in another shell
 ```
-
-Vehicle emits MAVLink HEARTBEAT messages over UDP at 1 Hz; GCS
-decodes them. Output:
-
-```
-vehicle: tx seq=0 type=2 status=3 mavlink_v=2 (21 bytes)
-gcs: rx heartbeat from 127.0.0.1:14551 type=2 autopilot=8 status=3 custom_mode=0
-```
-
-Connect QGroundControl with `--remote 127.0.0.1:14550` and the
-vehicle appears in the QGC list.
 
 ## Verification
 
@@ -78,10 +78,10 @@ GitHub Actions posts the same Markdown as a sticky PR comment via
 ## Build
 
 ```sh
-cargo test --workspace        # 49 test suites, all green
+cargo test --workspace        # all crate test suites
 cargo run -p falcon-hello -- --help
-bazel test //...              # verus + rocq + lean tracks for the
-                              # cFS engines (falcon Verus arrives in v0.2)
+bazel test //proofs/lean:...  # kernel-checked Lean proofs (Lyapunov, WCET)
+bazel test //...              # verus + rocq + lean verification tracks
 ```
 
 ## Traceability
@@ -108,7 +108,9 @@ relay/
 │   ├── components/        # per-component world specs
 │   └── worlds/            # cross-component compositions (relay-falcon.wit, ...)
 ├── examples/              # runnable showcases
-│   └── falcon-hello/      # v0.1 MAVLink heartbeat demo
+│   ├── falcon-hello/      # minimal MAVLink heartbeat demo
+│   ├── falcon-sitl-gz/    # Gazebo Harmonic SITL bench (the flight stack)
+│   └── falcon-hitl-rfspoof/ # HITL GPS-spoof safety harness
 ├── proofs/                # verus / rocq / lean source proofs
 ├── artifacts/             # rivet artifacts (STKH, SYSREQ, SWREQ, SWARCH, SWDD, FEAT, FV)
 │   ├── sysreq/            # stakeholder + system requirements

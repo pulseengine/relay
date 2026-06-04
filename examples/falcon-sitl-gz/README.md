@@ -24,7 +24,8 @@ unchanged — same pattern as the HITL harness's `HitlBench` and
 # in-process MockPhysics (default; toy 6-DoF integrator)
 cargo run -p falcon-sitl-gz
 
-# Gazebo STUB — no bridge yet; verdict will be FAIL.
+# Gazebo backend WITHOUT the bridge feature → stub path, verdict FAIL
+# (the lean fallback; build with --features gazebo for the real bridge below).
 cargo run -p falcon-sitl-gz -- --backend=gazebo --world=falcon --model=quad
 
 # Real Gazebo bridge (v0.18.0; needs `gz sim` running).
@@ -82,15 +83,21 @@ Same shape as `bench-evidence/px4-sitl/` from v0.18.2.
 in tokio + libzmq (compiled from C source via `zeromq-src`),
 ~30-60 s extra build time. Opt in only when you have a bench.
 
+## Status
+
+The real **`gz-transport-rs` bridge flies** (`cargo run -p falcon-sitl-gz
+--features gazebo …`): the verified cascade flies controlled hover since
+v0.19.5 and full autonomous waypoint missions through the v1.x arc, returning
+home <1 m (see `CHANGELOG.md` + `bench-evidence/gz-sim/`). The `GazeboPhysics`
+`MockPhysics`/stub path (the **no-`--features gazebo`** build) intentionally
+prints `FAIL` — it's the lean fallback for environments without gz, and that
+`FAIL` is the correct signal that the real bridge wasn't built.
+
 ## What this is NOT
 
-* A working Gazebo loop. The `GazeboPhysics` impl is a stub —
-  `step()` prints "stub" and `measure()` returns zeros. The verdict
-  prints `FAIL`, which is the *correct* signal that the bench
-  wire-up is required.
-* A replacement for `examples/falcon-sitl-hover`. The existing 17
-  scenarios stay there; this crate is the scaffold for the next
-  layer of "would our stuff fly" evidence.
+* A replacement for `examples/falcon-sitl-hover`. Those scenarios stay there;
+  this crate is the integrated SITL bench (IEKF → geometric → ADRC → mixer +
+  FSM + failsafes + the v1.16+ realism layers).
 
 ## Bench wire-up recipe (the user step)
 

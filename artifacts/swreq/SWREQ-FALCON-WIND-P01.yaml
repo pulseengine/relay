@@ -25,7 +25,7 @@ artifacts:
         offset > 1.5 m, and the integral cuts it by more than half (the
         falsification→fix); a 3 m/s wind + 2 m/s gusts stays bounded < 1.0 m.
         clippy clean; the embedded crate still builds; the
-        falcon-quad-wind.sdf gz world (WindEffects) validates.
+        gen-realism-world.py wind gz world (WindEffects) validates.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-017

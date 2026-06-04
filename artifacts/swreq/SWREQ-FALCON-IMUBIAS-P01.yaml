@@ -21,7 +21,7 @@ artifacts:
         gyro bias (gyro_bias_rw=0.01 rad/s/√s, ~0.06 rad/s wander over 40 s) +
         white noise (0.01 rad/s), the IEKF tracks the wandering bias and the
         steady tilt stays < 0.15 rad through a long hover. clippy clean; the
-        falcon-quad-imubias.sdf gz world (IMU dynamic_bias params) validates.
+        gen-realism-world.py imubias gz world (IMU dynamic_bias params) validates.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-018

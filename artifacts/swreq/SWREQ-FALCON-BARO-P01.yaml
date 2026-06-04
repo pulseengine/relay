@@ -22,7 +22,7 @@ artifacts:
         for 40 s and a barometer (0.2 m noise) fused into the IEKF, the altitude
         holds within 1.5 m of the commanded altitude AND strictly beats the
         GPS-only dead-reckoning (which drifts further). clippy clean; the
-        falcon-quad-baro.sdf gz world (air_pressure + atmosphere) validates.
+        gen-realism-world.py baro gz world (air_pressure + atmosphere) validates.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-018

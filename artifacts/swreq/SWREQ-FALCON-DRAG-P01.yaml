@@ -21,7 +21,7 @@ artifacts:
         tracks a far setpoint ([4,0,-2] m) to within 0.6 m through quadratic
         drag; a horizontally-kicked vehicle (4 m/s) sheds the kick with a
         SMALLER peak excursion WITH drag than without (the v² damping). clippy
-        clean; the falcon-quad-drag.sdf gz world (LiftDrag) validates.
+        clean; the gen-realism-world.py drag gz world (LiftDrag) validates.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-017
