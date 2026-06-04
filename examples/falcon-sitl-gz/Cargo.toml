@@ -44,4 +44,4 @@ gz-transport-rs = { version = "0.1", optional = true }
 # v0.19.2 — local `gz.msgs.Actuators` definition so the bridge can talk
 # to Harmonic's MulticopterMotorModel plugin (which subscribes Actuators,
 # not the per-rotor Double the v0.18 bridge published).
-prost = { version = "0.13", features = ["derive"], optional = true }
+prost = { version = "0.14", features = ["derive"], optional = true }
