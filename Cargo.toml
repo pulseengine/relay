@@ -43,6 +43,7 @@ members = [
     "examples/falcon-sitl-hover",
     "examples/falcon-hitl-rfspoof",
     "examples/falcon-sitl-gz",
+    "examples/falcon-mavlink-viz",
     "coverage_subjects/geofence_subject_rs",
     "host/falcon-config",
     "host/relay-sb",

@@ -1,0 +1,19 @@
+[package]
+name = "falcon-mavlink-viz"
+description = "Falcon v1.28 video harness — drives a SimBackend flight from a real MAVLink COMMAND_LONG timeline through the falcon-mavlink bridge + FlightSupervisor, and emits a per-frame JSONL of {mode, NED pose, the RX command this frame, the decoded outbound HEARTBEAT + GLOBAL_POSITION_INT}. The renderer turns this into the release video: the aircraft you see is the genuine response to the MAVLink commands, and the telemetry HUD shows the bridge's actual decoded bytes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "falcon-mavlink-viz"
+path = "src/main.rs"
+
+[dependencies]
+falcon-core = { path = "../../crates/falcon-core" }
+falcon-mavlink = { path = "../../crates/falcon-mavlink" }
+relay-mavlink = { path = "../../crates/relay-mavlink" }
+relay-fsm = { path = "../../crates/relay-fsm" }
+relay-iekf = { path = "../../crates/relay-iekf" }
