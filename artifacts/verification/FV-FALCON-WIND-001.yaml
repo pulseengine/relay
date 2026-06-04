@@ -1,0 +1,40 @@
+artifacts:
+  - id: FV-FALCON-WIND-001
+    type: sw-verification
+    title: "Wind rejection via position-loop integral (v1.16.0)"
+    status: approved
+    description: >
+      Verification of the v1.16.0 wind layer (15 falcon-core tests pass, clippy
+      clean, embedded builds), the first SITL-realism release:
+
+      1. holds_position_under_steady_wind — through the FlightBackend seam, the
+         P-I-D position loop holds within 0.6 m of the setpoint under a steady
+         5 m/s wind (a translational drag force the ESO does not reject).
+
+      2. bare_pd_loop_offsets_under_wind (FALSIFICATION→fix) — with the integral
+         DISABLED (ki=0, P-D only) the same wind leaves an offset > 1.5 m, and
+         the integral cuts it by more than half. This is the honest motivation
+         for the integral: a P-D loop cannot reject a constant force.
+
+      3. rejects_wind_gusts — a 3 m/s wind + 2 m/s deterministic gusts stays
+         bounded < 1.0 m; the integral tracks the mean, the loop rides the gust.
+
+      SimBackend gained a relative-velocity wind drag F = K_WIND·(v_wind −
+      v_body) with gusts; FlightCore gained an anti-windup position integral
+      (ki_pos) + a set_position_integral_gain seam for the contrast test. The gz
+      Harmonic realism is examples/falcon-sitl-gz/worlds/falcon-quad-wind.sdf
+      (WindEffects + <wind> + <enable_wind> on base_link; validates with gz sdf).
+
+      Honest limit: K_WIND is sized so a 5 m/s wind (~0.75 m/s²) stays within
+      the gentle tilt authority (a_cmd_max ≈ 1 m/s²); a wind force exceeding that
+      authority blows the vehicle away regardless of control — a real documented
+      limit, published, not hidden.
+    tags: [verification, falcon, wind, environment, realism, v1.16]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WIND-P01

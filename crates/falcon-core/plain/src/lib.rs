@@ -78,7 +78,13 @@ pub struct FlightCore {
     kd_alt: f32,
     kp_pos: f32,
     kd_vel: f32,
+    ki_pos: f32,
     a_cmd_max: f32,
+    /// Horizontal position-error integral (x,y). The integral term (v1.16) is
+    /// what rejects a STEADY force disturbance (wind) the P-D loop alone leaves
+    /// as a position offset. Anti-windup clamps its acceleration contribution.
+    pos_int: [f32; 2],
+    pos_int_max: f32,
 }
 
 impl FlightCore {
@@ -99,7 +105,10 @@ impl FlightCore {
             kd_alt: 0.30,
             kp_pos: 0.08,
             kd_vel: 0.6,
+            ki_pos: 0.02,
             a_cmd_max: 1.0,
+            pos_int: [0.0; 2],
+            pos_int_max: 1.5,
         }
     }
 
@@ -111,6 +120,14 @@ impl FlightCore {
     /// Command a full NED position target (metres; z negative = up). v1.3.
     pub fn set_position(&mut self, ned: Vec3) {
         self.setpoint = ned;
+    }
+
+    /// Set the horizontal position-loop integral gain (v1.16). `0` disables the
+    /// integral (P-D only) — used to show the steady-wind offset the integral
+    /// removes. Resets the accumulated integral.
+    pub fn set_position_integral_gain(&mut self, ki: f32) {
+        self.ki_pos = ki;
+        self.pos_int = [0.0; 2];
     }
 
     /// The estimated nav state (for telemetry / tests).
@@ -141,12 +158,21 @@ impl FlightCore {
         let alt_err = self.setpoint[2] - est.p[2];
         let thrust = (self.hover_thrust - self.kp_alt * alt_err + self.kd_alt * est.v[2]).clamp(0.0, 1.0);
 
-        // ── Horizontal position loop (v1.3) ── P-D on (pos, vel) error →
-        // commanded NED acceleration, magnitude-saturated. The vehicle TILTS
-        // to realise a_cmd; the geometric desired-rate maps it to a body rate.
+        // ── Horizontal position loop (v1.3 P-D, v1.16 +I) ── P-I-D on (pos,
+        // vel) error → commanded NED acceleration, magnitude-saturated. The
+        // vehicle TILTS to realise a_cmd. The INTEGRAL (v1.16) rejects a steady
+        // force disturbance (wind): the P-D terms alone settle at an offset
+        // where kp·err balances the wind force; the integral winds up to supply
+        // that command at zero error. Anti-windup clamps its accel contribution.
+        let perr = [self.setpoint[0] - est.p[0], self.setpoint[1] - est.p[1]];
+        for i in 0..2 {
+            self.pos_int[i] += perr[i] * dt;
+            let cap = if self.ki_pos > 0.0 { self.pos_int_max / self.ki_pos } else { 0.0 };
+            self.pos_int[i] = self.pos_int[i].clamp(-cap, cap);
+        }
         let mut a_cmd = [
-            self.kp_pos * (self.setpoint[0] - est.p[0]) - self.kd_vel * est.v[0],
-            self.kp_pos * (self.setpoint[1] - est.p[1]) - self.kd_vel * est.v[1],
+            self.kp_pos * perr[0] - self.kd_vel * est.v[0] + self.ki_pos * self.pos_int[0],
+            self.kp_pos * perr[1] - self.kd_vel * est.v[1] + self.ki_pos * self.pos_int[1],
             0.0,
         ];
         let ah = relay_math::sqrtf(a_cmd[0] * a_cmd[0] + a_cmd[1] * a_cmd[1]);
@@ -414,6 +440,12 @@ pub struct SimBackend {
     k_thrust: f32,
     /// A constant body-torque disturbance the verified ESO must reject (v1.2).
     pub disturbance: Vec3,
+    /// Steady wind velocity in NED (m/s) — a translational FORCE disturbance
+    /// (relative-velocity drag, mirroring gz WindEffects F = k·(v_wind−v_body)).
+    /// The position loop, not the ESO, must reject this (v1.16).
+    pub wind: Vec3,
+    /// Gust amplitude (m/s) added to the wind as deterministic broadband noise.
+    pub gust_amp: f32,
     /// Battery voltage reported to the supervisor's failsafe (v1.8).
     pub battery_v: f32,
     /// Injected sensor pathologies (v1.9).
@@ -441,6 +473,8 @@ impl SimBackend {
             torque_scale: 0.25,
             k_thrust: GRAVITY / (4.0 * 0.5), // hover collective 4×0.5 ⇒ T = g
             disturbance: [0.0; 3],
+            wind: [0.0; 3],
+            gust_amp: 0.0,
             battery_v: 16.0,
             path: Pathology::default(),
             step_n: 0,
@@ -562,11 +596,25 @@ impl FlightBackend for SimBackend {
         // translation: thrust acts along −body-z; in NED that is
         // −T·(R·ẑ) = −T·[r02, r12, r22]; add gravity (+g on NED-z). m = 1.
         let thrust = collective * self.k_thrust;
-        let accel = [
+        let mut accel = [
             -thrust * self.r[0][2],
             -thrust * self.r[1][2],
             -thrust * self.r[2][2] + GRAVITY,
         ];
+        // v1.16 — wind: a relative-velocity drag force in NED (mass = 1), the
+        // gz-WindEffects form F = K_WIND·(v_wind − v_body), with deterministic
+        // gusts. A translational disturbance the position loop (not the ESO)
+        // must reject. Horizontal only. K_WIND is sized so a strong 5 m/s wind
+        // (~0.75 m/s²) stays within the gentle tilt authority (a_cmd_max ≈ 1
+        // m/s²); a wind whose force exceeds that authority blows the vehicle
+        // away regardless of control — a real, documented limit, not a bug.
+        const K_WIND: f32 = 0.15;
+        if self.wind[0] != 0.0 || self.wind[1] != 0.0 || self.gust_amp != 0.0 {
+            for i in 0..2 {
+                let gust = self.gust_amp * self.noise_unit();
+                accel[i] += K_WIND * (self.wind[i] + gust - self.vel[i]);
+            }
+        }
         for i in 0..3 {
             self.vel[i] += self.dt * accel[i];
             self.pos[i] += self.dt * self.vel[i];
@@ -957,5 +1005,55 @@ mod tests {
             tilt < 0.1,
             "core must recover to level through the HARDWARE seam: {tilt} rad (start {tilt0})"
         );
+    }
+
+    // ── v1.16 wind: a translational FORCE disturbance the position loop must
+    // reject (the ESO handles torque, not this). The integral term is the fix.
+
+    /// Hold position at the origin under a given wind for N steps; return the
+    /// final horizontal distance from home. `ki=Some(0.0)` ⇒ P-D only.
+    fn fly_under_wind(wind: Vec3, gust: f32, ki: Option<f32>, steps: usize) -> f32 {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.wind = wind;
+        b.gust_amp = gust;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        if let Some(k) = ki {
+            core.set_position_integral_gain(k);
+        }
+        core.set_position([0.0, 0.0, -2.0]);
+        for _ in 0..steps {
+            core.step(&mut b);
+        }
+        relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1])
+    }
+
+    /// The P-I-D position loop REJECTS a steady 5 m/s wind — the integral winds
+    /// up to counter the constant force, returning near the setpoint.
+    #[test]
+    fn holds_position_under_steady_wind() {
+        let d = fly_under_wind([3.0, 4.0, 0.0], 0.0, None, 30000); // 5 m/s
+        assert!(d < 0.6, "P-I-D must reject steady wind: {d} m from home");
+    }
+
+    /// FALSIFICATION (the honest motivation): with the integral DISABLED
+    /// (ki=0, P-D only) the same wind leaves a much larger steady offset — a
+    /// P-D loop cannot reject a constant force. This is why v1.16 adds the
+    /// integral, and the integral must cut the offset by more than half.
+    #[test]
+    fn bare_pd_loop_offsets_under_wind() {
+        let d_pd = fly_under_wind([3.0, 4.0, 0.0], 0.0, Some(0.0), 30000);
+        let d_pid = fly_under_wind([3.0, 4.0, 0.0], 0.0, None, 30000);
+        assert!(d_pd > 1.5, "P-D alone should offset under wind: {d_pd} m");
+        assert!(d_pid < d_pd * 0.5, "the integral must cut the offset: PID {d_pid} m vs PD {d_pd} m");
+    }
+
+    /// Gusts on top of the steady wind stay bounded — the integral tracks the
+    /// mean, the loop rides out the deterministic broadband gust.
+    #[test]
+    fn rejects_wind_gusts() {
+        let d = fly_under_wind([3.0, 0.0, 0.0], 2.0, None, 30000); // 3 m/s + 2 m/s gusts
+        assert!(d < 1.0, "P-I-D must keep gusty wind bounded: {d} m from home");
     }
 }
