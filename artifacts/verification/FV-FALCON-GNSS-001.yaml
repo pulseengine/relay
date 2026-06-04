@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-FALCON-GNSS-001
+    type: sw-verification
+    title: "Noisy + intermittent GNSS: variance-matched hold vs over-trust divergence (v1.19.0)"
+    status: approved
+    description: >
+      Verification of the v1.19.0 GNSS-realism layer (20 falcon-core tests pass,
+      clippy clean), realism arc release 4:
+
+      1. holds_under_noisy_intermittent_gps — through the FlightBackend seam,
+         with 0.3 m per-axis fix noise + a recurring 0.6 s outage every 3 s, a
+         variance-matched filter (pos_var = (0.3 m)² = 0.09) smooths the noise
+         and dead-reckons through the outages, holding peak drift < 1.5 m.
+
+      2. optimistic_variance_diverges_under_noisy_gps (FALSIFICATION→fix) — the
+         optimistic default variance (0.01 = 1 cm²) OVER-TRUSTS the metre-class
+         fix: the filter injects the noise, the v1.16 position integral winds up
+         on it, and the loop DIVERGES (> 10 m, observed ~2400 m). The matched
+         variance is > 10x better. The honest motivation for set_pos_var: the
+         filter must model the actual sensor noise.
+
+      SimBackend gained Pathology.gps_noise (continuous fix noise) and
+      gps_dropout_period (recurring intermittent outage, beyond v1.9's single
+      window); FlightCore gained set_pos_var. The gz Harmonic realism is
+      examples/falcon-sitl-gz/worlds/falcon-quad-gnss.sdf — the navsat sensor's
+      position/velocity <noise> (the base world had none; validates with gz sdf).
+    tags: [verification, falcon, gnss, sensor-fidelity, realism, v1.19]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-GNSS-P01

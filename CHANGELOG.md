@@ -15,6 +15,39 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.19.0] — 2026-06-04
+
+**Realism arc release 4 of 10.** Noisy + intermittent GNSS — and it surfaced a
+second control-theory gap, this time downstream of the v1.16 integral.
+
+### The finding (falsification → fix)
+
+Realistic GNSS is metre-class noise plus recurring outages. The IEKF's default
+position-measurement variance was **`0.01` (1 cm²) — wildly over-trusting** a
+0.3 m fix. Under that mismatch the filter *injects* the noise, the v1.16
+position integral **winds up on it**, and the loop **diverges (>10 m, observed
+~2400 m)**. The fix is honest filter tuning: **match the measurement variance
+to the actual sensor** (`set_pos_var`).
+
+### Added / changed (`falcon-core`)
+
+- **`Pathology`** gains `gps_noise` (continuous fix noise) and
+  `gps_dropout_period` (recurring intermittent outage — beyond v1.9's single
+  window).
+- **`FlightCore::set_pos_var`** — tune the filter to the receiver.
+- **`worlds/falcon-quad-gnss.sdf`** — gz realism: the `navsat` sensor's
+  position/velocity `<noise>` (the base world had **none**; validates).
+
+### Verified (20 tests, clippy clean, embedded builds)
+
+- `holds_under_noisy_intermittent_gps` — variance-matched (`pos_var=(0.3 m)²`),
+  with 0.3 m noise + a 0.6 s outage every 3 s, holds **< 1.5 m**.
+- `optimistic_variance_diverges_under_noisy_gps` — the over-trusting default
+  **diverges > 10 m**; matched is **> 10× better**. The published
+  falsification→fix.
+
+rivet PASS · SYSREQ-FALCON-018 · SWREQ-FALCON-GNSS-P01 · FV-FALCON-GNSS-001.
+
 ## [falcon-v1.18.0] — 2026-06-04
 
 **Realism arc release 3 of 10 — first sensor-fidelity release.** A realistic IMU
