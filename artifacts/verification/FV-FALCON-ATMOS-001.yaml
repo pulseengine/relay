@@ -1,0 +1,38 @@
+artifacts:
+  - id: FV-FALCON-ATMOS-001
+    type: sw-verification
+    title: "Air-density thrust lapse: altitude integral + service ceiling (v1.22.0)"
+    status: approved
+    description: >
+      Verification of the v1.22.0 atmosphere / thrust-lapse layer (25 falcon-core
+      tests pass, clippy clean, embedded builds), realism arc release 7:
+
+      1. holds_altitude_under_thrust_lapse — with the opt-in altitude integral
+         enabled, the vehicle holds 20 m within 1 m despite air-density thrust
+         lapse (thrust = collective·k·(1 − lapse·alt)).
+
+      2. bare_altitude_pd_sags_under_lapse (FALSIFICATION→fix) — with the
+         integral DISABLED (P-D only) the thrust deficit leaves the vehicle
+         sagging below the target (< 19 m); the integral closes the gap. This
+         mirrors the v1.16 horizontal finding for the vertical axis.
+
+      3. thrust_lapse_imposes_service_ceiling — commanded to 80 m, the lapse caps
+         altitude at ~50 m (where full thrust just hovers); the vehicle settles
+         in 35–65 m, well below the command, even with the integral — an honest
+         physical limit, not a control failure.
+
+      SimBackend gained thrust_lapse; FlightCore gained an OPT-IN altitude
+      integral (set_altitude_integral_gain), default-OFF because default-on
+      regressed the mission/landing altitude hold (an honest tuning trade-off,
+      documented). gz Harmonic realism: the <atmosphere type="adiabatic"> model
+      (in gen-realism-world.py) + a density→thrust bridge (custom; the gz
+      atmosphere does not auto-lapse thrust).
+    tags: [verification, falcon, atmosphere, thrust-lapse, realism, v1.22]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-ATMOS-P01

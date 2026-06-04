@@ -1,0 +1,32 @@
+artifacts:
+  - id: SWREQ-FALCON-ATMOS-P01
+    type: sw-req
+    title: "ATMOS-P01 — altitude hold under air-density thrust lapse + service ceiling"
+    status: implemented
+    description: >
+      The flight stack shall account for air-density thrust lapse: thrust falls
+      with altitude (thrust = collective·k·(1 − lapse·alt)), so the altitude
+      loop must raise collective to hold a commanded altitude, and beyond the
+      thrust margin the vehicle shall exhibit a service ceiling rather than
+      diverge. An OPT-IN altitude-loop integral (set_altitude_integral_gain)
+      rejects the steady thrust deficit the P-D altitude loop alone leaves as an
+      offset; it is default-off because, like an aggressive integrator, it
+      interacts with large altitude transients (takeoff/landing) — a documented
+      tuning trade-off, enabled for high-altitude flight. Modelled in the no_std
+      SimBackend (thrust_lapse) and in the gz Harmonic SITL via the
+      <atmosphere type="adiabatic"> model + a density→thrust bridge (the gz
+      atmosphere does not auto-lapse thrust, per the realism catalog).
+    tags: [falcon, atmosphere, thrust-lapse, altitude, ceiling, realism, v1.22]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: with the altitude
+        integral enabled, the vehicle holds 20 m within 1 m despite a thrust
+        lapse; with it disabled (P-D only) it sags below the target (< 19 m), and
+        the integral closes the gap; commanded to 80 m, the lapse imposes a
+        service ceiling (final altitude 35–65 m, well below the command), even
+        with the integral. clippy clean; embedded builds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-017
