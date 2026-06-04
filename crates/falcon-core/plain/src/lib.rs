@@ -130,6 +130,14 @@ impl FlightCore {
         self.pos_int = [0.0; 2];
     }
 
+    /// Set the IEKF position-measurement variance (m²) (v1.19). This must match
+    /// the ACTUAL GNSS fix noise: the default (0.01 = 1 cm²) over-trusts a
+    /// metre-class fix, injecting noise the loop chases into instability. Set it
+    /// to ≈ stddev² of the real receiver.
+    pub fn set_pos_var(&mut self, var: f32) {
+        self.pos_var = var;
+    }
+
     /// The estimated nav state (for telemetry / tests).
     pub fn state(&self) -> NavState {
         self.iekf.state()
@@ -320,6 +328,13 @@ pub struct Pathology {
     pub gyro_bias_rw: f32,
     /// Gyro white-noise stddev (rad/s) added to each measured rate (v1.18).
     pub gyro_white: f32,
+    /// GNSS position-fix noise stddev (m, per axis) — continuous (v1.19).
+    pub gps_noise: f32,
+    /// Intermittent GNSS outage period (control steps). If > 0, the fix drops
+    /// for `gps_dropout_len` steps every `gps_dropout_period` steps — a
+    /// recurring loss the estimator must dead-reckon through and re-acquire
+    /// (v1.19, distinct from v1.9's single window).
+    pub gps_dropout_period: u32,
 }
 
 // ── v1.11 — the real-hardware backend SEAM ───────────────────────────────
@@ -570,13 +585,26 @@ impl FlightBackend for SimBackend {
         ImuSample { accel, gyro }
     }
     fn read_position(&mut self) -> Option<Vec3> {
-        // v1.9 — GPS dropout window: no fix ⇒ the IEKF dead-reckons.
-        let p = &self.path;
+        let p = self.path;
+        // v1.9 — single GPS dropout window: no fix ⇒ the IEKF dead-reckons.
         if p.gps_dropout_len > 0
             && self.step_n >= p.gps_dropout_start
             && self.step_n < p.gps_dropout_start + p.gps_dropout_len
         {
             return None;
+        }
+        // v1.19 — INTERMITTENT periodic outage: drop the fix for gps_dropout_len
+        // steps every gps_dropout_period steps (recurring loss, not one window).
+        if p.gps_dropout_period > 0 && (self.step_n % p.gps_dropout_period) < p.gps_dropout_len {
+            return None;
+        }
+        // v1.19 — continuous GNSS position noise (Gaussian per axis).
+        if p.gps_noise > 0.0 {
+            return Some([
+                self.pos[0] + p.gps_noise * self.noise_unit(),
+                self.pos[1] + p.gps_noise * self.noise_unit(),
+                self.pos[2] + p.gps_noise * self.noise_unit(),
+            ]);
         }
         Some(self.pos) // full 6-DoF NED position (v1.3)
     }
@@ -1161,5 +1189,55 @@ mod tests {
         // after ~40 s the injected bias has random-walked to ≈0.01·√40 ≈ 0.06
         // rad/s; the IEKF tracks it, so the steady tilt stays bounded.
         assert!(peak < 0.15, "IEKF must hold under random-walk gyro bias: peak tilt {peak} rad");
+    }
+
+    // ── v1.19 GNSS realism: continuous position noise + INTERMITTENT periodic
+    // outage (recurring loss), beyond v1.9's single dropout window.
+
+    /// Shared scenario: hold at the origin under 0.3 m noisy GNSS + a recurring
+    /// 0.6 s outage every 3 s; `pos_var` is the filter's assumed fix variance.
+    /// Returns the peak horizontal drift after settling.
+    fn fly_noisy_gps(pos_var: f32) -> f32 {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt).with_pathology(Pathology {
+            gps_noise: 0.3,           // 30 cm per-axis fix noise
+            gps_dropout_period: 1500, // every 3 s …
+            gps_dropout_len: 300,     // … lose the fix for 0.6 s
+            ..Default::default()
+        });
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_pos_var(pos_var);
+        core.set_position([0.0, 0.0, -2.0]);
+        let mut peak = 0.0f32;
+        for k in 0..30000 {
+            core.step(&mut b);
+            if k > 4000 {
+                let d = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
+                peak = peak.max(d);
+            }
+        }
+        peak
+    }
+
+    /// Position hold survives noisy + intermittently-dropping GNSS WHEN the
+    /// filter's measurement variance matches the receiver: the IEKF smooths the
+    /// 0.3 m fix noise and dead-reckons through the recurring outage, bounded.
+    #[test]
+    fn holds_under_noisy_intermittent_gps() {
+        let peak = fly_noisy_gps(0.09); // var = (0.3 m)² — matched to the fix noise
+        assert!(peak < 1.5, "variance-matched filter must hold under noisy GNSS: peak {peak} m");
+    }
+
+    /// FALSIFICATION: the optimistic default variance (0.01 = 1 cm²) over-trusts
+    /// a metre-class fix — the filter injects the noise, the v1.16 integral
+    /// winds up on it, and the loop DIVERGES (>10 m). The honest motivation for
+    /// matching the measurement variance to the real sensor (set_pos_var).
+    #[test]
+    fn optimistic_variance_diverges_under_noisy_gps() {
+        let peak_optimistic = fly_noisy_gps(0.01); // default 1 cm² — over-trusting
+        let peak_matched = fly_noisy_gps(0.09); // matched
+        assert!(peak_optimistic > 10.0, "over-trust should diverge: {peak_optimistic} m");
+        assert!(peak_matched < peak_optimistic * 0.1, "matched must be far better: {peak_matched} vs {peak_optimistic} m");
     }
 }

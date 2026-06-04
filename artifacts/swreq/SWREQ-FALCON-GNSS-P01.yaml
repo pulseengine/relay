@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-FALCON-GNSS-P01
+    type: sw-req
+    title: "GNSS-P01 — hold under noisy + intermittent GNSS via variance-matched filter"
+    status: implemented
+    description: >
+      The vehicle shall hold position under realistic GNSS — continuous
+      metre-class fix noise plus recurring (intermittent) outages — and the IEKF
+      position-measurement variance shall match the actual receiver noise. An
+      optimistic variance (over-trusting a metre-class fix) injects the noise,
+      the v1.16 position integral winds up on it, and the loop DIVERGES; matching
+      the variance to the sensor restores a bounded hold. Modelled in the no_std
+      SimBackend (Pathology gps_noise + gps_dropout_period intermittent outage)
+      and in the gz Harmonic navsat via position/velocity <noise> (the base
+      world had none). Exposes set_pos_var to tune the filter to the sensor.
+    tags: [falcon, gnss, gps, noise, outage, sensor-fidelity, v1.19]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend with 0.3 m fix noise +
+        a recurring 0.6 s outage every 3 s: a variance-matched filter
+        (pos_var=0.09=(0.3 m)²) holds peak drift < 1.5 m; the optimistic default
+        (pos_var=0.01=1 cm²) DIVERGES (> 10 m), and matching is > 10x better —
+        the published falsification→fix. clippy clean; the falcon-quad-gnss.sdf
+        gz world (navsat position/velocity noise) validates.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-018
