@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-DRAG-P01
+    type: sw-req
+    title: "DRAG-P01 — track setpoints through quadratic aerodynamic drag"
+    status: implemented
+    description: >
+      The flight stack shall remain accurate and stable under realistic
+      quadratic aerodynamic drag — a force F = -Cd·|v_air|·v_air on the
+      horizontal relative airspeed (v_body − v_wind) that grows with v² and so
+      dominates fast motion (mission legs) and caps drift speed. Modelled in the
+      no_std SimBackend (a drag_quad coefficient) and in the gz Harmonic SITL
+      via LiftDrag on base_link (a crude body-drag stand-in; gz's better
+      multirotor body-drag path is WindEffects + the motor rotorDragCoefficient,
+      noted honestly). Drag is also a stabilising damping force.
+    tags: [falcon, drag, aerodynamics, environment, realism, v1.17]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: the position loop
+        tracks a far setpoint ([4,0,-2] m) to within 0.6 m through quadratic
+        drag; a horizontally-kicked vehicle (4 m/s) sheds the kick with a
+        SMALLER peak excursion WITH drag than without (the v² damping). clippy
+        clean; the falcon-quad-drag.sdf gz world (LiftDrag) validates.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-017
