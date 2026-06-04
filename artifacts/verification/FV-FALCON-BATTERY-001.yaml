@@ -1,0 +1,32 @@
+artifacts:
+  - id: FV-FALCON-BATTERY-001
+    type: sw-verification
+    title: "Low-battery failsafe on a real draining pack (v1.21.0)"
+    status: approved
+    description: >
+      Verification of the v1.21.0 battery-drain layer (22 falcon-core tests pass,
+      clippy clean, embedded builds), realism arc release 6 (energy realism):
+
+      battery_drain_actuates_endurance_failsafe — through the FlightBackend seam,
+      with battery_drain on (a pack starting full), the supervisor arms, takes
+      off and loiters while the charge depletes with motor load and the terminal
+      voltage sags (V = 12.6 + 4.2·charge − R·I). The voltage SAGS below the 14 V
+      threshold (min_v < 14, computed each step — not the v1.8 set value), the
+      charge genuinely depletes (< 0.9), and the supervisor actuates a recovery
+      (RTL/Land/Disarmed). The v1.8 failsafe now fires on a real endurance limit.
+
+      SimBackend gained battery_drain + battery_charge (LinearBattery-style model;
+      battery_v computed from charge and load). gz Harmonic realism: the
+      LinearBatteryPlugin (gz-sim-linearbatteryplugin-system) drains with a motor
+      power-load bridge — documented here; the gz world is folded into the
+      consolidated realism world rather than a 6th per-release near-duplicate SDF
+      (repo-hygiene cleanup).
+    tags: [verification, falcon, battery, energy, realism, v1.21]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-BATTERY-P01

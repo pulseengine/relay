@@ -1,0 +1,30 @@
+artifacts:
+  - id: SWREQ-FALCON-BATTERY-P01
+    type: sw-req
+    title: "BATTERY-P01 — low-battery failsafe fires on a real draining pack"
+    status: implemented
+    description: >
+      The v1.8 low-battery failsafe shall be exercised against a realistic energy
+      model rather than a set voltage: the battery charge shall drain with motor
+      power and the terminal voltage shall sag under load
+      (V = 12.6 + 4.2·charge − R·I, a LinearBattery-style open-circuit + sag
+      model). The supervisor's failsafe shall then fire on a genuine endurance
+      limit. Modelled in the no_std SimBackend (battery_drain + battery_charge,
+      voltage computed each step) and in the gz Harmonic SITL via the
+      LinearBatteryPlugin (gz-sim-linearbatteryplugin-system) with a motor
+      power-load bridge — documented; the gz realism world is folded into the
+      consolidated realism world (post-cleanup) rather than a per-release
+      near-duplicate SDF.
+    tags: [falcon, battery, energy, endurance, failsafe, realism, v1.21]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam: with battery_drain on, the supervisor
+        arms, takes off and loiters while the pack depletes; the terminal voltage
+        SAGS below the 14 V threshold (min_v < 14, computed not set), the charge
+        genuinely depletes (< 0.9), and the supervisor actuates a recovery
+        (RTL/Land/Disarmed). clippy clean; embedded builds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-019
