@@ -15,6 +15,33 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.17.0] — 2026-06-04
+
+**Realism arc release 2 of 10.** Quadratic aerodynamic drag — the `v²` force
+that matters during fast mission legs (where v1.16's linear wind term doesn't),
+caps drift speed, and *damps* the vehicle.
+
+### Added / changed (`falcon-core`)
+
+- **`SimBackend`** gains a `drag_quad` coefficient applying
+  `F = −Cd·|v_air|·v_air` on the horizontal relative airspeed
+  (`v_body − v_wind`).
+- **`worlds/falcon-quad-drag.sdf`** — gz Harmonic realism via `LiftDrag` on
+  `base_link` (validates with `gz sdf`). *Honest note:* LiftDrag models a single
+  lifting surface — a crude stand-in for an omnidirectional quad body; gz's
+  better body-drag path is `WindEffects` (v1.16) + the motor
+  `rotorDragCoefficient`, documented in the world.
+
+### Verified (17 tests, clippy clean, embedded builds)
+
+- `tracks_setpoint_through_aerodynamic_drag` — the P-I-D loop tracks a far
+  setpoint (`[4,0,−2]` m) to **within 0.6 m** through quadratic drag.
+- `quadratic_drag_damps_a_kick` — a 4 m/s horizontal kick sheds with a
+  **smaller peak excursion *with* drag** than without (the `v²` damping; drag is
+  a stabilising force, not only a disturbance).
+
+rivet PASS · SYSREQ-FALCON-017 · SWREQ-FALCON-DRAG-P01 · FV-FALCON-DRAG-001.
+
 ## [falcon-v1.16.0] — 2026-06-04
 
 **Release 1 of the SITL-realism arc (v1.16→v1.25).** Wind — the disturbance

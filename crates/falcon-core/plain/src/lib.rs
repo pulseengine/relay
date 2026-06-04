@@ -446,6 +446,11 @@ pub struct SimBackend {
     pub wind: Vec3,
     /// Gust amplitude (m/s) added to the wind as deterministic broadband noise.
     pub gust_amp: f32,
+    /// Quadratic aerodynamic drag coefficient (v1.17): F = −Cd·|v_air|·v_air on
+    /// the horizontal relative airspeed (v_body − v_wind). Unlike the linear
+    /// wind term it grows with v², so it dominates during fast motion (mission
+    /// legs) and caps the drift speed; it is also a stabilising damping force.
+    pub drag_quad: f32,
     /// Battery voltage reported to the supervisor's failsafe (v1.8).
     pub battery_v: f32,
     /// Injected sensor pathologies (v1.9).
@@ -475,6 +480,7 @@ impl SimBackend {
             disturbance: [0.0; 3],
             wind: [0.0; 3],
             gust_amp: 0.0,
+            drag_quad: 0.0,
             battery_v: 16.0,
             path: Pathology::default(),
             step_n: 0,
@@ -613,6 +619,16 @@ impl FlightBackend for SimBackend {
             for i in 0..2 {
                 let gust = self.gust_amp * self.noise_unit();
                 accel[i] += K_WIND * (self.wind[i] + gust - self.vel[i]);
+            }
+        }
+        // v1.17 — quadratic aerodynamic drag on the horizontal relative airspeed
+        // (v_body − v_wind): F = −Cd·|v_air|·v_air. Grows with v² (dominates fast
+        // motion, caps drift speed) and damps the vehicle. mass = 1.
+        if self.drag_quad > 0.0 {
+            let va = [self.vel[0] - self.wind[0], self.vel[1] - self.wind[1]];
+            let speed = relay_math::sqrtf(va[0] * va[0] + va[1] * va[1]);
+            for i in 0..2 {
+                accel[i] -= self.drag_quad * speed * va[i];
             }
         }
         for i in 0..3 {
@@ -1055,5 +1071,55 @@ mod tests {
     fn rejects_wind_gusts() {
         let d = fly_under_wind([3.0, 0.0, 0.0], 2.0, None, 30000); // 3 m/s + 2 m/s gusts
         assert!(d < 1.0, "P-I-D must keep gusty wind bounded: {d} m from home");
+    }
+
+    // ── v1.17 aerodynamic drag (quadratic, ∝ v²) ──────────────────────────
+
+    /// The position loop TRACKS a far setpoint through realistic quadratic
+    /// aerodynamic drag — the drag opposes the transit and caps top speed, but
+    /// the P-I-D overcomes it and settles on target.
+    #[test]
+    fn tracks_setpoint_through_aerodynamic_drag() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.drag_quad = 0.05;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_position([4.0, 0.0, -2.0]);
+        for _ in 0..40000 {
+            core.step(&mut b);
+        }
+        let e = [b.pos[0] - 4.0, b.pos[1], b.pos[2] + 2.0];
+        let err = relay_math::sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        assert!(err < 0.6, "must track the setpoint through drag: {err} m");
+    }
+
+    /// Quadratic drag DAMPS the vehicle: a horizontally-kicked drone sheds the
+    /// kick faster WITH drag than without — the peak excursion is smaller.
+    /// Demonstrates the v² damping physics (drag is also a stabilising force).
+    #[test]
+    fn quadratic_drag_damps_a_kick() {
+        let run = |cd: f32| -> f32 {
+            let dt = 0.002f32;
+            let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+            let mut b = SimBackend::new(level, dt);
+            b.drag_quad = cd;
+            b.vel = [4.0, 0.0, 0.0]; // a 4 m/s horizontal kick
+            let mut core = FlightCore::new(0.5, 1.0 / dt);
+            core.set_position([0.0, 0.0, -2.0]);
+            let mut peak = 0.0f32;
+            for _ in 0..15000 {
+                core.step(&mut b);
+                let d = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
+                peak = peak.max(d);
+            }
+            peak
+        };
+        let peak_no_drag = run(0.0);
+        let peak_drag = run(0.15);
+        assert!(
+            peak_drag < peak_no_drag,
+            "drag must damp the kick: peak {peak_drag} m vs no-drag {peak_no_drag} m"
+        );
     }
 }

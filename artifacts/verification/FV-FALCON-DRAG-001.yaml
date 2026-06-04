@@ -1,0 +1,37 @@
+artifacts:
+  - id: FV-FALCON-DRAG-001
+    type: sw-verification
+    title: "Quadratic aerodynamic drag: tracking + damping (v1.17.0)"
+    status: approved
+    description: >
+      Verification of the v1.17.0 aerodynamic-drag layer (17 falcon-core tests
+      pass, clippy clean), realism arc release 2:
+
+      1. tracks_setpoint_through_aerodynamic_drag — through the FlightBackend
+         seam, the P-I-D position loop tracks a far setpoint ([4,0,-2] m) to
+         within 0.6 m through quadratic drag (drag_quad=0.05). The drag opposes
+         the transit and caps top speed; the loop overcomes it and settles.
+
+      2. quadratic_drag_damps_a_kick — a horizontally-kicked vehicle (4 m/s)
+         sheds the kick with a SMALLER peak excursion WITH drag (drag_quad=0.15)
+         than without — the v² damping the model adds (drag is a stabilising
+         force, not just a disturbance).
+
+      SimBackend gained a drag_quad coefficient applying F = -Cd·|v_air|·v_air on
+      the horizontal relative airspeed (v_body − v_wind). The gz Harmonic realism
+      is examples/falcon-sitl-gz/worlds/falcon-quad-drag.sdf (LiftDrag on
+      base_link; validates with gz sdf).
+
+      Honest note: LiftDrag models a single lifting SURFACE — a crude stand-in
+      for an omnidirectional quad body. gz's better multirotor body-drag path is
+      WindEffects (v1.16 world) + the motor rotorDragCoefficient; the world is
+      documented as such. The analytic SimBackend drag is the proof-grade piece.
+    tags: [verification, falcon, drag, aerodynamics, realism, v1.17]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-DRAG-P01
