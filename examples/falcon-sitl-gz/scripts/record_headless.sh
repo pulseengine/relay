@@ -116,12 +116,14 @@ fly_once() {
   local T1; T1=$(python3 -c 'import time;print(time.time())')
   kill $SUB $SRV 2>/dev/null; pkill -f 'gz sim' 2>/dev/null; sleep 1
   local V; V=$(grep -E 'verdict:' /tmp/gz-headless-fly.log | tail -1)
-  ELAPSED=$(python3 -c "print(max(1.0,$T1-$T0))")
+  local elapsed; elapsed=$(python3 -c "print(max(1.0,$T1-$T0))")
   local peak final rms
   peak=$(echo "$V" | sed -nE 's/.*peak_dist=([0-9.]+)m.*/\1/p'); peak=${peak:-9999}
   final=$(echo "$V" | sed -nE 's/.*final_dist=([0-9.]+)m.*/\1/p'); final=${final:-9999}
   rms=$(echo "$V" | sed -nE 's/.*rms_steady=([0-9.]+)m.*/\1/p'); rms=${rms:-9999}
-  echo "$peak $final $rms"
+  # echo ELAPSED as the 4th field: fly_once runs in a `< <(…)` subshell, so a
+  # global assignment here would be lost — the caller captures it via `read`.
+  echo "$peak $final $rms $elapsed"
 }
 
 # encode $FRAMES (in correct numeric order, real-time) -> $1 ; trims START_TRIM
@@ -150,7 +152,7 @@ if [ "$VIEW" = "markers" ]; then
   best_k=0; best_score=999999; best_framed=0
   for k in $(seq 1 "$RUNS"); do
     echo "== run $k/$RUNS =="
-    read peak final rms < <(fly_once)
+    read peak final rms ELAPSED < <(fly_once)
     echo "   peak=${peak}m final=${final}m rms=${rms}m"
     rm -rf "/tmp/run_$k"; cp -r "$FRAMES" "/tmp/run_$k"; echo "$ELAPSED" > "/tmp/run_$k.elap"
     framed=$(python3 -c "print(1 if float('$peak')<$FRAME_CAP else 0)")
@@ -168,7 +170,7 @@ print(1 if (fr>bf) or (fr==bf and sc<bs) else 0)")
   encode "$OUT"
 else
   echo "== flying ($VIEW, $SCEN, ${DUR}s) =="
-  read _ _ _ < <(fly_once)
+  read _ _ _ ELAPSED < <(fly_once)
   encode "$OUT"
 fi
 echo "== done -> $OUT =="
