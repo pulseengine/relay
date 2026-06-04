@@ -15,6 +15,30 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.18.0] — 2026-06-04
+
+**Realism arc release 3 of 10 — first sensor-fidelity release.** A realistic IMU
+**bias-instability**: a stochastic *random-walk* gyro bias (a moving target),
+richer than v1.9's constant ramp. The question: does the IEKF stay locked on?
+
+### Added / changed (`falcon-core`)
+
+- **`Pathology`** gains `gyro_bias_rw` (random-walk bias, `bias += σ_rw·√dt·N`)
+  and `gyro_white` (white gyro noise).
+- **`worlds/falcon-quad-imubias.sdf`** — gz Harmonic realism: the IMU
+  `angular_velocity` `<noise>` augmented with `bias_mean` /
+  `dynamic_bias_stddev` / `dynamic_bias_correlation_time` (the random-walk bias
+  the base world omits; validates with `gz sdf`).
+
+### Verified (18 tests, clippy clean, embedded builds)
+
+- `iekf_holds_under_random_walk_gyro_bias` — under a random-walk gyro bias
+  (`0.01 rad/s/√s`, ≈0.06 rad/s wander over ~40 s) + white noise, the IEKF
+  continuously re-tracks the wandering bias, holding tilt **< 0.15 rad** through
+  a long hover — not just a fixed-ramp bias.
+
+rivet PASS · SYSREQ-FALCON-018 · SWREQ-FALCON-IMUBIAS-P01 · FV-FALCON-IMUBIAS-001.
+
 ## [falcon-v1.17.0] — 2026-06-04
 
 **Realism arc release 2 of 10.** Quadratic aerodynamic drag — the `v²` force
