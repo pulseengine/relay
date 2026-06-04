@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-FALCON-BARO-001
+    type: sw-verification
+    title: "Barometer fusion holds altitude through GPS-vertical loss (v1.20.0)"
+    status: approved
+    description: >
+      Verification of the v1.20.0 barometer-fusion layer (21 falcon-core tests
+      pass, clippy clean), realism arc release 5:
+
+      baro_holds_altitude_through_gps_loss — through the FlightBackend seam, with
+      the GPS dropped for 40 s and a barometer (0.2 m noise) fused into the
+      verified IEKF as a vertical anchor, the altitude holds within ~1.3 m
+      (< 1.5 m) of the commanded altitude AND strictly beats the GPS-only
+      dead-reckoning (which drifts further without the baro).
+
+      Design note (an honest internal falsification): a first attempt used a
+      hand-rolled complementary / alpha-beta filter on the baro; it anchored
+      position but its lagged velocity estimate degraded the altitude loop's
+      rate feedback (7–9 m drift). Feeding the baro into the verified IEKF
+      instead (update_position with horizontal = current estimate, z = baro)
+      reuses the filter's velocity estimation and holds.
+
+      SimBackend gained a read_baro seam + baro_enabled/baro_noise; FlightCore
+      gained baro_var + the IEKF baro anchor. The gz Harmonic realism is
+      examples/falcon-sitl-gz/worlds/falcon-quad-baro.sdf — an air_pressure
+      sensor + the <atmosphere type="adiabatic"> model (validates with gz sdf).
+    tags: [verification, falcon, barometer, sensor-fidelity, realism, v1.20]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-BARO-P01
