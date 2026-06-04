@@ -1,0 +1,71 @@
+{
+  "_comment": "Per-release content for the falcon videos: spoken narration (TTS via Speaches af_nicole / Kokoro), plus a channel title + description for upload. Narration is written spoken-style (no symbols) for clean TTS.",
+  "releases": [
+    {
+      "version": "v1.16",
+      "narration": "Falcon one point sixteen adds wind rejection. We found the position loop could not reject a steady force, so we added an integral term, cutting the wind-induced offset from over one and a half metres down to under sixty centimetres.",
+      "title": "Falcon v1.16 — Wind Rejection | a formally-verified drone flight stack",
+      "description": "The verified falcon flight core now rejects a steady wind. A falsification-driven fix: the P-D position loop left a >1.5 m offset under wind, so we added an anti-windup integral that cuts it to <0.6 m. Verified in Gazebo SITL with the Lean Lyapunov proof and the Kani-verified FSM and mixer still holding. IEKF to geometric SE(3) to ADRC to mixer, all no_std / no_alloc.\n\n#drone #autopilot #formalverification #rust #robotics"
+    },
+    {
+      "version": "v1.17",
+      "narration": "Falcon one point seventeen adds quadratic aerodynamic drag. The vehicle still tracks a far setpoint to within sixty centimetres through the drag, and the drag itself adds damping that stabilises the flight.",
+      "title": "Falcon v1.17 — Aerodynamic Drag | verified drone flight stack",
+      "description": "Quadratic v-squared aerodynamic drag, the force that matters during fast flight. The verified cascade tracks a far [4,0,-2] m setpoint to within 0.6 m through the drag, and the drag damps the vehicle. Verified in SITL.\n\n#drone #autopilot #formalverification #rust #robotics"
+    },
+    {
+      "version": "v1.18",
+      "narration": "Falcon one point eighteen hardens the estimator against a realistic, wandering gyro bias. The Invariant E K F continuously re-tracks the random-walk bias, holding the body level through a long hover.",
+      "title": "Falcon v1.18 — IMU Bias-Instability | verified drone flight stack",
+      "description": "A realistic IMU bias-instability: a stochastic random-walk gyro bias, a moving target. The verified Invariant-EKF re-tracks it continuously, holding tilt under 0.15 rad as the bias wanders to about 0.06 rad/s. Verified in SITL.\n\n#drone #autopilot #estimation #formalverification #rust"
+    },
+    {
+      "version": "v1.19",
+      "narration": "Falcon one point nineteen survives noisy and intermittent G N S S. We found that an over-trusting filter actually diverged by two and a half kilometres, so we matched the measurement variance to the real sensor, and now it holds.",
+      "title": "Falcon v1.19 — Noisy + Intermittent GNSS | verified drone flight stack",
+      "description": "Realistic GNSS: metre-class noise plus recurring outages. A falsification: an over-trusting measurement variance made the filter diverge ~2400 m. The fix is honest filter tuning, matching the variance to the sensor, and it holds. Verified in SITL.\n\n#drone #autopilot #gps #formalverification #rust"
+    },
+    {
+      "version": "v1.20",
+      "narration": "Falcon one point twenty adds barometer fusion. With G P S vertical lost for forty seconds, the barometer, fed into the verified estimator, anchors the altitude and holds it within about one and a third metres.",
+      "title": "Falcon v1.20 — Barometer Fusion | verified drone flight stack",
+      "description": "An independent vertical source so altitude survives a GPS-vertical outage. The barometer is fed into the verified IEKF as a vertical anchor; through a 40 s GPS loss it holds altitude to ~1.3 m, beating dead-reckoning. Verified in SITL.\n\n#drone #autopilot #sensorfusion #formalverification #rust"
+    },
+    {
+      "version": "v1.21",
+      "narration": "Falcon one point twenty one makes the low-battery failsafe fire on a real draining pack. As the battery depletes and the voltage sags under load, the supervisor actuates a return to launch.",
+      "title": "Falcon v1.21 — Battery Drain Failsafe | verified drone flight stack",
+      "description": "The low-battery failsafe now fires on a real depleting pack, not a set value: the charge drains with motor load and the terminal voltage sags, and the supervisor actuates RTL/Land on a genuine endurance limit. Verified in SITL.\n\n#drone #autopilot #safety #formalverification #rust"
+    },
+    {
+      "version": "v1.22",
+      "narration": "Falcon one point twenty two models air-density thrust lapse. We added an altitude integral so the vehicle holds high altitude despite the falling thrust, and the model honestly shows a service ceiling.",
+      "title": "Falcon v1.22 — Air-Density Thrust Lapse | verified drone flight stack",
+      "description": "Thrust falls with altitude. The vertical twin of the wind finding: the P-D altitude loop sags, so an opt-in altitude integral holds it, and beyond the margin there is an honest service ceiling. Verified in SITL.\n\n#drone #autopilot #control #formalverification #rust"
+    },
+    {
+      "version": "v1.23",
+      "narration": "Falcon one point twenty three confirms the inner loop absorbs realistic motor lag. With a forty millisecond motor time constant, the A D R C extended state observer cancels the lag and recovers a tilted body to level.",
+      "title": "Falcon v1.23 — Motor Dynamics | verified drone flight stack",
+      "description": "First-order motor spin-up lag, the actuator lag the ADRC extended-state observer was built to absorb. With a 40 ms motor time constant the inner loop still recovers a tilted body to level. A robustness confirmation. Verified in SITL.\n\n#drone #autopilot #control #formalverification #rust"
+    },
+    {
+      "version": "v1.24",
+      "narration": "Falcon one point twenty four adds ground effect. The thrust cushion near the surface aids takeoff, and we honestly document that it floats the landing, which a future velocity-based touchdown controller will solve.",
+      "title": "Falcon v1.24 — Ground Effect | verified drone flight stack",
+      "description": "Rotor downwash off the surface augments thrust near the ground. It aids takeoff; on landing it cushions the vehicle into a documented float that a velocity-based touchdown controller will solve, an honest limitation, not a faked touchdown. Verified in SITL.\n\n#drone #autopilot #aerodynamics #formalverification #rust"
+    },
+    {
+      "version": "v1.25",
+      "narration": "Falcon one point twenty five flies through turbulence. Under a Dryden-like two metre per second gust spectrum, the vehicle stays bounded within a few metres and does not diverge, the worst-case environment of the realism arc.",
+      "title": "Falcon v1.25 — Turbulence | verified drone flight stack",
+      "description": "A Dryden-like colored gust spectrum, harder than white noise because the gusts persist. Under 2 m/s RMS turbulence the vehicle stays bounded within a few metres and does not diverge. Honest scope: bounded, not crisp. Verified in SITL.\n\n#drone #autopilot #turbulence #formalverification #rust"
+    },
+    {
+      "version": "v1.26",
+      "narration": "Falcon one point twenty six is the keystone. The verified flight core now runs as a Web Assembly component in wasmtime, the portable hand-off that our toolchain carries onto real hardware.",
+      "title": "Falcon v1.26 — WASM Component Model, runs in wasmtime | verified drone flight stack",
+      "description": "The keystone of the toolchain-to-hardware path. The verified IEKF to geometric to ADRC to mixer cascade builds as a WebAssembly Component Model component and runs in wasmtime, recovering a tilted body and flying to a setpoint. This is the portable hand-off artifact for the meld to loom to synth to gale integration onto silicon.\n\n#webassembly #wasm #drone #autopilot #formalverification #rust"
+    }
+  ]
+}
