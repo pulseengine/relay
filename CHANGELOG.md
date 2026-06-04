@@ -35,6 +35,63 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.28.0] — 2026-06-04
+
+**The vehicle now talks to QGroundControl / MAVSDK.** A new no_std/no_alloc
+`falcon-mavlink` crate bridges the MAVLink v2 wire to the flight supervisor —
+the first time an off-the-shelf ground station can arm, launch, land, and
+return-to-launch the falcon stack and watch its position live.
+
+### Added
+
+- **`falcon-mavlink` — the MAVLink ↔ flight-supervisor bridge.** A thin,
+  *pure* translation seam over the already-verified `relay-mavlink` codec and
+  `relay-fsm` state machine (it adds no byte-level or state-machine logic of
+  its own — those stay where they are proven):
+  - **Inbound** `COMMAND_LONG` → `relay_fsm::Event`: `COMPONENT_ARM_DISARM`
+    (param1 ≥ 0.5 ⇒ Arm, else Disarm), `NAV_TAKEOFF`, `NAV_LAND`,
+    `NAV_RETURN_TO_LAUNCH`, `DO_FLIGHTTERMINATION` ⇒ Failsafe. Commands for
+    another `target_system` (broadcast 0 excepted), other messages, and
+    unmapped commands are ignored; arbitrary bytes never panic.
+  - **Outbound** flight `Mode` → `HEARTBEAT` (`custom_mode` names the falcon
+    mode 1:1; `base_mode` sets `SAFETY_ARMED` off the ground; `system_status`
+    STANDBY disarmed / ACTIVE armed), and NED estimator state →
+    `GLOBAL_POSITION_INT` via a flat-earth projection around a geodetic home.
+- **`relay-mavlink`**: `MAV_CMD_COMPONENT_ARM_DISARM` (400), `MAV_CMD_NAV_TAKEOFF`
+  (22), `MAV_CMD_NAV_LAND` (21) constants + `arm_disarm` / `takeoff` / `land`
+  `CommandLong` constructors.
+
+### Verified
+
+- **11 `falcon-mavlink` unit tests** (SWREQ-FALCON-MAVBRIDGE-P01 /
+  FV-FALCON-MAVBRIDGE-001): a `COMMAND_LONG` stream drives the FSM through the
+  full lifecycle (arm → takeoff → reached-altitude → RTL → reached-home →
+  touchdown); `ingest` is panic-free over empty + all single bytes +
+  LCG-fuzzed buffers; HEARTBEAT/GLOBAL_POSITION_INT round-trip for every Mode;
+  the NED→geodetic projection is metre- and sign-accurate. clippy clean;
+  **builds bare-metal for `thumbv7em-none-eabihf`** (the bridge runs on the
+  Cortex-M flight controller, not just the host).
+
+### Honest scope
+
+- The bridge translates; it does not yet *stream* (no scheduled heartbeat /
+  position cadence — the caller drives `heartbeat()` / `global_position()`),
+  and it parses one frame per `ingest` (no buffer reassembly across partial
+  reads). The geodetic projection is flat-earth/local-tangent — exact enough
+  for the few-km radius a multirotor flies, not a geodesic. Command **ACK**
+  (`COMMAND_ACK`) is not emitted yet; a GCS sees the result via the next
+  HEARTBEAT mode change, not an explicit acknowledgement.
+
+### Falsification
+
+- **Predicted, then checked:** a GCS-encoded `COMMAND_LONG` for arm/takeoff/RTL,
+  put on the wire exactly as QGroundControl frames it, decodes through the
+  bridge to the `relay-fsm` Event that advances the verified FSM to the
+  expected mode — and a command addressed to a *different* `target_system` does
+  **not**. Both confirmed by `ingested_commands_drive_full_flight_lifecycle`
+  and `command_addressed_to_other_vehicle_is_ignored`. Kill criterion (a
+  mistranslated or cross-addressed command reaching the FSM) did not fire.
+
 ## [falcon-v1.27.0] — 2026-06-04
 
 **First hardware-practical release after the realism arc.** A **velocity-based

@@ -1,0 +1,39 @@
+artifacts:
+  - id: SWREQ-FALCON-MAVBRIDGE-P01
+    type: sw-req
+    title: "MAVBRIDGE-P01 — MAVLink ↔ flight-supervisor bridge (commands + telemetry)"
+    status: implemented
+    description: >
+      A no_std/no_alloc bridge shall translate between the MAVLink v2 wire
+      (QGroundControl / MAVSDK / PX4-ecosystem ground stations) and falcon's
+      flight supervisor, without leaking framing concerns into the verified
+      codec (relay-mavlink) or the verified flight-mode FSM (relay-fsm):
+        - Inbound: a COMMAND_LONG addressed to this vehicle (or broadcast,
+          target_system=0) shall map to the relay-fsm Event it requests —
+          COMPONENT_ARM_DISARM (param1>=0.5 ⇒ Arm, else RequestDisarm),
+          NAV_TAKEOFF ⇒ RequestTakeoff, NAV_LAND ⇒ RequestLand,
+          NAV_RETURN_TO_LAUNCH ⇒ RequestRtl, DO_FLIGHTTERMINATION ⇒ Failsafe.
+          Commands for another vehicle, other messages, and unmapped commands
+          shall be ignored (no event), and arbitrary bytes shall never panic.
+        - Outbound: the active flight Mode shall encode to a HEARTBEAT
+          (custom_mode names the falcon mode 1:1; base_mode carries
+          SAFETY_ARMED off the ground; system_status STANDBY disarmed / ACTIVE
+          armed), and the NED estimator state shall encode to a
+          GLOBAL_POSITION_INT via a flat-earth projection around a geodetic
+          home (NED down = negative-up on altitude).
+    tags: [falcon, mavlink, interop, gcs, command, telemetry, v1.28]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-mavlink unit tests (11): a COMMAND_LONG stream drives the FSM
+        through arm → takeoff → reached-altitude → RTL → reached-home →
+        touchdown; ingest returns Ok(None)/Err but never panics over empty +
+        all single bytes + LCG-fuzzed buffers; HEARTBEAT and
+        GLOBAL_POSITION_INT round-trip (encode → parse → decode equals the
+        bridge's intent) for every Mode; the NED→geodetic projection places a
+        north/east/up point at the expected lat/lon/alt within telemetry
+        tolerance. clippy clean; builds bare-metal for thumbv7em-none-eabihf.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

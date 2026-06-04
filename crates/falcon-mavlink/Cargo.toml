@@ -1,0 +1,23 @@
+[package]
+name = "falcon-mavlink"
+description = "Falcon MAVLink bridge — the no_std/no_alloc seam between the MAVLink v2 wire (QGroundControl / MAVSDK) and falcon's flight supervisor. Inbound: COMMAND_LONG → relay-fsm Event (arm/disarm, takeoff, land, RTL, terminate). Outbound: flight Mode → HEARTBEAT, and NED estimator state → GLOBAL_POSITION_INT (flat-earth projection around a geodetic home). The codec (relay-mavlink) and the state machine (relay-fsm) stay pure; this crate is only the translation layer (v1.28.0)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+relay-mavlink = { path = "../relay-mavlink" }
+relay-fsm = { path = "../relay-fsm" }
+relay-math = { path = "../relay-math" }
+
+[dev-dependencies]
+relay-fsm = { path = "../relay-fsm" }
+
+[lints]
+workspace = true

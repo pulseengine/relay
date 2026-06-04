@@ -137,10 +137,7 @@ pub fn encode_frame(
 /// up CRC_EXTRA, then call this). For HEARTBEAT, it's 50.
 ///
 /// Returns the parsed frame and the number of bytes consumed.
-pub fn parse_frame<'a>(
-    buf: &'a [u8],
-    crc_extra: u8,
-) -> Result<(Frame<'a>, usize), CodecError> {
+pub fn parse_frame<'a>(buf: &'a [u8], crc_extra: u8) -> Result<(Frame<'a>, usize), CodecError> {
     if buf.len() < HEADER_LEN {
         return Err(CodecError::Truncated);
     }
@@ -194,10 +191,14 @@ pub fn peek_message_id(buf: &[u8]) -> Result<u32, CodecError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::heartbeat::{Heartbeat, HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID,
-                            HEARTBEAT_PAYLOAD_LEN};
+    use crate::heartbeat::{
+        HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, HEARTBEAT_PAYLOAD_LEN, Heartbeat,
+    };
 
-    fn build_heartbeat_frame(seq: u8, hb: &Heartbeat) -> [u8; HEADER_LEN + HEARTBEAT_PAYLOAD_LEN + 2] {
+    fn build_heartbeat_frame(
+        seq: u8,
+        hb: &Heartbeat,
+    ) -> [u8; HEADER_LEN + HEARTBEAT_PAYLOAD_LEN + 2] {
         let header = FrameHeader {
             magic: MAGIC_V2,
             payload_len: HEARTBEAT_PAYLOAD_LEN as u8,
@@ -210,8 +211,7 @@ mod tests {
         };
         let payload = hb.encode_payload();
         let mut out = [0u8; HEADER_LEN + HEARTBEAT_PAYLOAD_LEN + 2];
-        let n = encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut out)
-            .expect("encode");
+        let n = encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut out).expect("encode");
         assert_eq!(n, out.len());
         out
     }
@@ -244,8 +244,7 @@ mod tests {
     fn round_trip_heartbeat_through_frame() {
         let hb_in = Heartbeat::falcon_quad_standby();
         let frame = build_heartbeat_frame(42, &hb_in);
-        let (parsed, n) = parse_frame(&frame, HEARTBEAT_CRC_EXTRA)
-            .expect("parse heartbeat frame");
+        let (parsed, n) = parse_frame(&frame, HEARTBEAT_CRC_EXTRA).expect("parse heartbeat frame");
         assert_eq!(n, frame.len());
         assert_eq!(parsed.header.magic, MAGIC_V2);
         assert_eq!(parsed.header.payload_len as usize, HEARTBEAT_PAYLOAD_LEN);
@@ -315,8 +314,7 @@ mod tests {
         };
         let payload = Heartbeat::falcon_quad_standby().encode_payload();
         let mut out = [0u8; 5]; // too small
-        let err = encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut out)
-            .unwrap_err();
+        let err = encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut out).unwrap_err();
         assert_eq!(err, CodecError::OutputTooSmall);
     }
 
@@ -334,8 +332,7 @@ mod tests {
         };
         let payload = Heartbeat::falcon_quad_standby().encode_payload();
         let mut out = [0u8; MAX_FRAME_SIZE];
-        let err = encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut out)
-            .unwrap_err();
+        let err = encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut out).unwrap_err();
         assert_eq!(err, CodecError::BadPayloadLength);
     }
 
