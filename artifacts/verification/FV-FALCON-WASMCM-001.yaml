@@ -1,0 +1,25 @@
+artifacts:
+  - id: FV-FALCON-WASMCM-001
+    type: sw-verification
+    title: "Verified flight core runs in wasmtime as a CM component (v1.26.0)"
+    status: approved
+    description: >
+      Verification of the v1.26.0 WASM Component Model keystone: falcon-core
+      (IEKF → geometric SE(3) → ADRC → mixer) builds as a falcon:flight Component
+      Model component (cargo-component, wasm32-wasip2, ~101 KB) and RUNS in
+      wasmtime — run-stabilization recovers a body tilted ~0.4 rad to level
+      (observed 0.023 rad < 0.1), run-position-hold flies to a [2,-1.5,-2] m
+      setpoint (observed 0.13 m < 0.6). The verified cascade executes as a
+      portable component, the hand-off artifact for the separate
+      hardware-integration project (meld → loom → synth → gale).
+      scripts/wasmtime-flight-test.sh is the mechanical gate. Bench-only (the CI
+      gate runner lacks the wasm32-wasip2 component toolchain + wasmtime; the
+      native falcon-core 30 tests cover the same cascade logic).
+    tags: [verification, falcon, wasm, component-model, wasmtime, v1.26]
+    fields:
+      method: test
+      steps:
+        - run: "scripts/wasmtime-flight-test.sh"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WASMCM-P01

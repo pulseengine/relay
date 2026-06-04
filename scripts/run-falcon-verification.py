@@ -84,6 +84,13 @@ BENCH_PATTERNS = [
     # and the build step itself (`--target wasm32-…`) needs the same.
     re.compile(r"target/wasm32-"),
     re.compile(r"--target\s+wasm32-"),
+    # v1.26 — the WASM Component Model build + wasmtime run are bench tools: the
+    # gate runner lacks cargo-component (wasm32-wasip2 component toolchain) and
+    # wasmtime. The native falcon-core tests cover the same logic; this runs
+    # locally (like meld / gz / thumbv7em).
+    re.compile(r"\bcargo\s+component\b"),
+    re.compile(r"\bwasmtime\b"),
+    re.compile(r"\bwasmtime-flight-test\b"),
 ]
 
 

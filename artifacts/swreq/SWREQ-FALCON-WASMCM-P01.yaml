@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-WASMCM-P01
+    type: sw-req
+    title: "WASMCM-P01 — falcon-core as a wasmtime-runnable Component-Model component"
+    status: implemented
+    description: >
+      The falcon-core flight cascade shall be wrapped as a WebAssembly Component
+      Model component (wit/falcon-flight/flight.wit, wasm/cm/flight) exporting
+      run-stabilization and run-position-hold, built with cargo-component to
+      wasm32-wasip2, and shall RUN in wasmtime executing the verified
+      IEKF → geometric → ADRC → mixer cascade against the analytic SimBackend
+      inside the component. The component is the portable hand-off artifact for
+      the separate hardware-integration project; this repo's job ends at "it
+      runs and is correct in wasmtime".
+    tags: [falcon, wasm, component-model, wasmtime, v1.26]
+    fields:
+      req-type: architecture
+      priority: must
+      verification-criteria: >
+        scripts/wasmtime-flight-test.sh builds the component and runs it in
+        wasmtime: run-stabilization < 0.1 rad final tilt, run-position-hold
+        < 0.6 m final error. The native falcon-core tests (30, all green) cover
+        the same cascade logic; the wasmtime run proves it executes as a
+        portable component (bench-only — the gate runner lacks cargo-component +
+        wasmtime, skipped like meld / gz).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020

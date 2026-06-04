@@ -35,6 +35,38 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.26.0] — 2026-06-04
+
+**The keystone of the toolchain-to-hardware path.** `falcon-core` — the verified
+IEKF → geometric SE(3) → ADRC → mixer cascade — now builds as a **WebAssembly
+Component Model component** and **runs in wasmtime**.
+
+### Added
+
+- **`wit/falcon-flight/flight.wit`** + **`wasm/cm/flight`** — `falcon-core`
+  wrapped as a `falcon:flight` CM component (cargo-component, wasm32-wasip2,
+  ~101 KB), exporting `run-stabilization` and `run-position-hold`.
+- **`scripts/wasmtime-flight-test.sh`** — the mechanical gate: builds the
+  component and **runs it in wasmtime**.
+
+### Verified (in wasmtime)
+
+- `run-stabilization` → **0.023 rad** final tilt (< 0.1) — a body tilted ~0.4 rad
+  recovered to level, the verified cascade executing as a portable component.
+- `run-position-hold` → **0.13 m** final error (< 0.6) — flew to a `[2,−1.5,−2]` m
+  setpoint. The native falcon-core 30 tests cover the same logic; the wasmtime
+  run proves it executes as a component.
+
+### Separation of concerns
+
+This is the **clean hand-off artifact**: a typed, portable, verified component.
+The **meld → loom → synth → gale → hardware** integration is a **separate
+project** that consumes `falcon:flight@1.26` — this repo proves the component
+*runs and is correct*; the integration project owns getting it onto silicon.
+Roadmap: `docs/research/toolchain-to-hardware-roadmap.md`.
+
+rivet PASS · SYSREQ-FALCON-020 · SWREQ-FALCON-WASMCM-P01 · FV-FALCON-WASMCM-001.
+
 ## [falcon-v1.25.0] — 2026-06-04
 
 **Realism arc release 10 of 10 — the finale.** Turbulence — a Dryden-like

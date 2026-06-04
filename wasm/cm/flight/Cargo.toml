@@ -1,0 +1,29 @@
+[package]
+name = "falcon-flight-component"
+description = "The verified falcon flight core (IEKF → geometric SE(3) → ADRC → mixer) as a WebAssembly Component Model component — the portable, wasmtime-runnable artifact the toolchain-to-hardware integration (meld → loom → synth → gale) consumes. (v1.26.0)"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+falcon-core = { path = "../../../crates/falcon-core" }
+relay-math = { path = "../../../crates/relay-math" }
+wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+package = "falcon:flight"
+
+[package.metadata.component.target]
+path = "../../../wit/falcon-flight/flight.wit"
+world = "flight-demo"
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+# standalone (not in the host cargo workspace) — built only by cargo-component
+# for wasm32-wasip2, like embedded/falcon-cortex-m.
+[workspace]
