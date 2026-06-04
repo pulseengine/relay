@@ -533,6 +533,12 @@ pub struct SimBackend {
     /// 0.4. The altitude loop must raise collective to compensate; if the lapse
     /// exceeds the thrust margin the vehicle hits a service ceiling.
     pub thrust_lapse: f32,
+    /// Motor first-order time constant τ (s) (v1.23): the actual rotor speed
+    /// lags the command (state += (cmd−state)·dt/τ). 0 = instantaneous. The
+    /// actuator lag the ADRC ESO is designed to absorb.
+    pub motor_tau: f32,
+    /// Per-rotor lagged actual motor state (v1.23).
+    motor_state: [f32; 4],
     /// Injected sensor pathologies (v1.9).
     pub path: Pathology,
     /// Control-tick counter (drives the GPS-dropout window).
@@ -567,6 +573,8 @@ impl SimBackend {
             battery_drain: false,
             battery_charge: 1.0,
             thrust_lapse: 0.0,
+            motor_tau: 0.0,
+            motor_state: [0.5; 4], // start at hover collective
             path: Pathology::default(),
             step_n: 0,
             gyro_bias: [0.0; 3],
@@ -684,11 +692,21 @@ impl FlightBackend for SimBackend {
         Some(m)
     }
     fn write_motors(&mut self, motors: &[f32]) {
+        // v1.23 — first-order MOTOR DYNAMICS: the actual rotor speed lags the
+        // command, state += (cmd − state)·dt/τ. The torque/thrust use the lagged
+        // ACTUAL, not the command — exactly the actuator lag the ADRC ESO is
+        // built to absorb (v0.25). τ = 0 ⇒ instantaneous (prior behaviour).
         let mut m4 = [0.0f32; 4];
         let mut collective = 0.0f32;
-        for (d, &s) in m4.iter_mut().zip(motors.iter()) {
-            *d = s;
-            collective += s;
+        for i in 0..4 {
+            let cmd = motors.get(i).copied().unwrap_or(0.0);
+            if self.motor_tau > 0.0 {
+                self.motor_state[i] += (cmd - self.motor_state[i]) * (self.dt / self.motor_tau);
+                m4[i] = self.motor_state[i];
+            } else {
+                m4[i] = cmd;
+            }
+            collective += m4[i];
         }
         // attitude: allocated torque + the injected disturbance the ESO rejects
         let tq = motors_to_torque_signs(m4);
@@ -1454,5 +1472,51 @@ mod tests {
             (35.0..65.0).contains(&alt),
             "thrust lapse must cap altitude well below the 80 m command: {alt} m"
         );
+    }
+
+    // ── v1.23 motor dynamics: first-order spin-up lag — the actuator lag the
+    // ADRC ESO is designed to absorb (a robustness confirmation).
+
+    /// The ADRC ESO ABSORBS realistic motor lag: with a 40 ms first-order motor
+    /// time constant (the rotor speed lags the command), the verified inner loop
+    /// still recovers a tilted body to level — exactly the actuator lag the ESO
+    /// was built for (v0.25).
+    #[test]
+    fn adrc_absorbs_motor_lag() {
+        let dt = 0.002f32;
+        let th = 0.4f32;
+        let (c, s) = (relay_math::cosf(th), relay_math::sinf(th));
+        let r0 = [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]];
+        let mut b = SimBackend::new(r0, dt);
+        b.motor_tau = 0.04; // 40 ms motor lag — significant
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-2.0);
+        for _ in 0..8000 {
+            core.step(&mut b);
+        }
+        assert!(
+            b.tilt() < 0.1,
+            "ADRC ESO must absorb motor lag and recover to level: {} rad",
+            b.tilt()
+        );
+    }
+
+    /// Position hold stays bounded under motor lag — the lag the v0.25 work
+    /// found could destabilise a naive loop is absorbed by the ESO; the vehicle
+    /// holds its setpoint.
+    #[test]
+    fn position_hold_stable_under_motor_lag() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.motor_tau = 0.03; // 30 ms motor lag
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_position([1.5, -1.0, -2.0]);
+        for _ in 0..30000 {
+            core.step(&mut b);
+        }
+        let e = [b.pos[0] - 1.5, b.pos[1] + 1.0, b.pos[2] + 2.0];
+        let err = relay_math::sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        assert!(err < 0.6, "position hold must stay bounded under motor lag: {err} m");
     }
 }

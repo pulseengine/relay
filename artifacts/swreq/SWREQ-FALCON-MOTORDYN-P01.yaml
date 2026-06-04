@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-MOTORDYN-P01
+    type: sw-req
+    title: "MOTORDYN-P01 — ADRC ESO absorbs first-order motor lag"
+    status: implemented
+    description: >
+      The verified inner rate loop shall remain stable under realistic motor
+      dynamics — a first-order spin-up/spin-down lag where the actual rotor
+      speed lags the command (state += (cmd − state)·dt/τ). This is exactly the
+      actuator lag the ADRC ESO is designed to estimate and cancel (the v0.25
+      lumped-disturbance model); the requirement makes that an explicit, tested
+      robustness property. Modelled in the no_std SimBackend (motor_tau +
+      per-rotor motor_state) and in the gz Harmonic SITL via the
+      MulticopterMotorModel timeConstantUp/timeConstantDown parameters (already
+      in the base world).
+    tags: [falcon, motor, actuator, lag, adrc, eso, realism, v1.23]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: with a 40 ms motor
+        time constant, the ADRC inner loop recovers a tilted body (~0.4 rad) to
+        level (< 0.1 rad); with a 30 ms time constant, position hold to a
+        setpoint stays bounded (< 0.6 m). clippy clean; embedded builds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
