@@ -31,7 +31,10 @@ else
   for f in $(ls "$FRAMES"/*.png | sed -E 's|.*_([0-9]+)\.png$|\1 &|' | sort -n -k1 | awk '{print $2}'); do
     printf -v p "/tmp/falcon-seq/f%06d.png" $i; ln -sf "$f" "$p"; i=$((i+1))
   done
-  ffmpeg -y -ss 2 -framerate 30 -i /tmp/falcon-seq/f%06d.png -i "$CARD" -t 72 \
+  # vary the start of each release's clip a LITTLE (1.0–4.0 s, deterministic
+  # from the title) so the videos are not byte-identical reuse of the footage.
+  START="${START:-$(python3 -c "import sys;print(round(1.0+(sum(map(ord,sys.argv[1]))%31)/10.0,1))" "$TITLE")}"
+  ffmpeg -y -ss "$START" -framerate 30 -i /tmp/falcon-seq/f%06d.png -i "$CARD" -t 72 \
     -filter_complex "[0:v]fps=30,format=yuv420p[v];[v][1:v]overlay=0:0:format=auto[o]" \
     -map "[o]" -c:v libx264 -crf 20 -movflags +faststart "$OUT" >/tmp/ff-rel.log 2>&1
 fi
