@@ -40,13 +40,28 @@ mixer) into one verified organism. *leeloo, not frankenstein.*
 
 ## status
 
-**pre-v0.1**, scope-defined, scaffolding in flight. follow the
-[release plan](#release-plan) below; each numbered release ships a
-specific verified-evidence increment.
+**falcon-v1.27** — well past the original v1.0 milestone. The verified cascade
+(Invariant-EKF → geometric SE(3) → ADRC → mixer) flies autonomous waypoint
+missions in Gazebo Harmonic SITL, runs bare-metal on an emulated Cortex-M, and
+sits behind a backend-agnostic hardware-abstraction seam (`FlightBackend`). It
+is now a **WebAssembly Component Model component that runs in wasmtime**
+(`falcon-v1.26`, the component is a downloadable release asset).
 
-this is work in progress and intentionally so. *don't wait for v1.0 to
-get value* — v0.1 is real, runnable, and produces signed evidence
-artifacts from day one.
+Shipped since v1.0: the **v1.x HAL arc** (supervisor + failsafes, the hardware
+seam, a reference IMU driver, the HITL link, a libm qualification seam, the
+WCET/Lyapunov proofs sorry-free), the **v1.16–v1.25 SITL-realism arc** (wind,
+drag, IMU-bias, GNSS noise/outage, barometer, battery, atmosphere, motor
+dynamics, ground effect, turbulence — surfacing five real falsification→fixes),
+the **WASM component** (v1.26), and a **velocity-based touchdown controller**
+(v1.27). See `CHANGELOG.md` for the per-release history and
+`docs/dossier/v1.0-practical-readiness.md` for the honest capability-vs-gap
+matrix.
+
+**Honest boundary:** everything above is SITL / proof / emulation complete. The
+remaining gaps — real sensor/actuator drivers, on-silicon validation, flight
+tuning, and the meld → loom → synth → gale integration onto hardware (a
+**separate project** consuming the WASM component) — are on the hardware side of
+the seam. Nothing here claims to have flown an aircraft.
 
 ## is this for you?
 
@@ -151,31 +166,43 @@ exercises: the entire control cascade (EKF → rate → att → pos → mix),
 deterministic Gazebo Harmonic SITL via MAVLink lockstep, rerun.io
 evidence recording, full overdo chain on every component.
 
-## release plan
+## release history & forward plan
 
-honest incremental scope, witness-style. each version closes a
-specific gap. signed binaries, CHANGELOG-disciplined, rivet-validated
-release artifacts.
+> The original v0.1 → v1.0 increment plan (a complementary-filter EKF → PID
+> rate → quaternion attitude → position → mixer cascade) was **superseded** at
+> v0.21: the stack was re-architected around a research-grade **Invariant-EKF
+> (SE₂(3))** estimator and **geometric SE(3)** control, with kernel-checked Lean
+> Lyapunov + WCET proofs. The notes below describe what actually shipped. See
+> `CHANGELOG.md` for the authoritative per-release record.
 
-| version | what ships | verification delta | example |
-|---|---|---|---|
-| v0.1 | falcon-quad world spec wired; relay-mavlink answers QGC heartbeat; stub `relay-ekf` emits constants | Verus on stubs · rivet trace skeleton · sigil signature | `falcon-hello` |
-| v0.2 | real `relay-ekf` (complementary filter, attitude only) | + Verus contracts on quaternion algebra · Lean WCET bound · witness MC/DC · proptest | `falcon-ekf-bench` |
-| v0.3 | `relay-rate` controller (1 kHz PID + anti-windup); SITL stabilizes in attitude-hold mode | + Lean Lyapunov of rate loop · Kani overflow paths · tokio-rs/loom on host bridge | `falcon-sitl-hover` |
-| v0.4 | `relay-att` controller (250 Hz quaternion error); `relay-mix` for falcon-quad geometry; SITL hovers | + Rocq for quaternion invariants · Verus matrix arithmetic · differential test vs PX4 reference | (extends v0.3) |
-| v0.5 | `relay-pos` controller (50 Hz); `relay-gps` host service; SITL completes a waypoint mission | + cargo-mutants on full cascade · sanitizer pass · cFS-DNA inherits chain unchanged | (extends v0.3) |
-| v0.6 | hardware bring-up on Cube Orange or pulseengine-board; tethered hover | + criterion budgets on silicon · synth+kiln WASM-on-MCU runtime · sigil firmware bundle | (HW) |
-| v0.7 | untethered hover; fault injection on `relay-hs` watchdog | + fault injection suite · `relay-hs` triggers RTL on EKF divergence | (HW) |
-| v0.8 | untethered waypoint mission; EASA U-space telemetry profile | + Z3 translation validation across loom optimizations | (HW) |
-| v0.9 | geofence + return-to-launch under EW-simulated GPS loss | + abstract interpretation pass (MIRAI or Charon) | (HW) |
-| v1.0 | six-domain credit dossier; `falcon-coax` + `falcon-hex` variant exports; Check-It checkers qualified for EKF + mixer | full overdo matrix green across all six domains in `rivet validate` output | (HW + dossier) |
+**Delivered (selected):**
+
+| arc | what shipped |
+|---|---|
+| v0.21 → v1.0 | IEKF estimator · geometric SE(3) (Lean Lyapunov) · ADRC inner loop · control allocation · trajectory gen · simplex shield · adaptive-Q estimator consistency · spoof FDI — autonomous SITL mission, capstone v1.0 |
+| v1.1 → v1.15 (HAL arc) | the `FlightBackend` seam + backend family (Sim / Hardware / HITL-link) · supervisor + geofence-RTL + battery failsafe · relay-fsm (Kani) · bare-metal Cortex-M · meld fusion · `relay-math` libm seam · reference ICM-42688 driver · readiness dossier |
+| v1.16 → v1.25 (realism) | wind · drag · IMU bias-instability · GNSS noise/outage · barometer · battery drain · atmosphere · motor dynamics · ground effect · turbulence — five real falsification→fixes |
+| v1.26 | **falcon-core as a WASM Component Model component**, runs in wasmtime (the component is a release asset) |
+| v1.27 | velocity-based touchdown controller (closes the v1.24 ground-effect float) |
+
+**Forward (this repo + a separate integration project):** the next arc hardens
+the practical edges and hands the verified **WASM component** to a separate
+integration project that carries it onto silicon — **meld → loom → synth →
+gale → board**. See `docs/research/toolchain-to-hardware-roadmap.md`. Remaining
+relay-side work: gz custom realism plugins, richer autonomy (replanning,
+obstacle-aware geofence), the full driver suite, and hygiene follow-ups.
 
 ## verification matrix (per new component)
 
-each new control-cascade component carries the full overdo chain. the
-existing cFS-DNA components in relay already do — falcon inherits.
+each control-cascade component carries the full overdo chain. (The v0.21+
+verified cascade is **relay-iekf** (estimator), **relay-geo** (geometric
+attitude/position), **relay-adrc** (inner rate loop), **relay-mix-quad**
+(allocation) — replacing the legacy ekf/rate/att/pos/mix column names below.
+Actually landed: a kernel-checked **Lean Lyapunov** proof for relay-geo, **Kani**
+harnesses for the mixer + the relay-fsm safety, NEES estimator-consistency, and
+the compositional-WCET proof — see `proofs/` and `CHANGELOG.md`.)
 
-| chain layer | relay-ekf | relay-rate | relay-att | relay-pos | relay-mix |
+| chain layer | relay-iekf | relay-adrc | relay-geo | relay-geo | relay-mix-quad |
 |---|---|---|---|---|---|
 | Lean / Rocq (math) | EKF observability theorem | Lyapunov of rate loop | quaternion-error invariants | cascade stability | mixer geometry validity |
 | Verus (SMT) | numerical bounds, state invariants | PID coefficient bounds, anti-windup | quaternion normalization | setpoint bounds | matrix arithmetic |
