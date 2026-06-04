@@ -495,8 +495,16 @@ pub struct SimBackend {
     pub baro_enabled: bool,
     /// Barometric altitude noise stddev (m) (v1.20).
     pub baro_noise: f32,
-    /// Battery voltage reported to the supervisor's failsafe (v1.8).
+    /// Battery terminal voltage reported to the supervisor's failsafe (v1.8).
+    /// When `battery_drain` is on (v1.21) this is COMPUTED each step from the
+    /// charge and load, not set: V = 12.6 + 4.2·charge − R·I (open-circuit +
+    /// sag), so the failsafe fires on a real endurance limit.
     pub battery_v: f32,
+    /// Drain the battery with motor load? (v1.21) Off = a fixed `battery_v`
+    /// (v1.8 behaviour). On = the LinearBattery-style draining model below.
+    pub battery_drain: bool,
+    /// Normalised state of charge (1.0 = full). Drains with motor power (v1.21).
+    pub battery_charge: f32,
     /// Injected sensor pathologies (v1.9).
     pub path: Pathology,
     /// Control-tick counter (drives the GPS-dropout window).
@@ -528,6 +536,8 @@ impl SimBackend {
             baro_enabled: false,
             baro_noise: 0.0,
             battery_v: 16.0,
+            battery_drain: false,
+            battery_charge: 1.0,
             path: Pathology::default(),
             step_n: 0,
             gyro_bias: [0.0; 3],
@@ -704,6 +714,14 @@ impl FlightBackend for SimBackend {
         let rw = self.path.gyro_bias_rw * relay_math::sqrtf(self.dt);
         for i in 0..3 {
             self.gyro_bias[i] += db + rw * self.noise_unit();
+        }
+        // v1.21 — draining battery (LinearBattery-style): the motor collective is
+        // the current draw; charge depletes; terminal voltage = open-circuit +
+        // load sag. The supervisor's failsafe then fires on real endurance.
+        if self.battery_drain {
+            let current = collective; // ∝ total motor power
+            self.battery_charge = (self.battery_charge - current * 5.0e-5 * self.dt / 0.002).max(0.0);
+            self.battery_v = 12.6 + 4.2 * self.battery_charge - 0.3 * current;
         }
     }
     fn dt(&self) -> f32 {
@@ -1308,6 +1326,42 @@ mod tests {
         assert!(
             err_baro < err_nobaro,
             "baro must beat GPS-only dead-reckoning: baro {err_baro} vs no-baro {err_nobaro} m"
+        );
+    }
+
+    // ── v1.21 battery drain: the v1.8 failsafe fires on a REAL endurance limit
+    // (a depleting pack whose voltage sags under load), not a set value.
+
+    /// A draining battery actuates the endurance failsafe: the supervisor arms,
+    /// takes off and loiters while the pack depletes; the terminal voltage sags
+    /// (open-circuit drop + load sag) below the threshold and the supervisor
+    /// commands a recovery — fired by genuine energy use, not a set voltage.
+    #[test]
+    fn battery_drain_actuates_endurance_failsafe() {
+        use relay_fsm::Mode;
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        backend.battery_drain = true; // a real depleting pack (starts full)
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(relay_fsm::Event::Arm, true, true);
+        sup.command(relay_fsm::Event::RequestTakeoff, true, true);
+        let mut min_v = 99.0f32;
+        let mut fired = false;
+        for _ in 0..30000 {
+            sup.step(&mut backend);
+            min_v = min_v.min(backend.battery_v);
+            if matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed) {
+                fired = true;
+                break;
+            }
+        }
+        assert!(fired, "draining battery must actuate the failsafe");
+        assert!(min_v < 14.0, "voltage must have SAGGED below threshold from drain, not set: {min_v} V");
+        assert!(
+            backend.battery_charge < 0.9,
+            "charge must have genuinely depleted: {}",
+            backend.battery_charge
         );
     }
 }

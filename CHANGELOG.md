@@ -15,6 +15,31 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.21.0] — 2026-06-04
+
+**Realism arc release 6 of 10 — energy realism.** The v1.8 low-battery failsafe
+now fires on a *real* draining pack, not a set voltage.
+
+### Added / changed (`falcon-core`)
+
+- **`SimBackend`** gains a LinearBattery-style draining model: `battery_drain` +
+  `battery_charge`; the terminal voltage is **computed each step** from charge
+  and load — `V = 12.6 + 4.2·charge − R·I` (open-circuit + sag), so the pack
+  depletes with motor power and sags under manoeuvre.
+- gz Harmonic realism: the `LinearBatteryPlugin` with a motor power-load bridge
+  — documented in the rivet artifact and folded into the *consolidated* realism
+  world rather than a 6th per-release near-duplicate SDF (repo-hygiene cleanup,
+  see the hygiene pass).
+
+### Verified (22 tests, clippy clean, embedded builds)
+
+- `battery_drain_actuates_endurance_failsafe` — the supervisor arms, takes off
+  and loiters while the pack depletes; the voltage **sags below 14 V** (computed,
+  not set), the charge genuinely depletes (< 0.9), and the supervisor actuates a
+  recovery. The v1.8 failsafe on a **real endurance limit**.
+
+rivet PASS · SYSREQ-FALCON-019 · SWREQ-FALCON-BATTERY-P01 · FV-FALCON-BATTERY-001.
+
 ## [falcon-v1.20.0] — 2026-06-04
 
 **Realism arc release 5 of 10.** A barometer — an independent vertical source so
