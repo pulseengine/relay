@@ -1,0 +1,32 @@
+artifacts:
+  - id: FV-FALCON-MOTORDYN-001
+    type: sw-verification
+    title: "ADRC ESO absorbs first-order motor lag (v1.23.0)"
+    status: approved
+    description: >
+      Verification of the v1.23.0 motor-dynamics layer (27 falcon-core tests
+      pass, clippy clean, embedded builds), realism arc release 8 (a robustness
+      confirmation, not a falsification — the ADRC ESO was designed for exactly
+      this lag, v0.25):
+
+      1. adrc_absorbs_motor_lag — through the FlightBackend seam, with a 40 ms
+         first-order motor time constant (the rotor speed lags the command), the
+         verified inner loop recovers a tilted body (~0.4 rad) to level (< 0.1
+         rad). The ESO estimates and cancels the actuator lag.
+
+      2. position_hold_stable_under_motor_lag — with a 30 ms motor time constant,
+         position hold to a [1.5,−1,−2] m setpoint stays bounded (< 0.6 m).
+
+      SimBackend gained motor_tau + a per-rotor motor_state (first-order lag,
+      state += (cmd − state)·dt/τ; the torque/thrust use the lagged actual). gz
+      Harmonic realism: the MulticopterMotorModel timeConstantUp/timeConstantDown
+      parameters (already in the base falcon-quad.sdf world).
+    tags: [verification, falcon, motor, adrc, realism, v1.23]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MOTORDYN-P01

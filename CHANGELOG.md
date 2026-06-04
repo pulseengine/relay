@@ -35,6 +35,30 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.23.0] — 2026-06-04
+
+**Realism arc release 8 of 10.** Motor dynamics — first-order spin-up lag. Unlike
+the earlier realism releases this is a **confirmation, not a falsification**: the
+actuator lag is *exactly* what the ADRC ESO was built to absorb (the v0.25
+lumped-disturbance model), and it does.
+
+### Added / changed (`falcon-core`)
+
+- **`SimBackend.motor_tau`** + a per-rotor `motor_state` — first-order motor lag
+  (`state += (cmd − state)·dt/τ`); the torque/thrust use the **lagged actual**,
+  not the command.
+- gz realism: the `MulticopterMotorModel` `timeConstantUp`/`timeConstantDown`
+  parameters (already in the base world).
+
+### Verified (27 tests, clippy clean, embedded builds)
+
+- `adrc_absorbs_motor_lag` — with a **40 ms** motor time constant, the ADRC inner
+  loop recovers a tilted body to level (< 0.1 rad). The ESO cancels the lag.
+- `position_hold_stable_under_motor_lag` — with a 30 ms time constant, position
+  hold stays bounded (< 0.6 m).
+
+rivet PASS · SYSREQ-FALCON-002 · SWREQ-FALCON-MOTORDYN-P01 · FV-FALCON-MOTORDYN-001.
+
 ## [falcon-v1.22.0] — 2026-06-04
 
 **Realism arc release 7 of 10.** Air-density thrust lapse — thrust falls with
