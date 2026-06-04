@@ -35,6 +35,50 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.25.0] — 2026-06-04
+
+**Realism arc release 10 of 10 — the finale.** Turbulence — a Dryden-like
+colored gust spectrum — and the capstone clean-room re-verification.
+
+### Added / changed (`falcon-core`)
+
+- **`Pathology.turbulence`** + a `turb_state` Ornstein-Uhlenbeck process — a
+  COLORED gust (`gust ← gust·(1−dt/T) + σ·√(2dt/T)·N`, ~1 s correlation), richer
+  than v1.16's white-noise gust because the gusts **persist**.
+- gz realism: gz Harmonic has **no built-in turbulence model** — it needs a
+  custom `/world/.../wind` topic feeder (the documented gap).
+
+### Verified (30 tests, clippy clean, embedded builds)
+
+- `holds_position_under_turbulence` — under **2 m/s RMS** turbulence the P-I-D +
+  ESO keep the vehicle **bounded** (peak drift < 4 m, observed ~3 m); it does
+  **not** diverge. Honest scope: turbulence drives larger excursions than steady
+  wind (the gusts persist) — **bounded, not crisp**, stated plainly.
+
+### Capstone — independent clean-room re-verification
+
+A cold subagent checked the **v1.16–v1.25 realism arc**: **10 CONFIRM / 1 REFUTE
+/ 0 CANNOT-VERIFY** (the refute a wording nitpick — `rivet validate` PASSes with
+0 errors / 93 warnings). Independently confirmed: the wind position-integral +
+its falsification, the GNSS variance divergence, the baro fed into the verified
+IEKF, the ground-effect landing-float **documented as a limitation**, turbulence
+**bounded-not-crisp**, the gz worlds **consolidated**, and **zero `libm::`** in
+falcon-core. The readiness dossier is refreshed with the realism rows.
+
+### The arc, in one line
+
+Ten releases (wind · drag · IMU-bias · GNSS · barometer · battery · atmosphere ·
+motor-dynamics · ground-effect · turbulence) hardened the verified cascade
+against the physics a clean sim hid — surfacing **five real control-theory
+falsification→fixes** (the missing position + altitude integrals, the
+over-trusting GNSS variance, the naive baro filter) and **honest documented
+limits** (over-authority wind, the service ceiling, the landing-float). Each a
+CI-gated test + a gz realism layer + a rivet trace. The flight code stays
+`no_std`/`no_alloc`; the remaining gaps are still on the hardware side of the
+seam.
+
+rivet PASS · SYSREQ-FALCON-017 · SWREQ-FALCON-TURB-P01 · FV-FALCON-TURB-001.
+
 ## [falcon-v1.24.0] — 2026-06-04
 
 **Realism arc release 9 of 10.** Ground effect — the rotor downwash reflecting

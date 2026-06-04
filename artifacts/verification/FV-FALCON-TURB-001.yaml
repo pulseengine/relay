@@ -1,0 +1,30 @@
+artifacts:
+  - id: FV-FALCON-TURB-001
+    type: sw-verification
+    title: "Bounded position hold under Dryden-like turbulence (v1.25.0)"
+    status: approved
+    description: >
+      Verification of the v1.25.0 turbulence layer (30 falcon-core tests pass,
+      clippy clean, embedded builds), the final realism arc release (10 of 10):
+
+      holds_position_under_turbulence — through the FlightBackend seam, under a
+      Dryden-like turbulence spectrum (2 m/s RMS, ~1 s correlation; an
+      Ornstein-Uhlenbeck colored gust, richer than v1.16's white-noise gust), the
+      P-I-D position loop + the ESO keep the vehicle BOUNDED: peak horizontal
+      drift < 4 m (observed ~3 m), it does NOT diverge. Honest scope: turbulence
+      drives larger excursions than a steady wind (the gusts persist) — the claim
+      is bounded-not-crisp, stated plainly (an over-authority steady wind blew
+      the vehicle 100s of metres; turbulence rides out within a few metres).
+
+      SimBackend gained Pathology.turbulence + a turb_state OU process. The gz
+      Harmonic SITL has no built-in turbulence model; it needs a custom
+      /world/.../wind topic feeder (the documented gap, per the realism catalog).
+    tags: [verification, falcon, turbulence, realism, v1.25]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TURB-P01

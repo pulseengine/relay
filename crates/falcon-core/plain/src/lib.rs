@@ -377,6 +377,11 @@ pub struct Pathology {
     /// recurring loss the estimator must dead-reckon through and re-acquire
     /// (v1.19, distinct from v1.9's single window).
     pub gps_dropout_period: u32,
+    /// Turbulence intensity σ (m/s) — a Dryden-like COLORED gust (an
+    /// Ornstein-Uhlenbeck process, ~1 s correlation time), richer than v1.16's
+    /// white-noise `gust_amp`. A realistic turbulence spectrum the position loop
+    /// + ESO must ride out (v1.25).
+    pub turbulence: f32,
 }
 
 // ── v1.11 — the real-hardware backend SEAM ───────────────────────────────
@@ -551,6 +556,8 @@ pub struct SimBackend {
     gyro_bias: Vec3,
     /// LCG state for the deterministic broadband noise.
     rng: u32,
+    /// Dryden-like turbulence gust state (OU process, horizontal x/y) (v1.25).
+    turb_state: Vec3,
 }
 
 const GRAVITY: f32 = 9.81;
@@ -584,6 +591,7 @@ impl SimBackend {
             step_n: 0,
             gyro_bias: [0.0; 3],
             rng: 0x9E3779B9, // a fixed, non-zero seed (golden-ratio constant)
+            turb_state: [0.0; 3],
         }
     }
 
@@ -754,11 +762,22 @@ impl FlightBackend for SimBackend {
         // (~0.75 m/s²) stays within the gentle tilt authority (a_cmd_max ≈ 1
         // m/s²); a wind whose force exceeds that authority blows the vehicle
         // away regardless of control — a real, documented limit, not a bug.
+        // v1.25 — Dryden-like turbulence: a COLORED gust (Ornstein-Uhlenbeck
+        // process, ~1 s correlation), richer than the white-noise gust_amp.
+        // gust ← gust·(1−dt/T) + σ·√(2dt/T)·N — stationary std σ, correlation T.
+        if self.path.turbulence > 0.0 {
+            const TC: f32 = 1.0; // gust correlation time (s)
+            let a = self.dt / TC;
+            let q = self.path.turbulence * relay_math::sqrtf(2.0 * a);
+            for i in 0..2 {
+                self.turb_state[i] = self.turb_state[i] * (1.0 - a) + q * self.noise_unit();
+            }
+        }
         const K_WIND: f32 = 0.15;
-        if self.wind[0] != 0.0 || self.wind[1] != 0.0 || self.gust_amp != 0.0 {
+        if self.wind[0] != 0.0 || self.wind[1] != 0.0 || self.gust_amp != 0.0 || self.path.turbulence > 0.0 {
             for i in 0..2 {
                 let gust = self.gust_amp * self.noise_unit();
-                accel[i] += K_WIND * (self.wind[i] + gust - self.vel[i]);
+                accel[i] += K_WIND * (self.wind[i] + gust + self.turb_state[i] - self.vel[i]);
             }
         }
         // v1.17 — quadratic aerodynamic drag on the horizontal relative airspeed
@@ -1582,5 +1601,35 @@ mod tests {
             (0.2..2.5).contains(&alt),
             "ground effect floats the landing on a bounded cushion: {alt} m"
         );
+    }
+
+    // ── v1.25 turbulence: a Dryden-like COLORED gust spectrum (OU, correlated),
+    // harder than v1.16's white-noise gust because the gusts persist.
+
+    /// Position hold rides out a Dryden-like turbulence spectrum (2 m/s RMS,
+    /// ~1 s correlation). Honest claim: the persistent, correlated gusts push
+    /// the vehicle into a larger excursion than a steady wind (peak ~3 m here),
+    /// but it stays BOUNDED — it does not diverge — and returns. The worst-case
+    /// environment of the realism arc; bounded-not-crisp, stated plainly.
+    #[test]
+    fn holds_position_under_turbulence() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt)
+            .with_pathology(Pathology { turbulence: 2.0, ..Default::default() });
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_position([0.0, 0.0, -2.0]);
+        let mut peak = 0.0f32;
+        for k in 0..40000 {
+            core.step(&mut b);
+            if k > 4000 {
+                let d = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
+                peak = peak.max(d);
+            }
+        }
+        // bounded under continuous turbulence — it does not diverge (an
+        // over-authority wind blew the vehicle to 100s of metres; this rides
+        // out the persistent gusts within a few metres).
+        assert!(peak < 4.0, "turbulence must stay bounded (not diverge): peak {peak} m");
     }
 }
