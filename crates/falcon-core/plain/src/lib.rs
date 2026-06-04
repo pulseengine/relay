@@ -82,6 +82,12 @@ pub struct FlightCore {
     setpoint: Vec3,
     kp_alt: f32,
     kd_alt: f32,
+    /// Altitude-error integral (v1.22) — rejects a steady thrust deficit (the
+    /// air-density lapse at altitude) the P-D altitude loop alone leaves as an
+    /// offset. Anti-windup clamps its thrust contribution.
+    ki_alt: f32,
+    alt_int: f32,
+    alt_int_max: f32,
     kp_pos: f32,
     kd_vel: f32,
     ki_pos: f32,
@@ -113,6 +119,9 @@ impl FlightCore {
             setpoint: [0.0; 3],
             kp_alt: 0.05,
             kd_alt: 0.30,
+            ki_alt: 0.0, // opt-in (set_altitude_integral_gain): the integral is
+            alt_int: 0.0, // for high-altitude thrust-lapse compensation; default
+            alt_int_max: 0.4, // off as it interacts with aggressive alt transients.
             kp_pos: 0.08,
             kd_vel: 0.6,
             ki_pos: 0.02,
@@ -139,6 +148,13 @@ impl FlightCore {
     pub fn set_position_integral_gain(&mut self, ki: f32) {
         self.ki_pos = ki;
         self.pos_int = [0.0; 2];
+    }
+
+    /// Set the altitude-loop integral gain (v1.22). `0` disables it (P-D only) —
+    /// used to show the altitude offset under thrust lapse the integral removes.
+    pub fn set_altitude_integral_gain(&mut self, ki: f32) {
+        self.ki_alt = ki;
+        self.alt_int = 0.0;
     }
 
     /// Set the IEKF position-measurement variance (m²) (v1.19). This must match
@@ -180,10 +196,17 @@ impl FlightCore {
         }
         let est = self.iekf.state();
 
-        // ── Altitude loop (v1.2; v1.20 the estimate's z/vz are baro-anchored) ──
-        // thrust = hover − kp·alt_err + kd·v_z, clamped.
+        // ── Altitude loop (v1.2; v1.20 baro-anchored; v1.22 +I) ── thrust =
+        // hover − kp·alt_err − ki·∫alt_err + kd·v_z, clamped. The integral
+        // (v1.22) rejects a steady thrust deficit (the air-density lapse at
+        // altitude) the P-D loop alone leaves as an altitude offset.
         let alt_err = self.setpoint[2] - est.p[2];
-        let thrust = (self.hover_thrust - self.kp_alt * alt_err + self.kd_alt * est.v[2]).clamp(0.0, 1.0);
+        self.alt_int += alt_err * dt;
+        let cap = if self.ki_alt > 0.0 { self.alt_int_max / self.ki_alt } else { 0.0 };
+        self.alt_int = self.alt_int.clamp(-cap, cap);
+        let thrust = (self.hover_thrust - self.kp_alt * alt_err - self.ki_alt * self.alt_int
+            + self.kd_alt * est.v[2])
+            .clamp(0.0, 1.0);
 
         // ── Horizontal position loop (v1.3 P-D, v1.16 +I) ── P-I-D on (pos,
         // vel) error → commanded NED acceleration, magnitude-saturated. The
@@ -505,6 +528,11 @@ pub struct SimBackend {
     pub battery_drain: bool,
     /// Normalised state of charge (1.0 = full). Drains with motor power (v1.21).
     pub battery_charge: f32,
+    /// Thrust-lapse rate per metre of altitude (v1.22): air density falls with
+    /// altitude, so thrust = collective·k_thrust·(1 − lapse·alt_m), floored at
+    /// 0.4. The altitude loop must raise collective to compensate; if the lapse
+    /// exceeds the thrust margin the vehicle hits a service ceiling.
+    pub thrust_lapse: f32,
     /// Injected sensor pathologies (v1.9).
     pub path: Pathology,
     /// Control-tick counter (drives the GPS-dropout window).
@@ -538,6 +566,7 @@ impl SimBackend {
             battery_v: 16.0,
             battery_drain: false,
             battery_charge: 1.0,
+            thrust_lapse: 0.0,
             path: Pathology::default(),
             step_n: 0,
             gyro_bias: [0.0; 3],
@@ -671,7 +700,15 @@ impl FlightBackend for SimBackend {
         self.integrate(torque);
         // translation: thrust acts along −body-z; in NED that is
         // −T·(R·ẑ) = −T·[r02, r12, r22]; add gravity (+g on NED-z). m = 1.
-        let thrust = collective * self.k_thrust;
+        // v1.22 — air-density thrust lapse: thrust falls with altitude (alt =
+        // −pos[2], NED), so the altitude loop must raise collective; beyond the
+        // margin the vehicle hits a service ceiling.
+        let lapse = if self.thrust_lapse > 0.0 {
+            (1.0 - self.thrust_lapse * (-self.pos[2]).max(0.0)).max(0.4)
+        } else {
+            1.0
+        };
+        let thrust = collective * self.k_thrust * lapse;
         let mut accel = [
             -thrust * self.r[0][2],
             -thrust * self.r[1][2],
@@ -1362,6 +1399,60 @@ mod tests {
             backend.battery_charge < 0.9,
             "charge must have genuinely depleted: {}",
             backend.battery_charge
+        );
+    }
+
+    // ── v1.22 air-density thrust lapse: thrust falls with altitude; the
+    // altitude integral compensates, and beyond the margin a service ceiling.
+
+    /// Final altitude (m up) after climbing to a target under a thrust lapse.
+    fn final_altitude_under_lapse(target_up_m: f32, lapse: f32, ki_alt: Option<f32>) -> f32 {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.thrust_lapse = lapse;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        if let Some(k) = ki_alt {
+            core.set_altitude_integral_gain(k);
+        }
+        core.set_altitude(-target_up_m);
+        for _ in 0..40000 {
+            core.step(&mut b);
+        }
+        -b.pos[2]
+    }
+
+    /// The altitude integral rejects the thrust lapse: the vehicle reaches and
+    /// holds 20 m even though air-density loss reduces thrust there.
+    #[test]
+    fn holds_altitude_under_thrust_lapse() {
+        let alt = final_altitude_under_lapse(20.0, 0.01, Some(0.02)); // integral ON
+        assert!((alt - 20.0).abs() < 1.0, "must hold 20 m despite thrust lapse: {alt} m");
+    }
+
+    /// FALSIFICATION: with the altitude integral DISABLED (P-D only) the thrust
+    /// lapse leaves the vehicle sagging below the target (a steady thrust
+    /// deficit the P-D loop cannot reject); the integral closes the gap.
+    #[test]
+    fn bare_altitude_pd_sags_under_lapse() {
+        let alt_pd = final_altitude_under_lapse(20.0, 0.01, Some(0.0)); // integral OFF
+        let alt_pid = final_altitude_under_lapse(20.0, 0.01, Some(0.02)); // integral ON
+        assert!(alt_pd < 19.0, "P-D alone should sag below target under lapse: {alt_pd} m");
+        assert!(
+            (alt_pid - 20.0).abs() < 1.0 && alt_pid > alt_pd,
+            "the integral must close the gap: pid {alt_pid} vs pd {alt_pd} m"
+        );
+    }
+
+    /// The thrust lapse imposes a SERVICE CEILING: commanded to 80 m, the
+    /// vehicle cannot climb past where full thrust just hovers (~50 m), even
+    /// with the integral — an honest physical limit, not a control failure.
+    #[test]
+    fn thrust_lapse_imposes_service_ceiling() {
+        let alt = final_altitude_under_lapse(80.0, 0.01, Some(0.02)); // integral ON, still ceiling
+        assert!(
+            (35.0..65.0).contains(&alt),
+            "thrust lapse must cap altitude well below the 80 m command: {alt} m"
         );
     }
 }

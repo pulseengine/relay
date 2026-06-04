@@ -35,6 +35,41 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.22.0] — 2026-06-04
+
+**Realism arc release 7 of 10.** Air-density thrust lapse — thrust falls with
+altitude — surfaced the *vertical* twin of the v1.16 finding, plus an honest
+service ceiling.
+
+### The finding (falsification → fix)
+
+The altitude loop was **P-D, no integral** (like the v1.3 horizontal loop): a
+steady thrust deficit (the density lapse at altitude) leaves it sagging **below**
+the commanded altitude. v1.22 adds an **opt-in altitude integral**
+(`set_altitude_integral_gain`) that closes the gap. It's **default-off** — turned
+on by default it regressed the mission/landing altitude hold (it interacts with
+large takeoff/land transients), an honest tuning trade-off; it's for
+high-altitude flight where the lapse matters.
+
+### Added / changed (`falcon-core`)
+
+- **`SimBackend.thrust_lapse`** — `thrust = collective·k·(1 − lapse·alt)`,
+  floored.
+- **`FlightCore`** opt-in altitude integral (`ki_alt`, anti-windup).
+- gz realism: the `<atmosphere type="adiabatic">` model (in `gen-realism-world.py`)
+  + a density→thrust bridge (custom — gz's atmosphere doesn't auto-lapse thrust).
+
+### Verified (25 tests, clippy clean, embedded builds)
+
+- `holds_altitude_under_thrust_lapse` — integral on → holds 20 m within 1 m.
+- `bare_altitude_pd_sags_under_lapse` — P-D only **sags < 19 m**; the integral
+  closes it. The vertical mirror of v1.16.
+- `thrust_lapse_imposes_service_ceiling` — commanded to 80 m, the lapse caps it
+  at **~50 m** (where full thrust just hovers), even with the integral — an
+  honest physical limit.
+
+rivet PASS · SYSREQ-FALCON-017 · SWREQ-FALCON-ATMOS-P01 · FV-FALCON-ATMOS-001.
+
 ## [falcon-v1.21.0] — 2026-06-04
 
 **Realism arc release 6 of 10 — energy realism.** The v1.8 low-battery failsafe
