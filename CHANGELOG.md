@@ -15,6 +15,48 @@ Tags use a per-track prefix:
 > flight arc**, which was developed unmerged on `falcon-v0.21-iekf` until
 > it was verified end-to-end and the kernel-checked Lyapunov proof built.
 
+## [falcon-v1.16.0] — 2026-06-04
+
+**Release 1 of the SITL-realism arc (v1.16→v1.25).** Wind — the disturbance
+that separates "hovers in a clean sim" from "flies outside." And it surfaced
+exactly the control-theory gap the roadmap predicted.
+
+### The finding (falsification → fix)
+
+Wind is a translational **force**. The ADRC ESO rejects *torque* disturbances,
+not this — and the v1.3 position loop was **P-D, no integrator**, which has
+**zero steady-state rejection of a constant force**: it settles at an offset
+where `kp·error = wind_accel`. So "the cascade rejects wind" was false. v1.16
+adds an **anti-windup position-loop integral**, which winds up to supply the
+counter-command at zero error.
+
+### Added / changed (`falcon-core`)
+
+- **`FlightCore`** position loop is now **P-I-D** (`ki_pos` + clamped integral);
+  `set_position_integral_gain` seam for the contrast test.
+- **`SimBackend`** gains a wind model — `wind` (NED m/s) + `gust_amp` — applied
+  as a relative-velocity drag `F = K_WIND·(v_wind − v_body)` with deterministic
+  gusts (the gz WindEffects form).
+- **`worlds/falcon-quad-wind.sdf`** — the gz Harmonic realism: `WindEffects` +
+  `<wind>` + `<enable_wind>` on `base_link` (validates with `gz sdf`).
+
+### Verified (15 tests, clippy clean, embedded builds)
+
+- `holds_position_under_steady_wind` — P-I-D holds **< 0.6 m** under a steady
+  5 m/s wind.
+- `bare_pd_loop_offsets_under_wind` — P-D alone offsets **> 1.5 m**; the integral
+  **cuts it by > half**. The published falsification→fix.
+- `rejects_wind_gusts` — 3 m/s + 2 m/s gusts stays **< 1.0 m**.
+
+### Honest limit
+
+`K_WIND` is sized so a 5 m/s wind (~0.75 m/s²) stays within the gentle tilt
+authority (`a_cmd_max ≈ 1 m/s²`). A wind whose force **exceeds** that authority
+blows the vehicle away regardless of control — a real, documented limit (a
+stronger wind needs more tilt authority), not hidden.
+
+rivet PASS · SYSREQ-FALCON-017 · SWREQ-FALCON-WIND-P01 · FV-FALCON-WIND-001.
+
 ## [falcon-v1.15.0] — 2026-06-03
 
 The **capstone** of the v1.8 → v1.15 hardware-abstraction arc: the

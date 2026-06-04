@@ -1,0 +1,31 @@
+artifacts:
+  - id: SWREQ-FALCON-WIND-P01
+    type: sw-req
+    title: "WIND-P01 — reject a steady wind force via a position-loop integral"
+    status: implemented
+    description: >
+      The horizontal position loop shall reject a sustained wind — a
+      translational FORCE disturbance the ADRC ESO (a torque observer) does not
+      see — by augmenting the v1.3 P-D loop with an anti-windup integral term.
+      A P-D loop alone settles at a steady offset (error = wind_accel / kp); the
+      integral winds up to supply the counter-command at zero error. Modelled in
+      the no_std SimBackend as a relative-velocity drag F = K_WIND·(v_wind −
+      v_body) (the gz WindEffects form) with deterministic gusts, and in the gz
+      Harmonic SITL via the WindEffects system + <wind> + <enable_wind>. Honest
+      limit: a wind whose force exceeds the vehicle's tilt authority (a_cmd_max)
+      blows it away regardless of control — documented, not hidden.
+    tags: [falcon, wind, environment, position-loop, integral, v1.16]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: under a steady 5 m/s
+        wind (within tilt authority) the P-I-D loop holds within 0.6 m of the
+        setpoint; the same wind with the integral DISABLED (P-D only) leaves an
+        offset > 1.5 m, and the integral cuts it by more than half (the
+        falsification→fix); a 3 m/s wind + 2 m/s gusts stays bounded < 1.0 m.
+        clippy clean; the embedded crate still builds; the
+        falcon-quad-wind.sdf gz world (WindEffects) validates.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-017
