@@ -35,6 +35,32 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.24.0] — 2026-06-04
+
+**Realism arc release 9 of 10.** Ground effect — the rotor downwash reflecting
+off the surface augments thrust near the ground.
+
+### Added / changed (`falcon-core`)
+
+- **`SimBackend.ground_effect`** — `thrust ×= 1 + gain/(1 + (alt/0.25)²)` (a
+  rational decay; **no new transcendental** in the flight path, respecting the
+  `relay-math` qualification seam).
+- gz realism: gz Harmonic has **no built-in ground-effect system** — it needs a
+  custom plugin (the documented gap).
+
+### Verified (29 tests, clippy clean, embedded builds)
+
+- `ground_effect_aids_takeoff` — the boost helps the climb; reaches 2 m within
+  0.3 m, no instability.
+- `ground_effect_cushions_landing_into_a_float` — **honest limitation:** on
+  landing, the position-based altitude loop floats on the cushion (bounded,
+  stable, 0.2–2.5 m) rather than touching down. A clean touchdown needs a
+  velocity-based landing controller (future). The v1.22 altitude integral is
+  **not** a fix — it runs away (~6 km) when wound up during the climb; tried and
+  rejected. Documented, not faked.
+
+rivet PASS · SYSREQ-FALCON-017 · SWREQ-FALCON-GNDEFFECT-P01 · FV-FALCON-GNDEFFECT-001.
+
 ## [falcon-v1.23.0] — 2026-06-04
 
 **Realism arc release 8 of 10.** Motor dynamics — first-order spin-up lag. Unlike
