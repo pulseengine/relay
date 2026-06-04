@@ -35,6 +35,34 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.27.0] — 2026-06-04
+
+**First hardware-practical release after the realism arc.** A **velocity-based
+touchdown controller** — closing the v1.24 ground-effect **landing-float**.
+
+### The fix
+
+v1.24 documented that the position-based altitude loop *floats* on the
+ground-effect cushion (~1.3 m) instead of landing. v1.27 adds a landing mode
+(`FlightCore::set_landing`) that commands a constant **descent rate** instead of
+a position, sized so the descent command (`hover − kvz·rate = 0.30`) stays
+**below `gravity / 1.4`** (the max ground-effect boost) — so it keeps descending
+through the *strongest* cushion — then cuts to idle on touchdown.
+
+### Added / changed (`falcon-core`)
+
+- **`FlightCore::set_landing`** + the velocity-landing altitude branch.
+- **`SimBackend.ground_contact`** — a surface constraint (can't descend below
+  NED z=0; vertical velocity zeroed on contact) so a touchdown can settle.
+
+### Verified (31 tests, clippy clean, embedded builds)
+
+- `velocity_landing_touches_down_through_ground_effect` — with `ground_effect=0.4`
+  the vehicle **descends through the cushion and settles on the surface**
+  (< 0.15 m, |vz| < 0.3 m/s) — vs the ~1.3 m float without it.
+
+rivet PASS · SYSREQ-FALCON-004 · SWREQ-FALCON-TOUCHDOWN-P01 · FV-FALCON-TOUCHDOWN-001.
+
 ## [falcon-v1.26.0] — 2026-06-04
 
 **The keystone of the toolchain-to-hardware path.** `falcon-core` — the verified

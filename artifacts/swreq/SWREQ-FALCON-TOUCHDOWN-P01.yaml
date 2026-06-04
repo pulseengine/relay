@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-TOUCHDOWN-P01
+    type: sw-req
+    title: "TOUCHDOWN-P01 — velocity-based touchdown lands through ground effect"
+    status: implemented
+    description: >
+      A velocity-based touchdown controller shall land the vehicle cleanly
+      through the ground-effect cushion the v1.24 position-based altitude loop
+      floated short of. When landing, the altitude loop shall command a constant
+      descent RATE (not a position) sized so the descent command stays below
+      gravity / the maximum ground-effect thrust boost — i.e. it keeps descending
+      through the strongest cushion — then cut to idle on touchdown so the
+      vehicle settles on the surface. Modelled in the no_std SimBackend
+      (set_landing on FlightCore + a ground-contact constraint).
+    tags: [falcon, landing, touchdown, ground-effect, control, v1.27]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend with ground_effect=0.4
+        and ground contact: after climbing to 2 m, engaging set_landing descends
+        through the cushion and reaches the surface (< 0.15 m), settled
+        (|vz| < 0.3 m/s) — vs the ~1.3 m float without the controller (v1.24).
+        clippy clean; embedded builds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004
