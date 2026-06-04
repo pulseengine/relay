@@ -1,0 +1,16 @@
+package falcon:flight@1.26.0;
+
+/// The verified flight core (falcon-core) as a Component-Model component — the
+/// keystone of the toolchain-to-hardware pipeline (meld → loom → synth → gale).
+/// These exports run the SAME verified IEKF → geometric → ADRC → mixer cascade
+/// against the analytic SimBackend INSIDE the component, so wasmtime (or any CM
+/// runtime) can execute the verified core and observe it stabilise — proving
+/// the core is a portable, runnable artifact, not just a native rlib.
+world flight-demo {
+    /// Recover a body tilted ~0.4 rad to level through the cascade; return the
+    /// final tilt (rad). A wasmtime host asserts < 0.1.
+    export run-stabilization: func() -> f32;
+    /// Fly to a [2,-1.5,-2] m position setpoint; return the final position
+    /// error (m). A wasmtime host asserts < 0.6.
+    export run-position-hold: func() -> f32;
+}

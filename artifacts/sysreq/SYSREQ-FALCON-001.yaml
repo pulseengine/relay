@@ -500,3 +500,31 @@ artifacts:
     links:
       - type: derives-from
         target: STKH-FALCON-001
+  - id: SYSREQ-FALCON-020
+    type: system-req
+    title: Verified flight core as a portable WebAssembly Component-Model artifact
+    status: approved
+    description: >
+      The verified flight core shall be deployable as a WebAssembly Component
+      Model component — a typed, portable artifact that runs unchanged in any CM
+      runtime (wasmtime) and is the clean hand-off to the separate
+      hardware-integration project (meld → loom → synth → gale → board).
+      Separation of concerns: this repo proves the component RUNS and is CORRECT
+      (the same verified IEKF → geometric → ADRC → mixer cascade, executed as a
+      component, closing the loop against the analytic SimBackend); the
+      integration project owns transcoding it to silicon. The component is the
+      contract — typed and stable so the integration project depends on it
+      without knowing this repo's internals.
+    tags: [falcon, wasm, component-model, deployment, toolchain, v1.26]
+    fields:
+      req-type: architecture
+      priority: must
+      verification-criteria: >
+        falcon-core builds as a falcon:flight Component Model component
+        (cargo-component, wasm32-wasip2) and RUNS in wasmtime: run-stabilization
+        recovers a tilted body to level (< 0.1 rad) and run-position-hold flies
+        to a setpoint (< 0.6 m), both executed by wasmtime — gated by
+        scripts/wasmtime-flight-test.sh.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
