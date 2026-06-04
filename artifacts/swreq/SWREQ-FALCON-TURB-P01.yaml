@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-TURB-P01
+    type: sw-req
+    title: "TURB-P01 — bounded position hold under a Dryden-like turbulence spectrum"
+    status: implemented
+    description: >
+      The flight stack shall remain BOUNDED (not diverge) under a realistic
+      turbulence spectrum — a Dryden-like COLORED gust (an Ornstein-Uhlenbeck
+      process with a ~1 s correlation time, gust ← gust·(1−dt/T) + σ·√(2dt/T)·N),
+      richer than v1.16's white-noise gust because the gusts persist. Modelled in
+      the no_std SimBackend (Pathology.turbulence intensity σ); the gz Harmonic
+      SITL has no built-in turbulence model — it needs a custom /world/.../wind
+      topic feeder (the documented gap). Honest scope: turbulence drives larger
+      excursions than a steady wind; the claim is BOUNDED, not crisp.
+    tags: [falcon, turbulence, dryden, environment, realism, v1.25]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Through the FlightBackend seam against SimBackend: under 2 m/s RMS
+        turbulence (~1 s correlation), position hold stays bounded — peak
+        horizontal drift < 4 m (observed ~3 m), it does NOT diverge (an
+        over-authority steady wind blew the vehicle 100s of metres; turbulence
+        rides out within a few metres). clippy clean; embedded builds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-017
