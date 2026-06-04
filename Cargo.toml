@@ -63,7 +63,7 @@ wit-bindgen = { version = "0.57.1", default-features = false }
 # Pinned below 1.11: proptest 1.11.0 regressed its f32 range sampler
 # (float_samplers.rs:466 internal assertion fails on narrow ranges), which
 # flakily failed the dt-jitter proptests on Linux CI. Re-allow 1.11+ once fixed.
-proptest = ">=1.7, <1.11"
+proptest = ">=1.7, <1.12"
 
 # Workspace-wide lint config. Engines use `#[cfg(kani)]` for the Kani
 # model-checker harness paths (they're built only under `cargo kani`,
