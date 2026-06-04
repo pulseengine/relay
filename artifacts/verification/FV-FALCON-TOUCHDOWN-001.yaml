@@ -1,0 +1,28 @@
+artifacts:
+  - id: FV-FALCON-TOUCHDOWN-001
+    type: sw-verification
+    title: "Velocity-based touchdown lands through ground effect (v1.27.0)"
+    status: approved
+    description: >
+      Verification of the v1.27.0 velocity-based touchdown controller (31
+      falcon-core tests pass, clippy clean, embedded builds), the first
+      hardware-practical release after the realism arc — it closes the v1.24
+      ground-effect landing-float limitation:
+
+      velocity_landing_touches_down_through_ground_effect — through the
+      FlightBackend seam with ground_effect=0.4 and a ground-contact constraint,
+      the vehicle climbs to 2 m, then set_landing engages a constant-descent-rate
+      controller (kvz sized so the vz=0 command 0.30 < gravity/1.4 ≈ 0.357, the
+      max ground-effect boost) that pushes through the cushion and settles on the
+      surface (< 0.15 m, |vz| < 0.3 m/s) — vs the ~1.3 m float the position loop
+      floated at (v1.24). FlightCore gained set_landing + the velocity-landing
+      branch; SimBackend gained a ground_contact constraint.
+    tags: [verification, falcon, landing, touchdown, v1.27]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TOUCHDOWN-P01

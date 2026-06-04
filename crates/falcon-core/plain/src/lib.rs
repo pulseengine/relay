@@ -88,6 +88,13 @@ pub struct FlightCore {
     ki_alt: f32,
     alt_int: f32,
     alt_int_max: f32,
+    /// Velocity-based touchdown (v1.27): when `landing`, the altitude loop
+    /// commands a constant descent RATE (not a position) so it pushes through
+    /// the ground-effect cushion the position loop floats on, then cuts thrust
+    /// on touchdown.
+    landing: bool,
+    landing_descent: f32,
+    kvz_land: f32,
     kp_pos: f32,
     kd_vel: f32,
     ki_pos: f32,
@@ -122,6 +129,12 @@ impl FlightCore {
             ki_alt: 0.0, // opt-in (set_altitude_integral_gain): the integral is
             alt_int: 0.0, // for high-altitude thrust-lapse compensation; default
             alt_int_max: 0.4, // off as it interacts with aggressive alt transients.
+            landing: false,
+            landing_descent: 0.5, // m/s controlled descent rate (NED z, +down)
+            // kvz sized so the vz=0 descent command (hover − kvz·descent = 0.30)
+            // is below gravity/(max ground-effect boost 1.4) ≈ 0.357 — i.e. the
+            // controller keeps descending even through the strongest cushion.
+            kvz_land: 0.4,
             kp_pos: 0.08,
             kd_vel: 0.6,
             ki_pos: 0.02,
@@ -135,6 +148,14 @@ impl FlightCore {
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
     pub fn set_altitude(&mut self, ned_z: f32) {
         self.setpoint[2] = ned_z;
+    }
+
+    /// Engage/disengage the velocity-based touchdown controller (v1.27). When
+    /// on, the altitude loop descends at a constant rate (pushing through the
+    /// ground-effect cushion) and cuts thrust on touchdown — the clean landing
+    /// the position loop floats short of (v1.24).
+    pub fn set_landing(&mut self, on: bool) {
+        self.landing = on;
     }
 
     /// Command a full NED position target (metres; z negative = up). v1.3.
@@ -196,17 +217,32 @@ impl FlightCore {
         }
         let est = self.iekf.state();
 
-        // ── Altitude loop (v1.2; v1.20 baro-anchored; v1.22 +I) ── thrust =
-        // hover − kp·alt_err − ki·∫alt_err + kd·v_z, clamped. The integral
-        // (v1.22) rejects a steady thrust deficit (the air-density lapse at
-        // altitude) the P-D loop alone leaves as an altitude offset.
-        let alt_err = self.setpoint[2] - est.p[2];
-        self.alt_int += alt_err * dt;
-        let cap = if self.ki_alt > 0.0 { self.alt_int_max / self.ki_alt } else { 0.0 };
-        self.alt_int = self.alt_int.clamp(-cap, cap);
-        let thrust = (self.hover_thrust - self.kp_alt * alt_err - self.ki_alt * self.alt_int
-            + self.kd_alt * est.v[2])
-            .clamp(0.0, 1.0);
+        // ── Altitude loop ── velocity-based touchdown when landing, else the
+        // position P-I-D.
+        let thrust = if self.landing {
+            // ── Velocity-based touchdown (v1.27) ── command a constant descent
+            // RATE (NED z positive = down), independent of the ground-effect
+            // cushion the position loop floats on; cut to idle on touchdown so
+            // the vehicle settles on the surface.
+            let alt_agl = -est.p[2];
+            if alt_agl < 0.12 {
+                0.1 // touched down — idle (the ground holds the vehicle)
+            } else {
+                (self.hover_thrust - self.kvz_land * (self.landing_descent - est.v[2]))
+                    .clamp(0.0, 1.0)
+            }
+        } else {
+            // ── Position altitude P-I-D (v1.2; v1.20 baro-anchored; v1.22 +I) ──
+            // thrust = hover − kp·alt_err − ki·∫alt_err + kd·v_z. The integral
+            // (v1.22) rejects a steady thrust deficit (the air-density lapse).
+            let alt_err = self.setpoint[2] - est.p[2];
+            self.alt_int += alt_err * dt;
+            let cap = if self.ki_alt > 0.0 { self.alt_int_max / self.ki_alt } else { 0.0 };
+            self.alt_int = self.alt_int.clamp(-cap, cap);
+            (self.hover_thrust - self.kp_alt * alt_err - self.ki_alt * self.alt_int
+                + self.kd_alt * est.v[2])
+                .clamp(0.0, 1.0)
+        };
 
         // ── Horizontal position loop (v1.3 P-D, v1.16 +I) ── P-I-D on (pos,
         // vel) error → commanded NED acceleration, magnitude-saturated. The
@@ -548,6 +584,10 @@ pub struct SimBackend {
     /// downwash reflects and boosts thrust — thrust ×= (1 + gain·e^(−alt/0.25)).
     /// A landing/takeoff cushion the altitude loop must push through. 0 = none.
     pub ground_effect: f32,
+    /// Model ground contact? (v1.27) When true the vehicle cannot descend below
+    /// the surface (NED z = 0) and its vertical velocity is zeroed on contact —
+    /// so a touchdown can settle. Default off (existing hover tests stay aloft).
+    pub ground_contact: bool,
     /// Injected sensor pathologies (v1.9).
     pub path: Pathology,
     /// Control-tick counter (drives the GPS-dropout window).
@@ -587,6 +627,7 @@ impl SimBackend {
             motor_tau: 0.0,
             motor_state: [0.5; 4], // start at hover collective
             ground_effect: 0.0,
+            ground_contact: false,
             path: Pathology::default(),
             step_n: 0,
             gyro_bias: [0.0; 3],
@@ -793,6 +834,14 @@ impl FlightBackend for SimBackend {
         for i in 0..3 {
             self.vel[i] += self.dt * accel[i];
             self.pos[i] += self.dt * self.vel[i];
+        }
+        // v1.27 — ground contact: the vehicle cannot descend below the surface
+        // (NED z = 0); zero the downward velocity on touchdown so it settles.
+        if self.ground_contact && self.pos[2] > 0.0 {
+            self.pos[2] = 0.0;
+            if self.vel[2] > 0.0 {
+                self.vel[2] = 0.0;
+            }
         }
         // v1.9 — advance the tick clock and integrate the gyro bias drift
         // (once per control step; write_motors is the tail of FlightCore::step).
@@ -1631,5 +1680,33 @@ mod tests {
         // over-authority wind blew the vehicle to 100s of metres; this rides
         // out the persistent gusts within a few metres).
         assert!(peak < 4.0, "turbulence must stay bounded (not diverge): peak {peak} m");
+    }
+
+    // ── v1.27 velocity-based touchdown: the clean landing the v1.24 ground-
+    // effect float needs.
+
+    /// The velocity-based touchdown controller LANDS through the ground-effect
+    /// cushion the v1.24 position loop floated on: commanded to land, the
+    /// vehicle descends at a controlled rate, pushes through the cushion, and
+    /// settles on the surface — vs the ~1.3 m float without it.
+    #[test]
+    fn velocity_landing_touches_down_through_ground_effect() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_effect = 0.4; // the cushion that floated v1.24
+        b.ground_contact = true; // model the ground so a touchdown can settle
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-2.0);
+        for _ in 0..10000 {
+            core.step(&mut b); // climb to 2 m
+        }
+        core.set_landing(true); // engage the velocity-based touchdown
+        for _ in 0..20000 {
+            core.step(&mut b);
+        }
+        let alt = -b.pos[2];
+        assert!(alt < 0.15, "velocity touchdown must reach the surface through ground effect: {alt} m");
+        assert!(b.vel[2].abs() < 0.3, "should settle on touchdown: vz {} m/s", b.vel[2]);
     }
 }
