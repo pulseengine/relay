@@ -33,10 +33,8 @@ impl Crc16X25 {
         // Reference: crc_accumulate() in mavgen-c.
         let mut tmp: u8 = b ^ (self.value as u8);
         tmp ^= tmp << 4;
-        self.value = (self.value >> 8)
-            ^ ((tmp as u16) << 8)
-            ^ ((tmp as u16) << 3)
-            ^ ((tmp as u16) >> 4);
+        self.value =
+            (self.value >> 8) ^ ((tmp as u16) << 8) ^ ((tmp as u16) << 3) ^ ((tmp as u16) >> 4);
     }
 
     /// Accumulate a slice of bytes in order.

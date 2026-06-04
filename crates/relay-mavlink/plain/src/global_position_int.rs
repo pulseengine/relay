@@ -85,7 +85,12 @@ impl GlobalPositionInt {
             lat_e7: i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]),
             lon_e7: i32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]),
             alt_mm: i32::from_le_bytes([payload[12], payload[13], payload[14], payload[15]]),
-            relative_alt_mm: i32::from_le_bytes([payload[16], payload[17], payload[18], payload[19]]),
+            relative_alt_mm: i32::from_le_bytes([
+                payload[16],
+                payload[17],
+                payload[18],
+                payload[19],
+            ]),
             vx_cms: i16::from_le_bytes([payload[20], payload[21]]),
             vy_cms: i16::from_le_bytes([payload[22], payload[23]]),
             vz_cms: i16::from_le_bytes([payload[24], payload[25]]),
@@ -101,22 +106,29 @@ mod tests {
     fn sample() -> GlobalPositionInt {
         GlobalPositionInt {
             time_boot_ms: 1_234_567,
-            lat_e7: 475_023_456,       // 47.5023456°
-            lon_e7: 190_401_234,       // 19.0401234°
-            alt_mm: 120_000,           // 120.000 m AMSL
-            relative_alt_mm: 5_000,    // 5 m above home
-            vx_cms: 850,               // 8.5 m/s north
-            vy_cms: -25,               // -0.25 m/s east (slight west drift)
-            vz_cms: -10,               // -0.1 m/s down (climbing)
-            hdg_cdeg: 18_000,          // 180.00°
+            lat_e7: 475_023_456,    // 47.5023456°
+            lon_e7: 190_401_234,    // 19.0401234°
+            alt_mm: 120_000,        // 120.000 m AMSL
+            relative_alt_mm: 5_000, // 5 m above home
+            vx_cms: 850,            // 8.5 m/s north
+            vy_cms: -25,            // -0.25 m/s east (slight west drift)
+            vz_cms: -10,            // -0.1 m/s down (climbing)
+            hdg_cdeg: 18_000,       // 180.00°
         }
     }
 
-    #[test] fn msg_id_is_33() { assert_eq!(GLOBAL_POSITION_INT_MSG_ID, 33); }
+    #[test]
+    fn msg_id_is_33() {
+        assert_eq!(GLOBAL_POSITION_INT_MSG_ID, 33);
+    }
 
-    #[test] fn payload_length_is_28() { assert_eq!(GLOBAL_POSITION_INT_PAYLOAD_LEN, 28); }
+    #[test]
+    fn payload_length_is_28() {
+        assert_eq!(GLOBAL_POSITION_INT_PAYLOAD_LEN, 28);
+    }
 
-    #[test] fn crc_extra_is_104() {
+    #[test]
+    fn crc_extra_is_104() {
         // Fixed by spec; if this fails, somebody edited the MAVLink XML constant.
         assert_eq!(GLOBAL_POSITION_INT_CRC_EXTRA, 104);
     }
@@ -133,8 +145,14 @@ mod tests {
     fn round_trip_zero() {
         let original = GlobalPositionInt {
             time_boot_ms: 0,
-            lat_e7: 0, lon_e7: 0, alt_mm: 0, relative_alt_mm: 0,
-            vx_cms: 0, vy_cms: 0, vz_cms: 0, hdg_cdeg: 0,
+            lat_e7: 0,
+            lon_e7: 0,
+            alt_mm: 0,
+            relative_alt_mm: 0,
+            vx_cms: 0,
+            vy_cms: 0,
+            vz_cms: 0,
+            hdg_cdeg: 0,
         };
         let bytes = original.encode_payload();
         let decoded = GlobalPositionInt::decode_payload(&bytes).expect("decode");
@@ -145,9 +163,13 @@ mod tests {
     fn round_trip_extremes() {
         let original = GlobalPositionInt {
             time_boot_ms: u32::MAX,
-            lat_e7: i32::MIN, lon_e7: i32::MAX,
-            alt_mm: i32::MIN, relative_alt_mm: i32::MAX,
-            vx_cms: i16::MIN, vy_cms: i16::MAX, vz_cms: i16::MIN,
+            lat_e7: i32::MIN,
+            lon_e7: i32::MAX,
+            alt_mm: i32::MIN,
+            relative_alt_mm: i32::MAX,
+            vx_cms: i16::MIN,
+            vy_cms: i16::MAX,
+            vz_cms: i16::MIN,
             hdg_cdeg: HEADING_UNKNOWN,
         };
         let bytes = original.encode_payload();
@@ -155,13 +177,16 @@ mod tests {
         assert_eq!(original, decoded);
     }
 
-    #[test] fn decode_rejects_short_payload() {
+    #[test]
+    fn decode_rejects_short_payload() {
         assert!(GlobalPositionInt::decode_payload(&[0u8; 27]).is_none());
     }
-    #[test] fn decode_rejects_long_payload() {
+    #[test]
+    fn decode_rejects_long_payload() {
         assert!(GlobalPositionInt::decode_payload(&[0u8; 29]).is_none());
     }
-    #[test] fn decode_rejects_empty() {
+    #[test]
+    fn decode_rejects_empty() {
         assert!(GlobalPositionInt::decode_payload(&[]).is_none());
     }
 
@@ -172,10 +197,13 @@ mod tests {
         let m = GlobalPositionInt {
             time_boot_ms: 0xAAAA_AAAA,
             lat_e7: 0x11_22_33_44u32 as i32,
-            lon_e7: 0x55_66_77_78u32 as i32,    // top nibble < 0x80 → positive i32
+            lon_e7: 0x55_66_77_78u32 as i32, // top nibble < 0x80 → positive i32
             alt_mm: 0x12345678,
             relative_alt_mm: 0x21436587u32 as i32,
-            vx_cms: 0, vy_cms: 0, vz_cms: 0, hdg_cdeg: 0,
+            vx_cms: 0,
+            vy_cms: 0,
+            vz_cms: 0,
+            hdg_cdeg: 0,
         };
         let b = m.encode_payload();
         assert_eq!(&b[0..4], &[0xAA, 0xAA, 0xAA, 0xAA]);

@@ -43,6 +43,17 @@ pub const COMMAND_LONG_CRC_EXTRA: u8 = 152;
 /// 0xA17C (the same command code the SITL + StubBench use).
 pub const MAV_CMD_NAV_RETURN_TO_LAUNCH: u16 = 20;
 
+/// `MAV_CMD_NAV_LAND` — land at the current (or specified) location.
+pub const MAV_CMD_NAV_LAND: u16 = 21;
+
+/// `MAV_CMD_NAV_TAKEOFF` — take off and climb to `param7` altitude.
+pub const MAV_CMD_NAV_TAKEOFF: u16 = 22;
+
+/// `MAV_CMD_COMPONENT_ARM_DISARM` — arm (`param1 >= 0.5`) or
+/// disarm (`param1 < 0.5`) the vehicle. This is the command QGC /
+/// MAVSDK send when the operator hits the Arm / Disarm control.
+pub const MAV_CMD_COMPONENT_ARM_DISARM: u16 = 400;
+
 /// `MAV_CMD_DO_FLIGHTTERMINATION` — terminate flight (last-resort
 /// safety command; relay-sc has a slot for it but falcon does not
 /// dispatch it today).
@@ -69,9 +80,66 @@ impl CommandLong {
     /// All seven param slots are zero per the spec for this command.
     pub const fn rtl(target_system: u8, target_component: u8) -> Self {
         Self {
-            param1: 0.0, param2: 0.0, param3: 0.0, param4: 0.0,
-            param5: 0.0, param6: 0.0, param7: 0.0,
+            param1: 0.0,
+            param2: 0.0,
+            param3: 0.0,
+            param4: 0.0,
+            param5: 0.0,
+            param6: 0.0,
+            param7: 0.0,
             command: MAV_CMD_NAV_RETURN_TO_LAUNCH,
+            target_system,
+            target_component,
+            confirmation: 0,
+        }
+    }
+
+    /// Build a `MAV_CMD_COMPONENT_ARM_DISARM`. `arm = true` sets
+    /// `param1 = 1.0` (arm); `arm = false` sets `param1 = 0.0` (disarm).
+    pub const fn arm_disarm(target_system: u8, target_component: u8, arm: bool) -> Self {
+        Self {
+            param1: if arm { 1.0 } else { 0.0 },
+            param2: 0.0,
+            param3: 0.0,
+            param4: 0.0,
+            param5: 0.0,
+            param6: 0.0,
+            param7: 0.0,
+            command: MAV_CMD_COMPONENT_ARM_DISARM,
+            target_system,
+            target_component,
+            confirmation: 0,
+        }
+    }
+
+    /// Build a `MAV_CMD_NAV_TAKEOFF` to climb to `alt_m` (param7).
+    pub const fn takeoff(target_system: u8, target_component: u8, alt_m: f32) -> Self {
+        Self {
+            param1: 0.0,
+            param2: 0.0,
+            param3: 0.0,
+            param4: 0.0,
+            param5: 0.0,
+            param6: 0.0,
+            param7: alt_m,
+            command: MAV_CMD_NAV_TAKEOFF,
+            target_system,
+            target_component,
+            confirmation: 0,
+        }
+    }
+
+    /// Build a `MAV_CMD_NAV_LAND` (land in place).
+    pub const fn land(target_system: u8, target_component: u8) -> Self {
+        Self {
+            param1: 0.0,
+            param2: 0.0,
+            param3: 0.0,
+            param4: 0.0,
+            param5: 0.0,
+            param6: 0.0,
+            param7: 0.0,
+            command: MAV_CMD_NAV_LAND,
             target_system,
             target_component,
             confirmation: 0,
@@ -120,13 +188,23 @@ impl CommandLong {
 mod tests {
     use super::*;
 
-    #[test] fn msg_id_is_76() { assert_eq!(COMMAND_LONG_MSG_ID, 76); }
-    #[test] fn payload_length_is_33() { assert_eq!(COMMAND_LONG_PAYLOAD_LEN, 33); }
-    #[test] fn crc_extra_is_152() {
+    #[test]
+    fn msg_id_is_76() {
+        assert_eq!(COMMAND_LONG_MSG_ID, 76);
+    }
+    #[test]
+    fn payload_length_is_33() {
+        assert_eq!(COMMAND_LONG_PAYLOAD_LEN, 33);
+    }
+    #[test]
+    fn crc_extra_is_152() {
         // Fixed by spec; if this fails, somebody edited the MAVLink XML constant.
         assert_eq!(COMMAND_LONG_CRC_EXTRA, 152);
     }
-    #[test] fn rtl_command_id_is_20() { assert_eq!(MAV_CMD_NAV_RETURN_TO_LAUNCH, 20); }
+    #[test]
+    fn rtl_command_id_is_20() {
+        assert_eq!(MAV_CMD_NAV_RETURN_TO_LAUNCH, 20);
+    }
 
     #[test]
     fn rtl_builder_has_zero_params() {
@@ -150,9 +228,16 @@ mod tests {
     #[test]
     fn round_trip_with_params() {
         let original = CommandLong {
-            param1: 1.5, param2: -2.5, param3: 3.0,
-            param4: 12.34, param5: -56.78, param6: 90.12, param7: 100.0,
-            command: 123, target_system: 7, target_component: 13,
+            param1: 1.5,
+            param2: -2.5,
+            param3: 3.0,
+            param4: 12.34,
+            param5: -56.78,
+            param6: 90.12,
+            param7: 100.0,
+            command: 123,
+            target_system: 7,
+            target_component: 13,
             confirmation: 2,
         };
         let bytes = original.encode_payload();
@@ -174,8 +259,13 @@ mod tests {
     fn field_offsets_match_spec() {
         // Sorted-by-size descending: 7×f32 (28 bytes) + u16 + 3×u8.
         let c = CommandLong {
-            param1: 0.0, param2: 0.0, param3: 0.0, param4: 0.0,
-            param5: 0.0, param6: 0.0, param7: 0.0,
+            param1: 0.0,
+            param2: 0.0,
+            param3: 0.0,
+            param4: 0.0,
+            param5: 0.0,
+            param6: 0.0,
+            param7: 0.0,
             command: 0xAABB,
             target_system: 0xCC,
             target_component: 0xDD,

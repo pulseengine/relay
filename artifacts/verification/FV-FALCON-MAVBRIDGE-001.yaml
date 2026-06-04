@@ -1,0 +1,47 @@
+artifacts:
+  - id: FV-FALCON-MAVBRIDGE-001
+    type: sw-verification
+    title: "MAVLink ↔ flight-supervisor bridge — commands + telemetry (v1.28.0)"
+    status: approved
+    description: >
+      Verification of the v1.28.0 falcon-mavlink bridge (11 unit tests pass,
+      clippy clean, builds bare-metal for thumbv7em-none-eabihf). The bridge is
+      the thin translation seam over the already-verified relay-mavlink codec
+      and relay-fsm state machine — it carries QGroundControl / MAVSDK commands
+      in and falcon telemetry out:
+
+      ingested_commands_drive_full_flight_lifecycle — GCS-encoded COMMAND_LONG
+      frames (ARM_DISARM → NAV_TAKEOFF → … → NAV_RETURN_TO_LAUNCH) ingested
+      through the bridge produce the relay-fsm Events that drive the FSM
+      Disarmed → Armed → Takeoff → Loiter → Rtl → Land → Disarmed (sensed
+      milestones ReachedAltitude/ReachedHome/Touchdown supplied by the vehicle).
+
+      command_addressed_to_other_vehicle_is_ignored / non_command_message_is_not_routed —
+      a command for system 9 yields no event; broadcast (target_system 0) is
+      accepted; a HEARTBEAT frame is a valid frame but routes to nothing.
+
+      ingest_never_panics_on_garbage — empty, all single bytes, and LCG-fuzzed
+      buffers (both raw and forced-valid-magic) return Ok/Err, never unwind.
+
+      heartbeat_round_trips_for_every_mode / heartbeat_arms_safety_flag_off_the_ground /
+      sequence_number_advances_per_frame — every Mode encodes to a HEARTBEAT
+      that re-parses to the intended value; SAFETY_ARMED is clear+STANDBY when
+      Disarmed and set+ACTIVE otherwise; the frame sequence counter advances.
+
+      global_position_round_trips / projection_places_north_east_and_altitude_correctly /
+      heading_wraps_into_centidegrees — GLOBAL_POSITION_INT round-trips; the
+      flat-earth projection moves 1113.2 m north by ~0.01° lat, scales east by
+      cos(home_lat), and is sign-correct on altitude (NED down = up); heading
+      wraps into [0, 35999] cdeg. The single transcendental (cos(home_lat)) is
+      computed once at construction behind the relay-math seam.
+    tags: [verification, falcon, mavlink, interop, gcs, v1.28]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-mavlink"
+        - run: "cargo test -p relay-mavlink"
+        - run: "cargo clippy -p falcon-mavlink --all-targets"
+        - run: "cargo build -p falcon-mavlink --target thumbv7em-none-eabihf"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MAVBRIDGE-P01

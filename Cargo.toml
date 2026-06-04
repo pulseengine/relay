@@ -35,6 +35,7 @@ members = [
     "crates/relay-fsm",
     "crates/relay-math",
     "crates/falcon-core",
+    "crates/falcon-mavlink",
     "crates/falcon-imu-icm42688",
     "crates/falcon-hitl",
     "examples/falcon-hello",
