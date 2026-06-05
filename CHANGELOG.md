@@ -35,6 +35,57 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.29.0] — 2026-06-05
+
+**The integrated stack now lands cleanly.** v1.27 built a velocity-based
+touchdown controller in `FlightCore`, but the `FlightSupervisor` never used it —
+so the *integrated* stack (what a real vehicle runs) still descended on the slow
+position-based altitude loop that floats short of the surface through ground
+effect (the v1.24 limitation). v1.29 wires it in.
+
+### Changed
+
+- **`FlightSupervisor` engages the v1.27 velocity-landing in `Land` mode.** On
+  landing the vehicle now descends at a constant rate and disarms on touchdown
+  (~5 s) instead of the ~20 s position creep that floated on the ground-effect
+  cushion. The core controller is unchanged — this is the missing integration.
+- **Settle-then-descend gate.** The velocity-landing descends fast, so engaging
+  it while the vehicle still carries horizontal velocity (e.g. arriving home at
+  the end of RTL) would touch down off-target. The supervisor now holds altitude
+  over home and engages the descent only once the vehicle is BOTH near home
+  (< 0.5 m) AND slow (< 0.4 m/s). Gating on speed alone is insufficient — speed
+  momentarily hits zero at the overshoot peak, far from home.
+
+### Verified
+
+- **32 `falcon-core` tests** (SWREQ-FALCON-SUPLAND-P01 / FV-FALCON-SUPLAND-001):
+  - `supervised_landing_disarms_through_ground_effect` — a full supervised
+    mission lands and **disarms** through ground effect, settling on the surface
+    (< 0.25 m), where the position-based descent floated (~1.3 m, never disarming).
+  - `geofence_breach_actuates_rtl_home` (regression-guarded) — the gate keeps the
+    fast descent from drifting off-target; RTL still lands within 1 m of home.
+  - `velocity_landing_touches_down_through_ground_effect` — the v1.27 core test
+    is unchanged and still passes (the core controller was not touched).
+  - clippy clean; builds bare-metal for `thumbv7em-none-eabihf`.
+
+### Video
+
+- The v1.29 release video reuses the `falcon-mavlink-viz` harness (`land`
+  scenario): a real `NAV_LAND` command drives the supervisor through a **crisp
+  constant-rate vertical descent to touchdown** over home, with the GCS⇄FALCON
+  HUD showing the live decoded telemetry — the fix, shown.
+
+### Falsification
+
+- **Emergent integration requirement, found by composing.** The velocity-landing
+  was unit-correct in isolation (v1.27's `FlightCore` test passed), but composing
+  it with RTL surfaced a precondition that only exists at the system level: you
+  must null horizontal drift before a fast vertical descent, or you touch down
+  off-target. The first naive wiring (engage in `Land`, always) regressed the
+  geofence-RTL landing to ~2.6 m off home — caught by the existing integration
+  test, fixed by the settle-then-descend gate. Unit-correct parts do not compose
+  to a correct system for free.
+
 ## [falcon-v1.28.0] — 2026-06-04
 
 **The vehicle now talks to QGroundControl / MAVSDK.** A new no_std/no_alloc

@@ -101,12 +101,11 @@ def draw_scene(d, r):
     d.ellipse([p[0] - 5, p[1] - 5, p[0] + 5, p[1] + 5], fill=col)
 
 
-def draw_hud(d, r, cmd_history, t):
+def draw_hud(d, r, cmd_history, t, title, subtitle):
     # top banner
     d.rectangle([0, 0, W, 86], fill=(8, 12, 20, 200))
-    d.text((28, 14), "FALCON  v1.28 — MAVLink Bridge", font=font(32, True), fill=(255, 255, 255, 255))
-    d.text((30, 56), "live MAVLink  <->  verified flight supervisor   ·   QGroundControl / MAVSDK",
-           font=font(19), fill=(150, 200, 255, 255))
+    d.text((28, 14), title, font=font(32, True), fill=(255, 255, 255, 255))
+    d.text((30, 56), subtitle, font=font(19), fill=(150, 200, 255, 255))
 
     # command ticker (left) — GCS -> FALCON
     px, py, pw = 28, 110, 300
@@ -154,6 +153,9 @@ def draw_hud(d, r, cmd_history, t):
 def main():
     src = sys.argv[1] if len(sys.argv) > 1 else "/dev/stdin"
     outdir = sys.argv[2] if len(sys.argv) > 2 else "/tmp/mvframes"
+    title = sys.argv[3] if len(sys.argv) > 3 else "FALCON  v1.28 — MAVLink Bridge"
+    subtitle = (sys.argv[4] if len(sys.argv) > 4 else
+                "live MAVLink  <->  verified flight supervisor   ·   QGroundControl / MAVSDK")
     os.makedirs(outdir, exist_ok=True)
     for f in os.listdir(outdir):
         if f.endswith(".png"):
@@ -165,7 +167,7 @@ def main():
         img = Image.new("RGBA", (W, H), (16, 20, 28, 255))
         d = ImageDraw.Draw(img)
         draw_scene(d, r)
-        draw_hud(d, r, cmd_history, r["t"])
+        draw_hud(d, r, cmd_history, r["t"], title, subtitle)
         img.convert("RGB").save(os.path.join(outdir, f"f{i:06d}.png"))
     print(f"{len(rows)} frames -> {outdir}")
 

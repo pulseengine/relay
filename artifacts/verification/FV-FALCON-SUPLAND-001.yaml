@@ -1,0 +1,36 @@
+artifacts:
+  - id: FV-FALCON-SUPLAND-001
+    type: sw-verification
+    title: "FlightSupervisor engages the velocity-landing in Land mode (v1.29.0)"
+    status: approved
+    description: >
+      Verification of the v1.29.0 supervisor-landing integration (falcon-core
+      tests pass — 32, clippy clean, embedded builds). v1.27 built the
+      velocity-based touchdown controller in FlightCore but never wired it into
+      the FlightSupervisor; v1.29 closes that integration gap:
+
+      supervised_landing_disarms_through_ground_effect — a full supervised
+      mission (arm → takeoff → loiter → RequestLand) against SimBackend with
+      ground_effect=0.4 and ground contact reaches Touchdown and DISARMS,
+      settling on the surface (< 0.25 m). Before v1.29 the supervised Land ran
+      the position-based descent, which `ground_effect_cushions_landing_into_a_float`
+      shows floats the vehicle on a bounded cushion (~1.3 m) — it never disarmed.
+
+      geofence_breach_actuates_rtl_home (regression-guarded) — the settle-then-
+      descend gate (engage the velocity-landing only when BOTH near home < 0.5 m
+      AND slow < 0.4 m/s) keeps the fast descent from touching down off-target
+      when RTL arrives at home carrying horizontal velocity; the RTL mission
+      still lands within 1 m of home.
+
+      velocity_landing_touches_down_through_ground_effect — the v1.27 core-level
+      touchdown test still passes unchanged (the core controller is unmodified;
+      v1.29 only wires it into the supervisor).
+    tags: [verification, falcon, landing, supervisor, integration, v1.29]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SUPLAND-P01
