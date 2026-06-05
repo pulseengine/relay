@@ -115,7 +115,18 @@ def battery(s):
       </link>''', 1)
 
 
-LAYERS = {"wind": wind, "drag": drag, "imubias": imubias, "gnss": gnss, "baro": baro, "battery": battery}
+def groundeffect(s):  # v1.32 — the custom falcon ground-effect cushion (model plugin)
+    i = s.index("</model>", s.index('<model name="quad">'))
+    blk = '''      <plugin filename="FalconGroundEffect" name="falcon::GroundEffect">
+        <link_name>base_link</link_name>
+        <gain>0.4</gain><decay>0.25</decay><reference_force>20.0</reference_force>
+      </plugin>
+    '''
+    return s[:i] + blk + s[i:]
+
+
+LAYERS = {"wind": wind, "drag": drag, "imubias": imubias, "gnss": gnss, "baro": baro,
+          "battery": battery, "groundeffect": groundeffect}
 
 
 def main():

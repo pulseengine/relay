@@ -35,6 +35,45 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.32.0] — 2026-06-05
+
+**Custom gz realism plugin.** The first of the gz-realism thread: a custom
+Gazebo Harmonic (`gz-sim8`) System plugin that brings the verified Rust
+`SimBackend`'s `ground_effect` model into the gz SITL — so the two simulators
+agree, using a *controlled* effect instead of the stock `WindEffects` plugin
+that over-authors disturbances and diverges the falcon mission.
+
+### Added
+
+- **`FalconGroundEffect`** — a C++ `gz-sim8` model System plugin
+  (`examples/falcon-sitl-gz/plugins/ground_effect/`) applying a near-surface
+  cushion force `F_z = gain · e^(−alt/decay) · reference_force` to a configured
+  link, matching the SimBackend `thrust ×= 1 + gain·e^(−alt/decay)` model.
+  Parameters: `link_name`, `gain`, `decay`, `reference_force`, `verbose`.
+- **`groundeffect` layer** in `worlds/gen-realism-world.py` — emits the plugin
+  into the quad model of the realism world.
+
+### Verified (bench-only — gz is not in CI)
+
+- **SWREQ-FALCON-GZGE-P01 / FV-FALCON-GZGE-001.** `run-ground-effect-test.sh`
+  builds the plugin (cmake/gz-cmake3/gz-sim8) and runs an A/B headless: a light
+  free box at 0.10 m is **held aloft** by the cushion (`gain=0.4` → settles
+  ~0.10 m) but **falls through** without it (`gain=0` → −78 m in 4 s) — the
+  cushion force is real and altitude-decaying. A large-boost run confirms the
+  force is applied (the box rockets to ~5.5 m, then falls back as the boost
+  decays). The plugin loads + activates in the generated quad realism world
+  (`Loaded system [falcon::GroundEffect]`).
+- The bench step is gated bench-only (CI skips it; the gz/qt5 toolchain isn't on
+  the gate runner — added a `falcon-sitl-gz/plugins/` skip pattern to
+  `run-falcon-verification.py`). No Rust changed.
+
+### Honest scope
+
+- A standalone cushion force, not yet rotor-thrust-coupled (it augments the link,
+  not each motor); one realism model of several (turbulence / motor→battery
+  feeders are the next gz-realism steps). gz remains a secondary, non-CI realism
+  check — the verified flight path is the Rust SimBackend + the WASM component.
+
 ## [falcon-v1.31.0] — 2026-06-05
 
 **Obstacle avoidance.** The `FlightSupervisor` now arcs around keep-out (no-fly)
