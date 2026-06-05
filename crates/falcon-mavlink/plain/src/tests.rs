@@ -363,3 +363,234 @@ fn heading_wraps_into_centidegrees() {
     assert!(yaw_to_cdeg(100.0) <= 35_999);
     assert!(yaw_to_cdeg(-100.0) <= 35_999);
 }
+
+// ---- v1.33: MAVLink mission-UPLOAD protocol ----
+
+use relay_mavlink::{
+    MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, MAV_MISSION_ACCEPTED, MISSION_ACK_CRC_EXTRA,
+    MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID, MISSION_COUNT_PAYLOAD_LEN,
+    MISSION_ITEM_INT_CRC_EXTRA, MISSION_ITEM_INT_MSG_ID, MISSION_ITEM_INT_PAYLOAD_LEN,
+    MISSION_REQUEST_INT_CRC_EXTRA, MissionAck, MissionCount, MissionItemInt, MissionRequestInt,
+};
+
+/// Encode an arbitrary message as a GCS would frame it.
+fn encode_gcs(msg_id: u32, payload: &[u8], crc_extra: u8) -> ([u8; 96], usize) {
+    let header = FrameHeader {
+        magic: MAGIC_V2,
+        payload_len: payload.len() as u8,
+        incompat_flags: 0,
+        compat_flags: 0,
+        sequence: 0,
+        system_id: GCS_SYS,
+        component_id: 190,
+        message_id: msg_id,
+    };
+    let mut buf = [0u8; 96];
+    let n = encode_frame(&header, payload, crc_extra, &mut buf).expect("encode gcs msg");
+    (buf, n)
+}
+
+/// A MISSION_ITEM_INT for a NED waypoint, framed exactly as the GCS would,
+/// using the geodetic image of the NED point under the bridge's home.
+fn item_for_ned(seq: u16, lat_e7: i32, lon_e7: i32, alt_m: f32) -> ([u8; 96], usize) {
+    let item = MissionItemInt {
+        param1: 0.0,
+        param2: 0.0,
+        param3: 0.0,
+        param4: 0.0,
+        x: lat_e7,
+        y: lon_e7,
+        z: alt_m,
+        seq,
+        command: 16, // MAV_CMD_NAV_WAYPOINT
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+        frame: MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+        current: 0,
+        autocontinue: 1,
+    };
+    let p = item.encode_payload();
+    assert_eq!(p.len(), MISSION_ITEM_INT_PAYLOAD_LEN);
+    encode_gcs(MISSION_ITEM_INT_MSG_ID, &p, MISSION_ITEM_INT_CRC_EXTRA)
+}
+
+#[test]
+fn mission_upload_handshake_loads_waypoints() {
+    let mut bridge = MavBridge::new(VEH_SYS, VEH_COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
+    let mut out = [0u8; 96];
+
+    // 1) GCS announces 2 items → bridge requests item 0.
+    let mc = MissionCount {
+        count: 2,
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+    };
+    let p = mc.encode_payload();
+    assert_eq!(p.len(), MISSION_COUNT_PAYLOAD_LEN);
+    let (buf, n) = encode_gcs(MISSION_COUNT_MSG_ID, &p, MISSION_COUNT_CRC_EXTRA);
+    let r = bridge.ingest_mission(&buf[..n], &mut out);
+    let req_n = match r {
+        MissionUpload::Request(k) => k,
+        other => panic!("expected Request after COUNT, got {other:?}"),
+    };
+    let (rf, _) = parse_frame(&out[..req_n], MISSION_REQUEST_INT_CRC_EXTRA).expect("parse req");
+    let req = MissionRequestInt::decode_payload(rf.payload).expect("decode req");
+    assert_eq!(req.seq, 0, "must request item 0 first");
+
+    // 2) Item 0 = 0.01° north (≈ 1113.2 m), 100 m east-ish lon, 5 m up.
+    let (b0, n0) = item_for_ned(0, HOME_LAT_E7 + 100_000, HOME_LON_E7, 5.0);
+    let r0 = bridge.ingest_mission(&b0[..n0], &mut out);
+    let req1_n = match r0 {
+        MissionUpload::Request(k) => k,
+        other => panic!("expected Request for item 1, got {other:?}"),
+    };
+    let (rf1, _) = parse_frame(&out[..req1_n], MISSION_REQUEST_INT_CRC_EXTRA).unwrap();
+    assert_eq!(
+        MissionRequestInt::decode_payload(rf1.payload).unwrap().seq,
+        1
+    );
+
+    // 3) Item 1 = 0.01° east of home, 8 m up → completes → MISSION_ACK(ACCEPTED).
+    let (b1, n1) = item_for_ned(1, HOME_LAT_E7, HOME_LON_E7 + 100_000, 8.0);
+    let r1 = bridge.ingest_mission(&b1[..n1], &mut out);
+    let ack_n = match r1 {
+        MissionUpload::Complete(k) => k,
+        other => panic!("expected Complete after last item, got {other:?}"),
+    };
+    let (af, _) = parse_frame(&out[..ack_n], MISSION_ACK_CRC_EXTRA).expect("parse ack");
+    let ack = MissionAck::decode_payload(af.payload).expect("decode ack");
+    assert_eq!(
+        ack.mav_type, MAV_MISSION_ACCEPTED,
+        "upload must be accepted"
+    );
+
+    // 4) The loaded NED waypoints match the geodetic round-trip.
+    let wps = bridge.mission_waypoints();
+    assert_eq!(wps.len(), 2, "two waypoints loaded");
+    // item 0: 0.01° lat north ⇒ ~1113.2 m north, ~0 east, 5 m up (down = -5).
+    assert!(
+        (wps[0][0] - 1113.2).abs() < 2.0,
+        "wp0 north = {} m",
+        wps[0][0]
+    );
+    assert!(wps[0][1].abs() < 1.0, "wp0 east = {} m", wps[0][1]);
+    assert!((wps[0][2] + 5.0).abs() < 0.01, "wp0 down = {} m", wps[0][2]);
+    // item 1: 0.01° lon east at this latitude ⇒ ~0 north, several-hundred m east.
+    assert!(wps[1][0].abs() < 1.0, "wp1 north = {} m", wps[1][0]);
+    let m_per_deg_lon = 111_320.0 * (47.3977_f64.to_radians().cos());
+    let expect_east = (0.01 * m_per_deg_lon) as f32;
+    assert!(
+        (wps[1][1] - expect_east).abs() < 2.0,
+        "wp1 east = {} m (expect ~{expect_east})",
+        wps[1][1]
+    );
+    assert!((wps[1][2] + 8.0).abs() < 0.01, "wp1 down = {} m", wps[1][2]);
+}
+
+#[test]
+fn mission_item_before_count_is_ignored() {
+    let mut bridge = MavBridge::new(VEH_SYS, VEH_COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
+    let mut out = [0u8; 96];
+    // An ITEM with no upload in progress is ignored (no spurious waypoint).
+    let (b, n) = item_for_ned(0, HOME_LAT_E7 + 100_000, HOME_LON_E7, 5.0);
+    assert_eq!(
+        bridge.ingest_mission(&b[..n], &mut out),
+        MissionUpload::Ignored
+    );
+    assert_eq!(bridge.mission_waypoints().len(), 0);
+}
+
+/// END-TO-END (v1.33): a mission UPLOADED over MAVLink is flown by the real
+/// FlightSupervisor. The full chain — GCS handshake → NED waypoints →
+/// MISSION_START → autonomous sortie — that v1.33 is about.
+#[test]
+fn uploaded_mission_is_flown_by_the_supervisor() {
+    use falcon_core::{FlightSupervisor, SimBackend};
+    use relay_fsm::Event;
+
+    // 1) Upload a 3-leg mission over MAVLink (close-in legs, ~3 m each).
+    let mut bridge = MavBridge::new(VEH_SYS, VEH_COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
+    let mut out = [0u8; 96];
+    let legs = [
+        (HOME_LAT_E7 + 280, HOME_LON_E7),       // ~3.1 m N
+        (HOME_LAT_E7 + 280, HOME_LON_E7 + 400), // ~3.1 m N, ~3 m E
+        (HOME_LAT_E7, HOME_LON_E7 + 400),       // ~3 m E
+    ];
+    let mc = MissionCount {
+        count: 3,
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+    };
+    let (b, n) = encode_gcs(
+        MISSION_COUNT_MSG_ID,
+        &mc.encode_payload(),
+        MISSION_COUNT_CRC_EXTRA,
+    );
+    assert!(matches!(
+        bridge.ingest_mission(&b[..n], &mut out),
+        MissionUpload::Request(_)
+    ));
+    for (i, (lat, lon)) in legs.iter().enumerate() {
+        let (bi, ni) = item_for_ned(i as u16, *lat, *lon, 2.0);
+        let r = bridge.ingest_mission(&bi[..ni], &mut out);
+        if i < legs.len() - 1 {
+            assert!(
+                matches!(r, MissionUpload::Request(_)),
+                "item {i} requests next"
+            );
+        } else {
+            assert!(
+                matches!(r, MissionUpload::Complete(_)),
+                "last item completes"
+            );
+        }
+    }
+    let wps: [[f32; 3]; 3] = [
+        bridge.mission_waypoints()[0],
+        bridge.mission_waypoints()[1],
+        bridge.mission_waypoints()[2],
+    ];
+
+    // 2) Load the uploaded waypoints into the real supervisor and fly.
+    let dt = 0.002f32;
+    let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut bk = SimBackend::new(level, dt);
+    bk.ground_contact = true;
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, 2.0, 1.0);
+    sup.set_mission_waypoints(bridge.mission_waypoints());
+    sup.command(Event::Arm, true, true);
+    sup.command(Event::RequestTakeoff, true, true);
+    for _ in 0..8000 {
+        sup.step(&mut bk);
+    }
+    assert_eq!(sup.mode(), Mode::Loiter);
+    sup.command(Event::RequestMission, true, false);
+
+    let mut min_d = [f32::MAX; 3];
+    let mut disarmed = false;
+    for _ in 0..160000 {
+        sup.step(&mut bk);
+        let p = sup.state().p;
+        for (i, w) in wps.iter().enumerate() {
+            let d = ((p[0] - w[0]).powi(2) + (p[1] - w[1]).powi(2) + (p[2] - w[2]).powi(2)).sqrt();
+            if d < min_d[i] {
+                min_d[i] = d;
+            }
+        }
+        if sup.mode() == Mode::Disarmed {
+            disarmed = true;
+            break;
+        }
+    }
+    for (i, d) in min_d.iter().enumerate() {
+        assert!(
+            *d < 1.5,
+            "uploaded waypoint {i} not visited: min dist {d} m"
+        );
+    }
+    assert!(
+        disarmed,
+        "uploaded mission must complete (mode {:?})",
+        sup.mode()
+    );
+}

@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-FALCON-MISSIONUP-P01
+    type: sw-req
+    title: "MISSIONUP-P01 — MAVLink mission UPLOAD (a GCS defines the mission)"
+    status: implemented
+    description: >
+      Falcon shall accept a mission uploaded over MAVLink, completing the
+      autonomy loop: a ground station DEFINES the mission (vs v1.30's
+      pre-loaded waypoints), then v1.30's MISSION_START flies it.
+
+      relay-mavlink shall implement the four mission-protocol messages —
+      MISSION_COUNT (44), MISSION_REQUEST_INT (51), MISSION_ITEM_INT (73),
+      MISSION_ACK (47) — encode/decode, with the common.xml CRC_EXTRAs.
+
+      The falcon-mavlink bridge shall run the upload handshake: on MISSION_COUNT
+      start an upload and request item 0; on each MISSION_ITEM_INT (in sequence)
+      decode the lat/lon/alt into an NED waypoint (relative to home) and request
+      the next, until all are received and a MISSION_ACK(ACCEPTED) is emitted.
+      The uploaded NED waypoints feed FlightSupervisor::set_mission_waypoints.
+      Out-of-sequence items re-request the needed seq; an item with no upload in
+      progress is ignored; arbitrary bytes never panic.
+    tags: [falcon, mavlink, mission, upload, autonomy, v1.33]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        relay-mavlink: the four messages round-trip (61 tests). falcon-mavlink
+        (14 tests): the full handshake (COUNT → REQUEST → ITEM×N → ACK) loads
+        waypoints whose NED matches the geodetic round-trip; an item before a
+        COUNT is ignored. END-TO-END: a 3-leg mission uploaded over MAVLink is
+        flown IN ORDER by the real FlightSupervisor, then returns + disarms.
+        clippy clean; builds bare-metal for thumbv7em.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-012
