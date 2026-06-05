@@ -19,11 +19,14 @@
 
 use falcon_core::{FlightSupervisor, KeepoutZone, SimBackend};
 use falcon_mavlink::MavBridge;
+use falcon_mavlink::MissionUpload;
 use relay_fsm::Mode;
 use relay_mavlink::{
     COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID, COMMAND_LONG_PAYLOAD_LEN, CommandLong,
     FrameHeader, GLOBAL_POSITION_INT_CRC_EXTRA, GlobalPositionInt, HEARTBEAT_CRC_EXTRA, Heartbeat,
-    MAGIC_V2, encode_frame, parse_frame,
+    MAGIC_V2, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID,
+    MISSION_ITEM_INT_CRC_EXTRA, MISSION_ITEM_INT_MSG_ID, MissionCount, MissionItemInt,
+    encode_frame, parse_frame,
 };
 
 const HZ: f32 = 1000.0;
@@ -61,6 +64,71 @@ fn encode_cmd(cmd: &CommandLong) -> ([u8; 64], usize) {
     (buf, n)
 }
 
+/// Frame an arbitrary message as a GCS would put it on the wire (for the
+/// mission-upload handshake).
+fn encode_gcs_msg(msg_id: u32, payload: &[u8], crc_extra: u8) -> ([u8; 96], usize) {
+    let header = FrameHeader {
+        magic: MAGIC_V2,
+        payload_len: payload.len() as u8,
+        incompat_flags: 0,
+        compat_flags: 0,
+        sequence: 0,
+        system_id: GCS,
+        component_id: 190,
+        message_id: msg_id,
+    };
+    let mut buf = [0u8; 96];
+    let n = encode_frame(&header, payload, crc_extra, &mut buf).expect("encode gcs msg");
+    (buf, n)
+}
+
+/// Build the upload-handshake frames (MISSION_COUNT + N MISSION_ITEM_INTs) the
+/// GCS would send to load `legs` (NED) — converted to geodetic about home.
+fn upload_frames(legs: &[[f32; 3]]) -> Vec<(usize, &'static str, [u8; 96], usize)> {
+    let labels = ["MISSION_ITEM 0", "MISSION_ITEM 1", "MISSION_ITEM 2"];
+    let lat_rad = (HOME_LAT_E7 as f64 / 1.0e7) * (core::f64::consts::PI / 180.0);
+    let m_per_deg_lon = 111_320.0 * (lat_rad.cos());
+    let mut v = Vec::new();
+    let mc = MissionCount {
+        count: legs.len() as u16,
+        target_system: VEH,
+        target_component: COMP,
+    };
+    let (b, n) = encode_gcs_msg(
+        MISSION_COUNT_MSG_ID,
+        &mc.encode_payload(),
+        MISSION_COUNT_CRC_EXTRA,
+    );
+    v.push((200usize, "MISSION_COUNT 3", b, n));
+    for (i, leg) in legs.iter().enumerate() {
+        let lat_e7 = HOME_LAT_E7 + (leg[0] as f64 / 111_320.0 * 1.0e7) as i32;
+        let lon_e7 = HOME_LON_E7 + (leg[1] as f64 / m_per_deg_lon * 1.0e7) as i32;
+        let item = MissionItemInt {
+            param1: 0.0,
+            param2: 0.0,
+            param3: 0.0,
+            param4: 0.0,
+            x: lat_e7,
+            y: lon_e7,
+            z: -leg[2], // NED down → altitude-up
+            seq: i as u16,
+            command: 16, // MAV_CMD_NAV_WAYPOINT
+            target_system: VEH,
+            target_component: COMP,
+            frame: MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            current: 0,
+            autocontinue: 1,
+        };
+        let (b, n) = encode_gcs_msg(
+            MISSION_ITEM_INT_MSG_ID,
+            &item.encode_payload(),
+            MISSION_ITEM_INT_CRC_EXTRA,
+        );
+        v.push((450 + i * 250, labels[i.min(2)], b, n));
+    }
+    v
+}
+
 fn mode_str(m: Mode) -> &'static str {
     match m {
         Mode::Disarmed => "DISARMED",
@@ -83,11 +151,14 @@ fn main() {
     //                      then autonomously returns + lands (the v1.30 sequencer).
     //   "avoid"          — a mission whose path runs through a keep-out zone; the
     //                      vehicle arcs AROUND it and back (the v1.31 avoidance).
+    //   "upload"         — a GCS UPLOADS the mission over MAVLink (COUNT → ITEM ×N
+    //                      → ACK), then MISSION_START flies it (the v1.33 upload).
     let scenario = std::env::args().nth(1).unwrap_or_else(|| "rtl".into());
     let land_demo = scenario == "land";
     let avoid_demo = scenario == "avoid";
-    // both mission + avoid fly a MISSION_START sortie from home at 2 m
-    let mission_demo = scenario == "mission" || avoid_demo;
+    let upload_demo = scenario == "upload";
+    // mission + avoid + upload all fly a MISSION_START sortie from home at 2 m
+    let mission_demo = scenario == "mission" || avoid_demo || upload_demo;
 
     // The v1.30 mission legs (NED, 2 m AGL) — a non-collinear path so the
     // in-order sequencing is visible. Avoid uses one far leg straight across a
@@ -118,13 +189,22 @@ fn main() {
 
     let cruise = if mission_demo { 2.0 } else { CRUISE };
     let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, cruise, 1.0);
-    if mission_demo {
+    // mission/avoid preset the waypoints; upload loads them over MAVLink (below).
+    if mission_demo && !upload_demo {
         sup.set_mission_waypoints(mission);
     }
     if avoid_demo {
         sup.set_keepout_zones(&[zone]);
     }
     let mut bridge = MavBridge::new(VEH, COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
+
+    // v1.33: the upload-handshake frames the GCS sends (empty for other demos).
+    let up_frames = if upload_demo {
+        upload_frames(mission)
+    } else {
+        Vec::new()
+    };
+    let mut up_i = 0usize;
 
     // The MAVLink command timeline (step index, ticker label, frame). Auto
     // milestones (ReachedAltitude → Loiter, ReachedHome → Land, Touchdown →
@@ -145,9 +225,16 @@ fn main() {
     } else {
         "TAKEOFF 3 m"
     };
+    // Upload finishes ~1 s in; arm after it so the ticker reads COUNT→ITEM→ACK
+    // then ARM. Other demos arm immediately.
+    let arm_step = if upload_demo { 1500 } else { 800 };
     let schedule: [(usize, &str, CommandLong); 3] = [
-        (800, "ARM", CommandLong::arm_disarm(VEH, COMP, true)),
-        (2500, takeoff_label, CommandLong::takeoff(VEH, COMP, cruise)),
+        (arm_step, "ARM", CommandLong::arm_disarm(VEH, COMP, true)),
+        (
+            arm_step + 1700,
+            takeoff_label,
+            CommandLong::takeoff(VEH, COMP, cruise),
+        ),
         final_cmd,
     ];
     let mut sched_i = 0;
@@ -166,6 +253,20 @@ fn main() {
     let mut flew = false;
     for step in 0..max_steps {
         let mut rx_label = "";
+
+        // v1.33: feed the GCS mission-upload frames through the REAL bridge
+        // handshake; on Complete the uploaded waypoints load into the supervisor.
+        if up_i < up_frames.len() && up_frames[up_i].0 == step {
+            let (_, label, ref buf, n) = up_frames[up_i];
+            let mut o = [0u8; 96];
+            rx_label = label;
+            if let MissionUpload::Complete(_) = bridge.ingest_mission(&buf[..n], &mut o) {
+                sup.set_mission_waypoints(bridge.mission_waypoints());
+                rx_label = "MISSION_ACK OK (3 wpts)";
+            }
+            up_i += 1;
+        }
+
         if sched_i < schedule.len() && schedule[sched_i].0 == step {
             let (_, label, cmd) = schedule[sched_i];
             let (buf, n) = encode_cmd(&cmd);

@@ -39,7 +39,10 @@ use relay_mavlink::{
     FrameHeader, GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID, GlobalPositionInt,
     HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, Heartbeat, MAGIC_V2, MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_FLIGHTTERMINATION, MAV_CMD_MISSION_START, MAV_CMD_NAV_LAND,
-    MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_TAKEOFF, MavModeFlag, MavState, MavType,
+    MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_TAKEOFF, MAV_MISSION_ACCEPTED, MISSION_ACK_CRC_EXTRA,
+    MISSION_ACK_MSG_ID, MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID, MISSION_ITEM_INT_CRC_EXTRA,
+    MISSION_ITEM_INT_MSG_ID, MISSION_REQUEST_INT_CRC_EXTRA, MISSION_REQUEST_INT_MSG_ID,
+    MavModeFlag, MavState, MavType, MissionAck, MissionCount, MissionItemInt, MissionRequestInt,
     encode_frame, parse_frame, peek_message_id,
 };
 
@@ -216,9 +219,28 @@ pub fn ned_to_global_position(
 // The bridge object
 // ----------------------------------------------------------------------
 
+/// Maximum mission items the uploader accumulates (no_std fixed capacity;
+/// matches the FlightSupervisor's MAX_WAYPOINTS).
+pub const MAX_MISSION_ITEMS: usize = 16;
+
+/// Result of feeding one frame to [`MavBridge::ingest_mission`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissionUpload {
+    /// Not a mission-upload message (or addressed to another vehicle).
+    Ignored,
+    /// A `MISSION_REQUEST_INT` was written to `out` (n bytes) — send it to ask
+    /// the GCS for the next item.
+    Request(usize),
+    /// All items received: a `MISSION_ACK(ACCEPTED)` was written to `out` (n
+    /// bytes) and the mission is loaded — read it with `mission_waypoints()`.
+    Complete(usize),
+    /// The upload was rejected: a `MISSION_ACK` with an error was written.
+    Rejected(usize),
+}
+
 /// Stateful MAVLink endpoint for a single falcon vehicle: holds its
-/// identity, an outbound frame sequence counter, and the geodetic home
-/// the NED telemetry is projected against.
+/// identity, an outbound frame sequence counter, the geodetic home the NED
+/// telemetry is projected against, and the in-progress mission upload.
 #[derive(Clone, Copy, Debug)]
 pub struct MavBridge {
     system_id: u8,
@@ -228,6 +250,14 @@ pub struct MavBridge {
     home_lon_e7: i32,
     home_alt_mm: i32,
     m_per_deg_lon: f64,
+    // ── mission-upload state (v1.33) ──
+    up_expected: u16,
+    up_next: u16,
+    up_count: usize,
+    up_active: bool,
+    up_gcs_sys: u8,
+    up_gcs_comp: u8,
+    up_wps: [[f32; 3]; MAX_MISSION_ITEMS],
 }
 
 impl MavBridge {
@@ -256,6 +286,13 @@ impl MavBridge {
             home_lon_e7,
             home_alt_mm,
             m_per_deg_lon,
+            up_expected: 0,
+            up_next: 0,
+            up_count: 0,
+            up_active: false,
+            up_gcs_sys: 0,
+            up_gcs_comp: 0,
+            up_wps: [[0.0; 3]; MAX_MISSION_ITEMS],
         }
     }
 
@@ -286,6 +323,120 @@ impl MavBridge {
             return Ok(None);
         }
         Ok(command_to_event(&cmd))
+    }
+
+    /// Drive the MAVLink mission-UPLOAD protocol (GCS → vehicle). Feed each
+    /// inbound frame: on `MISSION_COUNT` the uploader starts and requests item
+    /// 0; each `MISSION_ITEM_INT` is decoded into an NED waypoint and the next
+    /// item is requested, until all are in and a `MISSION_ACK(ACCEPTED)` is
+    /// emitted. The protocol responses are written to `out`; on `Complete` the
+    /// uploaded mission is available via [`mission_waypoints`](Self::mission_waypoints).
+    ///
+    /// Never panics on arbitrary input.
+    pub fn ingest_mission(&mut self, buf: &[u8], out: &mut [u8]) -> MissionUpload {
+        let msg_id = match peek_message_id(buf) {
+            Ok(id) => id,
+            Err(_) => return MissionUpload::Ignored,
+        };
+        match msg_id {
+            MISSION_COUNT_MSG_ID => {
+                let frame = match parse_frame(buf, MISSION_COUNT_CRC_EXTRA) {
+                    Ok((f, _)) => f,
+                    Err(_) => return MissionUpload::Ignored,
+                };
+                let mc = match MissionCount::decode_payload(frame.payload) {
+                    Some(m) => m,
+                    None => return MissionUpload::Ignored,
+                };
+                if mc.target_system != 0 && mc.target_system != self.system_id {
+                    return MissionUpload::Ignored;
+                }
+                // Start a fresh upload; remember who to reply to.
+                self.up_gcs_sys = frame.header.system_id;
+                self.up_gcs_comp = frame.header.component_id;
+                self.up_expected = mc.count.min(MAX_MISSION_ITEMS as u16);
+                self.up_next = 0;
+                self.up_count = 0;
+                self.up_active = true;
+                if self.up_expected == 0 {
+                    self.up_active = false;
+                    return self.send_ack(MAV_MISSION_ACCEPTED, out);
+                }
+                self.send_request(0, out)
+            }
+            MISSION_ITEM_INT_MSG_ID => {
+                if !self.up_active {
+                    return MissionUpload::Ignored;
+                }
+                let frame = match parse_frame(buf, MISSION_ITEM_INT_CRC_EXTRA) {
+                    Ok((f, _)) => f,
+                    Err(_) => return MissionUpload::Ignored,
+                };
+                let item = match MissionItemInt::decode_payload(frame.payload) {
+                    Some(i) => i,
+                    None => return MissionUpload::Ignored,
+                };
+                // Out-of-sequence: re-request the one we still need (idempotent).
+                if item.seq != self.up_next {
+                    return self.send_request(self.up_next, out);
+                }
+                // Geodetic → NED, relative to home (the inverse of the outbound
+                // GLOBAL_POSITION_INT projection). z is altitude-up; NED is down.
+                let north = (item.x - self.home_lat_e7) as f64 / 1.0e7 * M_PER_DEG_LAT;
+                let east = (item.y - self.home_lon_e7) as f64 / 1.0e7 * self.m_per_deg_lon;
+                self.up_wps[self.up_count] = [north as f32, east as f32, -item.z];
+                self.up_count += 1;
+                self.up_next += 1;
+                if self.up_next < self.up_expected {
+                    self.send_request(self.up_next, out)
+                } else {
+                    self.up_active = false;
+                    self.send_ack(MAV_MISSION_ACCEPTED, out)
+                }
+            }
+            _ => MissionUpload::Ignored,
+        }
+    }
+
+    /// The NED waypoints from the most recent completed upload — feed straight
+    /// to `FlightSupervisor::set_mission_waypoints`.
+    pub fn mission_waypoints(&self) -> &[[f32; 3]] {
+        &self.up_wps[..self.up_count]
+    }
+
+    fn send_request(&mut self, seq: u16, out: &mut [u8]) -> MissionUpload {
+        let req = MissionRequestInt {
+            seq,
+            target_system: self.up_gcs_sys,
+            target_component: self.up_gcs_comp,
+        };
+        match self.frame_out(
+            MISSION_REQUEST_INT_MSG_ID,
+            &req.encode_payload(),
+            MISSION_REQUEST_INT_CRC_EXTRA,
+            out,
+        ) {
+            Ok(n) => MissionUpload::Request(n),
+            Err(_) => MissionUpload::Rejected(0),
+        }
+    }
+
+    fn send_ack(&mut self, mav_type: u8, out: &mut [u8]) -> MissionUpload {
+        let ack = MissionAck {
+            target_system: self.up_gcs_sys,
+            target_component: self.up_gcs_comp,
+            mav_type,
+        };
+        match self.frame_out(
+            MISSION_ACK_MSG_ID,
+            &ack.encode_payload(),
+            MISSION_ACK_CRC_EXTRA,
+            out,
+        ) {
+            Ok(n) if mav_type == MAV_MISSION_ACCEPTED => MissionUpload::Complete(n),
+            Ok(n) => MissionUpload::Rejected(n),
+            Err(_) => MissionUpload::Rejected(0),
+        }
     }
 
     /// Encode a HEARTBEAT for `mode` into `out`; returns bytes written.

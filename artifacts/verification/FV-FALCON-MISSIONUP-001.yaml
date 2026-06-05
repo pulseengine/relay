@@ -1,0 +1,36 @@
+artifacts:
+  - id: FV-FALCON-MISSIONUP-001
+    type: sw-verification
+    title: "MAVLink mission upload — a GCS-defined mission flown end to end (v1.33.0)"
+    status: approved
+    description: >
+      Verification of the v1.33.0 MAVLink mission-upload protocol (relay-mavlink
+      61 tests + falcon-mavlink 14, clippy clean, embedded builds):
+
+      relay-mavlink mission.rs — MISSION_COUNT / MISSION_REQUEST_INT /
+      MISSION_ITEM_INT / MISSION_ACK encode↔decode round-trip; ids + CRC_EXTRAs
+      match common.xml (44/221, 51/196, 73/38, 47/153); field offsets verified.
+
+      mission_upload_handshake_loads_waypoints (falcon-mavlink) — a GCS uploads
+      2 items: COUNT → the bridge requests seq 0 → ITEM 0 → requests seq 1 →
+      ITEM 1 → MISSION_ACK(ACCEPTED). The loaded NED waypoints match the
+      geodetic round-trip (a 0.01° north item ≈ 1113 m north; a 0.01° east item
+      ≈ 0.01°·cos(lat)·111320 m east; altitude sign-correct).
+
+      mission_item_before_count_is_ignored — an ITEM with no upload in progress
+      is ignored (no spurious waypoint).
+
+      uploaded_mission_is_flown_by_the_supervisor (END-TO-END) — a 3-leg mission
+      uploaded over MAVLink, loaded into a real FlightSupervisor, is flown IN
+      ORDER (each uploaded waypoint visited within tolerance), then the vehicle
+      autonomously returns home, lands, and DISARMS — no per-waypoint commanding.
+    tags: [verification, falcon, mavlink, mission, upload, v1.33]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p relay-mavlink"
+        - run: "cargo test -p falcon-mavlink"
+        - run: "cargo clippy -p relay-mavlink -p falcon-mavlink"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MISSIONUP-P01

@@ -30,6 +30,7 @@ pub mod crc;
 pub mod frame;
 pub mod global_position_int;
 pub mod heartbeat;
+pub mod mission;
 
 pub use command_long::{
     COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID, COMMAND_LONG_PAYLOAD_LEN, CommandLong,
@@ -48,4 +49,12 @@ pub use global_position_int::{
 pub use heartbeat::{
     FALCON_AUTOPILOT_ID, HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, HEARTBEAT_PAYLOAD_LEN, Heartbeat,
     MavAutopilot, MavModeFlag, MavState, MavType,
+};
+pub use mission::{
+    MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, MAV_MISSION_ACCEPTED, MAV_MISSION_ERROR,
+    MAV_MISSION_TYPE_MISSION, MISSION_ACK_CRC_EXTRA, MISSION_ACK_MSG_ID, MISSION_ACK_PAYLOAD_LEN,
+    MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID, MISSION_COUNT_PAYLOAD_LEN,
+    MISSION_ITEM_INT_CRC_EXTRA, MISSION_ITEM_INT_MSG_ID, MISSION_ITEM_INT_PAYLOAD_LEN,
+    MISSION_REQUEST_INT_CRC_EXTRA, MISSION_REQUEST_INT_MSG_ID, MISSION_REQUEST_INT_PAYLOAD_LEN,
+    MissionAck, MissionCount, MissionItemInt, MissionRequestInt,
 };

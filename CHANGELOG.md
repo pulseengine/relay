@@ -35,6 +35,58 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.33.0] — 2026-06-05
+
+**MAVLink mission upload — a ground station defines the mission.** Completes the
+autonomy loop: a GCS (QGroundControl / MAVSDK) **uploads** the mission over
+MAVLink, then v1.30's `MISSION_START` flies it. No more hard-coded waypoints.
+
+### Added
+
+- **`relay-mavlink`: the four mission-protocol messages** (`mission` module) —
+  `MISSION_COUNT` (44), `MISSION_REQUEST_INT` (51), `MISSION_ITEM_INT` (73),
+  `MISSION_ACK` (47): structs + encode/decode, CRC_EXTRAs from common.xml
+  (221/196/38/153), MAVLink-canonical field order.
+- **`falcon-mavlink`: the upload handshake** in the bridge.
+  `MavBridge::ingest_mission` runs `COUNT → request item 0 → ITEM → … → ACK
+  ACCEPTED`, converting each uploaded lat/lon/alt into an NED waypoint (the
+  inverse of the outbound GLOBAL_POSITION_INT projection). `mission_waypoints()`
+  feeds `FlightSupervisor::set_mission_waypoints`. Out-of-sequence items
+  re-request; an item before a COUNT is ignored; arbitrary bytes never panic.
+
+### Verified
+
+- **61 `relay-mavlink` + 14 `falcon-mavlink` tests** (SWREQ-FALCON-MISSIONUP-P01 /
+  FV-FALCON-MISSIONUP-001):
+  - the four messages round-trip; ids + CRC_EXTRAs match common.xml.
+  - `mission_upload_handshake_loads_waypoints` — a full COUNT→REQUEST→ITEM×2→ACK
+    handshake loads waypoints whose NED matches the geodetic round-trip.
+  - **`uploaded_mission_is_flown_by_the_supervisor`** (end-to-end, via a
+    `falcon-core` dev-dep) — a 3-leg mission **uploaded over MAVLink** is flown
+    **in order** by the real `FlightSupervisor`, then returns + disarms.
+  - clippy clean; builds bare-metal for `thumbv7em-none-eabihf`.
+
+### Honest scope
+
+- Upload only (GCS → vehicle); mission **download** (vehicle → GCS) and partial
+  re-uploads aren't built. Items are taken in `MAV_FRAME_GLOBAL_RELATIVE_ALT_INT`
+  (the QGC default); other frames decode but aren't re-interpreted.
+
+### Video
+
+- The `falcon-mavlink-viz` `upload` scenario shows the handshake in the HUD
+  ticker (`MISSION_COUNT 3 → ITEM 0/1 → MISSION_ACK → ARM → TAKEOFF →
+  MISSION_START`), then flies the uploaded mission. At 2.5× speed.
+
+### Falsification
+
+- **Predicted, then checked:** a mission *uploaded* over the wire (not
+  hard-coded) is flown to the uploaded waypoints, in the uploaded order, and the
+  decoded NED matches the geodetic round-trip of the uploaded lat/lon. Confirmed
+  by the handshake + end-to-end tests. Kill criterion (a dropped or mis-ordered
+  item, a mis-projected waypoint, or the uploaded mission not flying) did not fire
+  — mis-ordered items are re-requested by the handshake, not silently dropped.
+
 ## [falcon-v1.32.0] — 2026-06-05
 
 **Custom gz realism plugin.** The first of the gz-realism thread: a custom

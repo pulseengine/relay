@@ -18,6 +18,8 @@ relay-math = { path = "../relay-math" }
 
 [dev-dependencies]
 relay-fsm = { path = "../relay-fsm" }
+# end-to-end test only: a GCS-uploaded mission flown by the real supervisor.
+falcon-core = { path = "../falcon-core" }
 
 [lints]
 workspace = true

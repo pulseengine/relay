@@ -175,3 +175,14 @@ v1.31 adds reactive keep-out (no-fly) zone avoidance to the FlightSupervisor. Wh
 _video: falcon-v1.31-narrated.mp4_
 
 ---
+
+## v1.33
+**Title:** Falcon v1.33 — MAVLink Mission Upload (a GCS defines the mission, end to end) | verified drone flight stack
+
+v1.33 completes the autonomy loop: a ground station (QGroundControl / MAVSDK) UPLOADS the mission over MAVLink, then v1.30's MISSION_START flies it. The relay-mavlink codec gains the four mission-protocol messages — MISSION_COUNT, MISSION_REQUEST_INT, MISSION_ITEM_INT, MISSION_ACK — and the falcon-mavlink bridge runs the upload handshake (COUNT → request item 0 → ITEM → … → ACK ACCEPTED), converting each uploaded lat/lon/alt into an NED waypoint for the FlightSupervisor sequencer. End-to-end tested: an uploaded 3-leg mission is flown in order by the real supervisor, then returns and disarms — no per-waypoint commanding, no hard-coded mission. 14 falcon-mavlink + 61 relay-mavlink tests; no_std/no_alloc; clippy clean; builds bare-metal for Cortex-M. Handshake shown in the HUD; flight at 2.5x speed.
+
+#mavlink #qgroundcontrol #mission #autonomy #drone #formalverification #rust
+
+_video: falcon-v1.33-narrated.mp4_
+
+---
