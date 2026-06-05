@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-AVOID-P01
+    type: sw-req
+    title: "AVOID-P01 — reactive keep-out (no-fly) zone avoidance"
+    status: implemented
+    description: >
+      The FlightSupervisor shall avoid circular keep-out (no-fly) zones: when a
+      mission or return-to-launch path would pass through a zone, the horizontal
+      position setpoint shall be deflected around the zone so the vehicle steers
+      AROUND it (radial stand-off on a safe ring `radius + KEEPOUT_MARGIN`, plus
+      a tangential look-ahead so it circles past instead of stalling in front).
+
+      The deflection shall be PATH-AWARE — it engages only when a zone actually
+      obstructs the route to the current goal (the zone is ahead, before the
+      goal, and laterally close), plus a hard guard whenever the vehicle is
+      inside the safe ring. A zone merely near the goal (e.g. beside home on the
+      final approach) shall NOT disturb the path. Zones are loaded via
+      `set_keepout_zones(&[KeepoutZone])` (up to `MAX_KEEPOUT_ZONES`, no_std
+      fixed capacity); with none set the supervisor behaviour is unchanged.
+    tags: [falcon, avoidance, keepout, autonomy, supervisor, v1.31]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Integration test through FlightSupervisor against SimBackend: a mission
+        whose straight path runs across a keep-out zone reaches its far waypoint
+        (so it really crossed the obstacle field), but its closest approach to
+        the zone centre stays OUTSIDE the zone radius for the whole flight (out
+        and back), and the sortie still completes + disarms. clippy clean;
+        builds bare-metal for thumbv7em.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-012

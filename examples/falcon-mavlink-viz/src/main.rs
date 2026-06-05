@@ -17,7 +17,7 @@
 //!
 //!   cargo run -p falcon-mavlink-viz --release > /tmp/mavlink-viz.jsonl
 
-use falcon_core::{FlightSupervisor, SimBackend};
+use falcon_core::{FlightSupervisor, KeepoutZone, SimBackend};
 use falcon_mavlink::MavBridge;
 use relay_fsm::Mode;
 use relay_mavlink::{
@@ -81,13 +81,27 @@ fn main() {
     //                      descent to touchdown (the v1.29 supervisor-landing video).
     //   "mission"        — MISSION_START flies a stored multi-leg waypoint path,
     //                      then autonomously returns + lands (the v1.30 sequencer).
+    //   "avoid"          — a mission whose path runs through a keep-out zone; the
+    //                      vehicle arcs AROUND it and back (the v1.31 avoidance).
     let scenario = std::env::args().nth(1).unwrap_or_else(|| "rtl".into());
     let land_demo = scenario == "land";
-    let mission_demo = scenario == "mission";
+    let avoid_demo = scenario == "avoid";
+    // both mission + avoid fly a MISSION_START sortie from home at 2 m
+    let mission_demo = scenario == "mission" || avoid_demo;
 
     // The v1.30 mission legs (NED, 2 m AGL) — a non-collinear path so the
-    // in-order sequencing is visible. After the last leg the supervisor returns.
-    let mission: [[f32; 3]; 3] = [[3.0, 0.0, -2.0], [3.0, 3.0, -2.0], [0.0, 3.0, -2.0]];
+    // in-order sequencing is visible. Avoid uses one far leg straight across a
+    // no-fly zone so the detour is obvious.
+    let mission: &[[f32; 3]] = if avoid_demo {
+        &[[9.0, 0.0, -2.0]]
+    } else {
+        &[[3.0, 0.0, -2.0], [3.0, 3.0, -2.0], [0.0, 3.0, -2.0]]
+    };
+    // v1.31 keep-out zone sitting on the avoid mission's path.
+    let zone = KeepoutZone {
+        center: [4.5, 0.0, -2.0],
+        radius: 1.8,
+    };
 
     let mut sim = SimBackend::new(IDENTITY, DT);
     // RTL demo spawns off home (so the return is visible); land + mission start
@@ -105,7 +119,10 @@ fn main() {
     let cruise = if mission_demo { 2.0 } else { CRUISE };
     let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, cruise, 1.0);
     if mission_demo {
-        sup.set_mission_waypoints(&mission);
+        sup.set_mission_waypoints(mission);
+    }
+    if avoid_demo {
+        sup.set_keepout_zones(&[zone]);
     }
     let mut bridge = MavBridge::new(VEH, COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
 
