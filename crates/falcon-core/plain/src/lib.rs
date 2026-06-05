@@ -287,6 +287,16 @@ impl FlightCore {
 /// failsafe + milestone events into the FSM, maps the resulting mode to a
 /// position setpoint, and steps the verified core. The same backend-agnostic
 /// seam carries it.
+/// Maximum stored mission legs (no_std fixed capacity).
+pub const MAX_WAYPOINTS: usize = 16;
+
+/// Arrival tolerance for a mission waypoint (m, 3-D). Within this of the active
+/// waypoint, the sequencer advances to the next leg. A multirotor acceptance
+/// radius (PX4's NAV_ACC_RAD is metres-scale); tight enough that the path is
+/// faithfully flown, loose enough that the underdamped position loop need not
+/// fully settle on each leg.
+const WAYPOINT_RADIUS: f32 = 1.2;
+
 pub struct FlightSupervisor {
     core: FlightCore,
     fsm: relay_fsm::FlightFsm,
@@ -294,7 +304,10 @@ pub struct FlightSupervisor {
     fence_radius: f32,
     cruise_alt: f32,
     low_batt_v: f32,
-    mission: Vec3,
+    /// Stored mission legs (NED), flown in order while in Mission mode.
+    waypoints: [Vec3; MAX_WAYPOINTS],
+    wp_count: usize,
+    wp_index: usize,
     rtl_latched: bool,
 }
 
@@ -309,7 +322,9 @@ impl FlightSupervisor {
             fence_radius,
             cruise_alt,
             low_batt_v,
-            mission: home,
+            waypoints: [home; MAX_WAYPOINTS],
+            wp_count: 0,
+            wp_index: 0,
             rtl_latched: false,
         }
     }
@@ -328,9 +343,41 @@ impl FlightSupervisor {
         self.fsm.on(ev, g);
     }
 
-    /// Set the mission target (used when in Mission mode).
+    /// Set a single mission target (back-compat: a one-leg mission).
     pub fn set_mission(&mut self, ned: Vec3) {
-        self.mission = ned;
+        self.waypoints[0] = ned;
+        self.wp_count = 1;
+        self.wp_index = 0;
+    }
+
+    /// Load a multi-leg mission: a sequence of NED waypoints flown in order
+    /// (up to `MAX_WAYPOINTS`) while in Mission mode. On reaching the last leg
+    /// the supervisor autonomously returns home and lands. Waypoints beyond
+    /// capacity are dropped.
+    pub fn set_mission_waypoints(&mut self, wps: &[Vec3]) {
+        let n = wps.len().min(MAX_WAYPOINTS);
+        self.waypoints[..n].copy_from_slice(&wps[..n]);
+        self.wp_count = n;
+        self.wp_index = 0;
+    }
+
+    /// The waypoint currently being flown to (home if the mission is empty).
+    fn current_waypoint(&self) -> Vec3 {
+        if self.wp_count == 0 {
+            self.home
+        } else {
+            self.waypoints[self.wp_index.min(self.wp_count - 1)]
+        }
+    }
+
+    /// Index of the active mission leg (telemetry / tests).
+    pub fn waypoint_index(&self) -> usize {
+        self.wp_index
+    }
+
+    /// Number of stored mission legs.
+    pub fn waypoint_count(&self) -> usize {
+        self.wp_count
     }
 
     /// One supervised control step.
@@ -363,6 +410,23 @@ impl FlightSupervisor {
             Mode::Land if alt_agl < 0.15 => {
                 self.fsm.on(Event::Touchdown, g); // ⇒ Disarmed
             }
+            // ── v1.30: multi-waypoint mission sequencing. Fly the stored legs
+            // in order; on arriving at the active leg advance to the next, and
+            // on finishing the last leg autonomously return home and land. ──
+            Mode::Mission => {
+                let wp = self.current_waypoint();
+                let wdx = est.p[0] - wp[0];
+                let wdy = est.p[1] - wp[1];
+                let wdz = est.p[2] - wp[2];
+                let wd = relay_math::sqrtf(wdx * wdx + wdy * wdy + wdz * wdz);
+                if wd < WAYPOINT_RADIUS {
+                    if self.wp_index + 1 < self.wp_count {
+                        self.wp_index += 1; // next leg
+                    } else {
+                        self.fsm.on(Event::RequestRtl, g); // mission done ⇒ return + land
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -387,7 +451,7 @@ impl FlightSupervisor {
         // at cruise altitude over home to kill the horizontal drift). ──
         let sp = match self.fsm.mode() {
             Mode::Takeoff | Mode::Loiter => [est.p[0], est.p[1], -self.cruise_alt],
-            Mode::Mission => [self.mission[0], self.mission[1], -self.cruise_alt],
+            Mode::Mission => self.current_waypoint(), // fly the active leg (its own altitude)
             Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
             Mode::Land => [self.home[0], self.home[1], -self.cruise_alt], // hold home; rate-descend
             Mode::Disarmed | Mode::Armed => [est.p[0], est.p[1], est.p[2]], // hold (idle)
@@ -1061,6 +1125,72 @@ mod tests {
         assert!(
             matches!(sup.mode(), Mode::Land | Mode::Disarmed),
             "RTL should be landing/landed, mode {:?}",
+            sup.mode()
+        );
+    }
+
+    /// v1.30 — a multi-leg mission: the supervisor flies a stored sequence of
+    /// waypoints IN ORDER, then autonomously returns home, lands, and disarms.
+    /// A full autonomous sortie with no per-waypoint commanding.
+    #[test]
+    fn flies_a_multi_waypoint_mission_then_returns_and_disarms() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_contact = true; // so the autonomous landing can settle
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, 2.0, 1.0);
+
+        // A three-leg path (NED, 2 m AGL) that is NOT in straight-line order, so
+        // visiting in sequence is observable.
+        let wps = [[3.0, 0.0, -2.0], [3.0, 3.0, -2.0], [0.0, 3.0, -2.0]];
+        sup.set_mission_waypoints(&wps);
+        assert_eq!(sup.waypoint_count(), 3);
+
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter after takeoff");
+        sup.command(Event::RequestMission, true, false);
+
+        // Fly the mission. Track the closest approach to each waypoint and the
+        // order the sequencer advanced through the legs.
+        let mut min_d = [f32::MAX; 3];
+        let mut last_index = 0usize;
+        let mut order_ok = true;
+        let mut disarmed = false;
+        for _ in 0..150000 {
+            sup.step(&mut b);
+            let p = sup.state().p;
+            for (i, w) in wps.iter().enumerate() {
+                let dx = p[0] - w[0];
+                let dy = p[1] - w[1];
+                let dz = p[2] - w[2];
+                let d = relay_math::sqrtf(dx * dx + dy * dy + dz * dz);
+                if d < min_d[i] {
+                    min_d[i] = d;
+                }
+            }
+            let idx = sup.waypoint_index();
+            if idx < last_index {
+                order_ok = false; // the leg index must never go backwards
+            }
+            last_index = idx;
+            if sup.mode() == Mode::Disarmed {
+                disarmed = true;
+                break;
+            }
+        }
+
+        for (i, d) in min_d.iter().enumerate() {
+            assert!(*d < WAYPOINT_RADIUS + 0.2, "waypoint {i} not visited: min dist {d} m");
+        }
+        assert!(order_ok, "waypoints must be flown in order (leg index monotonic)");
+        assert!(
+            disarmed,
+            "mission must complete autonomously: return home + land + disarm (mode {:?})",
             sup.mode()
         );
     }

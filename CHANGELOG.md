@@ -35,6 +35,60 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.30.0] — 2026-06-05
+
+**Autonomous multi-leg missions.** The `FlightSupervisor` can now fly a stored
+sequence of waypoints on a single command — the first real **autonomy** thread
+on the roadmap. Arm, take off, fly the legs in order, return home, land, disarm:
+a full sortie with no per-waypoint commanding.
+
+### Added
+
+- **Multi-waypoint mission sequencer** in `FlightSupervisor`. `set_mission_waypoints(&[Vec3])`
+  loads up to `MAX_WAYPOINTS` (16) NED legs (no_std fixed capacity). In Mission
+  mode the supervisor flies to the active leg, advances to the next on arriving
+  within `WAYPOINT_RADIUS` (1.2 m acceptance radius), and on finishing the last
+  leg **autonomously returns home and lands** (reusing the v1.29 velocity-landing).
+  `waypoint_index()` / `waypoint_count()` expose progress. The single-waypoint
+  `set_mission` API is preserved (a one-leg mission).
+- **`MAV_CMD_MISSION_START` (300)** in `relay-mavlink` (+ a `mission_start`
+  `CommandLong` ctor); the `falcon-mavlink` bridge maps it to `Event::RequestMission`,
+  so a ground station's "Start Mission" begins the autonomous flight.
+
+### Verified
+
+- **33 `falcon-core` + 11 `falcon-mavlink` + 55 `relay-mavlink` tests**
+  (SWREQ-FALCON-MISSION-P01 / FV-FALCON-MISSION-001):
+  - `flies_a_multi_waypoint_mission_then_returns_and_disarms` — a full sortie
+    flies a 3-leg non-collinear mission, visiting each leg **in order** (closest
+    approach < radius, leg index monotonic), then autonomously returns + lands +
+    **disarms**.
+  - `MAV_CMD_MISSION_START` decodes to `Event::RequestMission`.
+  - clippy clean; builds bare-metal for `thumbv7em-none-eabihf`.
+
+### Honest scope
+
+- Waypoints are loaded host-side (`set_mission_waypoints`); MAVLink waypoint
+  *upload* (`MISSION_ITEM`/`MISSION_COUNT`) is not built yet — `MISSION_START`
+  begins a mission already loaded. The acceptance radius (1.2 m) is loose enough
+  that the underdamped position loop need not fully settle on each leg.
+
+### Video
+
+- The v1.30 video uses the `falcon-mavlink-viz` `mission` scenario: a real
+  `MISSION_START` command drives the supervisor through the 3-leg sortie, with a
+  **flight trail** tracing the multi-leg path and a live **leg counter** in the
+  HUD. Shown at 2× speed (the autonomous sortie is a long flight).
+
+### Falsification
+
+- **Predicted, then checked:** one `MISSION_START` decoded through the bridge
+  flies the *stored legs in the loaded order* and finishes by returning home —
+  not the last leg, not out of order. Confirmed by the monotonic-leg-index +
+  closest-approach assertions and the autonomous return-to-disarm. Kill criterion
+  (a leg skipped, flown out of order, or the mission not self-completing) did not
+  fire.
+
 ## [falcon-v1.29.0] — 2026-06-05
 
 **The integrated stack now lands cleanly.** v1.27 built a velocity-based

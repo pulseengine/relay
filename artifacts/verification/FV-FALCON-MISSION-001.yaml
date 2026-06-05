@@ -1,0 +1,36 @@
+artifacts:
+  - id: FV-FALCON-MISSION-001
+    type: sw-verification
+    title: "Multi-waypoint mission sequencer + autonomous return (v1.30.0)"
+    status: approved
+    description: >
+      Verification of the v1.30.0 mission sequencer (falcon-core 33 tests +
+      relay-mavlink 55 + falcon-mavlink 11, clippy clean, embedded builds):
+
+      flies_a_multi_waypoint_mission_then_returns_and_disarms — a full
+      autonomous sortie through the FlightSupervisor against SimBackend: arm →
+      takeoff → loiter → RequestMission, then it flies a 3-leg non-collinear
+      mission [[3,0,-2],[3,3,-2],[0,3,-2]]. The test asserts each waypoint is
+      visited within the acceptance radius (closest approach < WAYPOINT_RADIUS),
+      that the leg index is monotonic (waypoints flown IN ORDER, never
+      backwards), and that on completing the last leg the vehicle autonomously
+      returns home, lands (v1.29 velocity-landing), and DISARMS — no
+      per-waypoint commanding.
+
+      command_to_event_mapping_is_exhaustive (falcon-mavlink) — the MAVLink
+      MAV_CMD_MISSION_START command decodes through the bridge to
+      Event::RequestMission, so a ground station can start the mission.
+
+      The single-waypoint set_mission API and the geofence-RTL test still pass
+      (the sequencer is a superset; a one-leg mission is the back-compat path).
+    tags: [verification, falcon, mission, autonomy, v1.30]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo test -p falcon-mavlink"
+        - run: "cargo test -p relay-mavlink"
+        - run: "cargo clippy -p falcon-core -p falcon-mavlink"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MISSION-P01

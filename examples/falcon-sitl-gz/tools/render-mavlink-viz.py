@@ -67,7 +67,7 @@ MODE_COLOR = {
 }
 
 
-def draw_scene(d, r):
+def draw_scene(d, r, trail):
     # ground grid (north/east lines from -5..5)
     grid = (44, 52, 66)
     for n in range(-5, 6):
@@ -81,6 +81,13 @@ def draw_scene(d, r):
         t = project(n, e, 2.4)
         d.line([b, t], fill=col, width=7)
         d.ellipse([t[0] - 6, t[1] - 6, t[0] + 6, t[1] + 6], fill=col)
+
+    # flight trail — the ground track flown so far (fades with age)
+    if len(trail) > 1:
+        pts = [project(n, e, 0) for (n, e) in trail]
+        for i in range(1, len(pts)):
+            a = int(40 + 150 * i / len(pts))  # older = dimmer
+            d.line([pts[i - 1], pts[i]], fill=(90, 150, 210, a), width=2)
 
     # HOME pad at origin
     hb = project(0, 0, 0)
@@ -127,6 +134,10 @@ def draw_hud(d, r, cmd_history, t, title, subtitle):
     d.rectangle([bx, by, bx + bw, by + bh], fill=(8, 12, 20, 200), outline=col, width=3)
     d.text((bx + 16, by + 8), "FSM MODE", font=font(14, True), fill=(150, 160, 175, 255))
     d.text((bx + 16, by + 26), mode, font=font(34, True), fill=col + (255,))
+    # mission leg counter (its own line under the badge, while in a mission)
+    if mode == "MISSION" and r.get("wp_n", 0) > 0:
+        d.text((bx + 16, by + bh + 8), f"waypoint leg {r['wp'] + 1} / {r['wp_n']}",
+               font=font(20, True), fill=(120, 230, 140, 255))
 
     # telemetry panel (bottom) — FALCON -> GCS
     bh2 = 132
@@ -163,10 +174,14 @@ def main():
     rows = [json.loads(l) for l in open(src) if l.strip()]
     cmd_history = [(r["t"], r["rx"]) for r in rows if r["rx"]]
 
+    trail = []
     for i, r in enumerate(rows):
+        # accumulate the ground track once airborne (skip the on-pad prefix)
+        if r["mode"] not in ("DISARMED", "ARMED"):
+            trail.append((r["px"], r["py"]))
         img = Image.new("RGBA", (W, H), (16, 20, 28, 255))
         d = ImageDraw.Draw(img)
-        draw_scene(d, r)
+        draw_scene(d, r, trail)
         draw_hud(d, r, cmd_history, r["t"], title, subtitle)
         img.convert("RGB").save(os.path.join(outdir, f"f{i:06d}.png"))
     print(f"{len(rows)} frames -> {outdir}")
