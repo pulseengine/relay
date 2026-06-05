@@ -35,6 +35,57 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.31.0] — 2026-06-05
+
+**Obstacle avoidance.** The `FlightSupervisor` now arcs around keep-out (no-fly)
+zones — a mission or RTL path that would run through a zone is deflected around
+it. The second autonomy thread, building on the v1.30 sequencer.
+
+### Added
+
+- **Reactive keep-out zone avoidance.** `set_keepout_zones(&[KeepoutZone])`
+  loads up to `MAX_KEEPOUT_ZONES` (8) circular no-fly zones (no_std fixed
+  capacity). When a zone obstructs the path to the current goal, the horizontal
+  setpoint is deflected onto a safe ring (`radius + KEEPOUT_MARGIN`) with a
+  tangential look-ahead, so the vehicle *steers around* the zone rather than
+  stalling in front of it (a potential-field local minimum). The margin is sized
+  to absorb the position loop's tracking lag, so the **actual** path — not just
+  the commanded setpoint — stays outside the radius. With no zones set the
+  supervisor is unchanged.
+
+### Verified
+
+- **34 `falcon-core` tests** (SWREQ-FALCON-AVOID-P01 / FV-FALCON-AVOID-001):
+  - `mission_avoids_a_keepout_zone` — a mission straight across a zone reaches
+    its far waypoint (it genuinely crossed the obstacle field), keeps its
+    closest approach to the zone centre **above the radius for the whole flight
+    (out and back)**, and still completes + disarms.
+  - clippy clean; builds bare-metal for `thumbv7em-none-eabihf`. Clean-room verified.
+
+### Honest scope
+
+- Reactive single-zone-at-a-time deflection (the last threatening zone wins),
+  not a global path planner — the detour is safe but not geometrically optimal
+  (it can arc wide; the underdamped position loop overshoots the deflected
+  setpoint). Optimal return-path planning is later on the roadmap.
+
+### Video
+
+- The v1.31 video uses the `falcon-mavlink-viz` `avoid` scenario: a `MISSION_START`
+  sortie whose path crosses a drawn **NO-FLY** zone; the flight trail traces a
+  wide arc *around* the zone (out and back). Shown at 2.5× speed.
+
+### Falsification
+
+- **An emergent failure, found and fixed.** The first naive avoidance (deflect
+  whenever near a zone) used an influence radius that reached *home* — so on RTL
+  the vehicle was pushed away from home and **orbited the zone forever, never
+  landing**. Caught by the "must complete + disarm" assertion. The fix is
+  path-aware engagement: deflect only when a zone actually obstructs the route to
+  the goal, so a zone beside home doesn't disturb the final approach. Kill
+  criterion (the vehicle entering the zone, or the sortie never completing) did
+  not fire after the fix.
+
 ## [falcon-v1.30.0] — 2026-06-05
 
 **Autonomous multi-leg missions.** The `FlightSupervisor` can now fly a stored

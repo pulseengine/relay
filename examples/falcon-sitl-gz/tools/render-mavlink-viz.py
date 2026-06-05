@@ -37,9 +37,11 @@ def font(sz, bold=False, mono=False):
 
 
 # ---- 2.5-D dimetric projection: NED (north, east) + up=-down -> screen ----
-CX, CY = 560, 400
-SX, DX = 70.0, 26.0   # east -> right ; north -> right (depth)
-SY, DY = 70.0, 34.0   # up -> up      ; north -> up (depth)
+# Scaled to fit a wide flight (the v1.31 avoidance detour reaches ~7 m); earlier
+# tight scenes (v1.28-30) were already rendered, so this only affects new renders.
+CX, CY = 545, 420
+SX, DX = 54.0, 20.0   # east -> right ; north -> right (depth)
+SY, DY = 54.0, 26.0   # up -> up      ; north -> up (depth)
 
 
 def project(n, e, up):
@@ -67,7 +69,19 @@ MODE_COLOR = {
 }
 
 
-def draw_scene(d, r, trail):
+def draw_zone(d, center, radius):
+    # a keep-out zone, drawn on the ground plane (a circle projects to a polygon)
+    import math as _m
+    pts = []
+    for k in range(33):
+        a = 2 * _m.pi * k / 32
+        pts.append(project(center[0] + radius * _m.cos(a), center[1] + radius * _m.sin(a), 0))
+    d.polygon(pts, fill=(200, 60, 60, 60), outline=(235, 90, 90, 230))
+    c = project(center[0], center[1], 0)
+    d.text((c[0] - 26, c[1] - 8), "NO-FLY", font=font(15, True), fill=(245, 130, 130, 255))
+
+
+def draw_scene(d, r, trail, zones):
     # ground grid (north/east lines from -5..5)
     grid = (44, 52, 66)
     for n in range(-5, 6):
@@ -81,6 +95,10 @@ def draw_scene(d, r, trail):
         t = project(n, e, 2.4)
         d.line([b, t], fill=col, width=7)
         d.ellipse([t[0] - 6, t[1] - 6, t[0] + 6, t[1] + 6], fill=col)
+
+    # keep-out zones (under the trail / drone)
+    for z in zones:
+        draw_zone(d, z["center"], z["radius"])
 
     # flight trail — the ground track flown so far (fades with age)
     if len(trail) > 1:
@@ -167,6 +185,8 @@ def main():
     title = sys.argv[3] if len(sys.argv) > 3 else "FALCON  v1.28 — MAVLink Bridge"
     subtitle = (sys.argv[4] if len(sys.argv) > 4 else
                 "live MAVLink  <->  verified flight supervisor   ·   QGroundControl / MAVSDK")
+    # optional keep-out zones: argv[5] = JSON list of {"center":[n,e],"radius":r}
+    zones = json.loads(sys.argv[5]) if len(sys.argv) > 5 else []
     os.makedirs(outdir, exist_ok=True)
     for f in os.listdir(outdir):
         if f.endswith(".png"):
@@ -181,7 +201,7 @@ def main():
             trail.append((r["px"], r["py"]))
         img = Image.new("RGBA", (W, H), (16, 20, 28, 255))
         d = ImageDraw.Draw(img)
-        draw_scene(d, r, trail)
+        draw_scene(d, r, trail, zones)
         draw_hud(d, r, cmd_history, r["t"], title, subtitle)
         img.convert("RGB").save(os.path.join(outdir, f"f{i:06d}.png"))
     print(f"{len(rows)} frames -> {outdir}")

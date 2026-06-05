@@ -164,3 +164,14 @@ v1.30 adds a multi-waypoint mission sequencer to the FlightSupervisor. A single 
 _video: falcon-v1.30-narrated.mp4_
 
 ---
+
+## v1.31
+**Title:** Falcon v1.31 — Keep-Out Zone Avoidance (the vehicle arcs around a no-fly zone) | verified drone flight stack
+
+v1.31 adds reactive keep-out (no-fly) zone avoidance to the FlightSupervisor. When a mission or return-to-launch path runs through a no-fly zone, the position setpoint is deflected around it — radial stand-off plus a tangential look-ahead, so the vehicle steers AROUND the zone (not into a stall in front of it). The deflection is path-aware: it engages only when a zone actually obstructs the route to the goal, so a zone beside home doesn't disturb the final approach. Integration-tested through the FlightSupervisor: a mission straight across a zone reaches its far waypoint, but its closest approach to the zone centre stays outside the radius the whole flight (out and back), and the sortie still completes + disarms. no_std fixed-capacity zone store; clippy clean; builds bare-metal for Cortex-M. Flight shown at 2.5x speed.
+
+#drone #autopilot #avoidance #autonomy #formalverification #rust
+
+_video: falcon-v1.31-narrated.mp4_
+
+---

@@ -1,0 +1,33 @@
+artifacts:
+  - id: FV-FALCON-AVOID-001
+    type: sw-verification
+    title: "Reactive keep-out zone avoidance (v1.31.0)"
+    status: approved
+    description: >
+      Verification of the v1.31.0 keep-out avoidance (falcon-core 34 tests,
+      clippy clean, embedded builds):
+
+      mission_avoids_a_keepout_zone — a single-leg mission to [10,0,-2] runs
+      straight across a keep-out zone at [5,0] radius 2.0. Through the
+      FlightSupervisor against SimBackend the vehicle: (a) reaches the far
+      waypoint (closest approach < acceptance radius, so it genuinely crossed
+      the obstacle field), (b) keeps its closest approach to the zone centre
+      ABOVE the zone radius for the entire flight — out AND back (the avoidance
+      deflects the setpoint around the zone on both the mission leg and the
+      autonomous RTL), and (c) still completes the sortie autonomously (returns,
+      lands, DISARMS).
+
+      The path-aware engagement was falsification-driven: the first naive
+      version (deflect whenever near a zone) used an influence radius that
+      reached home, so RTL could never settle to land — the vehicle orbited.
+      Gating the deflection on the zone actually obstructing the route to the
+      goal fixed it; the existing mission/landing/geofence tests still pass.
+    tags: [verification, falcon, avoidance, keepout, autonomy, v1.31]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo clippy -p falcon-core"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-AVOID-P01

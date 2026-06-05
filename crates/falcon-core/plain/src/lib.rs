@@ -297,6 +297,33 @@ pub const MAX_WAYPOINTS: usize = 16;
 /// fully settle on each leg.
 const WAYPOINT_RADIUS: f32 = 1.2;
 
+/// Maximum stored keep-out zones (no_std fixed capacity).
+pub const MAX_KEEPOUT_ZONES: usize = 8;
+
+/// Horizontal stand-off the avoidance commands beyond a keep-out zone's radius
+/// (m) — the safe ring the deflected setpoint rides. Sized to absorb the
+/// position loop's tracking lag (the vehicle, carrying momentum toward the goal,
+/// cuts inside the commanded ring), so the ACTUAL path stays outside the radius.
+const KEEPOUT_MARGIN: f32 = 1.6;
+
+/// How far beyond the safe ring a zone's influence reaches (m). Deflection
+/// starts this far out so the vehicle has room to redirect before the zone.
+const KEEPOUT_INFLUENCE: f32 = 4.0;
+
+/// Tangential look-ahead used to steer AROUND a zone (m), not merely away from
+/// it — without this, radial repulsion alone stalls when the goal sits directly
+/// behind the zone (a potential-field local minimum).
+const KEEPOUT_LOOKAHEAD: f32 = 3.0;
+
+/// A circular keep-out (no-fly) zone: the vehicle must stay outside `radius` of
+/// `center` (evaluated horizontally). Avoidance is reactive — the position
+/// setpoint is deflected around the zone. v1.31.
+#[derive(Clone, Copy, Debug)]
+pub struct KeepoutZone {
+    pub center: Vec3,
+    pub radius: f32,
+}
+
 pub struct FlightSupervisor {
     core: FlightCore,
     fsm: relay_fsm::FlightFsm,
@@ -308,6 +335,9 @@ pub struct FlightSupervisor {
     waypoints: [Vec3; MAX_WAYPOINTS],
     wp_count: usize,
     wp_index: usize,
+    /// Keep-out zones the position setpoint is deflected around (v1.31).
+    zones: [KeepoutZone; MAX_KEEPOUT_ZONES],
+    zone_count: usize,
     rtl_latched: bool,
 }
 
@@ -325,6 +355,8 @@ impl FlightSupervisor {
             waypoints: [home; MAX_WAYPOINTS],
             wp_count: 0,
             wp_index: 0,
+            zones: [KeepoutZone { center: home, radius: 0.0 }; MAX_KEEPOUT_ZONES],
+            zone_count: 0,
             rtl_latched: false,
         }
     }
@@ -378,6 +410,59 @@ impl FlightSupervisor {
     /// Number of stored mission legs.
     pub fn waypoint_count(&self) -> usize {
         self.wp_count
+    }
+
+    /// Load the keep-out (no-fly) zones the vehicle must arc around (up to
+    /// `MAX_KEEPOUT_ZONES`). Excess zones are dropped. v1.31.
+    pub fn set_keepout_zones(&mut self, zones: &[KeepoutZone]) {
+        let n = zones.len().min(MAX_KEEPOUT_ZONES);
+        self.zones[..n].copy_from_slice(&zones[..n]);
+        self.zone_count = n;
+    }
+
+    /// Deflect a horizontal position setpoint around any keep-out zone the
+    /// vehicle is currently near — reactive obstacle avoidance. Each threatening
+    /// zone replaces the commanded point with one on its safe ring
+    /// (`radius + KEEPOUT_MARGIN`) at the vehicle's bearing from the zone, biased
+    /// tangentially toward the goal so the vehicle *circles around* the zone
+    /// instead of stalling in front of it. Altitude (`sp[2]`) is untouched.
+    fn avoid(&self, p: Vec3, sp: Vec3) -> Vec3 {
+        let mut out = sp;
+        // unit vector from the vehicle toward the goal
+        let gx = sp[0] - p[0];
+        let gy = sp[1] - p[1];
+        let glen = relay_math::sqrtf(gx * gx + gy * gy).max(1e-3);
+        let ux = gx / glen;
+        let uy = gy / glen;
+        for z in &self.zones[..self.zone_count] {
+            let rx = p[0] - z.center[0]; // zone → vehicle
+            let ry = p[1] - z.center[1];
+            let d = relay_math::sqrtf(rx * rx + ry * ry).max(1e-3);
+            let safe = z.radius + KEEPOUT_MARGIN;
+            // Where the zone sits relative to the path to the goal: `along` is its
+            // distance ahead of the vehicle, `perp` its lateral offset. The zone
+            // OBSTRUCTS only if it is ahead, before the goal, and laterally close.
+            let along = -rx * ux + -ry * uy;
+            let perp = relay_math::sqrtf(((rx * rx + ry * ry) - along * along).max(0.0));
+            let obstructs =
+                along > 0.0 && along < glen + safe && perp < safe + KEEPOUT_INFLUENCE;
+            // Deflect when the zone blocks the path (and the vehicle is within
+            // reach of it), OR as a hard guard whenever the vehicle is inside the
+            // safe ring. Crucially NOT when the zone is merely near but off-path
+            // (e.g. sitting beside home on the final approach).
+            let near = d < safe + KEEPOUT_INFLUENCE;
+            if (obstructs && near) || d < safe {
+                let n = [rx / d, ry / d]; // outward radial
+                let mut t = [-n[1], n[0]]; // tangent, signed toward the goal
+                if t[0] * ux + t[1] * uy < 0.0 {
+                    t = [-t[0], -t[1]];
+                }
+                let urgency = ((safe + KEEPOUT_INFLUENCE - d) / KEEPOUT_INFLUENCE).clamp(0.0, 1.0);
+                out[0] = z.center[0] + n[0] * safe + t[0] * KEEPOUT_LOOKAHEAD * urgency;
+                out[1] = z.center[1] + n[1] * safe + t[1] * KEEPOUT_LOOKAHEAD * urgency;
+            }
+        }
+        out
     }
 
     /// One supervised control step.
@@ -455,6 +540,15 @@ impl FlightSupervisor {
             Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
             Mode::Land => [self.home[0], self.home[1], -self.cruise_alt], // hold home; rate-descend
             Mode::Disarmed | Mode::Armed => [est.p[0], est.p[1], est.p[2]], // hold (idle)
+        };
+        // ── v1.31: reactive keep-out avoidance ── deflect the horizontal
+        // setpoint around any no-fly zone the vehicle is near (no-op when none
+        // are set), so a mission or RTL path arcs around obstacles instead of
+        // through them. Not applied while landing (the vehicle is over home).
+        let sp = if self.zone_count > 0 && !landing {
+            self.avoid(est.p, sp)
+        } else {
+            sp
         };
         self.core.set_position(sp);
         self.core.step(b);
@@ -1193,6 +1287,63 @@ mod tests {
             "mission must complete autonomously: return home + land + disarm (mode {:?})",
             sup.mode()
         );
+    }
+
+    /// v1.31 — keep-out (no-fly) zone avoidance: a mission whose straight path
+    /// runs through a no-fly zone is still flown to completion, but the vehicle
+    /// ARCS AROUND the zone — its closest approach to the zone centre stays
+    /// outside the zone radius for the whole flight (out and back).
+    #[test]
+    fn mission_avoids_a_keepout_zone() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 1.0);
+
+        // A single far waypoint straight across a zone that sits on the path.
+        sup.set_mission_waypoints(&[[10.0, 0.0, -2.0]]);
+        let zone = KeepoutZone { center: [5.0, 0.0, -2.0], radius: 2.0 };
+        sup.set_keepout_zones(&[zone]);
+
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter);
+        sup.command(Event::RequestMission, true, false);
+
+        let mut min_zone = f32::MAX; // closest approach to the zone centre
+        let mut min_wp = f32::MAX; // closest approach to the waypoint
+        let mut disarmed = false;
+        for _ in 0..260000 {
+            sup.step(&mut b);
+            let p = sup.state().p;
+            let dz = relay_math::sqrtf((p[0] - 5.0) * (p[0] - 5.0) + (p[1] - 0.0) * (p[1] - 0.0));
+            if dz < min_zone {
+                min_zone = dz;
+            }
+            let dw = relay_math::sqrtf((p[0] - 10.0) * (p[0] - 10.0) + p[1] * p[1]);
+            if dw < min_wp {
+                min_wp = dw;
+            }
+            if sup.mode() == Mode::Disarmed {
+                disarmed = true;
+                break;
+            }
+        }
+        // visited the far waypoint (so it really crossed the obstacle field) …
+        assert!(min_wp < WAYPOINT_RADIUS + 0.3, "waypoint not reached: min dist {min_wp} m");
+        // … but never entered the no-fly zone …
+        assert!(
+            min_zone > zone.radius,
+            "entered the keep-out zone: min dist {min_zone} m < {} m",
+            zone.radius
+        );
+        // … and still completed the sortie autonomously.
+        assert!(disarmed, "mission with avoidance must still complete (mode {:?})", sup.mode());
     }
 
     /// A low battery actuates a failsafe (the audit's "no battery failsafe"):
