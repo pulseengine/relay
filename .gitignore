@@ -35,3 +35,4 @@ coverage.lcov
 # embedded cortex-m build artifacts
 embedded/falcon-cortex-m/target/
 target/falcon-pipeline/
+/dist/
