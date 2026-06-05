@@ -35,6 +35,44 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.34.0] — 2026-06-05
+
+**MAVLink mission download — a ground station reads the mission back.** The
+mirror of v1.33's upload, completing the mission protocol: a GCS (QGroundControl
+/ MAVSDK) can now read, display, and verify the vehicle's mission, not just send
+one.
+
+### Added
+
+- **`relay-mavlink`: `MISSION_REQUEST_LIST` (43)** message (id 43, CRC_EXTRA 132
+  from common.xml) — the GCS's "download my mission" request.
+- **`falcon-mavlink`: the download handshake** — `MavBridge::serve_mission` runs
+  `MISSION_REQUEST_LIST → MISSION_COUNT(n) → MISSION_REQUEST_INT(seq) →
+  MISSION_ITEM_INT(seq) → MISSION_ACK`, projecting each stored NED waypoint back
+  to geodetic about home (the inverse of the inbound upload projection).
+  `set_downloadable_mission(&[Vec3])` sets what to serve (the uploaded mission,
+  or the supervisor's current waypoints). Out-of-range seq + other-vehicle
+  requests are ignored; arbitrary bytes never panic.
+
+### Verified
+
+- **62 `relay-mavlink` + 16 `falcon-mavlink` tests** (SWREQ-FALCON-MISSIONDL-P01 /
+  FV-FALCON-MISSIONDL-001):
+  - `mission_download_serves_the_stored_mission` — the full download handshake
+    serves the stored mission (geodetic, sign-correct altitude); out-of-range
+    seq ignored.
+  - **`upload_then_download_round_trips`** — a mission UPLOADED at known lat/lon/alt
+    is DOWNLOADED back at the same coordinates (within e7 + f32-NED tolerance):
+    upload and download are inverse, so a GCS reads back exactly what it sent.
+  - clippy clean; builds bare-metal for `thumbv7em-none-eabihf`.
+
+### Honest scope
+
+- No video: download is a protocol exchange (the GCS reading the mission back),
+  not a distinct *flight* effect — the upload/mission videos already show the
+  visible behaviour. Mission *clear* (`MISSION_CLEAR_ALL`) and partial re-reads
+  aren't built. This closes v1.33's "download isn't built" honest-scope note.
+
 ## [falcon-v1.33.0] — 2026-06-05
 
 **MAVLink mission upload — a ground station defines the mission.** Completes the
