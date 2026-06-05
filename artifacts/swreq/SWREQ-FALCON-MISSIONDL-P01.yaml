@@ -1,0 +1,34 @@
+artifacts:
+  - id: SWREQ-FALCON-MISSIONDL-P01
+    type: sw-req
+    title: "MISSIONDL-P01 — MAVLink mission DOWNLOAD (a GCS reads the mission back)"
+    status: implemented
+    description: >
+      Falcon shall serve its current mission back to a ground station over
+      MAVLink — the mirror of the v1.33 upload, completing the mission protocol
+      so a GCS (QGroundControl / MAVSDK) can read, display, and verify the
+      vehicle's mission.
+
+      relay-mavlink shall add MISSION_REQUEST_LIST (43); the falcon-mavlink
+      bridge shall run the download handshake (MavBridge::serve_mission): on
+      MISSION_REQUEST_LIST reply MISSION_COUNT(n); on MISSION_REQUEST_INT(seq)
+      reply MISSION_ITEM_INT(seq) — the stored NED waypoint projected back to
+      geodetic about home (the inverse of the inbound upload projection); on
+      MISSION_ACK the download is complete. An out-of-range seq is ignored;
+      a request for another vehicle is ignored; arbitrary bytes never panic.
+      The downloadable mission is the uploaded one or one set via
+      set_downloadable_mission (e.g. the FlightSupervisor's current waypoints).
+    tags: [falcon, mavlink, mission, download, interop, v1.34]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-mavlink (16 tests): MISSION_REQUEST_LIST → COUNT → REQUEST_INT →
+        ITEM_INT → ACK serves the stored mission (geodetic, sign-correct alt);
+        out-of-range seq ignored. UPLOAD→DOWNLOAD round-trips: a mission uploaded
+        at known lat/lon/alt is served back at the same coordinates (within e7 +
+        f32-NED tolerance). relay-mavlink: MISSION_REQUEST_LIST round-trips
+        (id 43, CRC 132). clippy clean; builds bare-metal for thumbv7em.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

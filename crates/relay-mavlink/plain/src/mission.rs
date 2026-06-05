@@ -58,6 +58,36 @@ impl MissionCount {
     }
 }
 
+// ── MISSION_REQUEST_LIST (id 43) ─────────────────────────────────────────
+
+pub const MISSION_REQUEST_LIST_MSG_ID: u32 = 43;
+pub const MISSION_REQUEST_LIST_PAYLOAD_LEN: usize = 2;
+pub const MISSION_REQUEST_LIST_CRC_EXTRA: u8 = 132;
+
+/// MISSION_REQUEST_LIST — the GCS asks the vehicle to DOWNLOAD its mission
+/// (the vehicle replies with MISSION_COUNT, then serves each MISSION_ITEM_INT).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MissionRequestList {
+    pub target_system: u8,
+    pub target_component: u8,
+}
+
+impl MissionRequestList {
+    pub fn encode_payload(&self) -> [u8; MISSION_REQUEST_LIST_PAYLOAD_LEN] {
+        [self.target_system, self.target_component]
+    }
+
+    pub fn decode_payload(payload: &[u8]) -> Option<Self> {
+        if payload.len() < MISSION_REQUEST_LIST_PAYLOAD_LEN {
+            return None;
+        }
+        Some(Self {
+            target_system: payload[0],
+            target_component: payload[1],
+        })
+    }
+}
+
 // ── MISSION_REQUEST_INT (id 51) ──────────────────────────────────────────
 
 pub const MISSION_REQUEST_INT_MSG_ID: u32 = 51;
@@ -237,6 +267,20 @@ mod tests {
         };
         assert_eq!(
             MissionRequestInt::decode_payload(&r.encode_payload()),
+            Some(r)
+        );
+    }
+
+    #[test]
+    fn mission_request_list_round_trip() {
+        assert_eq!(MISSION_REQUEST_LIST_MSG_ID, 43);
+        assert_eq!(MISSION_REQUEST_LIST_CRC_EXTRA, 132);
+        let r = MissionRequestList {
+            target_system: 1,
+            target_component: 1,
+        };
+        assert_eq!(
+            MissionRequestList::decode_payload(&r.encode_payload()),
             Some(r)
         );
     }

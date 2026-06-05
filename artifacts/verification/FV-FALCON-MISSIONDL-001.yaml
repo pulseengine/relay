@@ -1,0 +1,32 @@
+artifacts:
+  - id: FV-FALCON-MISSIONDL-001
+    type: sw-verification
+    title: "MAVLink mission download — a GCS reads the mission back (v1.34.0)"
+    status: approved
+    description: >
+      Verification of the v1.34.0 MAVLink mission-DOWNLOAD protocol (relay-mavlink
+      62 tests + falcon-mavlink 16, clippy clean, embedded builds):
+
+      relay-mavlink mission_request_list_round_trip — MISSION_REQUEST_LIST (id 43,
+      CRC_EXTRA 132 from common.xml) encode↔decode round-trips.
+
+      mission_download_serves_the_stored_mission (falcon-mavlink) — with a stored
+      2-leg mission, a GCS handshake MISSION_REQUEST_LIST → MISSION_COUNT(2) →
+      MISSION_REQUEST_INT(0) → MISSION_ITEM_INT(0) serves the waypoint projected
+      back to geodetic (a 1113 m-north leg → +0.01° lat; altitude sign-correct);
+      an out-of-range MISSION_REQUEST_INT(9) is ignored; MISSION_ACK ⇒ Done.
+
+      upload_then_download_round_trips — a mission UPLOADED at known lat/lon/alt
+      is DOWNLOADED back at the same coordinates (within e7 rounding + the f32 NED
+      hop) — upload and download are inverse, so a GCS reads back exactly what it
+      sent. Closes the v1.33 honest-scope gap ("download isn't built").
+    tags: [verification, falcon, mavlink, mission, download, v1.34]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p relay-mavlink"
+        - run: "cargo test -p falcon-mavlink"
+        - run: "cargo clippy -p relay-mavlink -p falcon-mavlink"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MISSIONDL-P01

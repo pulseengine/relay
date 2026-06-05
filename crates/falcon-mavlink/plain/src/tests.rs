@@ -368,9 +368,11 @@ fn heading_wraps_into_centidegrees() {
 
 use relay_mavlink::{
     MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, MAV_MISSION_ACCEPTED, MISSION_ACK_CRC_EXTRA,
-    MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID, MISSION_COUNT_PAYLOAD_LEN,
+    MISSION_ACK_MSG_ID, MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID, MISSION_COUNT_PAYLOAD_LEN,
     MISSION_ITEM_INT_CRC_EXTRA, MISSION_ITEM_INT_MSG_ID, MISSION_ITEM_INT_PAYLOAD_LEN,
-    MISSION_REQUEST_INT_CRC_EXTRA, MissionAck, MissionCount, MissionItemInt, MissionRequestInt,
+    MISSION_REQUEST_INT_CRC_EXTRA, MISSION_REQUEST_INT_MSG_ID, MISSION_REQUEST_LIST_CRC_EXTRA,
+    MISSION_REQUEST_LIST_MSG_ID, MissionAck, MissionCount, MissionItemInt, MissionRequestInt,
+    MissionRequestList,
 };
 
 /// Encode an arbitrary message as a GCS would frame it.
@@ -593,4 +595,150 @@ fn uploaded_mission_is_flown_by_the_supervisor() {
         "uploaded mission must complete (mode {:?})",
         sup.mode()
     );
+}
+
+// ---- v1.34: MAVLink mission-DOWNLOAD protocol ----
+
+#[test]
+fn mission_download_serves_the_stored_mission() {
+    let mut bridge = MavBridge::new(VEH_SYS, VEH_COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
+    // Store a 2-leg mission for download (NED): ~1113 m N at 5 m up, then E at 8 m.
+    let wps = [[1113.2_f32, 0.0, -5.0], [0.0, 750.0, -8.0]];
+    bridge.set_downloadable_mission(&wps);
+    let mut out = [0u8; 96];
+
+    // 1) GCS asks for the list -> vehicle replies MISSION_COUNT(2).
+    let rl = MissionRequestList {
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+    };
+    let (b, n) = encode_gcs(
+        MISSION_REQUEST_LIST_MSG_ID,
+        &rl.encode_payload(),
+        MISSION_REQUEST_LIST_CRC_EXTRA,
+    );
+    let cn = match bridge.serve_mission(&b[..n], &mut out) {
+        MissionDownload::Count(k) => k,
+        other => panic!("expected Count, got {other:?}"),
+    };
+    let (cf, _) = parse_frame(&out[..cn], MISSION_COUNT_CRC_EXTRA).unwrap();
+    assert_eq!(MissionCount::decode_payload(cf.payload).unwrap().count, 2);
+
+    // 2) GCS requests item 0 -> vehicle serves MISSION_ITEM_INT(0).
+    let ri = MissionRequestInt {
+        seq: 0,
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+    };
+    let (b0, n0) = encode_gcs(
+        MISSION_REQUEST_INT_MSG_ID,
+        &ri.encode_payload(),
+        MISSION_REQUEST_INT_CRC_EXTRA,
+    );
+    let in0 = match bridge.serve_mission(&b0[..n0], &mut out) {
+        MissionDownload::Item(k) => k,
+        other => panic!("expected Item, got {other:?}"),
+    };
+    let (itf, _) = parse_frame(&out[..in0], MISSION_ITEM_INT_CRC_EXTRA).unwrap();
+    let item = MissionItemInt::decode_payload(itf.payload).unwrap();
+    assert_eq!(item.seq, 0);
+    assert_eq!(item.frame, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT);
+    // 1113.2 m north ~ +0.01 deg lat ~ +100_000 e7 units; altitude 5 m up.
+    assert!(
+        (item.x - HOME_LAT_E7 - 100_000).abs() < 200,
+        "item0 lat_e7 {}",
+        item.x
+    );
+    assert!((item.z - 5.0).abs() < 0.01, "item0 alt {}", item.z);
+
+    // 3) Out-of-range request is ignored (no spurious item).
+    let ri9 = MissionRequestInt {
+        seq: 9,
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+    };
+    let (b9, n9) = encode_gcs(
+        MISSION_REQUEST_INT_MSG_ID,
+        &ri9.encode_payload(),
+        MISSION_REQUEST_INT_CRC_EXTRA,
+    );
+    assert_eq!(
+        bridge.serve_mission(&b9[..n9], &mut out),
+        MissionDownload::Ignored
+    );
+
+    // 4) GCS acks -> download complete.
+    let ack = MissionAck {
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+        mav_type: MAV_MISSION_ACCEPTED,
+    };
+    let (ba, na) = encode_gcs(
+        MISSION_ACK_MSG_ID,
+        &ack.encode_payload(),
+        MISSION_ACK_CRC_EXTRA,
+    );
+    assert_eq!(
+        bridge.serve_mission(&ba[..na], &mut out),
+        MissionDownload::Done
+    );
+}
+
+/// Upload a mission, then download it: the served waypoints round-trip back to
+/// the uploaded geodetic coordinates (upload and download are inverse).
+#[test]
+fn upload_then_download_round_trips() {
+    let mut bridge = MavBridge::new(VEH_SYS, VEH_COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
+    let mut out = [0u8; 96];
+
+    // Upload 2 items at known geodetic offsets.
+    let up = [
+        (HOME_LAT_E7 + 100_000, HOME_LON_E7, 5.0f32),
+        (HOME_LAT_E7, HOME_LON_E7 + 100_000, 8.0f32),
+    ];
+    let mc = MissionCount {
+        count: 2,
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+    };
+    let (b, n) = encode_gcs(
+        MISSION_COUNT_MSG_ID,
+        &mc.encode_payload(),
+        MISSION_COUNT_CRC_EXTRA,
+    );
+    bridge.ingest_mission(&b[..n], &mut out);
+    for (i, (lat, lon, alt)) in up.iter().enumerate() {
+        let (bi, ni) = item_for_ned(i as u16, *lat, *lon, *alt);
+        bridge.ingest_mission(&bi[..ni], &mut out);
+    }
+    assert_eq!(bridge.mission_waypoints().len(), 2);
+
+    // Download item 0 and item 1; the served lat/lon/alt must match the upload
+    // (within e7 rounding + the f32 NED hop).
+    for (i, (lat, lon, alt)) in up.iter().enumerate() {
+        let ri = MissionRequestInt {
+            seq: i as u16,
+            target_system: VEH_SYS,
+            target_component: VEH_COMP,
+        };
+        let (br, nr) = encode_gcs(
+            MISSION_REQUEST_INT_MSG_ID,
+            &ri.encode_payload(),
+            MISSION_REQUEST_INT_CRC_EXTRA,
+        );
+        let k = match bridge.serve_mission(&br[..nr], &mut out) {
+            MissionDownload::Item(k) => k,
+            o => panic!("expected Item for seq {i}, got {o:?}"),
+        };
+        let (f, _) = parse_frame(&out[..k], MISSION_ITEM_INT_CRC_EXTRA).unwrap();
+        let it = MissionItemInt::decode_payload(f.payload).unwrap();
+        assert!((it.x - *lat).abs() < 300, "seq {i} lat {} vs {}", it.x, lat);
+        assert!((it.y - *lon).abs() < 300, "seq {i} lon {} vs {}", it.y, lon);
+        assert!(
+            (it.z - *alt).abs() < 0.01,
+            "seq {i} alt {} vs {}",
+            it.z,
+            alt
+        );
+    }
 }

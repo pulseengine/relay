@@ -39,11 +39,13 @@ use relay_mavlink::{
     FrameHeader, GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID, GlobalPositionInt,
     HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, Heartbeat, MAGIC_V2, MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_FLIGHTTERMINATION, MAV_CMD_MISSION_START, MAV_CMD_NAV_LAND,
-    MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_TAKEOFF, MAV_MISSION_ACCEPTED, MISSION_ACK_CRC_EXTRA,
-    MISSION_ACK_MSG_ID, MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID, MISSION_ITEM_INT_CRC_EXTRA,
-    MISSION_ITEM_INT_MSG_ID, MISSION_REQUEST_INT_CRC_EXTRA, MISSION_REQUEST_INT_MSG_ID,
-    MavModeFlag, MavState, MavType, MissionAck, MissionCount, MissionItemInt, MissionRequestInt,
-    encode_frame, parse_frame, peek_message_id,
+    MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_TAKEOFF, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+    MAV_MISSION_ACCEPTED, MISSION_ACK_CRC_EXTRA, MISSION_ACK_MSG_ID, MISSION_COUNT_CRC_EXTRA,
+    MISSION_COUNT_MSG_ID, MISSION_ITEM_INT_CRC_EXTRA, MISSION_ITEM_INT_MSG_ID,
+    MISSION_ITEM_INT_PAYLOAD_LEN, MISSION_REQUEST_INT_CRC_EXTRA, MISSION_REQUEST_INT_MSG_ID,
+    MISSION_REQUEST_LIST_CRC_EXTRA, MISSION_REQUEST_LIST_MSG_ID, MavModeFlag, MavState, MavType,
+    MissionAck, MissionCount, MissionItemInt, MissionRequestInt, MissionRequestList, encode_frame,
+    parse_frame, peek_message_id,
 };
 
 /// Metres per degree of latitude (WGS-84 mean). Latitude scale is very
@@ -238,6 +240,22 @@ pub enum MissionUpload {
     Rejected(usize),
 }
 
+/// Result of feeding one frame to [`MavBridge::serve_mission`] (the DOWNLOAD
+/// direction: the vehicle serves its stored mission back to a GCS).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissionDownload {
+    /// Not a mission-download request (or addressed to another vehicle).
+    Ignored,
+    /// A `MISSION_COUNT` was written to `out` (n bytes) — the reply to a
+    /// `MISSION_REQUEST_LIST`.
+    Count(usize),
+    /// A `MISSION_ITEM_INT` was written to `out` (n bytes) — the reply to a
+    /// `MISSION_REQUEST_INT(seq)`.
+    Item(usize),
+    /// The GCS sent a `MISSION_ACK` — the download is complete.
+    Done,
+}
+
 /// Stateful MAVLink endpoint for a single falcon vehicle: holds its
 /// identity, an outbound frame sequence counter, the geodetic home the NED
 /// telemetry is projected against, and the in-progress mission upload.
@@ -402,6 +420,106 @@ impl MavBridge {
     /// to `FlightSupervisor::set_mission_waypoints`.
     pub fn mission_waypoints(&self) -> &[[f32; 3]] {
         &self.up_wps[..self.up_count]
+    }
+
+    /// Set the mission the bridge will serve on DOWNLOAD (e.g. the waypoints the
+    /// FlightSupervisor is currently flying). Stored as the same NED waypoints an
+    /// upload would leave; a download projects them back to geodetic.
+    pub fn set_downloadable_mission(&mut self, wps: &[[f32; 3]]) {
+        let n = wps.len().min(MAX_MISSION_ITEMS);
+        self.up_wps[..n].copy_from_slice(&wps[..n]);
+        self.up_count = n;
+    }
+
+    /// Drive the MAVLink mission-DOWNLOAD protocol (vehicle → GCS), the mirror of
+    /// [`ingest_mission`](Self::ingest_mission). Feed each inbound frame:
+    /// `MISSION_REQUEST_LIST` → reply `MISSION_COUNT`; `MISSION_REQUEST_INT(seq)`
+    /// → reply `MISSION_ITEM_INT(seq)` (the stored NED waypoint projected back to
+    /// geodetic about home); `MISSION_ACK` → the download is complete. Replies
+    /// are written to `out`. Never panics on arbitrary input.
+    pub fn serve_mission(&mut self, buf: &[u8], out: &mut [u8]) -> MissionDownload {
+        let msg_id = match peek_message_id(buf) {
+            Ok(id) => id,
+            Err(_) => return MissionDownload::Ignored,
+        };
+        match msg_id {
+            MISSION_REQUEST_LIST_MSG_ID => {
+                let frame = match parse_frame(buf, MISSION_REQUEST_LIST_CRC_EXTRA) {
+                    Ok((f, _)) => f,
+                    Err(_) => return MissionDownload::Ignored,
+                };
+                let req = match MissionRequestList::decode_payload(frame.payload) {
+                    Some(r) => r,
+                    None => return MissionDownload::Ignored,
+                };
+                if req.target_system != 0 && req.target_system != self.system_id {
+                    return MissionDownload::Ignored;
+                }
+                self.up_gcs_sys = frame.header.system_id;
+                self.up_gcs_comp = frame.header.component_id;
+                let count = MissionCount {
+                    count: self.up_count as u16,
+                    target_system: self.up_gcs_sys,
+                    target_component: self.up_gcs_comp,
+                };
+                match self.frame_out(
+                    MISSION_COUNT_MSG_ID,
+                    &count.encode_payload(),
+                    MISSION_COUNT_CRC_EXTRA,
+                    out,
+                ) {
+                    Ok(n) => MissionDownload::Count(n),
+                    Err(_) => MissionDownload::Ignored,
+                }
+            }
+            MISSION_REQUEST_INT_MSG_ID => {
+                let frame = match parse_frame(buf, MISSION_REQUEST_INT_CRC_EXTRA) {
+                    Ok((f, _)) => f,
+                    Err(_) => return MissionDownload::Ignored,
+                };
+                let req = match MissionRequestInt::decode_payload(frame.payload) {
+                    Some(r) => r,
+                    None => return MissionDownload::Ignored,
+                };
+                let seq = req.seq as usize;
+                if seq >= self.up_count {
+                    return MissionDownload::Ignored;
+                }
+                let wp = self.up_wps[seq];
+                // NED → geodetic (the inverse of the inbound upload projection).
+                let lat_e7 = self.home_lat_e7 + (wp[0] as f64 / M_PER_DEG_LAT * 1.0e7) as i32;
+                let lon_e7 = self.home_lon_e7 + (wp[1] as f64 / self.m_per_deg_lon * 1.0e7) as i32;
+                let item = MissionItemInt {
+                    param1: 0.0,
+                    param2: 0.0,
+                    param3: 0.0,
+                    param4: 0.0,
+                    x: lat_e7,
+                    y: lon_e7,
+                    z: -wp[2], // NED down → altitude-up
+                    seq: req.seq,
+                    command: 16, // MAV_CMD_NAV_WAYPOINT
+                    target_system: self.up_gcs_sys,
+                    target_component: self.up_gcs_comp,
+                    frame: MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                    current: 0,
+                    autocontinue: 1,
+                };
+                let payload = item.encode_payload();
+                debug_assert_eq!(payload.len(), MISSION_ITEM_INT_PAYLOAD_LEN);
+                match self.frame_out(
+                    MISSION_ITEM_INT_MSG_ID,
+                    &payload,
+                    MISSION_ITEM_INT_CRC_EXTRA,
+                    out,
+                ) {
+                    Ok(n) => MissionDownload::Item(n),
+                    Err(_) => MissionDownload::Ignored,
+                }
+            }
+            MISSION_ACK_MSG_ID => MissionDownload::Done,
+            _ => MissionDownload::Ignored,
+        }
     }
 
     fn send_request(&mut self, seq: u16, out: &mut [u8]) -> MissionUpload {
