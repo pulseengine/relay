@@ -38,9 +38,9 @@ use relay_mavlink::{
     COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID, CodecError, CommandLong, FALCON_AUTOPILOT_ID,
     FrameHeader, GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID, GlobalPositionInt,
     HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, Heartbeat, MAGIC_V2, MAV_CMD_COMPONENT_ARM_DISARM,
-    MAV_CMD_DO_FLIGHTTERMINATION, MAV_CMD_NAV_LAND, MAV_CMD_NAV_RETURN_TO_LAUNCH,
-    MAV_CMD_NAV_TAKEOFF, MavModeFlag, MavState, MavType, encode_frame, parse_frame,
-    peek_message_id,
+    MAV_CMD_DO_FLIGHTTERMINATION, MAV_CMD_MISSION_START, MAV_CMD_NAV_LAND,
+    MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_TAKEOFF, MavModeFlag, MavState, MavType,
+    encode_frame, parse_frame, peek_message_id,
 };
 
 /// Metres per degree of latitude (WGS-84 mean). Latitude scale is very
@@ -89,6 +89,7 @@ pub fn command_to_event(cmd: &CommandLong) -> Option<Event> {
         MAV_CMD_NAV_TAKEOFF => Some(Event::RequestTakeoff),
         MAV_CMD_NAV_LAND => Some(Event::RequestLand),
         MAV_CMD_NAV_RETURN_TO_LAUNCH => Some(Event::RequestRtl),
+        MAV_CMD_MISSION_START => Some(Event::RequestMission),
         // Flight-termination is a last-resort failsafe; param1>=0.5 = engage.
         MAV_CMD_DO_FLIGHTTERMINATION => {
             if cmd.param1 >= 0.5 {

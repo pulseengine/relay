@@ -54,6 +54,10 @@ pub const MAV_CMD_NAV_TAKEOFF: u16 = 22;
 /// MAVSDK send when the operator hits the Arm / Disarm control.
 pub const MAV_CMD_COMPONENT_ARM_DISARM: u16 = 400;
 
+/// `MAV_CMD_MISSION_START` — begin flying the uploaded mission (the GCS
+/// "Start Mission" control). Falcon maps it to the Mission FSM event.
+pub const MAV_CMD_MISSION_START: u16 = 300;
+
 /// `MAV_CMD_DO_FLIGHTTERMINATION` — terminate flight (last-resort
 /// safety command; relay-sc has a slot for it but falcon does not
 /// dispatch it today).
@@ -140,6 +144,23 @@ impl CommandLong {
             param6: 0.0,
             param7: 0.0,
             command: MAV_CMD_NAV_LAND,
+            target_system,
+            target_component,
+            confirmation: 0,
+        }
+    }
+
+    /// Build a `MAV_CMD_MISSION_START` (begin the uploaded mission).
+    pub const fn mission_start(target_system: u8, target_component: u8) -> Self {
+        Self {
+            param1: 0.0,
+            param2: 0.0,
+            param3: 0.0,
+            param4: 0.0,
+            param5: 0.0,
+            param6: 0.0,
+            param7: 0.0,
+            command: MAV_CMD_MISSION_START,
             target_system,
             target_component,
             confirmation: 0,

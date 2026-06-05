@@ -78,6 +78,10 @@ fn command_to_event_mapping_is_exhaustive() {
         command_to_event(&CommandLong::rtl(1, 1)),
         Some(Event::RequestRtl)
     );
+    assert_eq!(
+        command_to_event(&CommandLong::mission_start(1, 1)),
+        Some(Event::RequestMission)
+    );
     // An unmapped command is ignored, not mistranslated.
     let mut unknown = CommandLong::rtl(1, 1);
     unknown.command = 511; // MAV_CMD_DO_SET_SERVO-ish; falcon doesn't route it

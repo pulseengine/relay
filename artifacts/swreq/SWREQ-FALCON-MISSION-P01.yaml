@@ -1,0 +1,32 @@
+artifacts:
+  - id: SWREQ-FALCON-MISSION-P01
+    type: sw-req
+    title: "MISSION-P01 — multi-waypoint mission sequencer + autonomous return"
+    status: implemented
+    description: >
+      The FlightSupervisor shall fly a stored sequence of NED waypoints (a
+      multi-leg mission) autonomously: while in Mission mode it flies to the
+      active waypoint, and on arriving within the acceptance radius
+      (WAYPOINT_RADIUS) it advances to the next leg, in order. On reaching the
+      final leg it shall autonomously return home and land (reusing the v1.29
+      velocity-landing), completing the sortie with no per-waypoint commanding.
+
+      The mission shall be loadable via `set_mission_waypoints(&[Vec3])` (up to
+      MAX_WAYPOINTS, no_std fixed capacity), and a ground station shall be able
+      to start it with the MAVLink `MAV_CMD_MISSION_START` command — the bridge
+      maps it to the Mission FSM event. The single-waypoint `set_mission` API is
+      preserved (a one-leg mission).
+    tags: [falcon, mission, autonomy, supervisor, mavlink, v1.30]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Integration test through FlightSupervisor against SimBackend: a 3-leg
+        mission (non-collinear) is flown in order — each leg visited within the
+        acceptance radius, the leg index monotonic (never backwards) — then the
+        vehicle autonomously returns home, lands, and DISARMS. falcon-mavlink:
+        MAV_CMD_MISSION_START decodes to Event::RequestMission. clippy clean;
+        builds bare-metal for thumbv7em.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-012

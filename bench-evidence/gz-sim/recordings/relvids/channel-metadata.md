@@ -153,3 +153,14 @@ v1.27 shipped a velocity-based touchdown controller — but the FlightSupervisor
 _video: falcon-v1.29-narrated.mp4_
 
 ---
+
+## v1.30
+**Title:** Falcon v1.30 — Autonomous Multi-Waypoint Mission (one command, full sortie) | verified drone flight stack
+
+v1.30 adds a multi-waypoint mission sequencer to the FlightSupervisor. A single MAVLink MISSION_START command (mapped to the Mission FSM event) flies a stored sequence of NED waypoints in order — advancing to the next leg within a 1.2 m acceptance radius — then autonomously returns home and lands (reusing the v1.29 settle-then-descend touchdown). The whole sortie — arm, takeoff, three-leg mission, return, land, disarm — runs with no per-waypoint commanding. Integration-tested through the FlightSupervisor (visits each leg in order, monotonic leg index, completes + disarms); no_std / no_alloc fixed-capacity waypoint store; clippy clean; builds bare-metal for Cortex-M. Flight shown at 2x speed.
+
+#drone #autopilot #mission #autonomy #formalverification #rust
+
+_video: falcon-v1.30-narrated.mp4_
+
+---

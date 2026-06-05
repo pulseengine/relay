@@ -78,15 +78,21 @@ fn main() {
     //   "rtl"  (default) — spawn off home, RTL is a visible lateral return then
     //                      land (the v1.28 MAVLink-bridge video).
     //   "land"           — hover at home, NAV_LAND a crisp constant-rate vertical
-    //                      descent to touchdown (the v1.29 supervisor-landing
-    //                      video — showcases set_landing wired into Land).
+    //                      descent to touchdown (the v1.29 supervisor-landing video).
+    //   "mission"        — MISSION_START flies a stored multi-leg waypoint path,
+    //                      then autonomously returns + lands (the v1.30 sequencer).
     let scenario = std::env::args().nth(1).unwrap_or_else(|| "rtl".into());
     let land_demo = scenario == "land";
+    let mission_demo = scenario == "mission";
+
+    // The v1.30 mission legs (NED, 2 m AGL) — a non-collinear path so the
+    // in-order sequencing is visible. After the last leg the supervisor returns.
+    let mission: [[f32; 3]; 3] = [[3.0, 0.0, -2.0], [3.0, 3.0, -2.0], [0.0, 3.0, -2.0]];
 
     let mut sim = SimBackend::new(IDENTITY, DT);
-    // RTL demo spawns off home (so the return is visible); the land demo hovers
-    // at home so the descent is a clean vertical drop, not an RTL sweep.
-    sim.pos = if land_demo {
+    // RTL demo spawns off home (so the return is visible); land + mission start
+    // at home (mission flies out and back, land drops straight down).
+    sim.pos = if land_demo || mission_demo {
         [0.0, 0.0, 0.0]
     } else {
         [3.0, -2.0, 0.0]
@@ -96,28 +102,51 @@ fn main() {
     // motion reads clean, not wobbly. Honest physics.
     sim.drag_quad = 0.3;
 
-    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, CRUISE, 1.0);
+    let cruise = if mission_demo { 2.0 } else { CRUISE };
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, cruise, 1.0);
+    if mission_demo {
+        sup.set_mission_waypoints(&mission);
+    }
     let mut bridge = MavBridge::new(VEH, COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
 
     // The MAVLink command timeline (step index, ticker label, frame). Auto
     // milestones (ReachedAltitude → Loiter, ReachedHome → Land, Touchdown →
-    // Disarmed) are produced by the supervisor, not scheduled here.
-    let final_cmd = if land_demo {
+    // Disarmed, and v1.30 waypoint advance) are produced by the supervisor.
+    let final_cmd = if mission_demo {
+        (
+            18_000,
+            "MISSION_START",
+            CommandLong::mission_start(VEH, COMP),
+        )
+    } else if land_demo {
         (22_000, "NAV_LAND", CommandLong::land(VEH, COMP))
     } else {
         (22_000, "RTL", CommandLong::rtl(VEH, COMP))
     };
+    let takeoff_label = if mission_demo {
+        "TAKEOFF 2 m"
+    } else {
+        "TAKEOFF 3 m"
+    };
     let schedule: [(usize, &str, CommandLong); 3] = [
         (800, "ARM", CommandLong::arm_disarm(VEH, COMP, true)),
-        (2500, "TAKEOFF 3 m", CommandLong::takeoff(VEH, COMP, CRUISE)),
+        (2500, takeoff_label, CommandLong::takeoff(VEH, COMP, cruise)),
         final_cmd,
     ];
     let mut sched_i = 0;
 
-    // The land demo touches down ~27 s in; end a few seconds after so the clip
-    // isn't a long disarmed-on-ground tail. The RTL demo runs the full window.
-    let max_steps = if land_demo { 38_000 } else { MAX_STEPS };
+    // The land demo touches down ~27 s in; the mission is a longer sortie. End a
+    // few seconds after touchdown so the clip isn't a long disarmed-on-ground tail.
+    let max_steps = if mission_demo {
+        130_000
+    } else if land_demo {
+        38_000
+    } else {
+        MAX_STEPS
+    };
 
+    let mut disarm_tail = 0usize;
+    let mut flew = false;
     for step in 0..max_steps {
         let mut rx_label = "";
         if sched_i < schedule.len() && schedule[sched_i].0 == step {
@@ -133,9 +162,21 @@ fn main() {
 
         sup.step(&mut sim);
 
+        // End a few seconds after the sortie completes (mission length varies).
+        let mode = sup.mode();
+        flew |= matches!(
+            mode,
+            Mode::Takeoff | Mode::Loiter | Mode::Mission | Mode::Rtl
+        );
+        if flew && mode == Mode::Disarmed {
+            disarm_tail += 1;
+            if disarm_tail > 2500 {
+                break;
+            }
+        }
+
         if step % FRAME_EVERY == 0 || !rx_label.is_empty() {
             let st = sup.state();
-            let mode = sup.mode();
             let t_ms = (step as f32 * DT * 1000.0) as u32;
 
             // Outbound telemetry, encoded + decoded through the real bridge.
@@ -152,7 +193,7 @@ fn main() {
             let gpd = GlobalPositionInt::decode_payload(gf.payload).expect("decode gp");
 
             println!(
-                "{{\"t\":{:.3},\"mode\":\"{}\",\"rx\":\"{}\",\"px\":{:.3},\"py\":{:.3},\"pz\":{:.3},\"vx\":{:.3},\"vy\":{:.3},\"vz\":{:.3},\"hb_custom\":{},\"base_mode\":{},\"sys_status\":{},\"lat_e7\":{},\"lon_e7\":{},\"rel_alt_mm\":{},\"vz_cms\":{},\"hdg_cdeg\":{}}}",
+                "{{\"t\":{:.3},\"mode\":\"{}\",\"rx\":\"{}\",\"px\":{:.3},\"py\":{:.3},\"pz\":{:.3},\"vx\":{:.3},\"vy\":{:.3},\"vz\":{:.3},\"hb_custom\":{},\"base_mode\":{},\"sys_status\":{},\"lat_e7\":{},\"lon_e7\":{},\"rel_alt_mm\":{},\"vz_cms\":{},\"hdg_cdeg\":{},\"wp\":{},\"wp_n\":{}}}",
                 step as f32 * DT,
                 mode_str(mode),
                 rx_label,
@@ -169,7 +210,9 @@ fn main() {
                 gpd.lon_e7,
                 gpd.relative_alt_mm,
                 gpd.vz_cms,
-                gpd.hdg_cdeg
+                gpd.hdg_cdeg,
+                sup.waypoint_index(),
+                sup.waypoint_count()
             );
         }
     }
