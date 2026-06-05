@@ -8,12 +8,12 @@ artifacts:
       The harnesses (the Rust companion to the Lean BackpressureSafety /
       WcetAnalysis specs) existed but were never executed (issue #6, acceptance
       item: "CI gate via cargo kani"). The new .github/workflows/kani.yml runs
-      `cargo kani` per engine; all 27 harnesses verify with 0 failures:
+      `cargo kani` per engine; all 30 harnesses verify with 0 failures:
 
         relay-lc   9  (violation-count bound ≤32, geofence latch transitions, compare semantics)
-        relay-sc   2  (dispatch bound ≤8, no-panic)
+        relay-sc   3  (dispatch bound ≤8, RTS state transition, no-panic)
         relay-hs   7  (alert bound ≤8, EKF-monitor RTL-latch transitions, no-panic)
-        relay-sch  4  (action bound ≤16, add-slot capacity, no-panic)
+        relay-sch  6  (action bound ≤16, add-slot capacity + transition, set-enabled transition, no-panic)
         relay-cfdp 3  (transaction bound, state validity, no-panic)
         relay-sca  2  (bound, no-panic)
 
@@ -23,9 +23,10 @@ artifacts:
       in the rivet-driven gate (CBMC is heavy) — the dedicated Kani workflow is
       the actual runner.
 
-      Remaining for full #6 closure (smaller follow-ups): state-transition
-      harnesses for relay-sc and relay-sch (acceptance #2), and an explicit
-      rivet link from each harness to the matching Lean theorem.
+      State-transition harnesses now cover all the stateful engines (acceptance
+      #2): lc geofence-latch, hs RTL-latch, cfdp transaction-state, sc RTS
+      sequence, sch add-slot + set-enabled. Remaining for full #6 closure: an
+      explicit rivet link from each harness to the matching Lean theorem.
     tags: [verification, relay, cfs, kani, ci]
     fields:
       method: model-checking

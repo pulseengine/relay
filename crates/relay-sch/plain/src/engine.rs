@@ -215,4 +215,45 @@ mod kani_proofs {
         let _ = table.process_tick(kani::any(), kani::any());
         let _ = table.set_enabled(kani::any(), kani::any());
     }
+
+    /// SCH-P03 (transition): `set_enabled` is index-safe and exact from ANY valid
+    /// table state. An in-range index toggles exactly that slot's enable bit and
+    /// reports success; an out-of-range index is rejected with no mutation. The
+    /// illegal (out-of-bounds) slot write is unreachable.
+    #[kani::proof]
+    fn verify_set_enabled_transition() {
+        let mut table = ScheduleTable::new();
+        let count: u32 = kani::any();
+        kani::assume(count as usize <= MAX_SCHEDULE_SLOTS);
+        table.slot_count = count;
+
+        let idx: u32 = kani::any();
+        let want: bool = kani::any();
+        let ok = table.set_enabled(idx, want);
+        if idx < count {
+            assert!(ok);
+            assert!(table.slots[idx as usize].enabled == want);
+        } else {
+            assert!(!ok);
+        }
+    }
+
+    /// SCH-P04 (transition): `add_slot` from ANY valid count never overflows the
+    /// table and grows by exactly one when there is room (else rejects, leaving
+    /// the count unchanged). Complements the concrete `verify_add_slot_full`.
+    #[kani::proof]
+    fn verify_add_slot_transition() {
+        let mut table = ScheduleTable::new();
+        let count: u32 = kani::any();
+        kani::assume(count as usize <= MAX_SCHEDULE_SLOTS);
+        table.slot_count = count;
+
+        let added = table.add_slot(ScheduleSlot::empty());
+        assert!(table.slot_count as usize <= MAX_SCHEDULE_SLOTS);
+        if (count as usize) < MAX_SCHEDULE_SLOTS {
+            assert!(added && table.slot_count == count + 1);
+        } else {
+            assert!(!added && table.slot_count == count);
+        }
+    }
 }
