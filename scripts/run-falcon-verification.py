@@ -50,6 +50,7 @@ BENCH_PATTERNS = [
     re.compile(r"--preset=px4-sitl\b"),               # needs PX4-Autopilot or live PX4
     re.compile(r"\$WITNESS\b"),                       # template env-var placeholder
     re.compile(r"\bgz\s+sim\b"),                      # Gazebo Sim install
+    re.compile(r"falcon-sitl-gz/plugins/"),           # gz custom-plugin bench scripts (build + run gz, not in CI)
     re.compile(r"\bmake\s+px4_sitl\b"),               # PX4-Autopilot install
     re.compile(r"\bbazel\s+(test|build|run)\b"),      # bazel not provisioned in the gate job
     # `cargo llvm-cov --workspace` has its OWN dedicated CI job (the `llvm-cov`

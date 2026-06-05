@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!-- Bench test for the falcon GroundEffect plugin. A light free box starts just
+     above the surface; with the cushion (boost > weight near the ground) it is
+     held aloft instead of resting at z=0 — the plugin's effect, observable in a
+     headless run. -->
+<sdf version="1.9">
+  <world name="ground_effect_test">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+
+    <model name="probe">
+      <pose>0 0 0.10 0 0 0</pose>
+      <link name="base_link">
+        <inertial>
+          <mass>0.5</mass>
+          <inertia>
+            <ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name="c">
+          <geometry><box><size>0.2 0.2 0.2</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>0.2 0.2 0.2</size></box></geometry>
+        </visual>
+      </link>
+      <!-- gain·ref ≈ 8 N at the surface ≫ the 4.9 N weight, so it levitates and
+           settles where boost == weight (~0.12 m). -->
+      <plugin filename="FalconGroundEffect" name="falcon::GroundEffect">
+        <link_name>base_link</link_name>
+        <gain>0.4</gain>
+        <decay>0.25</decay>
+        <reference_force>20.0</reference_force>
+        <verbose>true</verbose>
+      </plugin>
+    </model>
+  </world>
+</sdf>

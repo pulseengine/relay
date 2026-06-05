@@ -1,0 +1,30 @@
+artifacts:
+  - id: FV-FALCON-GZGE-001
+    type: sw-verification
+    title: "Custom gz ground-effect plugin — cushion holds the vehicle aloft (v1.32.0)"
+    status: approved
+    description: >
+      Verification of the v1.32.0 falcon GroundEffect gz-sim8 plugin. BENCH-ONLY:
+      Gazebo is not in CI (the CI gate skips gz/meld/bazel steps), so this runs
+      on a bench with gz Harmonic + the gz-sim8 dev headers installed.
+
+      run-ground-effect-test.sh — builds the plugin (cmake/gz-cmake3/gz-sim8) and
+      runs an A/B headless: a light free box (0.5 kg) starting at 0.10 m above the
+      surface is HELD aloft by the cushion (gain=0.4 → settles ~0.10 m) but FALLS
+      THROUGH without it (gain=0 → ~−78 m after 4 s). The PASS proves the cushion
+      force is real and altitude-decaying. A separate large-boost run confirms the
+      force is applied (the box rockets to ~5.5 m, then falls back as the boost
+      decays with altitude). The plugin also loads + activates in the generated
+      quad realism world (`Loaded system [falcon::GroundEffect]`).
+
+      Manual evidence (bench): the A/B printed `cushion … 0.100119 m` vs
+      `no cushion … -78.2804 m`, PASS.
+    tags: [verification, falcon, gz, sitl, ground-effect, v1.32, bench]
+    fields:
+      method: test
+      steps:
+        - run: "examples/falcon-sitl-gz/plugins/ground_effect/run-ground-effect-test.sh  # bench-only (needs gz Harmonic + gz-sim8 dev)"
+        - run: "python3 examples/falcon-sitl-gz/worlds/gen-realism-world.py groundeffect /tmp/ge-world.sdf"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-GZGE-P01
