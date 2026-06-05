@@ -74,12 +74,26 @@ fn mode_str(m: Mode) -> &'static str {
 }
 
 fn main() {
-    // Spawn offset from home so RTL is a visible lateral return-then-land.
+    // Scenario selector (argv[1]):
+    //   "rtl"  (default) — spawn off home, RTL is a visible lateral return then
+    //                      land (the v1.28 MAVLink-bridge video).
+    //   "land"           — hover at home, NAV_LAND a crisp constant-rate vertical
+    //                      descent to touchdown (the v1.29 supervisor-landing
+    //                      video — showcases set_landing wired into Land).
+    let scenario = std::env::args().nth(1).unwrap_or_else(|| "rtl".into());
+    let land_demo = scenario == "land";
+
     let mut sim = SimBackend::new(IDENTITY, DT);
-    sim.pos = [3.0, -2.0, 0.0];
+    // RTL demo spawns off home (so the return is visible); the land demo hovers
+    // at home so the descent is a clean vertical drop, not an RTL sweep.
+    sim.pos = if land_demo {
+        [0.0, 0.0, 0.0]
+    } else {
+        [3.0, -2.0, 0.0]
+    };
     sim.ground_contact = true; // let the touchdown settle on the surface
-    // Quadratic aerodynamic drag (v1.17): damps the position-loop ring on the
-    // RTL step so the return + descent read clean, not wobbly. Honest physics.
+    // Quadratic aerodynamic drag (v1.17): damps the position-loop ring so the
+    // motion reads clean, not wobbly. Honest physics.
     sim.drag_quad = 0.3;
 
     let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, CRUISE, 1.0);
@@ -88,14 +102,23 @@ fn main() {
     // The MAVLink command timeline (step index, ticker label, frame). Auto
     // milestones (ReachedAltitude → Loiter, ReachedHome → Land, Touchdown →
     // Disarmed) are produced by the supervisor, not scheduled here.
+    let final_cmd = if land_demo {
+        (22_000, "NAV_LAND", CommandLong::land(VEH, COMP))
+    } else {
+        (22_000, "RTL", CommandLong::rtl(VEH, COMP))
+    };
     let schedule: [(usize, &str, CommandLong); 3] = [
         (800, "ARM", CommandLong::arm_disarm(VEH, COMP, true)),
         (2500, "TAKEOFF 3 m", CommandLong::takeoff(VEH, COMP, CRUISE)),
-        (22_000, "RTL", CommandLong::rtl(VEH, COMP)),
+        final_cmd,
     ];
     let mut sched_i = 0;
 
-    for step in 0..MAX_STEPS {
+    // The land demo touches down ~27 s in; end a few seconds after so the clip
+    // isn't a long disarmed-on-ground tail. The RTL demo runs the full window.
+    let max_steps = if land_demo { 38_000 } else { MAX_STEPS };
+
+    for step in 0..max_steps {
         let mut rx_label = "";
         if sched_i < schedule.len() && schedule[sched_i].0 == step {
             let (_, label, cmd) = schedule[sched_i];

@@ -366,12 +366,30 @@ impl FlightSupervisor {
             _ => {}
         }
 
-        // ── mode → setpoint ──
+        // ── v1.29: engage the v1.27 velocity-based touchdown controller while
+        // landing. Before this, the supervisor left the core in position mode
+        // for Land, so the integrated stack descended on the slow altitude P-I-D
+        // that floats short of the surface through ground effect (the v1.24
+        // limitation v1.27 fixed at the core but never wired into the supervisor).
+        //
+        // SETTLE OVER HOME, THEN DESCEND: the velocity-landing descends fast, so
+        // engaging it while the vehicle still carries horizontal velocity or sits
+        // off-target (e.g. overshooting home at the end of RTL) would touch down
+        // in the wrong place. So we hold altitude over home until the vehicle is
+        // BOTH near home AND slow, then drop straight down. (Speed alone is not
+        // enough: it momentarily hits zero at the overshoot peak, far from home.)
+        let horiz_speed = relay_math::sqrtf(est.v[0] * est.v[0] + est.v[1] * est.v[1]);
+        let landing = matches!(self.fsm.mode(), Mode::Land) && horiz_speed < 0.4 && dist_home < 0.5;
+        self.core.set_landing(landing);
+
+        // ── mode → setpoint ── (horizontal hold target; while landing the core's
+        // velocity-landing owns the vertical once engaged — until then Land holds
+        // at cruise altitude over home to kill the horizontal drift). ──
         let sp = match self.fsm.mode() {
             Mode::Takeoff | Mode::Loiter => [est.p[0], est.p[1], -self.cruise_alt],
             Mode::Mission => [self.mission[0], self.mission[1], -self.cruise_alt],
             Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
-            Mode::Land => [self.home[0], self.home[1], 0.0], // descend to ground
+            Mode::Land => [self.home[0], self.home[1], -self.cruise_alt], // hold home; rate-descend
             Mode::Disarmed | Mode::Armed => [est.p[0], est.p[1], est.p[2]], // hold (idle)
         };
         self.core.set_position(sp);
@@ -1708,5 +1726,57 @@ mod tests {
         let alt = -b.pos[2];
         assert!(alt < 0.15, "velocity touchdown must reach the surface through ground effect: {alt} m");
         assert!(b.vel[2].abs() < 0.3, "should settle on touchdown: vz {} m/s", b.vel[2]);
+    }
+
+    // ── v1.29: wire the v1.27 velocity-landing into the FlightSupervisor ──
+    //
+    // v1.27 added the velocity-based touchdown controller to FlightCore but the
+    // FlightSupervisor still left the core in position mode for Land — so the
+    // INTEGRATED stack (the thing a real vehicle runs) still descended on the
+    // slow altitude P-I-D that floats short through ground effect
+    // (`ground_effect_cushions_landing_into_a_float` above shows that float).
+    // The supervisor now engages set_landing in Land mode, so a supervised
+    // landing through the same cushion reaches the surface and DISARMS.
+
+    /// A full supervised mission — arm → takeoff → loiter → land — touches down
+    /// and disarms through the ground-effect cushion the position loop floats
+    /// on. This is the integration the v1.27 core fix needed: before v1.29 the
+    /// supervised Land floated (never reaching Disarmed); now it settles.
+    #[test]
+    fn supervised_landing_disarms_through_ground_effect() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_effect = 0.4; // the cushion that floated the position-land
+        b.ground_contact = true; // model the ground so a touchdown can settle
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter after takeoff");
+
+        sup.command(Event::RequestLand, true, false); // → Land (velocity touchdown)
+        let mut disarmed = false;
+        for _ in 0..20000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Disarmed {
+                disarmed = true;
+                break;
+            }
+        }
+        assert!(
+            disarmed,
+            "supervised landing must touch down + disarm through ground effect \
+             (it floated before v1.29): mode {:?}, alt {} m",
+            sup.mode(),
+            -b.pos[2]
+        );
+        // Touchdown→Disarmed interrupts the descent at the 0.15 m trigger and the
+        // disarmed position-hold settles just above it through ground effect — on
+        // the surface (vs the ~1.3 m float without the velocity-landing).
+        assert!(-b.pos[2] < 0.25, "must settle on the surface (not float): {} m", -b.pos[2]);
     }
 }

@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-FALCON-SUPLAND-P01
+    type: sw-req
+    title: "SUPLAND-P01 — FlightSupervisor engages the velocity-landing in Land mode"
+    status: implemented
+    description: >
+      The FlightSupervisor shall land the vehicle with the v1.27 velocity-based
+      touchdown controller, not the position-based altitude descent. v1.27 added
+      set_landing to FlightCore but the supervisor still left the core in
+      position mode for Land — so the INTEGRATED stack (what a real vehicle runs)
+      kept the slow altitude P-I-D that floats short of the surface through
+      ground effect (the v1.24 limitation). The supervisor shall, in Land mode,
+      engage set_landing so the vehicle descends at a constant rate and disarms
+      on touchdown.
+
+      To keep the fast descent from touching down off-target when the vehicle
+      arrives at the landing point still carrying horizontal velocity (e.g. at
+      the end of RTL), the supervisor shall SETTLE THEN DESCEND: hold altitude
+      over home and only engage the velocity-landing once the vehicle is BOTH
+      near home (< 0.5 m) AND slow (< 0.4 m/s). (Gating on speed alone is
+      insufficient — speed momentarily hits zero at the overshoot peak, far from
+      home.)
+    tags: [falcon, landing, supervisor, integration, control, v1.29]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Integration test through FlightSupervisor against SimBackend with
+        ground_effect=0.4 + ground contact: a full arm → takeoff → loiter → land
+        mission reaches Touchdown and DISARMS, settling on the surface (< 0.25 m)
+        — where the position-based descent floated (~1.3 m, never disarming). The
+        geofence-RTL test still lands within 1 m of home (the settle-then-descend
+        gate prevents the fast descent drifting off-target). clippy clean;
+        embedded builds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004
