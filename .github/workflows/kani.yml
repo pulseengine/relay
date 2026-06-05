@@ -1,0 +1,44 @@
+name: Kani
+
+# Model-checks the cFS stream-transformer engines' Kani harnesses (closes the
+# gap in #6: the harnesses existed but nothing ran them). Each engine's
+# `#[cfg(kani)] mod` proves its per-cycle output bound, its no-panic / error
+# closure, and (lc/hs/cfdp) its state-machine transitions — the Rust-level
+# companion to the Lean BackpressureSafety / WcetAnalysis specs.
+#
+# Separate workflow (not the cargo CI matrix) because Kani installs CBMC and
+# runs CtoGOTO model checking — heavier + slower than `cargo test`. All 27
+# harnesses currently verify in well under a second each locally (kani 0.67).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: kani-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  kani:
+    name: Kani (${{ matrix.engine }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The verified framework engines (consumed by falcon and/or wohl). Each
+        # carries Kani harnesses in crates/<engine>/plain/src/engine.rs.
+        engine:
+          - relay-lc
+          - relay-sc
+          - relay-hs
+          - relay-sch
+          - relay-cfdp
+          - relay-sca
+    steps:
+      - uses: actions/checkout@v5
+      - name: Kani verify ${{ matrix.engine }}
+        uses: model-checking/kani-github-action@v1
+        with:
+          working-directory: crates/${{ matrix.engine }}

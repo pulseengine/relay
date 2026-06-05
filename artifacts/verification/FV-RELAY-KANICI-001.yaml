@@ -1,0 +1,51 @@
+artifacts:
+  - id: FV-RELAY-KANICI-001
+    type: sw-verification
+    title: "cFS engines' Kani harnesses model-checked in CI (closes #6's CI gap)"
+    status: approved
+    description: >
+      Verification that the cFS engines' Kani harnesses are model-checked in CI.
+      The harnesses (the Rust companion to the Lean BackpressureSafety /
+      WcetAnalysis specs) existed but were never executed (issue #6, acceptance
+      item: "CI gate via cargo kani"). The new .github/workflows/kani.yml runs
+      `cargo kani` per engine; all 27 harnesses verify with 0 failures:
+
+        relay-lc   9  (violation-count bound ≤32, geofence latch transitions, compare semantics)
+        relay-sc   2  (dispatch bound ≤8, no-panic)
+        relay-hs   7  (alert bound ≤8, EKF-monitor RTL-latch transitions, no-panic)
+        relay-sch  4  (action bound ≤16, add-slot capacity, no-panic)
+        relay-cfdp 3  (transaction bound, state validity, no-panic)
+        relay-sca  2  (bound, no-panic)
+
+      These engines are live framework surface: relay-lc/sc/hs are consumed by
+      falcon (SITL/HITL); relay-sch by wohl (its hub scheduler); relay-cfdp/sca
+      are rivet-traced CCSDS engines. The cargo-kani steps below are bench-only
+      in the rivet-driven gate (CBMC is heavy) — the dedicated Kani workflow is
+      the actual runner.
+
+      Remaining for full #6 closure (smaller follow-ups): state-transition
+      harnesses for relay-sc and relay-sch (acceptance #2), and an explicit
+      rivet link from each harness to the matching Lean theorem.
+    tags: [verification, relay, cfs, kani, ci]
+    fields:
+      method: model-checking
+      steps:
+        - run: "cargo kani -p relay-lc  # bench-only (CBMC; runs in the Kani CI workflow)"
+        - run: "cargo kani -p relay-sc  # bench-only"
+        - run: "cargo kani -p relay-hs  # bench-only"
+        - run: "cargo kani -p relay-sch  # bench-only"
+        - run: "cargo kani -p relay-cfdp  # bench-only"
+        - run: "cargo kani -p relay-sca  # bench-only"
+    links:
+      - type: verifies
+        target: SWREQ-LC-P01
+      - type: verifies
+        target: SWREQ-SC-P01
+      - type: verifies
+        target: SWREQ-HS-P01
+      - type: verifies
+        target: SWREQ-SCH-P01
+      - type: verifies
+        target: SWREQ-CFDP-P01
+      - type: verifies
+        target: SWREQ-SCA-P01
