@@ -1,0 +1,109 @@
+artifacts:
+  - id: SWARCH-RELAY-SCHED-001
+    type: sw-arch-component
+    title: Scheduling layer separation (RTOS / runtime / activity dispatch)
+    status: approved
+    description: >
+      "Scheduling" in the PulseEngine stack is three DISTINCT
+      responsibilities at three layers, not one component. This
+      artifact records the separation and the decision that the
+      relay scheduler (relay-sch) is the application-activity layer
+      and stays a WASM component — it is NOT the OS task scheduler and
+      must not be folded into the runtime.
+
+      The three layers (bottom to top):
+
+        (a) RTOS task scheduling — "which task gets the CPU":
+            preemption, priorities, real-time task dispatch. Lives in
+            gale (the verified embedded RTOS; Rocq-proven). gale is a
+            SEPARATE repository, not vendored here — see the honest
+            boundary below. On the embedded target the path is
+            synth -> gale, and gale's proven scheduler runs everything.
+
+        (b) Component-runtime execution — "drive the WASM components":
+            async poll, P3 stream pump, fuel budgeting. Lives in kiln
+            (the interpreter/runtime; fuel-async executor with
+            Cooperative / PriorityBased / DeadlineBased / RoundRobin
+            policies). This runtime scheduler is currently UNVERIFIED.
+            kiln is the std/desktop/dev path, not the safety target.
+
+        (c) Application activity dispatch — "which activity fires on
+            this frame": the cFS SCH pattern. Lives in relay-sch as a
+            stream transformer: stream<tick-event> -> [schedule table]
+            -> stream<scheduled-action>. Stateless lookup, bounded
+            (MAX_SCHEDULE_SLOTS=256, MAX_ACTIONS_PER_TICK=16), no
+            preemption, no task/thread awareness. Verus (SCH-P01..P08)
+            + Kani (plain/src/kani_proofs.rs) + Lean WCET
+            (proofs/lean/WcetAnalysis.lean: sch_wcet 3850 cyc <
+            1 ms @ 480 MHz).
+
+      Decision: relay-sch stays a WASM component.
+        - It is application logic (the cFS SCH table), not OS
+          scheduling — a different question (what-runs-when at what
+          rate, vs who-gets-the-CPU).
+        - It is verified in isolation; folding it into kiln would
+          forfeit its standalone Verus/Kani/Lean proofs and conflate
+          it with kiln's unverified task executor.
+        - It has a consumer: wohl-hub uses relay_sch::engine::
+          ScheduleTable as its scheduler. Moving relay-sch into kiln
+          would couple wohl (home-automation) to the kiln runtime.
+        - Same source, two targets: under gale (embedded, proven RTOS
+          underneath) or under kiln (dev, unverified executor
+          underneath). relay-sch sits cleanly on top of EITHER.
+
+      The verified-scheduling path is therefore relay-sch (activity,
+      proven) + gale (RTOS, proven); kiln is the convenience runtime
+      where an unverified executor is accepted for development. The
+      move to obtain proven end-to-end scheduling on a target is to
+      run under gale — NOT to migrate relay-sch into the runtime.
+
+      Honest boundary (recorded, not hidden):
+        - gale is NOT present in this repository, so its scheduler's
+          proof tool and theorem statements are referenced, not
+          verified here. Claims about layer (a) are architectural
+          intent pending a gale cross-read.
+        - kiln's runtime scheduler (layer b) is unverified today.
+        - OPEN QUESTION (gale<->kiln, not a relay decision): should
+          kiln eventually adopt gale's proven scheduler core so the
+          dev runtime and the embedded RTOS share one verified
+          scheduler, or are they deliberately separate (kiln = dev
+          ergonomics, gale = flight rigor)? relay-sch is unaffected
+          either way.
+    tags: [architecture, scheduling, relay-sch, gale, kiln, layering, verified]
+    fields:
+      composition: >
+        relay-sch is a build-time-fused stream-transformer component
+        (meld static fusion, no runtime topic lookup). It runs ABOVE
+        the runtime/RTOS scheduler, not as part of it.
+      layers:
+        rtos-task-scheduling: "gale (Rocq-proven RTOS; separate repo; embedded target)"
+        component-runtime: "kiln (fuel-async executor; unverified; dev/std target)"
+        application-activity: "relay-sch (cFS SCH; Verus+Kani+Lean; WASM component)"
+      interfaces:
+        provided:
+          - "stream<scheduled-action> — activity dispatch on each frame tick"
+        required:
+          - "stream<tick-event> — minor/major frame tick from the host time service"
+      concurrency: >
+        relay-sch is a stateless per-frame transformer; it carries no
+        threads of its own and runs UNDER the host scheduler — gale's
+        proven RTOS task scheduler on the embedded target, or kiln's
+        (unverified) fuel-async executor on the dev/std target.
+      resource-budgets:
+        sch-wcet: "3850 cycles (256 slots x 15 + 10); proven < 1 ms @ 480 MHz (Lean sch_wcet_under_deadline)"
+        slots-max: "256 (MAX_SCHEDULE_SLOTS)"
+        actions-per-tick-max: "16 (MAX_ACTIONS_PER_TICK)"
+      verification-by-layer:
+        application-activity: "Verus SCH-P01..P08 + Kani harnesses + Lean sch_wcet"
+        rtos-task-scheduling: "gale Rocq proofs (external; not cross-read in this repo)"
+        component-runtime: "kiln runtime scheduler currently unverified"
+      decision: >
+        relay-sch remains a WASM component at the application-activity
+        layer. Do not fold it into kiln. Proven end-to-end scheduling
+        on a target is achieved by running under gale, not by
+        migrating relay-sch into the runtime.
+    links:
+      - type: allocated-from
+        target: SWREQ-SCH-P01
+      - type: refines
+        target: SWARCH-RELAY-001

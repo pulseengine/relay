@@ -334,7 +334,7 @@ impl EkfHealthMonitor {
     /// (count bounded by `window`, which is bounded by 64) that
     /// observe()'s proof uses.
     #[verifier::external_body]
-    fn step_window(history: u64, window: u32, over_limit: bool) -> (result: (u64, u32))
+    pub(crate) fn step_window(history: u64, window: u32, over_limit: bool) -> (result: (u64, u32))
         requires window <= 64,
         ensures result.1 <= 64,
     {
