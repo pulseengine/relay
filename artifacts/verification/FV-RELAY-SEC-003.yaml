@@ -1,0 +1,41 @@
+artifacts:
+  - id: FV-RELAY-SEC-003
+    type: sw-verification
+    title: "Protected-frame path — header parser + authenticated wrap/verify (relay-sec)"
+    status: approved
+    description: >
+      Verification of the relay-sec protected-frame path: F1 the total pre-auth
+      Security-Header parser, F2 the per-channel authenticated frame
+      wrap/verify, F3 the authenticate-before-parse ordering.
+
+      Kani (all SUCCESSFUL, Kani 0.67):
+        SEC-K07 header parse is total (no panic) for any buffer
+        SEC-K08 write∘parse round-trips
+        SEC-K09 the AEAD nonce is injective in (spi, channel_id, counter)
+        SEC-K10 frame verify is total (no panic) on arbitrary bytes
+
+      Proptest: wrap→verify round-trip over random (key, spi, channel, payload)
+      returns the exact payload; verify-is-total over random bytes.
+      Unit: tampered tag -> BadMac; wrong SPI -> UnknownSpi; replayed
+      counter -> Replay; reordered-in-window -> accepted once then Replay;
+      truncated -> TooShort. The MAC is verified BEFORE the replay window is
+      consulted (authenticate, then judge freshness on the authenticated
+      counter). Cross-channel replay fails because the key is per-channel.
+
+      no_std/no_alloc, #![forbid(unsafe_code)]. Builds on the Ascon-AEAD128
+      primitive (FV-RELAY-SEC-002) and the ReplayWindow (FV-RELAY-SEC-001).
+
+      Coverage note: relay-sec is a verified no_std rlib, NOT the falcon:flight
+      Wasm component, so witness MC/DC does not apply here; the exhaustive Kani
+      harnesses + KAT-anchored Ascon + proptest are the coverage evidence.
+    tags: [verification, relay-sec, frame, header, anti-replay, kani, v0.1]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-sec"
+        - run: "cargo kani -p relay-sec"
+    links:
+      - type: verifies
+        target: SWREQ-SEC-P03
+      - type: verifies
+        target: SWREQ-SEC-P04

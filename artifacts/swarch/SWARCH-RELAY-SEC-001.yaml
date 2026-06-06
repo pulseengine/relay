@@ -133,8 +133,9 @@ artifacts:
           - "ascon::mac(key,nonce,msg) -> tag (MAC-floor) — DONE, KAT+Kani"
           - "ascon::seal(key,nonce,ad,pt,ct) -> tag (AEAD upgrade) — DONE, KAT"
           - "ReplayWindow.accept(counter) -> ReplayVerdict — DONE, Kani-proven"
-          - "verify_frame(sa,&frame) -> Authentic|BadMac|Replay|TooOld|UnknownSpi — PLANNED"
-          - "wrap_frame(sa,&mut frame) — PLANNED"
+          - "SecurityHeader::parse/write/nonce (F1) — DONE, Kani-total (SEC-K07..K09)"
+          - "SecurityChannel.verify(frame) -> payload | VerifyError (F2/F3) — DONE, Kani-total (SEC-K10) + proptest"
+          - "SecurityChannel.wrap(payload,out) -> frame_len (F2) — DONE, proptest round-trip"
         required:
           - "relay-ccsds frame with sec_header_flag set"
           - "per-channel session key from an ephemeral-X25519 + Ed25519/sigil establishment (cold path)"
@@ -148,12 +149,16 @@ artifacts:
         key-agreement: "ephemeral X25519 ECDH (forward secrecy)"
         authentication: "Ed25519 via sigil (signs the X25519 exchange; rotation; offline attest)"
       build-status:
-        done: "ReplayWindow (SEC-K01..K04); Ascon-AEAD128 + mac + seal (NIST KATs Count 1/2/3/34/35; SEC-K05/K06)"
-        planned: "total Security-Header parser, SA + frame wrap/verify, relay-ci/relay-to wiring, X25519+Ed25519/sigil session keys with rekey-on-reboot, AEAD-upgrade profiles"
+        done: "ReplayWindow (SEC-K01..K04); Ascon-AEAD128 + mac + seal (NIST KATs; SEC-K05/K06); Security-Header parser F1 (SEC-K07..K09); SecurityChannel wrap/verify F2/F3 — authenticate-before-parse (SEC-K10 total + proptest round-trip)"
+        planned: "relay-ci/relay-to call-site wiring (app-layer composition); X25519+Ed25519/sigil session keys with rekey-on-reboot; AEAD-upgrade profiles"
     links:
       - type: allocated-from
         target: SWREQ-SEC-P01
       - type: allocated-from
         target: SWREQ-SEC-P02
+      - type: allocated-from
+        target: SWREQ-SEC-P03
+      - type: allocated-from
+        target: SWREQ-SEC-P04
       - type: refines
         target: SWARCH-RELAY-001

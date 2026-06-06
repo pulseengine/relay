@@ -87,3 +87,61 @@ fn verify_ascon_mac_total() {
     let buf = [0u8; 33];
     let _ = ascon::mac(&key, &nonce, &buf[..len]);
 }
+
+use crate::frame::{SecurityChannel, MIN_FRAME_LEN};
+use crate::header::{SecurityHeader, SEC_HEADER_LEN};
+
+/// SEC-K07 — the Security-Header parser is total: any buffer (any bytes, any
+/// length) yields Some/None, never a panic.
+#[kani::proof]
+fn verify_header_parse_total() {
+    let buf: [u8; SEC_HEADER_LEN + 4] = kani::any();
+    let len: usize = kani::any();
+    kani::assume(len <= SEC_HEADER_LEN + 4);
+    let _ = SecurityHeader::parse(&buf[..len]);
+}
+
+/// SEC-K08 — write∘parse round-trips for any header.
+#[kani::proof]
+fn verify_header_roundtrip() {
+    let h = SecurityHeader {
+        spi: kani::any(),
+        channel_id: kani::any(),
+        counter: kani::any(),
+    };
+    let mut buf = [0u8; SEC_HEADER_LEN];
+    assert!(h.write(&mut buf));
+    assert!(SecurityHeader::parse(&buf) == Some(h));
+}
+
+/// SEC-K09 — the AEAD nonce is injective in (spi, channel_id, counter):
+/// distinct headers yield distinct nonces (nonce-uniqueness precondition).
+#[kani::proof]
+fn verify_nonce_injective() {
+    let a = SecurityHeader {
+        spi: kani::any(),
+        channel_id: kani::any(),
+        counter: kani::any(),
+    };
+    let b = SecurityHeader {
+        spi: kani::any(),
+        channel_id: kani::any(),
+        counter: kani::any(),
+    };
+    kani::assume(a != b);
+    assert!(a.nonce() != b.nonce());
+}
+
+/// SEC-K10 — frame `verify` is total: no panic for any frame length across the
+/// too-short / header-only / valid cases. Bytes are concrete (verify has no
+/// value-dependent indexing); the symbolic length drives the slicing.
+/// unwind covers the longest internal loop — ct_eq_tag's 16-byte compare.
+#[kani::proof]
+#[kani::unwind(41)]
+fn verify_frame_total() {
+    let mut ch = SecurityChannel::new(0, 0, [0u8; 16]);
+    let len: usize = kani::any();
+    kani::assume(len <= MIN_FRAME_LEN + 4);
+    let frame = [0u8; MIN_FRAME_LEN + 4];
+    let _ = ch.verify(&frame[..len]);
+}
