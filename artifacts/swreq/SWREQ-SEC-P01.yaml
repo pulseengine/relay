@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-SEC-P01
+    type: sw-req
+    title: "SEC-P01: Anti-replay freshness on authenticated frames"
+    status: approved
+    description: >
+      The authentication layer shall reject any frame whose monotonic
+      counter has already been accepted (replay) or has fallen outside
+      the replay window (too old), per (security-association, channel).
+      A counter accepted once shall never be accepted again; the accept
+      frontier shall never move backwards; classification shall be total
+      (no panic) for any input. This is the freshness oracle beneath the
+      per-frame MAC, shared by falcon (drone C2 uplink) and wohl
+      (home-automation command path) so a replayed "disarm"/"unlock" is
+      rejected on either product.
+    tags: [relay-sec, anti-replay, freshness, ccsds, falcon, wohl, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Kani proofs SEC-K01..K04 on relay-sec ReplayWindow: no
+        double-accept (a counter accepted once is Replay), monotone
+        frontier (accept never lowers highest), total accept (no
+        panic / arithmetic-overflow / shift-UB for any input), and
+        too-old rejected with state unchanged. Plus cargo unit +
+        proptest (no counter accepted twice over random interleavings).
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001

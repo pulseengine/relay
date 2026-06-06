@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-RELAY-SEC-001
+    type: sw-verification
+    title: "Anti-replay window — Kani proofs + unit/proptest (relay-sec v0.1)"
+    status: approved
+    description: >
+      Verification of the relay-sec anti-replay sliding window (RFC 6479 /
+      IPsec-ESP style) — the freshness oracle built BEFORE any crypto,
+      because replay defeat is a state-machine property provable with no
+      cryptography.
+
+      Four Kani harnesses, all VERIFICATION SUCCESSFUL (verified locally
+      with Kani 0.67):
+        SEC-K01 verify_no_double_accept   — a counter accepted once is Replay
+        SEC-K02 verify_frontier_monotone  — accept never lowers `highest`
+        SEC-K03 verify_accept_total       — total: no panic/overflow/shift-UB
+        SEC-K04 verify_too_old_unchanged  — outside-window rejected, unchanged
+
+      Plus 10 cargo tests (7 unit + 3 proptest), including
+      no_counter_accepted_twice over random interleavings and
+      frontier_is_monotone. The crate is no_std/no_alloc and runs on the
+      wohl STM32G0 (Cortex-M0+) and the falcon Cortex-M7 alike.
+
+      The per-frame MAC (Chaskey-12 default; HMAC-SHA256 certification
+      profile) and the frame wrap/verify layer land ON TOP of this window
+      in subsequent slices; this FV covers the freshness layer only.
+    tags: [verification, relay-sec, anti-replay, kani, proptest, v0.1]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-sec"
+        - run: "cargo kani -p relay-sec"
+    links:
+      - type: verifies
+        target: SWREQ-SEC-P01

@@ -1,0 +1,21 @@
+[package]
+name = "relay-sec"
+description = "Relay Sec — safety-protected comms: anti-replay + authenticated CCSDS frames (shared by falcon and wohl)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+# no_std + no alloc: runs on the wohl STM32G0 (M0+) and the falcon Cortex-M7
+# alike, and inside the verified flight core. Static buffers only.
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
