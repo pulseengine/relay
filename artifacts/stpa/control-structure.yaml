@@ -1,0 +1,61 @@
+# =============================================================================
+# STPA control structure — relay-sec safety-protected C2 link
+# =============================================================================
+# The control loop relay-sec protects: a legitimate operator/GCS issues commands
+# over a C2 link to the on-vehicle (or hub) supervisor, which actuates the
+# vehicle/home. relay-sec is the supervisor's authentication function — it
+# decides which received frames are authentic and fresh before the supervisor
+# acts. STPA-Sec (security inversion) lives in artifacts/stpa-sec/.
+# =============================================================================
+
+controllers:
+  - id: CTRL-OP
+    name: Operator / Ground-Control Station
+    type: human-and-automated
+    description: >
+      The legitimate command authority — a ground station / companion (falcon)
+      or home controller (wohl) issuing commands (arm/disarm/takeoff/land/
+      mission; unlock/actuate) to the vehicle or hub over the C2 link that
+      relay-sec protects.
+    control-actions:
+      - ca: CA-OP-1
+        target: CTRL-SUP
+        action: Send a command frame over the C2 link (radio / cellular / sub-GHz)
+    feedback:
+      - from: CTRL-SUP
+        info: Telemetry / state (position, mode, sensor state) over the downlink
+    process-model:
+      - Whether the vehicle/hub is armed and in which mode
+      - Current vehicle position and mission progress
+
+  - id: CTRL-SUP
+    name: Flight Supervisor / Hub Command Handler
+    type: automated
+    description: >
+      The on-vehicle FlightSupervisor (falcon) or hub command handler (wohl)
+      that receives command frames, AUTHENTICATES them via relay-sec
+      (verify-before-parse: Ascon MAC then anti-replay on the authenticated
+      counter), and — only for accepted commands — issues the corresponding
+      actuation. Its process model of "which commands are authentic and fresh"
+      is exactly the state relay-sec maintains.
+    source-file: crates/relay-sec/plain/src/frame.rs
+    control-actions:
+      - ca: CA-SUP-1
+        target: CP-ACT
+        action: Issue actuation (arm/disarm/setpoint/unlock) derived from a received command
+    feedback:
+      - from: CP-ACT
+        info: Actuator / vehicle state, sensor readings
+    process-model:
+      - Which received frames are cryptographically authentic (Ascon-AEAD128 tag)
+      - Which counters are fresh vs replayed (anti-replay window, per channel)
+      - The per-channel security association (SPI, key) currently in force
+
+controlled-processes:
+  - id: CP-ACT
+    name: Vehicle / Home Actuation
+    description: >
+      The physical process under control — multirotor actuation (motors, arming
+      state) for falcon, or the home actuator (door lock, relay) for wohl. Acts
+      on the control actions issued by CTRL-SUP; its hazardous states are reached
+      when CTRL-SUP actuates on an inauthentic or stale command.

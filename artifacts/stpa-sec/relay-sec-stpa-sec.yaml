@@ -1,0 +1,728 @@
+# =============================================================================
+# STPA-Sec — relay-sec safety-protected C2 link (the security front-end of the V)
+# =============================================================================
+# Attacker model: an adversary with RF/network access to the C2 link (external-
+# network), able to inject, capture/replay, intercept, and — at the strong end —
+# induce a vehicle reboot (RF/power glitch). Goal: cause unauthorized actuation,
+# observe sensitive data, or deny legitimate control. CIA triad covered:
+# integrity (SH-FORGE/STALE/NONCE), confidentiality (SH-DISCLOSE), availability
+# (SH-DOS). Constraints trace forward to SWREQ-SEC-P01..P05.
+# =============================================================================
+artifacts:
+
+  # ── Step 1a — security losses (CIA) ──────────────────────────────────────
+  - id: SL-CONTROL
+    type: sec-loss
+    title: Unauthorized actuation — loss of safe control of the vehicle/home
+    status: approved
+    description: >
+      The vehicle or home actuator performs an action not authorized by the
+      legitimate operator (a disarm in flight → crash; an unlock of a door).
+      An integrity breach of the command path with direct safety consequences.
+    fields:
+      cia-impact: [integrity]
+      stakeholders: [operator, public, homeowner, regulator]
+
+  - id: SL-PRIVACY
+    type: sec-loss
+    title: Disclosure of sensitive telemetry / occupancy / mission data
+    status: approved
+    description: >
+      An adversary observes data carried on the link — vehicle position and
+      mission intent (falcon), or door/occupancy state and activity patterns
+      (wohl). Confidentiality breach with privacy and operational-security
+      consequences.
+    fields:
+      cia-impact: [confidentiality]
+      stakeholders: [operator, homeowner]
+
+  - id: SL-AVAIL
+    type: sec-loss
+    title: Loss of the ability to command the vehicle/home when needed
+    status: approved
+    description: >
+      The operator cannot get a legitimate command (abort / RTL / land / lock)
+      accepted by the vehicle or hub when it matters. Availability breach that
+      can itself be a safety loss (no abort path).
+    fields:
+      cia-impact: [availability]
+      stakeholders: [operator, public]
+
+  # ── Step 1b — security hazards (system STATES) ───────────────────────────
+  - id: SH-FORGE
+    type: sec-hazard
+    title: Supervisor will act on a command not originated by the legitimate operator
+    status: approved
+    description: >
+      A system state in which CTRL-SUP would issue actuation from a frame that
+      was not produced by the authorized operator (forged/injected) — i.e. the
+      supervisor's "authentic" process-model belief is wrong.
+    fields:
+      cia-impact: [integrity]
+      severity: critical
+    links:
+      - type: leads-to-sec-loss
+        target: SL-CONTROL
+
+  - id: SH-STALE
+    type: sec-hazard
+    title: Supervisor will act on a replayed / stale command
+    status: approved
+    description: >
+      A system state in which CTRL-SUP would re-execute a previously-valid
+      command captured and re-sent by an adversary (e.g. a recorded "disarm"),
+      i.e. the supervisor's "fresh" belief is wrong.
+    fields:
+      cia-impact: [integrity, availability]
+      severity: critical
+    links:
+      - type: leads-to-sec-loss
+        target: SL-CONTROL
+
+  - id: SH-NONCE
+    type: sec-hazard
+    title: A (key, nonce) pair is reused, re-opening forgery / replay acceptance
+    status: approved
+    description: >
+      A system state in which the AEAD key is unchanged but the frame counter
+      has reset (e.g. after an induced reboot), so a nonce is reused and the
+      replay window is re-opened — collapsing both authenticity and freshness
+      guarantees.
+    fields:
+      cia-impact: [integrity]
+      severity: critical
+    links:
+      - type: leads-to-sec-loss
+        target: SL-CONTROL
+
+  - id: SH-DISCLOSE
+    type: sec-hazard
+    title: Command / telemetry content is observable to an adversary on the link
+    status: approved
+    description: >
+      A system state in which payloads (sensor/occupancy/mission/position) are
+      carried in a form readable by a passive adversary with link access.
+    fields:
+      cia-impact: [confidentiality]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-PRIVACY
+
+  - id: SH-DOS
+    type: sec-hazard
+    title: Legitimate commands cannot be accepted by the supervisor
+    status: approved
+    description: >
+      A system state in which CTRL-SUP cannot accept/process a legitimate
+      operator command — e.g. the receive path is crashed or saturated by
+      adversary-supplied malformed frames.
+    fields:
+      cia-impact: [availability]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-AVAIL
+
+  # ── Step 1c — security constraints (inversions; trace to SWREQ-SEC) ──────
+  - id: SSC-AUTH
+    type: sec-constraint
+    title: Every command must be cryptographically authenticated before the supervisor acts
+    status: approved
+    description: >
+      CTRL-SUP must not issue actuation from a frame unless its Ascon-AEAD128
+      tag verifies under the channel key (authenticate-before-parse). Satisfied
+      by SWREQ-SEC-P02 (Ascon MAC) and SWREQ-SEC-P04 (verify-before-parse).
+    links:
+      - type: prevents-sec-hazard
+        target: SH-FORGE
+
+  - id: SSC-FRESH
+    type: sec-constraint
+    title: Replayed / stale commands must be rejected on the authenticated counter
+    status: approved
+    description: >
+      CTRL-SUP must reject any frame whose authenticated counter has already
+      been seen or fallen outside the replay window — and the freshness check
+      must run AFTER authentication, on the authenticated counter. Satisfied by
+      SWREQ-SEC-P01 (anti-replay window) + SWREQ-SEC-P04 (ordering).
+    links:
+      - type: prevents-sec-hazard
+        target: SH-STALE
+
+  - id: SSC-NONCE
+    type: sec-constraint
+    title: A (key, nonce) pair must never be reused
+    status: approved
+    description: >
+      The (key, nonce) pair must be unique for every frame. A reboot must force
+      a fresh cold-path rekey (new key + reset counter), never resume the old
+      key under a reset counter. Recorded in SWARCH-RELAY-SEC-001 (rekey-on-
+      reboot invariant); enforced by the F4 session layer (planned).
+    links:
+      - type: prevents-sec-hazard
+        target: SH-NONCE
+
+  - id: SSC-CONF
+    type: sec-constraint
+    title: Payloads on adversary-exposed links must be encrypted where confidentiality is required
+    status: approved
+    description: >
+      Where the link carries privacy- or operationally-sensitive data, CTRL-SUP
+      and CTRL-OP must use the AEAD-upgrade mode (Ascon-AEAD128 encrypting the
+      payload), default-ON for wohl sensor/occupancy data. Satisfied by
+      SWREQ-SEC-P05 (AEAD-upgrade profiles, feature F5).
+    links:
+      - type: prevents-sec-hazard
+        target: SH-DISCLOSE
+
+  - id: SSC-TOTAL
+    type: sec-constraint
+    title: The pre-auth frame/header parser must be total on arbitrary input
+    status: approved
+    description: >
+      The pre-authentication parsing of any received bytes (the minimal pre-auth
+      TCB) must never crash or hang — a malformed/garbage frame yields a typed
+      rejection, so an adversary cannot deny service by malformed input.
+      Satisfied by SWREQ-SEC-P03 (total header parser) + SWREQ-SEC-P04 (total
+      verify).
+    links:
+      - type: prevents-sec-hazard
+        target: SH-DOS
+
+  - id: SSC-PERCHANNEL
+    type: sec-constraint
+    title: Each channel must use a distinct key so cross-channel replay fails at the MAC
+    status: approved
+    description: >
+      Each logical channel (radio / cellular / sub-GHz) must have its own
+      security association (distinct SPI + key); the replay window is selected
+      by the authenticated channel_id, never the arrival link. A frame recorded
+      on one channel must not verify on another. Satisfied by SWREQ-SEC-P04
+      (per-channel keys).
+    links:
+      - type: prevents-sec-hazard
+        target: SH-FORGE
+      - type: prevents-sec-hazard
+        target: SH-STALE
+
+  # ── Step 3 — security UCAs (CTRL-SUP issuing CA-SUP-1) ───────────────────
+  - id: SUCA-1
+    type: sec-uca
+    title: Supervisor actuates on a forged command
+    status: approved
+    description: >
+      CTRL-SUP PROVIDES actuation (arm/disarm/setpoint/unlock) when the
+      originating command frame was forged by an adversary rather than issued
+      by CTRL-OP.
+    fields:
+      uca-type: providing
+      context: >
+        An attacker with link access transmits a command frame the supervisor
+        treats as authentic (no MAC, or a bypassed/forged MAC).
+      adversarial-causation: >
+        INJECT — the attacker transmits a fabricated COMMAND_LONG/actuation
+        frame on the C2 link. Absent (or with a broken) Ascon MAC check, CTRL-SUP
+        accepts it and actuates.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-SUP
+      - type: leads-to-sec-hazard
+        target: SH-FORGE
+
+  - id: SUCA-2
+    type: sec-uca
+    title: Supervisor re-executes a captured command (replay, wrong time)
+    status: approved
+    description: >
+      CTRL-SUP PROVIDES actuation derived from a previously-valid command that
+      an adversary captured and re-transmitted later (wrong time / out of order).
+    fields:
+      # A replay is the supervisor PROVIDING actuation that should not be
+      # provided at all (the operator did not issue it now) — not a mis-timed
+      # legitimate action. The "captured-and-resent" nature is the context.
+      uca-type: providing
+      context: >
+        The attacker has recorded a legitimate frame (e.g. "disarm") and re-sends
+        it later; CTRL-SUP provides the actuation though the operator did not
+        issue this command now.
+      adversarial-causation: >
+        INTERCEPT then INJECT (replay) — the attacker captures a valid frame and
+        re-transmits it. Without an anti-replay check on the authenticated
+        counter, CTRL-SUP re-executes it.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-SUP
+      - type: leads-to-sec-hazard
+        target: SH-STALE
+
+  - id: SUCA-3
+    type: sec-uca
+    title: Supervisor fails to act on a legitimate command (induced)
+    status: approved
+    description: >
+      CTRL-SUP does NOT PROVIDE actuation for a legitimate operator command
+      because an adversary has crashed or saturated the receive path.
+    fields:
+      uca-type: not-providing
+      context: >
+        The operator issues a genuine abort/RTL/lock, but the supervisor's
+        receive path is unavailable.
+      adversarial-causation: >
+        INJECT — the attacker floods the receive path with malformed frames; if
+        the pre-auth parser is non-total it crashes/hangs, denying the legitimate
+        command.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-SUP
+      - type: leads-to-sec-hazard
+        target: SH-DOS
+
+  - id: SUCA-4
+    type: sec-uca
+    title: Supervisor actuates on a frame replayed after an induced counter reset
+    status: approved
+    description: >
+      CTRL-SUP PROVIDES actuation from a captured frame that passes the replay
+      window because an induced reboot reset the counter under an unchanged key.
+    fields:
+      uca-type: providing
+      context: >
+        After a brownout/watchdog reset, the channel resumes the same key with a
+        reset counter; a previously-captured frame now appears fresh.
+      adversarial-causation: >
+        TAMPER (induce reset, e.g. an RF/EMI glitch — typically REMOTE, not
+        requiring physical access) then INJECT (replay) — the attacker forces a
+        reboot and replays a captured frame into the re-opened window under a
+        reused (key, nonce). A remote-RF-induced reset makes this a cheaper
+        attacker than physical access, so the nonce-reuse hazard is rated
+        accordingly.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-SUP
+      - type: leads-to-sec-hazard
+        target: SH-NONCE
+
+  # ── Step 4 — security loss scenarios (causal chains; attack vectors) ─────
+  - id: SLS-INJECT
+    type: sec-scenario
+    title: RF command injection — forged disarm/unlock accepted
+    status: approved
+    description: >
+      An attacker within RF range transmits a fabricated actuation frame. If the
+      supervisor accepts unauthenticated commands (or authentication is
+      bypassable), CTRL-SUP actuates on the attacker's command — disarming a
+      drone in flight or unlocking a door. Defeated by SSC-AUTH (Ascon MAC,
+      verify-before-parse): the forged frame fails the tag check.
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: external-network
+      cia-impact: [integrity]
+    links:
+      - type: caused-by-sec-uca
+        target: SUCA-1
+      - type: leads-to-sec-hazard
+        target: SH-FORGE
+
+  - id: SLS-REPLAY
+    type: sec-scenario
+    title: Command replay — captured disarm re-transmitted
+    status: approved
+    description: >
+      The attacker records a valid command frame and re-transmits it later. With
+      no freshness check the supervisor re-executes it. Defeated by SSC-FRESH:
+      the authenticated monotonic counter is outside the replay window on the
+      second receipt → rejected.
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: adjacent
+      attacker-type: external-network
+      cia-impact: [integrity, availability]
+    links:
+      - type: caused-by-sec-uca
+        target: SUCA-2
+      - type: leads-to-sec-hazard
+        target: SH-STALE
+
+  - id: SLS-CROSSLINK
+    type: sec-scenario
+    title: Cross-link replay — record on radio, replay on cellular
+    status: approved
+    description: >
+      A vehicle with two links (radio + cellular) shares no key across them; an
+      attacker records a command on one and replays it on the other. Defeated by
+      SSC-PERCHANNEL: the per-channel key makes the MAC fail under the wrong
+      channel's key, and the replay window is keyed by the authenticated
+      channel_id, not the arrival link.
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: external-network
+      cia-impact: [integrity]
+    links:
+      - type: caused-by-sec-uca
+        target: SUCA-2
+      - type: leads-to-sec-hazard
+        target: SH-FORGE
+
+  - id: SLS-REBOOT
+    type: sec-scenario
+    title: Induced-reboot nonce reuse — replay into a re-opened window
+    status: approved
+    description: >
+      The attacker induces a reset (RF/power glitch) and replays a captured frame.
+      If the channel resumes the same key with a reset counter, the nonce repeats
+      and the replay window is empty, so the captured frame verifies and appears
+      fresh. Defeated by SSC-NONCE: a reboot forces a fresh cold-path rekey, so
+      the old key/nonce is never reused (F4, planned).
+    fields:
+      scenario-type: adversarial-process-interaction
+      attack-vector: network
+      attacker-type: external-network
+      cia-impact: [integrity]
+    links:
+      - type: caused-by-sec-uca
+        target: SUCA-4
+      - type: leads-to-sec-hazard
+        target: SH-NONCE
+
+  - id: SLS-EAVESDROP
+    type: sec-scenario
+    title: Passive eavesdrop — plaintext telemetry/occupancy observed
+    status: approved
+    description: >
+      A passive adversary with link access reads payloads when they are carried
+      without encryption — vehicle position/mission, or home door/occupancy
+      state. Defeated for sensitive links by SSC-CONF: the AEAD-upgrade mode
+      encrypts the payload (default-ON for wohl sensor data). NOTE: this scenario
+      is deliberately UCA-less — passive disclosure is an adversarial control-PATH
+      interception, not an unsafe control ACTION of CTRL-SUP, so it links a
+      hazard without a sec-uca (a legitimate STPA-Sec asymmetry).
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: external-network
+      cia-impact: [confidentiality]
+    links:
+      - type: leads-to-sec-hazard
+        target: SH-DISCLOSE
+
+  - id: SLS-DOS
+    type: sec-scenario
+    title: Malformed-frame flood — receive path denied
+    status: approved
+    description: >
+      The attacker floods the receive path with malformed/garbage frames. A
+      non-total pre-auth parser would crash or hang, denying legitimate commands.
+      Defeated by SSC-TOTAL: the header/verify parser is Kani-proven total, so
+      malformed frames yield typed rejections at bounded cost.
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: external-network
+      cia-impact: [availability]
+    links:
+      - type: caused-by-sec-uca
+        target: SUCA-3
+      - type: leads-to-sec-hazard
+        target: SH-DOS
+
+  # ===========================================================================
+  # Gap-closing additions (clean-room soundness audit, 2026-06-06): the closed
+  # graph above narrowed DoS to malformed-flood and rooted trust in CTRL-OP
+  # without examining it. These cover operator-side compromise, handshake MITM,
+  # AEAD→MAC downgrade, RF jamming, and accountability/non-repudiation.
+  # ===========================================================================
+
+  # ── additional loss ──────────────────────────────────────────────────────
+  - id: SL-ACCOUNT
+    type: sec-loss
+    title: Loss of accountability — an accepted command cannot be attributed
+    status: approved
+    description: >
+      After an incident (a crash, an unauthorized unlock) it cannot be proven
+      which operator/key/session issued the command. Not reducible to integrity:
+      a command can be authentic yet unattributable. Matters to regulators,
+      insurers, and forensic investigation.
+    fields:
+      cia-impact: [integrity]
+      stakeholders: [operator, regulator, insurer]
+
+  # ── additional hazards (states) ──────────────────────────────────────────
+  - id: SH-OPKEY
+    type: sec-hazard
+    title: An operator credential/key is held by an adversary
+    status: approved
+    description: >
+      A state in which an adversary possesses a valid operator key (stolen,
+      cloned, or supply-chained), so CTRL-SUP would accept correctly-authenticated
+      commands the legitimate operator never issued. relay-sec's authentication
+      is sound yet bypassed at the trust root.
+    fields:
+      cia-impact: [integrity]
+      severity: critical
+    links:
+      - type: leads-to-sec-loss
+        target: SL-CONTROL
+
+  - id: SH-MITM
+    type: sec-hazard
+    title: A session key was agreed with an adversary (handshake MITM)
+    status: approved
+    description: >
+      A state in which the X25519 key agreement completed with an adversary
+      interposed (because the exchange was not mutually authenticated), so the
+      "shared" key is attacker-known — collapsing both authenticity and
+      confidentiality for the session.
+    fields:
+      cia-impact: [integrity, confidentiality]
+      severity: critical
+    links:
+      - type: leads-to-sec-loss
+        target: SL-CONTROL
+      - type: leads-to-sec-loss
+        target: SL-PRIVACY
+
+  - id: SH-DOWNGRADE
+    type: sec-hazard
+    title: A confidentiality-required channel is operating in MAC-only mode
+    status: approved
+    description: >
+      A state in which a channel that should carry AEAD-encrypted payloads is
+      instead running MAC-only (authenticated but plaintext), so sensitive data
+      is exposed despite the AEAD-upgrade existing.
+    fields:
+      cia-impact: [confidentiality]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-PRIVACY
+
+  - id: SH-JAM
+    type: sec-hazard
+    title: Legitimate command frames are prevented from being delivered (jamming)
+    status: approved
+    description: >
+      A state in which legitimate frames (including an abort/RTL/lock) cannot
+      reach CTRL-SUP because the RF channel is jammed or specific frames are
+      selectively suppressed — distinct from the malformed-flood SH-DOS, and
+      NOT defeatable by parser totality.
+    fields:
+      cia-impact: [availability]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-AVAIL
+
+  - id: SH-NOATTR
+    type: sec-hazard
+    title: An accepted command cannot be attributed to an operator/session
+    status: approved
+    description: >
+      A state in which CTRL-SUP accepts and acts on commands without recording
+      enough (SA/SPI/channel/counter/session identity) to attribute them after
+      the fact.
+    fields:
+      cia-impact: [integrity]
+      severity: medium
+    links:
+      - type: leads-to-sec-loss
+        target: SL-ACCOUNT
+
+  # ── additional constraints ───────────────────────────────────────────────
+  - id: SSC-OPKEY
+    type: sec-constraint
+    title: Operator keys must be protected, identity-bound, and revocable
+    status: approved
+    description: >
+      Operator/session keys must be held in protected storage, bound to an
+      operator identity via attestation, and revocable so a compromised key can
+      be cut off. Out of relay-sec's wire scope; delegated to the sigil-attested
+      session establishment (F4) + key-custody policy.
+    links:
+      - type: prevents-sec-hazard
+        target: SH-OPKEY
+
+  - id: SSC-HANDSHAKE
+    type: sec-constraint
+    title: The session-key agreement must be mutually authenticated
+    status: approved
+    description: >
+      The X25519 ECDH must be authenticated by Ed25519/sigil signatures over the
+      ephemeral keys (signed-DH / Noise-IK), so a MITM cannot complete the
+      agreement. Satisfied by the F4 session layer (planned).
+    links:
+      - type: prevents-sec-hazard
+        target: SH-MITM
+
+  - id: SSC-NODOWNGRADE
+    type: sec-constraint
+    title: The confidentiality mode must be bound to the authenticated SA, not in-band negotiable
+    status: approved
+    description: >
+      A channel's MAC-only vs AEAD mode is a property of the authenticated
+      security association, fixed at session establishment — never negotiated in
+      a frame an attacker can strip. A required-AEAD channel must REJECT MAC-only
+      frames. Satisfied by SWREQ-SEC-P05 (per-SA AEAD-upgrade mode, F5).
+    links:
+      - type: prevents-sec-hazard
+        target: SH-DOWNGRADE
+
+  - id: SSC-JAM
+    type: sec-constraint
+    title: Availability under jamming must be handled at the link layer and by failsafe
+    status: approved
+    description: >
+      RF jamming / frame suppression is OUT of relay-sec's scope (it cannot
+      authenticate a frame that never arrives). It must be mitigated by link-
+      layer measures (frequency agility, redundant links) and by a fail-safe on
+      loss-of-link (RTL/land/lock) in the supervisor. Stated as an explicit
+      scope boundary, not a relay-sec guarantee.
+    links:
+      - type: prevents-sec-hazard
+        target: SH-JAM
+
+  - id: SSC-ATTR
+    type: sec-constraint
+    title: Each accepted command must be attributable to its SA/session
+    status: approved
+    description: >
+      CTRL-SUP must record the SPI/channel/counter (and session identity) of
+      every accepted command so actions can be attributed after the fact for
+      non-repudiation.
+    links:
+      - type: prevents-sec-hazard
+        target: SH-NOATTR
+
+  # ── additional UCAs ──────────────────────────────────────────────────────
+  - id: SUCA-5
+    type: sec-uca
+    title: Supervisor actuates on a correctly-keyed command from a compromised operator
+    status: approved
+    description: >
+      CTRL-SUP PROVIDES actuation from a frame that authenticates correctly
+      because the adversary holds a valid operator key — authentication passes
+      but the command is illegitimate.
+    fields:
+      uca-type: providing
+      context: >
+        An adversary has obtained an operator/session key (stolen device, cloned
+        credential, malicious companion app) and issues correctly-MAC'd commands.
+      adversarial-causation: >
+        TAMPER / supply-chain — the attacker exfiltrates or clones the operator
+        key (compromised GCS/companion, supply-chain implant) and SPOOFs the
+        operator by signing commands with the real key.
+      attacker-type: supply-chain
+    links:
+      - type: issued-by
+        target: CTRL-SUP
+      - type: leads-to-sec-hazard
+        target: SH-OPKEY
+
+  - id: SUCA-6
+    type: sec-uca
+    title: Supervisor fails to act on a legitimate command because the link is jammed
+    status: approved
+    description: >
+      CTRL-SUP does NOT PROVIDE actuation for a legitimate operator command
+      because the RF channel is jammed and the frame never arrives.
+    fields:
+      uca-type: not-providing
+      context: >
+        The operator issues an abort/RTL/lock while the adversary jams or
+        selectively suppresses the channel.
+      adversarial-causation: >
+        INTERCEPT/deny — the attacker jams the RF band or selectively drops
+        frames so the legitimate command is never delivered. relay-sec cannot
+        authenticate a frame that does not arrive.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-SUP
+      - type: leads-to-sec-hazard
+        target: SH-JAM
+
+  # ── additional scenarios ─────────────────────────────────────────────────
+  - id: SLS-OPKEY
+    type: sec-scenario
+    title: Operator-key compromise — correctly-authenticated malicious commands
+    status: approved
+    description: >
+      The adversary exfiltrates or clones an operator/session key (compromised
+      GCS, malicious companion app, supply-chain) and sends correctly-MAC'd
+      commands the supervisor cannot distinguish from genuine. Mitigated (not
+      fully defeated) by SSC-OPKEY: protected/attested keys + revocation bound
+      the exposure. The trust root is the operator key custody, outside the wire.
+    fields:
+      scenario-type: insider-threat
+      attack-vector: local
+      attacker-type: supply-chain
+      cia-impact: [integrity]
+    links:
+      - type: caused-by-sec-uca
+        target: SUCA-5
+      - type: leads-to-sec-hazard
+        target: SH-OPKEY
+
+  - id: SLS-MITM
+    type: sec-scenario
+    title: Handshake MITM — unauthenticated key agreement interposed
+    status: approved
+    description: >
+      The adversary interposes during the X25519 agreement; if the exchange is
+      not authenticated, it completes two half-sessions and thereafter reads and
+      forges everything. Defeated by SSC-HANDSHAKE: Ed25519/sigil signatures over
+      the ephemeral keys make an interposed agreement fail to authenticate.
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: external-network
+      cia-impact: [integrity, confidentiality]
+    links:
+      - type: leads-to-sec-hazard
+        target: SH-MITM
+
+  - id: SLS-DOWNGRADE
+    type: sec-scenario
+    title: Downgrade — AEAD channel forced to MAC-only, payloads exposed
+    status: approved
+    description: >
+      The adversary tampers with mode negotiation (or strips an AEAD indicator)
+      to force a confidentiality-required channel down to MAC-only, exposing
+      payloads while keeping authentication intact. Defeated by SSC-NODOWNGRADE:
+      the mode is a property of the authenticated SA, fixed at establishment, and
+      a required-AEAD channel rejects MAC-only frames (F5).
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: external-network
+      cia-impact: [confidentiality]
+    links:
+      - type: leads-to-sec-hazard
+        target: SH-DOWNGRADE
+
+  - id: SLS-JAM
+    type: sec-scenario
+    title: RF jamming / selective suppression — abort command never delivered
+    status: approved
+    description: >
+      The adversary jams the RF band or selectively suppresses frames so a
+      legitimate command (e.g. abort/RTL/lock) is never delivered. relay-sec
+      cannot help — it authenticates frames that arrive. Mitigated by SSC-JAM:
+      link-layer agility/redundancy + a supervisor loss-of-link failsafe. Stated
+      as an explicit scope boundary.
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: external-network
+      cia-impact: [availability]
+    links:
+      - type: caused-by-sec-uca
+        target: SUCA-6
+      - type: leads-to-sec-hazard
+        target: SH-JAM
