@@ -37,7 +37,7 @@ pub struct RtsSequence {
 pub struct CommandStore {
     ats_table: [AtsCommand; MAX_ATS_COMMANDS],
     ats_count: u32,
-    rts_sequences: [RtsSequence; MAX_RTS_SEQUENCES],
+    pub rts_sequences: [RtsSequence; MAX_RTS_SEQUENCES],
 }
 
 #[derive(Clone, Copy)]

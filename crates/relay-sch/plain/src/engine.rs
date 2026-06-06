@@ -24,8 +24,8 @@ pub struct ScheduledAction {
 }
 
 pub struct ScheduleTable {
-    slots: [ScheduleSlot; MAX_SCHEDULE_SLOTS],
-    slot_count: u32,
+    pub slots: [ScheduleSlot; MAX_SCHEDULE_SLOTS],
+    pub slot_count: u32,
 }
 
 pub struct TickResult {
