@@ -4,94 +4,156 @@ artifacts:
     title: Safety-protected comms layer (relay-sec, shared falcon + wohl)
     status: approved
     description: >
-      relay-sec is the end-to-end authentication layer for the relay
-      CCSDS communication stack. It is ONE shared, formally-verified,
-      no_std/no_alloc component protecting BOTH products: falcon (drone
-      C2 over radio/cellular/satellite) and wohl (home-automation
-      sensor->hub over sub-GHz). A spoofed or replayed command — "disarm"
-      on a drone, "unlock" on a door — is rejected on either, from one
-      layer that is qualified once.
+      relay-sec is the end-to-end authentication layer for the relay CCSDS
+      communication stack — ONE shared, formally-verified, no_std/no_alloc
+      component protecting BOTH falcon (drone C2 over radio/cellular/satellite)
+      and wohl (home-automation sensor->hub over sub-GHz). A spoofed or replayed
+      command — "disarm" on a drone, "unlock" on a door — is rejected on either,
+      from one layer qualified once.
 
-      Design rationale (NOT DDS/ROS2): the relay CCSDS stack already
-      exists and is proven in wohl (relay-ccsds codec, relay-to telemetry
-      downlink) — falcon uses the complementary half (relay-ci command
-      uplink). Rather than import a heavyweight runtime, relay-sec wraps
-      the EXISTING relay-ccsds frames using the primary-header
-      `sec_header_flag` bit (currently decoded but unused) with a
-      Security Header + Trailer. The performance side (companion/ground,
-      more power) converts CCSDS <-> anything (MAVLink for QGroundControl,
-      mission planners) OUTSIDE the verified boundary; the verified FC
-      speaks only the minimal safety-protected CCSDS wire.
+      Design rationale (NOT DDS/ROS2): the relay CCSDS stack already exists and
+      is proven in wohl (relay-ccsds codec + relay-to telemetry downlink);
+      falcon uses the complementary half (relay-ci command uplink). relay-sec
+      wraps the EXISTING relay-ccsds frames using the primary-header
+      `sec_header_flag` bit (decoded today, unused) with a Security Header +
+      Trailer. The performance side (companion/ground, more power) converts
+      CCSDS <-> anything (MAVLink/QGroundControl/mission planners) OUTSIDE the
+      verified boundary; the verified FC speaks only the minimal protected wire.
 
-      Two-tier crypto (asymmetric establishment / symmetric hot path),
-      mirroring Matter CASE->AES-CCM and SDLS SA->frame:
-        - Session establishment / identity / key rotation: sigil
-          (Ed25519 signed attestation, offline-verifiable) — COLD path,
-          never at 1 kHz.
-        - Per-frame authentication: a symmetric MAC over the
-          authenticated header+payload + a monotonic anti-replay
-          counter — HOT path, runs every frame.
+      ## ONE primitive, two modes (Ascon-AEAD128, NIST SP 800-232)
 
-      Per-frame primitive (recommended, SA-negotiated): Chaskey-12 MAC,
-      128-bit key, 64-bit tag. ~16.9 cyc/byte on the wohl STM32G0 M0+
-      value line (~8x faster than AES-CMAC's 136), ~400 B ROM, inherently
-      constant-time ARX (side-channel-safe AND the easiest construction
-      to Verus/Kani-verify: straight-line integer arithmetic, no tables,
-      no key schedule). HMAC-SHA256 is the certification-profile
-      alternative (FIPS-recognized, heavier on M0+); AES-256-GCM is an
-      optional AEAD profile where AES hardware exists and confidentiality
-      is wanted.
+      The single verified crypto primitive is **Ascon-AEAD128**. One permutation
+      yields both relay-sec modes, so the core proves ONE primitive, not a
+      separate MAC and AEAD:
+        - MAC-only floor  = Ascon-AEAD128 with EMPTY plaintext; the 128-bit tag
+          authenticates the frame (header+payload) carried as associated data.
+        - AEAD upgrade    = the same call encrypting the payload (confidentiality
+          + integrity).
+      This supersedes an earlier Chaskey-12 + AES-GCM plan: carrying two
+      unrelated cores contradicts "one verified core", and AES-GCM is the
+      expensive one to bring under constant-time proof. The TARGETS — STM32G0
+      (M0+), STM32G474 (M4), ESP32-C3 (RV32) — have NO AES instructions, so
+      table-based AES-GCM is timing-fragile and bitsliced is large/hard to
+      verify. Ascon's permutation is table-free bitwise logic: constant-time by
+      construction and Kani-friendly. Because wohl defaults AEAD-on, the AEAD
+      mode is in the SAME qualified layer falcon links — sharing ONE primitive
+      makes "one qualified layer, two products" literally true rather than
+      requiring split builds.
 
-      Wire format (SDLS-shaped, not the space byte-layout): Security
-      Header = SPI(2) || channel_id(1) || counter(8); Security Trailer =
-      tag (8 Chaskey / 16 GCM). Confidentiality is an SA-selectable
-      upgrade: MAC-only is the verifiable safety floor everywhere; AEAD
-      defaults ON for wohl sensor data (door/occupancy is privacy- and
-      safety-sensitive) and is optional for falcon.
+      ## Two-tier crypto (cold establishment / hot per-frame)
 
-      Integration (critical ordering): in relay-ci, verify_frame runs
-      BEFORE validate_header (authenticate, then parse — a spoofed packet
-      never reaches dispatch); in relay-to, wrap_frame runs AFTER encode.
-      The existing CRC/XOR checksum is retained only as a non-security
-      corruption check, never relied on for authenticity.
+      - Session establishment (COLD path): an EPHEMERAL X25519 ECDH gives the
+        shared secret, AUTHENTICATED by an Ed25519 signature via sigil
+        (signed-DH / Noise-IK shape). Ed25519 SIGNS the exchange; it does not by
+        itself establish a key — X25519 does the agreement. Ephemeral per
+        flight/enrollment => FORWARD SECRECY: a leaked long-term key does not
+        expose past flights or past wohl occupancy streams. sigil also handles
+        rotation and offline attestation.
+      - Per-frame (HOT path): Ascon-AEAD128 with the session key. Asymmetric
+        crypto NEVER runs at frame rate.
 
-      BUILD STATUS (honest):
-        - DONE: the anti-replay sliding window (ReplayWindow, RFC 6479 /
-          IPsec-ESP). 4 Kani proofs SEC-K01..K04 SUCCESSFUL + 10 tests.
-          Freshness oracle built before the crypto on purpose.
-        - PLANNED: the Chaskey-12 MAC core (Verus+Kani), the SA /
-          frame wrap-verify, the relay-ci / relay-to wiring, sigil
-          session-key establishment, and the AEAD profiles.
+      ## Anti-replay and nonce hygiene
 
-      Threat -> mitigation: command injection -> MAC; replay -> monotonic
-      counter (+ window); cross-channel replay -> channel_id in the
-      authenticated header; tampering -> MAC; eavesdropping/occupancy ->
-      optional AEAD; key compromise -> sigil rotation; pairing
-      impersonation -> sigil Ed25519 attestation. Out of scope (stated
-      honestly): GPS spoofing, RF jamming/DoS, key extraction from
-      unprotected flash — separate controls.
-    tags: [architecture, relay-sec, security, anti-replay, ccsds, falcon, wohl, sigil]
+      - Freshness: a per-(SA,channel) monotonic 64-bit counter + 64-wide sliding
+        window (relay-sec ReplayWindow, Kani-proven). The counter feeds the
+        AEAD nonce.
+      - REBOOT => FORCED COLD-PATH REKEY (invariant). A brownout/watchdog reset
+        that reset the counter under an UNCHANGED key would be deterministic
+        nonce reuse — and AEAD nonce reuse is catastrophic (for GCM it recovers
+        the auth key; Ascon's blast radius is smaller but reuse is still
+        forbidden). So a reboot forces a fresh sigil rekey (clean, no NVM
+        persistence, free counter reset) rather than resuming the old key. The
+        alternative (NVM-persisted counter with monotonicity proven across power
+        loss) is heavier and not chosen.
+
+      ## channel_id is load-bearing by construction
+
+      Each channel has its OWN SA/key (distinct SPI, distinct key). Cross-link
+      replay (record a "disarm" on radio, replay on cellular) therefore fails at
+      the MAC check — wrong key — so the property is enforced by construction,
+      not by a comment. `channel_id` is the authenticated SA selector, and the
+      ReplayWindow is selected by the AUTHENTICATED `channel_id` field, NEVER by
+      the physical arrival link. (If keys were ever shared, that authenticated-
+      channel_id window keying is what would still block cross-link replay.)
+
+      ## TCB boundary — authenticate before you parse, honestly
+
+      "Authenticate before parse" cannot cover the Security Header itself (SPI ||
+      channel_id || counter): you must parse THAT to look up the SA and verify
+      the MAC. So the minimal PRE-authentication attack surface is the fixed-
+      layout Security-Header parser, which is IN the proven set: total and
+      panic-free on arbitrary garbage (unknown SPI, out-of-range channel_id) —
+      it gets a totality proof exactly like ReplayWindow already has. The
+      payload/command parser runs STRICTLY post-auth. The honest TCB inventory:
+      { header parser (pre-auth, total), Ascon-AEAD128 verify, ReplayWindow,
+      SA/key store }.
+
+      ## Wire format
+
+      Security Header = SPI(2) || channel_id(1) || counter(8). The AEAD nonce is
+      derived from (SPI, channel_id, counter) so that uniqueness per (key,nonce)
+      holds given per-channel keys + monotonic counter + rekey-on-reboot.
+      Security Trailer = 16-byte Ascon tag. Confidentiality is per-product:
+      MAC-only floor is the verifiable safety floor everywhere; AEAD-upgrade
+      defaults ON for wohl sensor data (door/occupancy is privacy- AND
+      safety-sensitive), optional for falcon. Integration: verify (recompute +
+      constant-time compare) BEFORE validate_header in relay-ci; wrap AFTER
+      encode in relay-to. The CCSDS CRC is retained only as a non-security
+      corruption check.
+
+      ## Threat -> mitigation
+
+      command injection -> Ascon tag; replay -> monotonic counter + window;
+      cross-link replay -> per-channel key (fails at MAC) + authenticated
+      channel_id; tampering -> tag; eavesdropping/occupancy inference ->
+      AEAD-upgrade (default-on for wohl); nonce reuse on reboot -> forced rekey;
+      key compromise over time -> ephemeral X25519 PFS + sigil rotation;
+      pairing impersonation -> Ed25519 (sigil) attestation; garbage pre-auth
+      input -> total header parser. OUT OF SCOPE (stated): GPS spoofing, RF
+      jamming/DoS, key extraction from unprotected flash.
+
+      ## BUILD STATUS (honest)
+        - DONE: anti-replay window (ReplayWindow; Kani SEC-K01..K04). Ascon-
+          AEAD128 primitive + MAC-floor + AEAD seal (NIST SP 800-232; official
+          KATs Count 1/2/3/34/35 byte-exact; Kani SEC-K05 ct-eq, SEC-K06 mac
+          totality).
+        - PLANNED: Security-Header parser (total, pre-auth) + SA/frame wrap-
+          verify; relay-ci verify-before-parse + relay-to wrap wiring; X25519+
+          Ed25519/sigil session establishment with rekey-on-reboot; AEAD-upgrade
+          profile wiring; nonce-derivation finalization.
+    tags: [architecture, relay-sec, security, ascon, anti-replay, ccsds, falcon, wohl, sigil, pfs]
     fields:
       composition: >
-        relay-sec wraps relay-ccsds frames via the sec_header_flag bit;
-        consumed by relay-ci (uplink verify_frame) and relay-to (downlink
-        wrap_frame); shared byte-identically by falcon and wohl.
+        relay-sec wraps relay-ccsds frames via the sec_header_flag bit; consumed
+        by relay-ci (uplink verify-before-parse) and relay-to (downlink wrap);
+        shared byte-identically by falcon and wohl. One Ascon-AEAD128 primitive,
+        two modes (MAC-floor empty-PT / AEAD-upgrade).
       interfaces:
         provided:
-          - "verify_frame(sa, &frame) -> Authentic | BadMac | Replay | TooOld | UnknownSpi"
-          - "wrap_frame(sa, &mut frame) -> writes Security Header + Trailer"
-          - "ReplayWindow.accept(counter) -> ReplayVerdict (DONE, Kani-proven)"
+          - "ascon::mac(key,nonce,msg) -> tag (MAC-floor) — DONE, KAT+Kani"
+          - "ascon::seal(key,nonce,ad,pt,ct) -> tag (AEAD upgrade) — DONE, KAT"
+          - "ReplayWindow.accept(counter) -> ReplayVerdict — DONE, Kani-proven"
+          - "verify_frame(sa,&frame) -> Authentic|BadMac|Replay|TooOld|UnknownSpi — PLANNED"
+          - "wrap_frame(sa,&mut frame) — PLANNED"
         required:
           - "relay-ccsds frame with sec_header_flag set"
-          - "symmetric session key from a sigil-attested establishment (cold path)"
+          - "per-channel session key from an ephemeral-X25519 + Ed25519/sigil establishment (cold path)"
       concurrency: >
-        per-frame stateful (one ReplayWindow + SA per channel); no
-        threads; MAC + replay check run inline on the host's frame path.
+        per-(SA,channel) state (one ReplayWindow + key); no threads; Ascon MAC +
+        replay check run inline on the host frame path. Asymmetric crypto only on
+        the cold establishment path.
+      crypto-primitive:
+        aead: "Ascon-AEAD128 (NIST SP 800-232) — table-free, constant-time on M0+/M4/RV32"
+        mac-floor: "Ascon-AEAD128, empty plaintext (tag over frame-as-AD)"
+        key-agreement: "ephemeral X25519 ECDH (forward secrecy)"
+        authentication: "Ed25519 via sigil (signs the X25519 exchange; rotation; offline attest)"
       build-status:
-        done: "anti-replay window (ReplayWindow) — 4 Kani proofs + 10 tests"
-        planned: "Chaskey-12 MAC core, SA + frame wrap/verify, relay-ci/relay-to wiring, sigil session keys, AEAD profiles"
+        done: "ReplayWindow (SEC-K01..K04); Ascon-AEAD128 + mac + seal (NIST KATs Count 1/2/3/34/35; SEC-K05/K06)"
+        planned: "total Security-Header parser, SA + frame wrap/verify, relay-ci/relay-to wiring, X25519+Ed25519/sigil session keys with rekey-on-reboot, AEAD-upgrade profiles"
     links:
       - type: allocated-from
         target: SWREQ-SEC-P01
+      - type: allocated-from
+        target: SWREQ-SEC-P02
       - type: refines
         target: SWARCH-RELAY-001

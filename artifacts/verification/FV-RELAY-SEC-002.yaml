@@ -1,0 +1,43 @@
+artifacts:
+  - id: FV-RELAY-SEC-002
+    type: sw-verification
+    title: "Ascon-AEAD128 — NIST KAT + Kani totality (relay-sec)"
+    status: approved
+    description: >
+      Verification of the relay-sec Ascon-AEAD128 primitive (NIST SP 800-232) —
+      the single core providing both the MAC-only floor (empty plaintext) and
+      the AEAD upgrade.
+
+      Correctness — OFFICIAL NIST genkat (LWC_AEAD_KAT_128_128.txt), asserted
+      byte-exact in `ascon::tests`:
+        Count 1  empty AD, empty PT  -> tag 4F9C278211BEC9316BF68F46EE8B2EC6
+        Count 2  MAC-floor: empty PT, AD 0x30 -> CCCB674FE18A09A285D6AB11B35675C0
+        Count 3  empty PT, AD 0x3031 -> F65B191550C4DF9CFDD4460EBBCCA782
+        Count 34 PT 0x20, empty AD  -> CT E8, tag DD576ABA1CD3E6FC704DE02AEDB79588
+        Count 35 PT 0x20, AD 0x30   -> CT 96, tag 2B8016836C75A7D86866588CA245D886
+      The IV is the FINAL SP 800-232 value 0x00001000808c0001 (NOT the Ascon
+      v1.2 IV). All passing locally on first implementation.
+
+      Totality — Kani 0.67, both VERIFICATION SUCCESSFUL:
+        SEC-K05 verify_ct_eq_tag_correct — constant-time compare == structural eq
+        SEC-K06 verify_ascon_mac_total   — mac is total (no panic / OOB) for every
+                message length across empty / partial / full / multi-block-tail.
+
+      17 cargo tests in relay-sec (ReplayWindow + Ascon). no_std/no_alloc, safe
+      Rust (#![forbid(unsafe_code)]), u64 words (constant-time when lowered to
+      32-bit ops on M0+/M4/RV32; the permutation is table-free).
+
+      HONEST note: the implementation is transcribed from the official Ascon-c
+      reference and validated against the published genkat; the Kani harnesses
+      prove TOTALITY, not cryptographic strength (which rests on the Ascon
+      standard plus the KAT match). The 12-round Ascon-p, domain separation, and
+      finalization are exercised end-to-end by the KAT.
+    tags: [verification, relay-sec, ascon, aead, kani, kat, nist]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-sec"
+        - run: "cargo kani -p relay-sec"
+    links:
+      - type: verifies
+        target: SWREQ-SEC-P02

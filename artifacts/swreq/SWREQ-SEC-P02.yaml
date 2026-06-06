@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-SEC-P02
+    type: sw-req
+    title: "SEC-P02: Per-frame authentication via Ascon-AEAD128"
+    status: approved
+    description: >
+      The authentication layer shall protect each frame with Ascon-AEAD128
+      (NIST SP 800-232): a 128-bit tag authenticates the frame in a MAC-only
+      floor (empty plaintext, frame carried as associated data), with an
+      AEAD-upgrade mode encrypting the payload for confidentiality where the
+      security association selects it. Tag verification shall be constant-time.
+      ONE primitive serves both falcon and wohl on targets without AES hardware
+      (STM32G0 M0+, STM32G474 M4, ESP32-C3 RV32), so the verified core proves a
+      single crypto primitive.
+    tags: [relay-sec, ascon, aead, mac, ccsds, falcon, wohl, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Official NIST genkat vectors (LWC_AEAD_KAT_128_128.txt) asserted
+        byte-exact: Count 1 (empty/empty), Count 2 (MAC-floor empty PT + AD),
+        Count 3, Count 34 (PT only), Count 35 (PT+AD). Kani: SEC-K05 the
+        constant-time tag compare equals structural equality; SEC-K06 the MAC
+        is total (no panic / OOB) across all message-length cases.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001

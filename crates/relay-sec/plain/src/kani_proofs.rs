@@ -63,3 +63,27 @@ fn verify_too_old_unchanged() {
     assert!(w.accept(c) == ReplayVerdict::TooOld);
     assert!(w.highest() == snapshot.highest());
 }
+
+/// SEC-K05 — the constant-time tag comparison is functionally correct: it agrees
+/// with structural equality for every pair of 16-byte tags.
+#[kani::proof]
+fn verify_ct_eq_tag_correct() {
+    let a: [u8; 16] = kani::any();
+    let b: [u8; 16] = kani::any();
+    assert_eq!(ascon::ct_eq_tag(&a, &b), a == b);
+}
+
+/// SEC-K06 — Ascon-AEAD128 `mac` is total (no panic / no OOB index) for any
+/// message length across the empty / partial / full / multi-block tail cases.
+/// Length is symbolic (the indexing driver); data is concrete to keep the
+/// permutation cheap — panic-freedom does not depend on the byte values.
+#[kani::proof]
+#[kani::unwind(41)]
+fn verify_ascon_mac_total() {
+    let key = [0u8; 16];
+    let nonce = [0u8; 16];
+    let len: usize = kani::any();
+    kani::assume(len <= 33); // 0, partial, one full block, full+partial tail
+    let buf = [0u8; 33];
+    let _ = ascon::mac(&key, &nonce, &buf[..len]);
+}

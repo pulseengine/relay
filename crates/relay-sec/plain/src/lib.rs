@@ -9,9 +9,10 @@
 //! Built BEFORE the MAC primitive on purpose. Replay defeat is a *state-machine*
 //! property — counter monotonicity — provable with zero cryptography. Writing
 //! the MAC first would tempt a "done" on a green crypto test while freshness
-//! went unproven. The per-frame MAC (Chaskey-12 default; HMAC-SHA256 as the
-//! certification profile) and the frame wrap/verify layer land ON TOP of this
-//! window, which doubles as the authenticated nonce.
+//! went unproven. The per-frame authentication (Ascon-AEAD128, NIST SP 800-232 —
+//! ONE primitive providing both the MAC-only floor and the AEAD upgrade, in
+//! `ascon`) and the frame wrap/verify layer land ON TOP of this window, whose
+//! counter feeds the authenticated nonce.
 //!
 //! Model: RFC 6479 / IPsec-ESP sliding window. Counters are 1-based; 0 is the
 //! reserved "never seen" sentinel. `bitmap` bit `k` records that counter
@@ -26,6 +27,8 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
+
+pub mod ascon;
 
 /// Width of the replay window: how far out-of-order a frame may arrive and
 /// still be distinguished from a replay. Frames older than this are rejected.
