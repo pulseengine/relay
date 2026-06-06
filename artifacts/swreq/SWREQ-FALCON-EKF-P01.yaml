@@ -6,14 +6,17 @@ artifacts:
     description: >
       The estimator's output quaternion shall satisfy
       ||q|| in [1.0 - eps, 1.0 + eps] for eps = 1e-6 at every
-      tick. Verus contract enforces this on the state update.
-    tags: [falcon, ekf, quaternion, invariant, verus]
+      tick. Property tests enforce this on every tick output.
+    tags: [falcon, ekf, quaternion, invariant, proptest]
     fields:
       req-type: functional
       priority: must
       verification-criteria: >
-        Verus proof: update_state ensures self.q is unit-quaternion
-        within numerical tolerance.
+        Property test (relay-ekf): tick() output quaternion satisfies
+        is_unit_quaternion within tolerance, both per-tick
+        (ekf_p01_tick_preserves_unit_quaternion) and over randomized
+        sequences (proptest, >=4096 cases). A Verus SMT proof of the
+        quaternion algebra is roadmapped for v0.4 (see FV-FALCON-EKF-001).
     links:
       - type: derives-from
         target: SYSREQ-FALCON-001
@@ -26,13 +29,15 @@ artifacts:
       The estimator's state vector components shall remain
       within physically plausible ranges: position |x| < 1e6 m,
       velocity |v| < 1000 m/s, attitude error < 1 rad.
-    tags: [falcon, ekf, numerical-bounds, verus]
+    tags: [falcon, ekf, numerical-bounds, proptest]
     fields:
       req-type: functional
       priority: must
       verification-criteria: >
-        Verus proof: state update preserves the state-bound
-        invariant on all admissible sensor inputs.
+        Property test (relay-ekf): state stays finite and within
+        bounds under adversarial accel (zero / extreme / NaN) — no
+        NaN/inf reachable (see FV-FALCON-EKF-001). A Verus state-bound
+        proof is roadmapped for v0.4.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-001
@@ -46,13 +51,15 @@ artifacts:
       with the magnitude of sensor disagreement (residual between
       predicted and measured sensor values). Used by limit-checker
       as health signal for failover.
-    tags: [falcon, ekf, innovation, monitoring, verus]
+    tags: [falcon, ekf, innovation, monitoring, test]
     fields:
       req-type: functional
       priority: must
       verification-criteria: >
-        Verus proof: innovation(measurement_residual_a) >=
-        innovation(measurement_residual_b) when |a| >= |b|.
+        Test ekf_p03_innovation_monotone_with_tilt_disagreement
+        (relay-ekf): the innovation scalar increases monotonically with
+        tilt-disagreement magnitude. A Verus monotonicity proof is
+        roadmapped for v0.4.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-001
@@ -62,17 +69,20 @@ artifacts:
     title: "EKF-P04: WCET bounded by IMU sample interval"
     status: approved
     description: >
-      The estimator's process_sample function shall complete
-      within the IMU sample interval (1 ms at 1 kHz) on the
-      target Cortex-M7 (480 MHz). Bounded by Lean WCET proof.
+      The estimator's tick() function shall complete within the IMU
+      sample interval (1 ms at 1 kHz) on the target Cortex-M7
+      (480 MHz). Bounded by construction and the Lean cascade WCET proof.
     tags: [falcon, ekf, wcet, real-time, lean]
     fields:
       req-type: non-functional
       priority: must
       verification-criteria: >
-        Lean WCET proof: process_sample has bounded execution time
-        in instruction count, validated by criterion benchmark on
-        Cortex-M7 hardware.
+        WCET bounded by construction (straight-line tick(), fixed-size
+        state, no dynamic allocation). The in-loop estimator cascade
+        WCET is proven in CompositionalWcet.lean (FV-FALCON-WCET-001:
+        11507 cycles << the 480000-cycle 1 ms budget). A relay-ekf
+        tick()-specific Lean WCET proof and a Cortex-M7 criterion
+        bench are roadmapped.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-001

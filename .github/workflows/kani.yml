@@ -28,7 +28,8 @@ jobs:
       fail-fast: false
       matrix:
         # The verified framework engines (consumed by falcon and/or wohl). Each
-        # carries Kani harnesses in crates/<engine>/plain/src/engine.rs.
+        # carries Kani harnesses in crates/<engine>/plain/src/kani_proofs.rs
+        # (plain-only, so a verus-strip regen of engine.rs cannot wipe them).
         engine:
           - relay-lc
           - relay-sc
@@ -36,6 +37,16 @@ jobs:
           - relay-sch
           - relay-cfdp
           - relay-sca
+          - relay-ci
+          - relay-cs
+          - relay-ccsds
+          - relay-hk
+          - relay-ds
+          - relay-fm
+          - relay-mm
+          - relay-md
+          - relay-to
+          - relay-tbl
     steps:
       - uses: actions/checkout@v5
       - name: Kani verify ${{ matrix.engine }}

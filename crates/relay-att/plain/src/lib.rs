@@ -284,8 +284,9 @@ mod tests {
         // the small-angle path would compute ω = 2 * Kp which is huge.
         // Clamp must kick in.
         let mut a = AttController::new();
-        // 90° roll setpoint; q_err = (cos45°, sin45°, 0, 0) = (0.707, 0.707, 0, 0)
-        let q_sp = [0.7071, 0.7071, 0.0, 0.0];
+        // 90° roll setpoint; q_err = (cos45°, sin45°, 0, 0) = (1/√2, 1/√2, 0, 0)
+        let r2 = core::f32::consts::FRAC_1_SQRT_2;
+        let q_sp = [r2, r2, 0.0, 0.0];
         let r = a.tick(ts(0.001), [1.0, 0.0, 0.0, 0.0], q_sp);
         for i in 0..3 {
             assert!(
@@ -301,7 +302,8 @@ mod tests {
         // After the controller's internal sanitisation, both inputs
         // are unit; q_err = q_sp ⊗ q^-1 must therefore also be unit.
         let mut a = AttController::new();
-        let q = [0.7071_f32, 0.0, 0.7071, 0.0]; // 90° pitch
+        let r2 = core::f32::consts::FRAC_1_SQRT_2;
+        let q = [r2, 0.0, r2, 0.0]; // 90° pitch
         let q_sp = [0.9659_f32, 0.0, 0.2588, 0.0]; // 30° pitch
         a.tick(ts(0.001), q, q_sp);
         assert!(is_unit_quaternion(a.last_q_err()),

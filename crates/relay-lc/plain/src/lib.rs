@@ -8,5 +8,8 @@ pub use relay_primitives::persistence;
 
 pub mod engine;
 
+#[cfg(kani)]
+mod kani_proofs;
+
 #[cfg(feature = "c-api")]
 pub mod c_api;

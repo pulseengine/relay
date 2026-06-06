@@ -1804,12 +1804,8 @@ mod tests {
             adaptive.propagate(imu_rest, 0.01);
         }
         // velocity-block covariance identical to float precision at rest
-        for i in 3..6 {
-            let d = (fixed.nees_velocity([0.0; 3]) - adaptive.nees_velocity([0.0; 3])).abs();
-            let _ = i;
-            assert!(d < 1e-3, "rest covariance must match (diff {d})");
-            break;
-        }
+        let d = (fixed.nees_velocity([0.0; 3]) - adaptive.nees_velocity([0.0; 3])).abs();
+        assert!(d < 1e-3, "rest covariance must match (diff {d})");
     }
 
     /// clamp_factor bounds the inflation to [1, max] (never shrinks, never
