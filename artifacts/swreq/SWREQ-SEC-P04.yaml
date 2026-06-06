@@ -1,0 +1,38 @@
+artifacts:
+  - id: SWREQ-SEC-P04
+    type: sw-req
+    title: "SEC-P04: Authenticated frame wrap/verify (authenticate before parse)"
+    status: approved
+    description: >
+      The frame layer shall protect a CCSDS payload as
+      header(11) || payload || Ascon-tag(16) on a per-channel security
+      association (distinct SPI + key per channel).
+
+      wrap: emit the header with the channel's monotonic counter, derive the
+      nonce, and Ascon-MAC over (header || payload).
+
+      verify: AUTHENTICATE BEFORE PARSING THE PAYLOAD. In order — parse the
+      fixed header (total), confirm the SPI matches the channel (UnknownSpi
+      otherwise), recompute the Ascon tag over (header || payload) and compare
+      it in constant time (BadMac otherwise), and ONLY THEN check the replay
+      window on the AUTHENTICATED counter (Replay / TooOld otherwise),
+      returning the payload only on success. verify shall be TOTAL — it
+      returns a typed error and never panics on any byte input. Cross-channel
+      replay shall fail by construction because the key is per-channel (the
+      MAC check fails under the wrong key); the replay window is selected by
+      the authenticated channel_id, never the arrival link.
+    tags: [relay-sec, frame, wrap, verify, authenticate-before-parse, anti-replay, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Kani SEC-K10 verify is total (no panic) on arbitrary bytes. Proptest
+        wrap→verify round-trip over random key/spi/channel/payload returns the
+        exact payload; proptest verify-is-total over random bytes. Unit:
+        tampered tag/payload -> BadMac; wrong SPI -> UnknownSpi; replayed
+        counter -> Replay; truncated -> TooShort. The MAC is checked BEFORE the
+        replay window (authenticate, then judge freshness on the authenticated
+        counter).
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001

@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-SEC-P03
+    type: sw-req
+    title: "SEC-P03: Total pre-auth Security-Header parser + nonce derivation"
+    status: approved
+    description: >
+      The Security-Header parser is the minimal PRE-authentication attack
+      surface (you must parse SPI || channel_id || counter to look up the
+      security association before the MAC can be verified). It shall therefore
+      be TOTAL: for any byte buffer it returns either a valid SecurityHeader
+      (spi:u16, channel_id:u8, counter:u64) or a too-short indication, and
+      NEVER panics on arbitrary/garbage input. write∘parse shall round-trip.
+      The 128-bit AEAD nonce shall be derived INJECTIVELY from
+      (spi, channel_id, counter) so that distinct triples yield distinct
+      nonces — the uniqueness precondition for AEAD safety (with per-channel
+      keys + monotonic counter + rekey-on-reboot, the nonce is never reused).
+    tags: [relay-sec, header, parser, pre-auth, tcb, nonce, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Kani SEC-K07 parse is total (no panic) for any buffer; SEC-K08
+        write∘parse round-trips; SEC-K09 the nonce is injective in
+        (spi, channel_id, counter). Plus unit tests for the fixed layout.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001

@@ -29,6 +29,8 @@
 #![forbid(unsafe_code)]
 
 pub mod ascon;
+pub mod frame;
+pub mod header;
 
 /// Width of the replay window: how far out-of-order a frame may arrive and
 /// still be distinguished from a replay. Frames older than this are rejected.
