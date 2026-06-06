@@ -498,11 +498,15 @@ mod tests {
         /// adversarial measurements and a degenerate b0.
         #[test]
         fn adrc_is_total(
+            // Integer ranges scaled to floats: proptest 1.10's float-range
+            // sampler has a flaky internal assertion (float_samplers.rs:462).
+            // om∈[-50,50], od∈[-10,10], dt∈[0,0.2] — same ranges, integer-sampled.
             meas in proptest::collection::vec(
-                (-50.0f32..50.0, -10.0f32..10.0, 0.0f32..0.2), 0..400),
+                (-50_000i32..=50_000, -10_000i32..=10_000, 0u32..=200_000), 0..400),
         ) {
             let mut a = AdrcAxis::new(AdrcGains::new(20.0, 5.0, 6.0));
-            for (om, od, dt) in meas {
+            for (om_i, od_i, dt_i) in meas {
+                let (om, od, dt) = (om_i as f32 / 1000.0, od_i as f32 / 1000.0, dt_i as f32 / 1_000_000.0);
                 let u = a.tick(om, od, dt);
                 proptest::prop_assert!(u.is_finite());
                 proptest::prop_assert!(a.disturbance().is_finite());
@@ -577,11 +581,14 @@ mod tests {
         /// bounded command: y stays within max_mag, ẏ within max_rate.
         #[test]
         fn command_filter_bibo_under_dt_jitter(
+            // integer-sampled to dodge the proptest 1.10 float-range sampler
+            // flake; u∈[-5,5], dt∈[0.00085,0.00115] (±15% of 1 kHz).
             seq in proptest::collection::vec(
-                (-5.0f32..5.0, 0.00085f32..0.00115), 0..500),
+                (-5_000i32..=5_000, 850u32..=1150), 0..500),
         ) {
             let mut cf = CommandFilter::new(25.0, 2.0, 40.0);
-            for (u, dt) in seq {
+            for (u_i, dt_i) in seq {
+                let (u, dt) = (u_i as f32 / 1000.0, dt_i as f32 / 1_000_000.0);
                 let y = cf.step(u, dt);
                 proptest::prop_assert!(y.abs() <= 2.0 + 1e-4);
                 proptest::prop_assert!(cf.rate().abs() <= 40.0 + 1e-4);
@@ -595,11 +602,14 @@ mod tests {
         /// ω_o·dt < 2 margin.
         #[test]
         fn eso_bounded_under_dt_jitter(
+            // integer-sampled to dodge the proptest 1.10 float-range sampler
+            // flake; om∈[-3,3], dt∈[0.00085,0.00115] (±15% of 1 kHz).
             seq in proptest::collection::vec(
-                (-3.0f32..3.0, 0.00085f32..0.00115), 0..1000),
+                (-3_000i32..=3_000, 850u32..=1150), 0..1000),
         ) {
             let mut a = AdrcAxis::new(AdrcGains::with_tau(40.0, 12.0, 30.0, 0.0125));
-            for (om, dt) in seq {
+            for (om_i, dt_i) in seq {
+                let (om, dt) = (om_i as f32 / 1000.0, dt_i as f32 / 1_000_000.0);
                 let u = a.tick(om, 0.0, dt); // regulate to 0
                 proptest::prop_assert!(u.abs() < 1.0e3, "control bounded, {u}");
                 proptest::prop_assert!(a.disturbance().abs() < 1.0e4, "z2 bounded");
