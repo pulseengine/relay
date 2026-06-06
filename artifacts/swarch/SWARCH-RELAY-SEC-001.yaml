@@ -1,0 +1,97 @@
+artifacts:
+  - id: SWARCH-RELAY-SEC-001
+    type: sw-arch-component
+    title: Safety-protected comms layer (relay-sec, shared falcon + wohl)
+    status: approved
+    description: >
+      relay-sec is the end-to-end authentication layer for the relay
+      CCSDS communication stack. It is ONE shared, formally-verified,
+      no_std/no_alloc component protecting BOTH products: falcon (drone
+      C2 over radio/cellular/satellite) and wohl (home-automation
+      sensor->hub over sub-GHz). A spoofed or replayed command — "disarm"
+      on a drone, "unlock" on a door — is rejected on either, from one
+      layer that is qualified once.
+
+      Design rationale (NOT DDS/ROS2): the relay CCSDS stack already
+      exists and is proven in wohl (relay-ccsds codec, relay-to telemetry
+      downlink) — falcon uses the complementary half (relay-ci command
+      uplink). Rather than import a heavyweight runtime, relay-sec wraps
+      the EXISTING relay-ccsds frames using the primary-header
+      `sec_header_flag` bit (currently decoded but unused) with a
+      Security Header + Trailer. The performance side (companion/ground,
+      more power) converts CCSDS <-> anything (MAVLink for QGroundControl,
+      mission planners) OUTSIDE the verified boundary; the verified FC
+      speaks only the minimal safety-protected CCSDS wire.
+
+      Two-tier crypto (asymmetric establishment / symmetric hot path),
+      mirroring Matter CASE->AES-CCM and SDLS SA->frame:
+        - Session establishment / identity / key rotation: sigil
+          (Ed25519 signed attestation, offline-verifiable) — COLD path,
+          never at 1 kHz.
+        - Per-frame authentication: a symmetric MAC over the
+          authenticated header+payload + a monotonic anti-replay
+          counter — HOT path, runs every frame.
+
+      Per-frame primitive (recommended, SA-negotiated): Chaskey-12 MAC,
+      128-bit key, 64-bit tag. ~16.9 cyc/byte on the wohl STM32G0 M0+
+      value line (~8x faster than AES-CMAC's 136), ~400 B ROM, inherently
+      constant-time ARX (side-channel-safe AND the easiest construction
+      to Verus/Kani-verify: straight-line integer arithmetic, no tables,
+      no key schedule). HMAC-SHA256 is the certification-profile
+      alternative (FIPS-recognized, heavier on M0+); AES-256-GCM is an
+      optional AEAD profile where AES hardware exists and confidentiality
+      is wanted.
+
+      Wire format (SDLS-shaped, not the space byte-layout): Security
+      Header = SPI(2) || channel_id(1) || counter(8); Security Trailer =
+      tag (8 Chaskey / 16 GCM). Confidentiality is an SA-selectable
+      upgrade: MAC-only is the verifiable safety floor everywhere; AEAD
+      defaults ON for wohl sensor data (door/occupancy is privacy- and
+      safety-sensitive) and is optional for falcon.
+
+      Integration (critical ordering): in relay-ci, verify_frame runs
+      BEFORE validate_header (authenticate, then parse — a spoofed packet
+      never reaches dispatch); in relay-to, wrap_frame runs AFTER encode.
+      The existing CRC/XOR checksum is retained only as a non-security
+      corruption check, never relied on for authenticity.
+
+      BUILD STATUS (honest):
+        - DONE: the anti-replay sliding window (ReplayWindow, RFC 6479 /
+          IPsec-ESP). 4 Kani proofs SEC-K01..K04 SUCCESSFUL + 10 tests.
+          Freshness oracle built before the crypto on purpose.
+        - PLANNED: the Chaskey-12 MAC core (Verus+Kani), the SA /
+          frame wrap-verify, the relay-ci / relay-to wiring, sigil
+          session-key establishment, and the AEAD profiles.
+
+      Threat -> mitigation: command injection -> MAC; replay -> monotonic
+      counter (+ window); cross-channel replay -> channel_id in the
+      authenticated header; tampering -> MAC; eavesdropping/occupancy ->
+      optional AEAD; key compromise -> sigil rotation; pairing
+      impersonation -> sigil Ed25519 attestation. Out of scope (stated
+      honestly): GPS spoofing, RF jamming/DoS, key extraction from
+      unprotected flash — separate controls.
+    tags: [architecture, relay-sec, security, anti-replay, ccsds, falcon, wohl, sigil]
+    fields:
+      composition: >
+        relay-sec wraps relay-ccsds frames via the sec_header_flag bit;
+        consumed by relay-ci (uplink verify_frame) and relay-to (downlink
+        wrap_frame); shared byte-identically by falcon and wohl.
+      interfaces:
+        provided:
+          - "verify_frame(sa, &frame) -> Authentic | BadMac | Replay | TooOld | UnknownSpi"
+          - "wrap_frame(sa, &mut frame) -> writes Security Header + Trailer"
+          - "ReplayWindow.accept(counter) -> ReplayVerdict (DONE, Kani-proven)"
+        required:
+          - "relay-ccsds frame with sec_header_flag set"
+          - "symmetric session key from a sigil-attested establishment (cold path)"
+      concurrency: >
+        per-frame stateful (one ReplayWindow + SA per channel); no
+        threads; MAC + replay check run inline on the host's frame path.
+      build-status:
+        done: "anti-replay window (ReplayWindow) — 4 Kani proofs + 10 tests"
+        planned: "Chaskey-12 MAC core, SA + frame wrap/verify, relay-ci/relay-to wiring, sigil session keys, AEAD profiles"
+    links:
+      - type: allocated-from
+        target: SWREQ-SEC-P01
+      - type: refines
+        target: SWARCH-RELAY-001

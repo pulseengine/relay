@@ -47,6 +47,7 @@ jobs:
           - relay-md
           - relay-to
           - relay-tbl
+          - relay-sec
     steps:
       - uses: actions/checkout@v5
       - name: Kani verify ${{ matrix.engine }}
