@@ -1,0 +1,23 @@
+artifacts:
+  - id: FV-FALCON-OFFB-001
+    type: sw-verification
+    title: "Offboard setpoint-timeout failsafe — relay-offboard tests + Kani (falcon v1.40)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-OFFB-P01. The relay-offboard crate (no_std/no_alloc,
+      forbid-unsafe) implements OffboardReceiver — the freshness/timeout state
+      machine on top of the authenticated relay-sec channel. 6 unit tests cover
+      stale-before-start, active-while-fresh, stale-after-timeout, window
+      re-arm, replayed/stale-counter rejection, and backward-clock safety. Three
+      Kani harnesses pass: OFFB-K01 status total for any clock/timeout
+      (saturating arithmetic), OFFB-K02 the failsafe property (strictly past the
+      timeout ⇒ always Stale), OFFB-K03 replay/non-increasing-counter rejection.
+    tags: [verification, falcon, offboard, relay-offboard, kani, v1.40]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-offboard"
+        - run: "cargo kani -p relay-offboard"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OFFB-P01
