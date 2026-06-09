@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-FALCON-GNSSDRV-P01
+    type: sw-req
+    title: "GNSSDRV-P01: u-blox UBX GNSS driver decodes NAV-PVT with checksum validation, total on any stream"
+    status: implemented
+    description: >
+      Falcon shall provide a real GNSS driver body that parses the u-blox UBX
+      protocol from a byte stream and decodes UBX-NAV-PVT (position, velocity,
+      time) for the estimator, validating the UBX 8-bit Fletcher checksum and
+      rejecting corrupted frames. This is one of the real driver bodies the
+      readiness dossier flagged as the #1 hardware-boundary gap (F6) — until now
+      only the ICM-42688 IMU had a real driver. The parser shall be total: no
+      byte stream (including hostile/garbage UART input) may panic or overflow
+      its buffer.
+    tags: [falcon, gnss, ubx, driver, hardware, f6, px4-parity, kani]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-gnss-ubx UbxParser: a spec-built NAV-PVT frame decodes to the
+        exact lat/lon/height/hMSL/velNED/fixType/numSV (protocol round-trip
+        against an independent Fletcher encoder); a corrupted payload byte is
+        rejected (checksum mismatch → no emit); the parser resyncs after leading
+        garbage and a stray sync. Kani GNSS-K01: push() is total for any byte
+        sequence (no panic, no buffer overflow). On-silicon UART validation is
+        the named open item; this pins the byte-level protocol.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
