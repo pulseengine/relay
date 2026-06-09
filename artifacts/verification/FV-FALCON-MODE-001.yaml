@@ -1,0 +1,23 @@
+artifacts:
+  - id: FV-FALCON-MODE-001
+    type: sw-verification
+    title: "Flight-mode sequence + position/altitude-hold bench (falcon v1.39)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-MODE-P01. falcon-hold-bench exercises the existing
+      verified relay-fsm (flight-mode state machine) and relay-pos (position
+      loop): the FSM sequences Disarmed→Armed→Takeoff→Loiter and upholds the
+      never-disarm-airborne invariant (a disarm command is refused while
+      airborne; a land+touchdown reaches Disarmed), and a closed point-mass loop
+      under steady wind shows position-hold drift ≤ 1.0 m and altitude error
+      ≤ 0.5 m. The inner attitude/rate cascade is idealised here (it is verified
+      separately by relay-geo Lean Lyapunov + relay-adrc).
+    tags: [verification, falcon, flight-modes, hold, bench, v1.39]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-hold-bench"
+        - run: "cargo run -p falcon-hold-bench"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MODE-P01
