@@ -1,0 +1,32 @@
+artifacts:
+  - id: SWREQ-FALCON-IEKF-P01
+    type: sw-req
+    title: "IEKF-P01: full-state navigation tracks position/velocity on a SITL trajectory (RC#3 closed)"
+    status: implemented
+    description: >
+      The falcon full-state Invariant EKF (relay-iekf) shall estimate NED
+      position and velocity (not only attitude) by fusing IMU propagation with
+      GNSS position updates, demonstrated on a deterministic SITL trajectory.
+      This is the demonstration-level requirement for the closure of RC#3 (the
+      attitude-only Mahony filter produced no position estimate); the estimator
+      core, its covariance propagation, and its consistency tuning were built
+      and verified across v0.21–v0.35 (see SWREQ-FALCON-EKF-P05 / FV-FALCON-
+      EKF-002 for the gz consistency evidence). This requirement adds the SITL
+      accuracy bench so the keystone is exercised end-to-end, not only
+      unit-tested.
+    tags: [falcon, iekf, navigation, estimator, rc3, sitl, px4-parity]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-iekf-bench runs the verified relay-iekf over a 30 s synthetic
+        IMU+GNSS trajectory (~66 m translational leg) and reports: position RMS
+        over the final 5 s ≤ 2.0 m, velocity RMS ≤ 1.5 m/s, and finite estimates
+        throughout. Mean position NEES is reported as a diagnostic; rigorous
+        consistency (ANEES≈3) is gated separately against gz ground truth by
+        FV-FALCON-EKF-002 (adaptive-Q). Honest limit recorded: the IEKF exposes
+        no GPS-velocity update, so velocity is position-aided only, and baro
+        z-only fusion needs a scalar-axis update the API does not yet provide.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

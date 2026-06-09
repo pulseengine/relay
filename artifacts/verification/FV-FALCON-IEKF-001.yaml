@@ -1,0 +1,23 @@
+artifacts:
+  - id: FV-FALCON-IEKF-001
+    type: sw-verification
+    title: "IEKF SITL accuracy bench — full-state position/velocity tracking (falcon v1.38)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-IEKF-P01. The falcon-iekf-bench example exercises the
+      verified relay-iekf full-state Invariant EKF over a deterministic 30 s
+      synthetic IMU+GNSS trajectory and asserts the estimate tracks NED position
+      (RMS ≤ 2.0 m over the final 5 s) and velocity (RMS ≤ 1.5 m/s) and stays
+      finite throughout — the SITL-level demonstration that RC#3 is closed (the
+      old Mahony filter had no position estimate). Mean position NEES is reported
+      as a diagnostic; the rigorous consistency claim (ANEES≈3) remains gated by
+      FV-FALCON-EKF-002 against gz ground truth, not re-claimed here.
+    tags: [verification, falcon, iekf, navigation, sitl, bench, v1.38]
+    fields:
+      method: test
+      steps:
+        - run: "cargo test -p falcon-iekf-bench"
+        - run: "cargo run -p falcon-iekf-bench"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-IEKF-P01

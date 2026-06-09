@@ -2448,14 +2448,17 @@ artifacts:
   # The road to PX4 feature-parity — and past it. v1.38–v1.46.
   #
   # Frame: falcon already has the realism arc (GNSS/baro/battery/turbulence),
-  # MAVLink bridge + missions + keep-out zones, and a wasmtime-runnable verified
-  # flight core. The honest gaps vs PX4 are: NO full-state estimator (RC#3 — EKF
-  # is attitude-only Mahony), NO real driver suite on silicon (F6/F7), missing
-  # everyday flight modes (position/altitude/offboard), partial failsafes, and
-  # no hardware bring-up. These nine releases close those gaps in dependency
-  # order, and the through-line differentiator — formal verification + a verified
-  # authenticated C2 link (v1.35–v1.37) PX4 simply does not have — is what makes
-  # "parity" actually "parity, but provable."
+  # MAVLink bridge + missions + keep-out zones, a wasmtime-runnable verified
+  # flight core, AND (corrected on first scoping) a full-state IEKF estimator +
+  # geometric SE(3) control + flight-mode state machine + a failsafe supervisor —
+  # all built v0.21–v1.34. The GENUINE remaining gaps vs PX4 are the readiness
+  # dossier's hardware register: NO real driver suite on silicon (F6/F7 — only
+  # the IMU exists), offboard wiring, a unified failsafe arbiter, and
+  # collision/precision-landing. v1.38/v1.39 therefore land BENCHES/wiring for
+  # already-built capability; v1.40–v1.44 build the real gaps. The through-line
+  # differentiator — formal verification + a verified authenticated C2 link
+  # (v1.35–v1.37) PX4 lacks — is what makes "parity" actually "parity, but
+  # provable."
   #
   # Every entry ships a release VIDEO that VISUALLY shows the feature working,
   # driven by real output (gz VideoRecorder / SITL capture → YouTube), never a
@@ -2464,36 +2467,45 @@ artifacts:
   # ===========================================================================
   - id: FEAT-FALCON-v1.38
     type: feature
-    title: "v1.38 — IEKF full-state estimator: the keystone that closes RC#3 (PX4 EKF2 parity)"
-    status: pending
+    title: "v1.38 — IEKF full-state estimator SITL bench: RC#3 closure, demonstrated (PX4 EKF2 parity)"
+    status: approved
     description: >
-      PLANNED. The single biggest gap to PX4: today the estimator is an
-      attitude-only Mahony complementary filter — there is no real
-      position/velocity estimator (RC#3). This lands an Invariant EKF (IEKF) on
-      SE_2(3) fusing IMU + GNSS + baro into a full nav state (attitude,
-      velocity, position, biases), the role PX4 fills with EKF2.
+      LANDED. CORRECTION on first scoping: the full-state estimator is NOT a
+      gap — the Invariant EKF (relay-iekf, SE_2(3): attitude, velocity,
+      position, gyro/accel biases) was already built and verified across
+      v0.21–v0.35, and RC#3 (the attitude-only Mahony filter with no position)
+      was already closed (adaptive-Q consistency, FV-FALCON-EKF-002 against gz
+      ground truth). Re-scoped accordingly: this release adds the missing piece
+      — a standalone SITL accuracy bench that exercises the existing estimator
+      end-to-end, the role PX4 fills with EKF2 but here formally verified.
 
-      Why it's "beyond" parity: the IEKF is built to the verified posture —
-      no_std/no_alloc, the matrix kernels oracle-gated (Kani totality on the
-      update step, KAT-style consistency vs a reference trajectory), so the
-      estimator is not just present but provable. PX4's EKF2 is neither.
+      Ships: examples/falcon-iekf-bench — runs relay-iekf over a 30 s synthetic
+      IMU+GNSS trajectory (~66 m translational leg) and asserts position RMS
+      ≤ 2.0 m / velocity RMS ≤ 1.5 m/s over the final 5 s, finite throughout.
 
-      Oracle: SITL trajectory KAT (RMS nav error vs ground truth under a
-      budget) + Kani totality on the predict/update arithmetic + proptest on
-      covariance positive-definiteness.
-    tags: [falcon, estimator, iekf, navigation, px4-parity, milestone, v1.38, planned]
+      Honest limits published: position-only GNSS aiding (the IEKF exposes no
+      GPS-velocity update), so velocity is weakly observable between fixes and
+      NEES runs mildly over-confident on clean synthetic motion — reported as a
+      diagnostic, with rigorous consistency gated by the gz adaptive-Q evidence
+      (FV-FALCON-EKF-002), not re-claimed. Baro z-only fusion needs a
+      scalar-axis update the API does not yet expose (noted gap).
+    tags: [falcon, estimator, iekf, navigation, px4-parity, milestone, v1.38, landed]
     fields:
-      release-target: "IEKF tracks position+velocity vs SITL ground truth within RMS budget; predict/update Kani-total"
-      px4-equivalent: "EKF2 (24-state) — falcon matches the role, adds formal verification"
-      crate: crates/relay-ekf (new IEKF path; Mahony retained for the bench)
+      release-target: "falcon-iekf-bench: IEKF tracks position+velocity vs SITL ground truth within RMS budget"
+      px4-equivalent: "EKF2 (24-state) — falcon matches the role with a formally-verified estimator"
+      crate: crates/relay-iekf (existing) + examples/falcon-iekf-bench (new)
       video: >
-        SITL flight with two overlaid trails: estimated trajectory vs ground
-        truth, error shrinking as GNSS+baro fuse in. A GNSS dropout is injected
-        live and the estimate holds on IMU dead-reckoning, then re-converges.
-        The on-screen RMS-error number is the real bench output.
+        SITL run with two overlaid trails: estimated trajectory vs ground truth
+        over the 66 m leg, the on-screen position-RMS number the real bench
+        output. The full-state estimate (position+velocity) that the old
+        attitude-only Mahony filter could not produce at all.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.37
+      - type: depends-on
+        target: SWREQ-FALCON-IEKF-P01
+      - type: verified-by
+        target: FV-FALCON-IEKF-001
 
   - id: FEAT-FALCON-v1.39
     type: feature
