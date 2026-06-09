@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-SEC-P05
+    type: sw-req
+    title: "SEC-P05: AEAD-upgrade confidentiality mode (per-SA, no downgrade)"
+    status: approved
+    description: >
+      relay-sec shall provide a per-channel confidentiality mode — MAC-only
+      (authenticated plaintext) or AEAD (Ascon-AEAD128 encrypting the payload).
+      The mode is a property of the authenticated security association, fixed at
+      establishment; it shall NOT be negotiated in a frame an attacker can strip.
+      A frame built for one mode shall fail authentication on a channel
+      configured for the other (no silent downgrade). AEAD is the recommended
+      default for privacy-sensitive links (wohl sensor/occupancy data). Satisfies
+      the STPA-Sec constraints SSC-CONF (encrypt adversary-exposed payloads) and
+      SSC-NODOWNGRADE (mode bound to the SA).
+    tags: [relay-sec, ascon, aead, confidentiality, downgrade, falcon, wohl, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Ascon open (decrypt+verify) byte-exact vs the official NIST genkat
+        (Count 34/35 decrypt to PT 0x20, authentic). AEAD wrap/verify_into
+        round-trip recovers the plaintext and hides it on the wire; tampered
+        ciphertext/tag → BadMac. No-silent-downgrade: a MAC-only frame on an AEAD
+        channel (and vice versa) → BadMac. Kani SEC-K12: verify_into (AEAD) is
+        total.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001

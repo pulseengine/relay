@@ -43,13 +43,28 @@ pub enum VerifyError {
     TooOld,
 }
 
-/// One channel's security association: a distinct SPI + key, a send counter for
-/// `wrap`, and an anti-replay window for `verify`.
+/// The confidentiality mode of a channel — a property of the authenticated
+/// security association, fixed at establishment, NEVER negotiated in a frame an
+/// attacker could strip (SSC-NODOWNGRADE). The mode is bound by the Ascon
+/// construction itself (the AD/PT split differs), so a frame built for one mode
+/// fails authentication on a channel configured for the other — a downgrade
+/// cannot succeed silently.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Confidentiality {
+    /// Authenticated, payload in plaintext (Ascon MAC-floor over header‖payload).
+    MacOnly,
+    /// Authenticated AND encrypted (Ascon-AEAD128, AD=header, PT=payload).
+    Aead,
+}
+
+/// One channel's security association: a distinct SPI + key, the confidentiality
+/// mode, a send counter for `wrap`, and an anti-replay window for verification.
 #[derive(Clone, Copy)]
 pub struct SecurityChannel {
     spi: u16,
     channel_id: u8,
     key: [u8; KEY_LEN],
+    mode: Confidentiality,
     send_counter: u64,
     window: ReplayWindow,
 }
@@ -59,13 +74,30 @@ impl SecurityChannel {
     /// (ephemeral X25519 + Ed25519/sigil); on reboot a new key + fresh counter
     /// are established (rekey-on-reboot), so the nonce is never reused.
     pub fn new(spi: u16, channel_id: u8, key: [u8; KEY_LEN]) -> Self {
+        Self::with_confidentiality(spi, channel_id, key, Confidentiality::MacOnly)
+    }
+
+    /// A channel with an explicit confidentiality mode. AEAD is the recommended
+    /// default for privacy-sensitive links (wohl sensor/occupancy data).
+    pub fn with_confidentiality(
+        spi: u16,
+        channel_id: u8,
+        key: [u8; KEY_LEN],
+        mode: Confidentiality,
+    ) -> Self {
         SecurityChannel {
             spi,
             channel_id,
             key,
+            mode,
             send_counter: 0,
             window: ReplayWindow::new(),
         }
+    }
+
+    /// This channel's confidentiality mode.
+    pub fn mode(&self) -> Confidentiality {
+        self.mode
     }
 
     /// Wrap `payload` into `out` as `header ‖ payload ‖ tag`, advancing the send
@@ -84,11 +116,72 @@ impl SecurityChannel {
             counter: self.send_counter,
         };
         hdr.write(out);
-        out[SEC_HEADER_LEN..body_end].copy_from_slice(payload);
-        // MAC-floor over (header ‖ payload).
-        let tag = ascon::mac(&self.key, &hdr.nonce(), &out[..body_end]);
+        let nonce = hdr.nonce();
+        let tag = match self.mode {
+            Confidentiality::MacOnly => {
+                // plaintext payload + MAC-floor over (header ‖ payload).
+                out[SEC_HEADER_LEN..body_end].copy_from_slice(payload);
+                ascon::mac(&self.key, &nonce, &out[..body_end])
+            }
+            Confidentiality::Aead => {
+                // encrypt payload in place; AD = header, PT = payload.
+                let (header, rest) = out.split_at_mut(SEC_HEADER_LEN);
+                ascon::seal(&self.key, &nonce, header, payload, &mut rest[..payload.len()])
+            }
+        };
         out[body_end..frame_len].copy_from_slice(&tag);
         Some(frame_len)
+    }
+
+    /// Verify `frame` and write the recovered (decrypted, if AEAD) payload into
+    /// `out`, returning its length. Mode-aware and total: a typed [`VerifyError`]
+    /// for any input, never a panic. Same safety ordering as [`Self::verify`] —
+    /// authenticate (MAC or AEAD tag), then replay on the authenticated counter.
+    /// A frame whose mode does not match this channel fails authentication
+    /// (the Ascon construction binds the mode — no silent downgrade).
+    pub fn verify_into(&mut self, frame: &[u8], out: &mut [u8]) -> Result<usize, VerifyError> {
+        let hdr = SecurityHeader::parse(frame).ok_or(VerifyError::TooShort)?;
+        if frame.len() < MIN_FRAME_LEN {
+            return Err(VerifyError::TooShort);
+        }
+        if hdr.spi != self.spi {
+            return Err(VerifyError::UnknownSpi);
+        }
+        let body_end = frame.len() - TAG_LEN;
+        let body = &frame[SEC_HEADER_LEN..body_end]; // payload (MacOnly) or ciphertext (Aead)
+        if out.len() < body.len() {
+            return Err(VerifyError::TooShort); // caller buffer too small
+        }
+        let mut tag = [0u8; TAG_LEN];
+        tag.copy_from_slice(&frame[body_end..]);
+        let nonce = hdr.nonce();
+        let authentic = match self.mode {
+            Confidentiality::MacOnly => {
+                let expected = ascon::mac(&self.key, &nonce, &frame[..body_end]);
+                if ascon::ct_eq_tag(&expected, &tag) {
+                    out[..body.len()].copy_from_slice(body);
+                    true
+                } else {
+                    false
+                }
+            }
+            Confidentiality::Aead => ascon::open(
+                &self.key,
+                &nonce,
+                &frame[..SEC_HEADER_LEN],
+                body,
+                &tag,
+                &mut out[..body.len()],
+            ),
+        };
+        if !authentic {
+            return Err(VerifyError::BadMac);
+        }
+        match self.window.accept(hdr.counter) {
+            ReplayVerdict::Fresh | ReplayVerdict::Reordered => Ok(body.len()),
+            ReplayVerdict::Replay => Err(VerifyError::Replay),
+            ReplayVerdict::TooOld => Err(VerifyError::TooOld),
+        }
     }
 
     /// Verify `frame` and, on success, return the authenticated payload slice.
@@ -203,7 +296,82 @@ mod tests {
                 *b = (i as u8).wrapping_mul(37).wrapping_add(11);
             }
             let _ = rx.verify(&buf[..len]); // must not panic
+            let mut out = [0u8; 40];
+            let _ = rx.verify_into(&buf[..len], &mut out); // must not panic either
         }
+    }
+
+    fn aead_channels() -> (SecurityChannel, SecurityChannel) {
+        let key = [0x42u8; KEY_LEN];
+        (
+            SecurityChannel::with_confidentiality(0xABCD, 2, key, Confidentiality::Aead),
+            SecurityChannel::with_confidentiality(0xABCD, 2, key, Confidentiality::Aead),
+        )
+    }
+
+    #[test]
+    fn aead_roundtrips_and_hides_payload() {
+        let (mut tx, mut rx) = aead_channels();
+        let payload = b"DOOR=OPEN occupancy=1";
+        let mut buf = [0u8; 64];
+        let n = tx.wrap(payload, &mut buf).unwrap();
+        // confidentiality: the payload is NOT on the wire in plaintext.
+        assert!(
+            buf[SEC_HEADER_LEN..SEC_HEADER_LEN + payload.len()] != payload[..],
+            "payload must be encrypted on the wire"
+        );
+        // and it decrypts back exactly.
+        let mut out = [0u8; 64];
+        let len = rx.verify_into(&buf[..n], &mut out).unwrap();
+        assert_eq!(&out[..len], &payload[..]);
+    }
+
+    #[test]
+    fn aead_tamper_rejected() {
+        let (mut tx, mut rx) = aead_channels();
+        let mut buf = [0u8; 64];
+        let n = tx.wrap(b"unlock", &mut buf).unwrap();
+        buf[SEC_HEADER_LEN] ^= 0xFF; // flip a ciphertext byte
+        let mut out = [0u8; 64];
+        assert_eq!(rx.verify_into(&buf[..n], &mut out), Err(VerifyError::BadMac));
+    }
+
+    #[test]
+    fn macfloor_verify_into_matches_in_place() {
+        // MAC-only channel via verify_into returns the same plaintext payload.
+        let (mut tx, mut rx) = channels();
+        let mut buf = [0u8; 64];
+        let n = tx.wrap(b"ARM", &mut buf).unwrap();
+        let mut out = [0u8; 64];
+        let len = rx.verify_into(&buf[..n], &mut out).unwrap();
+        assert_eq!(&out[..len], b"ARM");
+    }
+
+    #[test]
+    fn no_silent_downgrade_either_direction() {
+        let key = [0x42u8; KEY_LEN];
+        // A MAC-only frame presented to an AEAD channel fails authentication.
+        let mut tx_mac = SecurityChannel::new(0xABCD, 2, key);
+        let mut rx_aead =
+            SecurityChannel::with_confidentiality(0xABCD, 2, key, Confidentiality::Aead);
+        let mut buf = [0u8; 64];
+        let n = tx_mac.wrap(b"disarm", &mut buf).unwrap();
+        let mut out = [0u8; 64];
+        assert_eq!(
+            rx_aead.verify_into(&buf[..n], &mut out),
+            Err(VerifyError::BadMac),
+            "AEAD channel must reject a MAC-only frame (no downgrade)"
+        );
+        // An AEAD frame presented to a MAC-only channel also fails.
+        let mut tx_aead =
+            SecurityChannel::with_confidentiality(0xABCD, 2, key, Confidentiality::Aead);
+        let mut rx_mac = SecurityChannel::new(0xABCD, 2, key);
+        let m = tx_aead.wrap(b"disarm", &mut buf).unwrap();
+        assert_eq!(
+            rx_mac.verify_into(&buf[..m], &mut out),
+            Err(VerifyError::BadMac),
+            "MAC-only channel must reject an AEAD frame"
+        );
     }
 }
 
