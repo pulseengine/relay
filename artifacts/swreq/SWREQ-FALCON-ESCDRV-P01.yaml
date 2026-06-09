@@ -1,0 +1,30 @@
+artifacts:
+  - id: SWREQ-FALCON-ESCDRV-P01
+    type: sw-req
+    title: "ESCDRV-P01: DShot ESC frames from the verified mixer (saturating, CRC4) + battery threshold monitor"
+    status: implemented
+    description: >
+      Falcon shall provide the output-side driver bodies (F7): a DShot ESC
+      throttle encoder and a battery monitor. The DShot encoder shall map the
+      verified mixer's [0,1] motor command into a valid DShot throttle
+      (saturating — never wrapping out of the 11-bit range; NaN/≤0 ⇒ motor stop)
+      and build the 16-bit frame with the exact 4-bit DShot CRC. The battery
+      monitor shall map a raw ADC reading to pack voltage and classify it
+      (Ok/Low/Critical) against the failsafe thresholds that feed the v1.41
+      failsafe arbiter.
+    tags: [falcon, esc, dshot, battery, driver, hardware, f7, px4-parity, kani]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-esc-dshot: dshot_frame CRC matches an independent reference for a
+        range of throttles/telemetry bits; a known frame equals its hand-computed
+        value (throttle 1046 ⇒ 0x82C6); throttle_from_unit saturates (≤0/NaN⇒0,
+        ≥1⇒2047, monotone, always in range); battery classify maps ADC→volts and
+        thresholds Ok/Low/Critical. Kani ESC-K01 throttle always 0 or in
+        [DSHOT_MIN,DSHOT_MAX] (no wrap) for any f32; ESC-K02 every emitted frame
+        is CRC-self-consistent; ESC-K03 battery classify total for any input.
+        On-silicon bit-timing validation is the named open item.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

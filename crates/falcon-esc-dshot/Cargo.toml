@@ -1,0 +1,15 @@
+[package]
+name = "falcon-esc-dshot"
+description = "Falcon ESC + battery driver — DShot digital throttle frames (CRC4) from the verified mixer, and a battery voltage/threshold monitor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[lints]
+workspace = true
