@@ -1,0 +1,25 @@
+artifacts:
+  - id: FV-FALCON-CPREV-001
+    type: sw-verification
+    title: "Collision prevention + precision landing — relay-avoid tests + Kani (falcon v1.44)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-CPREV-P01. The relay-avoid crate (no_std/no_alloc/
+      forbid-unsafe) provides the collision-prevention velocity limiter
+      (limit_approach_speed / cap_approach / braking_speed) and the vision
+      precision-landing controller (precision_velocity / within_radius). 6 unit
+      tests + 2 proptests cover stop-inside-margin, far-clear full command,
+      close-in braking cap, [0,v_cmd] bound, correction-toward-marker, v_max
+      clamp, within-radius, and NaN fail-safe. Two Kani harnesses: AVOID-K01
+      cap_approach safe (result <= both inputs, >= 0); AVOID-K02 within_radius
+      total. The sqrt-dependent invariants are proptest-gated (Kani on libm sqrt
+      is intractable); the guarded >=0/finite outputs keep the Kani bounds valid.
+    tags: [verification, falcon, collision-prevention, precision-landing, relay-avoid, kani, v1.44]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-avoid"
+        - run: "cargo kani -p relay-avoid"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-CPREV-P01

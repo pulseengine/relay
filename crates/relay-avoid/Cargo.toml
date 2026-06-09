@@ -1,0 +1,21 @@
+[package]
+name = "relay-avoid"
+description = "Relay Avoid — verified collision-prevention velocity limiter (brake before obstacles) + vision-marker precision-landing controller"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+relay-math = { path = "../relay-math" }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -2708,22 +2708,31 @@ artifacts:
   - id: FEAT-FALCON-v1.44
     type: feature
     title: "v1.44 — collision prevention + precision landing (PX4 parity, vision/rangefinder)"
-    status: pending
+    status: approved
     description: >
-      PLANNED. falcon has reactive keep-out zones (v1.31); PX4 adds
-      sensor-driven collision prevention (rangefinder/obstacle map) and
-      precision landing (vision/IR marker). This lands both: a rangefinder-fed
-      collision-prevention setpoint limiter and a vision-marker precision-land
-      controller, both inside the verified safety envelope.
+      LANDED. falcon has reactive keep-out zones (v1.31, path deflection around
+      mapped no-fly zones); PX4 adds sensor-driven collision prevention
+      (rangefinder braking) and precision landing (vision/IR marker). This lands
+      both, with the safety-critical capping logic formally verified.
 
-      Oracle: SITL obstacle-course test (no collision, stops short by margin) +
-      precision-land test (touchdown within radius of the marker) + Kani
-      totality on the setpoint limiter.
-    tags: [falcon, collision-prevention, precision-landing, vision, rangefinder, px4-parity, milestone, v1.44, planned]
+      Ships: crates/relay-avoid (new, no_std/no_alloc/forbid-unsafe) —
+      limit_approach_speed caps the commanded approach speed to the
+      braking-limited sqrt(2*a_max*(dist-margin)) so the vehicle always stops
+      before the margin of a sensed obstacle (inside the margin ⇒ stop);
+      precision_velocity drives a clamped horizontal correction toward a vision
+      marker, with a within_radius convergence check.
+
+      Oracle: stop-inside-margin, far-clear full command, close-in braking cap,
+      result always in [0,v_cmd], correction-toward-marker + v_max clamp,
+      within-radius, NaN fail-safe (6 unit + 2 proptests). Kani AVOID-K01
+      cap_approach safe (result ≤ both inputs, ≥ 0); AVOID-K02 within_radius
+      total. The f32 sqrt invariants are proptest-gated (Kani on libm sqrt is
+      intractable), with guarded ≥0/finite outputs so the Kani bounds hold.
+    tags: [falcon, collision-prevention, precision-landing, vision, rangefinder, px4-parity, milestone, v1.44, landed]
     fields:
-      release-target: "SITL: vehicle stops short of obstacles by margin; lands within precision radius of the marker"
-      px4-equivalent: "Collision Prevention + Precision Landing — falcon's limiter is Kani-total"
-      crate: crates/relay-pos + falcon-vision
+      release-target: "relay-avoid: approach speed capped to braking-limited (stops before margin); precision correction clamped to v_max; Kani-safe"
+      px4-equivalent: "Collision Prevention + Precision Landing — falcon's limiter/clamp is Kani-proven safe"
+      crate: crates/relay-avoid (new)
       video: >
         SITL: the drone flies at a wall and visibly stops short, the safety
         margin drawn on screen; then it descends onto a landing marker and the
@@ -2732,6 +2741,10 @@ artifacts:
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.43
+      - type: depends-on
+        target: SWREQ-FALCON-CPREV-P01
+      - type: verified-by
+        target: FV-FALCON-CPREV-001
 
   - id: FEAT-FALCON-v1.45
     type: feature
