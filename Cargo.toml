@@ -21,6 +21,7 @@ members = [
     "crates/relay-sec",
     "crates/relay-offboard",
     "crates/relay-fsafe",
+    "crates/relay-avoid",
     "crates/relay-lc-diff",
     "crates/relay-mavlink",
     "crates/relay-nid",

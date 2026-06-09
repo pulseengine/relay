@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-FALCON-CPREV-P01
+    type: sw-req
+    title: "CPREV-P01: collision-prevention velocity limiter + vision precision-landing controller"
+    status: implemented
+    description: >
+      Falcon shall provide, on top of the position loop, (a) a collision-
+      prevention velocity LIMITER that caps the commanded approach speed to the
+      braking-limited speed sqrt(2*a_max*(dist-margin)) so the vehicle can always
+      decelerate to a stop before the safety margin of a rangefinder-detected
+      obstacle (inside the margin yields a stop), and (b) a vision-marker
+      precision-landing controller that produces a horizontal velocity correction
+      toward a landing marker (clamped to a max speed) plus a within-radius
+      convergence check. These are PX4's Collision Prevention and Precision
+      Landing, here with the capping/clamp logic formally verified. The limiter
+      result shall be in [0, v_cmd] and the correction magnitude shall never
+      exceed v_max, for any input (NaN/inf fail safe to stop / no correction).
+      Distinct from the v1.31 reactive keep-out zones (SWREQ-FALCON-AVOID-P01):
+      that deflects the path around mapped no-fly zones; this brakes for sensed
+      obstacles and centres on a landing marker.
+    tags: [falcon, collision-prevention, precision-landing, vision, rangefinder, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-avoid: inside the margin yields speed 0; far/clear yields the full
+        command; close-in is capped to sqrt(2*a_max*usable); result always in
+        [0, v_cmd]; the precision correction points toward the marker and is
+        clamped to v_max; within_radius success check; NaN inputs fail safe. Kani
+        AVOID-K01 cap_approach safe (result <= both inputs and >= 0) for any
+        speeds; AVOID-K02 within_radius total (origin within any non-negative
+        radius). The f32 sqrt invariants (limited speed in range; correction
+        within v_max) are proptest-gated; their outputs are guarded >=0/finite so
+        the Kani bounds hold for any sqrt value.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001
