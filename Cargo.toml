@@ -41,6 +41,7 @@ members = [
     "crates/falcon-hitl",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
+    "examples/falcon-iekf-bench",
     "examples/falcon-sitl-hover",
     "examples/falcon-hitl-rfspoof",
     "examples/falcon-sitl-gz",

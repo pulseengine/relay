@@ -1,0 +1,15 @@
+[package]
+name = "falcon-iekf-bench"
+description = "Falcon v1.38 — synthetic IMU+GNSS+baro full-state IEKF accuracy + consistency bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "falcon-iekf-bench"
+path = "src/main.rs"
+
+[dependencies]
+relay-iekf = { path = "../../crates/relay-iekf" }
