@@ -2417,8 +2417,308 @@ artifacts:
       release-target: "session handshake (X25519 + Ed25519/sigil) + rekey-on-reboot invariant test green"
       crate: crates/relay-sec
       blocked-on: "reviewer design pass; SWREQ-SEC-P06 to be drafted"
+      video: >
+        Split screen: two endpoints run the handshake; the shared session key is
+        derived independently and matches (shown live). Then reboot one endpoint
+        and replay a captured pre-reboot frame — it is REJECTED on screen
+        (rekey-on-reboot). Beyond PX4: a verified, replay-proof C2 link PX4 has
+        no built-in equivalent for. Driven by the real handshake test output.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.36
       - type: implements
         target: SYSREQ-CI-001
+
+  # ===========================================================================
+  # The road to PX4 feature-parity — and past it. v1.38–v1.46.
+  #
+  # Frame: falcon already has the realism arc (GNSS/baro/battery/turbulence),
+  # MAVLink bridge + missions + keep-out zones, and a wasmtime-runnable verified
+  # flight core. The honest gaps vs PX4 are: NO full-state estimator (RC#3 — EKF
+  # is attitude-only Mahony), NO real driver suite on silicon (F6/F7), missing
+  # everyday flight modes (position/altitude/offboard), partial failsafes, and
+  # no hardware bring-up. These nine releases close those gaps in dependency
+  # order, and the through-line differentiator — formal verification + a verified
+  # authenticated C2 link (v1.35–v1.37) PX4 simply does not have — is what makes
+  # "parity" actually "parity, but provable."
+  #
+  # Every entry ships a release VIDEO that VISUALLY shows the feature working,
+  # driven by real output (gz VideoRecorder / SITL capture → YouTube), never a
+  # text card over generic footage. The video is part of done-ness, not a
+  # marketing afterthought.
+  # ===========================================================================
+  - id: FEAT-FALCON-v1.38
+    type: feature
+    title: "v1.38 — IEKF full-state estimator: the keystone that closes RC#3 (PX4 EKF2 parity)"
+    status: pending
+    description: >
+      PLANNED. The single biggest gap to PX4: today the estimator is an
+      attitude-only Mahony complementary filter — there is no real
+      position/velocity estimator (RC#3). This lands an Invariant EKF (IEKF) on
+      SE_2(3) fusing IMU + GNSS + baro into a full nav state (attitude,
+      velocity, position, biases), the role PX4 fills with EKF2.
+
+      Why it's "beyond" parity: the IEKF is built to the verified posture —
+      no_std/no_alloc, the matrix kernels oracle-gated (Kani totality on the
+      update step, KAT-style consistency vs a reference trajectory), so the
+      estimator is not just present but provable. PX4's EKF2 is neither.
+
+      Oracle: SITL trajectory KAT (RMS nav error vs ground truth under a
+      budget) + Kani totality on the predict/update arithmetic + proptest on
+      covariance positive-definiteness.
+    tags: [falcon, estimator, iekf, navigation, px4-parity, milestone, v1.38, planned]
+    fields:
+      release-target: "IEKF tracks position+velocity vs SITL ground truth within RMS budget; predict/update Kani-total"
+      px4-equivalent: "EKF2 (24-state) — falcon matches the role, adds formal verification"
+      crate: crates/relay-ekf (new IEKF path; Mahony retained for the bench)
+      video: >
+        SITL flight with two overlaid trails: estimated trajectory vs ground
+        truth, error shrinking as GNSS+baro fuse in. A GNSS dropout is injected
+        live and the estimate holds on IMU dead-reckoning, then re-converges.
+        The on-screen RMS-error number is the real bench output.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.37
+
+  - id: FEAT-FALCON-v1.39
+    type: feature
+    title: "v1.39 — Position + Altitude hold flight modes (the everyday PX4 GPS modes)"
+    status: pending
+    description: >
+      PLANNED. With a real estimator (v1.38), add the flight modes pilots
+      actually live in: Altitude hold (hold baro/estimated altitude, level
+      attitude) and Position hold (hold a 3D point against wind, stick =
+      velocity setpoint). These are PX4's Altitude and Position modes.
+
+      Builds on the existing POS→ATT→RATE→MIX cascade; the new work is the
+      mode state and the velocity/position setpoint generators with the
+      verified safety envelope (tilt/velocity limits).
+
+      Oracle: SITL hold-station test (drift < budget over N seconds in wind) +
+      Kani totality on the setpoint clamps + witness MC/DC on the new mode
+      branches.
+    tags: [falcon, flight-modes, position-hold, altitude-hold, px4-parity, milestone, v1.39, planned]
+    fields:
+      release-target: "Position hold keeps station < drift budget in SITL wind; Altitude hold steady; mode branches MC/DC-covered"
+      px4-equivalent: "Altitude (ALTCTL) + Position (POSCTL) modes"
+      crate: crates/relay-fm (flight-mode state) + relay-pos
+      video: >
+        Pilot pushes a stick, releases — the drone stops and holds the point
+        while a wind gust visibly pushes on it; the position-error trace stays
+        inside the budget band on screen. Real SITL telemetry, not a re-enacted
+        clip.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.38
+
+  - id: FEAT-FALCON-v1.40
+    type: feature
+    title: "v1.40 — Offboard control: companion-computer setpoint streaming (PX4 Offboard parity)"
+    status: pending
+    description: >
+      PLANNED. Let an external companion computer drive the vehicle by
+      streaming setpoints (position / velocity / attitude / body-rate) over the
+      AUTHENTICATED relay-sec link — the PX4 Offboard mode, but every setpoint
+      is on the v1.35–v1.37 verified, replay-proof channel rather than raw
+      MAVLink/uXRCE-DDS.
+
+      Includes the offboard safety contract: setpoint-timeout failsafe (stale
+      stream → hold/RTL), so a dropped companion link can't fly the vehicle
+      into the ground.
+
+      Oracle: setpoint round-trip integration test over the relay-sec channel +
+      Kani totality on the timeout state machine + the freshness check reusing
+      the v1.35 anti-replay window.
+    tags: [falcon, offboard, companion, setpoint-streaming, relay-sec, px4-parity, milestone, v1.40, planned]
+    fields:
+      release-target: "external script flies a trajectory via authenticated offboard setpoints; stale-stream failsafe triggers correctly"
+      px4-equivalent: "Offboard mode (MAVROS / uXRCE-DDS) — falcon does it over a verified authenticated link"
+      crate: crates/relay-sec + relay-to + relay-fm
+      video: >
+        A laptop script streams a figure-8 of setpoints; the drone flies it in
+        SITL. Mid-flight the script is killed — on screen the setpoint-timeout
+        failsafe fires and the vehicle holds, not crashes. Then a spoofed
+        (unauthenticated) setpoint is injected and is rejected at the link.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.39
+
+  - id: FEAT-FALCON-v1.41
+    type: feature
+    title: "v1.41 — full failsafe state machine: RC-loss, datalink-loss, geofence, position-loss"
+    status: pending
+    description: >
+      PLANNED. falcon has a low-battery failsafe (v1.21) and a geofence+RTL
+      path (v0.10); PX4 has a unified failsafe state machine with configurable
+      actions per trigger. This lands that: a single verified failsafe arbiter
+      taking RC-loss, datalink-loss, geofence-breach, position-loss, and
+      low-battery, resolving to the correct prioritized action (Hold / RTL /
+      Land / Terminate).
+
+      The arbiter is the highest-safety-value state machine in the vehicle, so
+      it is verified hardest: Verus/Kani on the transition table (no undefined
+      transition, the most-severe action always wins, no oscillation).
+
+      Oracle: per-trigger SITL injection test (each failsafe → correct action) +
+      Kani exhaustive transition-table proof + witness MC/DC on the arbiter.
+    tags: [falcon, failsafe, safety-state-machine, px4-parity, milestone, v1.41, planned]
+    fields:
+      release-target: "every failsafe trigger resolves to the correct prioritized action in SITL; transition table Kani-exhaustive"
+      px4-equivalent: "Commander failsafe state machine — falcon's is formally verified"
+      crate: crates/relay-hs (hazard/safety-state) + relay-fm
+      video: >
+        A dashboard of triggers; each is flipped live (RC off, datalink cut,
+        push past geofence, GNSS denied) and the vehicle takes the right
+        action on screen, with the arbiter's chosen state shown. The Kani
+        "no undefined transition" proof scrolls green alongside.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.40
+
+  - id: FEAT-FALCON-v1.42
+    type: feature
+    title: "v1.42 — real driver suite I: GNSS (UBX) + magnetometer + barometer on embedded-hal (F6)"
+    status: pending
+    description: >
+      PLANNED. The #1 hardware-boundary honesty gap (roadmap thread B / F6):
+      today only the ICM-42688 IMU is a real driver, over an abstract bus, with
+      axis-remap still TODO and never run on silicon. This lands GNSS (u-blox
+      UBX protocol), magnetometer, and barometer driver bodies over real
+      embedded-hal traits, and finishes the ICM-42688 SPI + axis-remap.
+
+      Oracle: mock-bus protocol tests (the icm42688 pattern — drive the exact
+      register/UBX byte sequences and assert parse) for each driver. On-silicon
+      validation is named as the honest open item carried to v1.45.
+    tags: [falcon, drivers, gnss, ubx, magnetometer, barometer, embedded-hal, px4-parity, milestone, v1.42, planned, f6]
+    fields:
+      release-target: "GNSS/mag/baro driver bodies parse real protocol byte sequences in mock-bus tests; ICM-42688 axis-remap done"
+      px4-equivalent: "PX4 driver suite — falcon's drivers feed the verified IEKF"
+      crate: crates/falcon-drivers (gnss, mag, baro) + falcon-imu-icm42688
+      video: >
+        A logic-analyzer-style capture of the real UBX-NAV-PVT byte stream on
+        one side and the parsed lat/lon/alt appearing on the other, feeding the
+        v1.38 IEKF in HITL. Real captured bus traffic, decoded live.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.41
+
+  - id: FEAT-FALCON-v1.43
+    type: feature
+    title: "v1.43 — real driver suite II: ESC (DShot) + battery + verified actuator output (F7)"
+    status: pending
+    description: >
+      PLANNED. The output half of the driver suite (roadmap thread B / F7):
+      DShot ESC protocol driver and battery (voltage/current/fuel-gauge) driver
+      bodies, plus wiring the verified mixer's outputs to real actuator
+      commands. This closes the loop from verified control law → real motor
+      command.
+
+      Oracle: mock-bus DShot frame tests (bit-timing / checksum) + battery
+      telemetry parse tests + a bench test that the verified mixer's saturated
+      output maps to in-range DShot values (no wraparound).
+    tags: [falcon, drivers, esc, dshot, battery, actuator, px4-parity, milestone, v1.43, planned, f7]
+    fields:
+      release-target: "DShot frames bit-exact in mock-bus tests; mixer→DShot mapping saturates safely; battery telemetry parses"
+      px4-equivalent: "PX4 DShot + battery drivers — falcon's path is mixer-to-motor verified end to end"
+      crate: crates/falcon-drivers (esc, battery)
+      video: >
+        A motor on a bench spins up driven by the verified WASM mixer through
+        the real DShot driver; the commanded vs measured RPM trace tracks on
+        screen, and a commanded saturation shows the output clamping instead of
+        wrapping. Real bench hardware.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.42
+
+  - id: FEAT-FALCON-v1.44
+    type: feature
+    title: "v1.44 — collision prevention + precision landing (PX4 parity, vision/rangefinder)"
+    status: pending
+    description: >
+      PLANNED. falcon has reactive keep-out zones (v1.31); PX4 adds
+      sensor-driven collision prevention (rangefinder/obstacle map) and
+      precision landing (vision/IR marker). This lands both: a rangefinder-fed
+      collision-prevention setpoint limiter and a vision-marker precision-land
+      controller, both inside the verified safety envelope.
+
+      Oracle: SITL obstacle-course test (no collision, stops short by margin) +
+      precision-land test (touchdown within radius of the marker) + Kani
+      totality on the setpoint limiter.
+    tags: [falcon, collision-prevention, precision-landing, vision, rangefinder, px4-parity, milestone, v1.44, planned]
+    fields:
+      release-target: "SITL: vehicle stops short of obstacles by margin; lands within precision radius of the marker"
+      px4-equivalent: "Collision Prevention + Precision Landing — falcon's limiter is Kani-total"
+      crate: crates/relay-pos + falcon-vision
+      video: >
+        SITL: the drone flies at a wall and visibly stops short, the safety
+        margin drawn on screen; then it descends onto a landing marker and the
+        touchdown-error circle shows it inside the precision radius. Real sim
+        telemetry.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.43
+
+  - id: FEAT-FALCON-v1.45
+    type: feature
+    title: "v1.45 — hardware bring-up: the verified stack flies on a real flight controller (HITL → tethered hover)"
+    status: pending
+    description: >
+      PLANNED. The hardware boundary, crossed. Everything above runs in SITL or
+      mock-bus; this lands the full verified flight core (meld → loom → synth →
+      gale, per SWARCH) on real silicon (G474 / ESP32-C3), reads the v1.42/v1.43
+      real drivers on the real buses, and achieves a HITL-validated tethered
+      hover. The honest "never on silicon" caveat from threads B/D is retired
+      here.
+
+      Oracle: on-silicon driver validation (the open item from v1.42/v1.43) +
+      a HITL hover-stability bench (attitude/position error under budget on real
+      hardware) + a `nm` symbol check that the gale-verified RTOS underlies
+      relay-sch.
+    tags: [falcon, hardware, bring-up, hitl, gale, silicon, milestone, v1.45, planned]
+    fields:
+      release-target: "verified core hovers tethered on real hardware; on-silicon driver validation passes; gale symbols confirmed under relay-sch"
+      px4-equivalent: "PX4 on Pixhawk — falcon on verified silicon with a verified RTOS beneath"
+      crate: "integration: meld/loom/synth/gale boundary (see SWARCH-RELAY-SCHED-001)"
+      video: >
+        A real drone on a tether lifts off and holds a stable hover, driven by
+        the verified WASM core on the real flight controller. Split with the
+        live attitude/position telemetry off the board. THE money shot: provable
+        software flying real hardware.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.44
+
+  - id: FEAT-FALCON-v1.46
+    type: feature
+    title: "v1.46 — beyond-PX4 capstone: the six-domain dossier + the 'provable parity' demonstrator"
+    status: pending
+    description: >
+      PLANNED. The capstone that states the thesis: falcon now matches PX4's
+      everyday capability (estimator, modes, offboard, failsafes, drivers,
+      collision/precision, on real hardware) AND ships what PX4 cannot — a
+      formally-verified stack with an authenticated, replay-proof C2 link.
+
+      Ships the certification evidence (this is where the long-pending v1.0
+      six-domain credit dossier capstone is discharged against real flight
+      evidence) plus a side-by-side demonstrator: the same mission flown by
+      falcon and by PX4, with falcon's verification + comms-auth differentiators
+      called out where PX4 has none.
+
+      Oracle: the release-execution traceability-completeness gate green across
+      all six safety domains (the V closed for every approved/implemented
+      artifact) + the demonstrator mission reproducible from a signed manifest.
+    tags: [falcon, capstone, dossier, certification, beyond-px4, differentiator, milestone, v1.46, planned]
+    fields:
+      release-target: "six-domain credit dossier clears the bar on real flight evidence; provable-parity demonstrator reproducible from a signed manifest"
+      px4-equivalent: "none — this is the differentiator: verified + authenticated where PX4 is neither"
+      relates-to: "discharges the long-pending FEAT-FALCON-v1.0 certification-dossier capstone against real evidence"
+      video: >
+        Side-by-side: falcon and PX4 fly the same mission. Where PX4 shows a
+        feature, falcon shows the same feature PLUS a green proof / a rejected
+        spoofed command. Ends on the six-domain dossier going green. The
+        tagline earned, not asserted: parity — but provable.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.45
+      - type: implements
+        target: SYSREQ-FALCON-010
