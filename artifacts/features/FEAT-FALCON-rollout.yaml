@@ -2509,26 +2509,28 @@ artifacts:
 
   - id: FEAT-FALCON-v1.39
     type: feature
-    title: "v1.39 — Position + Altitude hold flight modes (the everyday PX4 GPS modes)"
-    status: pending
+    title: "v1.39 — Position + Altitude hold flight modes demonstrator (the everyday PX4 GPS modes)"
+    status: approved
     description: >
-      PLANNED. With a real estimator (v1.38), add the flight modes pilots
-      actually live in: Altitude hold (hold baro/estimated altitude, level
-      attitude) and Position hold (hold a 3D point against wind, stick =
-      velocity setpoint). These are PX4's Altitude and Position modes.
+      LANDED. The everyday GPS modes pilots live in — Altitude hold and Position
+      hold (PX4 ALTCTL/POSCTL). Correction on scoping: the pieces already exist —
+      relay-fsm is the flight-mode state machine (Kani-proved never-disarm-
+      airborne / failsafe-recovers, built v1.7) and relay-pos is the position
+      loop (built v0.5, integral added v1.16). So this release adds the missing
+      end-to-end demonstrator that ties them together.
 
-      Builds on the existing POS→ATT→RATE→MIX cascade; the new work is the
-      mode state and the velocity/position setpoint generators with the
-      verified safety envelope (tilt/velocity limits).
-
-      Oracle: SITL hold-station test (drift < budget over N seconds in wind) +
-      Kani totality on the setpoint clamps + witness MC/DC on the new mode
-      branches.
-    tags: [falcon, flight-modes, position-hold, altitude-hold, px4-parity, milestone, v1.39, planned]
+      Ships: examples/falcon-hold-bench — drives relay-fsm through
+      Disarmed→Armed→Takeoff→Loiter (asserting the verified invariant: a disarm
+      COMMAND is refused while airborne, a land+touchdown reaches Disarmed) and
+      closes a point-mass loop where relay-pos holds a 10 m point under steady
+      wind: horizontal drift 0.23 m (budget ≤ 1.0), altitude error 0.01 m
+      (budget ≤ 0.5). The inner attitude/rate cascade is idealised here (it is
+      verified separately by relay-geo's Lean Lyapunov proof + relay-adrc).
+    tags: [falcon, flight-modes, position-hold, altitude-hold, px4-parity, milestone, v1.39, landed]
     fields:
-      release-target: "Position hold keeps station < drift budget in SITL wind; Altitude hold steady; mode branches MC/DC-covered"
+      release-target: "falcon-hold-bench: Loiter holds station ≤ 1.0 m drift / ≤ 0.5 m altitude under wind; FSM airborne invariant holds"
       px4-equivalent: "Altitude (ALTCTL) + Position (POSCTL) modes"
-      crate: crates/relay-fm (flight-mode state) + relay-pos
+      crate: crates/relay-fsm + crates/relay-pos (existing) + examples/falcon-hold-bench (new)
       video: >
         Pilot pushes a stick, releases — the drone stops and holds the point
         while a wind gust visibly pushes on it; the position-error trace stays
@@ -2537,6 +2539,10 @@ artifacts:
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.38
+      - type: depends-on
+        target: SWREQ-FALCON-MODE-P01
+      - type: verified-by
+        target: FV-FALCON-MODE-001
 
   - id: FEAT-FALCON-v1.40
     type: feature

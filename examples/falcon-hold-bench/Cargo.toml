@@ -1,0 +1,16 @@
+[package]
+name = "falcon-hold-bench"
+description = "Falcon v1.39 — flight-mode sequence + position/altitude-hold station-keeping bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "falcon-hold-bench"
+path = "src/main.rs"
+
+[dependencies]
+relay-fsm = { path = "../../crates/relay-fsm" }
+relay-pos = { path = "../../crates/relay-pos" }

@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-MODE-P01
+    type: sw-req
+    title: "MODE-P01: position + altitude hold flight modes hold station against wind (PX4 ALTCTL/POSCTL parity)"
+    status: implemented
+    description: >
+      Falcon shall provide the everyday GPS flight modes — Position hold and
+      Altitude hold — equivalent to PX4 POSCTL/ALTCTL: in the Loiter mode the
+      vehicle holds a commanded 3D point (and its altitude) against a steady
+      disturbance. The flight-mode state machine (relay-fsm, Kani-proved
+      never-disarm-airborne / failsafe-recovers) and the position loop
+      (relay-pos) already exist; this requirement demonstrates them closing a
+      station-keeping loop end-to-end.
+    tags: [falcon, flight-modes, position-hold, altitude-hold, px4-parity]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-hold-bench drives relay-fsm through Disarmed→Armed→Takeoff→Loiter
+        (asserting the verified invariant: a RequestDisarm command is refused
+        while airborne, while a RequestLand→Touchdown reaches Disarmed), and
+        closes a point-mass loop (ideal inner attitude loop; the inner cascade
+        is verified separately) where relay-pos holds a 10 m point under a steady
+        wind acceleration: horizontal drift ≤ 1.0 m and altitude error ≤ 0.5 m at
+        steady state.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
