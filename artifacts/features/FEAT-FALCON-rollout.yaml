@@ -2390,33 +2390,44 @@ artifacts:
 
   - id: FEAT-FALCON-v1.37
     type: feature
-    title: "v1.37 — relay-sec session establishment: ephemeral key agreement + rekey-on-reboot (PFS)"
-    status: pending
+    title: "v1.37 — relay-sec session establishment: ephemeral X25519 key agreement + rekey-on-reboot (PFS)"
+    status: approved
     description: >
-      PLANNED (roadmap feature F4 — the highest-stakes relay-sec slice; wants a
-      reviewer design pass before code). Replaces static per-channel keys with
-      negotiated session keys carrying forward secrecy.
+      LANDED. Replaces static per-channel keys with a negotiated session key
+      carrying forward secrecy — the highest-stakes relay-sec slice, taken
+      through a reviewer design pass before any code (roadmap feature F4).
 
-      Intended scope:
-        - ephemeral X25519 ECDH for per-session key agreement (PFS — a
-          compromised long-term key does not expose past sessions).
-        - Ed25519 / sigil identity binding so the peer is authenticated, not
-          just the channel.
-        - a rekey-on-reboot invariant: a rebooted endpoint must establish a
-          fresh session before any authenticated frame is accepted (no stale
-          counter / key reuse across a reboot).
+      Ships:
+        - X25519 (RFC 7748) from scratch in no_std safe Rust (TweetNaCl-ported
+          field arithmetic), KAT-exact vs the official RFC vectors, with
+          low-order / contributory-zero rejection (RFC 7748 §6.1).
+        - A 3-flight NNpsk2-style PSK-authenticated ephemeral-ephemeral DH
+          handshake (Initiator/Responder state machines + Hello/Response/Confirm
+          messages), deriving domain-separated SK_enc / SK_mac.
 
-      Oracle (intended): handshake KAT + a rekey-on-reboot invariant test +
-      Kani totality on the handshake parser, mirroring the v1.35/v1.36 posture.
+      Forward secrecy: the session key comes only from ephemeral shares, so a
+      later compromise of the long-term k_id does not expose past sessions.
 
-      Requirement SWREQ-SEC-P06 (session establishment) is BACKLOG — to be
-      drafted with the reviewer design pass, then linked here. Until drafted,
-      v1.37 is a planned milestone, not a commitment.
-    tags: [falcon, wohl, relay-sec, security, x25519, ed25519, pfs, handshake, rekey, milestone, v1.37, planned, f4]
+      Rekey-on-reboot invariant: a reboot-persistent monotonic epoch binds into
+      BOTH the handshake MAC nonce (no Ascon nonce reuse across reboots) and the
+      KDF transcript (post-reboot key unconditionally distinct from pre-reboot,
+      even if the RNG repeats an ephemeral). A data key is released only after
+      key confirmation, so no authenticated frame is accepted before a fresh
+      session exists.
+
+      Front-end: an adversarial cryptographic reviewer pass returned
+      GO-WITH-FIXES; all blocking must-fixes (responder freshness,
+      reboot-persistent nonce, low-order reject, epoch-bound KDF, self-share
+      reject, domain-separated keys) are realised. Honest boundary documented:
+      symmetric-PSK gives no KCI resistance; per-channel k_id contains a leak.
+
+      Oracle: RFC 7748 KATs + handshake round-trip + rekey-on-reboot invariant
+      test + negative paths (tamper/wrong-key/low-order/self-share/replay) +
+      Kani SEC-K13 (nonce injective) / SEC-K14 (transcript total). 50 tests.
+    tags: [falcon, wohl, relay-sec, security, x25519, pfs, handshake, rekey, milestone, v1.37, landed, f4]
     fields:
-      release-target: "session handshake (X25519 + Ed25519/sigil) + rekey-on-reboot invariant test green"
+      release-target: "X25519 RFC-7748 KAT-exact + handshake round-trip + rekey-on-reboot invariant test green"
       crate: crates/relay-sec
-      blocked-on: "reviewer design pass; SWREQ-SEC-P06 to be drafted"
       video: >
         Split screen: two endpoints run the handshake; the shared session key is
         derived independently and matches (shown live). Then reboot one endpoint
@@ -2428,6 +2439,10 @@ artifacts:
         target: FEAT-FALCON-v1.36
       - type: implements
         target: SYSREQ-CI-001
+      - type: depends-on
+        target: SWREQ-SEC-P06
+      - type: verified-by
+        target: FV-RELAY-SEC-005
 
   # ===========================================================================
   # The road to PX4 feature-parity — and past it. v1.38–v1.46.

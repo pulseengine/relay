@@ -31,6 +31,8 @@
 pub mod ascon;
 pub mod frame;
 pub mod header;
+pub mod session;
+pub mod x25519;
 
 /// Width of the replay window: how far out-of-order a frame may arrive and
 /// still be distinguished from a replay. Frames older than this are rejected.
