@@ -2281,3 +2281,144 @@ artifacts:
         target: SYSREQ-FALCON-010
       - type: depends-on
         target: FEAT-FALCON-v0.20
+
+  # ---------------------------------------------------------------------------
+  # Post-v1.34 feature line — relay-sec safety-protected comms.
+  # These continue the falcon RELEASE-TAG line (last tag falcon-v1.34.0), NOT
+  # the v0.x→v1.0 capability-milestone numbering above (v1.0 is the separate
+  # certification-dossier capstone). relay-sec is the shared command-auth layer
+  # beneath relay's CCSDS stack — falcon C2 AND wohl home-automation consume it;
+  # wiring it into the falcon flight binary is itself follow-on work.
+  # ---------------------------------------------------------------------------
+  - id: FEAT-FALCON-v1.35
+    type: feature
+    title: "v1.35 — relay-sec authenticated comms floor: replay-safe, MAC-authenticated frames"
+    status: approved
+    description: >
+      LANDED. The safety-protected comms floor in relay-sec — the shared
+      command-authentication layer (falcon drone C2 AND wohl home-automation),
+      built on relay's OWN CCSDS stack, NOT DDS/ROS2.
+
+      Ships (PRs #112, #113, #116):
+        - anti-replay freshness window (ReplayWindow + ReplayVerdict
+          Fresh/Reordered/Replay/TooOld) — the verified base.
+        - Ascon-AEAD128 (NIST SP 800-232): one table-free, constant-time
+          primitive for the MAC-floor (tag over the frame as AD, empty
+          plaintext). KAT-exact vs the official NIST genkat.
+        - total pre-auth Security-Header parser (SPI ∥ channel_id ∥ counter)
+          + injective nonce = f(SPI, channel_id, counter).
+        - authenticated frame wrap/verify with authenticate-BEFORE-parse
+          ordering: parse header → check SPI → verify Ascon MAC (constant
+          time) → THEN check the replay window on the AUTHENTICATED counter.
+          Per-channel keys defeat cross-link replay.
+
+      Verification (overdo chain): cargo test -p relay-sec green; Kani BMC
+      (no-double-accept, frontier-monotone, accept-total, too-old-unchanged,
+      ct_eq_tag-correct, mac-total, header-parse-total, header-roundtrip,
+      nonce-injective, frame-total); rivet trace SYSREQ-CI-001 → SWREQ-SEC-
+      P01..P04 → FV-RELAY-SEC-001/002/003.
+
+      Deferred to v1.36: payload confidentiality (AEAD).
+      Deferred to v1.37: session establishment / forward secrecy.
+    tags: [falcon, wohl, relay-sec, security, ascon, anti-replay, mac, milestone, v1.35, landed]
+    fields:
+      release-target: "authenticate-before-parse frame path + anti-replay window, Kani-total on garbage input"
+      crate: crates/relay-sec
+      prs: "#112, #113, #116"
+      shared-with: "wohl (home-automation) — relay-sec is framework-shared, not falcon-only"
+    links:
+      - type: implements
+        target: SYSREQ-CI-001
+      - type: depends-on
+        target: SWREQ-SEC-P01
+      - type: depends-on
+        target: SWREQ-SEC-P02
+      - type: depends-on
+        target: SWREQ-SEC-P03
+      - type: depends-on
+        target: SWREQ-SEC-P04
+      - type: verified-by
+        target: FV-RELAY-SEC-001
+      - type: verified-by
+        target: FV-RELAY-SEC-002
+      - type: verified-by
+        target: FV-RELAY-SEC-003
+
+  - id: FEAT-FALCON-v1.36
+    type: feature
+    title: "v1.36 — relay-sec confidentiality upgrade: per-SA AEAD mode, no silent downgrade"
+    status: approved
+    description: >
+      LANDED. Adds payload confidentiality on top of the v1.35 authenticated
+      floor, reusing the same Ascon-AEAD128 primitive.
+
+      Ships (PR #120):
+        - ascon::open — the decrypt+verify inverse of seal; constant-time,
+          rejects tampered tag/AD. Byte-exact vs the official NIST genkat
+          decrypt vectors (Count 34 / Count 35 → PT 0x20).
+        - Confidentiality{MacOnly, Aead} per-channel mode; wrap dispatches on
+          mode; verify_into is the mode-aware, total verify (same
+          authenticate-then-replay ordering). AEAD wrap encrypts the payload
+          (ciphertext ≠ plaintext on the wire); verify_into recovers it exactly.
+
+      No silent downgrade (STPA-Sec SSC-NODOWNGRADE): NO mode byte on the wire.
+      The Ascon AD/PT split binds the mode into the tag, so a MAC-only frame on
+      an AEAD channel — and an AEAD frame on a MAC-only channel — both fail
+      authentication. Also discharges SSC-CONF (encrypt adversary-exposed
+      payloads, e.g. wohl sensor/occupancy data).
+
+      Verification: cargo test -p relay-sec 37 green; Kani SEC-K12
+      verify_into_aead_total SUCCESSFUL; independent clean-room reproduced all
+      KAT tags from a from-scratch SP 800-232 impl; rivet trace SYSREQ-CI-001 →
+      SWREQ-SEC-P05 → FV-RELAY-SEC-004.
+
+      Deferred to v1.37: session establishment / forward secrecy.
+    tags: [falcon, wohl, relay-sec, security, ascon, aead, confidentiality, downgrade, milestone, v1.36, landed]
+    fields:
+      release-target: "AEAD wrap hides payload on the wire, no silent downgrade either direction, KAT-exact decrypt"
+      crate: crates/relay-sec
+      prs: "#120"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.35
+      - type: implements
+        target: SYSREQ-CI-001
+      - type: depends-on
+        target: SWREQ-SEC-P05
+      - type: verified-by
+        target: FV-RELAY-SEC-004
+
+  - id: FEAT-FALCON-v1.37
+    type: feature
+    title: "v1.37 — relay-sec session establishment: ephemeral key agreement + rekey-on-reboot (PFS)"
+    status: pending
+    description: >
+      PLANNED (roadmap feature F4 — the highest-stakes relay-sec slice; wants a
+      reviewer design pass before code). Replaces static per-channel keys with
+      negotiated session keys carrying forward secrecy.
+
+      Intended scope:
+        - ephemeral X25519 ECDH for per-session key agreement (PFS — a
+          compromised long-term key does not expose past sessions).
+        - Ed25519 / sigil identity binding so the peer is authenticated, not
+          just the channel.
+        - a rekey-on-reboot invariant: a rebooted endpoint must establish a
+          fresh session before any authenticated frame is accepted (no stale
+          counter / key reuse across a reboot).
+
+      Oracle (intended): handshake KAT + a rekey-on-reboot invariant test +
+      Kani totality on the handshake parser, mirroring the v1.35/v1.36 posture.
+
+      Requirement SWREQ-SEC-P06 (session establishment) is BACKLOG — to be
+      drafted with the reviewer design pass, then linked here. Until drafted,
+      v1.37 is a planned milestone, not a commitment.
+    tags: [falcon, wohl, relay-sec, security, x25519, ed25519, pfs, handshake, rekey, milestone, v1.37, planned, f4]
+    fields:
+      release-target: "session handshake (X25519 + Ed25519/sigil) + rekey-on-reboot invariant test green"
+      crate: crates/relay-sec
+      blocked-on: "reviewer design pass; SWREQ-SEC-P06 to be drafted"
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.36
+      - type: implements
+        target: SYSREQ-CI-001
