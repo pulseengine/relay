@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-SEC-P01
     type: sw-req
     title: "SEC-P01: Anti-replay freshness on authenticated frames"
-    status: approved
+    status: implemented
     description: >
       The authentication layer shall reject any frame whose monotonic
       counter has already been accepted (replay) or has fallen outside

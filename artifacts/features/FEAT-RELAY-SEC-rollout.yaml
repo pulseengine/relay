@@ -1,0 +1,144 @@
+artifacts:
+  - id: FEAT-RELAY-SEC-v0.1
+    type: feature
+    title: "v0.1 — authenticated frame floor: replay-safe, MAC-authenticated comms"
+    status: approved
+    description: >
+      LANDED. The safety-protected comms floor for relay-sec — the shared
+      command-authentication layer beneath relay's own CCSDS stack (falcon drone
+      C2 AND wohl home-automation), NOT DDS/ROS2.
+
+      Ships (PRs #112, #113, #116):
+        - crates/relay-sec anti-replay freshness window (ReplayWindow +
+          ReplayVerdict Fresh/Reordered/Replay/TooOld) — the verified base.
+        - Ascon-AEAD128 (NIST SP 800-232): one table-free, constant-time
+          primitive serving the MAC-floor (tag over the frame as AD, empty
+          plaintext). KAT-exact vs the official NIST genkat.
+        - Total pre-auth Security-Header parser (SPI ∥ channel_id ∥ counter,
+          SEC_HEADER_LEN=11) + injective nonce = f(SPI, channel_id, counter).
+        - Authenticated frame wrap/verify with authenticate-BEFORE-parse
+          ordering: parse header -> check SPI -> verify Ascon MAC (constant
+          time) -> THEN check the anti-replay window on the AUTHENTICATED
+          counter. Per-channel keys defeat cross-link replay.
+
+      Verification (overdo chain at the v0.1 layer):
+        - cargo test -p relay-sec green.
+        - Kani bounded model checking: no-double-accept, frontier-monotone,
+          accept-total, too-old-unchanged, ct_eq_tag-correct, mac-total,
+          header-parse-total, header-roundtrip, nonce-injective, frame-total.
+        - rivet trace SYSREQ-CI-001 -> SWREQ-SEC-P01..P04 -> FV-RELAY-SEC-001/
+          002/003 validated.
+
+      Deferred to v0.2: payload confidentiality (AEAD upgrade).
+      Deferred to v0.3: session establishment / forward secrecy (handshake).
+    tags: [relay-sec, security, ascon, anti-replay, mac, falcon, wohl, milestone, v0.1, landed]
+    fields:
+      release-target: "authenticate-before-parse frame path + anti-replay window, Kani-total on garbage input"
+      crate: crates/relay-sec
+      prs: "#112, #113, #116"
+      maps-to-overdo-layer: "cargo tests + proptest + Kani BMC + rivet traceability"
+    links:
+      - type: implements
+        target: SYSREQ-CI-001
+      - type: depends-on
+        target: SWREQ-SEC-P01
+      - type: depends-on
+        target: SWREQ-SEC-P02
+      - type: depends-on
+        target: SWREQ-SEC-P03
+      - type: depends-on
+        target: SWREQ-SEC-P04
+      - type: verified-by
+        target: FV-RELAY-SEC-001
+      - type: verified-by
+        target: FV-RELAY-SEC-002
+      - type: verified-by
+        target: FV-RELAY-SEC-003
+
+  - id: FEAT-RELAY-SEC-v0.2
+    type: feature
+    title: "v0.2 — confidentiality upgrade: per-SA AEAD mode, no silent downgrade"
+    status: approved
+    description: >
+      LANDED. Adds payload confidentiality on top of the v0.1 authenticated
+      floor, reusing the same Ascon-AEAD128 primitive.
+
+      Ships (PR #120):
+        - ascon::open — the decrypt+verify inverse of seal; constant-time,
+          rejects tampered tag/AD. Byte-exact vs the official NIST genkat
+          decrypt vectors (Count 34 / Count 35 -> PT 0x20).
+        - Confidentiality{MacOnly, Aead} per-channel mode +
+          SecurityChannel::with_confidentiality; wrap dispatches on mode;
+          verify_into is the mode-aware, total verify (same authenticate-then-
+          replay ordering).
+        - AEAD wrap encrypts the payload (ciphertext != plaintext on the wire);
+          verify_into recovers it exactly.
+
+      No silent downgrade (SSC-NODOWNGRADE): there is NO mode byte on the wire.
+      The Ascon AD/PT split binds the mode into the tag, so a MAC-only frame on
+      an AEAD channel — and an AEAD frame on a MAC-only channel — both fail
+      authentication. An attacker has no mode bit to flip.
+
+      Security front-end: this release discharges the STPA-Sec constraints
+      SSC-CONF (encrypt adversary-exposed payloads, e.g. wohl sensor/occupancy
+      data) and SSC-NODOWNGRADE (mode bound to the SA).
+
+      Verification (overdo chain at the v0.2 layer):
+        - cargo test -p relay-sec: 37 green.
+        - Kani SEC-K12 verify_into_aead_total: VERIFICATION SUCCESSFUL (AEAD
+          decrypt path total for any frame length).
+        - Independent clean-room reproduced all KAT tags from a from-scratch
+          SP 800-232 implementation — vectors are genuine standardized Ascon.
+        - rivet trace SYSREQ-CI-001 -> SWREQ-SEC-P05 -> FV-RELAY-SEC-004.
+
+      Deferred to v0.3: session establishment / forward secrecy.
+    tags: [relay-sec, security, ascon, aead, confidentiality, downgrade, wohl, milestone, v0.2, landed]
+    fields:
+      release-target: "AEAD wrap hides payload on the wire, no silent downgrade either direction, KAT-exact decrypt"
+      crate: crates/relay-sec
+      prs: "#120"
+      maps-to-overdo-layer: "cargo tests + Kani BMC + NIST KAT + clean-room + rivet traceability"
+    links:
+      - type: depends-on
+        target: FEAT-RELAY-SEC-v0.1
+      - type: implements
+        target: SYSREQ-CI-001
+      - type: depends-on
+        target: SWREQ-SEC-P05
+      - type: verified-by
+        target: FV-RELAY-SEC-004
+
+  - id: FEAT-RELAY-SEC-v0.3
+    type: feature
+    title: "v0.3 — session establishment: ephemeral key agreement + rekey-on-reboot (PFS)"
+    status: pending
+    description: >
+      PLANNED (roadmap feature F4 — the highest-stakes relay-sec slice; wants a
+      reviewer design pass before code). Replaces static per-channel keys with
+      negotiated session keys carrying forward secrecy.
+
+      Intended scope:
+        - Ephemeral X25519 ECDH for per-session key agreement (PFS — a
+          compromised long-term key does not expose past sessions).
+        - Ed25519 / sigil identity binding so the peer is authenticated, not
+          just the channel.
+        - A rekey-on-reboot invariant: a rebooted endpoint must establish a
+          fresh session before any authenticated frame is accepted (no stale
+          counter / key reuse across a reboot).
+
+      Oracle (intended): handshake KAT + a rekey-on-reboot invariant test +
+      Kani totality on the handshake parser, mirroring the v0.1/v0.2 posture.
+
+      Requirement SWREQ-SEC-P06 (session establishment) is BACKLOG — to be
+      drafted with the reviewer design pass, then linked here. Until drafted,
+      v0.3 is a planned milestone, not a commitment.
+    tags: [relay-sec, security, x25519, ed25519, pfs, handshake, rekey, milestone, v0.3, planned, f4]
+    fields:
+      release-target: "session handshake (X25519 + Ed25519/sigil) + rekey-on-reboot invariant test green"
+      crate: crates/relay-sec
+      blocked-on: "reviewer design pass; SWREQ-SEC-P06 to be drafted"
+    links:
+      - type: depends-on
+        target: FEAT-RELAY-SEC-v0.2
+      - type: implements
+        target: SYSREQ-CI-001
