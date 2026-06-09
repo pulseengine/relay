@@ -1,0 +1,34 @@
+artifacts:
+  - id: FV-RELAY-SEC-004
+    type: sw-verification
+    title: "AEAD-upgrade mode — Ascon decrypt + per-SA mode binding (relay-sec, F5)"
+    status: approved
+    description: >
+      Verification of the relay-sec AEAD-upgrade confidentiality mode (feature
+      F5; satisfies STPA-Sec SSC-CONF + SSC-NODOWNGRADE).
+
+      Crypto correctness — ascon::open (decrypt+verify) byte-exact vs the OFFICIAL
+      NIST genkat: Count 34 (CT E8, tag DD576A…) and Count 35 (CT 96, tag
+      2B8016…) both decrypt to PT 0x20 and authenticate. seal→open round-trips
+      over many lengths; a tampered tag or AD makes open reject.
+
+      Frame layer — an AEAD SecurityChannel: wrap encrypts the payload
+      (ciphertext != plaintext on the wire — confidentiality), verify_into
+      decrypts to the exact payload; a tampered ciphertext → BadMac. NO SILENT
+      DOWNGRADE: a MAC-only frame presented to an AEAD channel, and an AEAD frame
+      to a MAC-only channel, BOTH → BadMac — the Ascon AD/PT split binds the mode
+      to the authenticated SA, so a downgrade cannot succeed.
+
+      Totality — Kani 0.67 SEC-K12 verify_into (AEAD path, runs Ascon decrypt) is
+      total (no panic) for any frame length.
+
+      37 relay-sec cargo tests; 11 Kani harnesses. no_std/no_alloc, safe Rust.
+    tags: [verification, relay-sec, ascon, aead, downgrade, kani, kat, v0.1]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-sec"
+        - run: "cargo kani -p relay-sec"
+    links:
+      - type: verifies
+        target: SWREQ-SEC-P05

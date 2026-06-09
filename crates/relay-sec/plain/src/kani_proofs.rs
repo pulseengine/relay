@@ -145,3 +145,18 @@ fn verify_frame_total() {
     let frame = [0u8; MIN_FRAME_LEN + 4];
     let _ = ch.verify(&frame[..len]);
 }
+
+/// SEC-K12 — the mode-aware `verify_into` on an AEAD channel (which runs Ascon
+/// decrypt) is total: no panic for any frame length. Concrete bytes, symbolic
+/// length; unwind covers the Ascon permutation + the constant-time compare.
+#[kani::proof]
+#[kani::unwind(41)]
+fn verify_into_aead_total() {
+    use crate::frame::Confidentiality;
+    let mut ch = SecurityChannel::with_confidentiality(0, 0, [0u8; 16], Confidentiality::Aead);
+    let len: usize = kani::any();
+    kani::assume(len <= MIN_FRAME_LEN + 4);
+    let frame = [0u8; MIN_FRAME_LEN + 4];
+    let mut out = [0u8; MIN_FRAME_LEN + 4];
+    let _ = ch.verify_into(&frame[..len], &mut out);
+}

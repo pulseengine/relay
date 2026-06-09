@@ -211,6 +211,84 @@ pub fn mac_verify(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], msg: &[u8], tag:
     ct_eq_tag(&mac(key, nonce, msg), tag)
 }
 
+/// AEAD decrypt + verify: the inverse of [`seal`]. Recovers plaintext into `pt`
+/// (which must be the same length as `ct`) and returns `true` iff the tag
+/// authenticates. On `false` the caller MUST NOT release `pt` (it is unverified
+/// keystream output). Constant-time tag check.
+pub fn open(
+    key: &[u8; KEY_LEN],
+    nonce: &[u8; NONCE_LEN],
+    ad: &[u8],
+    ct: &[u8],
+    tag: &[u8; TAG_LEN],
+    pt: &mut [u8],
+) -> bool {
+    let k0 = load64(key, 0);
+    let k1 = load64(key, 8);
+
+    let mut s = [IV, k0, k1, load64(nonce, 0), load64(nonce, 8)];
+    p12(&mut s);
+    s[3] ^= k0;
+    s[4] ^= k1;
+
+    if !ad.is_empty() {
+        let mut off = 0;
+        while ad.len() - off >= 16 {
+            s[0] ^= load64(ad, off);
+            s[1] ^= load64(ad, off + 8);
+            p8(&mut s);
+            off += 16;
+        }
+        let rem = ad.len() - off;
+        let mut b = [0u8; 16];
+        b[..rem].copy_from_slice(&ad[off..]);
+        b[rem] = 0x01;
+        s[0] ^= load64(&b, 0);
+        s[1] ^= load64(&b, 8);
+        p8(&mut s);
+    }
+
+    s[4] ^= DSEP;
+
+    // Ciphertext -> plaintext: pt = ct ^ rate, then the rate BECOMES the ciphertext.
+    let mut off = 0;
+    while ct.len() - off >= 16 {
+        let c0 = load64(ct, off);
+        let c1 = load64(ct, off + 8);
+        store64(pt, off, s[0] ^ c0);
+        store64(pt, off + 8, s[1] ^ c1);
+        s[0] = c0;
+        s[1] = c1;
+        p8(&mut s);
+        off += 16;
+    }
+    let rem = ct.len() - off;
+    let mut r = [0u8; 16];
+    store64(&mut r, 0, s[0]);
+    store64(&mut r, 8, s[1]);
+    let mut i = 0;
+    while i < rem {
+        let c = ct[off + i];
+        pt[off + i] = r[i] ^ c;
+        r[i] = c; // rate position takes the ciphertext byte
+        i += 1;
+    }
+    r[rem] ^= 0x01; // 10* padding (positions rem+1..16 keep the state)
+    s[0] = load64(&r, 0);
+    s[1] = load64(&r, 8);
+
+    s[2] ^= k0;
+    s[3] ^= k1;
+    p12(&mut s);
+    s[3] ^= k0;
+    s[4] ^= k1;
+
+    let mut computed = [0u8; TAG_LEN];
+    store64(&mut computed, 0, s[3]);
+    store64(&mut computed, 8, s[4]);
+    ct_eq_tag(&computed, tag)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +383,51 @@ mod tests {
             if len > 0 {
                 assert_ne!(&ct[..len], &pt[..len]);
             }
+        }
+    }
+
+    /// `open` decrypts + verifies the official NIST genkat vectors (the inverse
+    /// of the seal KATs): Count 34 (PT 0x20, empty AD) and Count 35 (PT 0x20,
+    /// AD 0x30) both recover plaintext 0x20 and authenticate.
+    #[test]
+    fn kat_open_count34_count35() {
+        // Count 34: CT E8, tag DD576A..., empty AD -> PT 20, authentic
+        let ct34 = hx::<1>("E8");
+        let tag34 = hx::<16>("DD576ABA1CD3E6FC704DE02AEDB79588");
+        let mut pt = [0u8; 1];
+        assert!(open(&key(), &nonce(), &[], &ct34, &tag34, &mut pt));
+        assert_eq!(pt, hx::<1>("20"));
+
+        // Count 35: CT 96, tag 2B8016..., AD 30 -> PT 20, authentic
+        let ct35 = hx::<1>("96");
+        let tag35 = hx::<16>("2B8016836C75A7D86866588CA245D886");
+        let mut pt2 = [0u8; 1];
+        assert!(open(&key(), &nonce(), &hx::<1>("30"), &ct35, &tag35, &mut pt2));
+        assert_eq!(pt2, hx::<1>("20"));
+    }
+
+    /// seal then open round-trips for many lengths, and a tampered tag or
+    /// ciphertext makes open reject.
+    #[test]
+    fn seal_open_roundtrip_and_reject() {
+        let k = key();
+        let n = nonce();
+        for len in [0usize, 1, 8, 15, 16, 17, 32, 40] {
+            let mut pt = [0u8; 40];
+            for (i, b) in pt.iter_mut().enumerate().take(len) {
+                *b = (i as u8).wrapping_mul(7).wrapping_add(3);
+            }
+            let mut ct = [0u8; 40];
+            let tag = seal(&k, &n, &[0xAA, 0xBB], &pt[..len], &mut ct[..len]);
+            let mut out = [0u8; 40];
+            assert!(open(&k, &n, &[0xAA, 0xBB], &ct[..len], &tag, &mut out[..len]));
+            assert_eq!(&out[..len], &pt[..len]);
+            // tampered tag rejects
+            let mut bad = tag;
+            bad[0] ^= 1;
+            assert!(!open(&k, &n, &[0xAA, 0xBB], &ct[..len], &bad, &mut out[..len]));
+            // tampered AD rejects
+            assert!(!open(&k, &n, &[0xAA, 0xCC], &ct[..len], &tag, &mut out[..len]));
         }
     }
 }
