@@ -1,0 +1,31 @@
+artifacts:
+  - id: SWREQ-FALCON-FSAFE-P01
+    type: sw-req
+    title: "FSAFE-P01: unified failsafe arbiter resolves all triggers to a prioritized, latched action"
+    status: implemented
+    description: >
+      Falcon shall provide a single failsafe arbiter that takes every failsafe
+      trigger (RC loss, datalink loss, geofence breach, position loss, low /
+      critical battery, stale offboard stream) and resolves them to ONE
+      prioritized action (None/Hold/RTL/Land/Terminate), equivalent to PX4's
+      Commander failsafe handling. The arbiter shall: select the MOST-SEVERE
+      active action (a quiet trigger never masks a loud one); LATCH the action
+      monotonically (a momentary trigger is never silently downgraded until an
+      explicit reset on disarm); and NEVER command RTL when position is lost
+      (Land or more severe instead — you cannot return to launch without a
+      position fix to navigate home).
+    tags: [falcon, failsafe, safety-state-machine, arbiter, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-fsafe FailsafeArbiter: nothing-active→None; rc_loss→Rtl;
+        offboard_stale→Hold; most-severe-wins (rc_loss+critical_battery→Land);
+        no blind RTL (rc_loss+position_loss→Land, never Rtl); latch does not
+        downgrade; reset clears on disarm. Kani FSAFE-K01 total over all trigger
+        combinations; FSAFE-K02 most-severe-wins (action ≥ every active trigger's
+        action); FSAFE-K03 latch monotone non-decreasing; FSAFE-K04 no-blind-RTL
+        (position lost ⇒ action ≥ Land, never Rtl, for any prior latched state).
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001
