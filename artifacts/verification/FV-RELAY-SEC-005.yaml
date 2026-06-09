@@ -1,0 +1,51 @@
+artifacts:
+  - id: FV-RELAY-SEC-005
+    type: sw-verification
+    title: "Session establishment — X25519 ECDH + PFS + rekey-on-reboot (relay-sec, F4 / v1.37)"
+    status: approved
+    description: >
+      Verification of the relay-sec session-establishment handshake (feature F4;
+      falcon v1.37; satisfies SWREQ-SEC-P06).
+
+      Crypto correctness — X25519 (RFC 7748) byte-exact vs the OFFICIAL vectors:
+      §5.2 test 1 (k a546e3…/u e6db68… -> c3da55…) and test 2 (-> 95cbde…), and
+      §6.1 the Alice/Bob public keys (8520f0…, de9edb…) and shared secret
+      (4a5d9d…) with ECDH agreeing from both sides. A low-order (all-zero) point
+      yields the all-zero secret and is REJECTED (RFC 7748 §6.1). The field
+      arithmetic is the audited TweetNaCl reference, ported to no_std safe Rust.
+
+      Handshake — a 3-flight NNpsk2-style PSK-authenticated ephemeral DH:
+      initiator and responder reach Established with identical SK_enc/SK_mac
+      (domain-separated). Negative paths all reject: tampered response tag
+      (BadTag), tampered confirmation (BadConfirm), wrong k_id (BadTag),
+      low-order peer share (LowOrderPoint), self/reflected share (SelfShare),
+      and a replayed non-increasing-epoch Hello (EpochRegression).
+
+      Forward secrecy — distinct ephemerals give distinct session keys with the
+      same k_id and epochs.
+
+      REKEY-ON-REBOOT (headline) — a bumped epoch yields a different session key
+      EVEN WHEN the ephemerals are reused (the realistic post-boot RNG-repeat
+      failure), and a MAC made under the pre-reboot key fails under the
+      post-reboot key. The epoch is bound into both the MAC nonce and the KDF
+      transcript.
+
+      Totality — Kani 0.67 SEC-K13 handshake-nonce injective in (role, epoch)
+      (the no-Ascon-nonce-reuse core); SEC-K14 the transcript writer is total.
+
+      Front-end — the design passed an adversarial cryptographic reviewer pass
+      (GO-WITH-FIXES); all blocking must-fixes are realised in the code and
+      named in SWREQ-SEC-P06. Honest boundary documented: symmetric-PSK gives no
+      KCI resistance; per-channel k_id contains a leak. Caller contract (NVM
+      epoch, CSPRNG ephemerals) stated as the no_std integration boundary.
+
+      50 relay-sec cargo tests; 13 Kani harnesses. no_std/no_alloc, safe Rust.
+    tags: [verification, relay-sec, x25519, ecdh, pfs, rekey, handshake, kani, kat, v0.1]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-sec"
+        - run: "cargo kani -p relay-sec"
+    links:
+      - type: verifies
+        target: SWREQ-SEC-P06

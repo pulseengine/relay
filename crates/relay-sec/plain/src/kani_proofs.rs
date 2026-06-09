@@ -160,3 +160,37 @@ fn verify_into_aead_total() {
     let mut out = [0u8; MIN_FRAME_LEN + 4];
     let _ = ch.verify_into(&frame[..len], &mut out);
 }
+
+/// SEC-K13 — the handshake MAC nonce is injective in (role, epoch): distinct
+/// (role, epoch) pairs yield distinct nonces. This is the mechanical core of
+/// the "no Ascon nonce reuse under k_id across reboots" property (design-review
+/// must-fix #2): since epoch is a reboot-persistent monotonic counter, the
+/// (key, nonce) pair never repeats.
+#[kani::proof]
+fn verify_handshake_nonce_injective() {
+    let ra: u8 = kani::any();
+    let ea: u64 = kani::any();
+    let rb: u8 = kani::any();
+    let eb: u64 = kani::any();
+    kani::assume((ra, ea) != (rb, eb));
+    assert!(crate::session::handshake_nonce(ra, ea) != crate::session::handshake_nonce(rb, eb));
+}
+
+/// SEC-K14 — building the session transcript is total: the fixed-capacity,
+/// no_alloc transcript writer never panics for any epoch values (symbolic),
+/// across the spi/channel/epoch/ephemeral fields. Proves the new handshake
+/// indexing logic is panic-free.
+#[kani::proof]
+fn verify_session_transcript_total() {
+    use crate::session::Config;
+    let cfg = Config {
+        spi: kani::any(),
+        channel_id: kani::any(),
+        k_id: [0u8; 16],
+    };
+    let epoch_i: u64 = kani::any();
+    let epoch_r: u64 = kani::any();
+    let ei = [0u8; 32];
+    let er = [0u8; 32];
+    let _ = crate::session::session_transcript(&cfg, epoch_i, epoch_r, &ei, &er);
+}

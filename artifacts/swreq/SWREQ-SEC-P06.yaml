@@ -1,0 +1,57 @@
+artifacts:
+  - id: SWREQ-SEC-P06
+    type: sw-req
+    title: "SEC-P06: Session establishment — ephemeral X25519 key agreement (PFS) + rekey-on-reboot"
+    status: implemented
+    description: >
+      relay-sec shall establish per-session keys by an authenticated ephemeral
+      X25519 (RFC 7748) Diffie-Hellman handshake, replacing static per-channel
+      keys for links that require forward secrecy. The handshake shall:
+
+      (a) provide FORWARD SECRECY — the session key derives only from ephemeral
+      X25519 shares, so a later compromise of the long-term per-channel key
+      k_id does not expose past sessions;
+
+      (b) be MUTUALLY AUTHENTICATED under k_id — this is an NNpsk2-style
+      symmetric-PSK construction. The threat boundary is explicit and accepted:
+      it gives mutual auth + PFS but NOT KCI resistance — compromise of k_id is
+      a total break of THAT channel (k_id is per-channel, so a leak is
+      contained). It is NOT Noise-KK (which would need per-party static keys);
+
+      (c) enforce a REKEY-ON-REBOOT invariant — each endpoint binds a
+      reboot-persistent monotonic epoch into both the handshake MAC nonce and
+      the key-derivation transcript, so (i) an Ascon (k_id, nonce) pair is never
+      reused across sessions or reboots, and (ii) a post-reboot session key is
+      unconditionally distinct from any pre-reboot key, EVEN IF the RNG repeats
+      an ephemeral. A data key is released only after key confirmation
+      (Established), so no authenticated frame is accepted before a fresh
+      session exists;
+
+      (d) reject low-order / contributory-zero X25519 outputs (RFC 7748 §6.1),
+      reject a peer share equal to our own (reflection), and reject a
+      non-increasing initiator epoch (handshake replay).
+
+      Caller contract: the epoch MUST come from a reboot-persistent monotonic
+      counter (NVM-backed); ephemeral private keys MUST come from a CSPRNG
+      seeded before the first handshake.
+    tags: [relay-sec, x25519, ecdh, pfs, handshake, rekey, session, falcon, wohl, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        X25519 byte-exact vs the official RFC 7748 vectors (§5.2 test 1/2 and
+        §6.1 Alice/Bob public keys + shared secret); low-order point yields the
+        all-zero secret and is rejected. Handshake round-trip: initiator and
+        responder reach Established with identical SK_enc/SK_mac. Rekey-on-reboot:
+        a bumped epoch changes the session key even when ephemerals are reused,
+        and a pre-reboot-key MAC fails under the post-reboot key. Negative paths:
+        tampered response/confirm, wrong k_id, low-order share, self share, and a
+        replayed (non-increasing-epoch) Hello are all rejected. Kani SEC-K13
+        handshake-nonce injective in (role, epoch); SEC-K14 transcript build
+        total. Front-end: the design passed an adversarial reviewer pass whose
+        blocking must-fixes (#1 responder freshness, #2 reboot-persistent nonce,
+        #4 low-order reject, #5 epoch-bound KDF, #6 self-share reject, #7
+        domain-separated keys) are all realised.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001
