@@ -2546,35 +2546,42 @@ artifacts:
 
   - id: FEAT-FALCON-v1.40
     type: feature
-    title: "v1.40 — Offboard control: companion-computer setpoint streaming (PX4 Offboard parity)"
-    status: pending
+    title: "v1.40 — Offboard control: verified setpoint-timeout failsafe (PX4 Offboard parity)"
+    status: approved
     description: >
-      PLANNED. Let an external companion computer drive the vehicle by
-      streaming setpoints (position / velocity / attitude / body-rate) over the
-      AUTHENTICATED relay-sec link — the PX4 Offboard mode, but every setpoint
-      is on the v1.35–v1.37 verified, replay-proof channel rather than raw
-      MAVLink/uXRCE-DDS.
+      LANDED. Lets an external companion computer drive the vehicle by streaming
+      setpoints (position/velocity/yaw) over the AUTHENTICATED relay-sec link —
+      PX4 Offboard mode, but every setpoint is on the v1.35–v1.37 verified,
+      replay-proof channel rather than raw MAVLink/uXRCE-DDS.
 
-      Includes the offboard safety contract: setpoint-timeout failsafe (stale
-      stream → hold/RTL), so a dropped companion link can't fly the vehicle
-      into the ground.
+      Ships: crates/relay-offboard (new, no_std/no_alloc/forbid-unsafe) —
+      OffboardReceiver, the freshness/timeout state machine whose one job is the
+      offboard safety contract: a STALE or dropped setpoint stream must NOT keep
+      flying the vehicle. No fresh, strictly-in-order setpoint within the timeout
+      ⇒ Stale ⇒ the flight stack falls back to the failsafe action (Hold/RTL,
+      v1.41). A replayed/non-increasing counter cannot re-arm a stale stream.
 
-      Oracle: setpoint round-trip integration test over the relay-sec channel +
-      Kani totality on the timeout state machine + the freshness check reusing
-      the v1.35 anti-replay window.
-    tags: [falcon, offboard, companion, setpoint-streaming, relay-sec, px4-parity, milestone, v1.40, planned]
+      Oracle: 6 unit tests + 3 Kani harnesses — OFFB-K01 status total (any
+      clock/timeout, saturating), OFFB-K02 the failsafe property (strictly past
+      the timeout ⇒ always Stale), OFFB-K03 replay rejection. The transport
+      itself is the already-verified relay-sec channel.
+    tags: [falcon, offboard, companion, setpoint-streaming, relay-sec, px4-parity, milestone, v1.40, landed]
     fields:
-      release-target: "external script flies a trajectory via authenticated offboard setpoints; stale-stream failsafe triggers correctly"
+      release-target: "relay-offboard: stale/dropped setpoint stream reads Stale (failsafe trigger); replay can't re-arm; Kani-total"
       px4-equivalent: "Offboard mode (MAVROS / uXRCE-DDS) — falcon does it over a verified authenticated link"
-      crate: crates/relay-sec + relay-to + relay-fm
+      crate: crates/relay-offboard (new) over crates/relay-sec (existing)
       video: >
-        A laptop script streams a figure-8 of setpoints; the drone flies it in
-        SITL. Mid-flight the script is killed — on screen the setpoint-timeout
-        failsafe fires and the vehicle holds, not crashes. Then a spoofed
-        (unauthenticated) setpoint is injected and is rejected at the link.
+        A laptop script streams setpoints; the drone flies them in SITL.
+        Mid-flight the script is killed — on screen the setpoint-timeout failsafe
+        fires (status goes Stale) and the vehicle holds, not crashes. Then a
+        replayed setpoint is shown rejected at the receiver.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.39
+      - type: depends-on
+        target: SWREQ-FALCON-OFFB-P01
+      - type: verified-by
+        target: FV-FALCON-OFFB-001
 
   - id: FEAT-FALCON-v1.41
     type: feature

@@ -1,0 +1,21 @@
+[package]
+name = "relay-offboard"
+description = "Relay Offboard — verified setpoint-stream freshness + timeout failsafe for companion-computer control (shared by falcon and wohl)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+# no_std + no alloc: the offboard freshness/timeout logic runs inside the
+# verified flight core on the same Cortex-M targets as relay-sec.
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,31 @@
+artifacts:
+  - id: SWREQ-FALCON-OFFB-P01
+    type: sw-req
+    title: "OFFB-P01: offboard setpoint stream — stale/dropped stream must not keep flying (timeout failsafe)"
+    status: implemented
+    description: >
+      Falcon shall accept companion-computer setpoints (position/velocity/yaw)
+      over the AUTHENTICATED relay-sec channel (per-frame MAC + anti-replay +
+      session keys, v1.35–v1.37) and enforce a freshness timeout: if no fresh,
+      strictly-in-order setpoint arrives within the timeout, the offboard stream
+      shall be reported STALE — the trigger for the flight stack to fall back to
+      a failsafe action (Hold/RTL). This is the safety contract of PX4 Offboard
+      mode, but every setpoint is on the verified, replay-proof link. A replayed
+      or non-increasing setpoint counter shall be rejected and shall not re-arm
+      or extend a stale stream.
+    tags: [falcon, wohl, offboard, companion, setpoint, relay-sec, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-offboard OffboardReceiver: stale before the first setpoint; Active
+        while within the timeout window; Stale strictly past it; a fresh setpoint
+        slides the window; a replayed/stale counter is rejected and does not
+        extend the stream; a backward clock yields a defined result, no panic.
+        Kani OFFB-K01 status total (any clock/timeout, saturating); OFFB-K02 the
+        failsafe property — strictly past the timeout the stream is ALWAYS Stale;
+        OFFB-K03 a non-increasing counter is rejected and leaves the last counter
+        unchanged.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001
