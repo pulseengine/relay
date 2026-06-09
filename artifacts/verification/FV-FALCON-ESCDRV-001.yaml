@@ -1,0 +1,24 @@
+artifacts:
+  - id: FV-FALCON-ESCDRV-001
+    type: sw-verification
+    title: "ESC DShot + battery driver — protocol tests + Kani (falcon v1.43)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-ESCDRV-P01. The falcon-esc-dshot crate (no_std/
+      no_alloc/forbid-unsafe) provides the DShot throttle encoder
+      (mixer-[0,1]→saturating throttle→16-bit frame with CRC4) and a battery
+      threshold monitor. 4 tests: CRC vs an independent reference across
+      throttles/telemetry; a hand-computed known frame (0x82C6); throttle
+      saturation/monotonicity; battery Ok/Low/Critical classification. Three Kani
+      harnesses: ESC-K01 throttle always 0 or in [DSHOT_MIN,DSHOT_MAX] for any
+      f32 (no wrap); ESC-K02 every frame CRC-self-consistent; ESC-K03 battery
+      classify total. On-silicon DShot bit-timing validation is the open item.
+    tags: [verification, falcon, esc, dshot, battery, driver, kani, v1.43]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p falcon-esc-dshot"
+        - run: "cargo kani -p falcon-esc-dshot"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-ESCDRV-P01

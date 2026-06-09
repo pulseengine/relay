@@ -2667,31 +2667,43 @@ artifacts:
 
   - id: FEAT-FALCON-v1.43
     type: feature
-    title: "v1.43 — real driver suite II: ESC (DShot) + battery + verified actuator output (F7)"
-    status: pending
+    title: "v1.43 — real driver suite II: ESC (DShot) + battery driver bodies (F7)"
+    status: approved
     description: >
-      PLANNED. The output half of the driver suite (roadmap thread B / F7):
-      DShot ESC protocol driver and battery (voltage/current/fuel-gauge) driver
-      bodies, plus wiring the verified mixer's outputs to real actuator
-      commands. This closes the loop from verified control law → real motor
-      command.
+      LANDED. The output half of the driver suite (roadmap thread B / F7): the
+      DShot ESC protocol encoder and a battery monitor, closing the loop from the
+      verified control law → real motor command.
 
-      Oracle: mock-bus DShot frame tests (bit-timing / checksum) + battery
-      telemetry parse tests + a bench test that the verified mixer's saturated
-      output maps to in-range DShot values (no wraparound).
-    tags: [falcon, drivers, esc, dshot, battery, actuator, px4-parity, milestone, v1.43, planned, f7]
+      Ships: crates/falcon-esc-dshot (new, no_std/no_alloc/forbid-unsafe) —
+      throttle_from_unit maps the verified mixer's [0,1] command into a valid
+      DShot throttle, SATURATING (NaN/≤0 ⇒ motor stop, ≥1 ⇒ 2047, never wraps);
+      dshot_frame builds the 16-bit frame with the exact DShot CRC4; a
+      BatteryMonitor maps a raw ADC reading to pack voltage and classifies it
+      Ok/Low/Critical against the thresholds that drive the v1.41 failsafe
+      arbiter.
+
+      Oracle: CRC vs an independent reference; a hand-computed known frame
+      (throttle 1046 ⇒ 0x82C6); throttle saturation + monotonicity; battery
+      classification. Kani ESC-K01 throttle always 0 or in [48,2047] for any f32
+      (no wrap); ESC-K02 every emitted frame is CRC-self-consistent; ESC-K03
+      battery classify total. On-silicon DShot bit-timing is the named open item.
+    tags: [falcon, drivers, esc, dshot, battery, actuator, px4-parity, milestone, v1.43, landed, f7]
     fields:
-      release-target: "DShot frames bit-exact in mock-bus tests; mixer→DShot mapping saturates safely; battery telemetry parses"
-      px4-equivalent: "PX4 DShot + battery drivers — falcon's path is mixer-to-motor verified end to end"
-      crate: crates/falcon-drivers (esc, battery)
+      release-target: "falcon-esc-dshot: DShot frames CRC-exact; mixer→DShot saturates (no wrap, Kani-proven); battery thresholds classify"
+      px4-equivalent: "PX4 DShot + battery drivers — falcon's mixer-to-motor path is verified saturating"
+      crate: crates/falcon-esc-dshot (new)
       video: >
-        A motor on a bench spins up driven by the verified WASM mixer through
-        the real DShot driver; the commanded vs measured RPM trace tracks on
-        screen, and a commanded saturation shows the output clamping instead of
-        wrapping. Real bench hardware.
+        A motor on a bench spins up driven by the verified mixer through the
+        DShot encoder; a commanded over-range input shows the throttle CLAMPING
+        at 2047 instead of wrapping (the Kani-proven saturation), and the battery
+        gauge crossing a threshold trips the failsafe action on screen.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.42
+      - type: depends-on
+        target: SWREQ-FALCON-ESCDRV-P01
+      - type: verified-by
+        target: FV-FALCON-ESCDRV-001
 
   - id: FEAT-FALCON-v1.44
     type: feature
