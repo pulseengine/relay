@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-SEC-P02
     type: sw-req
     title: "SEC-P02: Per-frame authentication via Ascon-AEAD128"
-    status: approved
+    status: implemented
     description: >
       The authentication layer shall protect each frame with Ascon-AEAD128
       (NIST SP 800-232): a 128-bit tag authenticates the frame in a MAC-only

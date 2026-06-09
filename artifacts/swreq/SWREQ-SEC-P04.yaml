@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-SEC-P04
     type: sw-req
     title: "SEC-P04: Authenticated frame wrap/verify (authenticate before parse)"
-    status: approved
+    status: implemented
     description: >
       The frame layer shall protect a CCSDS payload as
       header(11) || payload || Ascon-tag(16) on a per-channel security
