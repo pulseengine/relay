@@ -1,0 +1,23 @@
+artifacts:
+  - id: FV-FALCON-GNSSDRV-001
+    type: sw-verification
+    title: "GNSS UBX driver — protocol round-trip tests + Kani totality (falcon v1.42)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-GNSSDRV-P01. The falcon-gnss-ubx crate (no_std/
+      no_alloc/forbid-unsafe) implements UbxParser, a streaming UBX frame parser
+      decoding NAV-PVT. 3 protocol tests: a NAV-PVT frame built by an independent
+      Fletcher encoder decodes to the exact fix fields (round-trip); a corrupted
+      payload byte is rejected on checksum; the parser resyncs after garbage.
+      Kani GNSS-K01: push() is total — no panic or buffer overflow for any byte
+      stream. Follows the falcon-imu-icm42688 driver pattern; on-silicon UART
+      validation remains the honest open item.
+    tags: [verification, falcon, gnss, ubx, driver, kani, v1.42]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p falcon-gnss-ubx"
+        - run: "cargo kani -p falcon-gnss-ubx"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-GNSSDRV-P01

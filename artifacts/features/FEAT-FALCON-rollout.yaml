@@ -2624,30 +2624,46 @@ artifacts:
 
   - id: FEAT-FALCON-v1.42
     type: feature
-    title: "v1.42 — real driver suite I: GNSS (UBX) + magnetometer + barometer on embedded-hal (F6)"
-    status: pending
+    title: "v1.42 — real driver suite I: u-blox UBX GNSS driver (F6)"
+    status: approved
     description: >
-      PLANNED. The #1 hardware-boundary honesty gap (roadmap thread B / F6):
-      today only the ICM-42688 IMU is a real driver, over an abstract bus, with
-      axis-remap still TODO and never run on silicon. This lands GNSS (u-blox
-      UBX protocol), magnetometer, and barometer driver bodies over real
-      embedded-hal traits, and finishes the ICM-42688 SPI + axis-remap.
+      LANDED (scoped to GNSS — the hard protocol). The #1 hardware-boundary
+      honesty gap (roadmap thread B / F6): until now only the ICM-42688 IMU was
+      a real driver. This lands the GNSS driver body — the genuinely hard piece,
+      a full u-blox UBX protocol parser — feeding the verified IEKF position
+      input.
 
-      Oracle: mock-bus protocol tests (the icm42688 pattern — drive the exact
-      register/UBX byte sequences and assert parse) for each driver. On-silicon
-      validation is named as the honest open item carried to v1.45.
-    tags: [falcon, drivers, gnss, ubx, magnetometer, barometer, embedded-hal, px4-parity, milestone, v1.42, planned, f6]
+      Ships: crates/falcon-gnss-ubx (new, no_std/no_alloc/forbid-unsafe) —
+      UbxParser, a streaming byte-at-a-time UBX frame parser decoding NAV-PVT
+      (lat/lon/height/hMSL/velNED/fixType/numSV) with UBX 8-bit Fletcher
+      checksum validation and resync, following the icm42688 driver pattern.
+
+      Oracle: protocol round-trip (a spec-built NAV-PVT frame decodes to the
+      exact fix vs an independent Fletcher encoder), checksum rejection, resync
+      after garbage; Kani GNSS-K01 the parser is total on ANY byte stream (no
+      panic / no buffer overflow). On-silicon UART validation is the named open
+      item (carried to v1.45).
+
+      Honest scope: magnetometer + barometer driver bodies (the register-read
+      siblings) are the immediate F6 follow-on, NOT in this release — GNSS was
+      taken first as the hard, high-value protocol.
+    tags: [falcon, drivers, gnss, ubx, embedded-hal, px4-parity, milestone, v1.42, landed, f6]
     fields:
-      release-target: "GNSS/mag/baro driver bodies parse real protocol byte sequences in mock-bus tests; ICM-42688 axis-remap done"
-      px4-equivalent: "PX4 driver suite — falcon's drivers feed the verified IEKF"
-      crate: crates/falcon-drivers (gnss, mag, baro) + falcon-imu-icm42688
+      release-target: "falcon-gnss-ubx parses NAV-PVT to the exact fix in mock-stream tests; parser Kani-total on any input"
+      px4-equivalent: "PX4 GPS driver — falcon's feeds the verified IEKF"
+      crate: crates/falcon-gnss-ubx (new)
+      follow-on: "magnetometer + barometer driver bodies (register-read, F6) — next"
       video: >
-        A logic-analyzer-style capture of the real UBX-NAV-PVT byte stream on
-        one side and the parsed lat/lon/alt appearing on the other, feeding the
-        v1.38 IEKF in HITL. Real captured bus traffic, decoded live.
+        A logic-analyzer-style capture of the real UBX-NAV-PVT byte stream on one
+        side and the parsed lat/lon/alt appearing on the other, feeding the v1.38
+        IEKF. Real protocol bytes, decoded live; a corrupted byte shown rejected.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.41
+      - type: depends-on
+        target: SWREQ-FALCON-GNSSDRV-P01
+      - type: verified-by
+        target: FV-FALCON-GNSSDRV-001
 
   - id: FEAT-FALCON-v1.43
     type: feature
