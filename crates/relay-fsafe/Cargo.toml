@@ -1,0 +1,21 @@
+[package]
+name = "relay-fsafe"
+description = "Relay Fsafe — verified failsafe arbiter: prioritized action over RC/datalink/geofence/position/battery/offboard triggers (shared by falcon and wohl)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+# no_std + no alloc: the arbiter is the highest-safety-value state machine in the
+# vehicle; it runs inside the verified flight core on the Cortex-M targets.
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

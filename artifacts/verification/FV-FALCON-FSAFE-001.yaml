@@ -1,0 +1,23 @@
+artifacts:
+  - id: FV-FALCON-FSAFE-001
+    type: sw-verification
+    title: "Failsafe arbiter — relay-fsafe tests + exhaustive Kani (falcon v1.41)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-FSAFE-P01. The relay-fsafe crate (no_std/no_alloc,
+      forbid-unsafe) implements the FailsafeArbiter — the single prioritized
+      resolver over all failsafe triggers. 7 unit tests cover the policy mapping,
+      most-severe-wins, the no-blind-RTL case, latch non-downgrade, and reset.
+      Four Kani harnesses pass exhaustively over the trigger space: FSAFE-K01
+      total; FSAFE-K02 most-severe-wins (action ≥ each active trigger's action);
+      FSAFE-K03 latch monotone non-decreasing; FSAFE-K04 no-blind-RTL (position
+      lost ⇒ action ≥ Land and never Rtl, for any prior latched state).
+    tags: [verification, falcon, failsafe, relay-fsafe, kani, v1.41]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-fsafe"
+        - run: "cargo kani -p relay-fsafe"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FSAFE-P01

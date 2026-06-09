@@ -2585,35 +2585,42 @@ artifacts:
 
   - id: FEAT-FALCON-v1.41
     type: feature
-    title: "v1.41 — full failsafe state machine: RC-loss, datalink-loss, geofence, position-loss"
-    status: pending
+    title: "v1.41 — unified failsafe arbiter: prioritized, latched, no-blind-RTL (PX4 Commander parity)"
+    status: approved
     description: >
-      PLANNED. falcon has a low-battery failsafe (v1.21) and a geofence+RTL
-      path (v0.10); PX4 has a unified failsafe state machine with configurable
-      actions per trigger. This lands that: a single verified failsafe arbiter
-      taking RC-loss, datalink-loss, geofence-breach, position-loss, and
-      low-battery, resolving to the correct prioritized action (Hold / RTL /
-      Land / Terminate).
+      LANDED. falcon had a low-battery failsafe (v1.21) and a geofence+RTL path
+      (v0.10/v1.8 FlightSupervisor); PX4 has a unified failsafe state machine.
+      This lands the single verified arbiter that resolves ALL triggers
+      (RC-loss, datalink-loss, geofence-breach, position-loss, low/critical
+      battery, stale offboard stream) to ONE prioritized action.
 
-      The arbiter is the highest-safety-value state machine in the vehicle, so
-      it is verified hardest: Verus/Kani on the transition table (no undefined
-      transition, the most-severe action always wins, no oscillation).
+      Ships: crates/relay-fsafe (new, no_std/no_alloc/forbid-unsafe) —
+      FailsafeArbiter over FailsafeAction{None,Hold,Rtl,Land,Terminate}. It
+      selects the most-severe active action, latches it monotonically (a
+      momentary trigger is never silently downgraded), and enforces the key
+      safety property NO BLIND RTL: when position is lost the action is at least
+      Land, never Rtl — you cannot return to launch with no fix to navigate home.
 
-      Oracle: per-trigger SITL injection test (each failsafe → correct action) +
-      Kani exhaustive transition-table proof + witness MC/DC on the arbiter.
-    tags: [falcon, failsafe, safety-state-machine, px4-parity, milestone, v1.41, planned]
+      Verified hardest (it is the highest-safety-value state machine): 7 unit
+      tests + 4 exhaustive Kani harnesses — FSAFE-K01 total, FSAFE-K02
+      most-severe-wins, FSAFE-K03 latch monotone, FSAFE-K04 no-blind-RTL.
+    tags: [falcon, failsafe, safety-state-machine, arbiter, px4-parity, milestone, v1.41, landed]
     fields:
-      release-target: "every failsafe trigger resolves to the correct prioritized action in SITL; transition table Kani-exhaustive"
-      px4-equivalent: "Commander failsafe state machine — falcon's is formally verified"
-      crate: crates/relay-hs (hazard/safety-state) + relay-fm
+      release-target: "relay-fsafe: every trigger combo resolves to the correct prioritized+latched action; no-blind-RTL Kani-proven"
+      px4-equivalent: "Commander failsafe state machine — falcon's is formally verified (Kani-exhaustive)"
+      crate: crates/relay-fsafe (new)
       video: >
-        A dashboard of triggers; each is flipped live (RC off, datalink cut,
-        push past geofence, GNSS denied) and the vehicle takes the right
-        action on screen, with the arbiter's chosen state shown. The Kani
-        "no undefined transition" proof scrolls green alongside.
+        A dashboard of triggers flipped live (RC off, datalink cut, push past
+        geofence, GNSS denied) and the arbiter's chosen action shown each time —
+        most-severe wins, latch holds, and GNSS-denied forces Land not RTL. The
+        Kani no-blind-RTL proof scrolls green alongside.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.40
+      - type: depends-on
+        target: SWREQ-FALCON-FSAFE-P01
+      - type: verified-by
+        target: FV-FALCON-FSAFE-001
 
   - id: FEAT-FALCON-v1.42
     type: feature
