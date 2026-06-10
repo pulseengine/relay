@@ -40,3 +40,4 @@ coverage.lcov
 embedded/falcon-cortex-m/target/
 target/falcon-pipeline/
 /dist/
+crates/*/src/bindings.rs
