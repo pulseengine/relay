@@ -2872,24 +2872,28 @@ artifacts:
   - id: FEAT-FALCON-v1.49
     type: feature
     title: "v1.49 — airframe variants: hexacopter + coaxial mixers (WORLD-P02)"
-    status: pending
+    status: approved
     description: >
       PLANNED. Only the quad mixer (relay-mix-quad) exists; PX4 supports many
       geometries. Lands hexacopter and coaxial allocation via the airframe-
       agnostic MixerN seam (the N×4 effectiveness matrix already proven for
       quad), with the same verified invariants (no-negative-thrust, saturation
       priority, bounded output) across the new geometries. Closes WORLD-P02.
-    tags: [falcon, airframe, mixer, hexacopter, coaxial, allocation, px4-parity, milestone, v1.49, planned]
+    tags: [falcon, airframe, mixer, hexacopter, coaxial, allocation, px4-parity, milestone, v1.49, landed]
     fields:
       release-target: "hex + coax mixers stabilize their airframe in SITL; Kani: any geometry → outputs in [0,1], saturation priority holds"
       px4-equivalent: "PX4 airframe library (hex/octo/coax mixers)"
-      crate: crates/relay-mix-quad (MixerN extension) + SITL worlds
+      crate: crates/relay-mix-multi (new)
       video: >
         Same verified cascade flies a quad, then a hex, then a coax in SITL —
-        one control law, three geometries, each Kani-bounded allocation.
+        one control law, three geometries, each clamp-bounded allocation.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.48
+      - type: depends-on
+        target: SWREQ-FALCON-MIXMULTI-P01
+      - type: verified-by
+        target: FV-FALCON-MIXMULTI-001
 
   - id: FEAT-FALCON-v1.50
     type: feature
