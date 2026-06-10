@@ -3040,12 +3040,93 @@ artifacts:
         target: SWREQ-FALCON-WORLD-P01
 
   # ===========================================================================
-  # HARDWARE ROUND — v1.55 onward. Begins only AFTER the v1.45–v1.54 software
-  # parity round. (Renumbered from the former v1.45/v1.46.)
+  # FULL-RELEASE ROUND — v1.55–v1.59. Five releases, each "full": CI-green merge
+  # (branch protection now REQUIRES Test×3/Clippy/Format/Verification-gate +
+  # Kani gate), tag, release workflow verified, assets attached. Driven by the
+  # 2026-06-10 process findings (checkless merges, runner starvation, component
+  # bit-rot, skipped attestation).
   # ===========================================================================
   - id: FEAT-FALCON-v1.55
     type: feature
-    title: "v1.55 — hardware bring-up: the verified stack flies on a real flight controller (HITL → tethered hover)"
+    title: "v1.55 — CI sovereignty: smithy self-hosted runners + Kani roll-up gate"
+    status: pending
+    description: >
+      PLANNED. Migrate the heavy Linux CI to the org's smithy runner farm
+      (12 self-hosted runners, org-level): fmt→light; clippy/test-linux/
+      falcon-hello/coverage/verification-gate/Kani×17→rust-cpu. macOS/Windows
+      tests + the Bazel-Nix cascade + the 5-platform release matrix stay
+      GitHub-hosted (no such runners on smithy, by design). Adds the "Kani gate"
+      roll-up job so the 17-engine formal result is ONE required branch-
+      protection context. Reduces GitHub-hosted dependency from 25 jobs/push to
+      3 — a repeat of the 2026-06-10 runner incident no longer blocks the
+      verification gate.
+    tags: [falcon, ci, runners, smithy, kani, infra, milestone, v1.55, planned]
+    fields:
+      release-target: "PR checks green ON the smithy runners; Kani gate + Test(linux/macos/windows) required contexts enforced"
+      px4-equivalent: "n/a — infrastructure sovereignty"
+  - id: FEAT-FALCON-v1.56
+    type: feature
+    title: "v1.56 — component family restored + released (the embedded hand-off bundle)"
+    status: pending
+    description: >
+      PLANNED (issue #148). Fix the relay-lc WIT package mismatch; migrate the 7
+      bit-rotted CM components (iekf/ekf/attitude/rate/position/falcon-mixer/
+      cascade) to current cargo-component conventions; generalize
+      build-flight-component.sh into build-components.sh emitting a versioned
+      falcon-components bundle (per-file sha256 + manifest) attached to each
+      release — the real meld→loom→synth hand-off, not just the pre-fused blob.
+    tags: [falcon, wasm, components, embedded, handoff, milestone, v1.56, planned]
+    fields:
+      release-target: "all 8 components build + bundle attached to the release with manifest + sha256s"
+      px4-equivalent: "n/a — component-model hand-off"
+  - id: FEAT-FALCON-v1.57
+    type: feature
+    title: "v1.57 — witness MC/DC on the real flight component"
+    status: pending
+    description: >
+      PLANNED (issue #145). Run witness MC/DC against falcon_flight_component
+      .wasm (the actual flight code, not the coverage_subjects calibration
+      fixtures), enumerate the truth-table gap rows, add vectors to zero them,
+      cite from a new FV-FALCON-COV artifact. Relabel coverage_subjects/ as
+      tool-qualification fixtures in BUILD.bazel.
+    tags: [falcon, witness, mcdc, coverage, milestone, v1.57, planned]
+    fields:
+      release-target: "flight-component truth table with zero unresolved gap rows, FV-cited"
+      px4-equivalent: "n/a — beyond: MC/DC evidence PX4 does not produce"
+  - id: FEAT-FALCON-v1.58
+    type: feature
+    title: "v1.58 — verification-debt sweep: FV criteria as properties (F9) + relay-ekf disposition (F10)"
+    status: pending
+    description: >
+      PLANNED. The two open hygiene threads: F9 — sweep the brittle FV
+      verification-criteria (exact-threshold prose) into property statements;
+      F10 — the relay-ekf retirement decision (the gz bench still uses its
+      utility types — scoped consumer check, then retire or re-document).
+    tags: [falcon, hygiene, fv-sweep, ekf-retirement, milestone, v1.58, planned, f9, f10]
+    fields:
+      release-target: "FV criteria read as properties (rivet validate clean); relay-ekf dispositioned with evidence"
+      px4-equivalent: "n/a — evidence hygiene"
+  - id: FEAT-FALCON-v1.59
+    type: feature
+    title: "v1.59 — sigil attestation chain for release artifacts"
+    status: pending
+    description: >
+      PLANNED. The skipped step 6 of the feature loop: sigil-sign the component
+      bundle + SBOM so the release carries verification + traceability +
+      ATTESTATION end-to-end; the detached verifier must accept the signed
+      artifacts. Closes the third PulseEngine pillar for the release pipeline.
+    tags: [falcon, sigil, attestation, signing, milestone, v1.59, planned]
+    fields:
+      release-target: "sigil-signed component bundle + SBOM verifiable detached"
+      px4-equivalent: "none — the differentiator"
+
+  # ===========================================================================
+  # HARDWARE ROUND — v1.55 onward. Begins only AFTER the v1.45–v1.54 software
+  # parity round. (Renumbered from the former v1.45/v1.46.)
+  # ===========================================================================
+  - id: FEAT-FALCON-v1.60
+    type: feature
+    title: "v1.60 — hardware bring-up: the verified stack flies on a real flight controller (HITL → tethered hover)"
     status: pending
     description: >
       PLANNED. The hardware boundary, crossed (the FIRST physical-work release).
@@ -3059,7 +3140,7 @@ artifacts:
       + a HITL hover-stability bench (attitude/position error under budget on real
       hardware) + a `nm` symbol check that the gale-verified RTOS underlies
       relay-sch.
-    tags: [falcon, hardware, bring-up, hitl, gale, silicon, milestone, v1.55, planned]
+    tags: [falcon, hardware, bring-up, hitl, gale, silicon, milestone, v1.60, planned]
     fields:
       release-target: "verified core hovers tethered on real hardware; on-silicon driver validation passes; gale symbols confirmed under relay-sch"
       px4-equivalent: "PX4 on Pixhawk — falcon on verified silicon with a verified RTOS beneath"
@@ -3071,11 +3152,11 @@ artifacts:
         software flying real hardware.
     links:
       - type: depends-on
-        target: FEAT-FALCON-v1.54
+        target: FEAT-FALCON-v1.59
 
-  - id: FEAT-FALCON-v1.56
+  - id: FEAT-FALCON-v1.61
     type: feature
-    title: "v1.56 — beyond-PX4 capstone: the six-domain dossier + the 'provable parity' demonstrator"
+    title: "v1.61 — beyond-PX4 capstone: the six-domain dossier + the 'provable parity' demonstrator"
     status: pending
     description: >
       PLANNED. The capstone that states the thesis: falcon now matches PX4's
@@ -3092,7 +3173,7 @@ artifacts:
       Oracle: the release-execution traceability-completeness gate green across
       all six safety domains (the V closed for every approved/implemented
       artifact) + the demonstrator mission reproducible from a signed manifest.
-    tags: [falcon, capstone, dossier, certification, beyond-px4, differentiator, milestone, v1.56, planned]
+    tags: [falcon, capstone, dossier, certification, beyond-px4, differentiator, milestone, v1.61, planned]
     fields:
       release-target: "six-domain credit dossier clears the bar on real flight evidence; provable-parity demonstrator reproducible from a signed manifest"
       px4-equivalent: "none — this is the differentiator: verified + authenticated where PX4 is neither"
