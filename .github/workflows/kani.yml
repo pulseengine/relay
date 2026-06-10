@@ -17,8 +17,11 @@ on:
     branches: [main]
 
 concurrency:
+  # PRs and non-main branch pushes: cancel superseded runs.
+  # Main pushes: never cancel — Kani is a required check on main;
+  # every commit needs a completed verdict for evidence preservation.
   group: kani-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   kani:

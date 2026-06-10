@@ -17,10 +17,13 @@ on:
   pull_request:
     branches: [main]
 
-# github.ref is unique per branch and per PR — safe, non-injectable.
+# Group key: head_ref (PR branch name) for pull_request events; ref
+# (e.g. refs/heads/main) for push events — unique per branch/PR.
+# PRs and non-main branch pushes: cancel superseded runs.
+# Main pushes: never cancel — evidence preservation (branch-protection).
 concurrency:
-  group: bazel-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: bazel-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   cascade:
