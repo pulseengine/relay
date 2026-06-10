@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-MIXMULTI-P01
+    type: sw-req
+    title: "MIXMULTI-P01: hexacopter + coaxial-octo mixers allocate within [0,1] for any wrench"
+    status: implemented
+    description: >
+      Falcon shall support multi-rotor airframes beyond the quad (WORLD-P02): a
+      hexacopter (6-rotor) and a coaxial-octo / X8 (8-rotor) control allocator
+      mapping a desired wrench (thrust + roll/pitch/yaw torque) to per-rotor
+      commands, so the SAME verified cascade flies multiple geometries. The
+      airframe-agnostic safety invariant shall hold for ANY geometry and ANY
+      wrench: every motor command is in [0,1] (no negative thrust, never
+      over-unity, NaN ⇒ 0).
+    tags: [falcon, airframe, mixer, hexacopter, coaxial, allocation, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-mix-multi: hover wrench spins all rotors evenly; a saturating
+        wrench clamps (no output > 1 or < 0); coax bounded; a NaN command is
+        zeroed not propagated. Kani MIXMULTI-K01 clamp01 ∈ [0,1] for any f32
+        (NaN⇒0) — the floor every rotor command inherits. Proptest: every hex +
+        coax output ∈ [0,1] for any wrench. The f32 matrix multiply is
+        proptest-gated (Kani-intractable).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

@@ -1,0 +1,22 @@
+artifacts:
+  - id: FV-FALCON-MIXMULTI-001
+    type: sw-verification
+    title: "Hex + coax mixers — relay-mix-multi tests + Kani (falcon v1.49)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-MIXMULTI-P01. The relay-mix-multi crate (no_std/
+      no_alloc/forbid-unsafe) provides hex_x (6) and octo_coax (8) N-rotor
+      allocators. 4 unit + 1 proptest (even hover; saturating wrench clamps; coax
+      bounded; NaN zeroed; every hex+coax output ∈ [0,1] for any wrench). Kani
+      MIXMULTI-K01 clamp01 ∈ [0,1] for any f32 — the airframe-agnostic invariant
+      every rotor command inherits. The per-geometry f32 allocation range is
+      proptest-gated (as in relay-avoid / relay-rc).
+    tags: [verification, falcon, mixer, hexacopter, coaxial, relay-mix-multi, kani, v1.49]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-mix-multi"
+        - run: "cargo kani -p relay-mix-multi"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MIXMULTI-P01
