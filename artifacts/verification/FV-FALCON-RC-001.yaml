@@ -1,0 +1,23 @@
+artifacts:
+  - id: FV-FALCON-RC-001
+    type: sw-verification
+    title: "Manual modes (Stabilized / Acro) — relay-rc tests + Kani clamp proofs (falcon v1.46)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-RC-P01. The relay-rc crate (no_std/no_alloc/
+      forbid-unsafe) maps RC sticks to Stabilized attitude / Acro rate setpoints.
+      4 unit tests (centre auto-levels, full stick hits the limit, out-of-range +
+      NaN clamp, acro rates bounded) + 2 proptests (stabilized + acro outputs
+      bounded for any input). Two Kani harnesses: RC-K01 the stick clamp is in
+      [-1,1] for any f32, RC-K02 the throttle clamp is in [0,1] — the safety floor
+      a glitching receiver passes through. The scaled bounds are proptest-gated
+      (f32 multiply intractable for Kani, as in relay-avoid).
+    tags: [verification, falcon, flight-modes, rc, manual, relay-rc, kani, v1.46]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-rc"
+        - run: "cargo kani -p relay-rc"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-RC-P01
