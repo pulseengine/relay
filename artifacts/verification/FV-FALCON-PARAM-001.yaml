@@ -1,0 +1,23 @@
+artifacts:
+  - id: FV-FALCON-PARAM-001
+    type: sw-verification
+    title: "Parameter store schema-bounded writes — relay-param tests + Kani (falcon v1.47)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-PARAM-P01. The relay-param crate (no_std/no_alloc/
+      forbid-unsafe) is the typed parameter store: register/get/set with
+      schema-bounded writes. 6 unit tests + 1 proptest (in-range applies,
+      out-of-range/NaN rejected with value unchanged, boundaries, unknown id,
+      full store, stored value always in bounds). Two Kani harnesses: PARAM-K01
+      an out-of-range write never lands (value bit-identical after), PARAM-K02
+      set total + in-range applies. The MAVLink PARAM_* wire framing (relay-
+      mavlink) is the integration layer that drives this store.
+    tags: [verification, falcon, parameters, relay-param, kani, v1.47]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-param"
+        - run: "cargo kani -p relay-param"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PARAM-P01

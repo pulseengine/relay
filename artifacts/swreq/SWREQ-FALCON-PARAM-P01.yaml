@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-PARAM-P01
+    type: sw-req
+    title: "PARAM-P01: parameter writes outside the schema bounds are rejected (value unchanged)"
+    status: implemented
+    description: >
+      Falcon shall provide a typed parameter store — the safety core of a
+      PX4-style MAVLink parameter system (PARAM_REQUEST_LIST / READ / SET /
+      VALUE) — where a parameter write outside the parameter's schema bounds
+      [min, max] (or NaN) is REJECTED and leaves the stored value unchanged. A
+      ground station (or a corrupted PARAM_SET frame) shall not be able to push a
+      control gain, failsafe threshold, or geofence value to an unsafe setting.
+      The MAVLink wire framing lives in relay-mavlink and drives this store.
+    tags: [falcon, parameters, mavlink, config, schema, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-param: register initialises to default; an in-range write Applies
+        and is readable; an out-of-range / negative / NaN write returns
+        OutOfRange and the value is unchanged; boundary values accepted; unknown
+        id rejected; full store register fails. Kani PARAM-K01 an out-of-range
+        write NEVER lands (any prior value, any min<=max, any out-of-range v ⇒
+        OutOfRange + value bit-identical); PARAM-K02 set total and in-range
+        applies. Proptest: the stored value is ALWAYS within bounds for any write.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

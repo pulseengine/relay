@@ -23,6 +23,7 @@ members = [
     "crates/relay-fsafe",
     "crates/relay-avoid",
     "crates/relay-rc",
+    "crates/relay-param",
     "crates/relay-lc-diff",
     "crates/relay-mavlink",
     "crates/relay-nid",
