@@ -1,0 +1,91 @@
+{
+  "_comment": "Content for the ONE 'achievements' falcon video (make-achievements-video.sh). Each segment names a chapter of the verified-flight-stack story, overlays a card (title/subtitle/facts) on a real flight clip, and contributes a spoken-style narration line (TTS, no symbols). All facts are REAL output captured from this repo: IEKF bench RMS, crate test counts, the Kani VERIFICATION SUCCESSFUL receipt, the Lean sorry-free proofs, relay-sec, and the falcon-v1.44.0 release tag. Footage is reused from the existing per-release relvids (real Gazebo physics).",
+  "title": "Falcon — a formally verified autonomous flight stack",
+  "subtitle": "IEKF to geometric SE(3) to ADRC to mixer   ·   no_std / no_alloc   ·   falcon v1.44.0",
+  "segments": [
+    {
+      "id": "intro",
+      "clip": "falcon-v1.30.mp4",
+      "title": "— verified flight, flown in physics",
+      "subtitle": "every layer machine-checked  ·  a real Gazebo mission  ·  falcon v1.44.0",
+      "facts": [
+        "A drone autopilot where every layer carries a mechanical proof",
+        "IEKF estimator to geometric SE(3) control to ADRC to mixer",
+        "no_std / no_alloc — the same code builds bare-metal for Cortex-M"
+      ],
+      "narration": "This is Falcon, a formally verified autonomous flight stack, flown in real Gazebo physics. Every layer of the autopilot, from the estimator to the controller to the motor mixer, carries a machine-checked proof. And it is the same no standard, no allocation code that builds bare metal for a Cortex M flight controller."
+    },
+    {
+      "id": "cascade",
+      "clip": "falcon-v1.27.mp4",
+      "title": "The verified cascade",
+      "subtitle": "Invariant EKF  →  geometric SE(3)  →  ADRC  →  mixer",
+      "facts": [
+        "IEKF full-state estimator: position RMS 1.43 m, velocity RMS 1.19 m/s",
+        "Lean kernel-checked Lyapunov proof for SE(3) control — zero sorry",
+        "relay-iekf, relay-geo, relay-mix-quad, relay-traj: 70 tests green"
+      ],
+      "narration": "At the core is a verified cascade. An invariant extended Kalman filter estimates the full state, tracking position to about one and a half metres on the simulation leg. Its setpoints flow into a geometric controller on the special Euclidean group, whose stability is proven in Lean with a kernel checked Lyapunov argument, and that proof has zero remaining gaps."
+    },
+    {
+      "id": "realism",
+      "clip": "falcon-v1.31.mp4",
+      "title": "SITL realism — it survives the physics",
+      "subtitle": "wind  ·  drag  ·  turbulence  ·  IMU bias  ·  noisy GNSS  ·  thrust lapse",
+      "facts": [
+        "Falsification-driven: each realism finding fixed and re-verified",
+        "Dryden turbulence, density thrust lapse, wandering gyro bias",
+        "Stays bounded and returns home — not generic footage, real flights"
+      ],
+      "narration": "It is hardened against realistic physics. Wind, aerodynamic drag, Dryden turbulence, a wandering gyro bias, noisy and intermittent satellite navigation, and falling thrust with altitude. Each one was found by falsification, fixed, and re-verified, and the vehicle stays bounded and returns home through all of them."
+    },
+    {
+      "id": "mavlink",
+      "clip": "falcon-v1.33.mp4",
+      "title": "MAVLink + autonomous missions",
+      "subtitle": "QGroundControl / MAVSDK  ·  upload a mission  ·  fly it end to end",
+      "facts": [
+        "A ground station uploads a mission over MAVLink, vehicle acks each item",
+        "One MISSION_START flies the legs in order, returns home, lands, disarms",
+        "Thin translation seam over the Kani-verified codec + flight FSM"
+      ],
+      "narration": "Falcon speaks MAVLink, the language of QGroundControl and MAVSDK. A ground station uploads a full mission over the wire, the vehicle acknowledges each item, and a single start command flies the legs in order, returns home, lands, and disarms. The bridge only translates. The verified codec and flight state machine underneath stay exactly as proven."
+    },
+    {
+      "id": "secure",
+      "clip": "falcon-v1.28.mp4",
+      "title": "Verified authenticated comms — relay-sec",
+      "subtitle": "X25519 key agreement  ·  Ascon AEAD  ·  anti-replay window",
+      "facts": [
+        "relay-sec: authenticated CCSDS frames, shared by falcon and wohl",
+        "Kani: ReplayWindow accept — VERIFICATION SUCCESSFUL, 0 of 93 failed",
+        "X25519 + Ascon AEAD + anti-replay  ·  50 tests green  ·  no_std"
+      ],
+      "narration": "The link itself is protected and proven. Relay sec adds authenticated command and control frames built on X25519 key agreement, Ascon authenticated encryption, and an anti replay window. The replay window's accept logic is bounded model checked by Kani, with all ninety three checks passing, so a replayed or forged command is provably rejected."
+    },
+    {
+      "id": "failsafe",
+      "clip": "falcon-v1.31.mp4",
+      "title": "Drivers, failsafes, avoidance",
+      "subtitle": "rotor-out reconfigure  ·  battery RTL  ·  keep-out zone avoidance",
+      "facts": [
+        "Kani-verified allocator reconfigures on a single rotor loss",
+        "Low-battery failsafe fires on a real draining pack — actuates RTL",
+        "Reactive keep-out: the vehicle arcs around a no-fly zone, never enters"
+      ],
+      "narration": "Around the cascade sits the safety machinery. A Kani verified allocator reconfigures when a rotor is lost. A low battery failsafe fires on a real draining pack and commands return to launch. And reactive avoidance deflects the path so the vehicle arcs cleanly around a no fly zone and never enters it."
+    },
+    {
+      "id": "outro",
+      "clip": "falcon-v1.29.mp4",
+      "title": "Parity, but provable",
+      "subtitle": "93 Kani harnesses  ·  Lean Lyapunov 0 sorry  ·  falcon v1.44.0",
+      "facts": [
+        "The capabilities of a modern autopilot — with a proof behind each one",
+        "93 Kani proof harnesses across the stack; Lean proofs are sorry-free",
+        "SITL + proof today; the honest gap to hardware is documented, not hidden"
+      ],
+      "narration": "The result is parity with a modern autopilot, but provable. Across the stack there are more than ninety bounded model checking proofs, kernel checked stability proofs with no gaps, and an honest, documented account of what is simulation and proof today versus what still needs hardware. Falcon. Verified flight."
+    }
+  ]
+}
