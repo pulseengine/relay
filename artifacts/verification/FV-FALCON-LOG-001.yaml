@@ -1,0 +1,22 @@
+artifacts:
+  - id: FV-FALCON-LOG-001
+    type: sw-verification
+    title: "Onboard flight logger — relay-log ring + replay tests + Kani (falcon v1.48)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-LOG-P01. The relay-log crate (no_std/no_alloc/
+      forbid-unsafe) is the bounded-ring black box: FlightLog<N> + a 16-byte
+      lossless record format + a replay decoder. 4 unit + 2 proptests (in-order,
+      ring overwrite + dropped count, exact round-trip, stream replay, ring
+      invariant held+dropped=recorded, lossless identity). Two Kani harnesses:
+      LOG-K01 the ring is total and held ≤ capacity for any record count;
+      LOG-K02 encode∘decode is the identity bit-for-bit.
+    tags: [verification, falcon, logging, relay-log, kani, v1.48]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-log"
+        - run: "cargo kani -p relay-log"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LOG-P01
