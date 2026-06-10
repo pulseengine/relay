@@ -1,0 +1,30 @@
+artifacts:
+  - id: SWREQ-FALCON-BAROMAGDRV-P01
+    type: sw-req
+    title: "BAROMAGDRV-P01: magnetometer (IST8310) + barometer (BMP388) driver bodies decode their register protocol, total on any contents"
+    status: implemented
+    description: >
+      Falcon shall provide real magnetometer and barometer driver bodies over a
+      register bus, completing the F6 sensor-input trio (GNSS landed v1.42). The
+      magnetometer driver (IST8310) shall verify the WHO_AM_I identity, read the
+      6 data bytes, and decode a 3-axis field vector in microtesla. The barometer
+      driver (BMP388) shall verify the CHIP_ID, read the 24-bit pressure and
+      temperature words, and apply a linear calibration to Pa / °C. Both decoders
+      shall be total: any register contents yield a finite reading, no panic.
+      Honest limits: the BMP388 per-chip NVM trim compensation and the
+      pressure→altitude conversion (needs powf, not yet in the relay-math seam)
+      are documented follow-ons; on-silicon I2C/SPI validation is the v1.55 item.
+    tags: [falcon, drivers, magnetometer, barometer, ist8310, bmp388, sensors, f6, px4-parity, kani]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-baromag: a mock-bus block decodes to the exact field vector
+        (X/Y/Z µT) and to the exact 24-bit pressure/temperature words + linear
+        Pa/°C; a wrong WHO_AM_I / CHIP_ID is rejected (WrongIdentity); the flat
+        heading helper returns the cardinal angle. Kani BAROMAG-K01 mag decode
+        total (finite vector for any register/data); BAROMAG-K02 baro decode
+        total (finite pressure/temp, raw words 24-bit) for any contents.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

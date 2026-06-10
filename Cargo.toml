@@ -43,6 +43,7 @@ members = [
     "crates/falcon-imu-icm42688",
     "crates/falcon-gnss-ubx",
     "crates/falcon-esc-dshot",
+    "crates/falcon-baromag",
     "crates/falcon-hitl",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",

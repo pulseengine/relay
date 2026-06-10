@@ -1,0 +1,25 @@
+artifacts:
+  - id: FV-FALCON-BAROMAGDRV-001
+    type: sw-verification
+    title: "Mag (IST8310) + baro (BMP388) driver bodies — mock-bus tests + Kani (falcon v1.45)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-BAROMAGDRV-P01. The falcon-baromag crate (no_std/
+      no_alloc/forbid-unsafe) provides the IST8310 magnetometer and BMP388
+      barometer drivers over the RegBus seam (shared with falcon-imu-icm42688).
+      5 mock-bus tests: mag identity + field decode (X/Y/Z µT), wrong-identity
+      rejection, cardinal flat-heading; baro identity + 24-bit pressure/temp
+      decode + linear Pa, wrong-identity rejection. Two Kani harnesses:
+      BAROMAG-K01 mag decode total, BAROMAG-K02 baro decode total (finite
+      readings, 24-bit raw words) over any register contents. On-silicon I2C/SPI
+      validation and the BMP388 NVM trim / pressure→altitude are documented
+      follow-ons.
+    tags: [verification, falcon, magnetometer, barometer, driver, kani, v1.45]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p falcon-baromag"
+        - run: "cargo kani -p falcon-baromag"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-BAROMAGDRV-P01

@@ -1,0 +1,18 @@
+[package]
+name = "falcon-baromag"
+description = "Falcon magnetometer (IST8310) + barometer (BMP388) driver bodies over a register bus — finishes the F6 sensor-input trio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+relay-math = { path = "../relay-math" }
+
+[lints]
+workspace = true
