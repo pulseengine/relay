@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-MD-P01
     type: sw-req
     title: "MD-P01: Invariant holds after init"
-    status: approved
+    status: implemented
     description: >
       After initialization, the dwell table shall be empty with
       entry_count at zero.

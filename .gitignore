@@ -15,8 +15,12 @@ bazel-*
 .DS_Store
 Thumbs.db
 Cargo.lock
-# ...except the crate_universe manifest lockfile, which must be
-# committed so the Bazel build (and Bazel CI) is reproducible.
+# ...except the workspace-root lockfile (v1.54 / F8): tracked + built with
+# --locked so a dependency cannot silently drift the build (the recurring
+# proptest-pin drift). Nested crate lockfiles stay ignored.
+!/Cargo.lock
+# ...and the crate_universe manifest lockfile, which must be committed so the
+# Bazel build (and Bazel CI) is reproducible.
 !crates/relay-sch/wasm/Cargo.lock
 
 # Claude Code session-local settings

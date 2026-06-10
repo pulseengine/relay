@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-CS-P01
     type: sw-req
     title: "CS-P01: Invariant holds after init"
-    status: approved
+    status: implemented
     description: >
       After initialization, the region table shall be empty with
       region_count at zero.

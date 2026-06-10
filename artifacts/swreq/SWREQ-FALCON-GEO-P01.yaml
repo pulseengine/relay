@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-GEO-P01
     type: sw-req
     title: "GEO-P01 — relay-lc Geofence latches RTL on first true-position violation, monotone"
-    status: approved
+    status: implemented
     description: >
       The relay-lc Geofence engine shall hold an axis-aligned bounding
       box on vehicle position (NED, centimetres) and, when fed the

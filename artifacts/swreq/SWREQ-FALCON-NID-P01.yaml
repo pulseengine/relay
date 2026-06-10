@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-NID-P01
     type: sw-req
     title: "NID-P01 — Network ID codec round-trips and rejects malformed input"
-    status: approved
+    status: implemented
     description: >
       The relay-nid Network Identification codec shall encode
       Basic ID and Location / Vector messages into a fixed

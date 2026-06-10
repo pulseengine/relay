@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-HS-P01
     type: sw-req
     title: "HS-P01: Invariant holds after init"
-    status: approved
+    status: implemented
     description: >
       After initialization, the app table shall be empty with
       app_count at zero.

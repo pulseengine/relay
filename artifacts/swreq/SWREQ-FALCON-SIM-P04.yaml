@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SIM-P04
     type: sw-req
     title: "gz-sim bench-evidence runner — SDF world + per-tick CSV + diagnostic counters"
-    status: approved
+    status: implemented
     description: >
       v0.19.0 closes the software-side prerequisites for capturing
       gz-sim flight evidence. Mirrors the v0.14.0 PX4-SITL bench

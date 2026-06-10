@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MAVLINK-P05
     type: sw-req
     title: "MAVLINK-P05: COMMAND_LONG codec + RTL builder for round-trip"
-    status: approved
+    status: implemented
     description: >
       The MAVLink codec shall encode and decode the COMMAND_LONG
       message (id 76, 33-byte payload, CRC_EXTRA = 152) per the

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-SCA-P01
     type: sw-req
     title: "SCA-P01: Invariant holds after init"
-    status: approved
+    status: implemented
     description: >
       After initialization, the absolute command table shall be empty
       with count at zero.

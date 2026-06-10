@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-TBL-P01
     type: sw-req
     title: "TBL-P01: Invariant holds after init"
-    status: approved
+    status: implemented
     description: >
       After initialization, the table registry shall be empty with
       table_count at zero.
