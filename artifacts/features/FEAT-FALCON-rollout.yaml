@@ -2846,14 +2846,14 @@ artifacts:
   - id: FEAT-FALCON-v1.48
     type: feature
     title: "v1.48 — onboard flight logger (black box) + replay"
-    status: pending
+    status: approved
     description: >
       PLANNED. PX4 writes a ulog black box every flight; falcon's relay-ds gates
       packets but archives nothing. Adds a no_std/no_alloc bounded-ring flight
       logger (timestamped state + events + setpoints) with a deterministic binary
       format and an offline replay/decoder, so a flight (or a SITL run) is
       reviewable and a failsafe is post-mortem-traceable.
-    tags: [falcon, logging, blackbox, telemetry, px4-parity, milestone, v1.48, planned]
+    tags: [falcon, logging, blackbox, telemetry, px4-parity, milestone, v1.48, landed]
     fields:
       release-target: "a SITL flight produces a decodable log; replay reconstructs the state/event timeline; logger ring is Kani-total (no overflow)"
       px4-equivalent: "PX4 ulog flight logging"
@@ -2864,6 +2864,10 @@ artifacts:
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.47
+      - type: depends-on
+        target: SWREQ-FALCON-LOG-P01
+      - type: verified-by
+        target: FV-FALCON-LOG-001
 
   - id: FEAT-FALCON-v1.49
     type: feature

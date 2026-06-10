@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-LOG-P01
+    type: sw-req
+    title: "LOG-P01: onboard flight logger is a bounded ring that never overflows and round-trips losslessly"
+    status: implemented
+    description: >
+      Falcon shall record a timestamped flight log (the PX4 ulog role) so a
+      flight, SITL run, or failsafe is reviewable after the fact. The logger
+      shall be a fixed-capacity RING (bounded RAM; oldest overwritten when full,
+      with a dropped-count so loss is accounted, not silent). The binary record
+      format shall round-trip LOSSLESSLY (a black box must not corrupt a field),
+      and recording shall be total — no panic / no out-of-bounds for any
+      sequence, the held count never exceeding capacity. A replay decoder shall
+      reconstruct the records from the byte stream.
+    tags: [falcon, logging, blackbox, telemetry, ring, px4-parity, kani]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        relay-log: records in order; the ring overwrites oldest when full and
+        counts dropped; encode/decode round-trips exactly; replay decodes a
+        concatenated stream. Kani LOG-K01 the ring is total + held count ≤
+        capacity for any record count; LOG-K02 encode∘decode is the identity
+        bit-for-bit for any timestamp/kind/payload. Proptest: held+dropped =
+        recorded; lossless encode/decode.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

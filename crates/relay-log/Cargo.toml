@@ -1,0 +1,18 @@
+[package]
+name = "relay-log"
+description = "Relay Log — bounded-ring onboard flight logger (black box) with a deterministic binary format + replay decode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
