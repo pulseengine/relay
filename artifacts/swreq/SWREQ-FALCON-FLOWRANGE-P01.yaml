@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-FLOWRANGE-P01
+    type: sw-req
+    title: "FLOWRANGE-P01: rangefinder + optical-flow preprocessing gates bad readings before they aid the estimator"
+    status: implemented
+    description: >
+      Falcon shall fuse a downward rangefinder (terrain altitude) and optical
+      flow (horizontal velocity) for low-altitude / GPS-denied flight (PX4 EKF2
+      terrain + flow). The rangefinder preprocessor shall give tilt-compensated
+      terrain altitude (range·cos(tilt)) and REJECT a non-finite or out-of-band
+      reading. The optical-flow preprocessor shall give gyro-compensated
+      horizontal velocity ((flow − gyro)·height) and REJECT a non-positive
+      height. A bad sensor reading shall never become an aiding measurement.
+    tags: [falcon, rangefinder, optical-flow, fusion, gps-denied, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-flowrange: level range = range; 60° tilt halves it; out-of-band /
+        NaN range → None; flow gives velocity; flow=gyro → zero velocity (pure
+        rotation); non-positive height → None. Kani FLOWRANGE-K01 the range gate
+        (out-of-band/NaN → None, total), FLOWRANGE-K02 the flow gate (non-positive
+        height → None, total). Proptest: altitude returned only in-band, |alt| ≤
+        |range|.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

@@ -2925,24 +2925,28 @@ artifacts:
   - id: FEAT-FALCON-v1.51
     type: feature
     title: "v1.51 — rangefinder + optical-flow fusion into the IEKF"
-    status: pending
+    status: approved
     description: >
       PLANNED. PX4 fuses a downward rangefinder (terrain altitude) and optical
       flow (horizontal velocity) for low-altitude / GPS-denied flight; falcon has
       baro/GNSS only (and a vision precision-land controller, but no flow fusion).
       Adds rangefinder terrain-altitude and optical-flow velocity measurement
       updates to the IEKF, with outlier gating reusing the existing NIS path.
-    tags: [falcon, rangefinder, optical-flow, fusion, gps-denied, px4-parity, milestone, v1.51, planned]
+    tags: [falcon, rangefinder, optical-flow, fusion, gps-denied, px4-parity, milestone, v1.51, landed]
     fields:
       release-target: "SITL: rangefinder anchors altitude + flow anchors velocity in a GPS-denied hover; NIS gate rejects outliers; updates Kani-total"
       px4-equivalent: "PX4 rangefinder + optical-flow (EKF2 terrain + flow fusion)"
-      crate: crates/relay-iekf (flow/range updates) + a flow/range driver seam
+      crate: crates/relay-flowrange (new) feeding relay-iekf
       video: >
         GPS denied at low altitude; the vehicle holds station on flow + rangefinder
         where baro/GNSS alone would drift — the estimated vs truth trail overlaid.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.50
+      - type: depends-on
+        target: SWREQ-FALCON-FLOWRANGE-P01
+      - type: verified-by
+        target: FV-FALCON-FLOWRANGE-001
 
   - id: FEAT-FALCON-v1.52
     type: feature

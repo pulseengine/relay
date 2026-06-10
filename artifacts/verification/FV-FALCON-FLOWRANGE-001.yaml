@@ -1,0 +1,21 @@
+artifacts:
+  - id: FV-FALCON-FLOWRANGE-001
+    type: sw-verification
+    title: "Rangefinder + optical-flow preprocessing — relay-flowrange tests + Kani (falcon v1.51)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-FLOWRANGE-P01. The relay-flowrange crate (no_std/
+      no_alloc/forbid-unsafe): range_to_altitude (tilt-compensated, band-gated) +
+      flow_to_velocity (gyro-compensated, height-gated). 6 unit + 1 proptest.
+      Two Kani harnesses: FLOWRANGE-K01 the range gate (out-of-band/NaN → None,
+      total), FLOWRANGE-K02 the flow gate (non-positive height → None, total).
+      The f32 cos/multiply is concrete/proptest territory.
+    tags: [verification, falcon, rangefinder, optical-flow, relay-flowrange, kani, v1.51]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-flowrange"
+        - run: "cargo kani -p relay-flowrange"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FLOWRANGE-P01
