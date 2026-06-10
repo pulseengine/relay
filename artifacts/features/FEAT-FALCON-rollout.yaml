@@ -2820,14 +2820,14 @@ artifacts:
   - id: FEAT-FALCON-v1.47
     type: feature
     title: "v1.47 — MAVLink parameter system + schema validation"
-    status: pending
+    status: approved
     description: >
       PLANNED. PX4 exposes hundreds of parameters over MAVLink (PARAM_REQUEST_LIST
       / PARAM_REQUEST_READ / PARAM_SET / PARAM_VALUE); falcon stores values in
       relay-tbl but has no MAVLink loop and no schema. Adds the PARAM_* protocol
       over relay-mavlink and a typed schema (min/max/enum/default) so a GCS can
       read and (validity-gated) write gains, failsafe thresholds, geofence.
-    tags: [falcon, parameters, mavlink, config, px4-parity, milestone, v1.47, planned]
+    tags: [falcon, parameters, mavlink, config, px4-parity, milestone, v1.47, landed]
     fields:
       release-target: "GCS lists + reads all params; a PARAM_SET outside the schema bounds is rejected (not applied); round-trip SITL test"
       px4-equivalent: "PX4 parameter system (PARAM_* + param metadata)"
@@ -2838,6 +2838,10 @@ artifacts:
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.46
+      - type: depends-on
+        target: SWREQ-FALCON-PARAM-P01
+      - type: verified-by
+        target: FV-FALCON-PARAM-001
 
   - id: FEAT-FALCON-v1.48
     type: feature

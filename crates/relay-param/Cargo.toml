@@ -1,0 +1,18 @@
+[package]
+name = "relay-param"
+description = "Relay Param — typed parameter store with schema-bounded writes (the safety core of the MAVLink parameter system)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
