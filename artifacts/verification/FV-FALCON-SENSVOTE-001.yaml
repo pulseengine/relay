@@ -1,0 +1,21 @@
+artifacts:
+  - id: FV-FALCON-SENSVOTE-001
+    type: sw-verification
+    title: "Sensor voting + GPS-loss fallback — relay-sensvote tests + Kani (falcon v1.50)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-SENSVOTE-P01. The relay-sensvote crate (no_std/
+      no_alloc/forbid-unsafe): median3 / vote3 / median3_vec (NaN-safe,
+      overflow-safe via a branch-free min/max median) + GpsFreshness. 5 unit + 1
+      proptest. Three Kani harnesses: SENSVOTE-K01 a single NaN never propagates
+      (which CAUGHT a real f32 overflow in the original summation median),
+      SENSVOTE-K02 freshness total, SENSVOTE-K03 strictly-past-timeout ⇒ Stale.
+    tags: [verification, falcon, redundancy, sensor-voting, relay-sensvote, kani, v1.50]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-sensvote"
+        - run: "cargo kani -p relay-sensvote"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SENSVOTE-P01

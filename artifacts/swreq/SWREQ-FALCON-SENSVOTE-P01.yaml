@@ -1,0 +1,30 @@
+artifacts:
+  - id: SWREQ-FALCON-SENSVOTE-P01
+    type: sw-req
+    title: "SENSVOTE-P01: redundant-sensor median voting (a faulted sensor never propagates) + GPS-loss fallback"
+    status: implemented
+    description: >
+      Falcon shall vote redundant sensors and degrade gracefully on a fault
+      (PX4 sensor redundancy). A triple-redundant median vote shall reject ONE
+      outlier and be NaN-SAFE: a faulted (NaN) sensor reading is excluded, never
+      propagated into the estimator, and the voted value is always finite when at
+      least one input is finite (no overflow). A GPS freshness monitor shall, on
+      timeout with no fix, report Stale so the flight stack falls back to INS
+      dead-reckoning and then the failsafe arbiter, rather than flying on a frozen
+      position.
+    tags: [falcon, redundancy, sensor-voting, ins, failover, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-sensvote: median rejects one outlier; a NaN sensor is excluded
+        (result finite, not NaN); vote3 flags the furthest outlier (NaN ⇒ the
+        fault); per-axis vec vote; GPS fresh within timeout, Stale past it. Kani
+        SENSVOTE-K01 a single NaN never propagates (result finite), SENSVOTE-K02
+        the freshness monitor total, SENSVOTE-K03 strictly past the timeout ⇒
+        always Stale. Proptest: the voted value lies within the inputs' range.
+        (Kani SENSVOTE-K01 caught a real f32 overflow in the original median sum;
+        fixed with a branch-free min/max median.)
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

@@ -2898,7 +2898,7 @@ artifacts:
   - id: FEAT-FALCON-v1.50
     type: feature
     title: "v1.50 — sensor redundancy: dual-IMU voting + GPS-loss INS fallback"
-    status: pending
+    status: approved
     description: >
       PLANNED. PX4 votes redundant sensors and degrades gracefully; falcon
       assumes a single IMU/GPS. Adds a sensor-selection/voting layer (dual-IMU
@@ -2906,7 +2906,7 @@ artifacts:
       timeout → dead-reckoning-with-bounded-drift → failsafe handoff, with the
       verified property that a single sensor fault never propagates a NaN/garbage
       reading into the estimator.
-    tags: [falcon, redundancy, sensor-voting, ins, failover, px4-parity, milestone, v1.50, planned]
+    tags: [falcon, redundancy, sensor-voting, ins, failover, px4-parity, milestone, v1.50, landed]
     fields:
       release-target: "SITL: a faulted IMU is voted out, estimator continues; GPS dropout → bounded INS drift then failsafe; voter Kani-total"
       px4-equivalent: "PX4 sensor redundancy / voting / EKF GPS-loss handling"
@@ -2917,6 +2917,10 @@ artifacts:
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.49
+      - type: depends-on
+        target: SWREQ-FALCON-SENSVOTE-P01
+      - type: verified-by
+        target: FV-FALCON-SENSVOTE-001
 
   - id: FEAT-FALCON-v1.51
     type: feature
