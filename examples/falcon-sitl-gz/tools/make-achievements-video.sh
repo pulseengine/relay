@@ -85,8 +85,9 @@ for k in $(seq 0 $((NSEG-1))); do
     "$PY" -c "import json,sys
 for x in json.load(open('$CONTENT'))['segments'][$k]['facts']: sys.stdout.write(x+'\0')")
   CARD="$WORK/card_$k.png"
-  # gen-achievements-card.py draws OPAQUE bands tall enough to mask the burned-in
-  # banners/HUD the source relvids already carry (no double-overlay collision).
+  # The source relvids carry burned-in banners (top ~96px) and a telemetry strip
+  # (bottom ~140px). Those are CROPPED out below, so the card bands can be
+  # semi-transparent — the flight stays visible through the overlay.
   "$PY" "$HERE/gen-achievements-card.py" "$CARD" "$TITLE" "$SUB" "${FACTS[@]}" >/dev/null
 
   # determine segment length: narration duration (+1s pad) when TTS is on, else SEG_SECS
@@ -103,7 +104,7 @@ for x in json.load(open('$CONTENT'))['segments'][$k]['facts']: sys.stdout.write(
   # freeze on a black tail. Overlay the card; normalize to 1280x720@30, yuv420p.
   SEG="$WORK/seg_$k.mp4"
   ffmpeg -y -stream_loop 3 -i "$CLIPPATH" -i "$CARD" -t "$SEG_LEN" \
-    -filter_complex "[0:v]scale=1280:720,fps=30,format=yuv420p[v];[v][1:v]overlay=0:0:format=auto[o]" \
+    -filter_complex "[0:v]scale=1280:720,crop=1280:484:0:96,scale=1904:720,crop=1280:720:312:0,fps=30,format=yuv420p[v];[v][1:v]overlay=0:0:format=auto[o]" \
     -map "[o]" -an -c:v libx264 -crf 20 -pix_fmt yuv420p -movflags +faststart \
     "$SEG" >"$WORK/ff_seg_$k.log" 2>&1
   echo "file '$SEG'" >> "$CONCAT"

@@ -20,7 +20,8 @@ from PIL import Image, ImageDraw, ImageFont
 W, H = 1280, 720
 FONTS = ["/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Helvetica.ttc"]
 FONTS_B = ["/System/Library/Fonts/Supplemental/Arial Bold.ttf"] + FONTS
-BG = (8, 12, 20, 255)          # fully opaque — masks whatever is underneath
+BG = (8, 12, 20, 145)          # semi-transparent — the burned-in HUD is cropped
+                               # out of the sources, so the flight shows through
 
 
 def font(sz, bold=False):
