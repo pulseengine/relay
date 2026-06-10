@@ -85,9 +85,11 @@ for k in $(seq 0 $((NSEG-1))); do
     "$PY" -c "import json,sys
 for x in json.load(open('$CONTENT'))['segments'][$k]['facts']: sys.stdout.write(x+'\0')")
   CARD="$WORK/card_$k.png"
-  # The source relvids carry burned-in banners (top ~96px) and a telemetry strip
-  # (bottom ~140px). Those are CROPPED out below, so the card bands can be
-  # semi-transparent — the flight stays visible through the overlay.
+  # The source relvids carry burned-in banners (top ~88px title+subtitle) and a
+  # telemetry strip (bottom ~184px, y=536..720). gen-achievements-card.py renders
+  # semi-transparent bands (alpha 215) that land EXACTLY on those regions, so the
+  # new text replaces the old text region-for-region with NO zoom and NO crop.
+  # The middle of the frame (y=90..536) stays 100 % unobscured.
   "$PY" "$HERE/gen-achievements-card.py" "$CARD" "$TITLE" "$SUB" "${FACTS[@]}" >/dev/null
 
   # determine segment length: narration duration (+1s pad) when TTS is on, else SEG_SECS
@@ -101,10 +103,11 @@ for x in json.load(open('$CONTENT'))['segments'][$k]['facts']: sys.stdout.write(
   printf '%s\n\n' "$NARR" >> "$NARR_ALL"
 
   # source clip is ~38-48s; loop it if the narration outruns it so we never
-  # freeze on a black tail. Overlay the card; normalize to 1280x720@30, yuv420p.
+  # freeze on a black tail. Overlay the card at native 1280x720 — no zoom, no
+  # crop. The card's transparent middle lets the full Gazebo scene show through.
   SEG="$WORK/seg_$k.mp4"
   ffmpeg -y -stream_loop 3 -i "$CLIPPATH" -i "$CARD" -t "$SEG_LEN" \
-    -filter_complex "[0:v]scale=1280:720,crop=1280:484:0:96,scale=1904:720,crop=1280:720:312:0,fps=30,format=yuv420p[v];[v][1:v]overlay=0:0:format=auto[o]" \
+    -filter_complex "[0:v]scale=1280:720,fps=30,format=yuv420p[v];[v][1:v]overlay=0:0:format=auto[o]" \
     -map "[o]" -an -c:v libx264 -crf 20 -pix_fmt yuv420p -movflags +faststart \
     "$SEG" >"$WORK/ff_seg_$k.log" 2>&1
   echo "file '$SEG'" >> "$CONCAT"
