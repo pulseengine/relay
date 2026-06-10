@@ -28,6 +28,7 @@ members = [
     "crates/relay-mix-multi",
     "crates/relay-sensvote",
     "crates/relay-flowrange",
+    "crates/relay-modextra",
     "crates/relay-lc-diff",
     "crates/relay-mavlink",
     "crates/relay-nid",

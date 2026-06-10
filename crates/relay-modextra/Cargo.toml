@@ -1,0 +1,21 @@
+[package]
+name = "relay-modextra"
+description = "Relay ModExtra — extended flight-mode setpoint generators: guided point-of-interest yaw, follow-me, land-in-place, RTL altitude override"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+relay-math = { path = "../relay-math" }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

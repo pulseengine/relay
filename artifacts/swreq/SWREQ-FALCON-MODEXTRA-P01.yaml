@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-FALCON-MODEXTRA-P01
+    type: sw-req
+    title: "MODEXTRA-P01: extended flight modes (guided yaw, follow-me, land-in-place, RTL override) emit safe finite setpoints"
+    status: implemented
+    description: >
+      Falcon shall round out the autonomy modes to PX4 breadth: guided
+      point-of-interest yaw (face a POI), follow-me (offset from a moving target),
+      land-in-place (descend at the current horizontal position), and RTL with an
+      altitude override (return at a safe altitude). Each shall generate a
+      position/yaw setpoint that the verified cascade flies, and shall be total /
+      NaN-safe within the operational envelope — a garbage input never flies a NaN
+      setpoint into the controller, and land-in-place never commands ABOVE the
+      current altitude.
+    tags: [falcon, flight-modes, guided, follow-me, rtl, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-modextra: poi_yaw faces the point (and holds when on top of it);
+        follow applies the offset; land descends never climbs; RTL override sets
+        the safe altitude; all NaN-safe. Kani MODEXTRA-K01 the follow/land/RTL
+        setpoints are finite within the operational envelope (|coord| ≤ 1e6 m);
+        MODEXTRA-K02 land_in_place z-setpoint ≥ current z (only descend/hold).
+        Honest bound: the envelope assumption is stated because finite+finite f32
+        overflows near f32::MAX, which is not a physical position (Kani caught it).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

@@ -2951,7 +2951,7 @@ artifacts:
   - id: FEAT-FALCON-v1.52
     type: feature
     title: "v1.52 — flight-mode completeness (guided yaw, follow-me, land-in-place, RTL override)"
-    status: pending
+    status: approved
     description: >
       PLANNED. Rounds out the autonomy modes to PX4 breadth: guided per-waypoint
       yaw (point-of-interest heading), follow-me (track a companion pose),
@@ -2959,17 +2959,21 @@ artifacts:
       (climb/descend to a safe return altitude). Each reuses the verified
       cascade + the v1.41 failsafe arbiter; the new logic is setpoint generation
       with bounded transitions.
-    tags: [falcon, flight-modes, guided, follow-me, rtl, px4-parity, milestone, v1.52, planned]
+    tags: [falcon, flight-modes, guided, follow-me, rtl, px4-parity, milestone, v1.52, landed]
     fields:
       release-target: "SITL: guided yaw points at a POI through a leg; follow-me tracks a moving pose; land-in-place + RTL-altitude-override behave per spec"
       px4-equivalent: "PX4 Guided / Follow Me / Land / RTL options"
-      crate: crates/relay-fsm + relay-pos (mode/setpoint extensions)
+      crate: crates/relay-modextra (new)
       video: >
         A mission where the camera-yaw tracks a point of interest, then follow-me
         chases a moving target, then a land-in-place on command. Real SITL telemetry.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.51
+      - type: depends-on
+        target: SWREQ-FALCON-MODEXTRA-P01
+      - type: verified-by
+        target: FV-FALCON-MODEXTRA-001
 
   - id: FEAT-FALCON-v1.53
     type: feature
