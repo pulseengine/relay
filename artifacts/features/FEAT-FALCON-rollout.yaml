@@ -2978,7 +2978,7 @@ artifacts:
   - id: FEAT-FALCON-v1.53
     type: feature
     title: "v1.53 — pre-flight built-in-test + arming-check gate"
-    status: pending
+    status: approved
     description: >
       PLANNED. PX4 refuses to arm until a battery of pre-flight checks pass;
       falcon's arm gate is only level + airborne-confirm. Adds a built-in-test
@@ -2987,7 +2987,7 @@ artifacts:
       battery above arming threshold, failsafe configured — each a checkable
       predicate, with the verified property that arming is BLOCKED unless every
       required check passes.
-    tags: [falcon, preflight, bit, arming, safety, px4-parity, milestone, v1.53, planned]
+    tags: [falcon, preflight, bit, arming, safety, px4-parity, milestone, v1.53, landed]
     fields:
       release-target: "SITL: arming is refused with any required check failing and permitted only when all pass; the gate is Kani-exhaustive over the check set"
       px4-equivalent: "PX4 pre-flight checks / arming checks (Commander)"
@@ -2999,6 +2999,10 @@ artifacts:
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.52
+      - type: depends-on
+        target: SWREQ-FALCON-PREFLIGHT-P01
+      - type: verified-by
+        target: FV-FALCON-PREFLIGHT-001
 
   - id: FEAT-FALCON-v1.54
     type: feature

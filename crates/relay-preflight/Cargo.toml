@@ -1,0 +1,18 @@
+[package]
+name = "relay-preflight"
+description = "Relay Preflight — built-in-test + arming-check gate: arming is blocked unless every required pre-flight check passes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
