@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ARM-P01
     type: sw-req
     title: "ARM-P01: Verified arming sequencer gates attitude-torque authority"
-    status: approved
+    status: implemented
     description: >
       The flight stack shall provide an arming sequencer
       (`relay-arm::ArmingSequencer`) that gates attitude-torque

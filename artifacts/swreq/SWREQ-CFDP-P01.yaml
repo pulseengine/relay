@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-CFDP-P01
     type: sw-req
     title: "CFDP-P01: State transitions are valid (no skipping states)"
-    status: approved
+    status: implemented
     description: >
       CFDP transaction state transitions shall follow the valid state
       machine graph. No state may be skipped. Transitions follow:

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-FAULT-P01
     type: sw-req
     title: "FAULT-P01 — EKF divergence latches RTL within 500 ms"
-    status: approved
+    status: implemented
     description: >
       The relay-hs EkfHealthMonitor shall observe a per-tick boolean
       `over_limit` signal (the f32 → bool gate "EKF innovation > limit"

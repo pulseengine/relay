@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ATT-P01
     type: sw-req
     title: "ATT-P01: Quaternion-error invariant preserved"
-    status: approved
+    status: implemented
     description: >
       The attitude controller's quaternion error computation
       shall produce a result in [-1, +1] componentwise, with

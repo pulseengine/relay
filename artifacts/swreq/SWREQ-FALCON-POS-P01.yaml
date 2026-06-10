@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-POS-P01
     type: sw-req
     title: "POS-P01: Setpoint magnitude bounds"
-    status: approved
+    status: implemented
     description: >
       The position controller shall accept setpoints within
       configured bounds: position [-1e6, +1e6] m, velocity

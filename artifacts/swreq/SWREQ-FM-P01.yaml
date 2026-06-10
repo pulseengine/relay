@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FM-P01
     type: sw-req
     title: "FM-P01: validate_path rejects empty paths"
-    status: approved
+    status: implemented
     description: >
       The validate_path function shall reject paths with length zero.
     tags: [file-manager, validation, safety, verus]

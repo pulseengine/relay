@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-RATE-P01
     type: sw-req
     title: "RATE-P01: PID integrator anti-windup saturation"
-    status: approved
+    status: implemented
     description: >
       The rate controller's integral term shall saturate at the
       configured anti-windup limits and never exceed them after

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-HITL-P01
     type: sw-req
     title: HITL harness — RF GPS-spoof driver for the geofence safety path
-    status: approved
+    status: implemented
     description: >
       A host-side hardware-in-the-loop driver shall exercise the
       v0.10 geofence safety path (SYSREQ-FALCON-014) against a real

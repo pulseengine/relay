@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SIM-P03
     type: sw-req
     title: "Gazebo SITL scaffold — Physics trait + MockPhysics + GazeboPhysics stub"
-    status: approved
+    status: implemented
     description: >
       v0.16.1 implements option C from docs/SIMULATOR.md (v0.15.0):
       a pluggable `Physics` trait abstracting the SITL physics

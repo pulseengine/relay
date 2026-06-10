@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-EKF-P01
     type: sw-req
     title: "EKF-P01: Quaternion normalization invariant"
-    status: approved
+    status: implemented
     description: >
       The estimator's output quaternion shall satisfy
       ||q|| in [1.0 - eps, 1.0 + eps] for eps = 1e-6 at every

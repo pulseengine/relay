@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-CCSDS-P01
     type: sw-req
     title: "CCSDS-P01: Encode then decode equals identity (roundtrip)"
-    status: approved
+    status: implemented
     description: >
       Encoding a CCSDS header and then decoding the result shall produce
       the original header fields. The codec is lossless for all valid inputs.

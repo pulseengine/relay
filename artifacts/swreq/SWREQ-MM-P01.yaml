@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-MM-P01
     type: sw-req
     title: "MM-P01: Valid only when address in range, size > 0, alignment ok"
-    status: approved
+    status: implemented
     description: >
       The validate function shall return Valid only when the address is
       within the configured RAM range, size is greater than zero, size

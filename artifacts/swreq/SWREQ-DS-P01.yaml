@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-DS-P01
     type: sw-req
     title: "DS-P01: Invariant holds after init"
-    status: approved
+    status: implemented
     description: >
       After initialization, the filter table shall be empty with
       filter_count at zero.

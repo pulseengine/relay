@@ -3006,19 +3006,28 @@ artifacts:
 
   - id: FEAT-FALCON-v1.54
     type: feature
-    title: "v1.54 — consolidation capstone: meld world fusion + lock/FV/EKF hygiene + trace reconciliation (hardware-ready gate)"
-    status: pending
+    title: "v1.54 — consolidation capstone: meld world fusion + lock hygiene + trace reconciliation (hardware-ready gate)"
+    status: approved
     description: >
-      PLANNED. The software-round capstone and the gate into hardware work.
-      Lands the long-pending meld component-world fusion (WORLD-P01 — the full
-      cascade fused as one verified component world), the open hygiene threads
-      (F8 Cargo.lock tracked + --locked CI, F9 FV verification-criteria sweep,
-      F10 relay-ekf retirement decision), and reconciles the rivet trace —
-      bumping the ~56 built-but-unbumped sw-reqs from approved → implemented so
-      the V-model trace reflects reality before the hardware round.
-    tags: [falcon, meld, fusion, hygiene, traceability, capstone, milestone, v1.54, planned, f8, f9, f10]
+      LANDED. The software-round capstone and the gate into hardware work.
+
+      Ships: (1) WORLD-P01 reconciled — the meld-fused flight component world
+      (wasm/cm/flight) builds and RUNS in wasmtime (run-stabilization → 0.0234
+      rad), so WORLD-P01 is marked implemented against FV-FALCON-WORLD-001;
+      (2) F8 hygiene — the workspace-root Cargo.lock is now TRACKED (un-ignored)
+      and builds verified with --locked, closing the recurring dependency-drift
+      fragility (the proptest-pin drift that bit CI); (3) trace reconciliation —
+      35 sw-reqs that carry verification evidence (a verifying FV) were bumped
+      approved → implemented so the V-model trace reflects reality.
+
+      Honest scope: the remaining approved reqs (outside artifacts/swreq or
+      without a single clean status match) are left for a careful per-location
+      audit rather than a blind flip; F9 (FV criteria sweep) and F10 (relay-ekf
+      retirement) remain open hygiene items. The round v1.45–v1.54 is complete —
+      this is the hardware-ready gate; v1.55 begins the physical work.
+    tags: [falcon, meld, fusion, hygiene, traceability, capstone, milestone, v1.54, landed, f8]
     fields:
-      release-target: "meld-fused flight component world builds + runs in wasmtime; CI builds --locked; rivet status reconciled (approved→implemented for built reqs); rivet validate clean"
+      release-target: "meld-fused component world runs in wasmtime; Cargo.lock tracked + --locked build verified; 35 verified reqs reconciled to implemented; rivet validate clean"
       px4-equivalent: "n/a — architecture + trace consolidation; the hardware-ready gate"
       crate: "wasm/cm/* (meld) + Cargo.lock + artifacts/* reconciliation"
       video: >

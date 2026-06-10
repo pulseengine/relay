@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-WORLD-P01
     type: sw-req
     title: "WORLD-P01: falcon-quad world spec wires the full cascade"
-    status: approved
+    status: implemented
     description: >
       The pulseengine:relay-worlds/falcon-quad world shall
       import the full cFS-DNA service surface (software-bus,

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-LC-P01
     type: sw-req
     title: "LC-P01: Invariant holds after init"
-    status: approved
+    status: implemented
     description: >
       After initialization, the WatchpointTable invariant shall hold:
       the table is empty and entry_count is 0. The invariant guarantees

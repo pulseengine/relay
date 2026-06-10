@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-SCH-P01
     type: sw-req
     title: "SCH-P01: Invariant holds after init"
-    status: approved
+    status: implemented
     description: >
       After initialization, the ScheduleTable invariant shall hold:
       the table is empty and slot_count is 0.
