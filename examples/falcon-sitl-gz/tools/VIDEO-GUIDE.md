@@ -4,6 +4,48 @@ The story: **every layer of an autonomous drone, formally proven — flying a
 real mission in physics.** The flight footage is genuine (real Gazebo
 physics, real control, no scripting); the *proofs* are the star.
 
+---
+
+## 0. Setup (do this first — the scripts need it)
+
+The video tools render text cards with **Pillow** and mux narration via a
+**TTS** server. Stand it all up and verify every prerequisite with one script:
+
+```bash
+./examples/falcon-sitl-gz/tools/setup-video-env.sh
+```
+
+It creates a **stable** Python venv at `target/video-venv` (git-ignored,
+survives reboots — *not* `/tmp`, which gets wiped), `pip install`s Pillow into
+it, and prints a clear **PASS / FAIL** for Pillow, ffmpeg, gz, and the TTS
+server. `--check` verifies without installing. The other scripts auto-pick this
+venv (or honor `PYTHON=...`); if Pillow is missing they tell you to run setup.
+
+If `pip install` is network-blocked, the venv is still created and the script
+says so — re-run it when network is back.
+
+---
+
+## The one "achievements" video (showcase, not per-release)
+
+A single ~4 min narrated video telling the whole arc — verified cascade (IEKF +
+geometric SE(3) + Lean Lyapunov, 0 sorry) → SITL realism → MAVLink/missions →
+verified authenticated comms (`relay-sec`, X25519 + Ascon AEAD + anti-replay) →
+drivers/failsafe/avoidance → **parity, but provable**:
+
+```bash
+./examples/falcon-sitl-gz/tools/setup-video-env.sh           # once
+./examples/falcon-sitl-gz/tools/make-achievements-video.sh   # -> relvids/falcon-achievements.mp4
+```
+
+Content (`achievements-content.json`) is driven by **real output** captured from
+this repo — IEKF bench RMS, crate test counts, the Kani `VERIFICATION
+SUCCESSFUL` receipt, the sorry-free Lean proofs, the `falcon-v1.44.0` tag — over
+**real** Gazebo flight footage reused from the per-release relvids. Cards use
+`gen-achievements-card.py` (opaque bands sized to mask the burned-in HUD the
+source clips carry). If the TTS server is down it builds a silent video plus a
+`*-narration.txt` script (narration pending). The mp4 is git-ignored.
+
 Honest framing — say it out loud, it's a strength: the mission is now **crisp**
 (returns home <1 m) since the v0.35 adaptive process-noise fix and the v1.16
 position-loop integral; the earlier "recognizable but not razor-crisp" caveat

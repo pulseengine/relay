@@ -16,7 +16,16 @@
 # overlay CARD over the verified mission footage, not a feature-specific flight.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-PY="${PYTHON:-/tmp/plotenv/bin/python}"   # a python with Pillow
+REPO="$(cd "$HERE/../../.." && pwd)"
+# Pick a python with Pillow. Prefer the stable venv from setup-video-env.sh
+# ($REPO/target/video-venv); fall back to the legacy /tmp/plotenv if that's all
+# that exists; honor an explicit $PYTHON override. Run setup-video-env.sh first.
+if [ -n "${PYTHON:-}" ]; then PY="$PYTHON"
+elif [ -x "$REPO/target/video-venv/bin/python" ]; then PY="$REPO/target/video-venv/bin/python"
+else PY="/tmp/plotenv/bin/python"; fi
+if ! "$PY" -c 'import PIL' >/dev/null 2>&1; then
+  echo "!! no Pillow-capable python ($PY). Run: $HERE/setup-video-env.sh" >&2; exit 1
+fi
 FRAMES="$1"; OUT="$2"; TITLE="$3"; SUB="$4"; shift 4
 CARD="/tmp/falcon-card.png"
 "$PY" "$HERE/gen-release-card.py" "$CARD" "$TITLE" "$SUB" "$@" >/dev/null
