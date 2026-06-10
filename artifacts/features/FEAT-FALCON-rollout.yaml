@@ -800,7 +800,7 @@ artifacts:
           14550 listen, 30 s duration. One command,
           `cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl`,
           and the verified relay-lc → relay-sc chain closes
-          against PX4 + jMAVSim / Gazebo. `sim/px4-sitl/README.md`
+          against PX4 + jMAVSim / Gazebo. `docs/px4-sitl-bench.md`
           has the bench recipe. **No shell scripts** — the runner
           is the harness binary itself (per user preference).
         - **cargo llvm-cov statement coverage in CI**
@@ -927,7 +927,7 @@ artifacts:
           HitlVerdict.rtl_frame_sent records the outbound evidence.
         - --preset=px4-sitl gains --peer=127.0.0.1:14580 default
           (PX4's offboard MAVLink endpoint).
-        - sim/px4-sitl/README.md updated with the round-trip story.
+        - docs/px4-sitl-bench.md updated with the round-trip story.
         - SYSREQ/SWREQ/FV: SWREQ-FALCON-MAVLINK-P05, FV-FALCON-SIM-002.
 
       Together with v0.14.0 (inbound) the loop is now end-to-end
@@ -1378,7 +1378,7 @@ artifacts:
           command sequence (arm → takeoff → reposition to 1.4 km),
           PX4 events log (Armed, Takeoff, Returning to launch,
           RTL: land, Disarmed).
-        - `sim/px4-sitl/README.md` — JDK pitfall section
+        - `docs/px4-sitl-bench.md` — JDK pitfall section
           (`UnsupportedClassVersionError`: jmavsim_run.jar built
           with Java 25 = class 69; openjdk@17 was first on PATH at
           class 61). Fix: `JAVA_HOME=$(/usr/libexec/java_home -v 26)`.

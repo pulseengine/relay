@@ -37,7 +37,7 @@ artifacts:
          publish), gz-transport binding options
          (gz-transport-rs OR prost-build directly from
          `gz/msgs/*.proto`), and the ENU↔NED frame conversion
-         note. Same shape as v0.14.0's `sim/px4-sitl/README.md`.
+         note. Same shape as v0.14.0's `docs/px4-sitl-bench.md`.
 
       Verification:
         - cargo test -p falcon-sitl-gz → 6/6 (3 MockPhysics + 1

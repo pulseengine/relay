@@ -18,7 +18,7 @@ artifacts:
            default MAVLink listen port (UDP 14550) and a 30 s
            duration. Explicit `--listen=`/`--home=`/`--duration=`
            flags still override the preset.
-        2. A `sim/px4-sitl/README.md` documenting the bench recipe
+        2. A `docs/px4-sitl-bench.md` documenting the bench recipe
            (PX4-Autopilot install, jMAVSim/Gazebo launch, takeoff
            command in `pxh>` console, expected verdict shape,
            troubleshooting table).
