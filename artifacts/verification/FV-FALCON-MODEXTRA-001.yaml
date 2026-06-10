@@ -1,0 +1,22 @@
+artifacts:
+  - id: FV-FALCON-MODEXTRA-001
+    type: sw-verification
+    title: "Extended flight modes — relay-modextra tests + Kani (falcon v1.52)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-MODEXTRA-P01. The relay-modextra crate (no_std/
+      no_alloc/forbid-unsafe): poi_yaw / follow_setpoint / land_in_place /
+      rtl_setpoint. 6 unit + 1 proptest. Two Kani harnesses: MODEXTRA-K01 the
+      setpoints are finite within the operational envelope (|coord| ≤ 1e6 m;
+      Kani caught a finite+finite overflow near f32::MAX, a non-physical input —
+      bound stated honestly); MODEXTRA-K02 land_in_place only descends (z ≥
+      current z).
+    tags: [verification, falcon, flight-modes, relay-modextra, kani, v1.52]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-modextra"
+        - run: "cargo kani -p relay-modextra"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MODEXTRA-P01
