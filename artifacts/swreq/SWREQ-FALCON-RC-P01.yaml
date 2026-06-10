@@ -1,0 +1,30 @@
+artifacts:
+  - id: SWREQ-FALCON-RC-P01
+    type: sw-req
+    title: "RC-P01: manual flight modes (Stabilized / Acro) map sticks to BOUNDED setpoints"
+    status: implemented
+    description: >
+      Falcon shall provide the manual pilot flight modes (PX4 Manual/Stabilized/
+      Acro), missing until now (offboard/MAVLink only). Stabilized maps the
+      sticks to a bounded attitude setpoint (roll/pitch tilt, yaw rate) with
+      centre stick = level (auto-level on release); Acro maps the sticks to a
+      bounded body-rate setpoint. The safety-relevant property shall hold for ANY
+      stick input (including NaN/∞ from a glitching receiver): the commanded tilt
+      never exceeds the tilt limit, the rates never exceed their limit, and
+      thrust stays in [0, 1] — a bad RC frame can never command an unbounded
+      angle or rate.
+    tags: [falcon, flight-modes, rc, manual, stabilized, acro, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-rc: centre stick auto-levels (0 rad); full stick hits exactly the
+        tilt/rate limit; out-of-range + NaN sticks clamp (not blow up). Kani
+        RC-K01 the stick clamp unit(x) ∈ [-1,1] for any f32 (NaN⇒0); RC-K02 the
+        throttle clamp ∈ [0,1] (NaN⇒0) — the safety floor a receiver glitch
+        passes through. The scaled-output bounds (|tilt| ≤ max, |rate| ≤ max for
+        any input) are proptest-gated (f32 multiply, Kani-intractable), following
+        from the clamp + a non-negative limit.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

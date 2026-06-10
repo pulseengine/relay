@@ -2794,24 +2794,28 @@ artifacts:
   - id: FEAT-FALCON-v1.46
     type: feature
     title: "v1.46 — RC input + manual flight modes (Stabilized / Acro)"
-    status: pending
+    status: approved
     description: >
       PLANNED. Today the vehicle is offboard/MAVLink-only; PX4's everyday modes
       start with a pilot stick. Adds an RC-input path and the manual modes:
       Stabilized (stick → attitude setpoint, auto-level on release) and Acro
       (stick → body-rate setpoint), feeding the existing verified attitude/rate
       cascade with verified stick→setpoint clamps.
-    tags: [falcon, flight-modes, rc, manual, stabilized, acro, px4-parity, milestone, v1.46, planned]
+    tags: [falcon, flight-modes, rc, manual, stabilized, acro, px4-parity, milestone, v1.46, landed]
     fields:
       release-target: "SITL: stick deflection → bounded attitude/rate setpoint; auto-level on release; mode clamps Kani-total"
       px4-equivalent: "PX4 Manual / Stabilized / Acro modes"
-      crate: crates/relay-rc (new) + relay-fsm/relay-att modes
+      crate: crates/relay-rc (new)
       video: >
         A stick input drives the SITL vehicle in Stabilized then Acro; the
         commanded-vs-achieved attitude/rate trace tracks; the clamp ceiling shown.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.45
+      - type: depends-on
+        target: SWREQ-FALCON-RC-P01
+      - type: verified-by
+        target: FV-FALCON-RC-001
 
   - id: FEAT-FALCON-v1.47
     type: feature
