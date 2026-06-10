@@ -155,7 +155,7 @@ crates/relay-rate/       (v0.3 body-rate PID with anti-windup)
 
 ## Falcon release table
 
-This example ships with **v0.3**. See [`falcon/README.md`](../../falcon/README.md)
+This example ships with **v0.3**. See [`falcon/README.md`](../../docs/falcon.md)
 for the full v0.1 → v1.0 plan.
 
 Tracked at [`artifacts/features/FEAT-FALCON-rollout.yaml`](../../artifacts/features/FEAT-FALCON-rollout.yaml).

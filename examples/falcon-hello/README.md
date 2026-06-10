@@ -88,7 +88,7 @@ tests over arbitrary inputs.
 - **Not a flight stack yet.** v0.1 doesn't actually fly anything —
   no controllers, no sensor drivers, no SITL hookup. That lands in
   v0.2 (ekf) through v0.5 (full waypoint flight). See
-  [`relay/falcon/README.md`](../../falcon/README.md) for the
+  [`relay/falcon/README.md`](../../docs/falcon.md) for the
   release plan.
 - **Not signed/AOT-compiled yet.** The example runs as a plain
   std binary. sigil signing + synth AOT compilation come with the

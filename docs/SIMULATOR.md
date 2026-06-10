@@ -38,7 +38,7 @@ Falsifiable claim: *if the cascade did not converge, every
 scenario's pass assertion (`!nan_seen`, position-bound check,
 RTL-dispatched flag) would trip*. They don't.
 
-### 2. PX4-SITL × MavlinkBench — `examples/falcon-hitl-rfspoof` + `sim/px4-sitl/`
+### 2. PX4-SITL × MavlinkBench — `examples/falcon-hitl-rfspoof` + `docs/px4-sitl-bench.md`
 
 **PX4 IS the flight controller; falcon watches + commands.**
 PX4-SITL (with jMAVSim or Gazebo Sim) emits `GLOBAL_POSITION_INT`
@@ -52,7 +52,7 @@ This proves the **safety chain** integrates with a real, mature
 flight stack against real 3D physics. It does NOT prove the
 cascade IS the flight stack.
 
-One command from the recipe in `sim/px4-sitl/README.md`:
+One command from the recipe in `docs/px4-sitl-bench.md`:
 ```bash
 cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl
 ```

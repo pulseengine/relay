@@ -18,7 +18,7 @@ artifacts:
          `latched: false, FAIL` — the harness is wired correctly;
          the loop only closes when PX4-SITL is also running.
 
-      2. Recipe — `sim/px4-sitl/README.md`: install steps, one
+      2. Recipe — `docs/px4-sitl-bench.md`: install steps, one
          `make px4_sitl jmavsim` invocation per terminal, the
          `pxh> commander mode auto:loiter` + `commander go
          --location 47.4100 8.5456 30` sequence that drives the
@@ -50,7 +50,7 @@ artifacts:
     fields:
       method: end-to-end-loop-recipe + cli-smoke
       preset: "--preset=px4-sitl"
-      recipe: "sim/px4-sitl/README.md"
+      recipe: "docs/px4-sitl-bench.md"
       steps:
         - run: cargo run -p falcon-hitl-rfspoof -- --preset=px4-sitl --duration=1   # bench-only — smoke; no PX4 → FAIL verdict (rc=1) is correct
         - run: cd ~/git/PX4-Autopilot && make px4_sitl jmavsim                       # bench-only — terminal 1; needs PX4-Autopilot

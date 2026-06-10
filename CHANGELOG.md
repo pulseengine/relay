@@ -2029,7 +2029,7 @@ The following are intentionally deferred per the falcon roadmap:
   engines have them; falcon crates get them in v0.2 once the
   `src/` Verus-annotated track lands.
 
-See [falcon/README.md](falcon/README.md) for the full v0.1 → v1.0
+See [falcon/README.md](docs/falcon.md) for the full v0.1 → v1.0
 release plan.
 
 ---

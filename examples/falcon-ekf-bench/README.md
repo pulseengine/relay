@@ -99,5 +99,5 @@ The relay-ekf tests cover (v0.2 surrogates for SWREQ-FALCON-EKF-P*):
 ## Related
 
 - [`crates/relay-ekf/`](../../crates/relay-ekf/) — the estimator
-- [`falcon/README.md`](../../falcon/README.md) — full v0.1 → v1.0 release plan
+- [`falcon/README.md`](../../docs/falcon.md) — full v0.1 → v1.0 release plan
 - [`examples/falcon-hello/`](../falcon-hello/) — v0.1 MAVLink heartbeat demo
