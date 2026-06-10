@@ -2746,23 +2746,267 @@ artifacts:
       - type: verified-by
         target: FV-FALCON-CPREV-001
 
+  # ===========================================================================
+  # SOFTWARE-PARITY ROUND — v1.45–v1.54. Ten releases that close PX4 CAPABILITY
+  # gaps with NO physical hardware (no_std / SITL / codec / verification work),
+  # BEFORE hardware bring-up. The gap to PX4 is not the control mathematics
+  # (ours is frontier SOTA + machine-checked proofs) — it is software breadth:
+  # manual modes, parameters, logging, airframe variants, sensor redundancy,
+  # more sensor types, pre-flight checks. Full rationale + the where-we-stand
+  # statement: docs/PX4-PARITY-ASSESSMENT.md. Hardware bring-up + the cert
+  # capstone move to v1.55 / v1.56 (after this round).
+  # ===========================================================================
   - id: FEAT-FALCON-v1.45
     type: feature
-    title: "v1.45 — hardware bring-up: the verified stack flies on a real flight controller (HITL → tethered hover)"
+    title: "v1.45 — magnetometer + barometer driver bodies (finish the F6 sensor trio)"
     status: pending
     description: >
-      PLANNED. The hardware boundary, crossed. Everything above runs in SITL or
-      mock-bus; this lands the full verified flight core (meld → loom → synth →
-      gale, per SWARCH) on real silicon (G474 / ESP32-C3), reads the v1.42/v1.43
-      real drivers on the real buses, and achieves a HITL-validated tethered
-      hover. The honest "never on silicon" caveat from threads B/D is retired
-      here.
+      PLANNED. Completes the sensor-input driver trio (GNSS landed v1.42): a
+      magnetometer (e.g. IST8310, I2C) and barometer (e.g. BMP388, I2C/SPI)
+      driver body over the RegBus pattern, decoding the field vector / pressure
+      to feed the IEKF's existing mag-heading and baro-altitude updates. No
+      silicon: mock-bus protocol tests (the icm42688/UBX pattern); on-silicon
+      validation stays the v1.55 open item.
+    tags: [falcon, drivers, magnetometer, barometer, sensors, px4-parity, milestone, v1.45, planned, f6]
+    fields:
+      release-target: "mag + baro driver bodies decode real register/protocol byte sequences in mock-bus tests; parsers Kani-total"
+      px4-equivalent: "PX4 mag + baro drivers — falcon's feed the verified IEKF"
+      crate: crates/falcon-mag-ist8310 + crates/falcon-baro-bmp388 (new)
+      video: >
+        Mock-bus register/I2C traffic on one side, decoded heading + altitude on
+        the other, feeding the IEKF mag/baro updates. Real protocol bytes decoded.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.44
 
-      Oracle: on-silicon driver validation (the open item from v1.42/v1.43) +
-      a HITL hover-stability bench (attitude/position error under budget on real
+  - id: FEAT-FALCON-v1.46
+    type: feature
+    title: "v1.46 — RC input + manual flight modes (Stabilized / Acro)"
+    status: pending
+    description: >
+      PLANNED. Today the vehicle is offboard/MAVLink-only; PX4's everyday modes
+      start with a pilot stick. Adds an RC-input path and the manual modes:
+      Stabilized (stick → attitude setpoint, auto-level on release) and Acro
+      (stick → body-rate setpoint), feeding the existing verified attitude/rate
+      cascade with verified stick→setpoint clamps.
+    tags: [falcon, flight-modes, rc, manual, stabilized, acro, px4-parity, milestone, v1.46, planned]
+    fields:
+      release-target: "SITL: stick deflection → bounded attitude/rate setpoint; auto-level on release; mode clamps Kani-total"
+      px4-equivalent: "PX4 Manual / Stabilized / Acro modes"
+      crate: crates/relay-rc (new) + relay-fsm/relay-att modes
+      video: >
+        A stick input drives the SITL vehicle in Stabilized then Acro; the
+        commanded-vs-achieved attitude/rate trace tracks; the clamp ceiling shown.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.45
+
+  - id: FEAT-FALCON-v1.47
+    type: feature
+    title: "v1.47 — MAVLink parameter system + schema validation"
+    status: pending
+    description: >
+      PLANNED. PX4 exposes hundreds of parameters over MAVLink (PARAM_REQUEST_LIST
+      / PARAM_REQUEST_READ / PARAM_SET / PARAM_VALUE); falcon stores values in
+      relay-tbl but has no MAVLink loop and no schema. Adds the PARAM_* protocol
+      over relay-mavlink and a typed schema (min/max/enum/default) so a GCS can
+      read and (validity-gated) write gains, failsafe thresholds, geofence.
+    tags: [falcon, parameters, mavlink, config, px4-parity, milestone, v1.47, planned]
+    fields:
+      release-target: "GCS lists + reads all params; a PARAM_SET outside the schema bounds is rejected (not applied); round-trip SITL test"
+      px4-equivalent: "PX4 parameter system (PARAM_* + param metadata)"
+      crate: crates/relay-param (new) over relay-tbl + relay-mavlink
+      video: >
+        QGroundControl pulls the full param list, edits a gain, an out-of-range
+        write is rejected on screen — all over the real MAVLink codec.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.46
+
+  - id: FEAT-FALCON-v1.48
+    type: feature
+    title: "v1.48 — onboard flight logger (black box) + replay"
+    status: pending
+    description: >
+      PLANNED. PX4 writes a ulog black box every flight; falcon's relay-ds gates
+      packets but archives nothing. Adds a no_std/no_alloc bounded-ring flight
+      logger (timestamped state + events + setpoints) with a deterministic binary
+      format and an offline replay/decoder, so a flight (or a SITL run) is
+      reviewable and a failsafe is post-mortem-traceable.
+    tags: [falcon, logging, blackbox, telemetry, px4-parity, milestone, v1.48, planned]
+    fields:
+      release-target: "a SITL flight produces a decodable log; replay reconstructs the state/event timeline; logger ring is Kani-total (no overflow)"
+      px4-equivalent: "PX4 ulog flight logging"
+      crate: crates/relay-log (new) over relay-ds
+      video: >
+        A SITL flight, then the log replayed offline reconstructing the
+        trajectory + the failsafe event timeline from the real recorded bytes.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.47
+
+  - id: FEAT-FALCON-v1.49
+    type: feature
+    title: "v1.49 — airframe variants: hexacopter + coaxial mixers (WORLD-P02)"
+    status: pending
+    description: >
+      PLANNED. Only the quad mixer (relay-mix-quad) exists; PX4 supports many
+      geometries. Lands hexacopter and coaxial allocation via the airframe-
+      agnostic MixerN seam (the N×4 effectiveness matrix already proven for
+      quad), with the same verified invariants (no-negative-thrust, saturation
+      priority, bounded output) across the new geometries. Closes WORLD-P02.
+    tags: [falcon, airframe, mixer, hexacopter, coaxial, allocation, px4-parity, milestone, v1.49, planned]
+    fields:
+      release-target: "hex + coax mixers stabilize their airframe in SITL; Kani: any geometry → outputs in [0,1], saturation priority holds"
+      px4-equivalent: "PX4 airframe library (hex/octo/coax mixers)"
+      crate: crates/relay-mix-quad (MixerN extension) + SITL worlds
+      video: >
+        Same verified cascade flies a quad, then a hex, then a coax in SITL —
+        one control law, three geometries, each Kani-bounded allocation.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.48
+
+  - id: FEAT-FALCON-v1.50
+    type: feature
+    title: "v1.50 — sensor redundancy: dual-IMU voting + GPS-loss INS fallback"
+    status: pending
+    description: >
+      PLANNED. PX4 votes redundant sensors and degrades gracefully; falcon
+      assumes a single IMU/GPS. Adds a sensor-selection/voting layer (dual-IMU
+      median/disagreement with a switch on fault) and an explicit GPS-loss INS
+      timeout → dead-reckoning-with-bounded-drift → failsafe handoff, with the
+      verified property that a single sensor fault never propagates a NaN/garbage
+      reading into the estimator.
+    tags: [falcon, redundancy, sensor-voting, ins, failover, px4-parity, milestone, v1.50, planned]
+    fields:
+      release-target: "SITL: a faulted IMU is voted out, estimator continues; GPS dropout → bounded INS drift then failsafe; voter Kani-total"
+      px4-equivalent: "PX4 sensor redundancy / voting / EKF GPS-loss handling"
+      crate: crates/relay-sensvote (new) feeding relay-iekf
+      video: >
+        Live: one IMU is corrupted; the voter switches to the healthy one with no
+        estimator glitch; then GPS is denied and the bounded INS-fallback is shown.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.49
+
+  - id: FEAT-FALCON-v1.51
+    type: feature
+    title: "v1.51 — rangefinder + optical-flow fusion into the IEKF"
+    status: pending
+    description: >
+      PLANNED. PX4 fuses a downward rangefinder (terrain altitude) and optical
+      flow (horizontal velocity) for low-altitude / GPS-denied flight; falcon has
+      baro/GNSS only (and a vision precision-land controller, but no flow fusion).
+      Adds rangefinder terrain-altitude and optical-flow velocity measurement
+      updates to the IEKF, with outlier gating reusing the existing NIS path.
+    tags: [falcon, rangefinder, optical-flow, fusion, gps-denied, px4-parity, milestone, v1.51, planned]
+    fields:
+      release-target: "SITL: rangefinder anchors altitude + flow anchors velocity in a GPS-denied hover; NIS gate rejects outliers; updates Kani-total"
+      px4-equivalent: "PX4 rangefinder + optical-flow (EKF2 terrain + flow fusion)"
+      crate: crates/relay-iekf (flow/range updates) + a flow/range driver seam
+      video: >
+        GPS denied at low altitude; the vehicle holds station on flow + rangefinder
+        where baro/GNSS alone would drift — the estimated vs truth trail overlaid.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.50
+
+  - id: FEAT-FALCON-v1.52
+    type: feature
+    title: "v1.52 — flight-mode completeness (guided yaw, follow-me, land-in-place, RTL override)"
+    status: pending
+    description: >
+      PLANNED. Rounds out the autonomy modes to PX4 breadth: guided per-waypoint
+      yaw (point-of-interest heading), follow-me (track a companion pose),
+      land-in-place as an alternative to RTL, and an RTL altitude override
+      (climb/descend to a safe return altitude). Each reuses the verified
+      cascade + the v1.41 failsafe arbiter; the new logic is setpoint generation
+      with bounded transitions.
+    tags: [falcon, flight-modes, guided, follow-me, rtl, px4-parity, milestone, v1.52, planned]
+    fields:
+      release-target: "SITL: guided yaw points at a POI through a leg; follow-me tracks a moving pose; land-in-place + RTL-altitude-override behave per spec"
+      px4-equivalent: "PX4 Guided / Follow Me / Land / RTL options"
+      crate: crates/relay-fsm + relay-pos (mode/setpoint extensions)
+      video: >
+        A mission where the camera-yaw tracks a point of interest, then follow-me
+        chases a moving target, then a land-in-place on command. Real SITL telemetry.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.51
+
+  - id: FEAT-FALCON-v1.53
+    type: feature
+    title: "v1.53 — pre-flight built-in-test + arming-check gate"
+    status: pending
+    description: >
+      PLANNED. PX4 refuses to arm until a battery of pre-flight checks pass;
+      falcon's arm gate is only level + airborne-confirm. Adds a built-in-test
+      (BIT) + arming-check arbiter: sensor health (IMU/GPS/mag/baro present and
+      sane), estimator converged, calibration-present flags, geofence loaded,
+      battery above arming threshold, failsafe configured — each a checkable
+      predicate, with the verified property that arming is BLOCKED unless every
+      required check passes.
+    tags: [falcon, preflight, bit, arming, safety, px4-parity, milestone, v1.53, planned]
+    fields:
+      release-target: "SITL: arming is refused with any required check failing and permitted only when all pass; the gate is Kani-exhaustive over the check set"
+      px4-equivalent: "PX4 pre-flight checks / arming checks (Commander)"
+      crate: crates/relay-preflight (new) feeding relay-fsm arm
+      video: >
+        A pre-flight dashboard: each check flips green; with one red, arming is
+        refused on screen; all green, the vehicle arms. The Kani 'no-arm-on-fail'
+        proof alongside.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.52
+
+  - id: FEAT-FALCON-v1.54
+    type: feature
+    title: "v1.54 — consolidation capstone: meld world fusion + lock/FV/EKF hygiene + trace reconciliation (hardware-ready gate)"
+    status: pending
+    description: >
+      PLANNED. The software-round capstone and the gate into hardware work.
+      Lands the long-pending meld component-world fusion (WORLD-P01 — the full
+      cascade fused as one verified component world), the open hygiene threads
+      (F8 Cargo.lock tracked + --locked CI, F9 FV verification-criteria sweep,
+      F10 relay-ekf retirement decision), and reconciles the rivet trace —
+      bumping the ~56 built-but-unbumped sw-reqs from approved → implemented so
+      the V-model trace reflects reality before the hardware round.
+    tags: [falcon, meld, fusion, hygiene, traceability, capstone, milestone, v1.54, planned, f8, f9, f10]
+    fields:
+      release-target: "meld-fused flight component world builds + runs in wasmtime; CI builds --locked; rivet status reconciled (approved→implemented for built reqs); rivet validate clean"
+      px4-equivalent: "n/a — architecture + trace consolidation; the hardware-ready gate"
+      crate: "wasm/cm/* (meld) + Cargo.lock + artifacts/* reconciliation"
+      video: >
+        The whole cascade fused by meld into one component world, run in wasmtime;
+        the rivet trace going green end-to-end as the built reqs are reconciled.
+    links:
+      - type: depends-on
+        target: FEAT-FALCON-v1.53
+      - type: depends-on
+        target: SWREQ-FALCON-WORLD-P01
+
+  # ===========================================================================
+  # HARDWARE ROUND — v1.55 onward. Begins only AFTER the v1.45–v1.54 software
+  # parity round. (Renumbered from the former v1.45/v1.46.)
+  # ===========================================================================
+  - id: FEAT-FALCON-v1.55
+    type: feature
+    title: "v1.55 — hardware bring-up: the verified stack flies on a real flight controller (HITL → tethered hover)"
+    status: pending
+    description: >
+      PLANNED. The hardware boundary, crossed (the FIRST physical-work release).
+      Everything above runs in SITL or mock-bus; this lands the full verified
+      flight core (meld → loom → synth → gale, per SWARCH) on real silicon
+      (G474 / ESP32-C3), reads the v1.42/v1.43/v1.45 real drivers on the real
+      buses, and achieves a HITL-validated tethered hover. The honest "never on
+      silicon" caveat from threads B/D is retired here.
+
+      Oracle: on-silicon driver validation (the open item from v1.42/v1.43/v1.45)
+      + a HITL hover-stability bench (attitude/position error under budget on real
       hardware) + a `nm` symbol check that the gale-verified RTOS underlies
       relay-sch.
-    tags: [falcon, hardware, bring-up, hitl, gale, silicon, milestone, v1.45, planned]
+    tags: [falcon, hardware, bring-up, hitl, gale, silicon, milestone, v1.55, planned]
     fields:
       release-target: "verified core hovers tethered on real hardware; on-silicon driver validation passes; gale symbols confirmed under relay-sch"
       px4-equivalent: "PX4 on Pixhawk — falcon on verified silicon with a verified RTOS beneath"
@@ -2774,11 +3018,11 @@ artifacts:
         software flying real hardware.
     links:
       - type: depends-on
-        target: FEAT-FALCON-v1.44
+        target: FEAT-FALCON-v1.54
 
-  - id: FEAT-FALCON-v1.46
+  - id: FEAT-FALCON-v1.56
     type: feature
-    title: "v1.46 — beyond-PX4 capstone: the six-domain dossier + the 'provable parity' demonstrator"
+    title: "v1.56 — beyond-PX4 capstone: the six-domain dossier + the 'provable parity' demonstrator"
     status: pending
     description: >
       PLANNED. The capstone that states the thesis: falcon now matches PX4's
@@ -2795,7 +3039,7 @@ artifacts:
       Oracle: the release-execution traceability-completeness gate green across
       all six safety domains (the V closed for every approved/implemented
       artifact) + the demonstrator mission reproducible from a signed manifest.
-    tags: [falcon, capstone, dossier, certification, beyond-px4, differentiator, milestone, v1.46, planned]
+    tags: [falcon, capstone, dossier, certification, beyond-px4, differentiator, milestone, v1.56, planned]
     fields:
       release-target: "six-domain credit dossier clears the bar on real flight evidence; provable-parity demonstrator reproducible from a signed manifest"
       px4-equivalent: "none — this is the differentiator: verified + authenticated where PX4 is neither"
@@ -2807,6 +3051,6 @@ artifacts:
         tagline earned, not asserted: parity — but provable.
     links:
       - type: depends-on
-        target: FEAT-FALCON-v1.45
+        target: FEAT-FALCON-v1.55
       - type: implements
         target: SYSREQ-FALCON-010
