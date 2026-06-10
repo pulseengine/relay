@@ -1,0 +1,21 @@
+artifacts:
+  - id: FV-FALCON-PREFLIGHT-001
+    type: sw-verification
+    title: "Pre-flight BIT + arming gate — relay-preflight tests + exhaustive Kani (falcon v1.53)"
+    status: approved
+    description: >
+      Verifies SWREQ-FALCON-PREFLIGHT-P01. The relay-preflight crate (no_std/
+      no_alloc/forbid-unsafe): PreflightChecks + arm_check. 4 unit tests
+      (all-pass arms, any fail blocks, first-failure priority, default blocked).
+      Two Kani harnesses, EXHAUSTIVE over the 2^6 check space: PREFLIGHT-K01
+      Allowed IFF all pass; PREFLIGHT-K02 a Blocked reason is always a real
+      failure and Allowed never returns with a failing check (no arm-on-fail).
+    tags: [verification, falcon, preflight, arming, relay-preflight, kani, v1.53]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-preflight"
+        - run: "cargo kani -p relay-preflight"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PREFLIGHT-P01

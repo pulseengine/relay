@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-PREFLIGHT-P01
+    type: sw-req
+    title: "PREFLIGHT-P01: arming is blocked unless every required pre-flight check passes"
+    status: implemented
+    description: >
+      Falcon shall gate arming behind a built-in-test (BIT) / pre-flight check
+      set (PX4 Commander pre-flight checks): sensor health, estimator
+      convergence, calibration present, geofence loaded, battery above arming
+      threshold, failsafe configured. Arming shall be BLOCKED unless EVERY
+      required check passes, and when blocked the FIRST failing check (in
+      priority order) shall be reported. A reported blocking reason shall always
+      correspond to a check that actually failed (no false accusation, no
+      arm-on-fail).
+    tags: [falcon, preflight, bit, arming, safety, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-preflight: all-pass arms; any single failure blocks; the first
+        failure (priority order) is reported; a default (all-false) struct does
+        NOT arm. Kani PREFLIGHT-K01 arm_check returns Allowed IFF all checks pass
+        (exhaustive over all 2^6 combinations); PREFLIGHT-K02 a Blocked reason
+        always corresponds to a check that actually failed, and Allowed never
+        returns with any check failing.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
