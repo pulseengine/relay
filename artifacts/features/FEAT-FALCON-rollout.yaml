@@ -2758,26 +2758,38 @@ artifacts:
   # ===========================================================================
   - id: FEAT-FALCON-v1.45
     type: feature
-    title: "v1.45 — magnetometer + barometer driver bodies (finish the F6 sensor trio)"
-    status: pending
+    title: "v1.45 — magnetometer (IST8310) + barometer (BMP388) driver bodies (finish the F6 sensor trio)"
+    status: approved
     description: >
-      PLANNED. Completes the sensor-input driver trio (GNSS landed v1.42): a
-      magnetometer (e.g. IST8310, I2C) and barometer (e.g. BMP388, I2C/SPI)
-      driver body over the RegBus pattern, decoding the field vector / pressure
-      to feed the IEKF's existing mag-heading and baro-altitude updates. No
-      silicon: mock-bus protocol tests (the icm42688/UBX pattern); on-silicon
-      validation stays the v1.55 open item.
-    tags: [falcon, drivers, magnetometer, barometer, sensors, px4-parity, milestone, v1.45, planned, f6]
+      LANDED. Completes the sensor-input driver trio (GNSS landed v1.42; the
+      ICM-42688 IMU is the v1.13 reference). Ships crates/falcon-baromag (new,
+      one crate, two driver modules, no_std/no_alloc/forbid-unsafe over the
+      shared RegBus seam): an IST8310 magnetometer (WHO_AM_I check, 3×i16 →
+      field µT, flat-heading helper) and a BMP388 barometer (CHIP_ID check,
+      24-bit pressure/temperature decode, linear Pa/°C), feeding the IEKF's
+      existing mag-heading and baro z-anchor updates.
+
+      Oracle: mock-bus protocol tests (exact field vector / 24-bit words decode;
+      wrong-identity rejected) + Kani BAROMAG-K01/K02 the decoders are total
+      (finite readings for ANY register contents). Honest follow-ons: the BMP388
+      per-chip NVM trim compensation + pressure→altitude (needs powf, not in the
+      relay-math seam) + on-silicon I2C/SPI validation (the v1.55 item).
+    tags: [falcon, drivers, magnetometer, barometer, ist8310, bmp388, sensors, px4-parity, milestone, v1.45, landed, f6]
     fields:
-      release-target: "mag + baro driver bodies decode real register/protocol byte sequences in mock-bus tests; parsers Kani-total"
+      release-target: "falcon-baromag: mag/baro decode the exact register protocol in mock-bus tests; both decoders Kani-total on any contents"
       px4-equivalent: "PX4 mag + baro drivers — falcon's feed the verified IEKF"
-      crate: crates/falcon-mag-ist8310 + crates/falcon-baro-bmp388 (new)
+      crate: crates/falcon-baromag (new)
       video: >
-        Mock-bus register/I2C traffic on one side, decoded heading + altitude on
-        the other, feeding the IEKF mag/baro updates. Real protocol bytes decoded.
+        Mock-bus register/I2C traffic on one side, decoded heading + pressure on
+        the other, feeding the IEKF mag/baro updates. Real protocol bytes decoded;
+        a wrong chip id shown rejected.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.44
+      - type: depends-on
+        target: SWREQ-FALCON-BAROMAGDRV-P01
+      - type: verified-by
+        target: FV-FALCON-BAROMAGDRV-001
 
   - id: FEAT-FALCON-v1.46
     type: feature
