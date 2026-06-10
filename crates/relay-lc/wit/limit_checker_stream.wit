@@ -1,4 +1,4 @@
-package pulseengine:relay-limit-checker-stream@0.1.0;
+package pulseengine:relay-limit-checker@0.1.0;
 
 /// Limit Checker — stream transformer edition.
 ///
