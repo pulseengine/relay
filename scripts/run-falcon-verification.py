@@ -90,6 +90,9 @@ BENCH_PATTERNS = [
     # wasmtime. The native falcon-core tests cover the same logic; this runs
     # locally (like meld / gz / thumbv7em).
     re.compile(r"\bcargo\s+component\b"),
+    # v1.56 — the component-bundle build scripts wrap `cargo component` (absent
+    # on the gate runner); same bench-tool rationale as the cargo-component line.
+    re.compile(r"\bbuild-(flight-)?components?\.sh\b"),
     re.compile(r"\bwasmtime\b"),
     re.compile(r"\bwasmtime-flight-test\b"),
 ]
