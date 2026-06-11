@@ -28,3 +28,7 @@ lto = true
 codegen-units = 1
 
 [workspace]
+
+[features]
+default = ["bazel-bindings"]
+bazel-bindings = []

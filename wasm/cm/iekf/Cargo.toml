@@ -1,8 +1,8 @@
 # Standalone cargo-component crate — kept out of the relay cargo
 # workspace (generated bindings module won't build under plain cargo).
 [package]
-name = "falcon-position-cm"
-description = "Falcon v0.7 — position as a Component Model component (wac cascade)"
+name = "falcon-iekf-cm"
+description = "Falcon v1.4 — IEKF (SE₂(3)) as a Component Model component, exporting the falcon:cascade/ekf interface"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
@@ -13,7 +13,8 @@ rust-version = "1.85"
 crate-type = ["cdylib"]
 
 [dependencies]
-relay-pos = { path = "../../../crates/relay-pos" }
+relay-iekf = { path = "../../../crates/relay-iekf" }
+relay-math = { path = "../../../crates/relay-math" }
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
 
 [package.metadata.component]
@@ -21,7 +22,7 @@ package = "falcon:cascade"
 
 [package.metadata.component.target]
 path = "../../../wit/falcon-cascade"
-world = "position-component"
+world = "ekf-component"
 
 [profile.release]
 panic = "abort"
@@ -32,7 +33,5 @@ codegen-units = 1
 [workspace]
 
 [features]
-# default = the Bazel rust_wasm_component_bindgen path (external *_bindings crate);
-# the cargo-component bundle build passes --no-default-features for `mod bindings`.
 default = ["bazel-bindings"]
 bazel-bindings = []

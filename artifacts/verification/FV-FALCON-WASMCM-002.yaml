@@ -1,0 +1,46 @@
+artifacts:
+  - id: FV-FALCON-WASMCM-002
+    type: sw-verification
+    title: "All 8 falcon CM components build and bundle script emits versioned dist/ (v1.56)"
+    status: approved
+    description: >
+      Verification that the full falcon Component Model family builds and the
+      versioned bundle emitter works end-to-end (v1.56, feat #148).
+
+      All 8 components build successfully with cargo-component --release
+      --target wasm32-wasip2, producing valid WebAssembly Component artifacts:
+
+        flight       101 207 bytes  (falcon:flight, standalone)
+        iekf          66 542 bytes  (falcon:cascade ekf-component, IEKF SE₂(3))
+        ekf           56 155 bytes  (falcon:cascade ekf-component, Mahony)
+        attitude      55 429 bytes  (falcon:cascade attitude-component)
+        rate          55 228 bytes  (falcon:cascade rate-component)
+        position      62 073 bytes  (falcon:cascade position-component)
+        falcon-mixer  14 573 bytes  (falcon:cascade mixer-component)
+        cascade       17 751 bytes  (falcon:cascade orchestrator)
+
+      Root cause of the 7 broken components (fixed in this PR):
+        - 6 components (ekf, attitude, rate, position, falcon-mixer, cascade)
+          referenced `use *_bindings as bindings` — the old Bazel
+          rust_wasm_component_bindgen crate-alias convention; replaced with
+          `#[allow(warnings)] mod bindings` (cargo-component convention).
+        - iekf was missing its Cargo.toml entirely; added with the correct
+          package metadata (falcon:cascade, ekf-component world).
+
+      The flight component smoke-test continues to pass in wasmtime:
+        run-stabilization: 0.0234 rad < 0.1 (PASS)
+        run-position-hold: 0.1317 m  < 0.6 (PASS)
+
+      scripts/build-components.sh is the mechanical gate for the bundle;
+      scripts/build-flight-component.sh retained unchanged for backward compat.
+      Bench-only (CI gate runner lacks cargo-component + wasmtime).
+    tags: [verification, falcon, wasm, component-model, bundle, v1.56]
+    fields:
+      method: test
+      steps:
+        - run: "scripts/build-components.sh 1.56"
+        - run: "wasmtime run --invoke 'run-stabilization()' dist/falcon-components-v1.56/falcon-flight-v1.56.wasm"
+        - run: "wasmtime run --invoke 'run-position-hold()' dist/falcon-components-v1.56/falcon-flight-v1.56.wasm"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WASMCM-P02

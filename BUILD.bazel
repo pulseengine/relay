@@ -556,6 +556,7 @@ rust_library(
 
 rust_wasm_component_bindgen(
     name = "falcon-ekf",
+    crate_features = ["bazel-bindings"],
     srcs = ["wasm/cm/ekf/src/lib.rs"],
     wit = ":falcon_ekf_wit",
     deps = [":relay-ekf"],
@@ -566,6 +567,7 @@ rust_wasm_component_bindgen(
 # it is a drop-in Component Model replacement for the Mahony falcon-ekf.
 rust_wasm_component_bindgen(
     name = "falcon-iekf",
+    crate_features = ["bazel-bindings"],
     srcs = ["wasm/cm/iekf/src/lib.rs"],
     wit = ":falcon_ekf_wit",
     deps = [":relay-iekf"],
@@ -574,6 +576,7 @@ rust_wasm_component_bindgen(
 
 rust_wasm_component_bindgen(
     name = "falcon-position",
+    crate_features = ["bazel-bindings"],
     srcs = ["wasm/cm/position/src/lib.rs"],
     wit = ":falcon_position_wit",
     deps = [":relay-pos"],
@@ -582,6 +585,7 @@ rust_wasm_component_bindgen(
 
 rust_wasm_component_bindgen(
     name = "falcon-attitude",
+    crate_features = ["bazel-bindings"],
     srcs = ["wasm/cm/attitude/src/lib.rs"],
     wit = ":falcon_attitude_wit",
     deps = [":relay-att"],
@@ -590,6 +594,7 @@ rust_wasm_component_bindgen(
 
 rust_wasm_component_bindgen(
     name = "falcon-rate",
+    crate_features = ["bazel-bindings"],
     srcs = ["wasm/cm/rate/src/lib.rs"],
     wit = ":falcon_rate_wit",
     deps = [":relay-rate"],
@@ -598,6 +603,7 @@ rust_wasm_component_bindgen(
 
 rust_wasm_component_bindgen(
     name = "falcon-mixer",
+    crate_features = ["bazel-bindings"],
     srcs = ["wasm/cm/falcon-mixer/src/lib.rs"],
     wit = ":falcon_mixer_wit",
     deps = [":relay-mix-quad"],
@@ -608,6 +614,7 @@ rust_wasm_component_bindgen(
 # No control-crate dep: the cascade is pure orchestration.
 rust_wasm_component_bindgen(
     name = "falcon-cascade",
+    crate_features = ["bazel-bindings"],
     srcs = ["wasm/cm/cascade/src/lib.rs"],
     wit = ":falcon_cascade_wit",
     profiles = ["release"],
