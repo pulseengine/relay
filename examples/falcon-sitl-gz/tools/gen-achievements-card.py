@@ -2,11 +2,17 @@
 """Render an 'achievements' overlay card (1280x720, transparent middle) for the
 single falcon achievements video.
 
-Unlike gen-release-card.py, this is sized to fully MASK the burned-in banners
-that the source relvids already carry (their own top banner ~86 px, a GCS box
-top-left, a HUD box top-right, and a bottom telemetry strip). So the bands here
-are OPAQUE and tall enough to cover those, leaving only the central flight in
-view. The middle stays transparent so the real Gazebo flight shows through.
+The source relvids carry burned-in UI at fixed pixel offsets:
+  - Top banner (title + subtitle):  y = 0 .. ~88 px
+  - Bottom telemetry strip:         y = ~536 .. 720 px  (~184 px tall)
+  Some clips also carry floating GCS/FSM boxes at y ~ 58-155 px (left/right sides)
+  but those are outside the main flight area and are accepted as ambient context.
+
+This card overlays two semi-transparent bands (alpha 215) that land EXACTLY on
+those burned-in regions, suppressing the old text while our new text replaces it
+region-for-region.  The middle of the frame (y = TOP_H .. BOT_Y, full width) is
+left at alpha = 0 so the Gazebo flight fills it 100 % unobscured.  No zoom, no
+crop — the source plays at native 1280 x 720.
 
 Usage:
   gen-achievements-card.py OUT.png "Title" "subtitle" "fact1" ["fact2"] ["fact3"]
@@ -20,8 +26,15 @@ from PIL import Image, ImageDraw, ImageFont
 W, H = 1280, 720
 FONTS = ["/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Helvetica.ttc"]
 FONTS_B = ["/System/Library/Fonts/Supplemental/Arial Bold.ttf"] + FONTS
-BG = (8, 12, 20, 145)          # semi-transparent — the burned-in HUD is cropped
-                               # out of the sources, so the flight shows through
+
+# Fully opaque bands — suppresses burned-in text completely; the transparent middle
+# (y = TOP_H .. BOT_Y) keeps the Gazebo flight 100 % visible
+BG = (8, 12, 20, 255)
+ACCENT = (90, 150, 230, 255)
+
+# Band heights chosen to exactly cover the burned-in regions in all relvid clips
+TOP_H = 90    # covers the title+subtitle header row (0..88 px)
+BOT_Y = 536   # bottom strip starts here; 536..720 = 184 px of telemetry
 
 
 def font(sz, bold=False):
@@ -40,25 +53,21 @@ def main():
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    # ── top band: opaque, 132 px — covers the relvids' own banner + the top of
-    #    their GCS / HUD boxes, so we don't double up. A thin accent rule below.
-    TOP = 132
-    d.rectangle([0, 0, W, TOP], fill=BG)
-    d.rectangle([0, TOP, W, TOP + 3], fill=(90, 150, 230, 230))
-    d.text((30, 22), f"FALCON   {title}", font=font(34, True), fill=(255, 255, 255, 255))
+    # ── top band: covers burned-in title+subtitle header (y = 0..TOP_H)
+    d.rectangle([0, 0, W, TOP_H], fill=BG)
+    d.rectangle([0, TOP_H, W, TOP_H + 3], fill=ACCENT)
+    d.text((30, 14), f"FALCON   {title}", font=font(34, True), fill=(255, 255, 255, 255))
     if subtitle:
-        d.text((32, 74), subtitle, font=font(22), fill=(150, 200, 255, 255))
+        d.text((32, 56), subtitle, font=font(20), fill=(150, 200, 255, 255))
 
-    # ── bottom band: opaque, sized to the fact lines — covers the relvids'
-    #    bottom telemetry strip + their own lower-third.
-    fh = 38
-    y0 = H - (52 + fh * len(facts))
-    d.rectangle([0, y0 - 3, W, y0], fill=(90, 150, 230, 230))
-    d.rectangle([0, y0, W, H], fill=BG)
+    # ── bottom band: covers burned-in telemetry strip (y = BOT_Y..H)
+    d.rectangle([0, BOT_Y - 3, W, BOT_Y], fill=ACCENT)
+    d.rectangle([0, BOT_Y, W, H], fill=BG)
+    fh = 37
     colors = [(170, 255, 170, 255), (235, 235, 235, 255), (255, 210, 140, 255)]
     for i, fact in enumerate(facts):
-        d.text((30, y0 + 18 + fh * i), fact,
-               font=font(23, i == 0), fill=colors[min(i, 2)])
+        d.text((30, BOT_Y + 12 + fh * i), fact,
+               font=font(22, i == 0), fill=colors[min(i, 2)])
 
     img.save(out)
     print(out)
