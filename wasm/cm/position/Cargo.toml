@@ -30,3 +30,9 @@ lto = true
 codegen-units = 1
 
 [workspace]
+
+[features]
+# default = the Bazel rust_wasm_component_bindgen path (external *_bindings crate);
+# the cargo-component bundle build passes --no-default-features for `mod bindings`.
+default = ["bazel-bindings"]
+bazel-bindings = []

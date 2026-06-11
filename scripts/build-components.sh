@@ -49,7 +49,7 @@ build_component() {
   local dir="$1"
   local wasm_dir="$HERE/wasm/cm/$dir"
   printf "  building %-16s..." "$dir" >&2
-  ( cd "$wasm_dir" && cargo component build --release --target wasm32-wasip2 2>&1 ) \
+  ( cd "$wasm_dir" && cargo component build --release --target wasm32-wasip2 --no-default-features 2>&1 ) \
     | grep -E "^error" | sed 's/^/    /' >&2 || true
   # Prefer the wasip2 path; cargo-component <0.20 emits wasip1.
   local src
