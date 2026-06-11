@@ -10,6 +10,9 @@
 //! attitude-estimate role the cascade's `ekf` slot fills.
 
 #[allow(warnings)]
+#[cfg(feature = "bazel-bindings")]
+use falcon_iekf_bindings as bindings;
+#[cfg(not(feature = "bazel-bindings"))]
 mod bindings;
 
 use core::cell::RefCell;

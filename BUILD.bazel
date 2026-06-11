@@ -567,6 +567,7 @@ rust_wasm_component_bindgen(
 # it is a drop-in Component Model replacement for the Mahony falcon-ekf.
 rust_wasm_component_bindgen(
     name = "falcon-iekf",
+    crate_features = ["bazel-bindings"],
     srcs = ["wasm/cm/iekf/src/lib.rs"],
     wit = ":falcon_ekf_wit",
     deps = [":relay-iekf"],
