@@ -19,8 +19,11 @@ on:
   workflow_dispatch:
 
 concurrency:
+  # PRs: cancel superseded runs when a new push arrives on the branch.
+  # workflow_dispatch: never cancel — a manually triggered verification
+  # run is deliberate; cancelling it silently discards the result.
   group: verify-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
