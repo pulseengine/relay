@@ -1,89 +1,122 @@
-# Where we are vs PX4 — parity assessment (2026-06-10, at falcon-v1.44.0)
+# Where we are vs PX4 — parity assessment (2026-06-11, at falcon-v1.56.0)
 
-A statement of the gap between the falcon/relay flight stack and PX4, and the
-work still to cover. Written to drive the v1.45→v1.54 release round — ten
-releases of software/SITL/verification work that close PX4 *capability* gaps
-**before** any physical-hardware work begins.
+A statement of the gap between the falcon/relay flight stack and PX4 (and the
+commercial field), and the work still to cover. Supersedes the v1.44.0 edition,
+which *planned* the v1.45→v1.54 capability round — that round, plus v1.55
+(CI sovereignty) and v1.56 (the Wasm component family), has now shipped.
 
 ## The one-line statement
 
-> falcon is **research-ready and SITL-complete with a formally-verified core**;
-> PX4 is **production-ready with thousands of real flights**. The remaining gap
-> is *not* the control mathematics (ours is frontier SOTA + machine-checked
-> proofs PX4 has no equivalent of) — it is **software breadth** (manual modes,
-> parameters, logging, airframe variants, sensor redundancy) and, separately,
-> **the hardware boundary** (real drivers on silicon, tuning, calibration, first
-> flight). This round closes the software breadth; the hardware boundary is the
-> round after.
+> falcon is **capability-complete in simulation with a formally-verified,
+> security-hardened core**; PX4 is **production-ready with millions of real
+> flight-hours**. The remaining gap is *not* features and *not* the control
+> mathematics — it is **flight-proven maturity**: real drivers on silicon,
+> per-airframe calibration and tuning, on-MCU WCET measurement, and first
+> flight. That is the next round. We lead on verification and security; we trail,
+> entirely, on flight hours.
 
-## Where we genuinely lead PX4
+## What shipped since v1.44 (the capability-parity round, now done)
 
-- **Formally-verified cascade**: IEKF on SE₂(3), geometric SE(3) control with a
-  *kernel-checked Lean Lyapunov proof* (0 sorry/0 axiom), ADRC, a simplex-shield
-  safety envelope, compositional WCET proof. PX4's EKF2/controllers are neither
-  verified nor proof-carrying.
-- **Verified authenticated C2 link** (relay-sec v1.35–v1.37): anti-replay +
-  Ascon-AEAD + X25519 session keys with forward secrecy + rekey-on-reboot. PX4
-  has **no built-in** authenticated command link.
-- **Verification rigor**: Kani BMC on loop/safety invariants, Lean/Rocq proofs,
-  proptest, independent clean-room audits, an STPA-Sec hazard analysis, a
-  six-domain certification dossier scaffold.
+Every PX4 capability gap the v1.44 edition listed as "buildable without hardware"
+now has a verified crate behind it — each present in-tree, each gated by a
+mechanical oracle (Kani / KAT / SITL test) before its release:
 
-This is the "parity, but provable" thesis: match PX4's capability, win on
-verification + security.
+| PX4 capability | Our crate (shipped) | Release |
+|---|---|---|
+| Mag + baro driver bodies (mock-bus) | `falcon-baromag` | v1.45 |
+| Manual / Stabilized / Acro RC modes | `relay-rc` | v1.46 |
+| MAVLink parameter system + schema | `relay-param` | v1.47 |
+| Onboard black-box log + replay | `relay-log` | v1.48 |
+| Airframe variants (hex / coax) | `relay-mix-multi` | v1.49 |
+| Sensor redundancy / voting / GPS-loss fallback | `relay-sensvote` | v1.50 |
+| Rangefinder + optical-flow fusion | `relay-flowrange` | v1.51 |
+| Mode completeness (follow-me, land-in-place, RTL override) | `relay-modextra` | v1.52 |
+| Pre-flight built-in-test + arming-check gate | `relay-preflight` | v1.53 |
+| Component-world fusion (meld) + trace reconciliation | (v1.54 capstone) | v1.54 |
+| CI sovereignty: self-hosted runners + Kani roll-up gate | (infra) | v1.55 |
+| Wasm component family as a versioned release bundle | `scripts/build-components.sh` | v1.56 |
 
-## Where PX4 leads us — the capability gap (buildable WITHOUT hardware)
+The trace moved with the build: at v1.44 rivet read 113 `approved` / 57
+`implemented`; it now carries ~180 sw-reqs with `implemented` roughly doubled,
+backed by 128 sw-verification + 32 unit-verification artifacts and a 10-hazard
+STPA-Sec security analysis.
 
-These are real PX4 features we lack, and **none require physical hardware** —
-they are no_std/SITL/codec work, exactly this round's scope:
+## How much of PX4 do we cover?
 
-| Gap | PX4 has | We have | Closes in |
-|---|---|---|---|
-| Manual / Stabilized / Acro modes (RC stick → rate/attitude) | yes | offboard/MAVLink only | v1.46 |
-| Parameter system over MAVLink (PARAM_*) + schema | yes | relay-tbl stores values, no MAVLink loop / no min-max-enum | v1.47 |
-| Onboard flight log / black box + replay | ulog | relay-ds gates packets, no archival | v1.48 |
-| Airframe variants (hex / coax) | yes | quad mixer only | v1.49 |
-| Sensor redundancy / voting / GPS-loss fallback | yes | single IMU/GPS, no voting | v1.50 |
-| Rangefinder + optical-flow fusion | yes | baro/GNSS only (precision-land controller exists, no flow) | v1.51 |
-| Mode completeness (guided per-wp yaw, follow-me, land-in-place, RTL alt override) | yes | mission + fixed loiter/RTL | v1.52 |
-| Pre-flight built-in-test + arming checks | yes | arm gate is level+airborne only | v1.53 |
-| Magnetometer + barometer driver bodies | yes | GNSS done (v1.42); mag/baro are seams only | v1.45 |
-| Component-world fusion (meld) + trace reconciliation | n/a (our architecture) | WORLD-P01 unbuilt; ~56 reqs built-but-unbumped | v1.54 |
+**The wrong axis is "feature %"; the right axis is two separate scores.**
 
-## Where PX4 leads us — the hardware boundary (the NEXT round, not this one)
+- **Capability surface (features that exist and pass their tests in SITL):**
+  broadly at parity — estimator, cascade control, all flight modes, three
+  airframe classes, params, logging, failsafes, pre-flight checks, sensor
+  voting, flow/range fusion, authenticated C2. Call it ~95% of the *flyable
+  feature set*.
+- **Flight-proven maturity:** ~0%. PX4's real mass is ~15 years × thousands of
+  airframes × millions of flight-hours of field-hardening, a driver ecosystem
+  for hundreds of boards/sensors/ESCs, and calibration/tuning baked in from
+  experience. We have **zero real flights**, ~4 real driver bodies (the rest are
+  mock-bus seams), and no on-silicon calibration or WCET *measurement* (the WCET
+  *proof* exists; cycle counts on a real MCU do not).
 
-Deliberately deferred to after v1.54 (the readiness dossier's 7-item register):
-real sensor/actuator driver bodies **on silicon**, sensor calibration, flight
-tuning per airframe, WCET leaf *measurement* (proof is done, cycle counts
-aren't), physical HITL transport (UART/USB/UDP), libm qualification, and **first
-flight**. Plus the separate integration project (meld→loom→synth→gale onto the
-board). These are v1.55+ (hardware bring-up) and the certification capstone.
+So: **most of the capability, none of the maturity.** The second axis is the
+entire hardware round (below), and it is the honest gap — not a number to inflate.
 
-## Honest note on the rivet trace
+## Where we genuinely lead PX4 — and the commercial PX4 derivatives
 
-rivet currently shows **113 `sw-req` approved vs 57 implemented**, which *reads*
-as "half-built." That is misleading: most of the 113 are **built-but-unbumped**
-(code + tests + proofs exist; the status was never advanced from `approved` to
-`implemented`, exactly as the relay-sec reqs were until bumped). A handful are
-genuinely unbuilt (WORLD-P01/P02 fusion + variants, PAYLOAD-P01, MISSION-GDSS
-geofence-upload). v1.54 reconciles the status so the trace reflects reality.
+Not "more features" — a different correctness basis:
 
-## The plan: v1.45 → v1.54 (software/SITL parity, no hardware)
+- **Machine-checked proofs.** Kernel-verified Lean Lyapunov proof for the
+  geometric SE(3) controller (0 sorry / 0 axiom), Kani BMC on loop/safety
+  invariants, a compositional WCET proof. PX4's EKF2 and controllers are neither
+  verified nor proof-carrying — **and neither are the commercial derivatives**
+  (Auterion/Skynode, ModalAI/VOXL inherit PX4's unverified core).
+- **Built-in authenticated C2** (`relay-sec`): anti-replay + Ascon-AEAD + X25519
+  session keys with forward secrecy + rekey-on-reboot. PX4 has **no native
+  authenticated command link** (MAVLink signing is optional and weak). Most
+  commercial stacks add security at the radio/link layer, not in the flight stack.
+- **Traceable MBSE as infrastructure** (spar→rivet→witness→sigil): every
+  requirement traced to architecture → code → MC/DC truth-table → signed
+  attestation. This is the thing certified-avionics shops spend person-years
+  building by hand.
 
-1. **v1.45** mag + baro driver bodies (finish the F6 sensor trio; mock-bus)
-2. **v1.46** RC input + manual flight modes (Stabilized / Acro)
-3. **v1.47** MAVLink parameter system + schema validation
-4. **v1.48** onboard flight logger (black box) + replay
-5. **v1.49** airframe variants: hexacopter + coaxial mixers
-6. **v1.50** sensor redundancy: dual-IMU voting + GPS-loss INS fallback
-7. **v1.51** rangefinder + optical-flow fusion into the IEKF
-8. **v1.52** flight-mode completeness (guided yaw, follow-me, land-in-place, RTL override)
-9. **v1.53** pre-flight built-in-test + arming-check gate
-10. **v1.54** consolidation capstone: meld world fusion + lock/FV/EKF hygiene + rivet status reconciliation = the hardware-ready gate
+The thesis: **"PX4's capability, made provable and secure."**
 
-Then — and only then — **v1.55 hardware bring-up** and **v1.56 the beyond-PX4
-certification capstone**.
+## The commercial comparison (honest)
 
-Every release keeps the discipline: a mechanical oracle (Kani/KAT/SITL test),
-honest limits published, no_std/no_alloc on the flight path, traceability
-leading, released via `release-execution` (a tag, not just a merge).
+| | falcon/relay | PX4 (+Auterion/ModalAI) | DJI | Certified avionics (DO-178C DAL-A) |
+|---|---|---|---|---|
+| Control sophistication | frontier (IEKF/SE(3)/ADRC) | solid, conventional | excellent (closed) | conservative, proven |
+| Formal verification | **machine-checked proofs** | none | none | testing/process (DO-333 formal methods rarely applied) |
+| Built-in C2 security | **yes, verified** | minimal | proprietary | mission-specific |
+| Flight-proven maturity | **none** | enormous | enormous | enormous, certified |
+| Hardware/driver ecosystem | minimal | huge | vertically integrated | per-platform |
+| Actually certified | dossier *scaffold* only | no | no | **yes — the bar** |
+
+The defensible claim: falcon is the only entry whose *correctness is
+proof-carrying*. Even DO-178C DAL-A — the gold standard — certifies by exhaustive
+testing and process rigor, not machine-checked proofs. So we hold a verification
+property nobody in this table has — while holding **none** of PX4's flight hours.
+Both halves are true; stating only the first is the over-claim to avoid.
+
+## The hardware boundary — the next round (v1.57+)
+
+Deliberately deferred. The 7-item register that stands between "provably correct
+in simulation" and "flown":
+
+1. Real sensor/actuator driver **bodies on silicon** (beyond the 4 we have).
+2. Sensor **calibration** (accel/gyro/mag/baro) on a real board.
+3. Per-airframe **flight tuning** (the math is proven; gains for a real frame are not).
+4. WCET **leaf measurement** (proof done; cycle counts on the target MCU not).
+5. Physical **HITL transport** (UART/USB/UDP) end-to-end.
+6. **libm qualification** (transcendental math on the flight path; centralize behind a math seam first).
+7. **First flight** — the irreducible field test no proof substitutes for.
+
+Plus the integration project: meld→loom→synth→gale onto the board (the v1.56
+component bundle is the input to this hand-off). Tracked as the hardware-round
+epic; each register item is an assignable slice others can pick up.
+
+## The line not to cross
+
+A machine-checked Lyapunov proof guarantees the *math* is right. It says nothing
+about whether a real ESC browns out at 6S or an IMU saturates under vibration.
+We are **research-ready and provably-correct in simulation, not flight-proven.**
+Every external statement of where we stand must carry both clauses.
