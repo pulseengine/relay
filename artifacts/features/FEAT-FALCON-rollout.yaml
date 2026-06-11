@@ -3049,7 +3049,7 @@ artifacts:
   - id: FEAT-FALCON-v1.55
     type: feature
     title: "v1.55 — CI sovereignty: smithy self-hosted runners + Kani roll-up gate"
-    status: pending
+    status: approved
     description: >
       PLANNED. Migrate the heavy Linux CI to the org's smithy runner farm
       (12 self-hosted runners, org-level): fmt→light; clippy/test-linux/
@@ -3060,7 +3060,7 @@ artifacts:
       protection context. Reduces GitHub-hosted dependency from 25 jobs/push to
       3 — a repeat of the 2026-06-10 runner incident no longer blocks the
       verification gate.
-    tags: [falcon, ci, runners, smithy, kani, infra, milestone, v1.55, planned]
+    tags: [falcon, ci, runners, smithy, kani, infra, milestone, v1.55, landed]
     fields:
       release-target: "PR checks green ON the smithy runners; Kani gate + Test(linux/macos/windows) required contexts enforced"
       px4-equivalent: "n/a — infrastructure sovereignty"
