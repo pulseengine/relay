@@ -23,7 +23,7 @@ concurrency:
 jobs:
   kani:
     name: Kani (${{ matrix.engine }})
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     strategy:
       fail-fast: false
       matrix:
@@ -54,3 +54,16 @@ jobs:
         uses: model-checking/kani-github-action@v1
         with:
           working-directory: crates/${{ matrix.engine }}
+
+  # Roll-up over the 17-engine matrix: ONE required context for branch
+  # protection ("Kani gate"), so the formal-verification result gates merges
+  # without registering 17 separate required checks.
+  kani-gate:
+    name: Kani gate
+    runs-on: [self-hosted, linux, x64, light]
+    needs: kani
+    if: always()
+    steps:
+      - name: All Kani engines green?
+        run: |
+          [ "${{ needs.kani.result }}" = "success" ] || { echo "Kani matrix result: ${{ needs.kani.result }}"; exit 1; }
