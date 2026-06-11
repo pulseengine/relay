@@ -1,0 +1,46 @@
+artifacts:
+  - id: SWREQ-FALCON-WASMCM-P02
+    type: sw-req
+    title: "WASMCM-P02 — all 8 falcon CM components build and are emitted as a versioned bundle"
+    status: implemented
+    description: >
+      The full falcon Component Model family (8 components) shall build with
+      cargo-component to wasm32-wasip2 and be emitted by
+      scripts/build-components.sh as a versioned bundle under
+      dist/falcon-components-vMM/:
+
+        flight     — falcon:flight   (IEKF→geometric SE(3)→ADRC→mixer, standalone)
+        iekf       — falcon:cascade  ekf-component  (IEKF SE₂(3) estimator)
+        ekf        — falcon:cascade  ekf-component  (Mahony estimator, legacy slot)
+        attitude   — falcon:cascade  attitude-component
+        rate       — falcon:cascade  rate-component
+        position   — falcon:cascade  position-component
+        falcon-mixer — falcon:cascade mixer-component
+        cascade    — falcon:cascade  cascade (orchestrator, imports the 5 leaf slots)
+
+      The bundle emitter shall:
+        (a) build each component with cargo-component --release --target wasm32-wasip2
+        (b) name the artifacts falcon-<component>-vMM.wasm
+        (c) emit a manifest.json (component name, file, sha256, byte size,
+            build toolchain: cargo-component + rustc versions)
+        (d) emit a SHA256SUMS file
+        (e) smoke-test the flight component in wasmtime
+            (run-stabilization < 0.1 rad, run-position-hold < 0.6 m)
+
+      scripts/build-flight-component.sh shall remain working (backward compat)
+      by delegating to the new build-components.sh with flight-only mode, or
+      by remaining unchanged and pointing users to the new script.
+
+      Generated bindings.rs files shall NOT be committed (gitignored).
+    tags: [falcon, wasm, component-model, cargo-component, bundle, v1.56]
+    fields:
+      req-type: architecture
+      priority: must
+      verification-criteria: >
+        scripts/build-components.sh <MM> runs to completion, all 8 .wasm files
+        exist in dist/falcon-components-vMM/, manifest.json and SHA256SUMS are
+        present, sha256 checksums verify. flight component smoke-test passes in
+        wasmtime (bench-only: CI lacks cargo-component + wasmtime).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020
