@@ -680,6 +680,13 @@ wasm_module_coverage(
     tags = ["manual"],
 )
 
+# TOOL-QUALIFICATION FIXTURE (#145) — NOT flight code. Calibrates the
+# witness MC/DC pipeline against a known truth table; measures no flight
+# component. Real-component MC/DC is the manual :falcon-cascade-coverage
+# target above, blocked on the witness toolchain + WASI-harness-as-Bazel
+# -target (see #145). Coverage claims: tool-qualified on fixtures;
+# flight-component MC/DC pending.
+#
 # v0.13: witness MC/DC end-to-end smoke target. Hand-written WAT
 # module mirroring the Geofence decision shape, no WASI imports — so
 # the full instrument + run + LCOV pipeline completes inside Bazel.
@@ -691,6 +698,11 @@ wasm_module_coverage(
     invoke = ["run"],
 )
 
+# TOOL-QUALIFICATION FIXTURE (#145) — NOT flight code. A real-Rust
+# subject that re-calls verified relay-lc::Geofence::check to qualify the
+# witness pipeline on real (not WAT) codegen; still a calibration subject,
+# not the flight component. Flight-component MC/DC pending — see #145.
+#
 # v0.14.1: witness MC/DC on a real-Rust subject that calls the
 # verified relay-lc::Geofence::check directly. Three entry points
 # exercise the three distinct branches of the latch state machine
