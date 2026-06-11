@@ -85,7 +85,17 @@ def main() -> int:
     p.add_argument("--body-file", required=True, type=Path)
     args = p.parse_args()
     body = args.body_file.read_text()
-    upsert(args.pr_number, body)
+    # The sticky comment is a convenience, not the gate verdict. If the GitHub
+    # CLI is unavailable (e.g. a self-hosted runner without `gh`), warn and skip
+    # cleanly rather than fail with a traceback — the workflow step is also
+    # continue-on-error, but a soft exit keeps the log readable.
+    try:
+        upsert(args.pr_number, body)
+    except FileNotFoundError as e:
+        print(f"::warning::skipping PR comment — {e.filename!r} not on PATH "
+              f"(self-hosted runner without gh?); verification verdict is "
+              f"unaffected", flush=True)
+        return 0
     return 0
 
 

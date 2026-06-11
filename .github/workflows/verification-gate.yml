@@ -117,6 +117,11 @@ jobs:
           if-no-files-found: warn
 
       - name: Post sticky PR comment
+        # Cosmetic: the verification VERDICT is owned by the separate
+        # "Fail job if any verification artifact failed" step below. A comment
+        # hiccup (e.g. `gh` absent on a self-hosted runner) must NEVER fail the
+        # gate. Surfaced by the v1.55 smithy migration (gh is GitHub-hosted-only).
+        continue-on-error: true
         if: github.event_name == 'pull_request' && always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
