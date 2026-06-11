@@ -9,7 +9,8 @@
 //! the filter with the IMU and runs the gravity (tilt) update — the
 //! attitude-estimate role the cascade's `ekf` slot fills.
 
-use falcon_iekf_bindings as bindings;
+#[allow(warnings)]
+mod bindings;
 
 use core::cell::RefCell;
 
