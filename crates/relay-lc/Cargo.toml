@@ -25,3 +25,10 @@ proptest.workspace = true
 
 [lints]
 workspace = true
+
+# Two worlds live in wit/ (relay-limit-checker + relay-limit-checker-stream,
+# one unified package since the v1.56 fix); cargo-component needs the default
+# named explicitly when other workspace components resolve this crate.
+[package.metadata.component.target]
+path = "wit"
+world = "relay-limit-checker"
