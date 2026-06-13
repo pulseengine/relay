@@ -1,0 +1,22 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
+# The witness WASI subprocess harness as a Bazel rust_binary, built from the
+# harness_crates crate_universe (host/witness-wasi-harness/Cargo.{toml,lock}).
+# bazel/wasm_module_coverage_wasi.bzl invokes `//host/witness-wasi-harness` as
+# `--harness` so cascade-class WASM modules (with wasi:* imports) can be
+# MC/DC-instrumented end-to-end — closing the tags=["manual"] workaround on
+# //:falcon-cascade-coverage. (#145)
+rust_binary(
+    name = "witness-wasi-harness",
+    srcs = ["src/main.rs"],
+    edition = "2024",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@harness_crates//:anyhow",
+        "@harness_crates//:serde",
+        "@harness_crates//:serde_json",
+        "@harness_crates//:tokio",
+        "@harness_crates//:wasmtime",
+        "@harness_crates//:wasmtime-wasi",
+    ],
+)
