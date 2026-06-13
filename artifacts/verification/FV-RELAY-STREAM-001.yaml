@@ -1,0 +1,41 @@
+artifacts:
+  - id: FV-RELAY-STREAM-001
+    type: sw-verification
+    title: "relay-lc P3 async stream component — authored, builds as a Component-Model Preview 3 component (v1.57)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P01 for the Limit Checker — the first relay
+      engine promoted to a real WASM Component-Model Preview 3 (P3) async stream
+      transformer, and the template the other engines follow.
+
+      Evidence:
+      1. The WIT (crates/relay-lc/wit/limit_checker_stream.wit) declares genuine
+         P3 stream types: `monitor: func(readings: stream<sensor-reading>) ->
+         stream<violation>`.
+      2. The implementation (crates/relay-lc/src/wasm_stream_component.rs) is a
+         real async stream transformer, not async-shaped-sync: `async fn monitor(
+         mut readings: StreamReader<WitReading>) -> StreamReader<WitViolation>`
+         with `wit_stream::new()`, `while let Some(r) = readings.next().await`,
+         and `writer.write(violations).await`. It delegates to the verified
+         relay-lc engine core (the same WatchpointTable::evaluate logic that
+         carries Verus + Kani guarantees), so the stream wrapper adds the async
+         transport without re-deriving the checked logic.
+      3. The mechanical ORACLE: the `//:relay-lc-stream` bazel target
+         (wasi_version = "p3") builds it as a P3 component, now exercised in CI
+         (.github/workflows/bazel.yml builds it alongside the cascade + harness)
+         — so "it is a valid P3 async component" is CI-validated, not asserted.
+
+      Honest scope: this verifies the component is AUTHORED + BUILDS as P3 async.
+      It does NOT verify end-to-end execution on kiln's async scheduler — kiln's
+      scheduler is shipped but dormant (kilnd async dispatch not wired, pending
+      P3 finalization + RFC #46). Running these streams is the kiln/jess track.
+      witness MC/DC on this component is blocked by the same component-format
+      parse gap as the cascade (#145) — tracked, not run here.
+    tags: [verification, relay, stream, async, p3, component-model, "v1.57"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:relay-lc-stream
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P01

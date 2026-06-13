@@ -1,0 +1,43 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P01
+    type: sw-req
+    title: "STREAM-P01 — relay engines expose Component-Model Preview 3 async stream interfaces"
+    status: implemented
+    description: >
+      Relay is stream-native by design (CLAUDE.md: "Components declare typed
+      stream<T> inputs/outputs; composition is stream wiring (P3 async)"). This
+      requirement makes that real, starting with the Limit Checker as the
+      streamification TEMPLATE: relay-lc shall expose a WASM Component-Model
+      Preview 3 (P3) async interface
+        monitor: func(readings: stream<sensor-reading>) -> stream<violation>
+      implemented as a genuine async stream transformer (async fn over a
+      StreamReader, .next().await on the input, .write().await on the output),
+      built as a P3 component (wasi_version = "p3").
+
+      This is the first of the cFS/flight engines to move from the synchronous
+      `func(record) -> list` interface to a real P3 async stream, and it is the
+      pattern the remaining engines (SCH/HK/SC, then the control cascade) follow.
+
+      The async RUNTIME that executes these streams is kiln's fuel-metered,
+      ASIL-graded async scheduler (the same Component-Model async semantics
+      wasmtime implements, in kiln's verified no_std runtime, std→embedded).
+      kiln's scheduler is shipped but DORMANT (not yet wired into kilnd's
+      execution path, pending upstream P3 finalization + the Meld-vs-Kiln
+      canonical-ABI ownership decision). Therefore this requirement's scope is
+      AUTHORING + BUILDING a valid P3 async component, NOT end-to-end execution
+      on kiln — execution is the kiln/jess track.
+    tags: [relay, stream, async, p3, component-model, kiln, streamification, template]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        relay-lc's limit_checker_stream WIT declares
+        `monitor: func(stream<sensor-reading>) -> stream<violation>`; the Rust
+        implementation is a real async stream transformer (async fn monitor over
+        StreamReader with .next().await / writer.write().await); the
+        //:relay-lc-stream bazel target builds it as a wasi_version="p3"
+        component in CI (the mechanical oracle). End-to-end execution on kiln is
+        explicitly out of scope (kiln async dispatch dormant).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

@@ -76,7 +76,10 @@ jobs:
         working-directory: relay
         env:
           CARGO_BAZEL_REPIN: "1"
-        run: bazel build //:falcon-cascade-composed
+        # Also builds //:relay-lc-stream — the first P3 (Component-Model
+        # Preview 3) async STREAM component (#STREAM-P01), so its P3 async build
+        # is CI-validated, not just asserted.
+        run: bazel build //:falcon-cascade-composed //:relay-lc-stream
 
       # Exercise the witness MC/DC path end-to-end (#145): forces the
       # harness_crates crate_universe (wasmtime/tokio) to resolve, builds the
