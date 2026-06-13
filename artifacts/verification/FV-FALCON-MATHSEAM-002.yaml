@@ -1,0 +1,43 @@
+artifacts:
+  - id: FV-FALCON-MATHSEAM-002
+    type: sw-verification
+    title: "Flight-math seam extended to the remaining flight crates — seam now complete across the no_std flight path"
+    status: implemented
+    description: >
+      FV-FALCON-MATHSEAM-001 migrated the v1.12 verified cascade
+      (relay-iekf/geo/adrc/mix-quad/falcon-core) to the relay-math seam, but four
+      additional no_std flight-path crates were still calling libm directly,
+      defeating the "single qualification boundary" the requirement intends:
+
+        - relay-ekf   (libm::cosf/sinf/sqrt f — Mahony estimator)
+        - relay-pos   (use libm::{atan2f, cosf, sinf})
+        - relay-traj  (libm::fabsf)
+        - falcon-hitl (libm::cosf/sinf/sqrtf — no_std, "runs unchanged on the MCU")
+
+      This closes that gap. All four crates now route their transcendentals
+      through relay-math, and their direct `libm` dependency is REMOVED from
+      Cargo.toml — so relay-math is now the SOLE libm consumer on the entire
+      flight path (verified: `grep '^libm' crates/*/Cargo.toml` lists only
+      relay-math). The removal is the structural enforcement: a future stray
+      `libm::` call in a flight crate no longer compiles (libm isn't in scope),
+      so the seam can't silently regress.
+
+      Behaviour is unchanged — all migrated-crate tests pass through the seam
+      (relay-ekf 2, relay-pos 16, relay-traj 1, falcon-hitl 13, relay-math 9; 0
+      failures), confirming relay-math forwards faithfully.
+
+      Honest scope (unchanged from -001): the seam still routes to the UNQUALIFIED
+      libm. This extends the qualification *boundary* to cover the whole flight
+      path; it does not by itself qualify libm. Discharging the qualification
+      (proven polynomial core / CMSIS-DSP / CORDIC / measured conformance) at the
+      single relay-math site remains the tracked program item (#157 register).
+    tags: [verification, falcon, math, qualification, seam, libm, "#157"]
+    fields:
+      method: test
+      crates-migrated: [relay-ekf, relay-pos, relay-traj, falcon-hitl]
+      sole-libm-consumer: relay-math
+      steps:
+        - run: "cargo test -p relay-math -p relay-ekf -p relay-pos -p relay-traj -p falcon-hitl"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MATHSEAM-P01

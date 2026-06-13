@@ -66,7 +66,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use libm::{atan2f, cosf, sinf};
+use relay_math::{atan2f, cosf, sinf};
 
 /// Standard gravity magnitude (m/s²).
 pub const GRAVITY: f32 = 9.81;

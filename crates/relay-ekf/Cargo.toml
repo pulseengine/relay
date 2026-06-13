@@ -14,7 +14,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 # libm gives us no_std square root + transcendentals without std/alloc.
-libm = "0.2"
+relay-math = { path = "../relay-math" }
 
 [dev-dependencies]
 proptest.workspace = true
