@@ -29,6 +29,11 @@ permissions:
   contents: read
   pull-requests: write
 
+# Opt the Node-20 JS actions (upload-artifact@v4) into Node 24 ahead of
+# GitHub's 2026-06-16 forced cutover; Node 20 removed 2026-09-16. (#153)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   gate:
     name: Verification gate (rivet-driven)
