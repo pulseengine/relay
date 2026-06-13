@@ -1,0 +1,48 @@
+name: Bench
+
+# Per-engine throughput benchmarks (#8). Runs the criterion suite for the five
+# core flight engines (LC/SCH/SC/HS/CFDP) so a performance regression toward the
+# Lean-proven WCET budget surfaces in review. This is a SMOKE gate — it compiles
+# and runs every bench (catching breakage + catastrophic regressions); the
+# numbers are advisory (absolute time is hardware-specific). A tight per-runner
+# SLA gate needs persisted baseline history — tracked as a follow-up on #8.
+#
+# Evidence: FV-FALCON-PERF-001 — ISO 26262-6 Table 10 row 1e / DO-178C A-6.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "benches/**"
+      - ".github/workflows/bench.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: bench-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  throughput:
+    name: Engine throughput
+    runs-on: [self-hosted, linux, x64, rust-cpu]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Quick measurement: enough samples to catch an order-of-magnitude
+      # regression without paying full criterion convergence time per PR.
+      - name: Run engine throughput benches
+        shell: bash
+        run: |
+          cargo bench -p engine-throughput-bench -- \
+            --warm-up-time 1 --measurement-time 3

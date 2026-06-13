@@ -1,0 +1,20 @@
+[package]
+name = "engine-throughput-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Per-cycle throughput benchmarks for the relay flight engines (LC/SCH/SC/HS/CFDP). Guards the Lean-proven WCET budgets against silent regression."
+
+[dependencies]
+relay-lc = { path = "../../crates/relay-lc" }
+relay-sch = { path = "../../crates/relay-sch" }
+relay-sc = { path = "../../crates/relay-sc" }
+relay-hs = { path = "../../crates/relay-hs" }
+relay-cfdp = { path = "../../crates/relay-cfdp" }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "engine_throughput"
+harness = false
