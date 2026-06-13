@@ -673,12 +673,16 @@ synth_compile(
 #   today. cargo-built recipe in FV-FALCON-COV-004 still applies.
 #
 # Closes DO-178C A-7.5 / A-7.6 (FV-FALCON-COV-001 / 004 / 005).
-# Real-component MC/DC: the fused cascade pulls wasi:* imports, so it runs
-# through the WASI subprocess harness (//host/witness-wasi-harness), now a real
-# rust_binary. No longer tags=["manual"] — this is the live #145 unblock.
+# Real-component MC/DC via the WASI subprocess harness (//host/witness-wasi-harness,
+# now a real rust_binary — the #145 harness blocker is CLOSED). Still manual: the
+# bundled `witness instrument` fails to parse the fused cascade's COMPONENT-model
+# binary ("failed to parse export section") — witness expects a core module, the
+# fused output is a component. Remaining blocker (deeper than the harness): target
+# the pre-fusion core module, or bump the witness version in rules_wasm_component.
 wasm_module_coverage_wasi(
     name = "falcon-cascade-coverage",
     module = ":falcon-cascade-fused",
+    tags = ["manual"],
 )
 
 # TOOL-QUALIFICATION FIXTURE (#145) — NOT flight code. Calibrates the
