@@ -82,7 +82,7 @@ artifacts:
       macro: bazel/wasm_module_coverage_wasi.bzl
       upstream-bug: "witness trace-buffer OOM on dense-branch subjects (reported to witness AI agent)"
       steps:
-        - run: cargo build -p witness-wasi-harness
+        - run: cargo build --manifest-path host/witness-wasi-harness/Cargo.toml
         - run: WITNESS_HARNESS_INVOKES="run_inside" $WITNESS run /tmp/instr.wasm --harness target/debug/witness-wasi-harness -o /tmp/run.json   # bench-only — needs $WITNESS + pre-instrumented module
     links:
       - type: verifies
