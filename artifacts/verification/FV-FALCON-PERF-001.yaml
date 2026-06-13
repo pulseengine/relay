@@ -1,0 +1,48 @@
+artifacts:
+  - id: FV-FALCON-PERF-001
+    type: sw-verification
+    title: "per-engine throughput benchmarks — WCET-budget regression guard (#8)"
+    status: implemented
+    description: >
+      Criterion per-cycle throughput benchmarks for the five core flight
+      engines (LC / SCH / SC / HS / CFDP), guarding the Lean-proven WCET
+      budgets against silent regression. Recognised as performance-test
+      evidence under ISO 26262-6 Table 10 row 1e (HR at ASIL D) and
+      DO-178C A-6 timing analysis.
+
+      Each bench drives one engine's per-cycle HOT PATH at realistic table
+      load — the same scan the engine performs every control cycle — not an
+      isolated-function microbenchmark:
+
+        - LC   evaluate ×32   : 64 watchpoints, a 32-reading sensor frame.
+        - SCH  process_tick ×10 : 128 schedule slots, a 10-tick major frame.
+        - SC   process_tick   : 256 ATS commands scanned per tick.
+        - HS   check_health   : 32 app monitors per check.
+        - CFDP process_nak    : retransmit (heaviest) PDU event.
+
+      Baseline (Apple-silicon dev host, 2026-06-13): LC 2.59 µs, SCH 1.38 µs,
+      SC 405 ns, HS 385 ns, CFDP 4.07 ns. Recorded in
+      benches/engine-throughput/BASELINE.md with coarse catastrophic-regression
+      ceilings (~10–20× headroom) that survive CI hardware variance.
+
+      A regression here is an early warning that a deployed system is drifting
+      toward the WCET ceiling the Lean proofs bound — this benchmark closes the
+      measurement side of the WCET requirement (the proof bounds the budget;
+      the benchmark watches the realised cost).
+
+      Honestly deferred (follow-ups on #8): a tight per-runner SLA gate
+      (needs persisted criterion baseline history) and nightly trend
+      persistence. The coarse absolute ceilings are the interim guard.
+    tags: [verification, falcon, performance, wcet, benchmark, iso26262, "#8"]
+    fields:
+      method: performance-test (criterion per-cycle throughput at realistic load)
+      tool: "criterion 0.5 (cargo bench)"
+      bench-crate: "benches/engine-throughput"
+      baseline-doc: "benches/engine-throughput/BASELINE.md"
+      lean-theorems: ["proofs/lean/WcetAnalysis.lean", "proofs/lean/CompositionalWcet.lean"]
+      engines: [LC, SCH, SC, HS, CFDP]
+      steps:
+        - run: cargo bench -p engine-throughput-bench
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WCET-P01
