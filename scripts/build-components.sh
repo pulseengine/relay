@@ -75,6 +75,13 @@ build_component() {
 
 smoke_test_flight() {
   local wasm="$1"
+  # The smoke-test is a dev/bench validation, not required to PRODUCE the bundle.
+  # Skip it where wasmtime isn't installed (e.g. the release runner) so the
+  # component build + attach still succeeds. (Caught: v1.57.0 release exit 127.)
+  if ! command -v wasmtime >/dev/null 2>&1; then
+    echo "== skipping flight smoke-test (wasmtime not on PATH) =="
+    return 0
+  fi
   echo "== smoke-testing flight component in wasmtime =="
   local stab pos
   stab=$(wasmtime run --invoke 'run-stabilization()' "$wasm" 2>/dev/null)
