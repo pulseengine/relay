@@ -77,3 +77,15 @@ jobs:
         env:
           CARGO_BAZEL_REPIN: "1"
         run: bazel build //:falcon-cascade-composed
+
+      # Exercise the witness MC/DC path end-to-end (#145): forces the
+      # harness_crates crate_universe (wasmtime/tokio) to resolve, builds the
+      # //host/witness-wasi-harness rust_binary, and runs the WASI coverage
+      # pipeline (instrument → run --harness → lcov) on the real cascade. This
+      # is what actually validates the witness-harness wiring — //:falcon-cascade
+      # -composed above does not depend on it.
+      - name: Build the harness + real-component MC/DC coverage
+        working-directory: relay
+        env:
+          CARGO_BAZEL_REPIN: "1"
+        run: bazel build //host/witness-wasi-harness //:falcon-cascade-coverage
