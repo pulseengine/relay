@@ -110,7 +110,7 @@ mod engine {
 
 // P3 Stream binding
 
-use relay_lc_stream_bindings::exports::pulseengine::relay_limit_checker_stream::limit_checker_stream::{
+use relay_lc_stream_bindings::exports::pulseengine::relay_limit_checker::limit_checker_stream::{
     Guest, ComparisonOp as WitOp, SensorReading as WitReading,
     Violation as WitViolation, Watchpoint as WitWp,
 };
