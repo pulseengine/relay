@@ -52,7 +52,7 @@ truth-table reconstruction is a follow-up.
 
 ```bash
 # Build
-cargo build -p witness-wasi-harness --release
+cargo build --manifest-path host/witness-wasi-harness/Cargo.toml --release
 
 # Run witness via subprocess harness mode
 WITNESS=/path/to/witness-bin       # rules_wasm_component toolchain
