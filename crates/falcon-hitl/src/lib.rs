@@ -264,7 +264,7 @@ mod tests {
     fn flight_core_stabilizes_over_the_hitl_link() {
         let dt = 0.002f32;
         let th = 0.4f32;
-        let (c, s) = (libm::cosf(th), libm::sinf(th));
+        let (c, s) = (relay_math::cosf(th), relay_math::sinf(th));
         let r0 = [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]];
         let server = SimServer::new(SimBackend::new(r0, dt));
         let link = LinkBackend::new(Loopback { server }, dt);
@@ -280,7 +280,7 @@ mod tests {
         // at rest the body-frame accel points along body −z·(−g) … simplest is
         // to assert the vehicle is near level via the reported accel z-dominance.
         let a = tilt.accel;
-        let mag = libm::sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).max(1e-6);
+        let mag = relay_math::sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).max(1e-6);
         let z_frac = a[2].abs() / mag; // ≈1 when level (accel ≈ [0,0,±g])
         assert!(
             z_frac > 0.99,

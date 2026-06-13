@@ -115,7 +115,7 @@ impl Quintic {
     pub fn peak_abs_jerk(&self) -> f32 {
         let (a, b, c) = self.jerk_coeffs();
         let t = self.t_end;
-        let bound = libm::fabsf(a) * t * t + libm::fabsf(b) * t + libm::fabsf(c);
+        let bound = relay_math::fabsf(a) * t * t + relay_math::fabsf(b) * t + relay_math::fabsf(c);
         fin(bound, f32::INFINITY)
     }
 }
@@ -287,8 +287,8 @@ mod kani_proofs {
         let lo: f32 = kani::any();
         let hi: f32 = kani::any();
         let g_min: f32 = kani::any();
-        kani::assume(lo.is_finite() && libm::fabsf(lo) <= 1e3);
-        kani::assume(hi.is_finite() && libm::fabsf(hi) <= 1e3);
+        kani::assume(lo.is_finite() && relay_math::fabsf(lo) <= 1e3);
+        kani::assume(hi.is_finite() && relay_math::fabsf(hi) <= 1e3);
         kani::assume(g_min.is_finite() && g_min >= 0.0 && g_min <= 1.0);
         let g = gate_factor(err, lo, hi, g_min);
         assert!(g >= g_min && g <= 1.0);
@@ -307,9 +307,9 @@ mod kani_proofs {
         let c4: f32 = kani::any();
         let c3: f32 = kani::any();
         let t_end: f32 = kani::any();
-        kani::assume(c5.is_finite() && libm::fabsf(c5) <= 1e3);
-        kani::assume(c4.is_finite() && libm::fabsf(c4) <= 1e3);
-        kani::assume(c3.is_finite() && libm::fabsf(c3) <= 1e3);
+        kani::assume(c5.is_finite() && relay_math::fabsf(c5) <= 1e3);
+        kani::assume(c4.is_finite() && relay_math::fabsf(c4) <= 1e3);
+        kani::assume(c3.is_finite() && relay_math::fabsf(c3) <= 1e3);
         kani::assume(t_end.is_finite() && t_end > 1e-3 && t_end <= 100.0);
         let q = Quintic { c5, c4, c3, c2: 0.0, c1: 0.0, c0: 0.0, t_end };
         let peak = q.peak_abs_jerk();
@@ -322,7 +322,7 @@ mod kani_proofs {
         let jt = (ja * t + jb) * t + jc;
         // peak is a sound upper bound on |j(t)| over [0,T] (relative
         // tolerance for f32 rounding).
-        assert!(libm::fabsf(jt) <= peak * 1.001 + 0.05);
+        assert!(relay_math::fabsf(jt) <= peak * 1.001 + 0.05);
     }
 }
 

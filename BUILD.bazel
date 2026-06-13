@@ -487,15 +487,16 @@ wit_library(
 
 # ── control-crate libraries — the verified relay-* control logic ──
 # Wrap crates/relay-*/plain/src/lib.rs as Bazel rust_library targets so
-# the leaf CM components can depend on them. relay-ekf / relay-pos pull
-# libm for no_std transcendentals from the @libm_crate http_archive
-# (see MODULE.bazel).
+# the leaf CM components can depend on them. relay-ekf / relay-pos route
+# their no_std transcendentals through the :relay-math seam (#157); relay-math
+# is the sole @libm_crate consumer (see MODULE.bazel).
 
 rust_library(
     name = "relay-ekf",
     srcs = glob(["crates/relay-ekf/plain/src/**/*.rs"]),
     edition = "2024",
-    deps = ["@libm_crate//:libm"],
+    # v1.x: transcendentals via the relay-math seam (mirrors Cargo.toml). (#157)
+    deps = [":relay-math"],
 )
 
 # v1.12 — the flight-math qualification seam. relay-iekf / relay-mix-quad route
@@ -524,7 +525,8 @@ rust_library(
     name = "relay-pos",
     srcs = glob(["crates/relay-pos/plain/src/**/*.rs"]),
     edition = "2024",
-    deps = ["@libm_crate//:libm"],
+    # v1.x: transcendentals via the relay-math seam (mirrors Cargo.toml). (#157)
+    deps = [":relay-math"],
 )
 
 rust_library(

@@ -360,7 +360,7 @@ name = "falcon-hitl"
 version = "0.1.0"
 dependencies = [
  "falcon-core",
- "libm",
+ "relay-math",
 ]
 
 [[package]]
@@ -1163,8 +1163,8 @@ dependencies = [
 name = "relay-ekf"
 version = "0.1.0"
 dependencies = [
- "libm",
  "proptest",
+ "relay-math",
 ]
 
 [[package]]
@@ -1338,8 +1338,8 @@ dependencies = [
 name = "relay-pos"
 version = "0.1.0"
 dependencies = [
- "libm",
  "proptest",
+ "relay-math",
 ]
 
 [[package]]
@@ -1433,8 +1433,8 @@ dependencies = [
 name = "relay-traj"
 version = "0.1.0"
 dependencies = [
- "libm",
  "proptest",
+ "relay-math",
 ]
 
 [[package]]

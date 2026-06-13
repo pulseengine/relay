@@ -57,7 +57,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use libm::sqrtf;
+use relay_math::sqrtf;
 
 /// Timestamp: seconds + 2^32-fraction.
 /// Mirrors `pulseengine:relay-common-types/types.{timestamp}`.
@@ -478,7 +478,7 @@ mod tests {
         for deg in [0.0_f32, 5.0, 10.0, 20.0, 40.0, 60.0] {
             let rad = deg.to_radians();
             // Tilt accel about body-x: gravity now has body-y component.
-            let accel = [0.0, libm::sinf(rad) * 9.81, libm::cosf(rad) * 9.81];
+            let accel = [0.0, relay_math::sinf(rad) * 9.81, relay_math::cosf(rad) * 9.81];
             let mut e = Ekf::new();
             e.tick(imu_at(0.01, accel, [0.0; 3]));
             assert!(e.last_innovation() + 1.0e-6 >= prev,

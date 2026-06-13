@@ -15,7 +15,7 @@ crate-type = ["rlib"]
 falcon-core = { path = "../falcon-core" }
 
 [dev-dependencies]
-libm = "0.2"
+relay-math = { path = "../relay-math" }
 
 [lints]
 workspace = true
