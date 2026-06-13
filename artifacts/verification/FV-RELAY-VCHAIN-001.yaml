@@ -1,0 +1,55 @@
+artifacts:
+  - id: FV-RELAY-VCHAIN-001
+    type: sw-verification
+    title: "four-track verification chain crosswalk — Verus/Kani/Rocq/Lean per engine (#4)"
+    status: implemented
+    description: >
+      Relay's distinguishing property is four INDEPENDENT verification techniques
+      confirming the same engine, not one. This artifact is the crosswalk for the
+      five core engines (LC/SCH/SC/HS/CFDP), reconciling issue #4's stale "not
+      started" claims with the actual repository state and citing live evidence.
+      Full matrix + per-track scope in docs/VERIFICATION-CHAIN.md; one-command
+      runner in scripts/verify-chain.sh.
+
+      Per-engine track coverage (all five engines):
+        - Verus (Z3): //:relay_<e>_verus_test — functional correctness per call.
+        - Kani (CBMC): plain/src/kani_proofs.rs — 28 harnesses total
+          (LC 9, SCH 6, SC 3, HS 7, CFDP 3); panic/overflow/UB + bounded output
+          + state-transition validity. Runs locally (cargo kani) AND in CI (the
+          Kani gate, .github/workflows/kani.yml, since v1.55).
+        - Rocq: proofs/rocq/<e>_proofs.v + rocq_proof_test targets — hand-written
+          MODEL proofs (honest scope: not yet a coq_of_rust refinement of the
+          shipped Rust).
+        - Lean: proofs/lean — system-level WCET/backpressure/dynamics (honest
+          scope: not yet per-engine Rate-Monotonic/priority-ceiling theorems).
+
+      LIVE EVIDENCE re-run on this change (cargo kani 0.67.0, local):
+        - relay-lc:  Complete - 9 successfully verified harnesses, 0 failures.
+        - relay-sc:  Complete - 3 successfully verified harnesses, 0 failures.
+      The remaining engines' Kani harnesses are green via the CI Kani gate.
+
+      What this artifact does NOT yet claim (the genuine remaining #4 gaps):
+      (1) Rocq coq_of_rust refinement of the plain Rust; (2) per-engine Lean
+      scheduling proofs; (3) a single CI aggregate "four-track agreement" target.
+      Tracks 1–4 exist for all five engines today; the above is what promotes
+      "four artifacts" to "four refinement-level proofs gated as one."
+    tags: [verification, relay, chain, verus, kani, rocq, lean, "#4"]
+    fields:
+      method: multi-track cross-verification (Verus + Kani + Rocq + Lean)
+      crosswalk-doc: "docs/VERIFICATION-CHAIN.md"
+      runner: "scripts/verify-chain.sh"
+      kani-harnesses-total: 28
+      live-kani-evidence: "relay-lc 9/9, relay-sc 3/3 (cargo kani 0.67.0, 2026-06-13)"
+      steps:
+        - run: scripts/verify-chain.sh --all
+    links:
+      - type: verifies
+        target: SWREQ-LC-P01
+      - type: verifies
+        target: SWREQ-SCH-P01
+      - type: verifies
+        target: SWREQ-SC-P01
+      - type: verifies
+        target: SWREQ-HS-P01
+      - type: verifies
+        target: SWREQ-CFDP-P01
