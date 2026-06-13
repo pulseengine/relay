@@ -1,9 +1,9 @@
 load("@rules_wasm_component//rust:defs.bzl", "rust_wasm_component_bindgen")
 load("@rules_wasm_component//wit:defs.bzl", "wit_library")
 load("@rules_wasm_component//wasm:defs.bzl", "meld_fuse", "synth_compile", "wasm_module_coverage")
-# bazel/wasm_module_coverage_wasi.bzl — defined for future use once
-# witness-wasi-harness becomes a Bazel rust_binary target; see
-# FV-FALCON-COV-005 for the wiring story.
+# WASI-importing MC/DC coverage via the //host/witness-wasi-harness rust_binary
+# (#145) — used for the real cascade component below.
+load("//bazel:wasm_module_coverage_wasi.bzl", "wasm_module_coverage_wasi")
 load("@rules_verus//verus:defs.bzl", "verus_library", "verus_strip_test", "verus_test")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
@@ -673,10 +673,15 @@ synth_compile(
 #   today. cargo-built recipe in FV-FALCON-COV-004 still applies.
 #
 # Closes DO-178C A-7.5 / A-7.6 (FV-FALCON-COV-001 / 004 / 005).
-wasm_module_coverage(
+# Real-component MC/DC via the WASI subprocess harness (//host/witness-wasi-harness,
+# now a real rust_binary — the #145 harness blocker is CLOSED). Still manual: the
+# bundled `witness instrument` fails to parse the fused cascade's COMPONENT-model
+# binary ("failed to parse export section") — witness expects a core module, the
+# fused output is a component. Remaining blocker (deeper than the harness): target
+# the pre-fusion core module, or bump the witness version in rules_wasm_component.
+wasm_module_coverage_wasi(
     name = "falcon-cascade-coverage",
     module = ":falcon-cascade-fused",
-    invoke_all = True,
     tags = ["manual"],
 )
 

@@ -1,11 +1,15 @@
+# Standalone workspace (mirrors crates/relay-sch/wasm): the harness carries heavy
+# host-only deps (wasmtime/tokio) that must NOT enter the no_std flight workspace,
+# and crate_universe needs a self-contained manifest + Cargo.lock to make it a
+# Bazel rust_binary. Excised from the root workspace for both reasons. (#145)
 [package]
 name = "witness-wasi-harness"
 description = "Subprocess harness for witness, providing wasmtime + WASI preview2 imports so cascade-class WASM modules can be MC/DC-instrumented"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-rust-version.workspace = true
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/pulseengine/relay"
+rust-version = "1.85.0"
 
 [[bin]]
 name = "witness-wasi-harness"
@@ -18,3 +22,5 @@ anyhow = "1"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "macros"] }
+
+[workspace]

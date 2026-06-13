@@ -68,7 +68,6 @@ members = [
     "host/relay-es",
     "host/relay-evs",
     "host/relay-time",
-    "host/witness-wasi-harness",
 ]
 
 [workspace.package]

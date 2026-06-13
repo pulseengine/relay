@@ -19,9 +19,10 @@ Cargo.lock
 # --locked so a dependency cannot silently drift the build (the recurring
 # proptest-pin drift). Nested crate lockfiles stay ignored.
 !/Cargo.lock
-# ...and the crate_universe manifest lockfile, which must be committed so the
+# ...and the crate_universe manifest lockfiles, which must be committed so the
 # Bazel build (and Bazel CI) is reproducible.
 !crates/relay-sch/wasm/Cargo.lock
+!host/witness-wasi-harness/Cargo.lock
 
 # Claude Code session-local settings
 .claude/

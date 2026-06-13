@@ -105,6 +105,25 @@ crate.from_cargo(
 )
 use_repo(crate, "relay_crates", "crates")
 
+# witness-wasi-harness host deps (wasmtime/wasmtime-wasi/tokio) — a SECOND
+# crate_universe over the standalone host/witness-wasi-harness workspace, so the
+# harness builds as a Bazel rust_binary (//host/witness-wasi-harness) that the
+# WASI MC/DC coverage flow (bazel/wasm_module_coverage_wasi.bzl) invokes. Host
+# triples only — this is a host tool, not a wasm module. Repin: CARGO_BAZEL_REPIN=1.
+# Unblocks real-component MC/DC (#145), flipping //:falcon-cascade-coverage off manual.
+crate.from_cargo(
+    name = "harness_crates",
+    cargo_lockfile = "//host/witness-wasi-harness:Cargo.lock",
+    manifests = ["//host/witness-wasi-harness:Cargo.toml"],
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+    ],
+)
+use_repo(crate, "harness_crates")
+
 # libm — no_std transcendentals for the falcon control crates
 # (relay-ekf, relay-pos). Pulled straight from crates.io as an
 # http_archive rather than through crate_universe. The sha256 is the
