@@ -373,3 +373,64 @@ jobs:
               --generate-notes \
               release-assets/*
           fi
+
+  # ── Flight Wasm component: build, attach, and GUARD (#140 / #100) ──────
+  # The falcon-flight Wasm component used to be attached by a SEPARATE MANUAL
+  # step, so it silently went missing twice (#100 v1.28–32, #140 v1.45–55).
+  # Build + upload it here as part of the release, then a hard guard fails the
+  # workflow if the asset is absent — so a third silent recurrence is impossible.
+  flight-component:
+    name: Build + attach flight Wasm component (+ guard)
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+
+      - name: Install cargo-component
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-component
+
+      - name: Build the falcon component bundle + attach + guard
+        env:
+          # TAG via env, dereferenced as $TAG — never expanded as ${{ }}
+          # inside run: (untrusted-input safety, per the rest of this file).
+          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"           # falcon-vX.Y.Z
+          MM=$(printf '%s' "$TAG" | sed -E 's/^falcon-v([0-9]+\.[0-9]+).*/\1/')
+          echo "::notice::Building falcon component bundle for $TAG (MM=$MM)"
+          bash scripts/build-components.sh "$MM"
+
+          BUNDLE="dist/falcon-components-v${MM}"
+          FLIGHT="${BUNDLE}/falcon-flight-v${MM}.wasm"
+          ( cd "$BUNDLE" && { sha256sum "falcon-flight-v${MM}.wasm" 2>/dev/null || shasum -a 256 "falcon-flight-v${MM}.wasm"; } > "falcon-flight-v${MM}.wasm.sha256" )
+          tar -C dist -czf "dist/falcon-components-v${MM}.tar.gz" "falcon-components-v${MM}"
+
+          gh release upload "$TAG" --clobber \
+            "$FLIGHT" \
+            "${FLIGHT}.sha256" \
+            "dist/falcon-components-v${MM}.tar.gz" \
+            "${BUNDLE}/manifest.json" \
+            "${BUNDLE}/SHA256SUMS"
+
+          # GUARD (#140): the release MUST carry a falcon-flight-*.wasm asset.
+          echo "::notice::Asserting flight wasm asset is present on $TAG"
+          if gh release view "$TAG" --json assets -q '.assets[].name' \
+               | grep -qE 'falcon-flight-v[0-9.]+\.wasm$'; then
+            echo "guard OK: falcon-flight wasm asset present on $TAG"
+          else
+            echo "::error::Release $TAG has NO falcon-flight-*.wasm asset — the #100/#140 regression. Failing."
+            exit 1
+          fi
