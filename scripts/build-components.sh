@@ -75,9 +75,11 @@ build_component() {
 
 smoke_test_flight() {
   local wasm="$1"
-  # The smoke-test is a dev/bench validation, not required to PRODUCE the bundle.
-  # Skip it where wasmtime isn't installed (e.g. the release runner) so the
-  # component build + attach still succeeds. (Caught: v1.57.0 release exit 127.)
+  # Install, don't skip: the release job installs wasmtime so this smoke-test
+  # RUNS and validates the component before shipping; dev hosts have it too. This
+  # branch is only a FALLBACK for an ad-hoc bundle build on a box without wasmtime
+  # — it warns loudly rather than aborting (caught: v1.57.0 release exit 127 when
+  # wasmtime wasn't installed). To validate locally: `cargo install wasmtime-cli`.
   if ! command -v wasmtime >/dev/null 2>&1; then
     echo "== skipping flight smoke-test (wasmtime not on PATH) =="
     return 0

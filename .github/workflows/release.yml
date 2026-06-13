@@ -399,6 +399,15 @@ jobs:
         with:
           tool: cargo-component
 
+      # Install wasmtime so build-components.sh's flight smoke-test actually RUNS
+      # at release time — the component is validated (run-stabilization < 0.1,
+      # run-position-hold < 0.6) before it ships, not just built. (Per review:
+      # install, don't skip — the skip in build-components.sh is only a fallback.)
+      - name: Install wasmtime
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasmtime
+
       - name: Build the falcon component bundle + attach + guard
         env:
           # TAG via env, dereferenced as $TAG — never expanded as ${{ }}
