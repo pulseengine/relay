@@ -331,12 +331,21 @@ wit_library(
     world = "relay-stored-command",
 )
 
+rust_library(
+    name = "relay-sc-engine",
+    srcs = glob(["crates/relay-sc/plain/src/**/*.rs"]),
+    edition = "2024",
+    crate_name = "relay_sc",
+)
+
 rust_wasm_component_bindgen(
     name = "relay-sc",
     srcs = ["crates/relay-sc/src/wasm_component.rs"],
     wit = ":relay_stored_command_wit",
     wasi_version = "p3",
     profiles = ["release"],
+    # Runs the REAL verified engine (#168), not an inline copy.
+    deps = [":relay-sc-engine"],
 )
 
 # ═══════════════════════════════════════════════════════════════
