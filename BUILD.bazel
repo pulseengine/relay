@@ -350,12 +350,21 @@ wit_library(
     world = "relay-housekeeping",
 )
 
+rust_library(
+    name = "relay-hk-engine",
+    srcs = glob(["crates/relay-hk/plain/src/**/*.rs"]),
+    edition = "2024",
+    crate_name = "relay_hk",
+)
+
 rust_wasm_component_bindgen(
     name = "relay-hk",
     srcs = ["crates/relay-hk/src/wasm_component.rs"],
     wit = ":relay_housekeeping_wit",
     wasi_version = "p3",
     profiles = ["release"],
+    # Runs the REAL verified engine (#168), not an inline copy.
+    deps = [":relay-hk-engine"],
 )
 
 # ═══════════════════════════════════════════════════════════════
