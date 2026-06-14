@@ -194,3 +194,32 @@ fn verify_session_transcript_total() {
     let er = [0u8; 32];
     let _ = crate::session::session_transcript(&cfg, epoch_i, epoch_r, &ei, &er);
 }
+
+/// SEC-K15 — cross-channel isolation: a frame wrapped on one security
+/// association NEVER verifies on a channel with a different SPI, for ALL
+/// (distinct) SPI pairs. This is the property that makes relay-sec sound as a
+/// TRANSPORT-AGNOSTIC end-to-end layer: distinct transports — the two
+/// directions of an inter-core IPC link, a radio link vs a CCSDS uplink — are
+/// distinct SAs (distinct SPI), so a frame captured on one transport can never
+/// be accepted on another. The rejection is by construction (the SPI check
+/// precedes the MAC), independent of payload or key, so it holds whatever rides
+/// on top. Symbolic SPIs drive it; the key/payload are concrete (the property
+/// does not depend on their value — only on SPI distinctness).
+#[kani::proof]
+#[kani::unwind(41)]
+fn cross_channel_isolation() {
+    let spi_a: u16 = kani::any();
+    let spi_b: u16 = kani::any();
+    kani::assume(spi_a != spi_b);
+    let key = [7u8; 16];
+    let mut a = SecurityChannel::new(spi_a, 0, key);
+    let mut b = SecurityChannel::new(spi_b, 0, key);
+    let payload = [0xABu8; 4];
+    let mut frame = [0u8; MIN_FRAME_LEN + 4];
+    let n = a.wrap(&payload, &mut frame).unwrap();
+    // b's SA is a different SPI -> the frame is not for it, never authenticated.
+    assert!(matches!(
+        b.verify(&frame[..n]),
+        Err(crate::frame::VerifyError::UnknownSpi)
+    ));
+}

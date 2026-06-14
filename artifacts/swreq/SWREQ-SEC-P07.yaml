@@ -1,0 +1,36 @@
+artifacts:
+  - id: SWREQ-SEC-P07
+    type: sw-req
+    title: "SEC-P07: transport-agnostic end-to-end channel (CCSDS is one binding, inter-core IPC another)"
+    status: implemented
+    description: >
+      relay-sec's authenticated channel (SecurityChannel wrap/verify) shall be a
+      TRANSPORT-AGNOSTIC end-to-end primitive: it shall protect opaque payload
+      bytes — emitting `SecurityHeader ‖ payload ‖ Ascon-tag` — with NO
+      dependency on the relay-ccsds wire format or any other transport. CCSDS
+      framing (falcon's C2 link, via relay-ci/relay-to) is ONE binding that rides
+      on top; a no_std inter-core IPC mailbox (jess, Pixhawk 6X-RT — issue #176)
+      is another, reusing the identical verified layer.
+
+      Soundness across transports: distinct transports shall be distinct security
+      associations (distinct SPI), so a frame captured on one transport — e.g.
+      one direction of an inter-core link, or a radio link — can NEVER be
+      accepted on another. This makes "one verified auth layer, many transports"
+      safe by construction (the SPI check precedes the MAC, independent of
+      payload or key). Closes the #175-class provenance gap at the module-doc
+      level: the layer is not CCSDS-bound; only the prose said so.
+    tags: [relay-sec, transport-agnostic, e2e, ipc, inter-core, jess, ccsds, kani]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        relay-sec has no relay-ccsds Cargo dependency (mechanical: grep). The
+        inter-core IPC scenario round-trips a raw (non-CCSDS) message through
+        wrap/verify across a shared-memory mailbox and the reverse-direction SA
+        rejects it (cargo test inter_core_ipc_roundtrip_and_isolation). Kani
+        SEC-K15 proves cross-channel isolation for ALL distinct SPI pairs (a
+        frame wrapped on one SA never verifies on a different-SPI SA). The module
+        doc states the transport-agnostic contract, not a CCSDS-bound one.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001

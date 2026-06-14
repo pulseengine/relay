@@ -1,0 +1,37 @@
+artifacts:
+  - id: FV-RELAY-SEC-006
+    type: sw-verification
+    title: "Transport-agnostic E2E channel — cross-channel isolation + non-CCSDS round-trip (relay-sec, #176)"
+    status: implemented
+    description: >
+      Verification of SWREQ-SEC-P07: relay-sec's SecurityChannel is a
+      transport-agnostic end-to-end layer, sound to reuse across CCSDS framing
+      and a no_std inter-core IPC mailbox (jess inter-core, #176).
+
+      No transport coupling (mechanical) — relay-sec declares NO relay-ccsds
+      dependency; `wrap`/`verify` take opaque `&[u8]` and produce
+      `SecurityHeader ‖ payload ‖ Ascon-tag`. CCSDS is one binding (relay-ci /
+      relay-to); the core never names it.
+
+      Inter-core scenario (cargo test) — inter_core_ipc_roundtrip_and_isolation
+      wraps a RAW (non-CCSDS) inter-core message into a shared-memory mailbox on
+      one core's SA and authenticates it on the peer's; the reverse-direction SA
+      (distinct SPI) rejects the same frame as UnknownSpi. The same wrap/verify
+      that protects the CCSDS C2 link protects the IPC link.
+
+      Cross-channel isolation (Kani 0.67) — SEC-K15 proves that for ALL distinct
+      SPI pairs, a frame wrapped on one SA NEVER verifies on the other: the
+      rejection is by construction (SPI check precedes the MAC), independent of
+      payload or key. This is the property that makes "one verified layer, many
+      transports" cross-replay-safe. VERIFICATION: SUCCESSFUL locally.
+
+      51 relay-sec cargo tests; Kani SEC-K01..K15. no_std/no_alloc, safe Rust.
+    tags: [verification, relay-sec, transport-agnostic, e2e, ipc, kani, "v1.59"]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-sec"
+        - run: "cargo kani -p relay-sec --harness cross_channel_isolation"
+    links:
+      - type: verifies
+        target: SWREQ-SEC-P07

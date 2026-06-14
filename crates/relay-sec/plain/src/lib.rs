@@ -1,8 +1,14 @@
 //! Relay Sec — no_std, no_alloc safety-protected communication primitives.
 //!
-//! Shared by falcon (drone C2 link) and wohl (home-automation command path):
-//! one verified authentication layer under the relay-ccsds wire format, so a
-//! spoofed/replayed "disarm" or "unlock" command is rejected on either product.
+//! A TRANSPORT-AGNOSTIC end-to-end authentication layer: `wrap`/`verify` take
+//! opaque bytes and emit `SecurityHeader ‖ payload ‖ Ascon-tag` — nothing here
+//! depends on CCSDS (the crate has no relay-ccsds dependency). CCSDS framing is
+//! ONE transport that rides on top (falcon's C2 link, via relay-ci/relay-to);
+//! an inter-core IPC mailbox is another (jess, Pixhawk 6X-RT — see #176). The
+//! same verified layer protects each, so a spoofed/replayed "disarm" on the
+//! radio link or a forged message on the inter-core bus is rejected identically.
+//! Distinct transports are distinct security associations (distinct SPI), so a
+//! frame captured on one can never be accepted on another (Kani SEC-K15).
 //!
 //! ## First slice: the anti-replay sliding window (the freshness oracle)
 //!
