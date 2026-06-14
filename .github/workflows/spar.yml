@@ -26,17 +26,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install spar (skip if cached)
+      - name: Install spar v0.18.0 (pinned for reproducible codegen)
         shell: bash
+        # PINNED: spar's WIT codegen output evolves between versions (e.g. the
+        # 0.10 -> 0.18 kebab-case fix), so the WIT-drift check below is only
+        # deterministic against a fixed spar. Bump this tag AND regenerate the
+        # committed WIT together. cargo install is idempotent — it no-ops if
+        # this exact source+tag is already on the runner.
         run: |
-          if command -v spar >/dev/null 2>&1; then
-            echo "spar already on PATH"
-          else
-            cargo install --locked \
-              --git https://github.com/pulseengine/spar \
-              --bin spar \
-              spar
-          fi
+          cargo install --locked \
+            --git https://github.com/pulseengine/spar \
+            --tag v0.18.0 \
+            --bin spar \
+            spar
 
       - name: Parse all AADL models
         shell: bash
