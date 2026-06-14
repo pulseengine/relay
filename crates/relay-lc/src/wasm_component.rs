@@ -75,7 +75,7 @@ impl Component {
     }
 
     fn do_check(reading: WitReading) -> Vec<WitViolation> {
-        let result = get_table().check(engine::SensorReading {
+        let result = get_table().evaluate(engine::SensorReading {
             sensor_id: reading.sensor_id,
             value: reading.value,
         });
