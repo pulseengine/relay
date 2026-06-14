@@ -1379,6 +1379,7 @@ name = "relay-sb"
 version = "0.1.0"
 dependencies = [
  "relay-bus",
+ "relay-sec",
 ]
 
 [[package]]
