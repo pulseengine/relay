@@ -9,3 +9,8 @@ rust-version.workspace = true
 
 [dependencies]
 relay-bus = { path = "../../crates/relay-bus" }
+
+[dev-dependencies]
+# The intercore demo (examples/intercore.rs) drives the real relay-sec
+# wrap/verify over the relay-bus ring — for the v1.60 release video.
+relay-sec = { path = "../../crates/relay-sec" }

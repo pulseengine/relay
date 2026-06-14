@@ -186,3 +186,14 @@ v1.33 completes the autonomy loop: a ground station (QGroundControl / MAVSDK) UP
 _video: falcon-v1.33-narrated.mp4_
 
 ---
+
+## v1.60
+**Title:** Falcon v1.60 — Secure Inter-Core Comms Seam (one verified auth layer, swappable transport) | verified flight stack
+
+v1.60 lands the relay-side of the inter-core comms carrier (for jess / Pixhawk 6X-RT, M7↔M4): a no_std/no_alloc transport SEAM under the Software Bus, so the same verified relay-sec end-to-end auth that protects falcon's CCSDS radio link now protects an on-board shared-memory link, with the carrier swappable underneath. The demo runs the REAL components — no flight footage, the mechanism itself on screen: a producer wraps commands with relay-sec (real `SecurityHeader‖payload‖Ascon-tag` bytes) and pushes them into a fixed-capacity `SpscRing` mailbox; the consumer pops FIFO and verifies (✓ AUTHENTIC). Then the seam's contract: a full mailbox REFUSES the next message (backpressure — never overwrites a pending command), a tampered frame is rejected (BadMac), and a frame minted on the other core's security association is rejected (UnknownSpi). relay owns the seam; the production ring is a verified Gale ring_buf (gale#63). Verified: Kani BUS-K01/K02 (ring total + bounded, full refuses) and SEC-K15 (cross-channel isolation, all SPI pairs). no_std/no_alloc; forbid(unsafe_code); behavior-preserving for the host bus (11 tests intact). Terminal demo driven by the actual relay-bus + relay-sec output.
+
+#embedded #intercore #security #ascon #no_std #formalverification #kani #rust
+
+_video: falcon-v1.60.mp4_
+
+---
