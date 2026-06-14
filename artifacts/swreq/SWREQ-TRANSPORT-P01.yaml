@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWREQ-TRANSPORT-P01
+    type: sw-req
+    title: "TRANSPORT-P01 — shared CCSDS-over-relay-sec secure channel AADL model + generated transport WIT"
+    status: implemented
+    description: >
+      The CCSDS-over-relay-sec secure channel — the safety-protected transport
+      shared by falcon (drone C2 link) and wohl (home-automation command/sensor
+      path) — shall be modelled as a SHARED AADL package in spar (spar/
+      relay_transport.aadl), and the transport WIT shall be GENERATED from it
+      (spar codegen --format wit), not hand-written. Architecture-first: the
+      model leads, the WIT derives, the consumer transport crates implement
+      against the WIT (relay#180; the leading step of wohl#49).
+
+      The model shall capture: (a) a SecureChannel component and the SecureFrame
+      wire type (SecurityHeader || payload || Ascon-AEAD128 tag), sitting between
+      the CCSDS encoder and the link bus; (b) the seal/open/handshake operations
+      and the sealed-frame flow; (c) an EMV2 error model — forge / replay / jam
+      as link-bus error SOURCES, relay-sec's AEAD + anti-replay as the mitigating
+      SINKS, with jam (availability) explicitly NOT maskable by the crypto layer
+      — the AADL fault-propagation counterpart of relay-sec's STPA-Sec
+      (SH-FORGE/SH-STALE/SH-JAM <-> SSC-AUTH/SSC-FRESH/SSC-JAM). falcon shall
+      import the shared package (relay/spar/falcon_system.aadl); wohl is the
+      mirror consumer (wohl#49, its own repo).
+    tags: [relay, transport, spar, aadl, secure-channel, wit, ccsds, relay-sec, falcon, wohl]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        spar parse spar/relay_transport.aadl OK; spar analyze --root
+        Relay_Transport::SecureTransport.Link reports zero errors (EMV2
+        fault-tree + RTA run); spar codegen --root
+        Relay_Transport::SecureEndpoint.Channel --format wit produces the
+        transport WIT (wit/relay-transport/secure-channel.wit, seal/open/
+        handshake + the app/frame ports); falcon_system.aadl imports the package
+        and analyzes with zero errors (the secure channel deployed on its own
+        comms core, since RTA rejects sharing the 200 Hz flight MCU).
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001

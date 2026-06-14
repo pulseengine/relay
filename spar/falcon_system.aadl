@@ -12,6 +12,7 @@ public
   with Falcon_Types;
   with Memory_Properties;
   with Deployment;
+  with Relay_Transport;  -- the shared CCSDS-over-relay-sec secure channel (relay#180)
 
   -- ══════════════════════════════════════════════════════════════
   -- Processor — STM32H743 Cortex-M7
@@ -45,6 +46,13 @@ public
       mcu: processor AutopilotMcu;
       sram: memory SRAM;
       autopilot: process Falcon_Cascade::AutopilotProcess.Cascade;
+      -- The C2 uplink secure channel — the shared relay-sec transport. spar RTA
+      -- showed it CANNOT share the 200 Hz flight MCU (overload) — it deploys on
+      -- a separate comms core, the real inter-core split (the jess M4 / a comms
+      -- coprocessor). falcon is one consumer of Relay_Transport; wohl is the
+      -- mirror (wohl#49).
+      comms_mcu: processor Relay_Transport::CommsMcu;
+      comms: process Relay_Transport::SecureChannel.Ascon;
     properties
       -- Bind the autopilot process + every cascade thread to the
       -- MCU + SRAM. AS5506 §10.6 requires bindings at thread level
@@ -56,6 +64,10 @@ public
       Actual_Processor_Binding => (reference (mcu)) applies to autopilot.att;
       Actual_Processor_Binding => (reference (mcu)) applies to autopilot.rate;
       Actual_Processor_Binding => (reference (mcu)) applies to autopilot.mix;
+      Actual_Processor_Binding => (reference (comms_mcu)) applies to comms;
+      Actual_Processor_Binding => (reference (comms_mcu)) applies to comms.seal;
+      Actual_Processor_Binding => (reference (comms_mcu)) applies to comms.open;
+      Actual_Processor_Binding => (reference (comms_mcu)) applies to comms.handshake;
       Actual_Memory_Binding => (reference (sram)) applies to autopilot;
   end Falcon.Quad;
 
