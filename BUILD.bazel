@@ -286,6 +286,8 @@ rust_wasm_component_bindgen(
     wit = ":relay_limit_checker_wit",
     wasi_version = "p3",
     profiles = ["release"],
+    # Runs the REAL verified engine (#168), not an inline copy.
+    deps = [":relay-lc-engine"],
 )
 
 # ═══════════════════════════════════════════════════════════════
