@@ -256,6 +256,23 @@ rust_wasm_component_bindgen(
 # Limit Checker
 # ═══════════════════════════════════════════════════════════════
 
+# The VERIFIED engine as bazel rust_libraries (#168) — so the P3 components
+# below run the actual Verus+Kani-verified code, not an inlined drift-prone copy.
+rust_library(
+    name = "relay-primitives-lib",
+    srcs = glob(["crates/relay-primitives/plain/src/**/*.rs"]),
+    edition = "2024",
+    crate_name = "relay_primitives",
+)
+
+rust_library(
+    name = "relay-lc-engine",
+    srcs = glob(["crates/relay-lc/plain/src/**/*.rs"]),
+    edition = "2024",
+    crate_name = "relay_lc",
+    deps = [":relay-primitives-lib"],
+)
+
 wit_library(
     name = "relay_limit_checker_wit",
     srcs = ["crates/relay-lc/wit/limit_checker.wit"],
@@ -288,7 +305,8 @@ rust_wasm_component_bindgen(
     wit = ":relay_limit_checker_stream_wit",
     wasi_version = "p3",
     profiles = ["release"],
-    deps = ["@crates//:wit-bindgen"],
+    # Runs the REAL verified engine (#168), not an inline copy.
+    deps = ["@crates//:wit-bindgen", ":relay-lc-engine"],
 )
 
 # ═══════════════════════════════════════════════════════════════
