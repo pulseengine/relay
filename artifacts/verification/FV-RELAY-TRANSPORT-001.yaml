@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-RELAY-TRANSPORT-001
+    type: sw-verification
+    title: "Secure transport AADL model — spar parse/analyze/codegen + EMV2 threat model (relay#180)"
+    status: implemented
+    description: >
+      Verification of SWREQ-TRANSPORT-P01: the shared CCSDS-over-relay-sec
+      secure channel is modelled in spar and the transport WIT is generated from
+      it, all spar-gated.
+
+      Model integrity (spar, run LOCALLY — no workflow runs spar in CI yet, the
+      same status as the existing falcon_*.aadl models; wiring a spar gate into
+      CI so AADL drift is caught is a tracked follow-up):
+        - spar parse spar/relay_transport.aadl -> OK; the whole spar/ set parses.
+        - spar analyze --root Relay_Transport::SecureTransport.Link -> 0 errors
+          (EMV2 fault-tree + response-time analysis both run).
+        - spar codegen --root Relay_Transport::SecureEndpoint.Channel --format
+          wit -> wit/relay-transport/secure-channel.wit (channel-ports app/frame
+          in+out; world exports handshake/seal/open). The WIT is DERIVED, not
+          hand-written (the methodology's "spar generates WIT", finally real for
+          this interface).
+
+      EMV2 threat model: link-bus error sources forge (AuthenticationError) /
+      replay (ItemTimingError) / jam (ServiceOmission); channel sinks AEAD
+      (SSC-AUTH) + anti-replay (SSC-FRESH); jam propagates (SSC-JAM not maskable).
+      Composes with artifacts/stpa-sec/relay-sec-stpa-sec.yaml; the Kani floor
+      (SEC-K10/SEC-K15, FV-RELAY-SEC-006) is the implementation evidence.
+
+      Deployment finding: spar RTA rejects the secure channel on the 200 Hz
+      flight MCU (104% overload) and confirms it on a separate comms core
+      (1.7%). falcon_system.aadl imports the package and analyzes with 0 errors.
+      This architecture-first step (spar -> WIT -> implement) leads wohl#49.
+    tags: [verification, relay, transport, spar, aadl, emv2, wit, "v1.61"]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "spar parse spar/relay_transport.aadl"
+        - run: "spar analyze --root Relay_Transport::SecureTransport.Link spar/relay_transport.aadl"
+        - run: "spar codegen --root Relay_Transport::SecureEndpoint.Channel --format wit spar/relay_transport.aadl"
+    links:
+      - type: verifies
+        target: SWREQ-TRANSPORT-P01

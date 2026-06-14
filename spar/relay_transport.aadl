@@ -1,0 +1,196 @@
+-- Relay Transport — the shared CCSDS-over-relay-sec secure channel (AADL model).
+--
+-- The architectural source of truth for the safety-protected transport that
+-- BOTH products import: falcon's drone C2 link and wohl's home-automation
+-- command/sensor path (pulseengine/relay#180, pulseengine/wohl#49). It sits
+-- between the relay-ccsds encoder and the physical link bus — the CCSDS Space
+-- Packet is the payload, relay-sec is the authenticated wrapper.
+--
+-- Mirrors the implementation in crates/relay-sec (plain/src/frame.rs): the wire
+-- frame is `SecurityHeader || payload || Ascon-AEAD128 tag`, the channel is
+-- transport-agnostic (proven, Kani SEC-K15 / FV-RELAY-SEC-006, v1.59), and the
+-- carrier underneath is the relay-bus seam (v1.60). The transport WIT is
+-- GENERATED from this model: `spar codegen --root Relay_Transport::SecureTransport.Link --format wit`.
+--
+-- The EMV2 error model (forge / replay / jam as bus error sources; relay-sec
+-- AEAD + anti-replay as the mitigating sinks) is the AADL fault-propagation
+-- counterpart to relay-sec's STPA-Sec (artifacts/stpa-sec/relay-sec-stpa-sec.yaml):
+-- SH-FORGE/SH-STALE/SH-JAM  <->  SSC-AUTH/SSC-FRESH/SSC-JAM.
+
+package Relay_Transport
+public
+  with Data_Model;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Wire data types — mirror relay-sec frame.rs field-for-field.
+  -- ══════════════════════════════════════════════════════════════
+
+  data CommandMessage
+    -- Plaintext application payload: a CCSDS Space Packet body handed to the
+    -- channel by the relay-ccsds encoder. Opaque to relay-sec, which wraps
+    -- arbitrary bytes (transport-agnostic, no relay-ccsds dependency).
+    properties
+      Data_Model::Data_Representation => Struct;
+  end CommandMessage;
+
+  data SecurityHeader
+    -- relay-sec header: SPI(2) || channel_id(1) || counter(8) = 11 bytes.
+    -- The pre-auth TCB: parsed before authentication to select the SA.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 11 Bytes;
+  end SecurityHeader;
+
+  data AsconTag
+    -- 16-byte Ascon-AEAD128 authentication tag (the frame trailer).
+    properties
+      Data_Size => 16 Bytes;
+  end AsconTag;
+
+  data SecureFrame
+    -- The wire frame: SecurityHeader || payload || AsconTag. Output of
+    -- SecurityChannel::wrap; input to verify.
+    properties
+      Data_Model::Data_Representation => Struct;
+  end SecureFrame;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- The secure channel — between the CCSDS encoder and the link bus.
+  -- ══════════════════════════════════════════════════════════════
+
+  process SecureChannel
+    features
+      app_in:    in  data port CommandMessage;  -- plaintext from app / CCSDS encode
+      frame_out: out data port SecureFrame;     -- sealed frame onto the link
+      frame_in:  in  data port SecureFrame;     -- sealed frame from the link
+      app_out:   out data port CommandMessage;  -- verified plaintext to the app
+    -- The mitigating sinks: relay-sec's Ascon-AEAD authenticates (kills a
+    -- forged frame) and the anti-replay window kills a stale one — SSC-AUTH /
+    -- SSC-FRESH. Jam (availability) is NOT maskable by the crypto layer, so it
+    -- propagates to the app as an omission (SSC-JAM needs FHSS / redundant link,
+    -- out of relay-sec's scope). This is the AADL counterpart of the STPA-Sec
+    -- constraints; the Kani floor (SEC-K10/K15) is the implementation evidence.
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        frame_in : in  propagation {AuthenticationError, ItemTimingError, ServiceOmission};
+        app_out  : out propagation {ServiceOmission};
+      flows
+        auth_sink  : error sink frame_in {AuthenticationError};  -- SSC-AUTH (AEAD rejects forged)
+        fresh_sink : error sink frame_in {ItemTimingError};      -- SSC-FRESH (anti-replay rejects stale)
+        jam_pass   : error path frame_in {ServiceOmission} -> app_out {ServiceOmission}; -- SSC-JAM (not maskable)
+      end propagations;
+    **};
+  end SecureChannel;
+
+  process implementation SecureChannel.Ascon
+    subcomponents
+      handshake: thread Handshake;  -- cold path: X25519 + Ed25519/sigil, rekey-on-reboot
+      seal:      thread Seal;       -- wrap: header || payload || tag; advance counter
+      open:      thread Open;       -- verify: authenticate, then anti-replay on the counter
+  end SecureChannel.Ascon;
+
+  thread Handshake
+    -- Cold path, rare: ephemeral X25519 ECDH + Ed25519/sigil, rekey-on-reboot.
+    -- Sporadic at ~1 Hz floor (a rekey is far rarer than a command) — the
+    -- heaviest op, but its long min-interarrival keeps it off the hot path.
+    properties
+      Dispatch_Protocol => Sporadic;
+      Period => 1000 ms;
+      Compute_Execution_Time => 2 ms .. 8 ms;
+  end Handshake;
+
+  thread Seal
+    -- wrap: header || payload || Ascon tag; advance counter. Constant-time.
+    -- ~20 Hz: a C2 command/telemetry rate, NOT the 200 Hz control loop (spar
+    -- RTA rejects running the channel at control-loop rate on the flight MCU).
+    properties
+      Dispatch_Protocol => Sporadic;
+      Period => 50 ms;
+      Compute_Execution_Time => 50 us .. 200 us;
+  end Seal;
+
+  thread Open
+    -- verify: authenticate (MAC/AEAD recompute + ct-compare), THEN anti-replay
+    -- on the authenticated counter. Slightly heavier than seal.
+    properties
+      Dispatch_Protocol => Sporadic;
+      Period => 50 ms;
+      Compute_Execution_Time => 60 us .. 240 us;
+  end Open;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- The physical link bus — the threat surface (forge/replay/jam).
+  -- ══════════════════════════════════════════════════════════════
+
+  bus SecureLink
+    -- The threat surface. EMV2 error sources mirror relay-sec's STPA-Sec
+    -- (artifacts/stpa-sec/relay-sec-stpa-sec.yaml): an adversary forges,
+    -- replays, or jams frames on the link.
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        frames : out propagation {AuthenticationError, ItemTimingError, ServiceOmission};
+      flows
+        forge  : error source frames {AuthenticationError};  -- SH-FORGE  (inject a forged frame)
+        replay : error source frames {ItemTimingError};      -- SH-STALE  (replay a captured frame)
+        jam    : error source frames {ServiceOmission};      -- SH-JAM    (drop/deny frames)
+      end propagations;
+    **};
+  end SecureLink;
+
+  -- The comms MCU hosting the channel (a low-end target: wohl STM32G0 M0+ /
+  -- the falcon comms sideband / a jess inter-core M4). relay-sec is no_std and
+  -- table-free (Ascon), so it runs on cores without AES instructions.
+  processor CommsMcu
+    properties
+      Scheduling_Protocol => (RATE_MONOTONIC_PROTOCOL);
+      Clock_Period => 1 ms;
+  end CommsMcu;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- A concrete secure link — two endpoints over the bus. Instantiated
+  -- for analysis + WIT codegen. tx seals; the sealed frame crosses the
+  -- link; rx opens (verify + anti-replay).
+  -- ══════════════════════════════════════════════════════════════
+
+  system SecureTransport
+  end SecureTransport;
+
+  -- A single endpoint — the canonical codegen root for the transport WIT:
+  --   spar codegen --root Relay_Transport::SecureEndpoint.Channel --format wit
+  system SecureEndpoint
+  end SecureEndpoint;
+
+  system implementation SecureEndpoint.Channel
+    subcomponents
+      channel: process SecureChannel.Ascon;
+      mcu:     processor CommsMcu;
+    properties
+      Actual_Processor_Binding => (reference (mcu)) applies to channel;
+      Actual_Processor_Binding => (reference (mcu)) applies to channel.seal;
+      Actual_Processor_Binding => (reference (mcu)) applies to channel.open;
+      Actual_Processor_Binding => (reference (mcu)) applies to channel.handshake;
+  end SecureEndpoint.Channel;
+
+  system implementation SecureTransport.Link
+    subcomponents
+      tx:   process SecureChannel.Ascon;  -- sealing endpoint
+      rx:   process SecureChannel.Ascon;  -- opening endpoint
+      link: bus SecureLink;
+      mcu:  processor CommsMcu;
+    connections
+      wire: port tx.frame_out -> rx.frame_in
+        { Actual_Connection_Binding => (reference (link)); };  -- sealed frame on the wire
+    properties
+      Actual_Processor_Binding  => (reference (mcu)) applies to tx;
+      Actual_Processor_Binding  => (reference (mcu)) applies to rx;
+      Actual_Processor_Binding  => (reference (mcu)) applies to tx.seal;
+      Actual_Processor_Binding  => (reference (mcu)) applies to tx.open;
+      Actual_Processor_Binding  => (reference (mcu)) applies to tx.handshake;
+      Actual_Processor_Binding  => (reference (mcu)) applies to rx.seal;
+      Actual_Processor_Binding  => (reference (mcu)) applies to rx.open;
+      Actual_Processor_Binding  => (reference (mcu)) applies to rx.handshake;
+  end SecureTransport.Link;
+
+end Relay_Transport;

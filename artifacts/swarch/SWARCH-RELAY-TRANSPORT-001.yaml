@@ -1,0 +1,50 @@
+artifacts:
+  - id: SWARCH-RELAY-TRANSPORT-001
+    type: sw-arch-component
+    title: Shared CCSDS-over-relay-sec secure channel (AADL model, falcon + wohl)
+    status: implemented
+    description: >
+      The architectural model of the safety-protected transport that BOTH
+      products import — falcon's drone C2 link and wohl's home-automation
+      command/sensor path (relay#180; wohl#49). Authored in spar as
+      spar/relay_transport.aadl and federated to consumers, the same pattern as
+      relay's STPA-Sec. This is the architecture-first counterpart of the
+      relay-sec implementation (SWARCH-RELAY-SEC-001) it refines.
+
+      ## Structure
+      - SecureFrame data type = SecurityHeader (SPI||channel_id||counter, 11 B) ||
+        payload (a CCSDS Space Packet body) || Ascon-AEAD128 tag (16 B) — mirrors
+        crates/relay-sec/plain/src/frame.rs field-for-field.
+      - SecureChannel process between the CCSDS encoder and the link bus, with the
+        seal / open / handshake threads (handshake = cold-path X25519 + Ed25519/
+        sigil rekey-on-reboot). The transport WIT is GENERATED from this process
+        (wit/relay-transport/secure-channel.wit).
+
+      ## EMV2 error model (composes with relay-sec STPA-Sec)
+      The link bus is the threat surface: forge (AuthenticationError), replay
+      (ItemTimingError), jam (ServiceOmission) are error SOURCES. The channel
+      SINKS forge (AEAD authenticate, SSC-AUTH) and replay (anti-replay window,
+      SSC-FRESH); jam is NOT maskable by the crypto layer and propagates to the
+      app as an omission (SSC-JAM needs FHSS / a redundant link — out of
+      relay-sec's scope). The Kani floor (SEC-K10 verify-total, SEC-K15
+      cross-channel isolation) is the implementation evidence under this model.
+
+      ## Deployment finding (spar RTA)
+      Response-time analysis REJECTS deploying the secure channel on the 200 Hz
+      flight MCU (overload, 104%). It deploys on a separate comms core (CommsMcu
+      — the jess inter-core M4 / a comms coprocessor, ~1.7% utilization), which
+      is exactly the inter-core split the relay-bus seam (v1.60) and relay-sec
+      transport-agnosticism (v1.59) were built to serve. falcon_system.aadl
+      imports the package with the channel on its own comms core.
+    tags: [relay, transport, spar, aadl, emv2, secure-channel, ccsds, relay-sec, falcon, wohl]
+    fields:
+      resource-budgets: >
+        Secure channel on a dedicated comms core (CommsMcu): ~1.7% utilization
+        (seal/open ~20 Hz, 50-240 us; handshake ~1 Hz cold-path, 2-8 ms). spar
+        RTA rejects co-hosting on the 200 Hz flight MCU (104% overload). spar
+        parse OK; spar analyze 0 errors.
+    links:
+      - type: allocated-from
+        target: SWREQ-TRANSPORT-P01
+      - type: refines
+        target: SWARCH-RELAY-SEC-001
