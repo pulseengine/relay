@@ -277,6 +277,37 @@ mod tests {
         assert_eq!(rx.verify(&buf[..n]), Err(VerifyError::UnknownSpi));
     }
 
+    /// Transport-agnostic E2E (#176): relay-sec wraps/verifies OPAQUE bytes —
+    /// nothing here is a CCSDS frame. This exercises the jess inter-core use:
+    /// two MCU cores over a shared-memory mailbox, each DIRECTION its own SA
+    /// (distinct SPI), carrying a raw inter-core message rather than a wire
+    /// frame. The same `wrap`/`verify` that protects the CCSDS C2 link protects
+    /// the IPC link — one verified layer, the transport on top.
+    #[test]
+    fn inter_core_ipc_roundtrip_and_isolation() {
+        let key = [0x5Au8; KEY_LEN];
+        // The two directions of the inter-core link are two SAs (distinct SPI).
+        let mut m7_to_m4_tx = SecurityChannel::new(0x4D37, 1, key);
+        let mut m7_to_m4_rx = SecurityChannel::new(0x4D37, 1, key);
+        let mut m4_to_m7_rx = SecurityChannel::new(0x4D47, 1, key); // other way
+
+        // A raw inter-core message (NOT a CCSDS frame): opcode + 3 payload bytes.
+        let msg = [0x01u8, 0xDE, 0xAD, 0xBE];
+        let mut mailbox = [0u8; MIN_FRAME_LEN + 4]; // the shared-memory slot
+
+        // One core protects the message into the mailbox; the other authenticates.
+        let n = m7_to_m4_tx.wrap(&msg, &mut mailbox).unwrap();
+        assert_eq!(m7_to_m4_rx.verify(&mailbox[..n]), Ok(&msg[..]));
+
+        // A frame on the M7->M4 direction is NOT accepted on the M4->M7 SA:
+        // distinct transports cannot cross-replay (the SEC-K15 property, here
+        // on a concrete inter-core scenario).
+        assert_eq!(
+            m4_to_m7_rx.verify(&mailbox[..n]),
+            Err(VerifyError::UnknownSpi)
+        );
+    }
+
     #[test]
     fn replay_is_rejected() {
         let (mut tx, mut rx) = channels();
