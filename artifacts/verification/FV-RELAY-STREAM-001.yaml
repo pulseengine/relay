@@ -18,18 +18,19 @@ artifacts:
          with `wit_stream::new()`, `while let Some(r) = readings.next().await`,
          and `writer.write(violations).await`.
 
-         CORRECTION (honest scope): the bindgen target compiles a SINGLE source
-         file (`srcs = ["wasm_stream_component.rs"]`, no crate deps), and that
-         file INLINES its own copy of the engine logic (`mod engine { ... }`) —
-         it does NOT depend on the verified relay-lc crate. So the running code
-         is a hand-copied DUPLICATE of WatchpointTable::evaluate, which can drift
-         from the Verus+Kani-verified original. The proofs cover the relay-lc
-         crate; this component runs a copy of that logic, not the proven crate.
-         This is the same pattern as the sync `relay-lc` component (also a single
-         inlined file). FIX (v1.58): expose the engine as a bazel rust_library and
-         have the bindgen targets depend on it, so the P3 component runs the
-         ACTUAL verified engine. Until then this artifact claims only "builds as a
-         valid P3 async component", NOT "runs verified code".
+         RUNS THE VERIFIED ENGINE (restored, #168/#169): the component no longer
+         inlines a copy. Two bazel rust_library targets — relay-primitives-lib and
+         relay-lc-engine (crate_name relay_lc) over the verified plain/ trees —
+         expose the engine, and //:relay-lc-stream `deps` on relay-lc-engine while
+         the source does `use relay_lc::engine;` (the ~100-line inline `mod engine`
+         was deleted). So the running monitor() now invokes the ACTUAL
+         Verus+Kani-verified WatchpointTable::evaluate, not a drift-prone copy.
+         CI-validated: `bazel build //:relay-lc-stream` (the cascade job) compiles
+         the component against the verified engine crate. (The earlier v1.57
+         edition of this artifact over-claimed this before the refactor existed;
+         #167 corrected it to "inline copy"; #169 makes the verified claim true.)
+         Remaining: the sync `relay-lc` component still inlines — same fix, tracked
+         on #168.
       3. The mechanical ORACLE: the `//:relay-lc-stream` bazel target
          (wasi_version = "p3") builds it as a P3 component, now exercised in CI
          (.github/workflows/bazel.yml builds it alongside the cascade + harness)
