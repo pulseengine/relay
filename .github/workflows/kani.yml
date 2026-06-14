@@ -51,6 +51,7 @@ jobs:
           - relay-to
           - relay-tbl
           - relay-sec
+          - relay-bus
     steps:
       - uses: actions/checkout@v5
       - name: Kani verify ${{ matrix.engine }}
@@ -58,7 +59,7 @@ jobs:
         with:
           working-directory: crates/${{ matrix.engine }}
 
-  # Roll-up over the 17-engine matrix: ONE required context for branch
+  # Roll-up over the 18-engine matrix: ONE required context for branch
   # protection ("Kani gate"), so the formal-verification result gates merges
   # without registering 17 separate required checks.
   kani-gate:

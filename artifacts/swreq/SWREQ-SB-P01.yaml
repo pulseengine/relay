@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWREQ-SB-P01
+    type: sw-req
+    title: "SB-P01: Software Bus no_std pluggable backend seam (stream<T> -> Gale ring_buf / ipc_service)"
+    status: implemented
+    description: >
+      The relay Software Bus shall expose a no_std/no_alloc BACKEND SEAM under
+      the `bus` WIT (wit/interfaces/relay-software-bus/bus.wit): the typed
+      `stream<T>`/`future<T>` contract shall be implementable over a pluggable
+      transport selected by the host/linker, NOT bound to the current std-only
+      in-process implementation (host/relay-sb/src/core.rs, Vec/VecDeque).
+
+      The seam (a Rust trait, SPSC + bounded, surfacing the existing sb-error
+      buffer-exhausted/backpressure/stream-closed) shall admit at least: the
+      std backend (today's relay-sb) and an embedded shared-memory ring backend
+      (a Gale ring_buf, RB01-RB08 verified — gale#63; or a Zephyr
+      ipc_service/ICMsg). This is the "thin agreed interface" between the
+      relay-owned stream seam and the Gale-owned ring (relay#177): relay owns
+      the seam, Gale owns the ring.
+
+      Scope boundary: relay provides the seam + the std backend; the verified
+      embedded ring implementation is Gale/jess (co-designed, jess DD-009). The
+      bus.wit already declares the intent ("stream<T> -> Gale ring_buf on
+      embedded"); this requirement makes the Rust seam real so an inter-core
+      (M7<->M4) carrier can plug in without changing the stream<T> contract.
+      The carrier transports relay-ccsds Space Packets wrapped by relay-sec
+      (reused unchanged) — see relay#177.
+    tags: [relay, software-bus, stream, no_std, ipc, inter-core, seam, gale, jess, v1.60]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        A no_std backend trait under the bus seam; the std relay-sb implements
+        it (refactor, behavior-preserving — existing relay-sb tests still pass);
+        a second backend can be linked without touching the stream<T> WIT or
+        relay-ccsds/relay-sec. End-to-end embedded ring verification is Gale's
+        track (gale#63), out of scope here.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008
