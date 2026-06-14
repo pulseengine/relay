@@ -35,7 +35,7 @@ jobs:
             cargo install --locked \
               --git https://github.com/pulseengine/spar \
               --bin spar \
-              spar-cli
+              spar
           fi
 
       - name: Parse all AADL models
