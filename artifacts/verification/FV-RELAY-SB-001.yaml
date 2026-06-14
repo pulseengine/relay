@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-RELAY-SB-001
+    type: sw-verification
+    title: "Software Bus transport seam — no_std MessageTransport trait + verified SpscRing backend (relay-bus, #177)"
+    status: implemented
+    description: >
+      Verification of SWREQ-SB-P01: the relay Software Bus exposes a no_std
+      pluggable backend seam so an inter-core carrier (relay#177) can swap the
+      message transport without changing the stream<T> contract or the bus above
+      it. relay owns the seam; Gale owns the production ring (gale#63).
+
+      The seam (new crate `relay-bus`, no_std/no_alloc, forbid(unsafe_code)) is a
+      single `MessageTransport` trait — bounded SPSC, push returns false on full
+      (explicit backpressure, never overwrites/panics), pop is FIFO. Two
+      interchangeable backends prove it is real:
+        - host: `relay-sb`'s MessageQueue (VecDeque) now IMPLEMENTS the trait —
+          behavior-preserving (all 11 original relay-sb tests still pass);
+        - embedded: `SpscRing<T, N>`, a no_alloc fixed-capacity ring mirroring a
+          Gale ring_buf's shape (the embeddable reference backend).
+      relay-sb's test_transport_seam_is_backend_agnostic drives a single generic
+      carrier-driver over BOTH backends (FIFO + backpressure identical).
+
+      Formal (Kani 0.67, in the CI kani.yml matrix — now 18 engines):
+        BUS-K01 ring_ops_total_and_bounded — an arbitrary symbolic sequence of
+          push/pop is total (no panic/overflow/shift-UB) and 0 <= len <= N holds
+          after every step;
+        BUS-K02 ring_full_refuses_no_overwrite — a full ring refuses the push,
+          len stays N, and the head item is still recovered in FIFO order.
+      Both VERIFICATION: SUCCESSFUL locally and green in CI.
+
+      Scope: relay provides the seam + std backend + the no_alloc reference ring.
+      The verified embedded Gale ring_buf backend is Gale/jess (gale#63),
+      co-designed — out of scope here. 5 relay-bus tests + 12 relay-sb tests.
+    tags: [verification, relay, software-bus, relay-bus, no_std, seam, kani, "v1.60"]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-bus -p relay-sb"
+        - run: "cargo kani -p relay-bus"
+    links:
+      - type: verifies
+        target: SWREQ-SB-P01

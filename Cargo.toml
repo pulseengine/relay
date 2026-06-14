@@ -47,6 +47,7 @@ members = [
     "crates/relay-pos",
     "crates/relay-fsm",
     "crates/relay-math",
+    "crates/relay-bus",
     "crates/falcon-core",
     "crates/falcon-mavlink",
     "crates/falcon-imu-icm42688",

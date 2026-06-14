@@ -1125,6 +1125,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "relay-bus"
+version = "0.1.0"
+
+[[package]]
 name = "relay-ccsds"
 version = "0.1.0"
 dependencies = [
@@ -1373,6 +1377,9 @@ dependencies = [
 [[package]]
 name = "relay-sb"
 version = "0.1.0"
+dependencies = [
+ "relay-bus",
+]
 
 [[package]]
 name = "relay-sc"

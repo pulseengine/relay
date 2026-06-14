@@ -8,3 +8,4 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+relay-bus = { path = "../../crates/relay-bus" }

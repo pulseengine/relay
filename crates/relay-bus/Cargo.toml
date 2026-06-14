@@ -1,0 +1,18 @@
+[package]
+name = "relay-bus"
+description = "Relay Bus — the no_std transport seam under the Software Bus (stream<T> -> pluggable ring backend)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+# no_std + no_alloc: the seam and its reference ring run inside the verified
+# embedded core (jess M7/M4) as well as the host bus. Static buffers only; a
+# Gale ring_buf is the production embedded backend behind the same trait.
+
+[lints]
+workspace = true

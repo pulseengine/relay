@@ -5,6 +5,7 @@
 //!
 //! Source mapping: NASA cFS Software Bus (cfe_sb_api.c, cfe_sb_task.c)
 
+use relay_bus::MessageTransport;
 use std::collections::VecDeque;
 
 pub const MAX_CHANNELS: usize = 256;
@@ -174,6 +175,15 @@ impl MessageQueue {
             capacity,
         }
     }
+}
+
+/// The host queue is one backend behind the Software Bus transport seam
+/// (`relay-bus`); an embedded Gale `ring_buf` is another. Routing through the
+/// trait is what lets the inter-core carrier (relay#177) swap the carrier
+/// without touching the bus above it. Behavior is unchanged from the previous
+/// inherent `push` — full → `false` (backpressure), bounded by `capacity`.
+impl MessageTransport for MessageQueue {
+    type Item = Message;
 
     fn push(&mut self, msg: Message) -> bool {
         if self.messages.len() >= self.capacity {
@@ -181,6 +191,18 @@ impl MessageQueue {
         }
         self.messages.push_back(msg);
         true
+    }
+
+    fn pop(&mut self) -> Option<Message> {
+        self.messages.pop_front()
+    }
+
+    fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    fn capacity(&self) -> usize {
+        self.capacity
     }
 }
 
@@ -352,6 +374,47 @@ mod tests {
         let result = bus.publish(1, vec![3], 0);
         assert_eq!(result, Err(SbError::QueueFull));
         assert_eq!(bus.stats().messages_dropped, 1);
+    }
+
+    /// The transport seam (relay#177): the host `MessageQueue` and the embedded
+    /// `no_alloc` `SpscRing` are interchangeable behind `MessageTransport`. A
+    /// single generic carrier-driver exercises both — the property that lets
+    /// jess swap the host queue for a Gale `ring_buf` without changing the bus.
+    #[test]
+    fn test_transport_seam_is_backend_agnostic() {
+        fn round_trip<Q: MessageTransport<Item = u8>>(q: &mut Q) {
+            assert!(q.is_empty());
+            assert!(q.push(0xA1));
+            assert!(q.push(0xA2));
+            assert_eq!(q.len(), 2);
+            assert_eq!(q.pop(), Some(0xA1)); // FIFO
+            assert_eq!(q.pop(), Some(0xA2));
+            assert_eq!(q.pop(), None);
+        }
+        // host backend (VecDeque-backed)
+        struct U8Queue(std::collections::VecDeque<u8>, usize);
+        impl MessageTransport for U8Queue {
+            type Item = u8;
+            fn push(&mut self, m: u8) -> bool {
+                if self.0.len() >= self.1 {
+                    return false;
+                }
+                self.0.push_back(m);
+                true
+            }
+            fn pop(&mut self) -> Option<u8> {
+                self.0.pop_front()
+            }
+            fn len(&self) -> usize {
+                self.0.len()
+            }
+            fn capacity(&self) -> usize {
+                self.1
+            }
+        }
+        round_trip(&mut U8Queue(std::collections::VecDeque::new(), 8));
+        // embedded backend (no_alloc ring) — same seam, same behavior
+        round_trip(&mut relay_bus::SpscRing::<u8, 8>::new());
     }
 
     #[test]
