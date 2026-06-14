@@ -244,12 +244,21 @@ wit_library(
 # P3 WASM component
 # ═══════════════════════════════════════════════════════════════
 
+rust_library(
+    name = "relay-sch-engine",
+    srcs = glob(["crates/relay-sch/plain/src/**/*.rs"]),
+    edition = "2024",
+    crate_name = "relay_sch",
+)
+
 rust_wasm_component_bindgen(
     name = "relay-sch",
     srcs = ["crates/relay-sch/src/wasm_component.rs"],
     wit = ":relay_scheduler_wit",
     wasi_version = "p3",
     profiles = ["release"],
+    # Runs the REAL verified engine (#168), not an inline copy.
+    deps = [":relay-sch-engine"],
 )
 
 # ═══════════════════════════════════════════════════════════════
