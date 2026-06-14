@@ -8,9 +8,10 @@ artifacts:
       secure channel is modelled in spar and the transport WIT is generated from
       it, all spar-gated.
 
-      Model integrity (spar, run LOCALLY — no workflow runs spar in CI yet, the
-      same status as the existing falcon_*.aadl models; wiring a spar gate into
-      CI so AADL drift is caught is a tracked follow-up):
+      Model integrity (spar, run locally AND in CI — .github/workflows/spar.yml
+      (added v1.62) parses spar/*.aadl, analyzes every system root for zero
+      errors, and fails on transport-WIT drift; so the model + the existing
+      falcon_*.aadl are now gated, not just locally checked):
         - spar parse spar/relay_transport.aadl -> OK; the whole spar/ set parses.
         - spar analyze --root Relay_Transport::SecureTransport.Link -> 0 errors
           (EMV2 fault-tree + response-time analysis both run).
