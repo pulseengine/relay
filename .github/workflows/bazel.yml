@@ -79,7 +79,7 @@ jobs:
         # Also builds //:relay-lc-stream — the first P3 (Component-Model
         # Preview 3) async STREAM component (#STREAM-P01), so its P3 async build
         # is CI-validated, not just asserted.
-        run: bazel build //:falcon-cascade-composed //:relay-lc-stream //:relay-lc //:relay-sch //:relay-hk
+        run: bazel build //:falcon-cascade-composed //:relay-lc-stream //:relay-lc //:relay-sch //:relay-hk //:relay-sc
 
       # Exercise the witness MC/DC path end-to-end (#145): forces the
       # harness_crates crate_universe (wasmtime/tokio) to resolve, builds the
