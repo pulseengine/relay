@@ -1,0 +1,52 @@
+package pulseengine:relay-scheduler@0.1.0;
+
+/// Scheduler — stream transformer edition.
+///
+/// Takes a stream of time ticks, emits a stream of scheduled actions.
+/// The verified engine (process_tick, Verus-proven SCH-P03..P06) processes
+/// each tick against the Schedule Definition Table.
+///
+/// This is the P3-native interface. The non-stream version (scheduler.wit)
+/// uses individual function calls.
+interface scheduler-stream {
+    /// One time tick (a minor frame within a major frame).
+    record tick {
+        minor-frame: u32,
+        major-frame: u32,
+    }
+
+    /// A scheduled action to fire.
+    record scheduled-action {
+        target-channel: u32,
+        payload-offset: u32,
+        payload-len: u32,
+    }
+
+    /// A schedule slot configuration.
+    record schedule-slot {
+        minor-frame: u32,
+        major-frame: u32,
+        target-channel: u32,
+        payload-offset: u32,
+        payload-len: u32,
+        enabled: bool,
+    }
+
+    /// Initialize the verified engine.
+    init: func() -> result<_, string>;
+
+    /// Add a schedule slot. Returns false if the table is full.
+    add-slot: func(slot: schedule-slot) -> bool;
+
+    /// Enable or disable a slot. Returns false if the index is out of range.
+    set-enabled: func(index: u32, enabled: bool) -> bool;
+
+    /// STREAM TRANSFORMER: ticks in → scheduled actions out.
+    /// Each tick is processed against the schedule table; the actions to fire
+    /// this frame are emitted to the output stream.
+    monitor: func(ticks: stream<tick>) -> stream<scheduled-action>;
+}
+
+world relay-scheduler-stream {
+    export scheduler-stream;
+}

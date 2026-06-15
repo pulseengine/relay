@@ -261,6 +261,24 @@ rust_wasm_component_bindgen(
     deps = [":relay-sch-engine"],
 )
 
+# P3 STREAM variant — stream<tick> -> stream<scheduled-action> (#168).
+wit_library(
+    name = "relay_scheduler_stream_wit",
+    srcs = ["crates/relay-sch/wit/scheduler_stream.wit"],
+    package_name = "pulseengine:relay-scheduler-stream",
+    world = "relay-scheduler-stream",
+)
+
+rust_wasm_component_bindgen(
+    name = "relay-sch-stream",
+    srcs = ["crates/relay-sch/src/wasm_stream_component.rs"],
+    wit = ":relay_scheduler_stream_wit",
+    wasi_version = "p3",
+    profiles = ["release"],
+    # Runs the REAL verified engine (#168), not an inline copy.
+    deps = ["@crates//:wit-bindgen", ":relay-sch-engine"],
+)
+
 # ═══════════════════════════════════════════════════════════════
 # Limit Checker
 # ═══════════════════════════════════════════════════════════════
