@@ -1,0 +1,44 @@
+artifacts:
+  - id: FV-RELAY-STREAM-005
+    type: sw-verification
+    title: "falcon rate controller P3 async stream component — runs the verified PID, builds as Component-Model P3 (v1.66)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P05 for the rate controller — the first
+      control-cascade engine promoted to a real WASM Component-Model Preview 3
+      (P3) async stream transformer, extending the streamification template
+      (FV-RELAY-STREAM-001..004) from the cFS engines to the flight cascade.
+
+      Evidence:
+      1. The WIT (wit/falcon-rate-stream/rate_stream.wit) declares genuine P3
+         stream types: `monitor: func(inputs: stream<rate-input>) ->
+         stream<torque-setpoint>`. Self-contained (falcon:rate-stream package),
+         not touching the shared cascade.wit.
+      2. The implementation (wasm/cm/rate/src/stream.rs) is a real async stream
+         transformer: `async fn monitor(mut inputs: StreamReader<RateInput>) ->
+         StreamReader<TorqueSetpoint>` with `wit_stream::new()`, `while let
+         Some(inp) = inputs.next().await`, and `writer.write(...).await`.
+      3. RUNS THE VERIFIED CONTROLLER: `use relay_rate::{RatePid, Timestamp};`
+         and //:falcon-rate-stream `deps` on :relay-rate, so the streaming
+         monitor() drives the ACTUAL relay-rate RatePid::tick (the body-rate
+         PID) — no inline copy. The PID integrator/derivative state persists
+         across the stream (static RatePid), timestamp a synthesised 1 kHz
+         counter, exactly as the sync falcon-rate component.
+      4. The mechanical ORACLE: the //:falcon-rate-stream bazel target
+         (wasi_version = "p3") builds it as a P3 component, EXERCISED in CI
+         (.github/workflows/bazel.yml builds it alongside the four cFS stream
+         components), so "valid P3 async component driving the verified PID" is
+         CI-validated, not asserted.
+
+      Honest scope (same as STREAM-001..004): verifies AUTHORED + BUILDS as P3
+      async driving the verified controller; does NOT verify end-to-end
+      execution on kiln's async scheduler (shipped but dormant). Composing the
+      cascade stream pipeline (iekf->pos->att->rate->mixer) is the follow-on.
+    tags: [verification, relay, falcon-rate, cascade, stream, async, p3, component-model, "v1.66"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:falcon-rate-stream
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P05

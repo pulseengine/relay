@@ -704,6 +704,26 @@ rust_wasm_component_bindgen(
     profiles = ["release"],
 )
 
+# P3 STREAM variant — stream<rate-input> -> stream<torque-setpoint> (#168).
+# The first control-cascade engine as a P3 async stream, built the proven
+# cFS-stream way (rust_wasm_component_bindgen, wasi p3) over the verified
+# :relay-rate library; self-contained WIT (does not touch cascade.wit).
+wit_library(
+    name = "falcon_rate_stream_wit",
+    srcs = ["wit/falcon-rate-stream/rate_stream.wit"],
+    package_name = "falcon:rate-stream",
+    world = "rate-stream-component",
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-rate-stream",
+    srcs = ["wasm/cm/rate/src/stream.rs"],
+    wit = ":falcon_rate_stream_wit",
+    wasi_version = "p3",
+    deps = ["@crates//:wit-bindgen", ":relay-rate"],
+    profiles = ["release"],
+)
+
 rust_wasm_component_bindgen(
     name = "falcon-mixer",
     crate_features = ["bazel-bindings"],
