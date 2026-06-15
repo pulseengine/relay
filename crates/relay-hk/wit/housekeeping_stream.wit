@@ -1,0 +1,52 @@
+package pulseengine:relay-housekeeping@0.1.0;
+
+/// Housekeeping — stream transformer edition.
+///
+/// Takes a stream of source-data batches, emits a stream of assembled HK
+/// packets. The verified engine (collect, Verus-proven HK-P02/HK-P04)
+/// applies the copy table to each batch.
+///
+/// This is the P3-native interface. The non-stream version (housekeeping.wit)
+/// uses individual function calls.
+interface housekeeping-stream {
+    /// A copy-table entry describing one field copy.
+    record copy-entry {
+        source-id: u32,
+        source-offset: u32,
+        length: u32,
+        output-offset: u32,
+    }
+
+    /// Source data block.
+    record source-data {
+        source-id: u32,
+        data: list<u8>,
+    }
+
+    /// One batch of sources to collect into a single HK packet.
+    record source-batch {
+        sources: list<source-data>,
+    }
+
+    /// An assembled housekeeping packet.
+    record hk-packet {
+        data: list<u8>,
+        length: u32,
+        sequence: u32,
+    }
+
+    /// Initialize the verified engine.
+    init: func() -> result<_, string>;
+
+    /// Add a copy entry. Returns false if the table is full.
+    add-copy-entry: func(entry: copy-entry) -> bool;
+
+    /// STREAM TRANSFORMER: source batches in → HK packets out.
+    /// Each batch is collected through the copy table; a successfully
+    /// assembled packet is emitted to the output stream.
+    monitor: func(batches: stream<source-batch>) -> stream<hk-packet>;
+}
+
+world relay-housekeeping-stream {
+    export housekeeping-stream;
+}

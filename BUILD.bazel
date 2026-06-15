@@ -394,6 +394,24 @@ rust_wasm_component_bindgen(
     deps = [":relay-hk-engine"],
 )
 
+# P3 STREAM variant — stream<source-batch> -> stream<hk-packet> (#168).
+wit_library(
+    name = "relay_housekeeping_stream_wit",
+    srcs = ["crates/relay-hk/wit/housekeeping_stream.wit"],
+    package_name = "pulseengine:relay-housekeeping-stream",
+    world = "relay-housekeeping-stream",
+)
+
+rust_wasm_component_bindgen(
+    name = "relay-hk-stream",
+    srcs = ["crates/relay-hk/src/wasm_stream_component.rs"],
+    wit = ":relay_housekeeping_stream_wit",
+    wasi_version = "p3",
+    profiles = ["release"],
+    # Runs the REAL verified engine (#168), not an inline copy.
+    deps = ["@crates//:wit-bindgen", ":relay-hk-engine"],
+)
+
 # ═══════════════════════════════════════════════════════════════
 # CLI Runner — imports scheduler, exercises it, prints results
 # ═══════════════════════════════════════════════════════════════

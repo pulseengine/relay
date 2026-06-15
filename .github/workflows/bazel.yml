@@ -77,9 +77,10 @@ jobs:
         env:
           CARGO_BAZEL_REPIN: "1"
         # Also builds the P3 (Component-Model Preview 3) async STREAM components
-        # //:relay-lc-stream + //:relay-sch-stream (#STREAM-P01/P02), so their P3
-        # async build is CI-validated, not just asserted.
-        run: bazel build //:falcon-cascade-composed //:relay-lc-stream //:relay-sch-stream //:relay-lc //:relay-sch //:relay-hk //:relay-sc
+        # //:relay-lc-stream + //:relay-sch-stream + //:relay-hk-stream
+        # (#STREAM-P01/P02/P03), so their P3 async build is CI-validated, not
+        # just asserted.
+        run: bazel build //:falcon-cascade-composed //:relay-lc-stream //:relay-sch-stream //:relay-hk-stream //:relay-lc //:relay-sch //:relay-hk //:relay-sc
 
       # Exercise the witness MC/DC path end-to-end (#145): forces the
       # harness_crates crate_universe (wasmtime/tokio) to resolve, builds the
