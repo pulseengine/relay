@@ -1,11 +1,14 @@
 // Generated from AADL process: Relay_Transport::channel
-package relay_transport:channel;
+package relay-transport:channel;
 
 interface channel-ports {
-    app_in: func() -> commandmessage;
-    set-frame_out: func(val: secureframe);
-    frame_in: func() -> secureframe;
-    set-app_out: func(val: commandmessage);
+    type commandmessage = list<u8>;
+    type secureframe = list<u8>;
+
+    app-in: func() -> commandmessage;
+    set-frame-out: func(val: secureframe);
+    frame-in: func() -> secureframe;
+    set-app-out: func(val: commandmessage);
 }
 
 world channel-world {

@@ -1,0 +1,78 @@
+name: Spar
+
+# Gates the spar AADL architecture models: they must PARSE cleanly, INSTANTIATE
+# + ANALYZE with zero errors, and the GENERATED transport WIT must stay in sync
+# with the model. Closes the drift gap flagged in v1.61 (relay#180): until now
+# NO workflow ran spar, so spar/*.aadl (and the WIT derived from it) could rot
+# unnoticed — the same "exercised, not lazy-eval-skipped" lesson as #168. The
+# model is only load-bearing if a gate runs it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  # PRs / non-main pushes: cancel superseded runs. Main: never cancel — every
+  # commit needs a completed verdict (mirrors the Kani gate's policy).
+  group: spar-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  spar:
+    name: Spar AADL gate
+    runs-on: [self-hosted, linux, x64, rust-cpu]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install spar v0.18.0 (pinned for reproducible codegen)
+        shell: bash
+        # PINNED: spar's WIT codegen output evolves between versions (e.g. the
+        # 0.10 -> 0.18 kebab-case fix), so the WIT-drift check below is only
+        # deterministic against a fixed spar. Bump this tag AND regenerate the
+        # committed WIT together. cargo install is idempotent — it no-ops if
+        # this exact source+tag is already on the runner.
+        run: |
+          cargo install --locked \
+            --git https://github.com/pulseengine/spar \
+            --tag v0.18.0 \
+            --bin spar \
+            spar
+
+      - name: Parse all AADL models
+        shell: bash
+        run: spar parse spar/*.aadl
+
+      - name: Analyze system roots (zero errors)
+        shell: bash
+        run: |
+          set -uo pipefail
+          fail=0
+          for root in \
+            "Relay_Transport::SecureTransport.Link" \
+            "Relay_Transport::SecureEndpoint.Channel" \
+            "Falcon_System::Falcon.Quad"; do
+            echo "== spar analyze --root $root =="
+            out=$(spar analyze --root "$root" spar/*.aadl 2>&1) || true
+            echo "$out"
+            if echo "$out" | grep -qE "ERROR"; then
+              echo "::error::spar analyze reported errors for $root"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Generated transport WIT is in sync (no drift)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf generated
+          spar codegen --root Relay_Transport::SecureEndpoint.Channel --format wit spar/*.aadl
+          if ! diff -u wit/relay-transport/secure-channel.wit generated/wit/channel.wit; then
+            echo "::error::wit/relay-transport/secure-channel.wit is stale — regenerate: spar codegen --root Relay_Transport::SecureEndpoint.Channel --format wit spar/*.aadl"
+            rm -rf generated
+            exit 1
+          fi
+          rm -rf generated
+          echo "transport WIT in sync"
