@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P02
+    type: sw-req
+    title: "STREAM-P02 — relay-sch exposes a Component-Model Preview 3 async stream interface"
+    status: implemented
+    description: >
+      The second cFS engine to follow the streamification TEMPLATE established by
+      the Limit Checker (SWREQ-RELAY-STREAM-P01): relay-sch shall expose a WASM
+      Component-Model Preview 3 (P3) async interface
+        monitor: func(ticks: stream<tick>) -> stream<scheduled-action>
+      implemented as a genuine async stream transformer (async fn over a
+      StreamReader, .next().await on the input ticks, .write().await on the
+      output actions), built as a P3 component (wasi_version = "p3").
+
+      It RUNS THE VERIFIED ENGINE, not an inline copy: the component does
+      `use relay_sch::engine;` and the //:relay-sch-stream bindgen target `deps`
+      on the relay-sch-engine rust_library over the verified plain/ tree — so the
+      streaming monitor() invokes the ACTUAL Verus-verified
+      ScheduleTable::process_tick (properties SCH-P03..P06), the same engine the
+      sync relay-sch component runs (#168).
+
+      As with P01, the async RUNTIME that executes these streams is kiln's
+      fuel-metered, ASIL-graded async scheduler (shipped but dormant); this
+      requirement's scope is AUTHORING + BUILDING a valid P3 async component,
+      NOT end-to-end execution on kiln.
+    tags: [relay, relay-sch, stream, async, p3, component-model, streamification, template]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        crates/relay-sch/wit/scheduler_stream.wit declares
+        `monitor: func(stream<tick>) -> stream<scheduled-action>`; the Rust
+        implementation (wasm_stream_component.rs) is a real async stream
+        transformer over StreamReader with .next().await / writer.write().await,
+        running relay_sch::engine::process_tick; the //:relay-sch-stream bazel
+        target builds it as a wasi_version="p3" component, exercised in CI
+        (.github/workflows/bazel.yml builds it alongside //:relay-lc-stream).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

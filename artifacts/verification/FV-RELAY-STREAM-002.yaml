@@ -1,0 +1,40 @@
+artifacts:
+  - id: FV-RELAY-STREAM-002
+    type: sw-verification
+    title: "relay-sch P3 async stream component — runs the verified engine, builds as Component-Model P3 (v1.63)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P02 for the Scheduler — the second relay engine
+      promoted to a real WASM Component-Model Preview 3 (P3) async stream
+      transformer, following the Limit Checker template (FV-RELAY-STREAM-001).
+
+      Evidence:
+      1. The WIT (crates/relay-sch/wit/scheduler_stream.wit) declares genuine P3
+         stream types: `monitor: func(ticks: stream<tick>) -> stream<scheduled-action>`.
+      2. The implementation (crates/relay-sch/src/wasm_stream_component.rs) is a
+         real async stream transformer, not async-shaped-sync: `async fn monitor(
+         mut ticks: StreamReader<Tick>) -> StreamReader<ScheduledAction>` with
+         `wit_stream::new()`, `while let Some(tick) = ticks.next().await`, and
+         `writer.write(actions).await`.
+      3. RUNS THE VERIFIED ENGINE: the component does `use relay_sch::engine;`
+         and //:relay-sch-stream `deps` on relay-sch-engine (crate_name relay_sch
+         over the verified plain/ tree), so the streaming monitor() invokes the
+         ACTUAL Verus-verified ScheduleTable::process_tick (SCH-P03..P06) — no
+         inline copy.
+      4. The mechanical ORACLE: the //:relay-sch-stream bazel target
+         (wasi_version = "p3") builds it as a P3 component, EXERCISED in CI
+         (.github/workflows/bazel.yml builds it alongside //:relay-lc-stream),
+         so "valid P3 async component running the verified engine" is
+         CI-validated, not asserted.
+
+      Honest scope (same as STREAM-001): this verifies the component is AUTHORED
+      + BUILDS as P3 async running the verified engine. It does NOT verify
+      end-to-end execution on kiln's async scheduler (shipped but dormant).
+    tags: [verification, relay, relay-sch, stream, async, p3, component-model, "v1.63"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:relay-sch-stream
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P02
