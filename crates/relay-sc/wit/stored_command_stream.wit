@@ -1,0 +1,53 @@
+package pulseengine:relay-stored-command@0.1.0;
+
+/// Stored Command — stream transformer edition.
+///
+/// Takes a stream of time ticks, emits a stream of dispatched commands.
+/// The verified engine (process_tick, Verus-proven) fires the Absolute and
+/// Relative Time Sequences whose time has come.
+///
+/// This is the P3-native interface. The non-stream version
+/// (stored_command.wit) uses individual function calls.
+interface stored-command-stream {
+    /// An absolute time sequence command.
+    record ats-command {
+        execute-at-sec: u64,
+        command-code: u16,
+        payload-offset: u32,
+        payload-len: u32,
+        dispatched: bool,
+    }
+
+    /// A dispatched command ready for execution.
+    record dispatched-command {
+        command-code: u16,
+        payload-offset: u32,
+        payload-len: u32,
+    }
+
+    /// One time tick (current UTC seconds).
+    record time-tick {
+        current-time: u64,
+    }
+
+    /// Initialize the verified engine.
+    init: func() -> result<_, string>;
+
+    /// Load an ATS command. Returns false if the table is full.
+    load-ats-command: func(cmd: ats-command) -> bool;
+
+    /// Start a relative time sequence. Returns false if invalid or empty.
+    start-rts: func(rts-id: u32, current-time: u64) -> bool;
+
+    /// Stop a relative time sequence. Returns false if the ID is invalid.
+    stop-rts: func(rts-id: u32) -> bool;
+
+    /// STREAM TRANSFORMER: time ticks in → dispatched commands out.
+    /// Each tick processes the stored sequences; commands whose time has
+    /// come are emitted to the output stream.
+    monitor: func(ticks: stream<time-tick>) -> stream<dispatched-command>;
+}
+
+world relay-stored-command-stream {
+    export stored-command-stream;
+}

@@ -366,6 +366,24 @@ rust_wasm_component_bindgen(
     deps = [":relay-sc-engine"],
 )
 
+# P3 STREAM variant — stream<time-tick> -> stream<dispatched-command> (#168).
+wit_library(
+    name = "relay_stored_command_stream_wit",
+    srcs = ["crates/relay-sc/wit/stored_command_stream.wit"],
+    package_name = "pulseengine:relay-stored-command-stream",
+    world = "relay-stored-command-stream",
+)
+
+rust_wasm_component_bindgen(
+    name = "relay-sc-stream",
+    srcs = ["crates/relay-sc/src/wasm_stream_component.rs"],
+    wit = ":relay_stored_command_stream_wit",
+    wasi_version = "p3",
+    profiles = ["release"],
+    # Runs the REAL verified engine (#168), not an inline copy.
+    deps = ["@crates//:wit-bindgen", ":relay-sc-engine"],
+)
+
 # ═══════════════════════════════════════════════════════════════
 # Housekeeping
 # ═══════════════════════════════════════════════════════════════

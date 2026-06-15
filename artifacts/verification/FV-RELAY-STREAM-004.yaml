@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-RELAY-STREAM-004
+    type: sw-verification
+    title: "relay-sc P3 async stream component — runs the verified engine, builds as Component-Model P3; completes the cFS set (v1.65)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P04 for the Stored Command sequencer — the
+      fourth and final cFS engine promoted to a real WASM Component-Model
+      Preview 3 (P3) async stream transformer, completing the streamification of
+      the cFS set (LC/SCH/HK/SC) begun in FV-RELAY-STREAM-001.
+
+      Evidence:
+      1. The WIT (crates/relay-sc/wit/stored_command_stream.wit) declares genuine
+         P3 stream types: `monitor: func(ticks: stream<time-tick>) ->
+         stream<dispatched-command>`.
+      2. The implementation (crates/relay-sc/src/wasm_stream_component.rs) is a
+         real async stream transformer: `async fn monitor(mut ticks:
+         StreamReader<TimeTick>) -> StreamReader<DispatchedCommand>` with
+         `wit_stream::new()`, `while let Some(t) = ticks.next().await`, and
+         `writer.write(...).await`.
+      3. RUNS THE VERIFIED ENGINE: `use relay_sc::engine;` and //:relay-sc-stream
+         `deps` on relay-sc-engine (crate_name relay_sc over the verified plain/
+         tree), so the streaming monitor() invokes the ACTUAL Verus-verified
+         CommandStore::process_tick — no inline copy.
+      4. The mechanical ORACLE: the //:relay-sc-stream bazel target
+         (wasi_version = "p3") builds it as a P3 component, EXERCISED in CI
+         (.github/workflows/bazel.yml builds all four stream components), so
+         "valid P3 async component running the verified engine" is CI-validated,
+         not asserted.
+
+      Honest scope (same as STREAM-001..003): verifies AUTHORED + BUILDS as P3
+      async running the verified engine; does NOT verify end-to-end execution on
+      kiln's async scheduler (shipped but dormant). With this, all four cFS
+      engines expose P3 async stream interfaces.
+    tags: [verification, relay, relay-sc, stream, async, p3, component-model, "v1.65"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:relay-sc-stream
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P04
