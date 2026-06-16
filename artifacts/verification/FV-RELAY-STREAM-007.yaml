@@ -1,0 +1,45 @@
+artifacts:
+  - id: FV-RELAY-STREAM-007
+    type: sw-verification
+    title: "falcon attitude controller P3 async stream component — runs the verified controller, builds as Component-Model P3 (v1.69)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P07 for the attitude controller — the third
+      control-cascade engine promoted to a real WASM Component-Model Preview 3
+      (P3) async stream transformer, continuing the cascade streamification
+      after rate (FV-RELAY-STREAM-005) and position (FV-RELAY-STREAM-006).
+
+      Evidence:
+      1. The WIT (wit/falcon-attitude-stream/attitude_stream.wit) declares
+         genuine P3 stream types: `monitor: func(inputs: stream<att-input>) ->
+         stream<rate-setpoint>`. Self-contained (falcon:attitude-stream package),
+         not touching the shared cascade.wit.
+      2. The implementation (wasm/cm/attitude/src/stream.rs) is a real async
+         stream transformer: `async fn monitor(mut inputs:
+         StreamReader<AttInput>) -> StreamReader<RateSetpoint>` with
+         `wit_stream::new()`, `while let Some(inp) = inputs.next().await`, and
+         `writer.write(...).await`.
+      3. RUNS THE VERIFIED CONTROLLER: `use relay_att::{AttController,
+         Timestamp};` and //:falcon-attitude-stream `deps` on :relay-att, so the
+         streaming monitor() drives the ACTUAL relay-att AttController::tick
+         (attitude-error -> body-rate command) — no inline copy. Controller state
+         persists across the stream (static AttController), timestamp a
+         synthesised 1 kHz counter, exactly as the sync falcon-attitude component.
+      4. The mechanical ORACLE: the //:falcon-attitude-stream bazel target
+         (wasi_version = "p3") builds it as a P3 component, EXERCISED in CI
+         (.github/workflows/bazel.yml builds it alongside falcon-rate-stream,
+         falcon-position-stream and the four cFS stream components), so "valid P3
+         async component driving the verified controller" is CI-validated.
+
+      Honest scope (same as the prior STREAM artifacts): verifies AUTHORED +
+      BUILDS as P3 async driving the verified controller; does NOT verify
+      end-to-end execution on kiln's async scheduler (shipped but dormant). Two
+      cascade engines remain (iekf, mixer) before the composed stream pipeline.
+    tags: [verification, relay, falcon-attitude, cascade, stream, async, p3, component-model, "v1.69"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:falcon-attitude-stream
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P07
