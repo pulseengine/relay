@@ -1,0 +1,43 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P06
+    type: sw-req
+    title: "STREAM-P06 — falcon position controller exposes a Component-Model Preview 3 async stream interface (second control-cascade engine)"
+    status: implemented
+    description: >
+      Continues the control-cascade streamification (after the rate controller,
+      P05): the falcon position controller shall expose a WASM Component-Model
+      Preview 3 (P3) async interface
+        monitor: func(inputs: stream<pos-input>) -> stream<attitude-setpoint>
+      implemented as a genuine async stream transformer (async fn over a
+      StreamReader, .next().await on the inputs, .write().await on the attitude
+      outputs), built as a P3 component (wasi_version = "p3"). This is the second
+      flight-control engine as a P3 stream, toward a composed flight-control
+      STREAM pipeline (iekf -> pos -> att -> rate -> mixer).
+
+      It RUNS THE VERIFIED CONTROLLER, not an inline copy: the component does
+      `use relay_pos::{PosController, PositionSetpoint, Timestamp};` and the
+      //:falcon-position-stream bindgen target `deps` on the :relay-pos Bazel
+      library, so the streaming monitor() drives the ACTUAL relay-pos
+      PosController::tick. The WIT is SELF-CONTAINED (its own
+      falcon:position-stream package) and does not modify the shared cascade.wit.
+
+      As with the prior STREAM reqs, the async RUNTIME that executes these
+      streams is kiln's fuel-metered async scheduler (shipped but dormant); this
+      requirement's scope is AUTHORING + BUILDING a valid P3 async component, NOT
+      end-to-end execution on kiln.
+    tags: [relay, falcon-position, cascade, stream, async, p3, component-model, streamification]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        wit/falcon-position-stream/position_stream.wit declares
+        `monitor: func(stream<pos-input>) -> stream<attitude-setpoint>`; the Rust
+        implementation (wasm/cm/position/src/stream.rs) is a real async stream
+        transformer over StreamReader with .next().await / writer.write().await,
+        driving relay_pos::PosController::tick; the //:falcon-position-stream
+        bazel target builds it as a wasi_version="p3" component, exercised in CI
+        (.github/workflows/bazel.yml builds it alongside the rate stream and the
+        cFS stream components).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

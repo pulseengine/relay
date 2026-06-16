@@ -686,6 +686,25 @@ rust_wasm_component_bindgen(
     profiles = ["release"],
 )
 
+# P3 STREAM variant — stream<pos-input> -> stream<attitude-setpoint> (#168).
+# Second control-cascade engine as a P3 async stream; proven cFS-stream pattern
+# over the verified :relay-pos library, self-contained WIT.
+wit_library(
+    name = "falcon_position_stream_wit",
+    srcs = ["wit/falcon-position-stream/position_stream.wit"],
+    package_name = "falcon:position-stream",
+    world = "position-stream-component",
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-position-stream",
+    srcs = ["wasm/cm/position/src/stream.rs"],
+    wit = ":falcon_position_stream_wit",
+    wasi_version = "p3",
+    deps = ["@crates//:wit-bindgen", ":relay-pos"],
+    profiles = ["release"],
+)
+
 rust_wasm_component_bindgen(
     name = "falcon-attitude",
     crate_features = ["bazel-bindings"],
