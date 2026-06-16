@@ -27,6 +27,22 @@ artifacts:
       Composes with artifacts/stpa-sec/relay-sec-stpa-sec.yaml; the Kani floor
       (SEC-K10/SEC-K15, FV-RELAY-SEC-006) is the implementation evidence.
 
+      Independent verification (avrabe, wohl-driven, 2026-06-16, relay#180):
+      re-ran spar against the landed model and CONFIRMED — timing/RTA green
+      (seal 200 us, open 440 us, handshake 8.88 ms, all <= deadline on CommsMcu);
+      WIT codegen REPRODUCES the committed secure-channel.wit; the EMV2 annex
+      drives a fault tree (8 cut sets, 8 single-point failures) AND the EMV2->STPA
+      bridge (1 hazard, 3 loss scenarios), both reading the annex. KNOWN
+      LIMITATION (spar, not the model): the forge/replay/jam -> AEAD/anti-replay
+      source->sink PROPAGATION CHAINS report "0 chains analysed" because spar's
+      compute_error_propagation does not yet ingest the .emv2 annex into the
+      SystemInstance (confirmed at spar-analysis/src/emv2_propagation.rs:128; even
+      spar's own bundled OSATE example yields 0 chains). This is a spar tool gap
+      tracked at pulseengine/spar#294 — NOT a model defect (the bus-source EMV2 is
+      correct as-is; the experimental model edit was reverted). The mitigation
+      claim is therefore evidenced by the fault tree + STPA bridge + the Kani
+      floor; the propagation-chain VISUALIZATION is pending spar#294.
+
       Deployment finding: spar RTA rejects the secure channel on the 200 Hz
       flight MCU (104% overload) and confirms it on a separate comms core
       (1.7%). falcon_system.aadl imports the package and analyzes with 0 errors.
