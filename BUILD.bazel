@@ -714,6 +714,25 @@ rust_wasm_component_bindgen(
     profiles = ["release"],
 )
 
+# P3 STREAM variant — stream<att-input> -> stream<rate-setpoint> (#168).
+# Third control-cascade engine as a P3 async stream; proven cFS-stream pattern
+# over the verified :relay-att library, self-contained WIT.
+wit_library(
+    name = "falcon_attitude_stream_wit",
+    srcs = ["wit/falcon-attitude-stream/attitude_stream.wit"],
+    package_name = "falcon:attitude-stream",
+    world = "attitude-stream-component",
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-attitude-stream",
+    srcs = ["wasm/cm/attitude/src/stream.rs"],
+    wit = ":falcon_attitude_stream_wit",
+    wasi_version = "p3",
+    deps = ["@crates//:wit-bindgen", ":relay-att"],
+    profiles = ["release"],
+)
+
 rust_wasm_component_bindgen(
     name = "falcon-rate",
     crate_features = ["bazel-bindings"],
