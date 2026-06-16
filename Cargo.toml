@@ -86,7 +86,7 @@ wit-bindgen = { version = "0.58.0", default-features = false }
 # re-admitted 1.11.0 since Cargo.lock is untracked + CI resolves fresh without
 # --locked → it picked 1.11.0 and Windows CI failed). 1.11.0 is CONFIRMED still
 # broken; keep <1.11 until a fixed 1.11.x is verified.
-proptest = ">=1.7, <1.11"
+proptest = ">=1.7, <1.12"
 
 # Workspace-wide lint config. Engines use `#[cfg(kani)]` for the Kani
 # model-checker harness paths (they're built only under `cargo kani`,
