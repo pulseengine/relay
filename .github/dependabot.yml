@@ -30,3 +30,11 @@ updates:
       interval: weekly
     labels:
       - dependencies
+  # Keep pinned third-party GitHub Actions SHAs fresh via reviewed PRs (the
+  # supply-chain hardening companion to SHA-pinning in release.yml/bazel.yml).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies

@@ -1,0 +1,24 @@
+artifacts:
+  - id: FV-RELAY-SUPPLY-001
+    type: sw-verification
+    title: "Third-party actions on @main pinned to SHA + dependabot github-actions (v1.78)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-SUPPLY-P01.
+      - release.yml (v1.77) and bazel.yml (v1.78) pin
+        DeterminateSystems/nix-installer-action to commit 75b0c90...
+        (was @main); setup-bazel pinned to 5483a91 (tag 0.14.0) in release.yml.
+      - .github/dependabot.yml adds a github-actions ecosystem (weekly) to keep
+        the pins fresh via reviewed PRs.
+      ORACLE: `grep -rE 'uses: [^/]+/[^@]+@(main|master)' .github/workflows/` over
+      non-actions/ third-party uses returns empty; the workflow + dependabot
+      YAMLs parse. Driven by the two automated security reviews of the v1.76/v1.77
+      release attestation work.
+    tags: [verification, relay, ci, supply-chain, security, "v1.78"]
+    fields:
+      method: automated-test
+      steps:
+        - run: "! grep -rE 'uses: [A-Za-z0-9_-]+/[A-Za-z0-9_.-]+@(main|master)' .github/workflows/ | grep -vE 'actions/'"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-SUPPLY-P01

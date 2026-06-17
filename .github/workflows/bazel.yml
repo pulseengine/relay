@@ -60,7 +60,7 @@ jobs:
           path: rules_lean
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@75b0c90b355186240b58c409b99c688ae4acf83e # pinned (was @main) — supply-chain
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.14.0

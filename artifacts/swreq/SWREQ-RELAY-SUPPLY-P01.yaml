@@ -1,0 +1,30 @@
+artifacts:
+  - id: SWREQ-RELAY-SUPPLY-P01
+    type: sw-req
+    title: "SUPPLY-P01 — third-party GitHub Actions on mutable branch refs SHA-pinned + dependabot-tracked"
+    status: implemented
+    description: >
+      Supply-chain hardening (from two release-pipeline security reviews):
+      third-party GitHub Actions referenced by a MUTABLE branch ref (e.g. @main)
+      in relay's workflows shall be pinned to a full commit SHA, so the bytes
+      that run at build/release time are the reviewed bytes — a compromised
+      upstream @main cannot silently execute in a job that holds the OIDC token /
+      produces the cosign signature. A Dependabot github-actions entry keeps the
+      pinned SHAs fresh via reviewed PRs.
+
+      Scope landed: the only mutable-branch ref was
+      DeterminateSystems/nix-installer-action@main — pinned in release.yml (v1.77)
+      and now bazel.yml (v1.78) to 75b0c90...; .github/dependabot.yml gains a
+      github-actions ecosystem. Version-tagged actions (@v1/@v2/@stable/@0.14.0)
+      are lower-risk and left to Dependabot to migrate to SHAs over time.
+    tags: [relay, ci, supply-chain, github-actions, security, pinning, "v1.78"]
+    fields:
+      req-type: safety
+      priority: should
+      verification-criteria: >
+        No `uses: <third-party>@(main|master)` remains in .github/workflows/
+        (grep is empty); .github/dependabot.yml has a github-actions
+        package-ecosystem entry. Both workflow YAMLs parse.
+    links:
+      - type: derives-from
+        target: SYSREQ-CI-001
