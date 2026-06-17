@@ -385,14 +385,45 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write          # keyless cosign over the bundle SHA256SUMS (v1.77)
     steps:
-      - uses: actions/checkout@v5
+      # relay's MODULE.bazel local_path_override's the four pulseengine rules to
+      # ../<repo>, so bazel needs relay in a subdir + the rules as siblings
+      # (mirrors .github/workflows/bazel.yml). build-components.sh bazel-builds
+      # the P3 stream artifacts into the bundle, so the bundle SHA256SUMS (signed
+      # below) attests them. Steps below run with working-directory: relay.
+      - name: Checkout relay
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
+          path: relay
+      - name: Checkout rules_wasm_component
+        uses: actions/checkout@v5
+        with:
+          repository: pulseengine/rules_wasm_component
+          path: rules_wasm_component
+      - name: Checkout rules_verus
+        uses: actions/checkout@v5
+        with:
+          repository: pulseengine/rules_verus
+          path: rules_verus
+      - name: Checkout rules_rocq_rust
+        uses: actions/checkout@v5
+        with:
+          repository: pulseengine/rules_rocq_rust
+          path: rules_rocq_rust
+      - name: Checkout rules_lean
+        uses: actions/checkout@v5
+        with:
+          repository: pulseengine/rules_lean
+          path: rules_lean
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
 
       - name: Install cargo-component
         uses: taiki-e/install-action@v2
@@ -408,7 +439,8 @@ jobs:
         with:
           tool: wasmtime
 
-      - name: Build the falcon component bundle + attach + guard
+      - name: Build the falcon component bundle + sign + attach + guard
+        working-directory: relay
         env:
           # TAG via env, dereferenced as $TAG — never expanded as ${{ }}
           # inside run: (untrusted-input safety, per the rest of this file).
@@ -420,6 +452,8 @@ jobs:
           TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"           # falcon-vX.Y.Z
           MM=$(printf '%s' "$TAG" | sed -E 's/^falcon-v([0-9]+\.[0-9]+).*/\1/')
           echo "::notice::Building falcon component bundle for $TAG (MM=$MM)"
+          # build-components.sh bazel-builds the P3 stream artifacts into the
+          # bundle (bazel resolves via the sibling rules checkouts above).
           bash scripts/build-components.sh "$MM"
 
           BUNDLE="dist/falcon-components-v${MM}"
@@ -427,12 +461,29 @@ jobs:
           ( cd "$BUNDLE" && { sha256sum "falcon-flight-v${MM}.wasm" 2>/dev/null || shasum -a 256 "falcon-flight-v${MM}.wasm"; } > "falcon-flight-v${MM}.wasm.sha256" )
           tar -C dist -czf "dist/falcon-components-v${MM}.tar.gz" "falcon-components-v${MM}"
 
+          # Cosign-sign the bundle SHA256SUMS (covers every .wasm in the bundle,
+          # including the P3 stream artifacts) — keyless Sigstore, same flow as
+          # the main SHA256SUMS.txt. Closes the FV-RELAY-STREAM-014 attestation
+          # gap (v1.77). Verify: cosign verify-blob --certificate-identity-regexp
+          # 'https://github.com/pulseengine/relay/.github/workflows/release.yml@.*'
+          # --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+          # --bundle SHA256SUMS.cosign.bundle SHA256SUMS
+          ( cd "$BUNDLE" && cosign sign-blob \
+              --yes \
+              --bundle SHA256SUMS.cosign.bundle \
+              --output-signature SHA256SUMS.sig \
+              --output-certificate SHA256SUMS.pem \
+              SHA256SUMS )
+
           gh release upload "$TAG" --clobber \
             "$FLIGHT" \
             "${FLIGHT}.sha256" \
             "dist/falcon-components-v${MM}.tar.gz" \
             "${BUNDLE}/manifest.json" \
-            "${BUNDLE}/SHA256SUMS"
+            "${BUNDLE}/SHA256SUMS" \
+            "${BUNDLE}/SHA256SUMS.sig" \
+            "${BUNDLE}/SHA256SUMS.pem" \
+            "${BUNDLE}/SHA256SUMS.cosign.bundle"
 
           # GUARD (#140): the release MUST carry a falcon-flight-*.wasm asset.
           echo "::notice::Asserting flight wasm asset is present on $TAG"
