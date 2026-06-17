@@ -1,0 +1,42 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P08
+    type: sw-req
+    title: "STREAM-P08 — falcon IEKF estimator exposes a Component-Model Preview 3 async stream interface (fourth control-cascade engine)"
+    status: implemented
+    description: >
+      Continues the control-cascade streamification (after rate P05, position
+      P06, attitude P07): the falcon IEKF estimator shall expose a WASM
+      Component-Model Preview 3 (P3) async interface
+        monitor: func(samples: stream<imu-sample>) -> stream<vehicle-state>
+      implemented as a genuine async stream transformer (async fn over a
+      StreamReader, .next().await on the samples, .write().await on the
+      vehicle-state estimates), built as a P3 component (wasi_version = "p3").
+      Fourth of five flight-control engines; the head of the pipeline (IMU ->
+      state estimate), toward a composed flight-control STREAM pipeline
+      (iekf -> pos -> att -> rate -> mixer).
+
+      It RUNS THE VERIFIED ESTIMATOR, not an inline copy: the component does
+      `use relay_iekf::{Iekf, Imu};` and the //:falcon-iekf-stream bindgen target
+      `deps` on the :relay-iekf Bazel library, so the streaming monitor() drives
+      the ACTUAL relay-iekf invariant EKF (SE2(3) propagate + gravity update).
+      The WIT is SELF-CONTAINED (its own falcon:iekf-stream package) and does not
+      modify the shared cascade.wit.
+
+      Scope (as with prior STREAM reqs): AUTHORING + BUILDING a valid P3 async
+      component; end-to-end execution on kiln's dormant scheduler is out of scope.
+    tags: [relay, falcon-iekf, cascade, stream, async, p3, component-model, streamification]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        wit/falcon-iekf-stream/iekf_stream.wit declares
+        `monitor: func(stream<imu-sample>) -> stream<vehicle-state>`; the Rust
+        implementation (wasm/cm/iekf/src/stream.rs) is a real async stream
+        transformer over StreamReader with .next().await / writer.write().await,
+        driving relay_iekf::Iekf (propagate + update_gravity + state); the
+        //:falcon-iekf-stream bazel target builds it as a wasi_version="p3"
+        component, exercised in CI (.github/workflows/bazel.yml builds it
+        alongside the rate/position/attitude streams and the cFS streams).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008
