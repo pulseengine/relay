@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-STREAM-P11
     type: sw-req
     title: "STREAM-P11 (v1.73) — composed control-cascade stream pipeline (wac_plug)"
-    status: draft
+    status: implemented
     description: >
       PLANNED v1.73. With shared stream types in place (STREAM-P10), wire the
       five cascade stream components into ONE composed P3 flight-control stream
