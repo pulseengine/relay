@@ -81,7 +81,7 @@ jobs:
         # //:relay-hk-stream + //:relay-sc-stream (#STREAM-P01..P04), plus the
         # first control-cascade stream //:falcon-rate-stream (#STREAM-P05), so
         # their P3 async build is CI-validated, not just asserted.
-        run: bazel build //:falcon-cascade-composed //:relay-lc-stream //:relay-sch-stream //:relay-hk-stream //:relay-sc-stream //:falcon-rate-stream //:falcon-position-stream //:falcon-attitude-stream //:falcon-iekf-stream //:falcon-mixer-stream //:falcon-cascade-stream-composed //:relay-lc //:relay-sch //:relay-hk //:relay-sc
+        run: bazel build //:falcon-cascade-composed //:relay-lc-stream //:relay-sch-stream //:relay-hk-stream //:relay-sc-stream //:falcon-rate-stream //:falcon-position-stream //:falcon-attitude-stream //:falcon-iekf-stream //:falcon-mixer-stream //:falcon-cascade-stream-composed //:falcon-cascade-stream-fused //:relay-lc //:relay-sch //:relay-hk //:relay-sc
 
       # Exercise the witness MC/DC path end-to-end (#145): forces the
       # harness_crates crate_universe (wasmtime/tokio) to resolve, builds the
