@@ -96,12 +96,17 @@ def _impl(ctx):
     )
 
     # Stage 3 — lcov.
+    # The current witness CLI takes run + manifest as named flags
+    # (`witness lcov --run <RUN> --manifest <MANIFEST>`); the earlier positional
+    # form (`witness lcov <run>`) was rejected after a witness version bump in
+    # rules_wasm_component.
     lcov_args = ctx.actions.args()
     lcov_args.add("lcov")
-    lcov_args.add(run_data)
+    lcov_args.add("--run", run_data)
+    lcov_args.add("--manifest", manifest)
     lcov_args.add("-o", lcov)
     ctx.actions.run(
-        inputs = [run_data],
+        inputs = [run_data, manifest],
         outputs = [lcov],
         executable = witness,
         arguments = [lcov_args],

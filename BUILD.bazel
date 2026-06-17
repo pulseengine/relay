@@ -920,6 +920,16 @@ wasm_module_coverage_wasi(
     tags = ["manual"],
 )
 
+# v1.75: witness MC/DC on the COMPOSED STREAM pipeline. Unlike the sync
+# falcon-cascade-fused (6 fused components -> duplicate cabi_realloc, witness
+# parse-blocked, #145), the stream pipeline fuses ONE component -> single
+# cabi_realloc -> witness parses it.
+wasm_module_coverage_wasi(
+    name = "falcon-cascade-stream-coverage",
+    module = ":falcon-cascade-stream-fused",
+    tags = ["manual"],
+)
+
 # TOOL-QUALIFICATION FIXTURE (#145) — NOT flight code. Calibrates the
 # witness MC/DC pipeline against a known truth table; measures no flight
 # component. Real-component MC/DC is the manual :falcon-cascade-coverage

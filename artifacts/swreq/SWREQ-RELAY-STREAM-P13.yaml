@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-STREAM-P13
     type: sw-req
     title: "STREAM-P13 (v1.75) — witness MC/DC on a composed stream component (verification depth)"
-    status: draft
+    status: implemented
     description: >
       PLANNED v1.75. Across the entire streamification campaign (9 engines + the
       composition) the feature-loop's witness step (MC/DC truth table on the Wasm
