@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P13
+    type: sw-req
+    title: "STREAM-P13 (v1.75) — witness MC/DC on a composed stream component (verification depth)"
+    status: draft
+    description: >
+      PLANNED v1.75. Across the entire streamification campaign (9 engines + the
+      composition) the feature-loop's witness step (MC/DC truth table on the Wasm
+      artifact) was N/A every time — and the loop is explicit that a recurring
+      N/A is a backlog item, not an exemption. This requirement brings a
+      streamification artifact (the composed cascade stream pipeline, or one
+      representative stream engine) under witness MC/DC: inspect the truth table
+      for unique-cause / masking vectors on each decision, zero unresolved gap
+      rows. Shares the spirit of #145 (witness MC/DC on the real flight
+      component); may surface the same component-format parse gap #145 notes,
+      which is itself a valuable confirm/triage.
+    tags: [relay, stream, p3, witness, mcdc, verification, "v1.75"]
+    fields:
+      req-type: safety
+      priority: should
+      verification-criteria: >
+        witness runs on the composed stream component (or a representative
+        engine); the truth table shows MC/DC vectors for each decision with zero
+        unresolved gap rows, OR the component-format parse blocker (#145) is
+        confirmed and tracked. Depends on STREAM-P11.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008
