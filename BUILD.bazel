@@ -677,6 +677,25 @@ rust_wasm_component_bindgen(
     profiles = ["release"],
 )
 
+# P3 STREAM variant — stream<imu-sample> -> stream<vehicle-state> (#168).
+# Fourth control-cascade engine as a P3 async stream; proven cFS-stream pattern
+# over the verified :relay-iekf library, self-contained WIT.
+wit_library(
+    name = "falcon_iekf_stream_wit",
+    srcs = ["wit/falcon-iekf-stream/iekf_stream.wit"],
+    package_name = "falcon:iekf-stream",
+    world = "iekf-stream-component",
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-iekf-stream",
+    srcs = ["wasm/cm/iekf/src/stream.rs"],
+    wit = ":falcon_iekf_stream_wit",
+    wasi_version = "p3",
+    deps = ["@crates//:wit-bindgen", ":relay-iekf"],
+    profiles = ["release"],
+)
+
 rust_wasm_component_bindgen(
     name = "falcon-position",
     crate_features = ["bazel-bindings"],

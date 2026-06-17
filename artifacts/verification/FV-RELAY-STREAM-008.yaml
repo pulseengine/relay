@@ -1,0 +1,44 @@
+artifacts:
+  - id: FV-RELAY-STREAM-008
+    type: sw-verification
+    title: "falcon IEKF estimator P3 async stream component — runs the verified EKF, builds as Component-Model P3 (v1.70)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P08 for the IEKF estimator — the fourth
+      control-cascade engine promoted to a real WASM Component-Model Preview 3
+      (P3) async stream transformer, continuing the cascade streamification
+      after rate/position/attitude (FV-RELAY-STREAM-005/006/007).
+
+      Evidence:
+      1. The WIT (wit/falcon-iekf-stream/iekf_stream.wit) declares genuine P3
+         stream types: `monitor: func(samples: stream<imu-sample>) ->
+         stream<vehicle-state>`. Self-contained (falcon:iekf-stream package), not
+         touching the shared cascade.wit.
+      2. The implementation (wasm/cm/iekf/src/stream.rs) is a real async stream
+         transformer: `async fn monitor(mut samples: StreamReader<ImuSample>) ->
+         StreamReader<VehicleState>` with `wit_stream::new()`, `while let
+         Some(imu) = samples.next().await`, and `writer.write(...).await`.
+      3. RUNS THE VERIFIED ESTIMATOR: `use relay_iekf::{Iekf, Imu};` and
+         //:falcon-iekf-stream `deps` on :relay-iekf, so the streaming monitor()
+         drives the ACTUAL relay-iekf invariant EKF — Iekf::propagate (SE2(3)
+         state) + update_gravity (tilt) + state() — no inline copy. The EKF state
+         persists across the stream (static Iekf), exactly as the sync
+         falcon-iekf component.
+      4. The mechanical ORACLE: the //:falcon-iekf-stream bazel target
+         (wasi_version = "p3") builds it as a P3 component, EXERCISED in CI
+         (.github/workflows/bazel.yml builds it alongside the rate/position/
+         attitude streams and the four cFS streams), so "valid P3 async component
+         driving the verified EKF" is CI-validated.
+
+      Honest scope (same as the prior STREAM artifacts): verifies AUTHORED +
+      BUILDS as P3 async driving the verified estimator; does NOT verify
+      end-to-end execution on kiln's async scheduler (shipped but dormant). One
+      cascade engine remains (mixer) before the composed stream pipeline.
+    tags: [verification, relay, falcon-iekf, cascade, stream, async, p3, component-model, "v1.70"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:falcon-iekf-stream
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P08

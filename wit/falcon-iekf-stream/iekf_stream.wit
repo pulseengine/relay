@@ -1,0 +1,47 @@
+package falcon:iekf-stream@0.1.0;
+
+/// IEKF estimator — stream transformer edition.
+///
+/// Takes a stream of IMU samples, emits a stream of vehicle-state estimates.
+/// Wraps the verified relay-iekf invariant EKF (SE2(3) propagate + gravity
+/// update). Self-contained types (does not depend on the shared cascade.wit) —
+/// the fourth control-cascade engine as a P3 async stream (#168 cascade arc).
+interface iekf-stream {
+    /// Raw IMU: body-frame accelerometer (m/s^2) + gyro (rad/s).
+    record imu-sample {
+        ax: f32,
+        ay: f32,
+        az: f32,
+        gx: f32,
+        gy: f32,
+        gz: f32,
+    }
+
+    /// EKF state estimate: body-to-NED quaternion, NED position (m), NED
+    /// velocity (m/s), body rates (gyro passthrough, rad/s), EKF innovation.
+    record vehicle-state {
+        qw: f32,
+        qx: f32,
+        qy: f32,
+        qz: f32,
+        pos-n: f32,
+        pos-e: f32,
+        pos-d: f32,
+        vel-n: f32,
+        vel-e: f32,
+        vel-d: f32,
+        wx: f32,
+        wy: f32,
+        wz: f32,
+        innovation: f32,
+    }
+
+    /// STREAM TRANSFORMER: IMU samples in → vehicle-state estimates out.
+    /// Each sample propagates the SE2(3) state then applies the gravity (tilt)
+    /// update; the resulting estimate is emitted to the output stream.
+    monitor: func(samples: stream<imu-sample>) -> stream<vehicle-state>;
+}
+
+world iekf-stream-component {
+    export iekf-stream;
+}
