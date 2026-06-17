@@ -1,0 +1,38 @@
+artifacts:
+  - id: FV-RELAY-STREAM-012
+    type: sw-verification
+    title: "Meld-lowered composed stream pipeline — runnable core module (v1.74)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P12: the composed flight-control stream
+      pipeline (STREAM-P11, //:falcon-cascade-stream-composed) is lowered by Meld
+      to a single CORE wasm module — the first RUNNABLE artifact of the
+      streamification arc (RFC #46: Meld lowers Component-Model async / P3 streams
+      to a core module at build time, so relay carries no runtime async
+      dependency; the lowered module runs on kiln std-side, or synth->gale
+      embedded).
+
+      Evidence:
+      1. BUILD.bazel adds meld_fuse(name="falcon-cascade-stream-fused",
+         components=[":falcon-cascade-stream-composed"]) — the same meld_fuse
+         rule that lowers the sync cascade (falcon-cascade-fused), now applied to
+         the composed P3 STREAM pipeline.
+      2. The mechanical ORACLE: //:falcon-cascade-stream-fused builds in CI
+         (.github/workflows/bazel.yml), i.e. Meld successfully resolves the P3
+         stream ABI of the composed pipeline to a core module. This is the first
+         time a streamification artifact is lowered to runnable core rather than
+         only a buildable component.
+
+      Honest scope: this verifies the BUILD-TIME Meld lowering produces a core
+      module. It does NOT run that module end-to-end (kiln runtime execution + the
+      synth->ARM step remain the kiln/jess track; synth_compile is currently
+      disabled in-tree). The lowering is the relay-side half of "make the streams
+      runnable".
+    tags: [verification, relay, cascade, stream, p3, meld, lowering, rfc46, "v1.74"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:falcon-cascade-stream-fused
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P12

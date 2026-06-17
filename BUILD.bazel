@@ -835,6 +835,16 @@ rust_wasm_component_bindgen(
     profiles = ["release"],
 )
 
+# Meld-LOWER the composed stream pipeline to a runnable CORE module (STREAM-P12,
+# RFC #46): meld lowers the Component-Model async (P3 streams) to a core wasm
+# module at build time, so relay has no runtime async dependency and the
+# pipeline becomes runnable (kiln std-side, or synth->gale embedded). The first
+# RUNNABLE artifact of the streamification arc.
+meld_fuse(
+    name = "falcon-cascade-stream-fused",
+    components = [":falcon-cascade-stream-composed"],
+)
+
 # ── cascade orchestrator — imports the five, exports `step` ───────
 # No control-crate dep: the cascade is pure orchestration.
 rust_wasm_component_bindgen(
