@@ -1,0 +1,44 @@
+artifacts:
+  - id: FV-RELAY-STREAM-013
+    type: sw-verification
+    title: "Witness MC/DC on the composed stream pipeline — parse gap closed, macro fixed, async-invoke gap isolated (v1.75)"
+    status: implemented
+    description: >
+      Verifies the witness MC/DC path for SWREQ-RELAY-STREAM-P13 against the
+      composed flight-control stream pipeline, and records the HONEST result.
+
+      Real progress (empirically established, witness via rules_wasm_component):
+      1. TOOL-FRICTION FIX: bazel/wasm_module_coverage_wasi.bzl called
+         `witness lcov <run>` positionally; a witness version bump moved the CLI
+         to `witness lcov --run <RUN> --manifest <MANIFEST>`, so the lcov stage
+         failed ("unexpected argument"). Fixed to the flag form (+ manifest in
+         the action inputs). The coverage pipeline now COMPLETES.
+      2. #145 PARSE GAP CLOSED FOR THE STREAM PATH: the composed pipeline is ONE
+         orchestrating component (its five engines are Rust libraries, not
+         components), so its Meld-fused module has a SINGLE cabi_realloc — witness
+         parses + instruments it, finding 2713 branches. The sync
+         falcon-cascade-fused (six fused components) has DUPLICATE cabi_realloc$N
+         and is still parse-blocked (#145).
+
+      Honest gap (NOT a populated truth table): the run invoked NOTHING
+      (witness-run.json: invoked=[], trace rows=0), so all 2713 branches show
+      hits=0 and the LCOV is empty (TN only). Cause: the only export is the
+      async-lift stream `monitor`, which the witness WASI harness cannot drive
+      (streams are not simple call-return; the harness's invoke-with-args is for
+      scalar values). Populated MC/DC on the stream pipeline therefore needs
+      harness support for async-stream invocation (or a sync entry point) — a
+      witness/harness capability gap, tracked, NOT a relay defect.
+
+      Oracle: //:falcon-cascade-stream-coverage (wasm_module_coverage_wasi on
+      :falcon-cascade-stream-fused) builds the instrument->run->lcov pipeline to
+      completion locally; the 2713-branch instrument is the evidence the module
+      is witness-parseable. Coverage claims stay honest: parse+instrument done,
+      branch EXERCISE pending the harness async-invoke gap.
+    tags: [verification, relay, cascade, stream, witness, mcdc, "v1.75", tool-friction]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:falcon-cascade-stream-coverage
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P13
