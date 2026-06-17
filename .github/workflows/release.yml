@@ -418,6 +418,19 @@ jobs:
           repository: pulseengine/rules_lean
           path: rules_lean
 
+      # relay's bazel graph pulls a toolchain via rules_nixpkgs (needs
+      # nix-build) + setup-bazel — same as the cascade CI job. Without these the
+      # bazel build aborts with "nix-build not found in PATH".
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@75b0c90b355186240b58c409b99c688ae4acf83e # pinned (was @main) — supply-chain
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@5483a91b6e3ffac6092848f1dd7eafcfad203d80 # v0.14.0 pinned
+        with:
+          bazelisk-cache: true
+          disk-cache: bazel
+          repository-cache: true
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
@@ -446,6 +459,7 @@ jobs:
           # inside run: (untrusted-input safety, per the rest of this file).
           INPUT_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_BAZEL_REPIN: "1"   # crate_universe resolution on a clean checkout
         shell: bash
         run: |
           set -euo pipefail
