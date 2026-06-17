@@ -1,0 +1,43 @@
+artifacts:
+  - id: FV-RELAY-STREAM-010
+    type: sw-verification
+    title: "Shared cascade stream-types — the 5 cascade streams re-pointed to one falcon:cascade-stream package (v1.72)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P10: the five control-cascade stream components
+      (iekf/pos/att/rate/mixer) now share types via a single
+      wit/falcon-cascade-stream/cascade_stream.wit (a `types` interface with the
+      cascade message records + five stream interfaces that `use types.{...}`),
+      mirroring the sync falcon-cascade/cascade.wit. This is the substrate for
+      the composed stream pipeline (STREAM-P11): each engine's OUTPUT stream type
+      is now the SAME WIT type as the next engine's input.
+
+      Evidence:
+      1. Shared types: vehicle-state, imu-sample, waypoint, attitude-setpoint,
+         rate-setpoint, torque-setpoint, motor-pwm — defined once in the `types`
+         interface. The controllers are single-input-stream with COMBINED inputs
+         composed of shared types (pos-input{state,target}, att-input{state,sp},
+         rate-input{state,sp}), so the composition socket can build them from the
+         upstream shared-type streams.
+      2. All five components re-pointed: each `use`s
+         falcon::cascade_stream::<engine>-stream and reads the nested shared-type
+         records; each still drives its ACTUAL verified engine (relay-iekf/-pos/
+         -att/-rate/-mix-quad) — no inline copy.
+      3. The mechanical ORACLE: the five bazel targets //:falcon-{iekf,position,
+         attitude,rate,mixer}-stream (wasi_version="p3"), now all built against
+         the one shared cascade_stream.wit (five wit_library, different worlds —
+         the sync-cascade pattern), still build as P3 components, EXERCISED in CI
+         (.github/workflows/bazel.yml). Behavior-preserving: each engine computes
+         the same output from the same inputs, now typed via the shared records.
+
+      Honest scope: this delivers the shared-types substrate; the wac_plug
+      composed pipeline that wires them is STREAM-P11 (v1.73). The orphaned
+      self-contained per-engine WITs were removed.
+    tags: [verification, relay, cascade, stream, p3, composition, types, "v1.72"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:falcon-iekf-stream //:falcon-position-stream //:falcon-attitude-stream //:falcon-rate-stream //:falcon-mixer-stream
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P10

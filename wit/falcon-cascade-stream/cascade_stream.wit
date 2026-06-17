@@ -1,0 +1,96 @@
+package falcon:cascade-stream@0.1.0;
+
+/// Control cascade — stream transformer edition, SHARED types.
+///
+/// The streaming counterpart of falcon-cascade/cascade.wit: one `types`
+/// interface holds the cascade message records, and the five controller
+/// stream interfaces `use` them, so each engine's OUTPUT stream type is the
+/// SAME WIT type as the next engine's input — the prerequisite for wiring the
+/// cascade into a composed P3 stream graph (#168 composition arc, STREAM-P10).
+///
+/// Each controller is single-input-stream: its input is one record COMPOSED of
+/// shared types (e.g. rate-input { state: vehicle-state, sp: rate-setpoint }),
+/// so the composition socket (STREAM-P11) builds those records from the
+/// upstream shared-type streams. Records use flat f32 fields — the canonical
+/// ABI is scalars.
+interface types {
+    /// EKF state estimate: body-to-NED quaternion, NED position (m), NED
+    /// velocity (m/s), body rates (gyro passthrough, rad/s), EKF innovation.
+    record vehicle-state {
+        qw: f32, qx: f32, qy: f32, qz: f32,
+        pos-n: f32, pos-e: f32, pos-d: f32,
+        vel-n: f32, vel-e: f32, vel-d: f32,
+        wx: f32, wy: f32, wz: f32,
+        innovation: f32,
+    }
+
+    /// Raw IMU: body-frame accel (m/s^2) + gyro (rad/s).
+    record imu-sample {
+        ax: f32, ay: f32, az: f32,
+        gx: f32, gy: f32, gz: f32,
+    }
+
+    /// Mission waypoint: NED target (m) + yaw (rad).
+    record waypoint {
+        north: f32, east: f32, down: f32, yaw: f32,
+    }
+
+    /// Body-to-NED attitude setpoint quaternion + collective thrust.
+    record attitude-setpoint {
+        qw: f32, qx: f32, qy: f32, qz: f32, thrust: f32,
+    }
+
+    /// Body-rate setpoint (rad/s) + collective thrust.
+    record rate-setpoint {
+        rx: f32, ry: f32, rz: f32, thrust: f32,
+    }
+
+    /// Body-frame torque + collective thrust.
+    record torque-setpoint {
+        tx: f32, ty: f32, tz: f32, thrust: f32,
+    }
+
+    /// Per-motor PWM for a quad (normalised).
+    record motor-pwm {
+        m1: f32, m2: f32, m3: f32, m4: f32,
+    }
+}
+
+/// IEKF estimator: IMU samples -> vehicle-state estimates.
+interface iekf-stream {
+    use types.{imu-sample, vehicle-state};
+    monitor: func(samples: stream<imu-sample>) -> stream<vehicle-state>;
+}
+
+/// Position controller: (state, target) -> attitude setpoint.
+interface position-stream {
+    use types.{vehicle-state, waypoint, attitude-setpoint};
+    record pos-input { state: vehicle-state, target: waypoint }
+    monitor: func(inputs: stream<pos-input>) -> stream<attitude-setpoint>;
+}
+
+/// Attitude controller: (state, attitude setpoint) -> rate setpoint.
+interface attitude-stream {
+    use types.{vehicle-state, attitude-setpoint, rate-setpoint};
+    record att-input { state: vehicle-state, sp: attitude-setpoint }
+    monitor: func(inputs: stream<att-input>) -> stream<rate-setpoint>;
+}
+
+/// Rate controller: (state, rate setpoint) -> torque setpoint.
+interface rate-stream {
+    use types.{vehicle-state, rate-setpoint, torque-setpoint};
+    record rate-input { state: vehicle-state, sp: rate-setpoint }
+    monitor: func(inputs: stream<rate-input>) -> stream<torque-setpoint>;
+}
+
+/// Quad mixer: torque setpoint -> motor PWM.
+interface mixer-stream {
+    use types.{torque-setpoint, motor-pwm};
+    monitor: func(inputs: stream<torque-setpoint>) -> stream<motor-pwm>;
+}
+
+world iekf-stream-component     { export iekf-stream; }
+world position-stream-component { export position-stream; }
+world attitude-stream-component { export attitude-stream; }
+world rate-stream-component     { export rate-stream; }
+world mixer-stream-component    { export mixer-stream; }
