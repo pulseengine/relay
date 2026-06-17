@@ -1,0 +1,45 @@
+artifacts:
+  - id: FV-RELAY-STREAM-009
+    type: sw-verification
+    title: "falcon quad mixer P3 async stream component — runs the verified mixer, builds as Component-Model P3; completes the control cascade (v1.71)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P09 for the quad mixer — the fifth and final
+      control-cascade engine promoted to a real WASM Component-Model Preview 3
+      (P3) async stream transformer, completing the streamification of the
+      control cascade (iekf/pos/att/rate/mixer) begun at FV-RELAY-STREAM-005.
+
+      Evidence:
+      1. The WIT (wit/falcon-mixer-stream/mixer_stream.wit) declares genuine P3
+         stream types: `monitor: func(inputs: stream<torque-setpoint>) ->
+         stream<motor-pwm>`. Self-contained (falcon:mixer-stream package), not
+         touching the shared cascade.wit.
+      2. The implementation (wasm/cm/falcon-mixer/src/stream.rs) is a real async
+         stream transformer: `async fn monitor(mut inputs:
+         StreamReader<TorqueSetpoint>) -> StreamReader<MotorPwm>` with
+         `wit_stream::new()`, `while let Some(t) = inputs.next().await`, and
+         `writer.write(...).await`.
+      3. RUNS THE VERIFIED MIXER: `use relay_mix_quad::QuadMixer;` and
+         //:falcon-mixer-stream `deps` on :relay-mix-quad, so the streaming
+         monitor() drives the ACTUAL relay-mix-quad QuadMixer::mix (the stateless
+         torque->4-motor mix) — no inline copy.
+      4. The mechanical ORACLE: the //:falcon-mixer-stream bazel target
+         (wasi_version = "p3") builds it as a P3 component, EXERCISED in CI
+         (.github/workflows/bazel.yml builds all five cascade streams + the four
+         cFS streams), so "valid P3 async component driving the verified mixer"
+         is CI-validated.
+
+      Honest scope (same as the prior STREAM artifacts): verifies AUTHORED +
+      BUILDS as P3 async driving the verified mixer; does NOT verify end-to-end
+      execution on kiln's async scheduler (shipped but dormant). With this, ALL
+      nine relay engines (4 cFS + 5 control-cascade) expose P3 async stream
+      interfaces; the wac_plug-composed flight-control stream pipeline is the
+      follow-on.
+    tags: [verification, relay, falcon-mixer, cascade, stream, async, p3, component-model, "v1.71"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:falcon-mixer-stream
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P09
