@@ -1,23 +1,17 @@
-// Falcon Rate Controller — P3 Stream Transformer WASM component.
+// Falcon Rate Controller — P3 Stream Transformer (shared cascade-stream types).
 //
-// Takes stream<rate-input>, emits stream<torque-setpoint>.
-// Wraps the verified relay-rate body-rate PID (RatePid) — the first
-// control-cascade engine promoted to a P3 async stream (#168 cascade arc).
-//
-// Built as a rust_wasm_component_bindgen (wasi_version="p3"), the same proven
-// pattern as the cFS stream components — deps on the verified :relay-rate
-// Bazel library, NOT an inline copy of the controller.
+// stream<rate-input> -> stream<torque-setpoint>, where rate-input is
+// { state: vehicle-state, sp: rate-setpoint } — shared types so the cascade
+// composes (STREAM-P10). Drives the verified relay-rate body-rate PID.
 
 use relay_rate::{RatePid, Timestamp};
 
-use falcon_rate_stream_bindings::exports::falcon::rate_stream::rate_stream::{
+use falcon_rate_stream_bindings::exports::falcon::cascade_stream::rate_stream::{
     Guest, RateInput as WitInput, TorqueSetpoint as WitTorque,
 };
 
 struct Component;
 
-// Stateful across the stream: the PID integrator/derivative state persists,
-// and the timestamp is a synthesised 1 kHz counter (as in the sync component).
 static mut PID: Option<RatePid> = None;
 static mut TICK_MS: u64 = 0;
 
@@ -40,24 +34,24 @@ fn next_timestamp() -> Timestamp {
 }
 
 impl Guest for Component {
-    /// STREAM TRANSFORMER: reads rate-loop inputs, steps the verified PID on
-    /// each, writes the torque setpoint to the output stream.
     async fn monitor(
         mut inputs: wit_bindgen::rt::async_support::StreamReader<WitInput>,
     ) -> wit_bindgen::rt::async_support::StreamReader<WitTorque> {
-        let (mut writer, reader) = falcon_rate_stream_bindings::wit_stream::new::<WitTorque>();
+        let (mut writer, reader) =
+            falcon_rate_stream_bindings::wit_stream::new::<WitTorque>();
 
         while let Some(inp) = inputs.next().await {
+            // Body rates from the estimated state; setpoint from the rate loop.
             let torque = pid().tick(
                 next_timestamp(),
-                [inp.wx, inp.wy, inp.wz],
-                [inp.rx, inp.ry, inp.rz],
+                [inp.state.wx, inp.state.wy, inp.state.wz],
+                [inp.sp.rx, inp.sp.ry, inp.sp.rz],
             );
             let out = WitTorque {
                 tx: torque[0],
                 ty: torque[1],
                 tz: torque[2],
-                thrust: inp.thrust, // thrust passes straight through the rate loop
+                thrust: inp.sp.thrust,
             };
             let _ = writer.write(vec![out]).await;
         }

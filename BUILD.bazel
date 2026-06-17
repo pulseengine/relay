@@ -682,8 +682,8 @@ rust_wasm_component_bindgen(
 # over the verified :relay-iekf library, self-contained WIT.
 wit_library(
     name = "falcon_iekf_stream_wit",
-    srcs = ["wit/falcon-iekf-stream/iekf_stream.wit"],
-    package_name = "falcon:iekf-stream",
+    srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
+    package_name = "falcon:cascade-stream",
     world = "iekf-stream-component",
 )
 
@@ -710,8 +710,8 @@ rust_wasm_component_bindgen(
 # over the verified :relay-pos library, self-contained WIT.
 wit_library(
     name = "falcon_position_stream_wit",
-    srcs = ["wit/falcon-position-stream/position_stream.wit"],
-    package_name = "falcon:position-stream",
+    srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
+    package_name = "falcon:cascade-stream",
     world = "position-stream-component",
 )
 
@@ -738,8 +738,8 @@ rust_wasm_component_bindgen(
 # over the verified :relay-att library, self-contained WIT.
 wit_library(
     name = "falcon_attitude_stream_wit",
-    srcs = ["wit/falcon-attitude-stream/attitude_stream.wit"],
-    package_name = "falcon:attitude-stream",
+    srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
+    package_name = "falcon:cascade-stream",
     world = "attitude-stream-component",
 )
 
@@ -767,8 +767,8 @@ rust_wasm_component_bindgen(
 # :relay-rate library; self-contained WIT (does not touch cascade.wit).
 wit_library(
     name = "falcon_rate_stream_wit",
-    srcs = ["wit/falcon-rate-stream/rate_stream.wit"],
-    package_name = "falcon:rate-stream",
+    srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
+    package_name = "falcon:cascade-stream",
     world = "rate-stream-component",
 )
 
@@ -795,8 +795,8 @@ rust_wasm_component_bindgen(
 # pattern over the verified :relay-mix-quad library, self-contained WIT.
 wit_library(
     name = "falcon_mixer_stream_wit",
-    srcs = ["wit/falcon-mixer-stream/mixer_stream.wit"],
-    package_name = "falcon:mixer-stream",
+    srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
+    package_name = "falcon:cascade-stream",
     world = "mixer-stream-component",
 )
 

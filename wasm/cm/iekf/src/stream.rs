@@ -1,21 +1,16 @@
-// Falcon IEKF Estimator — P3 Stream Transformer WASM component.
+// Falcon IEKF Estimator — P3 Stream Transformer (shared cascade-stream types).
 //
-// Takes stream<imu-sample>, emits stream<vehicle-state>.
-// Wraps the verified relay-iekf invariant EKF — the fourth control-cascade
-// engine promoted to a P3 async stream (#168 cascade arc).
-//
-// Built as a rust_wasm_component_bindgen (wasi_version="p3"), the proven
-// cFS-stream pattern, over the verified :relay-iekf Bazel library.
+// stream<imu-sample> -> stream<vehicle-state> over the shared types
+// (STREAM-P10). Drives the verified relay-iekf invariant EKF.
 
 use relay_iekf::{Iekf, Imu as RImu};
 
-use falcon_iekf_stream_bindings::exports::falcon::iekf_stream::iekf_stream::{
+use falcon_iekf_stream_bindings::exports::falcon::cascade_stream::iekf_stream::{
     Guest, ImuSample as WitImu, VehicleState as WitState,
 };
 
 struct Component;
 
-// Stateful across the stream: the EKF state persists sample to sample.
 static mut IEKF: Option<Iekf> = None;
 
 fn iekf() -> &'static mut Iekf {
@@ -26,9 +21,6 @@ fn iekf() -> &'static mut Iekf {
 }
 
 impl Guest for Component {
-    /// STREAM TRANSFORMER: reads IMU samples, runs the verified EKF (1 kHz
-    /// SE2(3) propagate + gravity update) on each, writes the vehicle-state
-    /// estimate to the output stream.
     async fn monitor(
         mut samples: wit_bindgen::rt::async_support::StreamReader<WitImu>,
     ) -> wit_bindgen::rt::async_support::StreamReader<WitState> {
@@ -53,7 +45,6 @@ impl Guest for Component {
                 vel_n: st.v[0],
                 vel_e: st.v[1],
                 vel_d: st.v[2],
-                // Body rates are the gyro reading, passed through for the rate loop.
                 wx: imu.gx,
                 wy: imu.gy,
                 wz: imu.gz,

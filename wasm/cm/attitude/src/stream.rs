@@ -1,22 +1,17 @@
-// Falcon Attitude Controller — P3 Stream Transformer WASM component.
+// Falcon Attitude Controller — P3 Stream Transformer (shared cascade-stream types).
 //
-// Takes stream<att-input>, emits stream<rate-setpoint>.
-// Wraps the verified relay-att AttController — the third control-cascade
-// engine promoted to a P3 async stream (#168 cascade arc).
-//
-// Built as a rust_wasm_component_bindgen (wasi_version="p3"), the proven
-// cFS-stream pattern, over the verified :relay-att Bazel library.
+// stream<att-input> -> stream<rate-setpoint>, where att-input is
+// { state: vehicle-state, sp: attitude-setpoint } — shared types so the cascade
+// composes (STREAM-P10). Drives the verified relay-att AttController.
 
 use relay_att::{AttController, Timestamp};
 
-use falcon_attitude_stream_bindings::exports::falcon::attitude_stream::attitude_stream::{
+use falcon_attitude_stream_bindings::exports::falcon::cascade_stream::attitude_stream::{
     AttInput as WitInput, Guest, RateSetpoint as WitRate,
 };
 
 struct Component;
 
-// Stateful across the stream: the controller state persists, and the timestamp
-// is a synthesised 1 kHz counter (as in the sync component).
 static mut ATT: Option<AttController> = None;
 static mut TICK_MS: u64 = 0;
 
@@ -39,8 +34,6 @@ fn next_timestamp() -> Timestamp {
 }
 
 impl Guest for Component {
-    /// STREAM TRANSFORMER: reads attitude-loop inputs, steps the verified
-    /// attitude controller on each, writes the body-rate setpoint to the output.
     async fn monitor(
         mut inputs: wit_bindgen::rt::async_support::StreamReader<WitInput>,
     ) -> wit_bindgen::rt::async_support::StreamReader<WitRate> {
@@ -48,16 +41,17 @@ impl Guest for Component {
             falcon_attitude_stream_bindings::wit_stream::new::<WitRate>();
 
         while let Some(inp) = inputs.next().await {
+            // Attitude estimate from the state; setpoint quaternion from upstream.
             let rate = att().tick(
                 next_timestamp(),
-                [inp.qw, inp.qx, inp.qy, inp.qz],
-                [inp.sp_qw, inp.sp_qx, inp.sp_qy, inp.sp_qz],
+                [inp.state.qw, inp.state.qx, inp.state.qy, inp.state.qz],
+                [inp.sp.qw, inp.sp.qx, inp.sp.qy, inp.sp.qz],
             );
             let out = WitRate {
                 rx: rate[0],
                 ry: rate[1],
                 rz: rate[2],
-                thrust: inp.thrust, // thrust passes straight through the attitude loop
+                thrust: inp.sp.thrust,
             };
             let _ = writer.write(vec![out]).await;
         }

@@ -1,22 +1,17 @@
-// Falcon Position Controller — P3 Stream Transformer WASM component.
+// Falcon Position Controller — P3 Stream Transformer (shared cascade-stream types).
 //
-// Takes stream<pos-input>, emits stream<attitude-setpoint>.
-// Wraps the verified relay-pos PosController — the second control-cascade
-// engine promoted to a P3 async stream (#168 cascade arc).
-//
-// Built as a rust_wasm_component_bindgen (wasi_version="p3"), the proven
-// cFS-stream pattern, over the verified :relay-pos Bazel library.
+// stream<pos-input> -> stream<attitude-setpoint>, where pos-input is
+// { state: vehicle-state, target: waypoint } — shared types so the cascade
+// composes (STREAM-P10). Drives the verified relay-pos PosController.
 
 use relay_pos::{PosController, PositionSetpoint, Timestamp};
 
-use falcon_position_stream_bindings::exports::falcon::position_stream::position_stream::{
+use falcon_position_stream_bindings::exports::falcon::cascade_stream::position_stream::{
     AttitudeSetpoint as WitAtt, Guest, PosInput as WitInput,
 };
 
 struct Component;
 
-// Stateful across the stream: the controller integrator state persists, and the
-// timestamp is a synthesised 1 kHz counter (as in the sync component).
 static mut POS: Option<PosController> = None;
 static mut TICK_MS: u64 = 0;
 
@@ -39,8 +34,6 @@ fn next_timestamp() -> Timestamp {
 }
 
 impl Guest for Component {
-    /// STREAM TRANSFORMER: reads position-loop inputs, steps the verified
-    /// position controller on each, writes the attitude setpoint to the output.
     async fn monitor(
         mut inputs: wit_bindgen::rt::async_support::StreamReader<WitInput>,
     ) -> wit_bindgen::rt::async_support::StreamReader<WitAtt> {
@@ -48,16 +41,18 @@ impl Guest for Component {
             falcon_position_stream_bindings::wit_stream::new::<WitAtt>();
 
         while let Some(inp) = inputs.next().await {
+            let s = &inp.state;
+            let t = &inp.target;
             let setpoint = PositionSetpoint {
-                position_ned: [inp.target_north, inp.target_east, inp.target_down],
+                position_ned: [t.north, t.east, t.down],
                 velocity_ned: [0.0, 0.0, 0.0],
-                yaw_setpoint: inp.target_yaw,
+                yaw_setpoint: t.yaw,
             };
             let att = pos().tick(
                 next_timestamp(),
-                [inp.pos_n, inp.pos_e, inp.pos_d],
-                [inp.vel_n, inp.vel_e, inp.vel_d],
-                [inp.qw, inp.qx, inp.qy, inp.qz],
+                [s.pos_n, s.pos_e, s.pos_d],
+                [s.vel_n, s.vel_e, s.vel_d],
+                [s.qw, s.qx, s.qy, s.qz],
                 setpoint,
             );
             let out = WitAtt {
