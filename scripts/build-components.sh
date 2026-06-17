@@ -107,6 +107,24 @@ build_component "position"     > /dev/null
 build_component "falcon-mixer" > /dev/null
 build_component "cascade"      > /dev/null
 
+# P3 STREAM artifacts (bazel-built, not cargo-component): the composed
+# flight-control stream pipeline + its Meld-lowered runnable CORE module. Added
+# to the bundle so the bundle SHA256SUMS (cosign-signed in release.yml) attests
+# them — closing the FV-RELAY-STREAM-014 gap (v1.77). The cascade CI job already
+# builds these targets, so a build failure here is loud, not silent.
+if command -v bazel >/dev/null 2>&1; then
+  echo "== building P3 stream artifacts (bazel) =="
+  bazel build //:falcon-cascade-stream-composed //:falcon-cascade-stream-fused
+  for tgt in falcon-cascade-stream-composed falcon-cascade-stream-fused; do
+    src=$(bazel cquery --output=files "//:$tgt" 2>/dev/null | grep -E '\.wasm$' | head -1)
+    [ -n "$src" ] && [ -f "$src" ] || { echo " ERROR: no .wasm for //:$tgt" >&2; exit 1; }
+    cp "$src" "$BUNDLE_DIR/$tgt-v$MM.wasm"
+    echo "  $tgt-v$MM.wasm  <-  $src"
+  done
+else
+  echo "== WARNING: bazel not on PATH — P3 stream artifacts NOT bundled =="
+fi
+
 # Helper: artifact filename from dir name (strips leading "falcon-")
 artifact_name() { local s="${1#falcon-}"; echo "falcon-$s-v$MM.wasm"; }
 

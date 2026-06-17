@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P15
+    type: sw-req
+    title: "STREAM-P15 (v1.77) — bundle + cosign-attest the composed/fused stream artifacts in the release"
+    status: implemented
+    description: >
+      Closes the FV-RELAY-STREAM-014 honest gap: the composed flight-control
+      stream pipeline (//:falcon-cascade-stream-composed) and its Meld-lowered
+      core module (//:falcon-cascade-stream-fused) shall be SHIPPED in the
+      release components bundle and cosign-attested, so a downstream consumer
+      (jess) can verify them from the relay release signature.
+
+      Mechanism: build-components.sh bazel-builds the two stream targets into the
+      bundle (alongside the cargo-component cFS/cascade components), so they
+      enter the bundle SHA256SUMS; the release flight-component job is made bazel-
+      capable (relay + the four local_path_override rules repos checked out as
+      siblings, mirroring bazel.yml) and cosign-signs the bundle SHA256SUMS
+      (keyless Sigstore, id-token: write). The one cosign signature transitively
+      attests every .wasm in the bundle, including the two stream artifacts.
+
+      Note: the bazel-in-the-cargo-component-release-job is a deliberate hybrid;
+      its only full validation is an actual release run (a fix-up release may be
+      needed if the first run surfaces an issue).
+    tags: [relay, cascade, stream, release, cosign, attestation, bundle, "v1.77"]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        A release's components bundle contains falcon-cascade-stream-composed-vMM
+        .wasm + falcon-cascade-stream-fused-vMM.wasm; the bundle SHA256SUMS lists
+        them; cosign verify-blob on the bundle SHA256SUMS under the PINNED relay
+        release identity + GitHub OIDC issuer returns Verified OK.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

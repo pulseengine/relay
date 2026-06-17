@@ -1,0 +1,37 @@
+artifacts:
+  - id: FV-RELAY-STREAM-015
+    type: sw-verification
+    title: "Stream artifacts bundled + cosign-attested in the release (v1.77)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P15 — closes the FV-RELAY-STREAM-014 gap.
+
+      Mechanism (landed):
+      - scripts/build-components.sh bazel-builds //:falcon-cascade-stream-composed
+        + //:falcon-cascade-stream-fused (cquery -> bundle), guarded on bazel
+        availability.
+      - .github/workflows/release.yml flight-component job: relay + the four
+        local_path_override rules repos checked out as siblings (bazel-capable),
+        id-token: write, sigstore/cosign-installer, and a cosign sign-blob over
+        the bundle SHA256SUMS (-> .sig/.pem/.cosign.bundle, uploaded). One
+        signature transitively attests every bundle .wasm incl. the stream ones.
+
+      Verification (HONEST scope): the mechanism is in place and the workflow YAML
+      is valid, but its FULL end-to-end validation is the v1.77 RELEASE RUN
+      itself — the hybrid bazel-in-the-cargo-component-job path cannot be
+      pre-validated in a PR (no release pipeline runs on PRs). Post-release proof:
+        cosign verify-blob \
+          --certificate-identity-regexp \
+            'https://github.com/pulseengine/relay/.github/workflows/release.yml@.*' \
+          --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+          --bundle SHA256SUMS.cosign.bundle SHA256SUMS   -> expect Verified OK
+      on the falcon-v1.77.0 bundle. A fix-up release follows if the first run
+      surfaces an issue (user-acknowledged risk).
+    tags: [verification, relay, cascade, stream, release, cosign, attestation, "v1.77"]
+    fields:
+      method: automated-test
+      steps:
+        - run: "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/release.yml'))\""
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P15
