@@ -1,0 +1,26 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P14
+    type: sw-req
+    title: "STREAM-P14 (v1.76) — sigil attestation of the composed/lowered stream artifacts + streamification closure"
+    status: draft
+    description: >
+      PLANNED v1.76. The other recurring feature-loop N/A across the campaign was
+      sigil (step 6): the composed P3 component (STREAM-P11) and the Meld-lowered
+      core module (STREAM-P12) are new build artifacts that should carry a signed
+      attestation, verifiable detached. This requirement signs them with sigil
+      and confirms the verification chain end-to-end. Campaign CLOSURE: with all
+      nine engines streamed (P01..P09), composed (P11), lowered (P12), witnessed
+      (P13) and attested (P14), the streamification arc's V is fully closed —
+      and issue #168 ("P3 targets run an inline copy") is resolved (no inline
+      copies remain; every component runs its verified engine) and closed.
+    tags: [relay, stream, p3, sigil, attestation, closure, "v1.76"]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        sigil signs the composed stream component + the Meld-lowered module; a
+        detached verifier accepts them. #168 closed with the streamification
+        traceability summary. Depends on STREAM-P11/P12.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

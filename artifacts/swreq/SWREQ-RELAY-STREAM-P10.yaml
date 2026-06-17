@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P10
+    type: sw-req
+    title: "STREAM-P10 (v1.72) — shared cascade stream-types WIT (the composition substrate)"
+    status: draft
+    description: >
+      PLANNED v1.72. The five control-cascade stream components (iekf/pos/att/
+      rate/mixer, STREAM-P05..P09) were authored with SELF-CONTAINED WITs to
+      de-risk per-engine delivery — each redefines its records in its own
+      package. Composition (wac wiring iekf.out -> pos.in -> ... -> mixer.out)
+      requires that each engine's OUTPUT type be the SAME WIT type as the next
+      engine's INPUT type. This requirement introduces a shared
+      `falcon:cascade-stream-types` WIT (imu-sample, vehicle-state,
+      attitude-setpoint, rate-setpoint, torque-setpoint, motor-pwm) that all five
+      cascade stream components import, so their stream types align for wiring.
+      Behavior-preserving (each component still builds + runs its verified
+      engine); the only change is the type source.
+    tags: [relay, cascade, stream, p3, composition, types, "v1.72"]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        All five //:falcon-{iekf,position,attitude,rate,mixer}-stream targets
+        still build as P3 components against the shared types; the output stream
+        type of each engine is identical (same WIT type) to the input stream type
+        of its downstream neighbour.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

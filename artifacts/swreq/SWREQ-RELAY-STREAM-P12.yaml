@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P12
+    type: sw-req
+    title: "STREAM-P12 (v1.74) — Meld-lower the composed stream pipeline to a runnable core module"
+    status: draft
+    description: >
+      PLANNED v1.74. Per RFC #46, Meld lowers Component-Model async (P3 streams)
+      to a core wasm module at BUILD time, so relay has no runtime async
+      dependency and the composed pipeline becomes runnable (by kiln std-side, or
+      synth->gale embedded). This requirement adds a meld_fuse target lowering
+      the composed cascade stream pipeline (STREAM-P11) to a single core module —
+      the first time the streamification arc produces a RUNNABLE artifact rather
+      than only a buildable component. Reuses the existing meld_fuse precedent
+      (relay-fused / relay-all-fused). Note: kiln RUNTIME execution + the
+      synth->ARM step (synth_compile, currently disabled) remain the kiln/jess
+      track; this requirement's scope is the relay-side Meld lowering only.
+    tags: [relay, cascade, stream, p3, meld, lowering, rfc46, "v1.74"]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        A meld_fuse target lowers the composed cascade stream pipeline to a core
+        module that builds in CI; the lowered module is a valid core wasm
+        (Meld resolves the P3 stream ABI to core at build time). Depends on
+        STREAM-P11.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008
