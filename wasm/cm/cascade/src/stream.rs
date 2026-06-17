@@ -16,7 +16,7 @@ use relay_mix_quad::QuadMixer;
 use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTs};
 use relay_rate::{RatePid, Timestamp as RateTs};
 
-use falcon_cascade_stream_bindings::exports::falcon::cascade_stream::cascade_stream::{
+use falcon_cascade_stream_composed_bindings::exports::falcon::cascade_stream::cascade_stream::{
     CascadeInput as WitInput, Guest, MotorPwm as WitPwm,
 };
 
@@ -60,7 +60,7 @@ impl Guest for Component {
         mut inputs: wit_bindgen::rt::async_support::StreamReader<WitInput>,
     ) -> wit_bindgen::rt::async_support::StreamReader<WitPwm> {
         let (mut writer, reader) =
-            falcon_cascade_stream_bindings::wit_stream::new::<WitPwm>();
+            falcon_cascade_stream_composed_bindings::wit_stream::new::<WitPwm>();
 
         while let Some(inp) = inputs.next().await {
             let ms = unsafe {
@@ -116,4 +116,4 @@ impl Guest for Component {
     }
 }
 
-falcon_cascade_stream_bindings::export!(Component with_types_in falcon_cascade_stream_bindings);
+falcon_cascade_stream_composed_bindings::export!(Component with_types_in falcon_cascade_stream_composed_bindings);
