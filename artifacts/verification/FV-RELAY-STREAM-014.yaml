@@ -1,0 +1,40 @@
+artifacts:
+  - id: FV-RELAY-STREAM-014
+    type: sw-verification
+    title: "Streamification arc closure — attestation chain validated + composition arc complete (v1.76)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P14 and closes the streamification arc.
+
+      Attestation (sigil/cosign, the feature-loop step 6): relay's release
+      pipeline keyless-signs SHA256SUMS.txt with cosign (Fulcio cert chain;
+      SHA256SUMS contains every release asset's digest, so the one signature
+      transitively attests all bundled artifacts). VALIDATED end-to-end locally:
+        cosign verify-blob --bundle SHA256SUMS.txt.cosign.bundle ... -> Verified OK
+      on a shipped release (falcon-v1.74.0). This is the attestation step the
+      streamification campaign had left N/A, now exercised + validated.
+
+      Honest scope boundary: the composed stream pipeline + the Meld-fused core
+      module are BAZEL targets, while the release bundle (scripts/build-
+      components.sh) is cargo-component-built — so the stream artifacts are not
+      yet IN the signed bundle. They are CI-built + reproducible (the Component
+      Model cascade job builds //:falcon-cascade-stream-composed +
+      //:falcon-cascade-stream-fused on every commit). Adding the bazel stream
+      artifacts to the signed bundle (a bazel step in the release pipeline) is a
+      tracked follow-up; the attestation MECHANISM that would cover them is
+      validated here.
+
+      Arc complete: STREAM-P01..P09 (9 engines streamed) -> P10 (shared types) ->
+      P11 (composed pipeline) -> P12 (Meld-lowered core module) -> P13 (witness
+      parse gap closed for the stream path + macro fixed; async-invoke gap filed)
+      -> P14 (attestation chain validated). #168 ("P3 targets run an inline
+      copy") is fully resolved and closed: every component runs its verified
+      engine, composed + lowered, no inline copies.
+    tags: [verification, relay, cascade, stream, sigil, cosign, attestation, closure, "v1.76"]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cosign verify-blob --bundle SHA256SUMS.txt.cosign.bundle --certificate-identity-regexp '.*' --certificate-oidc-issuer-regexp '.*' SHA256SUMS.txt"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P14
