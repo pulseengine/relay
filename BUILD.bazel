@@ -809,6 +809,32 @@ rust_wasm_component_bindgen(
     profiles = ["release"],
 )
 
+# COMPOSED flight-control stream pipeline (STREAM-P11): one P3 component running
+# the full cascade (iekf->pos->att->rate->mixer) per tick over the five verified
+# engines. The streamed counterpart of the sync falcon-cascade-composed.
+wit_library(
+    name = "falcon_cascade_stream_composed_wit",
+    srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
+    package_name = "falcon:cascade-stream",
+    world = "cascade-stream-component",
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-cascade-stream-composed",
+    srcs = ["wasm/cm/cascade/src/stream.rs"],
+    wit = ":falcon_cascade_stream_composed_wit",
+    wasi_version = "p3",
+    deps = [
+        "@crates//:wit-bindgen",
+        ":relay-iekf",
+        ":relay-pos",
+        ":relay-att",
+        ":relay-rate",
+        ":relay-mix-quad",
+    ],
+    profiles = ["release"],
+)
+
 # ── cascade orchestrator — imports the five, exports `step` ───────
 # No control-crate dep: the cascade is pure orchestration.
 rust_wasm_component_bindgen(

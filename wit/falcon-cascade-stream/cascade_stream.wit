@@ -89,8 +89,20 @@ interface mixer-stream {
     monitor: func(inputs: stream<torque-setpoint>) -> stream<motor-pwm>;
 }
 
+/// Composed flight-control pipeline: IMU + waypoint -> motor PWM, running the
+/// full cascade (iekf -> pos -> att -> rate -> mixer) per tick. One orchestrating
+/// component driving all five verified engines directly — the streamed
+/// counterpart of the sync falcon-cascade socket (STREAM-P11).
+interface cascade-stream {
+    use types.{imu-sample, waypoint, motor-pwm};
+    /// One pipeline input: a raw IMU sample + the current mission waypoint.
+    record cascade-input { imu: imu-sample, target: waypoint }
+    monitor: func(inputs: stream<cascade-input>) -> stream<motor-pwm>;
+}
+
 world iekf-stream-component     { export iekf-stream; }
 world position-stream-component { export position-stream; }
 world attitude-stream-component { export attitude-stream; }
 world rate-stream-component     { export rate-stream; }
 world mixer-stream-component    { export mixer-stream; }
+world cascade-stream-component  { export cascade-stream; }

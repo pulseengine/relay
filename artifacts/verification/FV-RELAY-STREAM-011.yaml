@@ -1,0 +1,43 @@
+artifacts:
+  - id: FV-RELAY-STREAM-011
+    type: sw-verification
+    title: "Composed flight-control stream pipeline — one P3 component running the full cascade over five verified engines (v1.73)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P11: the control cascade is composed into ONE
+      P3 stream component, the streamed counterpart of the sync
+      falcon-cascade-composed.
+
+      Design refinement (recorded honestly): wac composes function-call
+      interfaces, NOT stream data-flow — it cannot auto-wire one component's
+      output stream to another's input stream. So a streamed pipeline is one
+      orchestrating component, not a wac_plug of the five stream components.
+
+      Evidence:
+      1. WIT: a `cascade-stream` interface in wit/falcon-cascade-stream/
+         cascade_stream.wit declares `monitor: func(inputs: stream<cascade-input>)
+         -> stream<motor-pwm>`, cascade-input = { imu: imu-sample, target:
+         waypoint } — single input stream of a combined record (no multi-stream
+         zip), over the shared cascade types (STREAM-P10).
+      2. Implementation (wasm/cm/cascade/src/stream.rs): a real async stream
+         transformer whose monitor loop runs the FULL pipeline per tick —
+         estimate (relay-iekf) -> position (relay-pos) -> attitude (relay-att) ->
+         rate (relay-rate) -> mix (relay-mix-quad) — mirroring the sync cascade
+         socket's step(). Drives all five ACTUAL verified engines directly; no
+         inline copies.
+      3. The mechanical ORACLE: //:falcon-cascade-stream-composed
+         (wasi_version="p3", deps on the five relay engine libraries) builds as a
+         P3 component, EXERCISED in CI (.github/workflows/bazel.yml).
+
+      Honest scope: AUTHORED + BUILDS as P3 async running the five verified
+      engines; does NOT verify end-to-end execution on kiln's dormant scheduler
+      (the Meld-lowered runnable artifact is STREAM-P12). The composed pipeline
+      is the demonstration of relay's "composition is stream wiring" thesis.
+    tags: [verification, relay, cascade, stream, p3, composition, "v1.73"]
+    fields:
+      method: automated-test
+      steps:
+        - run: bazel build //:falcon-cascade-stream-composed
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P11
