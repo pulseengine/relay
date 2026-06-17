@@ -1,0 +1,42 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P09
+    type: sw-req
+    title: "STREAM-P09 — falcon quad mixer exposes a Component-Model Preview 3 async stream interface (completes the control cascade)"
+    status: implemented
+    description: >
+      The fifth and FINAL control-cascade engine to follow the streamification
+      template (after rate P05, position P06, attitude P07, iekf P08): the falcon
+      quad mixer shall expose a WASM Component-Model Preview 3 (P3) async
+      interface
+        monitor: func(inputs: stream<torque-setpoint>) -> stream<motor-pwm>
+      implemented as a genuine async stream transformer (async fn over a
+      StreamReader, .next().await on the inputs, .write().await on the motor PWM
+      outputs), built as a P3 component (wasi_version = "p3"). This completes the
+      control cascade (iekf/pos/att/rate/mixer) as P3 async streams — the tail of
+      the pipeline.
+
+      It RUNS THE VERIFIED MIXER, not an inline copy: the component does
+      `use relay_mix_quad::QuadMixer;` and the //:falcon-mixer-stream bindgen
+      target `deps` on the :relay-mix-quad Bazel library, so the streaming
+      monitor() drives the ACTUAL relay-mix-quad QuadMixer::mix. The WIT is
+      SELF-CONTAINED (its own falcon:mixer-stream package) and does not modify
+      the shared cascade.wit.
+
+      Scope (as with prior STREAM reqs): AUTHORING + BUILDING a valid P3 async
+      component; end-to-end execution on kiln's dormant scheduler is out of scope.
+    tags: [relay, falcon-mixer, cascade, stream, async, p3, component-model, streamification]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        wit/falcon-mixer-stream/mixer_stream.wit declares
+        `monitor: func(stream<torque-setpoint>) -> stream<motor-pwm>`; the Rust
+        implementation (wasm/cm/falcon-mixer/src/stream.rs) is a real async
+        stream transformer over StreamReader with .next().await /
+        writer.write().await, driving relay_mix_quad::QuadMixer::mix; the
+        //:falcon-mixer-stream bazel target builds it as a wasi_version="p3"
+        component, exercised in CI (.github/workflows/bazel.yml builds it
+        alongside the other four cascade streams and the four cFS streams).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

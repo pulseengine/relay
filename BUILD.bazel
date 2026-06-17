@@ -790,6 +790,25 @@ rust_wasm_component_bindgen(
     profiles = ["release"],
 )
 
+# P3 STREAM variant — stream<torque-setpoint> -> stream<motor-pwm> (#168).
+# Fifth/final control-cascade engine as a P3 async stream; proven cFS-stream
+# pattern over the verified :relay-mix-quad library, self-contained WIT.
+wit_library(
+    name = "falcon_mixer_stream_wit",
+    srcs = ["wit/falcon-mixer-stream/mixer_stream.wit"],
+    package_name = "falcon:mixer-stream",
+    world = "mixer-stream-component",
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-mixer-stream",
+    srcs = ["wasm/cm/falcon-mixer/src/stream.rs"],
+    wit = ":falcon_mixer_stream_wit",
+    wasi_version = "p3",
+    deps = ["@crates//:wit-bindgen", ":relay-mix-quad"],
+    profiles = ["release"],
+)
+
 # ── cascade orchestrator — imports the five, exports `step` ───────
 # No control-crate dep: the cascade is pure orchestration.
 rust_wasm_component_bindgen(
