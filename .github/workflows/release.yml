@@ -425,7 +425,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@75b0c90b355186240b58c409b99c688ae4acf83e # pinned (was @main) — supply-chain
 
       - name: Set up Bazel
-        uses: bazel-contrib/setup-bazel@5483a91b6e3ffac6092848f1dd7eafcfad203d80 # v0.14.0 pinned
+        uses: bazel-contrib/setup-bazel@96e74558374e6b9c14f235bdfca314756232c5f6 # v0.14.0 pinned
         with:
           bazelisk-cache: true
           disk-cache: bazel
