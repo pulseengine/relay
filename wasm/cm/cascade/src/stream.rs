@@ -10,11 +10,7 @@
 // stream components. Single input stream of a combined record — no multi-stream
 // zip. Each stage runs its actual verified engine; no inline copies.
 
-use relay_att::{AttController, Timestamp as AttTs};
-use relay_iekf::{Iekf, Imu as RImu};
-use relay_mix_quad::QuadMixer;
-use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTs};
-use relay_rate::{RatePid, Timestamp as RateTs};
+use cascade_orch::{Cascade, TickIn};
 
 use falcon_cascade_stream_composed_bindings::exports::falcon::cascade_stream::cascade_stream::{
     CascadeInput as WitInput, Guest, MotorPwm as WitPwm,
@@ -22,40 +18,21 @@ use falcon_cascade_stream_composed_bindings::exports::falcon::cascade_stream::ca
 
 struct Component;
 
-static mut EKF: Option<Iekf> = None;
-static mut POS: Option<PosController> = None;
-static mut ATT: Option<AttController> = None;
-static mut RATE: Option<RatePid> = None;
-static mut TICK_MS: u64 = 0;
+static mut CASCADE: Option<Cascade> = None;
 
-fn ekf() -> &'static mut Iekf {
+fn cascade() -> &'static mut Cascade {
     unsafe {
-        if EKF.is_none() { EKF = Some(Iekf::level()); }
-        EKF.as_mut().unwrap()
-    }
-}
-fn pos() -> &'static mut PosController {
-    unsafe {
-        if POS.is_none() { POS = Some(PosController::new()); }
-        POS.as_mut().unwrap()
-    }
-}
-fn att() -> &'static mut AttController {
-    unsafe {
-        if ATT.is_none() { ATT = Some(AttController::new()); }
-        ATT.as_mut().unwrap()
-    }
-}
-fn rate() -> &'static mut RatePid {
-    unsafe {
-        if RATE.is_none() { RATE = Some(RatePid::new()); }
-        RATE.as_mut().unwrap()
+        if CASCADE.is_none() {
+            CASCADE = Some(Cascade::new());
+        }
+        CASCADE.as_mut().unwrap()
     }
 }
 
 impl Guest for Component {
-    /// One tick of the full cascade per input. Mirrors the sync cascade socket's
-    /// step(): estimate -> position -> attitude -> rate -> mix.
+    /// One tick of the full cascade per input — drives the shared `cascade_orch`
+    /// pipeline (estimate -> position -> attitude -> rate -> mix), identical to
+    /// the sync `step` coverage sibling.
     async fn monitor(
         mut inputs: wit_bindgen::rt::async_support::StreamReader<WitInput>,
     ) -> wit_bindgen::rt::async_support::StreamReader<WitPwm> {
@@ -63,52 +40,19 @@ impl Guest for Component {
             falcon_cascade_stream_composed_bindings::wit_stream::new::<WitPwm>();
 
         while let Some(inp) = inputs.next().await {
-            let ms = unsafe {
-                let m = TICK_MS;
-                TICK_MS += 1;
-                m
-            };
-            let (s, fr) = (ms / 1000, ((ms % 1000) * (1u64 << 32) / 1000) as u32);
-
-            // 1. State estimation (SE2(3) propagate + gravity update).
-            let accel = [inp.imu.ax, inp.imu.ay, inp.imu.az];
-            let gyro = [inp.imu.gx, inp.imu.gy, inp.imu.gz];
-            let e = ekf();
-            e.propagate(RImu { gyro, accel }, 0.001);
-            e.update_gravity(accel, 0.5);
-            let st = e.state();
-            let quat = [st.q[0], st.q[1], st.q[2], st.q[3]];
-
-            // 2. Position loop -> attitude setpoint.
-            let att_out = pos().tick(
-                PosTs { seconds: s, fraction: fr },
-                [st.p[0], st.p[1], st.p[2]],
-                [st.v[0], st.v[1], st.v[2]],
-                quat,
-                PositionSetpoint {
-                    position_ned: [inp.target.north, inp.target.east, inp.target.down],
-                    velocity_ned: [0.0, 0.0, 0.0],
-                    yaw_setpoint: inp.target.yaw,
-                },
-            );
-            let att_sp = [
-                att_out.quaternion[0],
-                att_out.quaternion[1],
-                att_out.quaternion[2],
-                att_out.quaternion[3],
-            ];
-            let thrust = att_out.thrust;
-
-            // 3. Attitude loop -> body-rate setpoint (estimate quat vs setpoint quat).
-            let rate_sp = att().tick(AttTs { seconds: s, fraction: fr }, quat, att_sp);
-
-            // 4. Rate loop -> torque (measured body rate = gyro passthrough).
-            let torque = rate().tick(RateTs { seconds: s, fraction: fr }, gyro, rate_sp);
-
-            // 5. Control allocation -> per-motor PWM.
-            let mut mixer = QuadMixer::new();
-            let m = mixer.mix(torque, thrust);
-            let out = WitPwm { m1: m[0], m2: m[1], m3: m[2], m4: m[3] };
+            let o = cascade().tick(TickIn {
+                ax: inp.imu.ax,
+                ay: inp.imu.ay,
+                az: inp.imu.az,
+                gx: inp.imu.gx,
+                gy: inp.imu.gy,
+                gz: inp.imu.gz,
+                north: inp.target.north,
+                east: inp.target.east,
+                down: inp.target.down,
+                yaw: inp.target.yaw,
+            });
+            let out = WitPwm { m1: o.m1, m2: o.m2, m3: o.m3, m4: o.m4 };
             let _ = writer.write(vec![out]).await;
         }
 
