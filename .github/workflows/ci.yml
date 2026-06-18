@@ -38,7 +38,7 @@ jobs:
     name: Format
     runs-on: [self-hosted, linux, x64, light]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -51,7 +51,7 @@ jobs:
     name: Clippy
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -81,7 +81,7 @@ jobs:
             runner: windows-latest
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: cargo test
@@ -91,7 +91,7 @@ jobs:
     name: falcon-hello end-to-end demo
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run falcon-hello UDP-loopback demo
