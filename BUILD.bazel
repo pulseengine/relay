@@ -819,6 +819,24 @@ wit_library(
     world = "cascade-stream-component",
 )
 
+# Shared cascade orchestration (the iekf->pos->att->rate->mixer wiring over the
+# five verified engines). One source, used by BOTH the async P3 stream component
+# (monitor) and the sync coverage sibling (step, #202) — no inline copy of the
+# pipeline in either component.
+rust_library(
+    name = "cascade-orch",
+    srcs = ["wasm/cm/cascade/src/orch.rs"],
+    crate_root = "wasm/cm/cascade/src/orch.rs",
+    edition = "2024",
+    deps = [
+        ":relay-iekf",
+        ":relay-pos",
+        ":relay-att",
+        ":relay-rate",
+        ":relay-mix-quad",
+    ],
+)
+
 rust_wasm_component_bindgen(
     name = "falcon-cascade-stream-composed",
     srcs = ["wasm/cm/cascade/src/stream.rs"],
@@ -826,13 +844,60 @@ rust_wasm_component_bindgen(
     wasi_version = "p3",
     deps = [
         "@crates//:wit-bindgen",
-        ":relay-iekf",
-        ":relay-pos",
-        ":relay-att",
-        ":relay-rate",
-        ":relay-mix-quad",
+        ":cascade-orch",
     ],
     profiles = ["release"],
+)
+
+# SYNC coverage sibling (#202): a p2 (synchronous) component exporting a
+# call-return `step` over the SAME cascade_orch pipeline. The p3 stream
+# component lifts every export async (`async: all`), so its only export is the
+# async-lift `monitor` stream — which the witness MC/DC harness cannot invoke
+# call-return (0/2713 branches). This sync sibling runs the identical verified
+# engines behind a harness-drivable scalar entry point, so witness can actually
+# exercise the cascade's branches.
+wit_library(
+    name = "falcon_cascade_step_wit",
+    srcs = ["wit/falcon-cascade-step/cascade_step.wit"],
+    package_name = "falcon:cascade-step",
+    world = "cascade-step-component",
+)
+
+rust_wasm_component_bindgen(
+    name = "falcon-cascade-step",
+    srcs = ["wasm/cm/cascade/src/step.rs"],
+    wit = ":falcon_cascade_step_wit",
+    deps = [
+        "@crates//:wit-bindgen",
+        ":cascade-orch",
+    ],
+    profiles = ["release"],
+)
+
+meld_fuse(
+    name = "falcon-cascade-step-fused",
+    components = [":falcon-cascade-step"],
+)
+
+# witness MC/DC on the SYNC sibling: its single component -> single cabi_realloc
+# (witness parses it, per #145/#201), and its `step` export is sync call-return
+# so the WASI harness's auto-invoke + scripted f32 vectors actually drive the
+# cascade branches — closing the 0/2713 invoke gap (#202).
+wasm_module_coverage_wasi(
+    name = "falcon-cascade-step-coverage",
+    module = ":falcon-cascade-step-fused",
+    # Scripted scalar flight vectors so `step` runs to COMPLETION (the all-zero
+    # auto-invoke traps on a degenerate IMU/quaternion), each exercising a
+    # different region of the cascade: level hover, a north/east/down position
+    # error, a yaw command, and a perturbed attitude+rate state. Args are the 10
+    # flat f32 (ax,ay,az,gx,gy,gz, north,east,down,yaw); az≈9.81 is specific
+    # force at rest so the IEKF gravity update is well-conditioned.
+    invokes = ("falcon:cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,0,0,0,0;" +
+               "falcon:cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,5,0,0,0;" +
+               "falcon:cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,0,5,-2,0.5;" +
+               "falcon:cascade-step/step-api@0.1.0#step=0.5,0.3,9.6,0.1,-0.1,0.05,2,-3,1,-0.3;" +
+               "falcon:cascade-step/step-api@0.1.0#step=-0.4,0.2,9.7,-0.2,0.15,-0.1,-4,2,0.5,0.8"),
+    tags = ["manual"],
 )
 
 # Meld-LOWER the composed stream pipeline to a runnable CORE module (STREAM-P12,

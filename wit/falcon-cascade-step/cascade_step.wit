@@ -1,0 +1,29 @@
+package falcon:cascade-step@0.1.0;
+
+/// Sync single-tick facade over the SAME verified cascade pipeline as the P3
+/// stream component (`falcon:cascade-stream`), with FLAT scalar args and a
+/// scalar return so a CALL-RETURN MC/DC harness (witness) can drive the engine
+/// branches.
+///
+/// Why this exists (#202): the composed stream pipeline's only export is the
+/// async-lift `monitor` stream function, which a call-return harness cannot
+/// invoke — so witness MC/DC saw 0/2713 branches on it. The `p3` bindgen lifts
+/// EVERY export async (`async: all`), so a sync `step` cannot live inside the
+/// async stream component; this is a separate SYNC (p2) sibling that runs the
+/// identical `cascade_orch` pipeline over the identical verified engines.
+///
+/// NOT a flight interface: a coverage / tooling entry point. The return is the
+/// SUM of the four motor PWMs — a single scalar, so the canonical ABI returns
+/// it directly in a register (no return-area pointer the harness would have to
+/// synthesise) and the dependency on all four outputs keeps the whole pipeline
+/// live against dead-code elimination.
+interface step-api {
+    step: func(
+        ax: f32, ay: f32, az: f32, gx: f32, gy: f32, gz: f32,
+        north: f32, east: f32, down: f32, yaw: f32,
+    ) -> f32;
+}
+
+world cascade-step-component {
+    export step-api;
+}

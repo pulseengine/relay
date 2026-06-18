@@ -1,0 +1,50 @@
+artifacts:
+  - id: SWREQ-RELAY-STREAM-P16
+    type: sw-req
+    title: "STREAM-P16 (v1.80) — composed cascade MC/DC: harness-drivable sync entry point + WIT-name invoke fix (#202)"
+    status: implemented
+    description: >
+      Closes the #202 invoke gap: witness MC/DC on the composed flight-control
+      stream pipeline instrumented 2713 branches but EXERCISED ZERO of them
+      (witness-run: invoked nothing), because the composed component's only
+      export is the async-lift `monitor` stream function, which a call-return
+      harness cannot invoke. The `p3` bindgen lifts EVERY export async
+      (`async: all`), so a sync entry point cannot live inside the async stream
+      component.
+
+      Mechanism (two parts):
+      1. A SYNC (p2) coverage sibling component `falcon:cascade-step` exporting a
+         call-return `step(10x f32) -> f32` over the SAME verified cascade,
+         sharing the iekf->pos->att->rate->mixer wiring with the stream component
+         via a single `cascade-orch` rust_library (no inline copy of the
+         pipeline in either component). `step` returns the SUM of the four motor
+         PWMs — a single scalar (direct canonical-ABI return, no return-area
+         pointer the harness must synthesise) whose dependency on all four motors
+         keeps the whole pipeline live against dead-code elimination.
+      2. A fix to the witness WASI harness (`host/witness-wasi-harness`): its
+         `WITNESS_HARNESS_INVOKES` spec parser split `name:args` on `:`, but WIT
+         export names are `namespace:package/iface@ver#func` — they ALWAYS
+         contain a colon, so no WIT export was addressable for scripted invokes
+         ("export not found"). The separator is now `=` (`:` kept as a fallback
+         for colon-free names).
+
+      Result: the composed cascade's branches are now exercised — 299/2006
+      branches across 58 functions, up from 0 — driven by scripted realistic
+      flight vectors (hover, position error, yaw command, perturbed attitude,
+      large-error). The residual (~85%) is libm range-reduction internals,
+      panic/fmt cold paths, and NaN guards unreachable by finite scalar inputs;
+      pushing the percentage with white-box / guard-targeted vectors is a
+      tracked follow-up, NOT part of this infrastructure fix.
+    tags: [relay, cascade, stream, witness, mcdc, coverage, "v1.80", issue-202]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        bazel build //:falcon-cascade-step-coverage produces a witness-run.json
+        whose branches array has a NON-ZERO count of hits>0 entries (the prior
+        composed-stream coverage was 0); the cascade-step component shares the
+        engine wiring via :cascade-orch (no copy); the harness splits
+        WITNESS_HARNESS_INVOKES specs on '=' so WIT export names are addressable.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

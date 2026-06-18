@@ -1,0 +1,43 @@
+artifacts:
+  - id: FV-RELAY-STREAM-016
+    type: sw-verification
+    title: "Composed cascade MC/DC populated via sync sibling + harness invoke-name fix (v1.80, #202)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-STREAM-P16. The composed flight-control cascade's
+      MC/DC branches are now EXERCISED by the witness WASI harness, closing the
+      #202 "invokes nothing / 0 branches" gap.
+
+      Evidence (reproduced locally, bazel 9.1.1 + nix witness toolchain v0.22.0):
+        bazel build //:falcon-cascade-step-coverage
+        -> falcon-cascade-step-coverage_witness-run.json:
+             total branches = 2006
+             branches with hits>0 = 299 (14.9%), across 58 functions
+           (the composed-stream coverage target reported 0 hits — the only export
+            was the async-lift `monitor`, uninvokable call-return.)
+
+      The sync sibling `falcon-cascade-step` runs the IDENTICAL verified engines
+      (iekf/pos/att/rate/mix-quad) as the stream component, sharing the cascade
+      wiring through the single `cascade-orch` rust_library — so the branches it
+      exercises are the real flight-pipeline branches, not a re-implementation.
+
+      Harness fix root cause: WITNESS_HARNESS_INVOKES specs were split on the
+      FIRST `:`, but WIT export names start with `namespace:package` — so the
+      scripted name resolved to `falcon` and every invoke reported "export not
+      found". Switched the separator to `=`; "invoked N exports" and the branch
+      counters rose (176 zero-arg-only -> 299 with realistic scalar vectors).
+
+      ORACLE (mechanical, automatable): the witness-run.json branches array has a
+      non-zero count of entries with hits>0. Honest scope: this verifies the
+      INVOKE/infrastructure gap is closed (0 -> populated); raising the coverage
+      PERCENTAGE beyond the finite-input plateau (~15%) with guard-targeted
+      vectors is a tracked follow-up on #202, not claimed here.
+    tags: [verification, relay, cascade, stream, witness, mcdc, "v1.80", issue-202]
+    fields:
+      method: automated-test
+      steps:
+        - run: "bazel build //:falcon-cascade-step-coverage"
+        - run: "python3 -c \"import json; b=json.load(open('bazel-bin/falcon-cascade-step-coverage_witness-run.json'))['branches']; assert sum(1 for x in b if x['hits']>0) > 0\"  # was 0 on the async-only stream target"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-STREAM-P16

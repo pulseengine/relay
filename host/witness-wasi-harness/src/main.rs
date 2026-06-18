@@ -90,11 +90,14 @@ fn main() -> Result<()> {
     //
     // After that, two precedence layers:
     //   (a) `WITNESS_HARNESS_INVOKES` env var — semicolon-separated
-    //       list of `func_name:val1,val2,…` specs (v0.16). Lets
-    //       callers drive funcs with realistic args without
-    //       teaching the harness about each subject. Mirrors
-    //       witness's own `--invoke-with-args` syntax. Values are
-    //       parsed against the export's declared param types.
+    //       list of `func_name=val1,val2,…` specs. Lets callers drive
+    //       funcs with realistic args without teaching the harness
+    //       about each subject. Values are parsed against the export's
+    //       declared param types. The name/args separator is `=`
+    //       (NOT `:`) because WIT export names are
+    //       `namespace:package/iface@ver#func` — they always contain a
+    //       colon, so a `:` separator can't address them (#202). A bare
+    //       `:` is still accepted as a fallback for colon-free names.
     //   (b) auto-discover — every non-`__witness_*` export gets
     //       called with zero-filled args. Walks at least one path
     //       per export even when no script is supplied.
@@ -111,9 +114,14 @@ fn main() -> Result<()> {
     let scripted = env::var("WITNESS_HARNESS_INVOKES").unwrap_or_default();
     if !scripted.is_empty() {
         for spec in scripted.split(';').filter(|s| !s.is_empty()) {
-            let (name, args_csv) = match spec.split_once(':') {
+            // Split on `=` so WIT export names (which contain `:`) are
+            // addressable; fall back to `:` for colon-free names (#202).
+            let (name, args_csv) = match spec.split_once('=') {
                 Some((n, a)) => (n.trim(), a),
-                None => (spec.trim(), ""),
+                None => match spec.split_once(':') {
+                    Some((n, a)) => (n.trim(), a),
+                    None => (spec.trim(), ""),
+                },
             };
             let Some(func) = instance.get_func(&mut store, name) else {
                 eprintln!("witness-wasi-harness: scripted invoke {name}: export not found");
