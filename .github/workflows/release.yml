@@ -94,7 +94,7 @@ jobs:
       TARGET: ${{ matrix.target }}
       ARCHIVE_KIND: ${{ matrix.archive }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -183,7 +183,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -393,27 +393,27 @@ jobs:
       # the P3 stream artifacts into the bundle, so the bundle SHA256SUMS (signed
       # below) attests them. Steps below run with working-directory: relay.
       - name: Checkout relay
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           path: relay
       - name: Checkout rules_wasm_component
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: pulseengine/rules_wasm_component
           path: rules_wasm_component
       - name: Checkout rules_verus
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: pulseengine/rules_verus
           path: rules_verus
       - name: Checkout rules_rocq_rust
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: pulseengine/rules_rocq_rust
           path: rules_rocq_rust
       - name: Checkout rules_lean
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: pulseengine/rules_lean
           path: rules_lean

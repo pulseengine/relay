@@ -31,30 +31,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout relay
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: relay
 
       - name: Checkout rules_wasm_component
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: pulseengine/rules_wasm_component
           path: rules_wasm_component
 
       - name: Checkout rules_verus
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: pulseengine/rules_verus
           path: rules_verus
 
       - name: Checkout rules_rocq_rust
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: pulseengine/rules_rocq_rust
           path: rules_rocq_rust
 
       - name: Checkout rules_lean
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: pulseengine/rules_lean
           path: rules_lean

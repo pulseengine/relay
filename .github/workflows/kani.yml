@@ -53,7 +53,7 @@ jobs:
           - relay-sec
           - relay-bus
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Kani verify ${{ matrix.engine }}
         uses: model-checking/kani-github-action@v1
         with:
