@@ -164,7 +164,7 @@ jobs:
           cd staging && 7z a "../${ARCHIVE}" . && cd ..
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
@@ -188,7 +188,7 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -284,7 +284,7 @@ jobs:
       # Consumers verify with `gh attestation verify <file> --repo
       # pulseengine/relay`.
       - name: Generate SLSA build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             release-assets/*.tar.gz
