@@ -1,0 +1,41 @@
+artifacts:
+  - id: FV-RELAY-SUPPLY-002
+    type: sw-verification
+    title: "First github-actions Dependabot round triaged; pin-truthfulness invariant enforced (v1.79)"
+    status: implemented
+    description: >
+      Further verifies SWREQ-RELAY-SUPPLY-P01 by exercising the Dependabot
+      mechanism it mandates. The github-actions ecosystem added in v1.78 opened
+      its first round of three bump PRs; each was triaged (measure-don't-guess)
+      rather than auto-accepted:
+
+        - #207 actions/checkout v5->v6        : ACCEPTED — first-party, tag form,
+                                                exercised by every PR job; merged green.
+        - #211 actions/upload-artifact v4->v7 : ACCEPTED — its PR-tested consumers
+                                                (llvm-cov, verification-gate) green;
+                                                merged green.
+        - #209 setup-bazel 0.14.0->0.19.0     : REJECTED — Dependabot pinned
+                                                release.yml to 96e74558, which is
+                                                10 commits AHEAD of the 0.19.0 tag
+                                                (commit c5acdfb2) and carries an
+                                                unrelated message, while leaving the
+                                                comment '# v0.14.0 pinned'. A pin
+                                                whose SHA does not match its claimed
+                                                version breaks SUPPLY-P01's
+                                                auditability invariant on the signing
+                                                path; closed with evidence.
+
+      ORACLE: for every SHA-pinned third-party action in .github/workflows/, the
+      pinned commit resolves to the tag named in its trailing comment
+      (gh api .../git/refs/tags/<v> dereferenced == pinned SHA). The setup-bazel
+      bump failed this check (ahead/10) and was rejected; the merged bumps
+      (checkout, upload-artifact) use version tags whose CI passed on the merge
+      commit. Main CI green post-merge.
+    tags: [verification, relay, ci, supply-chain, security, dependabot, "v1.79"]
+    fields:
+      method: automated-test
+      steps:
+        - run: "gh api repos/bazel-contrib/setup-bazel/compare/c5acdfb2...96e74558 -q .status  # => 'ahead' (NOT identical) — why #209 was rejected"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-SUPPLY-P01
