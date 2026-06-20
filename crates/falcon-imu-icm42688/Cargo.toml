@@ -13,6 +13,12 @@ crate-type = ["rlib"]
 
 [dependencies]
 falcon-core = { path = "../falcon-core" }
+# The hardware async path (Icm42688Spi) targets embedded-hal-async per the HAL
+# contract with jess (relay#214 / jess#62): jess delivers the RT1176 SpiDevice
+# impl (DMA + completion-IRQ), this driver decodes above it. embedded-hal is
+# named for the SpiDevice error/ErrorType bounds. (cargo-only crate — no bazel.)
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
 
 [lints]
 workspace = true

@@ -1,0 +1,32 @@
+artifacts:
+  - id: SWREQ-RELAY-HAL-P02
+    type: sw-req
+    title: "HAL-P02 — falcon-imu-icm42688 anchors on embedded-hal-async SpiDevice; the verified decode is shared by both transports"
+    status: implemented
+    description: >
+      The reference IMU driver (falcon-imu-icm42688) shall target the standard
+      embedded-hal-async SpiDevice for its hardware bus (relay#214 / jess#62
+      DD-016): jess delivers the i.MX RT1176 SpiDevice impl (LPSPI + DMA +
+      completion-IRQ), this driver decodes above it. The driver shall provide an
+      async hardware path (Icm42688Spi<S: SpiDevice>) alongside the existing sync
+      sim path (Icm42688<B: RegBus>, kept for SimBackend/ImuDriver compat).
+
+      The register decode (12-byte big-endian ACCEL+GYRO block -> SI ImuSample)
+      shall be a single pure sync function `decode_block` used by BOTH transports
+      — so the verifiable protocol body lives once in relay above the seam, and
+      sim vs silicon differ ONLY in the transport. The async path shall be
+      fallible: a transport error returns S::Error (the per-device health source
+      the estimator votes on).
+    tags: [relay, relay-hal, falcon-imu-icm42688, embedded-hal-async, spidevice, "v1.82", jess-62]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        The async SpiDevice path (Icm42688Spi::read_sample) and the sync RegBus
+        path (Icm42688::read_sample) decode an identical 12-byte block to a
+        byte-identical ImuSample (shared decode_block); a transport error on the
+        async path propagates as Err; the existing sync tests still pass.
+        cargo-only crate (no bazel); embedded-hal-async 1.0.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

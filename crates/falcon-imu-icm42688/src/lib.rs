@@ -30,6 +30,7 @@
 
 #![no_std]
 
+use embedded_hal_async::spi::{Operation, SpiDevice};
 use falcon_core::{ImuDriver, ImuSample};
 
 /// A minimal, dependency-free register bus: the thin contract your board's SPI
@@ -105,20 +106,7 @@ impl<B: RegBus> Icm42688<B> {
     pub fn read_sample(&mut self) -> ImuSample {
         let mut raw = [0u8; 12];
         self.bus.read_burst(REG_ACCEL_DATA_X1, &mut raw);
-        // big-endian i16 pairs: AX AY AZ GX GY GZ
-        let be = |hi: u8, lo: u8| ((hi as i16) << 8 | lo as i16) as f32;
-        let accel = [
-            be(raw[0], raw[1]) * self.accel_scale,
-            be(raw[2], raw[3]) * self.accel_scale,
-            be(raw[4], raw[5]) * self.accel_scale,
-        ];
-        let gyro = [
-            be(raw[6], raw[7]) * self.gyro_scale,
-            be(raw[8], raw[9]) * self.gyro_scale,
-            be(raw[10], raw[11]) * self.gyro_scale,
-        ];
-        // NB: identity axis remap. Real board mounting needs a 3×3 here.
-        ImuSample { accel, gyro }
+        decode_block(&raw, self.accel_scale, self.gyro_scale)
     }
 
     /// Consume the driver, returning the bus (for shutdown / re-use).
@@ -130,6 +118,77 @@ impl<B: RegBus> Icm42688<B> {
 impl<B: RegBus> ImuDriver for Icm42688<B> {
     fn read(&mut self) -> ImuSample {
         self.read_sample()
+    }
+}
+
+/// Pure, synchronous decode of the 12-byte ACCEL+GYRO burst (big-endian i16
+/// pairs `AX AY AZ GX GY GZ`) into an SI body-frame [`ImuSample`].
+///
+/// This is the **verifiable driver body** — it stays in relay above *both* bus
+/// transports (the sync [`RegBus`] sim path and the async [`SpiDevice`] hardware
+/// path call it), so the protocol knowledge is decoded once and the only thing
+/// that differs between sim and silicon is the transport (jess#62 / relay#214).
+///
+/// NB: identity axis remap — a real board's mounting needs a 3×3 here (the
+/// calibration jess supplies per board).
+pub fn decode_block(raw: &[u8; 12], accel_scale: f32, gyro_scale: f32) -> ImuSample {
+    let be = |hi: u8, lo: u8| ((hi as i16) << 8 | lo as i16) as f32;
+    let accel = [
+        be(raw[0], raw[1]) * accel_scale,
+        be(raw[2], raw[3]) * accel_scale,
+        be(raw[4], raw[5]) * accel_scale,
+    ];
+    let gyro = [
+        be(raw[6], raw[7]) * gyro_scale,
+        be(raw[8], raw[9]) * gyro_scale,
+        be(raw[10], raw[11]) * gyro_scale,
+    ];
+    ImuSample { accel, gyro }
+}
+
+/// The ICM-42688-P over an **`embedded-hal-async` `SpiDevice`** — the hardware
+/// path (jess#62 / relay#214). The bus transport is async (jess binds it to the
+/// i.MX RT1176 LPSPI with DMA + completion-IRQ → wake); the decode is the same
+/// pure [`decode_block`] the sim path uses. Fallible by construction — a wedged
+/// bus returns `S::Error`, which the caller folds into the per-device health the
+/// estimator votes on.
+pub struct Icm42688Spi<S> {
+    spi: S,
+    accel_scale: f32,
+    gyro_scale: f32,
+}
+
+impl<S: SpiDevice> Icm42688Spi<S> {
+    /// Wrap an `SpiDevice` at the ICM-42688-P's ±16 g / ±2000 dps full scale
+    /// (matching the configuration the register init writes).
+    pub fn new(spi: S) -> Self {
+        // Same datasheet sensitivities as the sync path: ±16 g → 2048 LSB/g,
+        // ±2000 dps → 16.4 LSB/dps. Identical scales mean both transports decode
+        // a given byte block to a byte-identical sample (tested).
+        Self {
+            spi,
+            accel_scale: GRAVITY / 2048.0,
+            gyro_scale: (PI / 180.0) / 16.4,
+        }
+    }
+
+    /// Async burst-read of the ACCEL+GYRO block, then [`decode_block`]. The SPI
+    /// register read is one transaction: write `reg | 0x80` (the read bit), then
+    /// read the 12-byte auto-incrementing block.
+    pub async fn read_sample(&mut self) -> Result<ImuSample, S::Error> {
+        let mut raw = [0u8; 12];
+        self.spi
+            .transaction(&mut [
+                Operation::Write(&[REG_ACCEL_DATA_X1 | 0x80]),
+                Operation::Read(&mut raw),
+            ])
+            .await?;
+        Ok(decode_block(&raw, self.accel_scale, self.gyro_scale))
+    }
+
+    /// Consume the driver, returning the `SpiDevice`.
+    pub fn release(self) -> S {
+        self.spi
     }
 }
 
@@ -238,5 +297,92 @@ mod tests {
         }
         let s = use_driver(&mut imu);
         assert!((s.accel[2] - 9.80665).abs() < 1e-3);
+    }
+
+    // ── async hardware path (embedded-hal-async SpiDevice) ───────────────────
+
+    /// A mock `SpiDevice` that returns a canned 12-byte block on the Read leg of
+    /// a transaction (the Write leg is the register address — ignored here).
+    struct MockSpi {
+        data: [u8; 12],
+    }
+
+    #[derive(Debug)]
+    struct MockSpiError;
+    impl embedded_hal::spi::Error for MockSpiError {
+        fn kind(&self) -> embedded_hal::spi::ErrorKind {
+            embedded_hal::spi::ErrorKind::Other
+        }
+    }
+    impl embedded_hal::spi::ErrorType for MockSpi {
+        type Error = MockSpiError;
+    }
+    impl SpiDevice for MockSpi {
+        async fn transaction(
+            &mut self,
+            operations: &mut [Operation<'_, u8>],
+        ) -> Result<(), MockSpiError> {
+            for op in operations {
+                if let Operation::Read(buf) = op {
+                    let n = buf.len().min(12);
+                    buf[..n].copy_from_slice(&self.data[..n]);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Drive a future that completes synchronously (the mock never pends) — a
+    /// no_std poll loop, no executor.
+    fn block_on<F: core::future::Future>(fut: F) -> F::Output {
+        use core::task::{Context, Poll, Waker};
+        let mut fut = core::pin::pin!(fut);
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    /// The async SpiDevice path decodes a byte block to the SAME sample the sync
+    /// RegBus path does — the re-target preserves the verified decode; only the
+    /// transport differs (jess#62 / relay#214).
+    #[test]
+    fn async_spi_path_matches_sync_decode() {
+        // −1 g on AZ, +2000-dps-ish on GX, arbitrary on the rest.
+        let data = [0x10, 0x00, 0xF0, 0x00, 0xF8, 0x00, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB];
+
+        // sync RegBus path
+        let mut sync_imu = Icm42688::new(MockBus::new(WHO_AM_I_VALUE, data));
+        sync_imu.init().unwrap();
+        let sync_sample = sync_imu.read_sample();
+
+        // async SpiDevice path
+        let mut spi_imu = Icm42688Spi::new(MockSpi { data });
+        let async_sample = block_on(spi_imu.read_sample()).unwrap();
+
+        assert_eq!(sync_sample.accel, async_sample.accel, "accel must match");
+        assert_eq!(sync_sample.gyro, async_sample.gyro, "gyro must match");
+    }
+
+    /// The async path is fallible: a transport error propagates as `Err`.
+    #[test]
+    fn async_spi_path_propagates_transport_error() {
+        struct FailSpi;
+        impl embedded_hal::spi::ErrorType for FailSpi {
+            type Error = MockSpiError;
+        }
+        impl SpiDevice for FailSpi {
+            async fn transaction(
+                &mut self,
+                _: &mut [Operation<'_, u8>],
+            ) -> Result<(), MockSpiError> {
+                Err(MockSpiError)
+            }
+        }
+        let mut imu = Icm42688Spi::new(FailSpi);
+        assert!(block_on(imu.read_sample()).is_err());
     }
 }
