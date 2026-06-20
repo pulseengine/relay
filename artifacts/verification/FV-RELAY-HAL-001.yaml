@@ -1,0 +1,32 @@
+artifacts:
+  - id: FV-RELAY-HAL-001
+    type: sw-verification
+    title: "relay-hal Presence/health enumeration — Kani totality + bounds (v1 of the HAL seam)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-HAL-P01. Kani bounded-model-checks the relay-owned
+      Presence device-set logic (the seam's only non-trivial sync logic in v1;
+      PwmOut/AdcIn are async interfaces whose decode/bounds live in the driver
+      crates falcon-esc-dshot/baromag).
+
+      Kani harnesses (crates/relay-hal/src/kani_proofs.rs, plain sibling per the
+      kani-in-plain rule):
+        - HAL-K01 push_bounded_and_total: an arbitrary sequence of pushes is
+          total (no panic) and count stays in [0, N]; push returns false exactly
+          when full and does not grow past N.
+        - HAL-K02 get_in_range_only: get(i) is Some iff i < count; any index
+          (incl. >= N) returns None, never panics / never OOB.
+        - HAL-K03 healthy_set_bounded: count_healthy(kind) <= count for any kind
+          and any device set (the voter's selectable set can never exceed what
+          the host enumerated present).
+      ORACLE: `cargo kani -p relay-hal` reports VERIFICATION SUCCESSFUL for all
+      three; `cargo test -p relay-hal` green.
+    tags: [verification, relay, relay-hal, kani, presence, "v1.81", jess-62]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-hal"
+        - run: "cargo kani -p relay-hal"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-HAL-P01

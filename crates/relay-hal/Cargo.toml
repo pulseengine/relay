@@ -1,0 +1,19 @@
+[package]
+name = "relay-hal"
+description = "relay-hal — the no_std peripheral-abstraction seam (relay owns the abstraction; jess binds it to silicon)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+# no_std + no_alloc: the seam runs inside the verified flight cores (jess T1
+# RT1176-M7 / T2 RT1176-M4 / T3 STM32F100-M3) as wasm->synth, and on the host.
+# SPI/I2C transport anchors on embedded-hal-async (added once wired into the
+# bazel crate_universe — relay#214); v1 ships the relay-owned customs.
+
+[lints]
+workspace = true

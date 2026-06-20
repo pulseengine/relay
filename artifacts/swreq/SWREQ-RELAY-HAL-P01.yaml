@@ -1,0 +1,44 @@
+artifacts:
+  - id: SWREQ-RELAY-HAL-P01
+    type: sw-req
+    title: "HAL-P01 — relay-hal peripheral-abstraction seam: per-instance + enumerable + fallible, with a Presence/health device set for the voter"
+    status: implemented
+    description: >
+      relay owns the hardware ABSTRACTION (jess#62 / relay#214 contract; jess
+      DD-014/015/018). The relay-hal crate is the no_std peripheral seam:
+      portable, verification-carrying, anchored on embedded-hal-async for the
+      bus transport (SPI SpiDevice / I2C I2c — wired once the crate_universe dep
+      lands), with three relay-OWNED pieces the standard has no concept of.
+
+      This requirement (v1) covers the relay-owned core — the part with the most
+      design value and no embedded-hal-async equivalent:
+
+      1. A `Presence` device-set descriptor: fixed-capacity (no_alloc), holding
+         per-device {isolated-bus instance, part-id, kind, health}. This is how
+         board-variance (DD-013) and the estimator's voter device set (DD-014,
+         triple-IMU/double-baro each on its own isolated bus) are expressed —
+         per-instance + ENUMERABLE, never multiplexed. Decode + voting stay in
+         relay above the seam; the host only enumerates presence + raw health.
+
+      2. `PwmOut` — async actuator-frame sink (DShot frame for T1/T2 via FlexIO,
+         duty for T3's failsafe PWM). Frame encoding stays in the driver crate.
+
+      3. `AdcIn` — async per-rail monitor read (INA228 V/I). MONITOR-ONLY: power
+         failover is hardware-OR (DD-014), no failover logic crosses the seam.
+
+      Fallibility is load-bearing: a wedged isolated bus surfaces as a transport
+      error → the per-device `health` the voter selects on. The contract is
+      async (DD-018: jess is wasm-async on all three cores).
+    tags: [relay, relay-hal, hal, seam, embedded-hal-async, presence, health, no_std, "v1.81", jess-62]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        `Presence<N>` is total + bounded — push past capacity returns false and
+        never exceeds N; get(i) is Some iff i<count, out-of-range is None (no
+        panic); count_healthy(kind) <= count for any kind (the voter set is
+        bounded by what is present). The PwmOut/AdcIn traits compile as async,
+        per-instance, fallible. no_std, forbid(unsafe_code).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008
