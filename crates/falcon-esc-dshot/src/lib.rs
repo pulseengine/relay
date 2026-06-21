@@ -153,6 +153,43 @@ impl<P: relay_hal::PwmOut> DShotEsc<P> {
     }
 }
 
+/// A battery monitor reading its raw per-rail count over a relay-hal
+/// [`AdcIn`](relay_hal::AdcIn) sink — the hardware path (relay#214 / jess#62).
+/// jess binds the i.MX RT1176 LPADC / INA228 under `AdcIn`; the voltage +
+/// classification ([`BatteryMonitor`]) stays the pure verified body above the
+/// seam. **Monitor-only** — power failover is hardware-OR'd (DD-014), so no
+/// failover logic crosses this seam. Fallible: an ADC error returns `A::Error`.
+pub struct BatteryAdc<A> {
+    adc: A,
+    channel: u8,
+    monitor: BatteryMonitor,
+}
+
+impl<A: relay_hal::AdcIn> BatteryAdc<A> {
+    /// Wrap an `AdcIn` reading rail `channel`, with the given monitor calibration.
+    pub fn new(adc: A, channel: u8, monitor: BatteryMonitor) -> Self {
+        Self { adc, channel, monitor }
+    }
+
+    /// Async read of the battery state: pull the raw count via `AdcIn`, then
+    /// classify it with the same verified [`BatteryMonitor::classify`].
+    pub async fn read_state(&mut self) -> Result<BatteryState, A::Error> {
+        let count = self.adc.read(self.channel).await?;
+        Ok(self.monitor.classify(count))
+    }
+
+    /// Async read of the battery voltage (volts).
+    pub async fn read_voltage(&mut self) -> Result<f32, A::Error> {
+        let count = self.adc.read(self.channel).await?;
+        Ok(self.monitor.voltage(count))
+    }
+
+    /// Consume the monitor, returning the `AdcIn` sink.
+    pub fn release(self) -> A {
+        self.adc
+    }
+}
+
 #[cfg(kani)]
 mod kani_proofs;
 
@@ -272,5 +309,62 @@ mod tests {
     fn esc_send_propagates_sink_error() {
         let mut esc = DShotEsc::new(MockPwm { last: None, fail: true });
         assert_eq!(block_on(esc.send(&[0.0; 4])), Err(MockPwmError));
+    }
+
+    // ── async battery path (relay-hal AdcIn) + inter-core carrier ────────────
+
+    /// A mock `AdcIn` returning a fixed count (or failing).
+    struct MockAdc {
+        count: u16,
+        fail: bool,
+    }
+    impl relay_hal::AdcIn for MockAdc {
+        type Error = MockPwmError;
+        async fn read(&mut self, _channel: u8) -> Result<u16, MockPwmError> {
+            if self.fail {
+                Err(MockPwmError)
+            } else {
+                Ok(self.count)
+            }
+        }
+    }
+
+    /// `BatteryAdc::read_state` over an `AdcIn` returning count C equals the sync
+    /// `BatteryMonitor::classify(C)`, and `read_voltage` equals `voltage(C)` —
+    /// the ADC re-target keeps the verified classify; only the transport differs.
+    #[test]
+    fn battery_adc_matches_sync_classify() {
+        let monitor = BatteryMonitor::new(0.016, 14.0, 13.2);
+        for count in [1000_u16, 860, 800, 0] {
+            let mut bat = BatteryAdc::new(MockAdc { count, fail: false }, 3, monitor);
+            assert_eq!(block_on(bat.read_state()).unwrap(), monitor.classify(count));
+            let mut bat2 = BatteryAdc::new(MockAdc { count, fail: false }, 3, monitor);
+            let v = block_on(bat2.read_voltage()).unwrap();
+            assert!((v - monitor.voltage(count)).abs() < 1e-6);
+        }
+    }
+
+    /// The async battery path is fallible: an ADC error propagates as Err.
+    #[test]
+    fn battery_adc_propagates_error() {
+        let monitor = BatteryMonitor::new(0.016, 14.0, 13.2);
+        let mut bat = BatteryAdc::new(MockAdc { count: 0, fail: true }, 3, monitor);
+        assert_eq!(block_on(bat.read_state()), Err(MockPwmError));
+    }
+
+    /// relay#177 — a BatteryState (the HAL output) rides the relay-bus ring
+    /// across the M4→M7 seam, byte-identical + FIFO.
+    #[test]
+    fn battery_state_rides_the_intercore_ring() {
+        use relay_bus::{MessageTransport, SpscRing};
+        let monitor = BatteryMonitor::new(0.016, 14.0, 13.2);
+        let s0 = monitor.classify(1000); // Ok
+        let s1 = monitor.classify(800); // Critical
+        let mut ring: SpscRing<BatteryState, 2> = SpscRing::new();
+        assert!(ring.push(s0));
+        assert!(ring.push(s1));
+        assert_eq!(ring.pop(), Some(s0));
+        assert_eq!(ring.pop(), Some(s1));
+        assert!(ring.pop().is_none());
     }
 }
