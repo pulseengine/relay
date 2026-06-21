@@ -17,8 +17,10 @@ artifacts:
     tags: [verification, relay, relay-hal, falcon-imu-icm42688, embedded-hal-async, "v1.82"]
     fields:
       method: automated-test
+      # Test-level evidence: named tests per requirement clause (pulseengine.eu#89).
       steps:
-        - run: "cargo test -p falcon-imu-icm42688"
+        - run: "cargo test -p falcon-imu-icm42688 async_spi_path_matches_sync_decode"
+        - run: "cargo test -p falcon-imu-icm42688 async_spi_path_propagates_transport_error"
     links:
       - type: verifies
         target: SWREQ-RELAY-HAL-P02

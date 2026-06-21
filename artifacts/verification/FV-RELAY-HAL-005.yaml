@@ -17,8 +17,17 @@ artifacts:
     tags: [verification, relay, relay-hal, falcon-esc-dshot, adcin, "v1.85", issue-177]
     fields:
       method: automated-test
+      # Test-level evidence: each step names the SPECIFIC test that proves a
+      # requirement clause, not a crate-wide `cargo test`. The verification gate
+      # runs each named test, so the requirement<->test map is mechanical, not
+      # prose. (Test-level-traceability practice — pulseengine.eu#89.)
       steps:
-        - run: "cargo test -p falcon-esc-dshot"
+        # clause 1: async AdcIn path == sync BatteryMonitor classify + voltage
+        - run: "cargo test -p falcon-esc-dshot battery_adc_matches_sync_classify"
+        # clause: the async path is fallible (transport error -> health source)
+        - run: "cargo test -p falcon-esc-dshot battery_adc_propagates_error"
+        # clause 2 (relay#177): a BatteryState rides the inter-core ring FIFO
+        - run: "cargo test -p falcon-esc-dshot battery_state_rides_the_intercore_ring"
     links:
       - type: verifies
         target: SWREQ-RELAY-HAL-P05

@@ -120,6 +120,37 @@ def rivet_get(artifact_id: str) -> dict[str, Any]:
     return json.loads(out)
 
 
+def cargo_test_names_a_filter(cmd: str) -> bool:
+    """True if `cmd` is a `cargo test ...` that names a SPECIFIC test filter (a
+    bare token that isn't a flag, a `-p <pkg>` package, or a `--` harness arg).
+    Used to enforce test-level traceability: a step naming a test must run it."""
+    import shlex
+    try:
+        toks = shlex.split(cmd)
+    except ValueError:
+        return False
+    if toks[:2] != ["cargo", "test"]:
+        return False
+    i = 2
+    while i < len(toks):
+        t = toks[i]
+        if t == "--":
+            return False  # everything after -- is harness flags, not a filter
+        if t in ("-p", "--package", "--manifest-path", "--features"):
+            i += 2
+            continue
+        if t.startswith("-"):
+            i += 1
+            continue
+        return True  # a bare non-flag token = a test-name filter
+    return False
+
+
+def cargo_tests_passed(output: str) -> int:
+    """Sum of `test result: ok. N passed` across all test binaries in `output`."""
+    return sum(int(m) for m in re.findall(r"test result: ok\. (\d+) passed", output))
+
+
 def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]]:
     aid = artifact["id"]
     steps = artifact.get("fields", {}).get("steps") or []
@@ -139,12 +170,25 @@ def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]
             results.append({"cmd": cmd, "pass": True, "skipped": False, "rc": 0, "duration": 0.0})
             continue
         start = time.monotonic()
-        rc = subprocess.call(cmd, shell=True)
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        rc = proc.returncode
         duration = time.monotonic() - start
         passed = rc == 0
+        note = ""
+        # Test-level traceability: a step that NAMES a specific test must actually
+        # run it. `cargo test -p X typo` exits 0 with "0 passed" (filter matched
+        # nothing) — that would silently mark the requirement verified. Require
+        # >=1 test to have run (pulseengine.eu#89).
+        if passed and cargo_test_names_a_filter(cmd) and cargo_tests_passed(proc.stdout) == 0:
+            passed = False
+            note = " — named test ran 0 (renamed/removed? evidence drift)"
         artifact_pass = artifact_pass and passed
-        status = "PASS" if passed else f"FAIL (rc={rc})"
-        print(f"  [{status:>14}] ({duration:6.2f}s) {aid}: {cmd}")
+        status = "PASS" if passed else (f"FAIL (rc={rc})" if rc != 0 else "FAIL (0 tests)")
+        print(f"  [{status:>14}] ({duration:6.2f}s) {aid}: {cmd}{note}")
+        if not passed and (proc.stdout or proc.stderr):
+            tail = (proc.stdout + proc.stderr).strip().splitlines()[-15:]
+            for line in tail:
+                print(f"        | {line}")
         results.append({"cmd": cmd, "pass": passed, "skipped": False, "rc": rc, "duration": duration})
     if not steps:
         print(f"  [   skip-no-steps] {aid}: (no steps defined)")

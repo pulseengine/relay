@@ -19,8 +19,12 @@ artifacts:
     tags: [verification, relay, relay-hal, falcon-baromag, embedded-hal-async, relay-bus, "v1.83", issue-177]
     fields:
       method: automated-test
+      # Test-level evidence: named tests per requirement clause (pulseengine.eu#89).
       steps:
-        - run: "cargo test -p falcon-baromag"
+        - run: "cargo test -p falcon-baromag mag_async_i2c_matches_sync_decode"
+        - run: "cargo test -p falcon-baromag baro_async_i2c_matches_sync_decode"
+        - run: "cargo test -p falcon-baromag baromag_async_propagates_transport_error"
+        - run: "cargo test -p falcon-baromag mag_sample_rides_the_intercore_ring"
     links:
       - type: verifies
         target: SWREQ-RELAY-HAL-P03
