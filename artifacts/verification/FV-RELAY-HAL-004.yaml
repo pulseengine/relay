@@ -1,0 +1,27 @@
+artifacts:
+  - id: FV-RELAY-HAL-004
+    type: sw-verification
+    title: "GNSS embedded-io-async + ESC relay-hal PwmOut + NAV-PVT inter-core carrier (v1.84)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-HAL-P04. Unit tests:
+        - gnss_async_read_matches_sync_parse (falcon-gnss-ubx): UbxReader over a
+          mock embedded-io-async Read and the sync UbxParser::push loop decode an
+          identical frame to a byte-identical NavPvt — the stream re-target keeps
+          the verified parser; only the transport differs.
+        - gnss_async_propagates_read_error: a failing Read yields Err.
+        - nav_pvt_rides_the_intercore_ring (relay#177): a decoded NavPvt pushed to
+          a relay-bus SpscRing pops byte-identical + FIFO.
+        - esc_send_emits_dshot_frames (falcon-esc-dshot): DShotEsc::send over a
+          mock relay-hal PwmOut emits exactly dshot_from_unit(cmd) per motor.
+        - esc_send_propagates_sink_error: a failing PwmOut yields Err.
+        - existing sync + Kani tests unchanged.
+      ORACLE: `cargo test -p falcon-gnss-ubx -p falcon-esc-dshot` green; clippy clean.
+    tags: [verification, relay, relay-hal, falcon-gnss-ubx, falcon-esc-dshot, embedded-io-async, "v1.84", issue-177]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-gnss-ubx -p falcon-esc-dshot"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-HAL-P04

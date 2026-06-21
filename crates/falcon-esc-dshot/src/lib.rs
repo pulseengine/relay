@@ -119,6 +119,40 @@ impl BatteryMonitor {
     }
 }
 
+/// A 4-motor DShot ESC bank over a **relay-hal [`PwmOut`](relay_hal::PwmOut)**
+/// frame sink — the hardware path (relay#214 / jess#62). The frame *encoding*
+/// ([`dshot_from_unit`], CRC4, throttle saturation) is the pure verified body in
+/// this crate; this just maps the mixer's `[0,1]` commands to frames and emits
+/// them. jess binds FlexIO+eDMA under `PwmOut`. Fallible: a sink error returns
+/// `P::Error`.
+pub struct DShotEsc<P> {
+    pwm: P,
+}
+
+impl<P: relay_hal::PwmOut> DShotEsc<P> {
+    /// Wrap a `PwmOut` actuator-frame sink.
+    pub fn new(pwm: P) -> Self {
+        Self { pwm }
+    }
+
+    /// Encode four mixer `[0,1]` commands as DShot frames and emit them — one
+    /// frame per motor channel.
+    pub async fn send(&mut self, motors: &[f32; 4]) -> Result<(), P::Error> {
+        let frames = [
+            dshot_from_unit(motors[0]),
+            dshot_from_unit(motors[1]),
+            dshot_from_unit(motors[2]),
+            dshot_from_unit(motors[3]),
+        ];
+        self.pwm.send(&frames).await
+    }
+
+    /// Consume the bank, returning the `PwmOut` sink.
+    pub fn release(self) -> P {
+        self.pwm
+    }
+}
+
 #[cfg(kani)]
 mod kani_proofs;
 
@@ -177,5 +211,66 @@ mod tests {
         assert_eq!(bm.classify(1000), BatteryState::Ok); // 16.0 V
         assert_eq!(bm.classify(860), BatteryState::Low); // 13.76 V
         assert_eq!(bm.classify(800), BatteryState::Critical); // 12.8 V
+    }
+
+    // ── async actuator path (relay-hal PwmOut sink) ──────────────────────────
+
+    /// A mock `PwmOut` recording the last frame batch it was sent (or failing).
+    struct MockPwm {
+        last: Option<[u16; 4]>,
+        fail: bool,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct MockPwmError;
+    impl relay_hal::PwmOut for MockPwm {
+        type Error = MockPwmError;
+        async fn send(&mut self, frames: &[u16]) -> Result<(), MockPwmError> {
+            if self.fail {
+                return Err(MockPwmError);
+            }
+            let mut f = [0u16; 4];
+            for (i, &x) in frames.iter().take(4).enumerate() {
+                f[i] = x;
+            }
+            self.last = Some(f);
+            Ok(())
+        }
+    }
+
+    fn block_on<F: core::future::Future>(fut: F) -> F::Output {
+        use core::task::{Context, Poll, Waker};
+        let mut fut = core::pin::pin!(fut);
+        let mut cx = Context::from_waker(Waker::noop());
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    /// `DShotEsc::send` emits exactly the frames `dshot_from_unit` produces for
+    /// the same commands — the actuator re-target keeps the verified encoding;
+    /// only the transport (the PwmOut sink) differs.
+    #[test]
+    fn esc_send_emits_dshot_frames() {
+        let motors = [0.0_f32, 0.25, 0.5, 1.0];
+        let mut esc = DShotEsc::new(MockPwm { last: None, fail: false });
+        block_on(esc.send(&motors)).unwrap();
+        let sent = esc.release().last.expect("a frame batch was sent");
+        let expected = [
+            dshot_from_unit(0.0),
+            dshot_from_unit(0.25),
+            dshot_from_unit(0.5),
+            dshot_from_unit(1.0),
+        ];
+        assert_eq!(sent, expected);
+    }
+
+    /// The async path is fallible: a sink error propagates as Err.
+    #[test]
+    fn esc_send_propagates_sink_error() {
+        let mut esc = DShotEsc::new(MockPwm { last: None, fail: true });
+        assert_eq!(block_on(esc.send(&[0.0; 4])), Err(MockPwmError));
     }
 }
