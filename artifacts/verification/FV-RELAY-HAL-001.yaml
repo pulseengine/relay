@@ -24,8 +24,12 @@ artifacts:
     tags: [verification, relay, relay-hal, kani, presence, "v1.81", jess-62]
     fields:
       method: formal-verification
+      # Test-level evidence: each step names the SPECIFIC test/harness proving a
+      # requirement clause, not a crate-wide `cargo test` (pulseengine.eu#89).
       steps:
-        - run: "cargo test -p relay-hal"
+        - run: "cargo test -p relay-hal push_fills_then_refuses"
+        - run: "cargo test -p relay-hal get_only_in_present_range"
+        - run: "cargo test -p relay-hal healthy_set_is_the_voter_set"
         - run: "cargo kani -p relay-hal"
     links:
       - type: verifies

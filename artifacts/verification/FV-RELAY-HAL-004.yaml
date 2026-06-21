@@ -20,8 +20,13 @@ artifacts:
     tags: [verification, relay, relay-hal, falcon-gnss-ubx, falcon-esc-dshot, embedded-io-async, "v1.84", issue-177]
     fields:
       method: automated-test
+      # Test-level evidence: named tests per requirement clause (pulseengine.eu#89).
       steps:
-        - run: "cargo test -p falcon-gnss-ubx -p falcon-esc-dshot"
+        - run: "cargo test -p falcon-gnss-ubx gnss_async_read_matches_sync_parse"
+        - run: "cargo test -p falcon-gnss-ubx gnss_async_propagates_read_error"
+        - run: "cargo test -p falcon-gnss-ubx nav_pvt_rides_the_intercore_ring"
+        - run: "cargo test -p falcon-esc-dshot esc_send_emits_dshot_frames"
+        - run: "cargo test -p falcon-esc-dshot esc_send_propagates_sink_error"
     links:
       - type: verifies
         target: SWREQ-RELAY-HAL-P04
