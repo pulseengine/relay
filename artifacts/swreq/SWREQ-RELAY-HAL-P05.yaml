@@ -1,0 +1,34 @@
+artifacts:
+  - id: SWREQ-RELAY-HAL-P05
+    type: sw-req
+    title: "HAL-P05 — battery monitor anchors on relay-hal AdcIn (completes the ADC transport shape); BatteryState rides the carrier"
+    status: implemented
+    description: >
+      Completes the driver-retarget arc (relay#214 / jess#62): the battery
+      monitor is the last driver, and AdcIn the last relay-hal custom trait, not
+      yet consumed by a real driver. With this slice the HAL seam has a real
+      async-anchored driver for EVERY transport shape — register (SPI/I2c: IMU,
+      baro, mag), stream (embedded-io-async: GNSS), actuator (PwmOut: ESC), and
+      now ADC (AdcIn: battery).
+
+      1. falcon-esc-dshot shall provide BatteryAdc<A: relay_hal::AdcIn>: an async
+         path that reads the raw per-rail count via AdcIn (jess binds the RT1176
+         LPADC / INA228) and classifies it with the SAME pure BatteryMonitor the
+         existing sync path uses (voltage + classify stay the verified body above
+         the seam). Monitor-only — power failover is hardware-OR (DD-014), no
+         failover logic crosses the seam. Fallible: an ADC error returns A::Error.
+
+      2. A BatteryState (the HAL output) shall ride the relay-bus MessageTransport
+         ring across the M4->M7 seam byte-identical + FIFO (relay#177).
+    tags: [relay, relay-hal, falcon-esc-dshot, adcin, battery, relay-bus, "v1.85", jess-62, issue-177]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        BatteryAdc::read_state over a mock AdcIn returning count C equals
+        BatteryMonitor::classify(C) (and read_voltage equals voltage(C)); an ADC
+        error propagates as Err. A BatteryState pushed to an SpscRing pops
+        byte-identical + FIFO. cargo test green; existing tests unchanged.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

@@ -12,10 +12,17 @@ path = "src/lib.rs"
 crate-type = ["rlib"]
 
 [dependencies]
-# The async ESC bank (DShotEsc) emits frames through the relay-hal PwmOut sink
-# (the v1.81 actuator seam; relay#214 / jess#62) — jess binds FlexIO+eDMA under
-# PwmOut. The DShot frame encoding stays the pure verified body in this crate.
+# The async ESC bank (DShotEsc) emits frames through the relay-hal PwmOut sink,
+# and the async battery monitor (BatteryAdc) reads counts through the relay-hal
+# AdcIn sink (the v1.81 actuator + ADC seams; relay#214 / jess#62) — jess binds
+# FlexIO+eDMA (PwmOut) and the LPADC/INA228 (AdcIn). The DShot frame encoding and
+# the battery voltage/classify stay the pure verified bodies in this crate.
 relay-hal = { path = "../relay-hal" }
+
+[dev-dependencies]
+# The inter-core carrier test (relay#177): a BatteryState rides the verified
+# MessageTransport ring across the M4->M7 seam.
+relay-bus = { path = "../relay-bus" }
 
 [lints]
 workspace = true
