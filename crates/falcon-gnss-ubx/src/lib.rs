@@ -216,6 +216,45 @@ pub fn encode_nav_pvt_frame(payload: &[u8; PVT_LEN], out: &mut [u8; PVT_LEN + 8]
     PVT_LEN + 8
 }
 
+/// Async UBX NAV-PVT reader over an **`embedded-io-async` `Read`** byte source —
+/// the hardware path (relay#214 / jess#62). jess binds the i.MX RT1176 LPUART
+/// (DMA RX) under `Read`; this wraps the SAME pure [`UbxParser`] the sync path
+/// uses, so the verified frame parser lives once above the seam and only the
+/// transport differs. Fallible: a read error returns `R::Error`, the per-device
+/// health source the estimator votes on.
+pub struct UbxReader<R> {
+    rx: R,
+    parser: UbxParser,
+}
+
+impl<R: embedded_io_async::Read> UbxReader<R> {
+    /// Wrap an async byte source.
+    pub fn new(rx: R) -> Self {
+        Self { rx, parser: UbxParser::new() }
+    }
+
+    /// Read bytes until a complete, checksum-valid NAV-PVT frame decodes, then
+    /// return it. Every received byte is fed through the verified parser, so a
+    /// fix mid-buffer is returned immediately (a real GNSS stream is continuous;
+    /// a bounded source must deliver a full frame before it stops yielding).
+    pub async fn read_fix(&mut self) -> Result<NavPvt, R::Error> {
+        let mut buf = [0u8; 64];
+        loop {
+            let n = self.rx.read(&mut buf).await?;
+            for &b in &buf[..n] {
+                if let Some(fix) = self.parser.push(b) {
+                    return Ok(fix);
+                }
+            }
+        }
+    }
+
+    /// Consume the reader, returning the byte source.
+    pub fn release(self) -> R {
+        self.rx
+    }
+}
+
 #[cfg(kani)]
 mod kani_proofs;
 
@@ -297,5 +336,114 @@ mod tests {
             }
         }
         assert!(got.is_some(), "the parser must resync and decode the real frame");
+    }
+
+    // ── async stream path (embedded-io-async Read) + inter-core carrier ──────
+
+    /// A mock `embedded-io-async` Read that yields a byte buffer once, then 0.
+    struct MockRx {
+        data: [u8; 128],
+        len: usize,
+        pos: usize,
+        fail: bool,
+    }
+
+    #[derive(Debug)]
+    struct MockRxError;
+    impl core::fmt::Display for MockRxError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("MockRxError")
+        }
+    }
+    impl core::error::Error for MockRxError {}
+    impl embedded_io::Error for MockRxError {
+        fn kind(&self) -> embedded_io::ErrorKind {
+            embedded_io::ErrorKind::Other
+        }
+    }
+    impl embedded_io::ErrorType for MockRx {
+        type Error = MockRxError;
+    }
+    impl embedded_io_async::Read for MockRx {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, MockRxError> {
+            if self.fail {
+                return Err(MockRxError);
+            }
+            let remaining = self.len - self.pos;
+            let n = remaining.min(buf.len());
+            buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    /// Drive a future that completes synchronously (the mock delivers the whole
+    /// frame in one read, so `read_fix` returns on the first poll).
+    fn block_on<F: core::future::Future>(fut: F) -> F::Output {
+        use core::task::{Context, Poll, Waker};
+        let mut fut = core::pin::pin!(fut);
+        let mut cx = Context::from_waker(Waker::noop());
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    fn one_frame() -> ([u8; 128], usize) {
+        let payload = sample_payload();
+        let mut frame = [0u8; PVT_LEN + 8];
+        let n = encode_nav_pvt_frame(&payload, &mut frame);
+        let mut data = [0u8; 128];
+        data[..n].copy_from_slice(&frame[..n]);
+        (data, n)
+    }
+
+    /// The async Read path and the sync push loop decode an identical frame to a
+    /// byte-identical NavPvt — the stream re-target preserves the verified parser.
+    #[test]
+    fn gnss_async_read_matches_sync_parse() {
+        let (data, n) = one_frame();
+        // sync push loop
+        let mut parser = UbxParser::new();
+        let mut sync_fix = None;
+        for &b in &data[..n] {
+            if let Some(p) = parser.push(b) {
+                sync_fix = Some(p);
+            }
+        }
+        let sync_fix = sync_fix.unwrap();
+        // async Read path
+        let mut rdr = UbxReader::new(MockRx { data, len: n, pos: 0, fail: false });
+        let async_fix = block_on(rdr.read_fix()).unwrap();
+        assert_eq!(sync_fix, async_fix);
+    }
+
+    /// The async path is fallible: a read transport error propagates as Err.
+    #[test]
+    fn gnss_async_propagates_read_error() {
+        let mut rdr = UbxReader::new(MockRx { data: [0; 128], len: 0, pos: 0, fail: true });
+        assert!(block_on(rdr.read_fix()).is_err());
+    }
+
+    /// relay#177 — a decoded NAV-PVT fix (a larger HAL payload than MagField)
+    /// rides the relay-bus MessageTransport ring across the M4→M7 seam,
+    /// byte-identical + FIFO.
+    #[test]
+    fn nav_pvt_rides_the_intercore_ring() {
+        use relay_bus::{MessageTransport, SpscRing};
+        let (data, n) = one_frame();
+        let mut parser = UbxParser::new();
+        let mut fix = None;
+        for &b in &data[..n] {
+            if let Some(p) = parser.push(b) {
+                fix = Some(p);
+            }
+        }
+        let fix = fix.unwrap();
+        let mut ring: SpscRing<NavPvt, 2> = SpscRing::new();
+        assert!(ring.push(fix));
+        assert_eq!(ring.pop(), Some(fix));
+        assert!(ring.pop().is_none());
     }
 }

@@ -1,0 +1,39 @@
+artifacts:
+  - id: SWREQ-RELAY-HAL-P04
+    type: sw-req
+    title: "HAL-P04 — GNSS anchors on embedded-io-async, ESC on the relay-hal PwmOut sink; the carrier transports a NAV-PVT fix"
+    status: implemented
+    description: >
+      Completes the driver re-target across the remaining transport shapes
+      (relay#214 / jess#62) and extends the inter-core carrier proof (relay#177):
+
+      1. STREAM transport — falcon-gnss-ubx shall provide an async hardware path
+         (UbxReader<R: embedded_io_async::Read>) that feeds bytes from the async
+         byte source into the SAME pure UbxParser the sync path uses, returning a
+         NAV-PVT fix. jess binds the RT1176 LPUART under embedded-io-async Read.
+         Fallible: a read error returns R::Error.
+
+      2. ACTUATOR transport — falcon-esc-dshot shall provide an async path
+         (DShotEsc<P: relay_hal::PwmOut>) that encodes four mixer [0,1] commands
+         with the SAME pure dshot_from_unit and emits them via the relay-hal
+         PwmOut frame sink (the v1.81 actuator seam; jess binds FlexIO+eDMA).
+         The frame encoding stays the pure verified body above the seam.
+
+      3. CARRIER — a decoded NAV-PVT fix (a larger HAL payload than MagField)
+         shall ride the relay-bus MessageTransport ring across the M4->M7 seam
+         byte-identical + FIFO, showing the carrier transports varied verified
+         HAL outputs.
+    tags: [relay, relay-hal, falcon-gnss-ubx, falcon-esc-dshot, embedded-io-async, pwmout, relay-bus, "v1.84", jess-62, issue-177]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        GNSS: feeding an identical byte frame sync (UbxParser::push loop) and
+        async (UbxReader over a mock Read) yields a byte-identical NavPvt; a read
+        error propagates as Err. ESC: DShotEsc::send emits exactly the frames
+        dshot_from_unit produces for the same commands; a sink error propagates.
+        Carrier: a NavPvt pushed to an SpscRing pops byte-identical + FIFO. cargo
+        test green; existing sync/Kani tests unchanged.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

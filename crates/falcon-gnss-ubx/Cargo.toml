@@ -11,5 +11,17 @@ rust-version.workspace = true
 path = "src/lib.rs"
 crate-type = ["rlib"]
 
+[dependencies]
+# The async hardware path (UbxReader) targets embedded-io-async Read — jess
+# binds the RT1176 LPUART byte source under it (relay#214 / jess#62). embedded-io
+# is named for the Read error/ErrorType bounds.
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+
+[dev-dependencies]
+# The inter-core carrier test (relay#177): a decoded NAV-PVT fix rides the
+# verified MessageTransport ring across the M4->M7 seam.
+relay-bus = { path = "../relay-bus" }
+
 [lints]
 workspace = true

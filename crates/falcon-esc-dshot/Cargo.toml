@@ -11,5 +11,11 @@ rust-version.workspace = true
 path = "src/lib.rs"
 crate-type = ["rlib"]
 
+[dependencies]
+# The async ESC bank (DShotEsc) emits frames through the relay-hal PwmOut sink
+# (the v1.81 actuator seam; relay#214 / jess#62) — jess binds FlexIO+eDMA under
+# PwmOut. The DShot frame encoding stays the pure verified body in this crate.
+relay-hal = { path = "../relay-hal" }
+
 [lints]
 workspace = true
