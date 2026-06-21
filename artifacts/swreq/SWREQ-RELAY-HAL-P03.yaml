@@ -1,0 +1,36 @@
+artifacts:
+  - id: SWREQ-RELAY-HAL-P03
+    type: sw-req
+    title: "HAL-P03 — baromag anchors on embedded-hal-async I2c (shared decode); the relay-bus carrier transports a decoded sensor sample across the inter-core seam"
+    status: implemented
+    description: >
+      Extends the embedded-hal-async re-target (relay#214 / jess#62 DD-016) to
+      the I2C sensors and connects the HAL output to the inter-core carrier
+      (relay#177):
+
+      1. falcon-baromag (IST8310 mag + BMP388 baro) shall provide an async
+         hardware path over the standard embedded-hal-async I2c, alongside the
+         existing sync RegBus sim path. The register decode (6-byte block ->
+         MagField / BaroSample) shall be a single pure sync fn per sensor used by
+         BOTH transports — the verified body lives once in relay above the seam;
+         sim vs silicon differ only in transport. The async path is fallible
+         (I2c error -> the per-device health source the voter selects on).
+
+      2. A decoded sensor sample (the HAL output, e.g. MagField) shall ride the
+         relay-bus MessageTransport ring (relay#177 carrier) FIFO across the
+         M4->M7 inter-core seam unchanged — the sensor I/O core (M4) pushes,
+         the flight core (M7) pops the identical value. This shows the verified
+         carrier transports the verified HAL output, end to end.
+    tags: [relay, relay-hal, falcon-baromag, embedded-hal-async, i2c, relay-bus, inter-core, "v1.83", jess-62, issue-177]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        For mag and baro: the async I2c path and the sync RegBus path decode an
+        identical register block to a byte-identical sample (shared decode fn); a
+        transport error on the async path propagates as Err. A MagField pushed to
+        an SpscRing pops byte-identical and FIFO. cargo test green; no regression
+        in the existing sync/Kani tests.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

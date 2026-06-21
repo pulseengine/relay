@@ -13,6 +13,16 @@ crate-type = ["rlib"]
 
 [dependencies]
 relay-math = { path = "../relay-math" }
+# The async hardware path (Ist8310I2c / Bmp388I2c) targets embedded-hal-async
+# I2c per the HAL contract (relay#214 / jess#62): jess binds the RT1176 LPI2C
+# impl, this driver decodes above it. embedded-hal names the I2c error bounds.
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
+
+[dev-dependencies]
+# The inter-core carrier test (relay#177): a decoded sample rides the verified
+# MessageTransport ring across the M4->M7 seam. high (driver) deps low (carrier).
+relay-bus = { path = "../relay-bus" }
 
 [lints]
 workspace = true

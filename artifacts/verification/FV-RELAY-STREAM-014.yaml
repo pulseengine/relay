@@ -6,8 +6,10 @@ artifacts:
     description: >
       Verifies SWREQ-RELAY-STREAM-P14 and closes the streamification arc.
 
-      Attestation (sigil/cosign, the feature-loop step 6): relay's release
-      pipeline keyless-signs SHA256SUMS.txt with cosign (Fulcio cert chain;
+      Attestation (cosign + SLSA build-provenance; sigil PLANNED, not yet wired
+      — relay#216): the feature-loop step-6 chain as SHIPPED is cosign-only.
+      relay's release pipeline keyless-signs SHA256SUMS.txt with cosign (Fulcio
+      cert chain;
       SHA256SUMS contains every release asset's digest, so the one signature
       transitively attests all bundled artifacts). VALIDATED end-to-end locally
       under PINNED identity + issuer (a `.*` regexp would fail open — it proves a
