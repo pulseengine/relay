@@ -1,0 +1,26 @@
+artifacts:
+  - id: FV-RELAY-HAL-003
+    type: sw-verification
+    title: "baromag embedded-hal-async I2c re-target + relay-bus inter-core carrier of a decoded sample (v1.83)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-HAL-P03. Unit tests (crates/falcon-baromag):
+        - mag_async_i2c_matches_sync_decode / baro_async_i2c_matches_sync_decode:
+          the async I2c path (Ist8310I2c / Bmp388I2c) and the sync RegBus path
+          decode the SAME register block to a byte-identical MagField / BaroSample
+          (shared decode_field / decode_sample) — the re-target preserves the
+          verified decode; only the transport differs.
+        - baromag_async_propagates_transport_error: a failing I2c yields Err.
+        - mag_sample_rides_the_intercore_ring (relay#177): a decoded MagField
+          pushed to a relay-bus SpscRing pops byte-identical, FIFO — the verified
+          carrier transports the verified HAL output across the M4->M7 seam.
+        - existing sync + Kani tests unchanged.
+      ORACLE: `cargo test -p falcon-baromag` green; clippy clean.
+    tags: [verification, relay, relay-hal, falcon-baromag, embedded-hal-async, relay-bus, "v1.83", issue-177]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-baromag"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-HAL-P03

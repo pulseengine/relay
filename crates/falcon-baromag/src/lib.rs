@@ -27,6 +27,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+use embedded_hal_async::i2c::I2c;
+
 /// A minimal register bus (I2C/SPI register transactions). Mirrors the
 /// `falcon-imu-icm42688` `RegBus` so all sensor drivers share the seam shape; a
 /// real impl wraps `embedded-hal`.
@@ -100,11 +102,51 @@ pub mod mag {
         pub fn read_field(&mut self) -> MagField {
             let mut b = [0u8; 6];
             self.bus.read_burst(REG_DATA, &mut b);
-            MagField {
-                x_ut: le_i16(b[0], b[1]) as f32 * UT_PER_LSB,
-                y_ut: le_i16(b[2], b[3]) as f32 * UT_PER_LSB,
-                z_ut: le_i16(b[4], b[5]) as f32 * UT_PER_LSB,
-            }
+            decode_field(&b)
+        }
+    }
+
+    /// Pure decode of the 6-byte IST8310 data block (LE i16 X,Y,Z) into a
+    /// [`MagField`]. The verifiable body — shared by the sync [`Ist8310`] sim
+    /// path and the async [`Ist8310I2c`] hardware path, so the protocol is
+    /// decoded once and only the transport differs (relay#214 / jess#62).
+    pub fn decode_field(b: &[u8; 6]) -> MagField {
+        MagField {
+            x_ut: le_i16(b[0], b[1]) as f32 * UT_PER_LSB,
+            y_ut: le_i16(b[2], b[3]) as f32 * UT_PER_LSB,
+            z_ut: le_i16(b[4], b[5]) as f32 * UT_PER_LSB,
+        }
+    }
+
+    /// IST8310 over an **`embedded-hal-async` `I2c`** — the hardware path. jess
+    /// binds the i.MX RT1176 LPI2C (DMA + completion-IRQ); this driver decodes
+    /// above it with the same [`decode_field`]. Fallible: an I2C error returns
+    /// `I::Error`, the per-device health source the estimator votes on.
+    pub struct Ist8310I2c<I> {
+        i2c: I,
+        addr: u8,
+    }
+
+    impl<I: I2c> Ist8310I2c<I> {
+        /// The IST8310's default 7-bit I2C address.
+        pub const DEFAULT_ADDR: u8 = 0x0E;
+
+        /// Wrap an I2C bus at the default address.
+        pub fn new(i2c: I) -> Self {
+            Self { i2c, addr: Self::DEFAULT_ADDR }
+        }
+
+        /// Wrap an I2C bus at an explicit address.
+        pub fn with_addr(i2c: I, addr: u8) -> Self {
+            Self { i2c, addr }
+        }
+
+        /// Async field read: one I2C write-read (register pointer → 6 bytes),
+        /// then [`decode_field`].
+        pub async fn read_field(&mut self) -> Result<MagField, I::Error> {
+            let mut b = [0u8; 6];
+            self.i2c.write_read(self.addr, &[REG_DATA], &mut b).await?;
+            Ok(decode_field(&b))
         }
     }
 
@@ -195,14 +237,53 @@ pub mod baro {
         pub fn read(&mut self) -> BaroSample {
             let mut b = [0u8; 6];
             self.bus.read_burst(REG_DATA, &mut b);
-            let raw_pressure = b[0] as u32 | (b[1] as u32) << 8 | (b[2] as u32) << 16;
-            let raw_temp = b[3] as u32 | (b[4] as u32) << 8 | (b[5] as u32) << 16;
-            BaroSample {
-                raw_pressure,
-                raw_temp,
-                pressure_pa: raw_pressure as f32 * self.cal.p_scale,
-                temp_c: raw_temp as f32 * self.cal.t_scale + self.cal.t_offset,
-            }
+            decode_sample(&b, &self.cal)
+        }
+    }
+
+    /// Pure decode of the 6-byte BMP388 data block (P[0..3], T[0..3], 24-bit LE)
+    /// plus the linear calibration into a [`BaroSample`]. Shared by the sync
+    /// [`Bmp388`] sim path and the async [`Bmp388I2c`] hardware path.
+    pub fn decode_sample(b: &[u8; 6], cal: &BaroCal) -> BaroSample {
+        let raw_pressure = b[0] as u32 | (b[1] as u32) << 8 | (b[2] as u32) << 16;
+        let raw_temp = b[3] as u32 | (b[4] as u32) << 8 | (b[5] as u32) << 16;
+        BaroSample {
+            raw_pressure,
+            raw_temp,
+            pressure_pa: raw_pressure as f32 * cal.p_scale,
+            temp_c: raw_temp as f32 * cal.t_scale + cal.t_offset,
+        }
+    }
+
+    /// BMP388 over an **`embedded-hal-async` `I2c`** — the hardware path. jess
+    /// binds the LPI2C; this driver decodes above it with the same
+    /// [`decode_sample`]. Fallible (`I::Error` → per-device health).
+    pub struct Bmp388I2c<I> {
+        i2c: I,
+        addr: u8,
+        cal: BaroCal,
+    }
+
+    impl<I: I2c> Bmp388I2c<I> {
+        /// The BMP388's default 7-bit I2C address (SDO low).
+        pub const DEFAULT_ADDR: u8 = 0x76;
+
+        /// Wrap an I2C bus at the default address + default calibration.
+        pub fn new(i2c: I) -> Self {
+            Self { i2c, addr: Self::DEFAULT_ADDR, cal: BaroCal::default() }
+        }
+
+        /// Wrap an I2C bus at an explicit address + calibration.
+        pub fn with_cal(i2c: I, addr: u8, cal: BaroCal) -> Self {
+            Self { i2c, addr, cal }
+        }
+
+        /// Async pressure + temperature read: one I2C write-read, then
+        /// [`decode_sample`].
+        pub async fn read(&mut self) -> Result<BaroSample, I::Error> {
+            let mut b = [0u8; 6];
+            self.i2c.write_read(self.addr, &[REG_DATA], &mut b).await?;
+            Ok(decode_sample(&b, &self.cal))
         }
     }
 }
@@ -303,5 +384,124 @@ mod tests {
         bus.set(0x00, 0x99);
         let mut b = Bmp388::new(bus);
         assert_eq!(b.init(), Err(DriverError::WrongIdentity { got: 0x99, want: 0x50 }));
+    }
+
+    // ── async hardware path (embedded-hal-async I2c) ─────────────────────────
+
+    /// A mock `embedded-hal-async` I2c whose write-read returns a canned 6-byte
+    /// block (or fails, to exercise the fallible path).
+    struct MockI2c {
+        block: [u8; 6],
+        fail: bool,
+    }
+
+    #[derive(Debug)]
+    struct MockI2cError;
+    impl embedded_hal::i2c::Error for MockI2cError {
+        fn kind(&self) -> embedded_hal::i2c::ErrorKind {
+            embedded_hal::i2c::ErrorKind::Other
+        }
+    }
+    impl embedded_hal::i2c::ErrorType for MockI2c {
+        type Error = MockI2cError;
+    }
+    impl embedded_hal_async::i2c::I2c for MockI2c {
+        async fn transaction(
+            &mut self,
+            _address: u8,
+            operations: &mut [embedded_hal::i2c::Operation<'_>],
+        ) -> Result<(), MockI2cError> {
+            if self.fail {
+                return Err(MockI2cError);
+            }
+            // write_read lowers to [Write(reg ptr), Read(buf)] — fill the Read.
+            for op in operations {
+                if let embedded_hal::i2c::Operation::Read(buf) = op {
+                    let n = buf.len().min(6);
+                    buf[..n].copy_from_slice(&self.block[..n]);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Drive a future that completes synchronously (the mock never pends).
+    fn block_on<F: core::future::Future>(fut: F) -> F::Output {
+        use core::task::{Context, Poll, Waker};
+        let mut fut = core::pin::pin!(fut);
+        let mut cx = Context::from_waker(Waker::noop());
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    /// The async I2c mag path decodes a block to the SAME MagField the sync
+    /// RegBus path does — the re-target preserves the verified decode.
+    #[test]
+    fn mag_async_i2c_matches_sync_decode() {
+        let block = [0xE8, 0x03, 0x0C, 0xFE, 0xFA, 0x00];
+        // sync RegBus path (block at the IST8310 data register 0x03)
+        let mut bus = MockBus::new();
+        bus.set(0x00, 0x10);
+        for (i, &v) in block.iter().enumerate() {
+            bus.set(0x03 + i as u8, v);
+        }
+        let mut sync = Ist8310::new(bus);
+        sync.init().unwrap();
+        let sync_field = sync.read_field();
+        // async I2c path
+        let mut hw = Ist8310I2c::new(MockI2c { block, fail: false });
+        let async_field = block_on(hw.read_field()).unwrap();
+        assert_eq!(sync_field, async_field);
+    }
+
+    /// Same equivalence for the baro.
+    #[test]
+    fn baro_async_i2c_matches_sync_decode() {
+        let block = [0x34, 0x12, 0x05, 0x00, 0x80, 0x00];
+        let mut bus = MockBus::new();
+        bus.set(0x00, 0x50);
+        for (i, &v) in block.iter().enumerate() {
+            bus.set(0x04 + i as u8, v);
+        }
+        let mut sync = Bmp388::new(bus);
+        sync.init().unwrap();
+        let sync_sample = sync.read();
+        let mut hw = Bmp388I2c::new(MockI2c { block, fail: false });
+        let async_sample = block_on(hw.read()).unwrap();
+        assert_eq!(sync_sample, async_sample);
+    }
+
+    /// The async paths are fallible: an I2C transport error propagates as Err.
+    #[test]
+    fn baromag_async_propagates_transport_error() {
+        let mut mag = Ist8310I2c::new(MockI2c { block: [0; 6], fail: true });
+        assert!(block_on(mag.read_field()).is_err());
+        let mut baro = Bmp388I2c::new(MockI2c { block: [0; 6], fail: true });
+        assert!(block_on(baro.read()).is_err());
+    }
+
+    /// relay#177 — a decoded sensor sample (the HAL output) rides the relay-bus
+    /// MessageTransport ring across the M4→M7 inter-core seam, byte-identical
+    /// and FIFO. Proves the verified carrier transports the verified HAL output.
+    #[test]
+    fn mag_sample_rides_the_intercore_ring() {
+        use relay_bus::{MessageTransport, SpscRing};
+
+        // M4 (sensor-I/O core): decode two field samples.
+        let f0 = decode_field(&[0xE8, 0x03, 0x0C, 0xFE, 0xFA, 0x00]);
+        let f1 = decode_field(&[0x10, 0x00, 0x20, 0x00, 0x30, 0x00]);
+
+        // Push them onto the inter-core ring (the #177 carrier seam).
+        let mut ring: SpscRing<MagField, 4> = SpscRing::new();
+        assert!(ring.push(f0));
+        assert!(ring.push(f1));
+
+        // M7 (flight core): pop them back — identical values, FIFO order.
+        assert_eq!(ring.pop(), Some(f0));
+        assert_eq!(ring.pop(), Some(f1));
+        assert!(ring.pop().is_none());
     }
 }
