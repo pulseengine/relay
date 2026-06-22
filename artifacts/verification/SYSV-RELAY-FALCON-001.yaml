@@ -86,3 +86,261 @@ artifacts:
     links:
       - type: verifies
         target: SYSREQ-FALCON-004
+
+  - id: SYSV-RELAY-FALCON-MIX
+    type: sys-verification
+    title: "SYSREQ-FALCON-005 verification — Control allocation (motor mixing) per airframe variant (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-005 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: relay-mix-quad mixer bounds/saturation/airframe + Kani verify_mix_*.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-mix-quad"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-005
+
+  - id: SYSV-RELAY-FALCON-MAVLINK
+    type: sys-verification
+    title: "SYSREQ-FALCON-006 verification — MAVLink v2 protocol interop for GCS (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-006 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: relay-mavlink codec round-trip + parser-never-panics.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-mavlink"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-006
+
+  - id: SYSV-RELAY-FALCON-WORLD
+    type: sys-verification
+    title: "SYSREQ-FALCON-007 verification — Airframe-variant world specifications (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-007 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: relay-mix-multi hexa/coax/octo cascade stabilization.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-mix-multi"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-007
+
+  - id: SYSV-RELAY-FALCON-DUALDNA
+    type: sys-verification
+    title: "SYSREQ-FALCON-008 verification — Dual-DNA composition with the cFS mission layer (LC/SC/HS cross-DNA path) (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-008 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-sitl-hover deterministic_geofence_catches_spoof_and_triggers_rtl + deterministic_fault_triggers_rtl (LC/HS detect -> SC dispatch). SCOPE: the LC/SC/HS cross-DNA path; the TBL-gain-update + EVS-event legs of the written criteria have no dedicated test yet (known partial)..
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-sitl-hover"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-008
+
+  - id: SYSV-RELAY-FALCON-SITL
+    type: sys-verification
+    title: "SYSREQ-FALCON-009 verification — Deterministic SITL with byte-identical evidence (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-009 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-sitl-hover deterministic_hover_settles / deterministic_mission_passes / deterministic_across_ticks_with_same_time.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-sitl-hover"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-009
+
+  - id: SYSV-RELAY-FALCON-EKFRTL
+    type: sys-verification
+    title: "SYSREQ-FALCON-011 verification — Safety: EKF divergence -> RTL (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-011 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-sitl-hover deterministic_fault_triggers_rtl / noisy_fault_still_triggers_rtl / ekf_watchdog_catches_intermittent_fault.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-sitl-hover"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-011
+
+  - id: SYSV-RELAY-FALCON-MISSION
+    type: sys-verification
+    title: "SYSREQ-FALCON-012 verification — Autonomous multi-waypoint mission via stored commands (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-012 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-sitl-hover deterministic_untethered_mission_visits_all_waypoints + relay-sc SC-P01..P05.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-sitl-hover"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-012
+
+  - id: SYSV-RELAY-FALCON-NID
+    type: sys-verification
+    title: "SYSREQ-FALCON-013 verification — EASA U-space Network-ID telemetry (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-013 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: relay-nid encode/decode basic-id + location (+ bitpacked) + rejects-unknown-protocol-version.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-nid"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-013
+
+  - id: SYSV-RELAY-FALCON-GEOFENCE
+    type: sys-verification
+    title: "SYSREQ-FALCON-014 verification — Safety: geofence violation -> RTL under spoofing (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-014 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-sitl-hover deterministic_geofence_catches_spoof_and_triggers_rtl + relay-lc LC-P09/P10.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-sitl-hover"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-014
+
+  - id: SYSV-RELAY-FALCON-HITL-RF
+    type: sys-verification
+    title: "SYSREQ-FALCON-015 verification — Safety: HITL evidence under RF GPS spoofing (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-015 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-hitl stub_bench_trips_and_dispatches / stub_bench_no_violation_no_latch / gps_sdr_sim_argv_shape_is_stable.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-hitl"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-015
+
+  - id: SYSV-RELAY-FALCON-HITL-MAV
+    type: sys-verification
+    title: "SYSREQ-FALCON-016 verification — Safety: HITL with live-FC MAVLink telemetry (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-016 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-hitl MavlinkBench InMemoryFrameSource pos/neg controls + relay-mavlink codec.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-hitl"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-016
+
+  - id: SYSV-RELAY-FALCON-ENV
+    type: sys-verification
+    title: "SYSREQ-FALCON-017 verification — Environmental disturbance rejection (wind/gust/drag/turbulence) (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-017 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-core holds_position_under_steady_wind / rejects_wind_gusts / holds_position_under_turbulence / tracks_setpoint_through_aerodynamic_drag.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-core"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-017
+
+  - id: SYSV-RELAY-FALCON-SENSORS
+    type: sys-verification
+    title: "SYSREQ-FALCON-018 verification — Sensor-fidelity robustness (bias/GNSS/baro) (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-018 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-core holds_under_noisy_intermittent_gps / survives_gps_dropout_and_recovers / baro_holds_altitude_through_gps_loss + relay-iekf NEES consistency.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo test -p relay-iekf"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-018
+
+  - id: SYSV-RELAY-FALCON-BATTERY
+    type: sys-verification
+    title: "SYSREQ-FALCON-019 verification — Energy realism: battery drain/sag/endurance failsafe (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-019 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-core battery_drain_actuates_endurance_failsafe / bare_altitude_pd_sags_under_lapse + relay-fsafe battery classify.
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "cargo test -p relay-fsafe"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-019
+
+  - id: SYSV-RELAY-FALCON-WASMCM
+    type: sys-verification
+    title: "SYSREQ-FALCON-020 verification — Verified flight core as a portable WASM Component (v1.87 traceability closeout)"
+    status: approved
+    description: >
+      Trace-topology artifact wiring existing in-tree evidence to
+      SYSREQ-FALCON-020 at the SYS.5 level (closes the no-verifies-link gap,
+      pulseengine.eu#89). Evidence: falcon-core flight_core_stabilizes_through_the_hal / position_hold_flies_to_setpoint + the wasmtime component gate (bench-only on CI).
+    tags: [verification, system, falcon, trace-topology, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-core"
+        - run: "bash scripts/wasmtime-flight-test.sh  # bench-only"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-020

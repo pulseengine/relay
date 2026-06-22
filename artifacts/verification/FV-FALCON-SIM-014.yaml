@@ -1,0 +1,36 @@
+artifacts:
+  - id: FV-FALCON-SIM-014
+    type: sw-verification
+    title: "SIM-P02 review — simulator landscape analysis + Gazebo-bridge path (docs/SIMULATOR.md)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-SIM-P02, a documentation requirement (req-type:
+      documentation, doc: docs/SIMULATOR.md). Verification method is review:
+      the reviewer confirms docs/SIMULATOR.md exists and records the three
+      mandated elements:
+        1. Falsifiable hover / step / mission / disturbance criteria for
+           "flies under real physics".
+        2. Three concrete next-step options — (A) full gz-sim bridge,
+           (B) PX4 external-EKF integration, (C) Gazebo backend for
+           falcon-sitl-hover — each with relative scope.
+        3. Honest scope notes: what the simulator does NOT prove, and what
+           gz-sim's noise models do and do not capture.
+      ORACLE (review checklist, mechanical greps):
+        - `test -f docs/SIMULATOR.md`
+        - the falsifiable-criteria section names hover, step, mission, and
+          disturbance.
+        - the three options A/B/C are present and scoped.
+        - a "what this does NOT prove" / scope-limits section is present.
+      NOTE: this artifact was authored in the v1.87 traceability closeout to
+      give SIM-P02 its OWN verification evidence. An earlier draft mistakenly
+      repurposed FV-FALCON-SIM-002 (the PX4-SITL COMMAND_LONG round-trip) for
+      this; that overwrite was reverted and SIM-002 restored — SIM-P02 now has
+      this dedicated review artifact instead.
+    tags: [verification, falcon, sim, gazebo, px4, review, "v1.87"]
+    fields:
+      method: review
+      steps:
+        - run: "test -f docs/SIMULATOR.md"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SIM-P02
