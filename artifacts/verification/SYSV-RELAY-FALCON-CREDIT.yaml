@@ -1,0 +1,21 @@
+artifacts:
+  - id: SYSV-RELAY-FALCON-CREDIT
+    type: sys-verification
+    title: "SYSREQ-FALCON-010 review — multi-domain credit-evidence packaging (v1.87)"
+    status: approved
+    description: >
+      Review-method verification of SYSREQ-FALCON-010. The credit-evidence
+      packaging mechanism exists: scripts/run-falcon-verification.py aggregates
+      every FV/SYSV artifact's executable steps into a markdown report (the CI
+      "Verification gate (rivet-driven)" job), and `rivet export` emits the trace
+      in reqif/html. NOTE: the requirement criteria names `rivet export --bundle
+      do178c-dal-a`, which does not exist in rivet today; this artifact verifies
+      the EXISTING packaging path, and the per-standard bundler is a rivet feature
+      request (rescope the criteria or build it). Closes the no-verifies-link gap
+      (pulseengine.eu#89).
+    tags: [verification, system, falcon, review, "v1.87", issue-89]
+    fields:
+      method: review
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-010

@@ -1,0 +1,16 @@
+artifacts:
+  - id: UV-FALCON-MIX-001
+    type: unit-verification
+    title: "Unit tests for SWDD-FALCON-MIX-001"
+    status: approved
+    description: >
+      Automated unit tests + Kani harnesses verifying the detailed design of
+      relay-mix-quad (closes the SWDD no-verifies-link gap, pulseengine.eu#89).
+    tags: [testing, unit, falcon, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-mix-quad"
+    links:
+      - type: verifies
+        target: SWDD-FALCON-MIX-001

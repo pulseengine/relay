@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-FALCON-WORLD-002
+    type: sw-verification
+    title: "WORLD-P02: variant worlds share one mixer-agnostic control cascade (v1.87)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-WORLD-P02 (all falcon-* worlds reuse the same
+      relay-ekf/rate/att/pos cascade unmodified; only the relay-mix-* mixer and
+      the exported stream<motor-pwm> shape differ between variants). The
+      mixer-agnostic claim is shown by relay-mix-multi: the SAME cascade wrench
+      drives the hex and coax mixers and both stay bounded — i.e. swapping the
+      variant only swaps the mixer, the cascade contract is unchanged.
+      Test-level evidence (pulseengine.eu#89), each step a real named test:
+        - hex_outputs_bounded_under_saturating_command: the hex mixer keeps all
+          rotor outputs bounded under a saturating cascade command.
+        - coax_outputs_bounded: the coax mixer keeps its outputs bounded.
+        - hover_wrench_spins_all_rotors: a hover wrench maps to all rotors (the
+          shared cascade->mixer contract holds).
+        - nan_command_is_zeroed_not_propagated: a NaN cascade command is zeroed,
+          not propagated, across the mixer family.
+      ORACLE: `cargo test -p relay-mix-multi` green.
+    tags: [verification, falcon, world, variants, reuse, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      # Test-level evidence: each step names a SPECIFIC test that exists in
+      # relay-mix-multi (verified against `cargo test -p relay-mix-multi --list`),
+      # not a crate-wide sweep and not a hand-named prose citation.
+      steps:
+        - run: "cargo test -p relay-mix-multi tests::hex_outputs_bounded_under_saturating_command"
+        - run: "cargo test -p relay-mix-multi tests::coax_outputs_bounded"
+        - run: "cargo test -p relay-mix-multi tests::hover_wrench_spins_all_rotors"
+        - run: "cargo test -p relay-mix-multi tests::nan_command_is_zeroed_not_propagated"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WORLD-P02

@@ -1,0 +1,16 @@
+artifacts:
+  - id: UV-FALCON-ATT-001
+    type: unit-verification
+    title: "Unit tests for SWDD-FALCON-ATT-001"
+    status: approved
+    description: >
+      Automated unit tests + Kani harnesses verifying the detailed design of
+      relay-att (closes the SWDD no-verifies-link gap, pulseengine.eu#89).
+    tags: [testing, unit, falcon, "v1.87", issue-89]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-att"
+    links:
+      - type: verifies
+        target: SWDD-FALCON-ATT-001

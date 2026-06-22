@@ -1,0 +1,54 @@
+artifacts:
+  - id: FV-FALCON-CMDLONG-001
+    type: sw-verification
+    title: "MAVLink COMMAND_LONG codec + RTL builder — round-trip, CRC_EXTRA, length-rejection (v0.14.2 carrier)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-MAVLINK-P05 (the COMMAND_LONG message + RTL builder,
+      added at v0.14.2 after the v0.1 codec that FV-FALCON-MAVLINK-001 covers).
+      Unit + proptest evidence in crates/relay-mavlink (command_long module) —
+      each named test proves one requirement clause, not a crate-wide sweep
+      (pulseengine.eu#89):
+        - msg_id_is_76 / payload_length_is_33 / crc_extra_is_152: the wire
+          identity of COMMAND_LONG (id 76, 33-byte payload, CRC_EXTRA 152) is
+          pinned so a spec drift fails the build.
+        - field_offsets_match_spec: the sorted-by-size-descending field layout
+          (7x f32 + u16 + 3x u8, little-endian) matches the MAVLink XML.
+        - round_trip_arbitrary: proptest fuzz (f32::from_bits, so NaN payloads
+          also round-trip) — encode->decode preserves every field bit-for-bit.
+        - round_trip_with_params / round_trip_rtl: deterministic round-trips for
+          a parameterised command and the RTL builder.
+        - decode_rejects_short_payload / decode_rejects_long_payload: a
+          length-mismatched payload is rejected without panic.
+        - rtl_command_id_is_20 / rtl_builder_has_zero_params: CommandLong::rtl
+          emits MAV_CMD_NAV_RETURN_TO_LAUNCH (20) with all seven param slots
+          zero per the spec — the canonical "fly home and land" message falcon
+          writes to PX4's offboard endpoint when the safety chain latches.
+      ORACLE: `cargo test -p relay-mavlink` green (11 command_long tests).
+    tags: [verification, falcon, relay-mavlink, command-long, rtl, "v0.14.2"]
+    fields:
+      method: automated-test
+      # Test-level evidence: each step names the SPECIFIC test that proves a
+      # requirement clause, not a crate-wide `cargo test`. The verification gate
+      # runs each named test, so the requirement<->test map is mechanical, not
+      # prose. (Test-level-traceability practice — pulseengine.eu#89.)
+      steps:
+        # clause: wire identity (msg-id / payload-len / CRC_EXTRA pinned)
+        - run: "cargo test -p relay-mavlink command_long::tests::msg_id_is_76"
+        - run: "cargo test -p relay-mavlink command_long::tests::payload_length_is_33"
+        - run: "cargo test -p relay-mavlink command_long::tests::crc_extra_is_152"
+        # clause: field layout matches the MAVLink XML spec
+        - run: "cargo test -p relay-mavlink command_long::tests::field_offsets_match_spec"
+        # clause: encode->decode preserves every field bit-for-bit (incl. NaN)
+        - run: "cargo test -p relay-mavlink command_long::tests::round_trip_arbitrary"
+        - run: "cargo test -p relay-mavlink command_long::tests::round_trip_with_params"
+        - run: "cargo test -p relay-mavlink command_long::tests::round_trip_rtl"
+        # clause: length-mismatched payloads rejected without panic
+        - run: "cargo test -p relay-mavlink command_long::tests::decode_rejects_short_payload"
+        - run: "cargo test -p relay-mavlink command_long::tests::decode_rejects_long_payload"
+        # clause: RTL builder shape (MAV_CMD 20, all seven params zero)
+        - run: "cargo test -p relay-mavlink command_long::tests::rtl_command_id_is_20"
+        - run: "cargo test -p relay-mavlink command_long::tests::rtl_builder_has_zero_params"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P05

@@ -271,6 +271,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
+name = "embedded-hal"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+
+[[package]]
+name = "embedded-hal-async"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
+dependencies = [
+ "embedded-hal",
+]
+
+[[package]]
+name = "embedded-io"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7"
+
+[[package]]
+name = "embedded-io-async"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0"
+dependencies = [
+ "embedded-io",
+]
+
+[[package]]
 name = "engine-throughput-bench"
 version = "0.1.0"
 dependencies = [
@@ -302,6 +332,9 @@ dependencies = [
 name = "falcon-baromag"
 version = "0.1.0"
 dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
+ "relay-bus",
  "relay-math",
 ]
 
@@ -339,10 +372,19 @@ dependencies = [
 [[package]]
 name = "falcon-esc-dshot"
 version = "0.1.0"
+dependencies = [
+ "relay-bus",
+ "relay-hal",
+]
 
 [[package]]
 name = "falcon-gnss-ubx"
 version = "0.1.0"
+dependencies = [
+ "embedded-io",
+ "embedded-io-async",
+ "relay-bus",
+]
 
 [[package]]
 name = "falcon-hello"
@@ -388,6 +430,8 @@ dependencies = [
 name = "falcon-imu-icm42688"
 version = "0.1.0"
 dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
  "falcon-core",
 ]
 
@@ -1199,6 +1243,10 @@ dependencies = [
  "proptest",
  "relay-math",
 ]
+
+[[package]]
+name = "relay-hal"
+version = "0.1.0"
 
 [[package]]
 name = "relay-hk"
