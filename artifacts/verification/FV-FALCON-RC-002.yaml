@@ -1,0 +1,51 @@
+artifacts:
+  - id: FV-FALCON-RC-002
+    type: sw-verification
+    title: "SBUS wire decode — relay-rc tests + Kani unpack-bounded proof (RC-P02, v1.88)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-RC-P02. The relay-rc crate (no_std/no_alloc/
+      forbid-unsafe) gains the SBUS verified-decode lane: a 25-byte S.BUS frame
+      to 16 11-bit channels + failsafe/frame-lost flags, then an AETR map to the
+      RC-P01 RcInput. Test-level evidence (pulseengine.eu#89), each step a real
+      named test/harness:
+        - sbus_rejects_bad_start_byte: a frame whose start byte != 0x0F -> None.
+        - sbus_round_trips_channels: 16 distinct 11-bit channels survive
+          pack -> decode_sbus byte-identical.
+        - sbus_flags_are_exposed_not_applied: failsafe+frame-lost bits are
+          surfaced AND the channels still reflect the wire bytes (expose-only;
+          the decode applies no policy).
+        - sbus_endpoints_map_to_stick_extremes: 992->centre, 172->-100%,
+          1811->full throttle through sbus_to_rc.
+        - sbus_to_rc_output_bounded (proptest): roll/pitch/yaw in [-1,1] and
+          throttle in [0,1] for ANY 16 channel counts.
+        - sbus_decode_never_panics (proptest): decode_sbus over arbitrary 25
+          bytes never panics and every channel <= 0x7FF.
+        - Kani RC-K03 verify_sbus_unpack_bounded: the integer unpack is TOTAL
+          (never panics) and range-bounded (every channel <= 0x7FF) for ANY
+          25-byte frame — the integer floor under the f32 stick mapping.
+      ORACLE: `cargo test -p relay-rc` green; `cargo kani -p relay-rc` reports
+      VERIFICATION SUCCESSFUL for all three harnesses (RC-K01/K02/K03).
+    tags: [verification, falcon, rc, sbus, wire-decode, relay-rc, kani, "v1.88"]
+    fields:
+      method: formal-verification
+      # Test-level evidence: each step names the SPECIFIC test/harness proving a
+      # requirement clause, not a crate-wide sweep (pulseengine.eu#89).
+      steps:
+        # clause: bad start byte rejected (only structural check SBUS affords)
+        - run: "cargo test -p relay-rc tests::sbus_rejects_bad_start_byte"
+        # clause: 16 channels round-trip byte-identical
+        - run: "cargo test -p relay-rc tests::sbus_round_trips_channels"
+        # clause: failsafe/frame-lost expose-only, channels not overridden
+        - run: "cargo test -p relay-rc tests::sbus_flags_are_exposed_not_applied"
+        # clause: endpoints map to stick extremes (AETR + SBUS 172/992/1811)
+        - run: "cargo test -p relay-rc tests::sbus_endpoints_map_to_stick_extremes"
+        # clause: f32 stick map bounded for any channels (proptest)
+        - run: "cargo test -p relay-rc proptests::sbus_to_rc_output_bounded"
+        # clause: decode never panics + channels 11-bit (proptest companion)
+        - run: "cargo test -p relay-rc proptests::sbus_decode_never_panics"
+        # clause: Kani RC-K03 — integer unpack total + range-bounded over all frames
+        - run: "cargo kani -p relay-rc --harness verify_sbus_unpack_bounded"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-RC-P02

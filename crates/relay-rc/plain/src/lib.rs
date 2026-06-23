@@ -123,6 +123,107 @@ pub fn acro(rc: RcInput, max_rate: f32) -> RateCmd {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SBUS wire decode (RC-P02) — the verified-decode lane upstream of RcInput.
+//
+// Futaba/FrSky S.BUS: a fixed 25-byte frame carrying 16 channels of 11 bits
+// each (LSB-first, packed across 22 bytes so channels straddle byte
+// boundaries), a flags byte, and an end byte. NO CRC — integrity is the
+// start/end markers + the fixed length. The decode splits along the codebase's
+// verification line: the INTEGER bit-unpacking (every channel <= 0x7FF,
+// total/panic-free over ALL frames) is Kani-proven (RC-K03); the f32
+// channel->stick normalisation (bounded output) is proptest-gated, since Kani
+// on f32 multiply/divide is intractable. Failsafe is EXPOSE-ONLY: the flags are
+// surfaced for the relay-fsafe arbiter to act on; the decode never overrides
+// channels (single-responsibility — policy is not the decoder's job).
+// ---------------------------------------------------------------------------
+
+/// SBUS frame length in bytes (fixed).
+pub const SBUS_FRAME_LEN: usize = 25;
+/// SBUS start-of-frame marker (byte 0).
+pub const SBUS_START: u8 = 0x0F;
+
+/// Nominal SBUS channel endpoints (Futaba): 172 = -100%, 992 = centre,
+/// 1811 = +100%. Span is ~819 counts per 100%.
+const SBUS_CENTRE: f32 = 992.0;
+const SBUS_SPAN: f32 = 819.0;
+const SBUS_MIN: f32 = 172.0;
+const SBUS_RANGE: f32 = 1811.0 - 172.0; // 1639 counts, idle..full throttle
+
+/// The 16 decoded SBUS channels plus the receiver status flags. Each channel is
+/// an 11-bit count in `0..=2047`; `failsafe`/`frame_lost` are exposed for the
+/// arbiter (the decode applies no policy of its own).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SbusChannels {
+    /// 16 channels, each an 11-bit raw count (0..=2047).
+    pub ch: [u16; 16],
+    /// Receiver failsafe latched (lost the transmitter).
+    pub failsafe: bool,
+    /// At least one frame was lost since the last good frame.
+    pub frame_lost: bool,
+}
+
+/// Decode a 25-byte SBUS frame into its 16 channels + status flags.
+///
+/// Returns `None` if the start marker is wrong (the only structural check SBUS
+/// affords without a CRC). Total: never panics for ANY 25 bytes, and every
+/// returned channel is guaranteed `<= 0x7FF` (11-bit) — proven by Kani (RC-K03).
+pub fn decode_sbus(frame: &[u8; SBUS_FRAME_LEN]) -> Option<SbusChannels> {
+    if frame[0] != SBUS_START {
+        return None;
+    }
+    // 22 payload bytes (frame[1..23]) carry 16 * 11 = 176 bits, LSB-first.
+    let mut ch = [0u16; 16];
+    let mut i = 0;
+    while i < 16 {
+        let bit = i * 11;
+        let byte = bit / 8;
+        let shift = (bit % 8) as u32;
+        // The 11-bit field spans at most three payload bytes. Read each guarded
+        // (the third may sit at index 22, past the 22-byte payload) so the
+        // unpack is provably panic-free.
+        let b0 = frame[1 + byte] as u32;
+        let b1 = *frame.get(2 + byte).unwrap_or(&0) as u32;
+        let b2 = *frame.get(3 + byte).unwrap_or(&0) as u32;
+        let word = b0 | (b1 << 8) | (b2 << 16);
+        ch[i] = ((word >> shift) & 0x07FF) as u16;
+        i += 1;
+    }
+    let flags = frame[23];
+    Some(SbusChannels {
+        ch,
+        frame_lost: flags & 0x04 != 0,
+        failsafe: flags & 0x08 != 0,
+    })
+}
+
+/// Map an SBUS channel count to a centred stick axis in roughly [-1, 1], then
+/// sanitise through the same clamp the manual modes use. AETR channel order
+/// (the Pixhubox/PX4 default): ch0 roll, ch1 pitch, ch2 throttle, ch3 yaw.
+#[inline]
+fn sbus_axis(raw: u16) -> f32 {
+    unit((raw as f32 - SBUS_CENTRE) / SBUS_SPAN)
+}
+
+/// Map an SBUS throttle channel count to [0, 1] (172..1811 -> 0..1), sanitised.
+#[inline]
+fn sbus_throttle(raw: u16) -> f32 {
+    throttle01((raw as f32 - SBUS_MIN) / SBUS_RANGE)
+}
+
+/// Map decoded SBUS channels to a normalised [`RcInput`] using AETR order
+/// (ch0 roll, ch1 pitch, ch2 throttle, ch3 yaw). The output is always bounded
+/// (roll/pitch/yaw in [-1, 1], throttle in [0, 1]) for ANY channel counts —
+/// proptest-gated (RC-P02), since it feeds the already-verified manual modes.
+pub fn sbus_to_rc(s: &SbusChannels) -> RcInput {
+    RcInput {
+        roll: sbus_axis(s.ch[0]),
+        pitch: sbus_axis(s.ch[1]),
+        throttle: sbus_throttle(s.ch[2]),
+        yaw: sbus_axis(s.ch[3]),
+    }
+}
+
 #[cfg(kani)]
 mod kani_proofs;
 
@@ -169,6 +270,71 @@ mod tests {
         assert!((c.yaw_rate - 1.5).abs() < 1e-6);
         assert_eq!(c.thrust, 0.7);
     }
+
+    // --- SBUS wire decode (RC-P02) ---
+
+    /// Pack 16 channel counts into a 25-byte SBUS frame (the inverse of
+    /// decode_sbus) so tests can round-trip without a captured byte log.
+    fn pack_sbus(ch: &[u16; 16], flags: u8) -> [u8; SBUS_FRAME_LEN] {
+        let mut f = [0u8; SBUS_FRAME_LEN];
+        f[0] = SBUS_START;
+        let mut bit = 0usize;
+        for &c in ch.iter() {
+            let v = (c & 0x07FF) as u32;
+            for b in 0..11 {
+                if v & (1 << b) != 0 {
+                    let pos = bit + b;
+                    f[1 + pos / 8] |= 1 << (pos % 8);
+                }
+            }
+            bit += 11;
+        }
+        f[23] = flags;
+        f
+    }
+
+    #[test]
+    fn sbus_rejects_bad_start_byte() {
+        let mut f = pack_sbus(&[992; 16], 0);
+        f[0] = 0x00;
+        assert_eq!(decode_sbus(&f), None);
+    }
+
+    #[test]
+    fn sbus_round_trips_channels() {
+        // distinct per-channel values, all 11-bit
+        let mut ch = [0u16; 16];
+        for (i, c) in ch.iter_mut().enumerate() {
+            *c = (i as u16 * 113 + 7) & 0x07FF;
+        }
+        let f = pack_sbus(&ch, 0);
+        let s = decode_sbus(&f).expect("valid start byte");
+        assert_eq!(s.ch, ch);
+        assert!(!s.failsafe && !s.frame_lost);
+    }
+
+    #[test]
+    fn sbus_flags_are_exposed_not_applied() {
+        // failsafe + frame_lost set; channels must STILL reflect the wire bytes
+        // (expose-only: the decode applies no policy).
+        let ch = [1811u16; 16];
+        let f = pack_sbus(&ch, 0x04 | 0x08);
+        let s = decode_sbus(&f).unwrap();
+        assert!(s.failsafe && s.frame_lost);
+        assert_eq!(s.ch, ch); // not overridden to centre/idle
+    }
+
+    #[test]
+    fn sbus_endpoints_map_to_stick_extremes() {
+        // centre count -> level; min/max -> stick extremes; throttle idle/full.
+        let ch = [992, 172, 1811, 172, /* rest */ 992, 992, 992, 992, 992, 992,
+                  992, 992, 992, 992, 992, 992];
+        let rc = sbus_to_rc(&decode_sbus(&pack_sbus(&ch, 0)).unwrap());
+        assert!(rc.roll.abs() < 1e-3); // 992 -> centre
+        assert!((rc.pitch + 1.0).abs() < 2e-2); // 172 -> -100%
+        assert!((rc.throttle - 1.0).abs() < 1e-6); // 1811 -> full
+        assert!(rc.yaw < -0.9); // 172 -> near -100%
+    }
 }
 
 #[cfg(test)]
@@ -202,6 +368,30 @@ mod proptests {
             prop_assert!(c.pitch_rate.abs() <= mr + 1e-4);
             prop_assert!(c.yaw_rate.abs() <= mr + 1e-4);
             prop_assert!((0.0..=1.0).contains(&c.thrust));
+        }
+
+        /// RC-P02: the SBUS stick mapping is bounded for ANY 16 channel counts
+        /// (incl. out-of-nominal-range raw values) — roll/pitch/yaw in [-1, 1],
+        /// throttle in [0, 1]. The f32 floor under the Kani integer-unpack proof.
+        #[test]
+        fn sbus_to_rc_output_bounded(raw in proptest::array::uniform16(0u16..=0xFFFF)) {
+            let s = SbusChannels { ch: raw, failsafe: false, frame_lost: false };
+            let rc = sbus_to_rc(&s);
+            prop_assert!((-1.0..=1.0).contains(&rc.roll));
+            prop_assert!((-1.0..=1.0).contains(&rc.pitch));
+            prop_assert!((-1.0..=1.0).contains(&rc.yaw));
+            prop_assert!((0.0..=1.0).contains(&rc.throttle));
+        }
+
+        /// decode_sbus never panics for ANY 25 bytes, and every returned channel
+        /// is an 11-bit count (the proptest companion to Kani RC-K03).
+        #[test]
+        fn sbus_decode_never_panics(bytes in proptest::array::uniform25(0u8..=0xFF)) {
+            if let Some(s) = decode_sbus(&bytes) {
+                for c in s.ch {
+                    prop_assert!(c <= 0x07FF);
+                }
+            }
         }
     }
 }

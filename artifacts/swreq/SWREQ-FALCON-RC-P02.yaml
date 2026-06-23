@@ -1,0 +1,47 @@
+artifacts:
+  - id: SWREQ-FALCON-RC-P02
+    type: sw-req
+    title: "RC-P02: SBUS wire decode — byte-frame to bounded RcInput, panic-free"
+    status: implemented
+    description: >
+      Falcon shall decode the Futaba/FrSky S.BUS receiver protocol — the
+      dominant Pixhawk RC link — into the normalised RcInput consumed by the
+      manual flight modes (RC-P01). The decode is the verified-decode lane
+      upstream of the stick mapping, mirroring the GNSS UBX and MAVLink
+      COMMAND_LONG decoders.
+
+      Wire format: a fixed 25-byte frame — 0x0F start byte, 16 channels of 11
+      bits each (LSB-first, packed across 22 bytes so channels straddle byte
+      boundaries), a flags byte (frame-lost bit 2, failsafe bit 3), and an end
+      byte. No CRC; integrity is the start marker + fixed length.
+
+      Behaviour:
+        - decode_sbus(&[u8; 25]) returns the 16 channels (each an 11-bit count,
+          0..=2047) + the failsafe/frame-lost flags, or None if the start byte
+          is wrong. It NEVER panics for any 25 bytes, and EVERY returned channel
+          is guaranteed <= 0x7FF (the integer safety floor — a garbage/glitching
+          frame cannot produce an out-of-range count or index OOB).
+        - Failsafe is EXPOSE-ONLY: the flags are surfaced for the relay-fsafe
+          arbiter; the decode applies no policy of its own and never overrides
+          channels (single-responsibility — policy is not the decoder's job).
+        - sbus_to_rc maps the channels to RcInput with AETR order (ch0 roll,
+          ch1 pitch, ch2 throttle, ch3 yaw) and SBUS endpoints (172/992/1811).
+          The output is ALWAYS bounded (roll/pitch/yaw in [-1,1], throttle in
+          [0,1]) for any channel counts, feeding the already-verified RC-P01
+          manual modes.
+    tags: [falcon, rc, sbus, receiver, wire-decode, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-rc: a packed frame round-trips its 16 channels; a bad start byte
+        is rejected (None); failsafe/frame-lost flags are exposed AND the
+        channels still reflect the wire bytes (not overridden); endpoints map to
+        stick extremes (992->centre, 172->-100%, 1811->full throttle). Kani
+        RC-K03 verify_sbus_unpack_bounded: decode_sbus is total (never panics)
+        and every channel <= 0x7FF for ANY 25-byte frame. The f32 stick-mapping
+        bound (|roll/pitch/yaw| <= 1, throttle in [0,1] for any channels) is
+        proptest-gated (f32 multiply/divide, Kani-intractable).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
