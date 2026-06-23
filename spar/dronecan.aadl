@@ -65,15 +65,25 @@ public
       Data_Size => 7 Bytes;
   end NodeStatus;
 
+  data EscRawCommand
+    -- uavcan.equipment.esc.RawCommand (DTID 1030): an array of up to 20 int14
+    -- throttle commands (LSB-first). A quad's 4xint14 is 7 bytes -> single
+    -- frame. The verified mixer's per-motor output, encoded onto the CAN bus and
+    -- emitted at the control-loop rate (the Command thread below).
+    properties
+      Data_Model::Data_Representation => Struct;
+  end EscRawCommand;
+
   -- ══════════════════════════════════════════════════════════════
   -- The transfer-reassembly process — frames in, transfers out.
   -- ══════════════════════════════════════════════════════════════
 
   process TransferReassembler
     features
-      frames_in:    in  data port CanFrame;   -- raw frames from the CanBus seam
-      transfer_out: out data port Transfer;   -- a completed, CRC-checked transfer
-      status_out:   out data port NodeStatus; -- this node's own 1 Hz heartbeat
+      frames_in:    in  data port CanFrame;        -- raw frames from the CanBus seam
+      transfer_out: out data port Transfer;        -- a completed, CRC-checked transfer
+      status_out:   out data port NodeStatus;      -- this node's own 1 Hz heartbeat
+      command_in:   in  data port EscRawCommand;   -- the mixer's per-motor throttles (DC-P02)
     -- The mitigating sinks: the transfer-CRC kills a corrupted multi-frame
     -- (ValueError), the fixed-buffer bound kills an oversized transfer
     -- (SequenceError), and the toggle + transfer-id state kills a re-ordered or
@@ -98,6 +108,7 @@ public
     subcomponents
       reassemble: thread Reassemble;  -- per-frame: tail decode, accumulate, CRC-check, emit
       heartbeat:  thread Heartbeat;   -- broadcast this node's NodeStatus at 1 Hz
+      command:    thread Command;     -- encode + emit esc.RawCommand at the control rate
   end TransferReassembler.Fixed;
 
   thread Reassemble
@@ -122,6 +133,18 @@ public
       Period => 1000 ms;
       Compute_Execution_Time => 5 us .. 20 us;
   end Heartbeat;
+
+  thread Command
+    -- Encode the verified mixer's per-motor throttles as esc.RawCommand (int14)
+    -- and emit a single-frame transfer onto the CAN bus, every control cycle.
+    -- 400 Hz (2.5 ms) — the ESC-command hot path; its deadline is the control
+    -- period (a late command is a missed actuation). encode_raw_command +
+    -- encode_single_frame are the Kani-bounded bodies (DC-K06/K07).
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 2500 us;
+      Compute_Execution_Time => 2 us .. 8 us;
+  end Command;
 
   -- ══════════════════════════════════════════════════════════════
   -- The CAN bus — the fault surface (bus-off / noise / overrun).
@@ -185,6 +208,7 @@ public
       Actual_Processor_Binding => (reference (cpu)) applies to node;
       Actual_Processor_Binding => (reference (cpu)) applies to node.reassemble;
       Actual_Processor_Binding => (reference (cpu)) applies to node.heartbeat;
+      Actual_Processor_Binding => (reference (cpu)) applies to node.command;
   end DroneCanNode.Fmu;
 
 end Falcon_DroneCAN;

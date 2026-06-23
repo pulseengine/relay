@@ -17,8 +17,8 @@
 //! state-machine core proven here is unchanged by it.
 
 use crate::crc::{crc16_add, crc16_signature};
-use crate::id::decode_message_id;
-use crate::tail::decode_tail;
+use crate::id::{encode_message_id, decode_message_id, MessageId};
+use crate::tail::{decode_tail, single_frame_tail};
 
 /// The CAN frame value type is owned by the relay-hal seam (jess binds FlexCAN
 /// underneath); the transfer layer decodes these into reassembled transfers.
@@ -186,6 +186,31 @@ impl Reassembler {
     }
 }
 
+/// Encode a SINGLE-FRAME DroneCAN transfer: a payload of up to 7 bytes plus the
+/// single-frame tail byte (SOT|EOT, toggle 0), into one [`CanFrame`]. Single-
+/// frame transfers carry no transfer CRC. Returns `None` if `payload` exceeds 7
+/// bytes (multi-frame TX is a follow-on). This is the ESC RawCommand hot path —
+/// a quad's 4xint14 command is 7 bytes -> one frame. Total: never panics.
+pub fn encode_single_frame(
+    data_type_id: u16,
+    source_node_id: u8,
+    priority: u8,
+    transfer_id: u8,
+    payload: &[u8],
+) -> Option<CanFrame> {
+    if payload.len() > 7 {
+        return None;
+    }
+    let mut data = [0u8; 8];
+    data[..payload.len()].copy_from_slice(payload);
+    data[payload.len()] = single_frame_tail(transfer_id);
+    Some(CanFrame {
+        id: encode_message_id(&MessageId { priority, data_type_id, source_node_id }),
+        dlc: (payload.len() + 1) as u8,
+        data,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,6 +289,25 @@ mod tests {
         let mut f = frame(341, 1, single_frame_tail(0), &[1, 2]);
         f.id |= 1 << 7; // service-not-message bit
         assert!(r.push(&f).is_none());
+    }
+
+    #[test]
+    fn encode_single_frame_round_trips_through_reassembler() {
+        // the TX side (falcon emits) round-trips through the RX side (a node
+        // reassembles): a 7-byte single-frame transfer.
+        let payload = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77];
+        let f = encode_single_frame(1030, 9, 16, 5, &payload).expect("fits one frame");
+        let mut r = Reassembler::new(SIG);
+        let t = r.push(&f).expect("single-frame transfer completes");
+        assert_eq!(t.data_type_id, 1030);
+        assert_eq!(t.source_node_id, 9);
+        assert_eq!(t.transfer_id, 5);
+        assert_eq!(&t.payload[..t.len], &payload);
+    }
+
+    #[test]
+    fn encode_single_frame_rejects_oversized_payload() {
+        assert!(encode_single_frame(1030, 1, 16, 0, &[0u8; 8]).is_none());
     }
 }
 

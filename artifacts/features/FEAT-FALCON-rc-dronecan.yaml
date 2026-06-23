@@ -103,8 +103,8 @@ artifacts:
 
   - id: FEAT-FALCON-v1.93
     type: feature
-    title: "v1.93 — DroneCAN ESC control path (DC-P02): NodeStatus + esc.RawCommand + esc.Status decoders"
-    status: pending
+    title: "v1.93 — DroneCAN ESC control path (DC-P02): NodeStatus decode + esc.RawCommand encode + single-frame TX"
+    status: implemented
     description: >
       PLANNED. The DroneCAN message decoders for the ESC control path, on top of
       the v1.92 transfer layer. Pure fixed-bit-offset DSDL decoders (Kani-bounded,
@@ -114,11 +114,13 @@ artifacts:
           mandatory message; the bus-presence + node-health source.
         - uavcan.equipment.esc.RawCommand (DTID 1030) — up to 20x int14 throttle
           commands; the verified mixer's PWM output re-expressed on the CAN bus.
-        - uavcan.equipment.esc.Status (DTID 1034) — per-ESC RPM/voltage/current/
-          temperature telemetry (a health + FDI source).
-      Verification: per-message Kani decode totality + field-range bounds; tests
-      for round-trip + truncated-payload rejection; spar message components in
-      dronecan.aadl.
+      SCOPE MOVE (deliberate): esc.Status (DTID 1034) telemetry — float16 +
+      multi-frame, a DECODE-in message like the sensors — moved to v1.94, leaving
+      v1.93 the coherent ESC COMMAND path (decode presence + encode throttle +
+      single-frame TX). As shipped, v1.93 also added the single-frame transfer
+      ENCODER (the TX side the v1.92 RX-only foundation lacked).
+      Verification: per-message Kani decode/encode totality + field/buffer bounds;
+      round-trip + reject tests; spar Command-thread RTA <= control-loop deadline.
     tags: [falcon, dronecan, esc, nodestatus, rawcommand, decoders, kani, v1.93, planned]
     fields:
       release-target: "NodeStatus/RawCommand/esc.Status decoders + Kani bounds; spar message components; relay-dronecan tests green"
@@ -136,6 +138,9 @@ artifacts:
     description: >
       PLANNED. The DroneCAN sensor-ingest decoders, completing the peripheral
       family over CAN (the SPI/I2C drivers' CAN-bus counterparts):
+        - uavcan.equipment.esc.Status (DTID 1034) — per-ESC RPM/voltage/current/
+          temperature telemetry (float16; moved here from v1.93 as a decode-in
+          message). Adds the float16 (IEEE half) decode helper.
         - uavcan.equipment.gnss.Fix2 (DTID 1063) — position/velocity/fix-type.
         - uavcan.equipment.ahrs.MagneticFieldStrength / air_data (mag 1001,
           baro 1028) — the external mag/baro the IST8310/BMP388 drivers read on

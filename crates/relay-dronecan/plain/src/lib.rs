@@ -25,6 +25,7 @@
 
 pub mod crc;
 pub mod id;
+pub mod msg;
 pub mod tail;
 pub mod transfer;
 

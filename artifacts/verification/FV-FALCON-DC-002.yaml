@@ -1,0 +1,56 @@
+artifacts:
+  - id: FV-FALCON-DC-002
+    type: sw-verification
+    title: "DroneCAN ESC control path — NodeStatus/RawCommand codecs + single-frame TX, Kani-bounded (DC-P02, v1.93)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-DC-P02. relay-dronecan gains the ESC-path message
+      codecs (msg.rs) and the single-frame transfer encoder (transfer.rs).
+      Test-level evidence (pulseengine.eu#89), each step a real named
+      test/harness:
+        - msg::tests::node_status_decodes_fields: the 7-byte NodeStatus payload
+          decodes uptime/health/mode/sub_mode/vendor at the right bit offsets.
+        - msg::tests::node_status_rejects_short_payload: < 7 bytes -> None.
+        - msg::tests::raw_command_round_trips_quad: a quad's 4 int14 throttles
+          (incl. a negative) survive encode -> decode byte-identical (7 bytes ->
+          single frame).
+        - msg::tests::raw_command_clamps_out_of_range: out-of-int14 values clamp
+          to [-8192, 8191].
+        - msg::tests::raw_command_caps_at_max_esc: > 20 channels caps at MAX_ESC.
+        - msg::proptests::raw_command_encode_decode_round_trip: for ANY channels,
+          the int14 round-trip preserves every clamped value (never panics).
+        - msg::proptests::node_status_decode_never_panics: decode over arbitrary
+          bytes never panics; fields within DSDL width.
+        - transfer::tests::encode_single_frame_round_trips_through_reassembler:
+          the TX side round-trips through the v1.92 RX Reassembler byte-identical.
+        - transfer::tests::encode_single_frame_rejects_oversized_payload: > 7
+          bytes -> None.
+        - Kani DC-K05 verify_node_status_bounded (fields within DSDL width, total),
+          DC-K06 verify_raw_command_encode_bounded (<= 35 bytes, total), DC-K07
+          verify_encode_single_frame_bounded (dlc <= 8, payload <= 7 or None).
+      Architecture: spar analyze --root Falcon_DroneCAN::DroneCanNode.Fmu reports
+      0 errors with the Command thread RTA 20us <= 2.5ms (400 Hz) control-loop
+      deadline; wit/dronecan/node.wit (now with the command port + export) is in
+      sync (spar.yml gate).
+      ORACLE: `cargo test -p relay-dronecan` green (25 tests); `cargo kani -p
+      relay-dronecan` VERIFICATION SUCCESSFUL for all seven harnesses.
+    tags: [verification, falcon, dronecan, esc, nodestatus, rawcommand, relay-dronecan, spar, kani, "v1.93"]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-dronecan msg::tests::node_status_decodes_fields"
+        - run: "cargo test -p relay-dronecan msg::tests::node_status_rejects_short_payload"
+        - run: "cargo test -p relay-dronecan msg::tests::raw_command_round_trips_quad"
+        - run: "cargo test -p relay-dronecan msg::tests::raw_command_clamps_out_of_range"
+        - run: "cargo test -p relay-dronecan msg::tests::raw_command_caps_at_max_esc"
+        - run: "cargo test -p relay-dronecan msg::proptests::raw_command_encode_decode_round_trip"
+        - run: "cargo test -p relay-dronecan msg::proptests::node_status_decode_never_panics"
+        - run: "cargo test -p relay-dronecan transfer::tests::encode_single_frame_round_trips_through_reassembler"
+        - run: "cargo test -p relay-dronecan transfer::tests::encode_single_frame_rejects_oversized_payload"
+        # Kani DC-K05..K07 — gated by the kani.yml matrix (relay-dronecan entry)
+        - run: "cargo kani -p relay-dronecan --harness verify_node_status_bounded"
+        - run: "cargo kani -p relay-dronecan --harness verify_raw_command_encode_bounded"
+        - run: "cargo kani -p relay-dronecan --harness verify_encode_single_frame_bounded"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-DC-P02

@@ -1,0 +1,47 @@
+artifacts:
+  - id: SWREQ-FALCON-DC-P02
+    type: sw-req
+    title: "DC-P02: DroneCAN ESC control path — NodeStatus decode + esc.RawCommand encode + single-frame TX"
+    status: implemented
+    description: >
+      Falcon shall command its ESCs and observe node presence over DroneCAN v0,
+      on the v1.92 transfer layer (DC-P01). The ESC control path:
+        - OUT — encode the verified mixer's per-motor throttles as
+          uavcan.equipment.esc.RawCommand (DTID 1030, array of int14, LSB-first)
+          and emit a single-frame transfer onto the CAN bus every control cycle.
+        - IN — decode uavcan.protocol.NodeStatus (DTID 341): uptime/health/mode —
+          the one mandatory message; the bus-presence + node-health source.
+
+      The architecture (spar/dronecan.aadl) gains the EscRawCommand data type and
+      a Command thread modelling the control-rate emit; spar RTA confirms its
+      20us response meets the 2.5ms (400 Hz) control-loop deadline. The node WIT
+      (wit/dronecan/node.wit) is regenerated with the command port + export.
+
+      Behaviour (crates/relay-dronecan):
+        - decode_node_status(payload) returns None if < 7 bytes; every bit-field
+          is masked to its DSDL width (health <= 3, mode <= 7, sub_mode <= 7).
+          Total.
+        - encode_raw_command(channels, out) packs up to 20 int14 commands
+          (each clamped to [-8192, 8191]) LSB-first, returning bytes written;
+          writes at most 35 bytes, never overruns the caller buffer. Total. The
+          int14 round-trip (encode then decode) preserves every clamped channel.
+        - encode_single_frame(dtid, node, priority, transfer_id, payload) emits a
+          single CanFrame for payloads <= 7 bytes (None otherwise); it round-trips
+          through the v1.92 Reassembler byte-identical. Total.
+    tags: [falcon, dronecan, esc, nodestatus, rawcommand, decoders, spar, kani, v1.93]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-dronecan: NodeStatus field decode + short-payload reject;
+        RawCommand quad round-trip, out-of-range clamp, MAX_ESC cap; single-frame
+        TX round-trip through the reassembler + oversized reject. Kani DC-K05
+        decode_node_status bounded (fields within DSDL width, total); DC-K06
+        encode_raw_command bounded (<= 35 bytes, total); DC-K07 encode_single_frame
+        bounded (dlc <= 8, payload <= 7 or None, total). The int14 encode/decode
+        round-trip + node-status totality are proptest-fuzzed. spar/dronecan.aadl
+        analyzes 0 errors with the Command thread RTA 20us <= 2.5ms deadline; the
+        node WIT is in sync.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008
