@@ -1,0 +1,29 @@
+[package]
+name = "relay-dronecan"
+description = "Relay DroneCAN v0 — verified transfer layer (29-bit ID, tail byte, CRC-16, multi-frame reassembly) for the falcon peripheral bus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Single plain tree + Kani sibling (the UBX/relay-rc template, not the
+# Verus dual-tree): the transfer layer is bit-fiddling + a fixed-buffer
+# state machine — a Kani target (totality + buffer-bound), out of Verus's
+# productive range. Harnesses live in plain/src/kani_proofs.rs and are
+# gated by the kani.yml matrix (relay#214, jess#62).
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+# no_std + no_alloc. The CanFrame value type + the async CanBus seam live in
+# relay-hal (jess binds FlexCAN underneath, relay#214/jess#62); this crate owns
+# the pure verified protocol above it (id/tail/crc/multi-frame reassembly).
+relay-hal = { path = "../relay-hal" }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

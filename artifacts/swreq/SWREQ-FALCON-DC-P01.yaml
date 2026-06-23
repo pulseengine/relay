@@ -1,0 +1,50 @@
+artifacts:
+  - id: SWREQ-FALCON-DC-P01
+    type: sw-req
+    title: "DC-P01: DroneCAN v0 verified transfer layer — id/tail/CRC + multi-frame reassembly"
+    status: implemented
+    description: >
+      Falcon shall decode the DroneCAN v0 (classic CAN 2.0B) transfer layer for
+      its external peripheral bus (ESC/GPS/mag/power on the 6X-RT, relay#214 /
+      jess#62): the 29-bit message id, the tail byte, the CRC-16-CCITT transfer
+      checksum, and multi-frame reassembly into complete transfers. relay owns
+      this pure verified protocol; jess moves raw frames over the relay-hal
+      CanBus seam.
+
+      The architecture (timing + EMV2 fault model) is spar/dronecan.aadl; the
+      node WIT (wit/dronecan/node.wit) is generated from it and drift-gated. The
+      CanFrame value type + the async CanBus trait are the relay-hal seam.
+
+      Behaviour (crates/relay-dronecan):
+        - id: decode_message_id(u32) recovers priority/data-type-id/source-node;
+          returns None on a service frame (service-not-message bit). Total.
+        - tail: decode_tail(u8) recovers SOT/EOT/toggle/transfer-id (5 bits).
+          Total.
+        - crc: CRC-16-CCITT-FALSE (poly 0x1021, init 0xFFFF) accumulator; the
+          canonical "123456789" check value is 0x29B1; seeded by the message
+          data-type signature.
+        - transfer: the Reassembler accepts CanFrames and emits a Transfer on a
+          valid end-of-transfer. A single-frame transfer emits directly; a
+          multi-frame transfer only completes if its transfer-CRC matches; a
+          re-ordered/duplicated frame (wrong toggle/transfer-id) is dropped; an
+          oversized transfer is dropped, NEVER overflowing the fixed
+          MAX_PAYLOAD buffer. It NEVER panics for any sequence of frames.
+    tags: [falcon, dronecan, uavcan-v0, can, transfer-layer, spar, relay-hal, kani, v1.92]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-dronecan: id/tail/crc round-trip + the CCITT reference vector;
+        single-frame emit, multi-frame reassemble-with-CRC, corrupt-CRC drop,
+        wrong-toggle drop, service-frame ignore. Kani DC-K01 message-id
+        round-trip; DC-K02 tail bounded (transfer-id <= 0x1F, total); DC-K03 the
+        buffer-bound INVARIANT on accumulate (len <= MAX_PAYLOAD preserved, no
+        OOB — the inductive core making every buf[..len] slice in-range); DC-K04
+        push-dispatch totality from the inactive state. The full multi-frame+CRC
+        path is proptest-fuzzed (the symbolic CRC over the 128-byte buffer is
+        Kani-intractable — proptest-gated, the codebase's integer/float split).
+        spar/dronecan.aadl analyzes with 0 errors (RTA: reassembly 12us <= 130us
+        deadline) and the node WIT is in sync.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

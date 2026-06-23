@@ -24,6 +24,7 @@ members = [
     "crates/relay-fsafe",
     "crates/relay-avoid",
     "crates/relay-rc",
+    "crates/relay-dronecan",
     "crates/relay-param",
     "crates/relay-log",
     "crates/relay-mix-multi",

@@ -1,0 +1,18 @@
+// Generated from AADL process: Falcon_DroneCAN::node
+package falcon-dronecan:node;
+
+interface node-ports {
+    type canframe = list<u8>;
+    type nodestatus = list<u8>;
+    type transfer = list<u8>;
+
+    frames-in: func() -> canframe;
+    set-transfer-out: func(val: transfer);
+    set-status-out: func(val: nodestatus);
+}
+
+world node-world {
+    import node-ports;
+    export reassemble: func();
+    export heartbeat: func();
+}
