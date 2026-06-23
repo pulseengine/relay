@@ -50,3 +50,21 @@ fn verify_sbus_unpack_bounded() {
         }
     }
 }
+
+/// RC-K04 — the CRSF decode is total and range-bounded: for ANY 26-byte frame,
+/// `decode_crsf_rc` never panics (incl. the CRC-8 loop and the shared 11-bit
+/// unpack), and when it returns channels EVERY channel is `<= 0x7FF`. A garbage
+/// CRSF frame can never produce an out-of-range channel or index out of bounds;
+/// a bad CRC yields None (the integrity check SBUS lacks). The scaled f32 stick
+/// bound is proptest-gated.
+#[kani::proof]
+fn verify_crsf_unpack_bounded() {
+    let frame: [u8; CRSF_RC_FRAME_LEN] = kani::any();
+    if let Some(c) = decode_crsf_rc(&frame) {
+        let mut i = 0;
+        while i < 16 {
+            assert!(c.ch[i] <= 0x07FF);
+            i += 1;
+        }
+    }
+}

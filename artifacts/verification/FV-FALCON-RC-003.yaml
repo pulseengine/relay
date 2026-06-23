@@ -1,0 +1,58 @@
+artifacts:
+  - id: FV-FALCON-RC-003
+    type: sw-verification
+    title: "CRSF wire decode — relay-rc tests + Kani unpack/CRC-bounded proof (RC-P03, v1.89)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-RC-P03. relay-rc gains the CRSF (TBS Crossfire /
+      ExpressLRS) verified-decode lane: a 26-byte RC_CHANNELS_PACKED frame
+      (addr/len/type + 22-byte payload + CRC-8 DVB-S2) to 16 11-bit channels,
+      then the shared AETR map to the RC-P01 RcInput. CRSF reuses SBUS's 11-bit
+      unpack + 172/992/1811 endpoints (one shared verified core; only the framing
+      and the CRC-8 integrity check differ). Test-level evidence
+      (pulseengine.eu#89), each step a real named test/harness:
+        - crsf_rejects_bad_address: addr != 0xC8 -> None.
+        - crsf_rejects_bad_type: type != 0x16 (RC_CHANNELS_PACKED) -> None, with
+          the CRC recomputed so ONLY the type check rejects it.
+        - crsf_rejects_bad_crc: a corrupted CRC-8 byte -> None (the integrity
+          check SBUS lacks).
+        - crsf_round_trips_channels: 16 distinct 11-bit channels survive
+          pack -> decode_crsf_rc byte-identical.
+        - crsf_and_sbus_share_the_unpack: the same channels packed into each
+          protocol decode to IDENTICAL counts (proves the shared unpack core).
+        - crsf_endpoints_map_to_stick_extremes: 992->centre, 172->-100%,
+          1811->full/+100% through crsf_to_rc.
+        - crsf_to_rc_output_bounded (proptest): roll/pitch/yaw in [-1,1] and
+          throttle in [0,1] for ANY 16 channel counts.
+        - crsf_decode_never_panics (proptest): decode_crsf_rc over arbitrary 26
+          bytes never panics and every channel <= 0x7FF.
+        - Kani RC-K04 verify_crsf_unpack_bounded: the decode (incl. the CRC-8
+          loop and the shared 11-bit unpack) is TOTAL and range-bounded (every
+          channel <= 0x7FF) for ANY 26-byte frame.
+      ORACLE: `cargo test -p relay-rc` green (20 tests); `cargo kani -p relay-rc`
+      reports VERIFICATION SUCCESSFUL for all four harnesses (RC-K01..K04).
+    tags: [verification, falcon, rc, crsf, elrs, wire-decode, relay-rc, kani, "v1.89"]
+    fields:
+      method: formal-verification
+      # Test-level evidence: each step names the SPECIFIC test/harness proving a
+      # requirement clause, not a crate-wide sweep (pulseengine.eu#89).
+      steps:
+        # clause: address / type / CRC structural rejection
+        - run: "cargo test -p relay-rc tests::crsf_rejects_bad_address"
+        - run: "cargo test -p relay-rc tests::crsf_rejects_bad_type"
+        - run: "cargo test -p relay-rc tests::crsf_rejects_bad_crc"
+        # clause: 16 channels round-trip byte-identical
+        - run: "cargo test -p relay-rc tests::crsf_round_trips_channels"
+        # clause: CRSF and SBUS share the unpack core
+        - run: "cargo test -p relay-rc tests::crsf_and_sbus_share_the_unpack"
+        # clause: endpoints map to stick extremes (AETR + shared 172/992/1811)
+        - run: "cargo test -p relay-rc tests::crsf_endpoints_map_to_stick_extremes"
+        # clause: f32 stick map bounded for any channels (proptest)
+        - run: "cargo test -p relay-rc proptests::crsf_to_rc_output_bounded"
+        # clause: decode never panics + channels 11-bit (proptest companion)
+        - run: "cargo test -p relay-rc proptests::crsf_decode_never_panics"
+        # clause: Kani RC-K04 — decode total + CRC + range-bounded over all frames
+        - run: "cargo kani -p relay-rc --harness verify_crsf_unpack_bounded"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-RC-P03
