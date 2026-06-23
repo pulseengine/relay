@@ -32,3 +32,21 @@ fn verify_throttle_clamped() {
         assert!(t == 0.0);
     }
 }
+
+/// RC-K03 — the SBUS unpack is total and range-bounded: for ANY 25-byte frame,
+/// `decode_sbus` never panics, and when it returns channels EVERY channel is an
+/// 11-bit count (`<= 0x7FF`). This is the integer floor under the f32 stick
+/// mapping — a glitching/garbage receiver frame can never produce an
+/// out-of-range channel count or index out of bounds. (The scaled f32 stick
+/// bound is proptest-gated; Kani on f32 multiply/divide is intractable.)
+#[kani::proof]
+fn verify_sbus_unpack_bounded() {
+    let frame: [u8; SBUS_FRAME_LEN] = kani::any();
+    if let Some(s) = decode_sbus(&frame) {
+        let mut i = 0;
+        while i < 16 {
+            assert!(s.ch[i] <= 0x07FF);
+            i += 1;
+        }
+    }
+}
