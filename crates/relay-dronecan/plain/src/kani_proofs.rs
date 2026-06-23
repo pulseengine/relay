@@ -7,8 +7,9 @@
 #![cfg(kani)]
 
 use crate::id::{decode_message_id, encode_message_id, MessageId};
+use crate::msg::{decode_node_status, encode_raw_command, MAX_ESC};
 use crate::tail::{decode_tail, encode_tail};
-use crate::transfer::{CanFrame, Reassembler, MAX_PAYLOAD};
+use crate::transfer::{encode_single_frame, CanFrame, Reassembler, MAX_PAYLOAD};
 
 /// DC-K01 — the message-id round-trip is exact for in-range fields: encode then
 /// decode recovers priority/dtid/node for ANY field values (masked to width).
@@ -87,5 +88,52 @@ fn verify_push_from_inactive_total() {
     assert!(r.len <= MAX_PAYLOAD);
     if let Some(t) = out {
         assert!(t.len <= MAX_PAYLOAD);
+    }
+}
+
+/// DC-K05 — decode_node_status is total and field-bounded: for ANY 7-byte
+/// payload it never panics and every bit-field is within its DSDL width
+/// (health <= 3, mode <= 7, sub_mode <= 7). A garbage NodeStatus frame can never
+/// yield an out-of-range health/mode the FDI layer would mis-read.
+#[kani::proof]
+fn verify_node_status_bounded() {
+    let payload: [u8; 7] = kani::any();
+    if let Some(ns) = decode_node_status(&payload) {
+        assert!(ns.health <= 3);
+        assert!(ns.mode <= 7);
+        assert!(ns.sub_mode <= 7);
+    }
+}
+
+/// DC-K06 — encode_raw_command is total and buffer-bounded: for an arbitrary
+/// channel array (here a fixed MAX_ESC-sized arbitrary input) and a 35-byte
+/// output, it never panics and writes at most 35 bytes (the int14 packing can
+/// never overrun the caller buffer). The output-bound floor under the ESC
+/// command path.
+#[kani::proof]
+fn verify_raw_command_encode_bounded() {
+    let channels: [i16; MAX_ESC] = kani::any();
+    let mut out = [0u8; 35]; // ceil(MAX_ESC*14/8)
+    let n = encode_raw_command(&channels, &mut out);
+    assert!(n <= 35);
+}
+
+/// DC-K07 — encode_single_frame totality: for ANY dtid/node/priority/transfer-id
+/// and ANY payload up to 7 bytes, it returns Some with dlc <= 8 and never
+/// panics; an 8-byte payload returns None (no frame can exceed the CAN data
+/// field). The TX-side bound.
+#[kani::proof]
+fn verify_encode_single_frame_bounded() {
+    let dtid: u16 = kani::any();
+    let node: u8 = kani::any();
+    let prio: u8 = kani::any();
+    let tid: u8 = kani::any();
+    let payload: [u8; 8] = kani::any();
+    let n: usize = kani::any();
+    kani::assume(n <= 8);
+    let out = encode_single_frame(dtid, node, prio, tid, &payload[..n]);
+    match out {
+        Some(f) => assert!(f.dlc <= 8 && n <= 7),
+        None => assert!(n > 7),
     }
 }

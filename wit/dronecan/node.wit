@@ -3,16 +3,19 @@ package falcon-dronecan:node;
 
 interface node-ports {
     type canframe = list<u8>;
+    type escrawcommand = list<u8>;
     type nodestatus = list<u8>;
     type transfer = list<u8>;
 
     frames-in: func() -> canframe;
     set-transfer-out: func(val: transfer);
     set-status-out: func(val: nodestatus);
+    command-in: func() -> escrawcommand;
 }
 
 world node-world {
     import node-ports;
     export reassemble: func();
     export heartbeat: func();
+    export command: func();
 }
