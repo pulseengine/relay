@@ -24,7 +24,7 @@ jobs:
     name: Spar AADL gate
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install spar v0.18.0 (pinned for reproducible codegen)
         shell: bash
