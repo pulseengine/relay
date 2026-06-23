@@ -1181,6 +1181,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "relay-dronecan"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "relay-hal",
+]
+
+[[package]]
 name = "relay-ds"
 version = "0.1.0"
 dependencies = [

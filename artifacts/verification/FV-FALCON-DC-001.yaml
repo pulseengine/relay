@@ -1,0 +1,56 @@
+artifacts:
+  - id: FV-FALCON-DC-001
+    type: sw-verification
+    title: "DroneCAN v0 transfer layer — relay-dronecan tests + Kani buffer-bound/totality proofs (DC-P01, v1.92)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-DC-P01. The relay-dronecan crate (no_std/no_alloc/
+      forbid-unsafe) implements the DroneCAN v0 transfer layer. Test-level
+      evidence (pulseengine.eu#89), each step a real named test/harness:
+        - crc::tests::ccitt_false_reference_vector: CRC-16-CCITT-FALSE("123456789")
+          == 0x29B1 (the canonical check value pins the algorithm).
+        - id::tests::nodestatus_id_round_trips + service_frame_is_rejected: the
+          29-bit message-id encode/decode round-trips; a service frame -> None.
+        - tail::tests::single_frame_markers + transfer_id_is_five_bits: the tail
+          byte decode (SOT/EOT/toggle + 5-bit transfer-id).
+        - transfer::tests::single_frame_transfer_emits_payload: a single-frame
+          transfer emits its payload directly.
+        - transfer::tests::multi_frame_transfer_reassembles_with_crc: a 2-frame
+          transfer reassembles byte-identical with a matching transfer-CRC.
+        - transfer::tests::corrupt_crc_is_dropped: a multi-frame transfer with a
+          bad CRC is dropped (the AADL CRC sink).
+        - transfer::tests::wrong_toggle_drops_the_transfer: a re-ordered frame
+          (wrong toggle) drops the active transfer (the AADL sequence sink).
+        - transfer::proptests::reassembler_never_panics_and_stays_bounded: over
+          arbitrary 40-frame sequences, push never panics and len <= MAX_PAYLOAD
+          (the full multi-frame+CRC path; Kani-intractable, proptest-gated).
+        - Kani DC-K01 verify_message_id_round_trip, DC-K02 verify_tail_bounded,
+          DC-K03 verify_accumulate_bounded (the buffer-bound INVARIANT at its
+          inductive core — len <= MAX_PAYLOAD preserved, no OOB), DC-K04
+          verify_push_from_inactive_total (dispatch totality).
+      Architecture evidence: spar analyze --root Falcon_DroneCAN::DroneCanNode.Fmu
+      reports 0 errors (RTA: reassembly response 12us <= 130us deadline; 9.2%
+      utilization) and wit/dronecan/node.wit is in sync (spar.yml gate).
+      ORACLE: `cargo test -p relay-dronecan` green (16 tests); `cargo kani -p
+      relay-dronecan` VERIFICATION SUCCESSFUL for all four harnesses.
+    tags: [verification, falcon, dronecan, can, transfer-layer, relay-dronecan, spar, kani, "v1.92"]
+    fields:
+      method: formal-verification
+      # Test-level evidence: each step names the SPECIFIC test/harness proving a
+      # requirement clause, not a crate-wide sweep (pulseengine.eu#89).
+      steps:
+        - run: "cargo test -p relay-dronecan crc::tests::ccitt_false_reference_vector"
+        - run: "cargo test -p relay-dronecan id::tests::nodestatus_id_round_trips"
+        - run: "cargo test -p relay-dronecan id::tests::service_frame_is_rejected"
+        - run: "cargo test -p relay-dronecan tail::tests::transfer_id_is_five_bits"
+        - run: "cargo test -p relay-dronecan transfer::tests::single_frame_transfer_emits_payload"
+        - run: "cargo test -p relay-dronecan transfer::tests::multi_frame_transfer_reassembles_with_crc"
+        - run: "cargo test -p relay-dronecan transfer::tests::corrupt_crc_is_dropped"
+        - run: "cargo test -p relay-dronecan transfer::tests::wrong_toggle_drops_the_transfer"
+        - run: "cargo test -p relay-dronecan transfer::proptests::reassembler_never_panics_and_stays_bounded"
+        # Kani DC-K01..K04 — gated by the kani.yml matrix (relay-dronecan entry)
+        - run: "cargo kani -p relay-dronecan --harness verify_accumulate_bounded"
+        - run: "cargo kani -p relay-dronecan --harness verify_push_from_inactive_total"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-DC-P01

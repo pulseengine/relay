@@ -1,0 +1,190 @@
+-- Falcon DroneCAN — the verified DroneCAN v0 peripheral-bus node (AADL model).
+--
+-- The architectural source of truth for falcon's external-peripheral bus: the
+-- ESCs, GPS, mag, baro, power module the 6X-RT talks to over CAN (relay#214,
+-- jess#62). DroneCAN v0 (classic CAN 2.0B, 8-byte frames, fixed tail-byte +
+-- transfer-CRC), NOT Cyphal — the 6X-RT ecosystem is DroneCAN today and the
+-- simpler framing is Kani-friendly.
+--
+-- This is the v1.92 FOUNDATION slice: the bus + the multi-frame
+-- TransferReassembler + the node heartbeat. The per-message decoders
+-- (NodeStatus/RawCommand/Fix2/...) are the v1.93-94 slices layered on top. The
+-- split: relay owns the verified transfer layer + decoders (pure protocol);
+-- jess moves raw CAN frames only (binds FlexCAN to the relay-hal CanBus seam).
+--
+-- The node interface WIT is GENERATED from this model:
+--   spar codegen --root Falcon_DroneCAN::DroneCanNode.Fmu --format wit spar/*.aadl
+--
+-- The EMV2 error model is the AADL fault-propagation counterpart of the
+-- transfer.rs Kani proofs (the prime target): a corrupted multi-frame transfer
+-- (line noise) is killed by the transfer-CRC sink; an oversized transfer (bus
+-- overrun) is killed by the fixed-buffer bound sink; a re-ordered/duplicated
+-- frame is killed by the toggle + transfer-id sink; a dropped frame (bus-off)
+-- is NOT maskable and propagates as an omission (an absent peripheral -> the
+-- FDI/health layer's job, not the reassembler's).
+
+package Falcon_DroneCAN
+public
+  with Data_Model;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Wire data types — mirror crates/relay-dronecan field-for-field.
+  -- ══════════════════════════════════════════════════════════════
+
+  data CanFrame
+    -- A classic CAN 2.0B frame: 29-bit extended ID (priority || data-type-id ||
+    -- source-node-id) + DLC + up to 8 data bytes (last byte is the tail byte on
+    -- DroneCAN transfers). Fixed-size, no_alloc — the relay-hal CanBus value type.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 13 Bytes;  -- 4 (ext id) + 1 (dlc) + 8 (data)
+  end CanFrame;
+
+  data TailByte
+    -- The DroneCAN tail byte (last data byte of every frame):
+    -- start-of-transfer(1) || end-of-transfer(1) || toggle(1) || transfer-id(5).
+    properties
+      Data_Size => 1 Bytes;
+  end TailByte;
+
+  data Transfer
+    -- A reassembled DroneCAN transfer: the concatenated payload of one (single-
+    -- frame) or many (multi-frame, transfer-CRC-checked) CAN frames, tagged with
+    -- its data-type-id + source-node-id. Output of the TransferReassembler;
+    -- input to the per-DTID decoders (v1.93-94).
+    properties
+      Data_Model::Data_Representation => Struct;
+  end Transfer;
+
+  data NodeStatus
+    -- uavcan.protocol.NodeStatus (DTID 341): uptime_sec(u32) || health(2b) ||
+    -- mode(3b) || sub_mode(3b) || vendor_specific_status_code(u16) = 7 bytes.
+    -- The one mandatory DroneCAN message; the bus-presence + node-health source.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 7 Bytes;
+  end NodeStatus;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- The transfer-reassembly process — frames in, transfers out.
+  -- ══════════════════════════════════════════════════════════════
+
+  process TransferReassembler
+    features
+      frames_in:    in  data port CanFrame;   -- raw frames from the CanBus seam
+      transfer_out: out data port Transfer;   -- a completed, CRC-checked transfer
+      status_out:   out data port NodeStatus; -- this node's own 1 Hz heartbeat
+    -- The mitigating sinks: the transfer-CRC kills a corrupted multi-frame
+    -- (ValueError), the fixed-buffer bound kills an oversized transfer
+    -- (SequenceError), and the toggle + transfer-id state kills a re-ordered or
+    -- duplicated frame (also SequenceError). Frame loss / bus-off (omission) is
+    -- NOT maskable by reassembly — it propagates as a missing transfer (the FDI
+    -- / health layer reconfigures; out of the reassembler's scope). The Kani
+    -- floor (transfer.rs totality + buffer-bound) is the implementation evidence.
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        frames_in    : in  propagation {ValueError, SequenceError, ServiceOmission};
+        transfer_out : out propagation {ServiceOmission};
+      flows
+        crc_sink   : error sink frames_in {ValueError};        -- transfer-CRC rejects corruption
+        bound_sink : error sink frames_in {SequenceError};     -- buffer-bound + toggle/xfer-id reject overrun/reorder
+        loss_pass  : error path frames_in {ServiceOmission} -> transfer_out {ServiceOmission}; -- bus-off not maskable
+      end propagations;
+    **};
+  end TransferReassembler;
+
+  process implementation TransferReassembler.Fixed
+    subcomponents
+      reassemble: thread Reassemble;  -- per-frame: tail decode, accumulate, CRC-check, emit
+      heartbeat:  thread Heartbeat;   -- broadcast this node's NodeStatus at 1 Hz
+  end TransferReassembler.Fixed;
+
+  thread Reassemble
+    -- Per-CAN-frame step: decode the tail byte, route to the per-(node,DTID)
+    -- reassembly slot, accumulate payload, and on end-of-transfer verify the
+    -- transfer-CRC (multi-frame) and emit. A fixed-buffer state machine — the
+    -- prime Kani target (totality + buffer-bound). Sporadic, bounded by the bus:
+    -- a classic CAN frame at 1 Mbit/s (~130 us with stuffing for 8 data bytes)
+    -- floors the min interarrival; a single-frame transfer (a quad's RawCommand
+    -- is 7 bytes -> one frame) is the hot path.
+    properties
+      Dispatch_Protocol => Sporadic;
+      Period => 130 us;  -- min interarrival = one classic CAN frame at 1 Mbit/s
+      Compute_Execution_Time => 2 us .. 12 us;
+  end Reassemble;
+
+  thread Heartbeat
+    -- Broadcast uavcan.protocol.NodeStatus at the DroneCAN-spec 1 Hz. Cheap;
+    -- off the hot path. (Dynamic node-ID allocation is a v1.95 follow-on.)
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 1000 ms;
+      Compute_Execution_Time => 5 us .. 20 us;
+  end Heartbeat;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- The CAN bus — the fault surface (bus-off / noise / overrun).
+  -- ══════════════════════════════════════════════════════════════
+
+  bus CanBus2_0
+    -- Classic CAN 2.0B at 1 Mbit/s. EMV2 error sources are the bus fault modes
+    -- the reassembler must tolerate: a noisy line corrupts a multi-frame payload
+    -- (caught by the transfer-CRC), an overrun/babbling node oversizes or
+    -- re-orders a transfer (caught by the buffer bound + toggle), and a bus-off
+    -- / disconnected node drops frames (an omission — not maskable here).
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        frames : out propagation {ValueError, SequenceError, ServiceOmission};
+      flows
+        noise   : error source frames {ValueError};        -- DC-NOISE   (corrupt a multi-frame payload)
+        overrun : error source frames {SequenceError};     -- DC-OVERRUN (oversize / re-order a transfer)
+        busoff  : error source frames {ServiceOmission};   -- DC-BUSOFF  (drop frames / node off)
+      end propagations;
+    **};
+  end CanBus2_0;
+
+  -- A peripheral node on the bus (an ESC / GPS / mag / power module): the
+  -- SOURCE of the CAN frames the FMU node reassembles. Modelling it explicitly
+  -- completes the EMV2 propagation chain — its frames cross the CanBus2_0, which
+  -- injects the noise / overrun / bus-off faults that the reassembler's sinks
+  -- must catch.
+  device Peripheral
+    features
+      frames_out: out data port CanFrame;
+  end Peripheral;
+
+  -- The FMU core that runs the DroneCAN node. relay-dronecan is no_std +
+  -- forbid(unsafe) + table-free, so it runs on the flight MCU or an inter-core
+  -- companion (jess binds the FlexCAN peripheral underneath the CanBus seam).
+  processor FmuCore
+    properties
+      Scheduling_Protocol => (RATE_MONOTONIC_PROTOCOL);
+      Clock_Period => 100 us;  -- fine enough to dispatch per-CAN-frame reassembly
+  end FmuCore;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- The concrete on-FMU node — the codegen root for the node WIT:
+  --   spar codegen --root Falcon_DroneCAN::DroneCanNode.Fmu --format wit
+  -- ══════════════════════════════════════════════════════════════
+
+  system DroneCanNode
+  end DroneCanNode;
+
+  system implementation DroneCanNode.Fmu
+    subcomponents
+      node:   process TransferReassembler.Fixed;
+      periph: device Peripheral;            -- an ESC/GPS/power node on the bus
+      link:   bus CanBus2_0;
+      cpu:    processor FmuCore;
+    connections
+      rx: port periph.frames_out -> node.frames_in
+        { Actual_Connection_Binding => (reference (link)); };  -- frames cross the CAN bus
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to node;
+      Actual_Processor_Binding => (reference (cpu)) applies to node.reassemble;
+      Actual_Processor_Binding => (reference (cpu)) applies to node.heartbeat;
+  end DroneCanNode.Fmu;
+
+end Falcon_DroneCAN;

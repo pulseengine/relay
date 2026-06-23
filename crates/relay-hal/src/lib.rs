@@ -67,6 +67,40 @@ pub trait AdcIn {
     fn read(&mut self, channel: u8) -> impl Future<Output = Result<u16, Self::Error>>;
 }
 
+/// A classic CAN 2.0B frame — the value unit carried over the [`CanBus`] seam.
+/// 29-bit extended id, a data-length code, and up to 8 data bytes. Fixed-size,
+/// no_alloc. The DroneCAN transfer layer (`relay-dronecan`) decodes these into
+/// reassembled transfers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CanFrame {
+    /// 29-bit extended identifier (only the low 29 bits are meaningful).
+    pub id: u32,
+    /// Data length code: number of valid bytes in `data`, 0..=8.
+    pub dlc: u8,
+    /// The data field (only `dlc` bytes are valid).
+    pub data: [u8; 8],
+}
+
+/// Async CAN bus seam — the DroneCAN peripheral link (ESC/GPS/mag/power) on the
+/// external-bus targets.
+///
+/// jess binds the FlexCAN peripheral underneath (relay#214 / jess#62); relay
+/// owns the verified DroneCAN protocol above (`relay-dronecan`: id/tail/CRC/
+/// multi-frame reassembly). `embedded-hal-async` has NO CAN trait (it is
+/// SPI/I2C/GPIO only; `embedded-can` is sync `nb`), so this is a relay-hal seam.
+/// Fallible-as-health: a wedged/bus-off link surfaces as `Err` — the FDI/health
+/// source, the same posture as the SPI/I2c/Read seams.
+pub trait CanBus {
+    /// Transport error (e.g. bus-off, arbitration loss, peripheral fault).
+    type Error;
+
+    /// Transmit one CAN frame.
+    fn send(&mut self, frame: &CanFrame) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Receive the next CAN frame (await the RX FIFO / interrupt).
+    fn recv(&mut self) -> impl Future<Output = Result<CanFrame, Self::Error>>;
+}
+
 /// What kind of device a [`DeviceDescriptor`] refers to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DeviceKind {
@@ -75,6 +109,8 @@ pub enum DeviceKind {
     Mag,
     Gnss,
     PowerMonitor,
+    /// A DroneCAN node on the CAN bus (ESC/GPS/mag/power over CAN).
+    CanNode,
     Other,
 }
 

@@ -1,0 +1,184 @@
+artifacts:
+  # ════════════════════════════════════════════════════════════════════
+  # Forward release plan (release-planning skill): the RC wire-decode tail
+  # (legacy receivers) + the DroneCAN peripheral-bus arc. status: pending =
+  # committed plan, not yet implemented. Each milestone flips to a built
+  # SWREQ/SWDD/FV trace in its feature-loop release. Parents:
+  #   - RC track   -> SYSREQ-FALCON-006 (command input; the RC-P01..P03 chain)
+  #   - DroneCAN   -> SYSREQ-FALCON-008 (peripheral/HAL seam; the driver arc)
+  # ════════════════════════════════════════════════════════════════════
+
+  # ---- Track A: legacy RC decoders (leaf, mirror the SBUS/CRSF slice) ----
+
+  - id: FEAT-FALCON-v1.90
+    type: feature
+    title: "v1.90 — iBUS wire decode (RC-P04): FlySky receiver to bounded RcInput"
+    status: pending
+    description: >
+      PLANNED. The FlySky iBUS receiver decoder, the third RC link after SBUS
+      (v1.88) and CRSF (v1.89). A leaf verified-decode lane in relay-rc, NO spar
+      (same as SBUS/CRSF — a single fixed-frame decoder, not a subsystem).
+
+      Wire format: a 32-byte iBUS frame — 2-byte header (0x20 0x40), 14 channels
+      of 16-bit little-endian (1000..2000 us range), and a 16-bit checksum
+      (0xFFFF minus the sum of the first 30 bytes). Decode validates the header +
+      checksum, maps the 14 channels (AETR) to the shared RcInput via the
+      v1.89 channels_to_rc core (iBUS uses microsecond values, so a us->axis
+      map, not the SBUS 172/992/1811 count map).
+
+      Verification (mirror RC-P02/P03): Kani RC-K05 decode totality + checksum
+      rejection over any 32 bytes; tests for header/checksum reject, round-trip,
+      endpoint map; proptest bounded-output. relay-rc already in the kani.yml
+      matrix (v1.88), so the harness is CI-gated.
+    tags: [falcon, rc, ibus, flysky, receiver, wire-decode, px4-parity, kani, v1.90, planned]
+    fields:
+      release-target: "decode_ibus(&[u8;32]) -> Option<IbusChannels>; ibus_to_rc; Kani RC-K05; relay-rc tests + proptests green"
+      px4-equivalent: "PX4/ArduPilot iBUS driver — falcon adds the Kani totality + bounded-output proofs"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-006
+
+  - id: FEAT-FALCON-v1.91
+    type: feature
+    title: "v1.91 — PPM wire decode (RC-P05): sum-PPM pulse-widths to bounded RcInput"
+    status: pending
+    description: >
+      PLANNED. The legacy sum-PPM (CPPM) decoder — the lowest-common-denominator
+      RC link, a single signal whose channel values are encoded as pulse widths.
+      A leaf verified-decode lane in relay-rc, NO spar.
+
+      Unlike the byte-framed protocols, PPM arrives as a sequence of pulse-width
+      measurements in microseconds (jess captures them via an input-capture
+      timer; relay owns the pure mapping). decode_ppm(&[u16]) takes the captured
+      pulse widths (each 1000..2000 us, channels separated by a >3000 us sync
+      gap), validates the frame boundary, and maps the channels (AETR) to the
+      shared RcInput. Out-of-range / glitched widths sanitise to centre/idle.
+
+      Verification: Kani RC-K06 totality + channel-count bound over any width
+      array; tests for sync-gap framing, round-trip, endpoint map; proptest
+      bounded-output. CI-gated via the relay-rc matrix entry.
+    tags: [falcon, rc, ppm, cppm, receiver, wire-decode, px4-parity, kani, v1.91, planned]
+    fields:
+      release-target: "decode_ppm(&[u16]) -> Option<PpmChannels>; ppm_to_rc; Kani RC-K06; relay-rc tests + proptests green"
+      px4-equivalent: "PX4 PPM input — falcon adds the verified pulse-width->stick mapping with glitch sanitisation"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-006
+
+  # ---- Track B: DroneCAN peripheral-bus arc (spar-first architecture) ----
+
+  - id: FEAT-FALCON-v1.92
+    type: feature
+    title: "v1.92 — DroneCAN foundation (DC-P01): spar model + CanBus seam + verified transfer layer"
+    status: implemented
+    description: >
+      PLANNED. The base of the DroneCAN v0 peripheral bus — the architecture
+      slice. SPAR-FIRST (unlike the leaf RC decoders): DroneCAN is a subsystem
+      (a CAN node + a multi-frame transfer-reassembly state machine + message
+      components), so it is modelled in spar/dronecan.aadl with EMV2 fault
+      propagation (bus-off / frame-loss / transfer-CRC-mismatch / buffer-overflow
+      as sources; the reassembler bounds + transfer-CRC as mitigating sinks) and
+      timing properties (classic 1 Mbit/s CAN, 8-byte frames, the ESC-command
+      control-loop deadline). spar codegen generates the CanFrame/node WIT
+      interfaces (with the spar.yml drift gate).
+
+      Ships:
+        - spar/dronecan.aadl — node + TransferReassembler + EMV2 + timing; spar
+          analyze zero-errors; spar codegen --format wit -> wit/dronecan/*.wit.
+        - relay-hal CanBus seam (async send/recv, embedded_can::ExtendedId frame
+          value type, fallible-as-health — jess binds FlexCAN per jess#62/#214).
+        - relay-dronecan crate (no_std, forbid-unsafe, mirrors the UBX template):
+          id.rs (29-bit pack/unpack), tail.rs (SOT/EOT/toggle/transfer-id),
+          crc.rs (CRC-16-CCITT-FALSE), transfer.rs (the fixed-buffer
+          TransferReassembler — the PRIME Kani target: totality + buffer-bound).
+      Decision (resolved, #214): hand-written fixed-offset decoders, NOT DSDL
+      codegen (DSDL v0 is frozen; codegen targets the C/Cyphal-v1 dialect).
+    tags: [falcon, dronecan, uavcan-v0, can, spar, transfer-layer, relay-hal, kani, v1.92, planned]
+    fields:
+      release-target: "spar/dronecan.aadl analyze+codegen green; relay-hal CanBus; relay-dronecan transfer layer; Kani: TransferReassembler totality + buffer-bound"
+      px4-equivalent: "libcanard transfer layer — falcon adds the spar-checked timing/EMV2 model + the Kani buffer-bound proof"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+
+  - id: FEAT-FALCON-v1.93
+    type: feature
+    title: "v1.93 — DroneCAN ESC control path (DC-P02): NodeStatus + esc.RawCommand + esc.Status decoders"
+    status: pending
+    description: >
+      PLANNED. The DroneCAN message decoders for the ESC control path, on top of
+      the v1.92 transfer layer. Pure fixed-bit-offset DSDL decoders (Kani-bounded,
+      mirroring the SBUS/CRSF/UBX decode pattern), wrapped by spar-modelled
+      message components:
+        - uavcan.protocol.NodeStatus (DTID 341) — uptime/health/mode, the one
+          mandatory message; the bus-presence + node-health source.
+        - uavcan.equipment.esc.RawCommand (DTID 1030) — up to 20x int14 throttle
+          commands; the verified mixer's PWM output re-expressed on the CAN bus.
+        - uavcan.equipment.esc.Status (DTID 1034) — per-ESC RPM/voltage/current/
+          temperature telemetry (a health + FDI source).
+      Verification: per-message Kani decode totality + field-range bounds; tests
+      for round-trip + truncated-payload rejection; spar message components in
+      dronecan.aadl.
+    tags: [falcon, dronecan, esc, nodestatus, rawcommand, decoders, kani, v1.93, planned]
+    fields:
+      release-target: "NodeStatus/RawCommand/esc.Status decoders + Kani bounds; spar message components; relay-dronecan tests green"
+      px4-equivalent: "DroneCAN ESC output + telemetry — falcon adds per-message Kani decode-bound proofs"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+      - type: depends-on
+        target: FEAT-FALCON-v1.92
+
+  - id: FEAT-FALCON-v1.94
+    type: feature
+    title: "v1.94 — DroneCAN sensor ingest (DC-P03): gnss.Fix2 + mag + baro + BatteryInfo decoders"
+    status: pending
+    description: >
+      PLANNED. The DroneCAN sensor-ingest decoders, completing the peripheral
+      family over CAN (the SPI/I2C drivers' CAN-bus counterparts):
+        - uavcan.equipment.gnss.Fix2 (DTID 1063) — position/velocity/fix-type.
+        - uavcan.equipment.ahrs.MagneticFieldStrength / air_data (mag 1001,
+          baro 1028) — the external mag/baro the IST8310/BMP388 drivers read on
+          SPI/I2C, here over CAN.
+        - uavcan.equipment.power.BatteryInfo (DTID 1092) — pack voltage/current/
+          SoC; the BatteryMonitor classify input over CAN.
+      Verification: per-message Kani decode totality + field-range bounds; tests
+      for round-trip + truncated rejection; the decoded samples ride the existing
+      relay-bus inter-core carrier (relay#177) to the M7 estimator. spar message
+      components.
+    tags: [falcon, dronecan, gnss, mag, baro, battery, sensors, decoders, kani, v1.94, planned]
+    fields:
+      release-target: "gnss.Fix2/mag/baro/BatteryInfo decoders + Kani bounds; carrier test; spar components; relay-dronecan tests green"
+      px4-equivalent: "DroneCAN GPS/mag/baro/power nodes — falcon adds the per-message Kani bounds + the verified inter-core carrier"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+      - type: depends-on
+        target: FEAT-FALCON-v1.92
+
+  - id: FEAT-FALCON-v1.95
+    type: feature
+    title: "v1.95 — DroneCAN node pump (DC-P04): DroneCanNode async loop + NodeStatus heartbeat"
+    status: pending
+    description: >
+      PLANNED. The runtime that ties the transfer layer + decoders to the CanBus
+      seam: DroneCanNode<C: CanBus> — an async pump (mirrors UbxReader) that
+      reads frames, drives the TransferReassembler, dispatches completed
+      transfers to the per-DTID decoders, and broadcasts the node's own
+      NodeStatus heartbeat at 1 Hz. Static node-ID in this slice; the dynamic
+      node-ID allocator (uavcan.protocol.dynamic_node_id.Allocation) is deferred
+      to a follow-on per the #214 recommendation and the open jess/program
+      question (is the FC the allocator?).
+      Verification: the node pump's dispatch is a sync pure step (Kani-bounded);
+      an async/sync equivalence test (decoded transfer == sync dispatch) mirrors
+      the driver-arc pattern; the heartbeat cadence + node-ID are spar timing
+      properties.
+    tags: [falcon, dronecan, node, heartbeat, async-pump, kani, v1.95, planned]
+    fields:
+      release-target: "DroneCanNode async pump + NodeStatus heartbeat; sync/async dispatch equivalence; spar timing; relay-dronecan tests green"
+      px4-equivalent: "a DroneCAN node (libcanard pump) — falcon adds the verified dispatch step + spar-checked heartbeat timing"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+      - type: depends-on
+        target: FEAT-FALCON-v1.93
