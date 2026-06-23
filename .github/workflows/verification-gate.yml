@@ -46,7 +46,7 @@ jobs:
       # cFS cfg(kani) lints would block rivet install + cargo test on
       # the wider workspace. Falcon crates compile clean.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:

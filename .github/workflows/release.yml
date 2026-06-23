@@ -94,7 +94,7 @@ jobs:
       TARGET: ${{ matrix.target }}
       ARCHIVE_KIND: ${{ matrix.archive }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -183,7 +183,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -393,27 +393,27 @@ jobs:
       # the P3 stream artifacts into the bundle, so the bundle SHA256SUMS (signed
       # below) attests them. Steps below run with working-directory: relay.
       - name: Checkout relay
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           path: relay
       - name: Checkout rules_wasm_component
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: pulseengine/rules_wasm_component
           path: rules_wasm_component
       - name: Checkout rules_verus
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: pulseengine/rules_verus
           path: rules_verus
       - name: Checkout rules_rocq_rust
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: pulseengine/rules_rocq_rust
           path: rules_rocq_rust
       - name: Checkout rules_lean
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: pulseengine/rules_lean
           path: rules_lean
@@ -422,7 +422,7 @@ jobs:
       # nix-build) + setup-bazel — same as the cascade CI job. Without these the
       # bazel build aborts with "nix-build not found in PATH".
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@75b0c90b355186240b58c409b99c688ae4acf83e # pinned (was @main) — supply-chain
+        uses: DeterminateSystems/nix-installer-action@a7ad9c4f0c65208097f4d34f3cfa1913b80cce5c # pinned (was @main) — supply-chain
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@5483a91b6e3ffac6092848f1dd7eafcfad203d80 # v0.14.0 pinned
