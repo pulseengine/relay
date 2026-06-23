@@ -1,0 +1,45 @@
+artifacts:
+  - id: SWREQ-FALCON-RC-P03
+    type: sw-req
+    title: "RC-P03: CRSF wire decode — CRC-checked byte-frame to bounded RcInput"
+    status: implemented
+    description: >
+      Falcon shall decode the TBS Crossfire / ExpressLRS (CRSF) receiver protocol
+      — the other dominant modern RC link alongside SBUS (RC-P02) — into the
+      normalised RcInput consumed by the manual flight modes (RC-P01). CRSF shares
+      SBUS's 11-bit channel packing and 172/992/1811 endpoint convention, so the
+      unpack and stick mapping are the SAME verified core; only the framing and
+      the integrity check differ.
+
+      Wire format (RC_CHANNELS_PACKED): a 26-byte frame — destination address
+      (0xC8 = flight controller), a length byte (24), the frame type (0x16), 22
+      payload bytes (16 channels of 11 bits, LSB-first), and a CRC-8 (DVB-S2,
+      poly 0xD5) over the type + payload. Link status (failsafe/RSSI) rides a
+      SEPARATE LinkStatistics frame, so the RC frame exposes no inline flags.
+
+      Behaviour:
+        - decode_crsf_rc(&[u8; 26]) returns the 16 channels (each 0..=2047), or
+          None on a wrong address/length/type OR a CRC-8 mismatch — the
+          structural integrity guarantee SBUS lacks. It NEVER panics for any 26
+          bytes, and EVERY returned channel is guaranteed <= 0x7FF.
+        - decode_crsf_rc and decode_sbus produce IDENTICAL channel counts for the
+          same 11-bit channels (shared unpack core).
+        - crsf_to_rc maps the channels to RcInput with AETR order and the shared
+          172/992/1811 endpoints; the output is ALWAYS bounded (roll/pitch/yaw in
+          [-1,1], throttle in [0,1]) for any channel counts, feeding the verified
+          RC-P01 manual modes.
+    tags: [falcon, rc, crsf, elrs, crossfire, receiver, wire-decode, px4-parity, kani]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-rc: a packed frame round-trips its 16 channels; a bad address /
+        bad type / bad CRC-8 is rejected (None); CRSF and SBUS agree on the same
+        channels (shared unpack); endpoints map to stick extremes. Kani RC-K04
+        verify_crsf_unpack_bounded: decode_crsf_rc is total (never panics, incl.
+        the CRC-8 loop) and every channel <= 0x7FF for ANY 26-byte frame. The f32
+        stick-mapping bound is proptest-gated (f32 multiply/divide,
+        Kani-intractable).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

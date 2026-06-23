@@ -173,22 +173,7 @@ pub fn decode_sbus(frame: &[u8; SBUS_FRAME_LEN]) -> Option<SbusChannels> {
         return None;
     }
     // 22 payload bytes (frame[1..23]) carry 16 * 11 = 176 bits, LSB-first.
-    let mut ch = [0u16; 16];
-    let mut i = 0;
-    while i < 16 {
-        let bit = i * 11;
-        let byte = bit / 8;
-        let shift = (bit % 8) as u32;
-        // The 11-bit field spans at most three payload bytes. Read each guarded
-        // (the third may sit at index 22, past the 22-byte payload) so the
-        // unpack is provably panic-free.
-        let b0 = frame[1 + byte] as u32;
-        let b1 = *frame.get(2 + byte).unwrap_or(&0) as u32;
-        let b2 = *frame.get(3 + byte).unwrap_or(&0) as u32;
-        let word = b0 | (b1 << 8) | (b2 << 16);
-        ch[i] = ((word >> shift) & 0x07FF) as u16;
-        i += 1;
-    }
+    let ch = unpack_channels_11bit(&frame[1..23]);
     let flags = frame[23];
     Some(SbusChannels {
         ch,
@@ -197,31 +182,131 @@ pub fn decode_sbus(frame: &[u8; SBUS_FRAME_LEN]) -> Option<SbusChannels> {
     })
 }
 
-/// Map an SBUS channel count to a centred stick axis in roughly [-1, 1], then
-/// sanitise through the same clamp the manual modes use. AETR channel order
-/// (the Pixhubox/PX4 default): ch0 roll, ch1 pitch, ch2 throttle, ch3 yaw.
+/// Unpack 16 LSB-first 11-bit channels from a packed payload — the wire layout
+/// SHARED by SBUS and CRSF RC_CHANNELS_PACKED (only the surrounding framing
+/// differs). Every read is bounds-guarded, so the unpack is panic-free for ANY
+/// payload length and every returned channel is guaranteed `<= 0x7FF` (proven
+/// by Kani RC-K03 over SBUS and RC-K04 over CRSF).
+fn unpack_channels_11bit(payload: &[u8]) -> [u16; 16] {
+    let mut ch = [0u16; 16];
+    let mut i = 0;
+    while i < 16 {
+        let bit = i * 11;
+        let byte = bit / 8;
+        let shift = (bit % 8) as u32;
+        // The 11-bit field spans at most three payload bytes; guard every read
+        // so the unpack cannot index out of bounds regardless of slice length.
+        let b0 = *payload.get(byte).unwrap_or(&0) as u32;
+        let b1 = *payload.get(byte + 1).unwrap_or(&0) as u32;
+        let b2 = *payload.get(byte + 2).unwrap_or(&0) as u32;
+        let word = b0 | (b1 << 8) | (b2 << 16);
+        ch[i] = ((word >> shift) & 0x07FF) as u16;
+        i += 1;
+    }
+    ch
+}
+
+/// Map an 11-bit RC channel count to a centred stick axis in [-1, 1], sanitised
+/// through the same clamp the manual modes use. SBUS and CRSF share the
+/// 172/992/1811 endpoint convention, so this maps both.
 #[inline]
-fn sbus_axis(raw: u16) -> f32 {
+fn rc_axis(raw: u16) -> f32 {
     unit((raw as f32 - SBUS_CENTRE) / SBUS_SPAN)
 }
 
-/// Map an SBUS throttle channel count to [0, 1] (172..1811 -> 0..1), sanitised.
+/// Map an 11-bit throttle channel count to [0, 1] (172..1811 -> 0..1), sanitised.
 #[inline]
-fn sbus_throttle(raw: u16) -> f32 {
+fn rc_throttle(raw: u16) -> f32 {
     throttle01((raw as f32 - SBUS_MIN) / SBUS_RANGE)
 }
 
-/// Map decoded SBUS channels to a normalised [`RcInput`] using AETR order
-/// (ch0 roll, ch1 pitch, ch2 throttle, ch3 yaw). The output is always bounded
-/// (roll/pitch/yaw in [-1, 1], throttle in [0, 1]) for ANY channel counts —
-/// proptest-gated (RC-P02), since it feeds the already-verified manual modes.
-pub fn sbus_to_rc(s: &SbusChannels) -> RcInput {
+/// Map 16 raw 11-bit channel counts to a normalised [`RcInput`] using AETR order
+/// (the Pixhawk/PX4 default: ch0 roll, ch1 pitch, ch2 throttle, ch3 yaw). The
+/// output is always bounded (roll/pitch/yaw in [-1, 1], throttle in [0, 1]) for
+/// ANY channel counts — proptest-gated, since it feeds the verified manual modes.
+fn channels_to_rc(ch: &[u16; 16]) -> RcInput {
     RcInput {
-        roll: sbus_axis(s.ch[0]),
-        pitch: sbus_axis(s.ch[1]),
-        throttle: sbus_throttle(s.ch[2]),
-        yaw: sbus_axis(s.ch[3]),
+        roll: rc_axis(ch[0]),
+        pitch: rc_axis(ch[1]),
+        throttle: rc_throttle(ch[2]),
+        yaw: rc_axis(ch[3]),
     }
+}
+
+/// Map decoded SBUS channels to a normalised [`RcInput`] (AETR order). Bounded
+/// for any channel counts (RC-P02).
+pub fn sbus_to_rc(s: &SbusChannels) -> RcInput {
+    channels_to_rc(&s.ch)
+}
+
+// ---------------------------------------------------------------------------
+// CRSF wire decode (RC-P03) — TBS Crossfire / ExpressLRS, the other dominant RC
+// link. Same 11-bit channel packing + 172/992/1811 endpoints as SBUS (so the
+// unpack + stick mapping are shared), but different framing: [addr][len][type]
+// [22-byte payload][CRC-8]. Unlike SBUS, CRSF has a real CRC-8 (DVB-S2, poly
+// 0xD5) integrity check; link status (failsafe/RSSI) rides a SEPARATE
+// LinkStatistics frame, so the RC frame exposes no inline flags.
+// ---------------------------------------------------------------------------
+
+/// CRSF RC_CHANNELS_PACKED frame length: addr + len + type + 22 payload + crc.
+pub const CRSF_RC_FRAME_LEN: usize = 26;
+/// CRSF sync/destination address for the flight controller.
+pub const CRSF_ADDR_FC: u8 = 0xC8;
+/// CRSF frame type for the packed 16-channel RC payload.
+pub const CRSF_TYPE_RC_CHANNELS: u8 = 0x16;
+/// CRSF `len` byte for an RC frame: type(1) + payload(22) + crc(1) = 24.
+const CRSF_RC_LEN_FIELD: u8 = 24;
+
+/// 16 decoded CRSF channels (11-bit counts, 0..=2047). CRSF carries link status
+/// (failsafe/RSSI/link-quality) in a SEPARATE LinkStatistics frame, so the RC
+/// frame alone exposes no flags — the arbiter reads link health from that frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CrsfChannels {
+    /// 16 channels, each an 11-bit raw count (0..=2047).
+    pub ch: [u16; 16],
+}
+
+/// CRSF CRC-8 (DVB-S2: poly 0xD5, init 0x00, no reflection) over the given bytes
+/// (type + payload). Bounded loop — Kani-tractable.
+fn crsf_crc8(data: &[u8]) -> u8 {
+    let mut crc = 0u8;
+    for &b in data {
+        crc ^= b;
+        let mut bit = 0;
+        while bit < 8 {
+            crc = if crc & 0x80 != 0 { (crc << 1) ^ 0xD5 } else { crc << 1 };
+            bit += 1;
+        }
+    }
+    crc
+}
+
+/// Decode a 26-byte CRSF RC_CHANNELS_PACKED frame into its 16 channels.
+///
+/// Returns `None` on a wrong address/length/type or a CRC-8 mismatch — CRSF's
+/// integrity check, the structural guarantee SBUS lacks. Total: never panics for
+/// ANY 26 bytes, and every returned channel is guaranteed `<= 0x7FF` (Kani
+/// RC-K04).
+pub fn decode_crsf_rc(frame: &[u8; CRSF_RC_FRAME_LEN]) -> Option<CrsfChannels> {
+    if frame[0] != CRSF_ADDR_FC
+        || frame[1] != CRSF_RC_LEN_FIELD
+        || frame[2] != CRSF_TYPE_RC_CHANNELS
+    {
+        return None;
+    }
+    // CRC-8 over type + payload (bytes 2..25); compare with the trailing byte.
+    if crsf_crc8(&frame[2..25]) != frame[25] {
+        return None;
+    }
+    Some(CrsfChannels {
+        ch: unpack_channels_11bit(&frame[3..25]),
+    })
+}
+
+/// Map decoded CRSF channels to a normalised [`RcInput`] (AETR order, the shared
+/// endpoints). Bounded for any channel counts (RC-P03).
+pub fn crsf_to_rc(c: &CrsfChannels) -> RcInput {
+    channels_to_rc(&c.ch)
 }
 
 #[cfg(kani)]
@@ -335,6 +420,95 @@ mod tests {
         assert!((rc.throttle - 1.0).abs() < 1e-6); // 1811 -> full
         assert!(rc.yaw < -0.9); // 172 -> near -100%
     }
+
+    // --- CRSF wire decode (RC-P03) ---
+
+    /// Pack 16 channels into a valid 26-byte CRSF RC frame (correct CRC-8).
+    fn pack_crsf(ch: &[u16; 16]) -> [u8; CRSF_RC_FRAME_LEN] {
+        let mut f = [0u8; CRSF_RC_FRAME_LEN];
+        f[0] = CRSF_ADDR_FC;
+        f[1] = CRSF_RC_LEN_FIELD;
+        f[2] = CRSF_TYPE_RC_CHANNELS;
+        let mut bit = 0usize;
+        for &c in ch.iter() {
+            let v = (c & 0x07FF) as u32;
+            for b in 0..11 {
+                if v & (1 << b) != 0 {
+                    let pos = bit + b;
+                    f[3 + pos / 8] |= 1 << (pos % 8);
+                }
+            }
+            bit += 11;
+        }
+        f[25] = crsf_crc8(&f[2..25]);
+        f
+    }
+
+    #[test]
+    fn crsf_rejects_bad_address() {
+        let mut f = pack_crsf(&[992; 16]);
+        f[0] = 0xEE; // transmitter-module address, not the FC
+        assert_eq!(decode_crsf_rc(&f), None);
+    }
+
+    #[test]
+    fn crsf_rejects_bad_type() {
+        let mut f = pack_crsf(&[992; 16]);
+        f[2] = 0x14; // LinkStatistics, not RC_CHANNELS_PACKED
+        f[25] = {
+            // recompute CRC so ONLY the type check (not CRC) rejects it
+            let mut crc = 0u8;
+            for &b in &f[2..25] {
+                crc ^= b;
+                for _ in 0..8 {
+                    crc = if crc & 0x80 != 0 { (crc << 1) ^ 0xD5 } else { crc << 1 };
+                }
+            }
+            crc
+        };
+        assert_eq!(decode_crsf_rc(&f), None);
+    }
+
+    #[test]
+    fn crsf_rejects_bad_crc() {
+        let mut f = pack_crsf(&[992; 16]);
+        f[25] ^= 0xFF; // corrupt the CRC byte
+        assert_eq!(decode_crsf_rc(&f), None);
+    }
+
+    #[test]
+    fn crsf_round_trips_channels() {
+        let mut ch = [0u16; 16];
+        for (i, c) in ch.iter_mut().enumerate() {
+            *c = (i as u16 * 97 + 13) & 0x07FF;
+        }
+        let s = decode_crsf_rc(&pack_crsf(&ch)).expect("valid frame");
+        assert_eq!(s.ch, ch);
+    }
+
+    #[test]
+    fn crsf_and_sbus_share_the_unpack() {
+        // The SAME 11-bit channels packed into each protocol's frame decode to
+        // identical channel counts — proving the shared unpack core.
+        let mut ch = [0u16; 16];
+        for (i, c) in ch.iter_mut().enumerate() {
+            *c = (i as u16 * 113 + 7) & 0x07FF;
+        }
+        let from_sbus = decode_sbus(&pack_sbus(&ch, 0)).unwrap().ch;
+        let from_crsf = decode_crsf_rc(&pack_crsf(&ch)).unwrap().ch;
+        assert_eq!(from_sbus, from_crsf);
+    }
+
+    #[test]
+    fn crsf_endpoints_map_to_stick_extremes() {
+        let ch = [992, 172, 1811, 1811, 992, 992, 992, 992, 992, 992, 992, 992,
+                  992, 992, 992, 992];
+        let rc = crsf_to_rc(&decode_crsf_rc(&pack_crsf(&ch)).unwrap());
+        assert!(rc.roll.abs() < 1e-3); // 992 -> centre
+        assert!((rc.pitch + 1.0).abs() < 2e-2); // 172 -> -100%
+        assert!((rc.throttle - 1.0).abs() < 1e-6); // 1811 -> full
+        assert!(rc.yaw > 0.9); // 1811 -> near +100%
+    }
 }
 
 #[cfg(test)]
@@ -390,6 +564,27 @@ mod proptests {
             if let Some(s) = decode_sbus(&bytes) {
                 for c in s.ch {
                     prop_assert!(c <= 0x07FF);
+                }
+            }
+        }
+
+        /// RC-P03: the CRSF stick mapping is bounded for ANY 16 channel counts.
+        #[test]
+        fn crsf_to_rc_output_bounded(raw in proptest::array::uniform16(0u16..=0xFFFF)) {
+            let rc = crsf_to_rc(&CrsfChannels { ch: raw });
+            prop_assert!((-1.0..=1.0).contains(&rc.roll));
+            prop_assert!((-1.0..=1.0).contains(&rc.pitch));
+            prop_assert!((-1.0..=1.0).contains(&rc.yaw));
+            prop_assert!((0.0..=1.0).contains(&rc.throttle));
+        }
+
+        /// decode_crsf_rc never panics for ANY 26 bytes (incl. the CRC-8 loop),
+        /// and every returned channel is 11-bit (proptest companion to RC-K04).
+        #[test]
+        fn crsf_decode_never_panics(bytes in proptest::array::uniform26(0u8..=0xFF)) {
+            if let Some(c) = decode_crsf_rc(&bytes) {
+                for v in c.ch {
+                    prop_assert!(v <= 0x07FF);
                 }
             }
         }
