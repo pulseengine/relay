@@ -1,0 +1,45 @@
+artifacts:
+  - id: SWREQ-FALCON-DC-P03
+    type: sw-req
+    title: "DC-P03: DroneCAN sensor ingest — esc.Status/mag/baro/battery decoders + float16 primitive"
+    status: implemented
+    description: >
+      Falcon shall decode the DroneCAN v0 sensor-ingest messages (the SPI/I2C
+      drivers' CAN-bus counterparts) on the v1.92 transfer layer, plus the shared
+      IEEE-754 half-precision primitive the telemetry uses:
+        - float16 (binary16) -> f32 decode (f16_to_f32): handles normals,
+          subnormals, ±inf, NaN, ±0. Decode-only (falcon reads sensor float16;
+          it never emits it). Total (pure arithmetic, no panic surface).
+        - esc.Status (DTID 1034): error_count/voltage/current/temperature/rpm/
+          power_rating/esc_index — the FDI source (multi-frame, 14-byte layout).
+        - MagneticFieldStrength (DTID 1002): ahrs_id + 3x float16 (external mag).
+        - StaticPressure (DTID 1028): float32 pressure + float16 variance (baro).
+        - BatteryInfo (DTID 1092) flight-relevant PREFIX: temperature/voltage/
+          current (the BatteryMonitor inputs over CAN; the SoC/model tail is not
+          decoded).
+
+      The architecture (spar/dronecan.aadl) gains the SensorSample data type + a
+      Decode thread; spar RTA confirms its 18us response meets the 2ms telemetry
+      deadline. The node WIT gains the sample-out port + decode export.
+
+      Behaviour (crates/relay-dronecan): every decoder returns None on a short
+      payload and NEVER panics for any bytes; esc.Status bit-fields are masked to
+      width (power_rating <= 127, esc_index <= 31); rpm sign-extends from int18.
+      The read_bits helper (non-byte-aligned esc.Status fields) is total and
+      every result < 2^nbits.
+    tags: [falcon, dronecan, sensors, esc-status, mag, baro, battery, float16, spar, kani, v1.94]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-dronecan: float16 known-vector decode (0x3C00->1.0, 0xC000->-2.0,
+        ±inf, NaN, subnormals); esc.Status field decode + rpm sign-extend + short
+        reject; mag 3-axis, baro float32, battery prefix decode; short-payload
+        rejects. Kani DC-K08 read_bits bounded (total, result < 2^nbits — the
+        integer floor under esc.Status). The float16 VALUES + full-decoder
+        totality are proptest-fuzzed (f32 Kani-intractable). spar/dronecan.aadl
+        analyzes 0 errors with the Decode thread RTA 18us <= 2ms; node WIT in sync.
+        SCOPE: gnss.Fix2 (variable covariance tail) is the v1.95 follow-on.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

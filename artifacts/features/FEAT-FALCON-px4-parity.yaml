@@ -1,0 +1,190 @@
+artifacts:
+  # ════════════════════════════════════════════════════════════════════
+  # PX4 everyday-multicopter parity roadmap (release-planning skill, driven
+  # by the 2026-06 PX4 gap analysis vs docs.px4.io). falcon is ~65-70% of
+  # PX4's everyday-MC feature set today and AHEAD on rigor; the missing ~30%
+  # is configurability + operational breadth, NOT flight capability. This
+  # thread closes the realistic next ~20%. status: pending = committed plan.
+  #
+  # Priority order (from the analysis): the PARAMETER SYSTEM is the keystone
+  # (unblocks autotune/calibration/UX/field-config); then the cheap high-safety
+  # predicate/limiter slices. The harder tier (autotune/multi-EKF/wind-est) is
+  # scope-after-first-flight backlog.
+  #
+  # Numbering: this thread is v1.96+ (after the DroneCAN arc v1.94/95). The
+  # legacy-RC quick wins (v1.90/91) stay low-priority filler. Numbers are
+  # labels; the dependency/priority is in the descriptions.
+  # ════════════════════════════════════════════════════════════════════
+
+  # ---- Tier 1: the committed next-20% (highest leverage × feasibility) ----
+
+  - id: FEAT-FALCON-v1.96
+    type: feature
+    title: "v1.96 — Parameter system (the keystone): typed bounded param store + MAVLink PARAM binding"
+    status: pending
+    description: >
+      PLANNED. The single highest-leverage gap vs PX4 (gap-analysis #1). PX4 has
+      hundreds of typed, persisted, GCS-readable/writable parameters; falcon tunes
+      via code constants. Without a param store you cannot field-tune gains, run
+      calibration, set geofence/battery thresholds, or integrate QGC — autotune,
+      calibration, and UX shaping ALL presuppose it.
+
+      A relay-fit design: a WIT-typed parameter TABLE (named, typed entries with
+      DECLARED bounds), a verified storage/serialization leaf (bounded keys +
+      range-clamped values — exactly Kani's wheelhouse), and a MAVLink
+      PARAM_REQUEST_LIST / PARAM_REQUEST_READ / PARAM_SET / PARAM_VALUE binding
+      (relay-mavlink already carries the codec pattern). The differentiator from
+      PX4: a BOUNDED param system — every value's range is proven, not
+      open-ended live-tuning.
+      Feasibility: medium effort, high leverage. DO THIS FIRST of the PX4 thread.
+    tags: [falcon, px4-parity, parameters, config, mavlink, keystone, kani, v1.96, planned]
+    fields:
+      release-target: "WIT param table + verified bounded storage leaf (Kani: key-in-range, value-clamped) + MAVLink PARAM_SET/VALUE round-trip"
+      px4-equivalent: "PX4 parameter system + QGC param panel — falcon adds proven per-param bounds (bounded, not open-ended)"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-006
+
+  - id: FEAT-FALCON-v1.97
+    type: feature
+    title: "v1.97 — Pre-arm / commander checks: arm only when preconditions provably hold"
+    status: pending
+    description: >
+      PLANNED. The #1 real-world crash-preventer (gap-analysis #2). falcon's FSM
+      proves the EXIT invariant (never-disarm-airborne); PX4's commander enforces
+      a broad ENTRY gate. Add the pre-arm predicate: gate arming on sensor health,
+      EKF convergence (NIS in-band), calibration-present, GPS-lock-for-mode,
+      battery-min, RC-present.
+      Excellent verified fit: a pure predicate over already-available health
+      signals; Kani proves "arm => all preconditions held". Hangs on the existing
+      relay-fsm. Cheap, highest safety ROI.
+    tags: [falcon, px4-parity, prearm, commander, arming, safety, fsm, kani, v1.97, planned]
+    fields:
+      release-target: "prearm_ok(health) predicate + Kani arm=>preconditions-held; relay-fsm arming gate wired to the health sources"
+      px4-equivalent: "PX4 commander pre-flight checks — falcon adds the Kani-proven arming precondition"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-011
+
+  - id: FEAT-FALCON-v1.98
+    type: feature
+    title: "v1.98 — Sensor calibration routines: accel/gyro/mag/level offsets the estimator consumes"
+    status: pending
+    description: >
+      PLANNED. An uncalibrated mag/accel diverges even a proven estimator
+      (gap-analysis #3; was under-scoped as 'validation' on the known-gaps list).
+      The guided calibration that solves bias/scale/axis-remap + board-level
+      offsets, landing them in the v1.96 param store.
+      Feasibility: medium, param-system-dependent (needs v1.96). The calibration
+      math (ellipsoid fit for mag, accel 6-orientation bias solve, gyro
+      null-rate) is verifiable leaf work; the verified estimator then consumes
+      the calibrated offsets (replacing the identity-remap placeholder).
+    tags: [falcon, px4-parity, calibration, sensors, estimator, kani, v1.98, planned]
+    fields:
+      release-target: "mag ellipsoid-fit + accel 6-orientation bias solve + gyro null (verified leaf) -> param store; estimator consumes the offsets"
+      px4-equivalent: "PX4 sensor calibration (QGC-guided) — falcon adds verified calibration math"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-018
+
+  - id: FEAT-FALCON-v1.99
+    type: feature
+    title: "v1.99 — Expanded failsafes: high-wind, motor-failure reallocation, attitude-runaway termination"
+    status: pending
+    description: >
+      PLANNED. Three failsafe responses PX4 has that the unified arbiter lacks
+      (gap-analysis #5), covering the failure classes most likely to be fatal:
+        - high-wind: a wind/tilt-saturation threshold -> RTL/land.
+        - motor-failure: an ESC current/RPM anomaly (from esc.Status, v1.94) ->
+          control-allocation reallocation (the hardest; touches relay-mix-*).
+        - attitude-runaway: a sustained-tilt-beyond-limit -> flight termination.
+      The arbiter is already unified; these are new bounded inputs + actions with
+      Kani-provable response bounds. Easy-to-medium except motor reallocation.
+    tags: [falcon, px4-parity, failsafe, high-wind, motor-failure, termination, safety, kani, v1.99, planned]
+    fields:
+      release-target: "3 new arbiter inputs+actions (high-wind/motor-fail/attitude-runaway) with Kani response-bound proofs"
+      px4-equivalent: "PX4 wind/actuator/lockdown failsafes — falcon adds proven response bounds"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-011
+
+  - id: FEAT-FALCON-v1.100
+    type: feature
+    title: "v1.100 — Position-mode UX shaping: jerk/slew limits, velocity feedforward, stick expo"
+    status: pending
+    description: >
+      PLANNED. The flight-feel niceties that make position mode professional
+      (gap-analysis #7): jerk/accel-limited smooth trajectories, velocity
+      feedforward, and stick expo/smoothing. Flight quality + pilot acceptance,
+      not safety.
+      Feasibility: easy, verified-friendly — bounded slew/jerk limiters are
+      textbook Kani-boundable leaves; the knobs live in the v1.96 param store.
+    tags: [falcon, px4-parity, position-mode, ux, slew, feedforward, kani, v1.100, planned]
+    fields:
+      release-target: "bounded jerk/slew limiters + velocity-FF + stick-expo (Kani output-bounded); knobs in the param store"
+      px4-equivalent: "PX4 MPC_* trajectory shaping + stick curves — falcon adds Kani-bounded limiters"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-006
+
+  # ---- Tier 2: harder backlog (scope AFTER first flight; not yet committed) ----
+
+  - id: FEAT-FALCON-v1.101
+    type: feature
+    title: "v1.101 — Multicopter wind estimation (airspeed-less, drag-fusion) [backlog: estimator extension]"
+    status: pending
+    description: >
+      BACKLOG (harder; scope after single-EKF flight is proven). PX4's EKF2
+      estimates MC wind via drag-specific-force fusion (no airspeed sensor);
+      falcon's IEKF carries no wind states (gap-analysis #4). A natural estimator
+      extension — the IEKF can carry wind states + a clean drag model — that
+      improves position hold in wind and ENABLES the v1.99 high-wind failsafe.
+      Medium-hard with a Lyapunov/consistency proof; a credible 'verified wind
+      estimation' differentiator.
+    tags: [falcon, px4-parity, wind-estimation, iekf, drag, backlog, harder, v1.101, planned]
+    fields:
+      release-target: "IEKF wind-state extension + drag-specific-force fusion + consistency proof; feeds the high-wind failsafe"
+      px4-equivalent: "PX4 EKF2 MC wind estimation — falcon adds a verified wind estimator"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-017
+
+  - id: FEAT-FALCON-v1.102
+    type: feature
+    title: "v1.102 — Multi-EKF instance selector / sensor voting [backlog: redundancy]"
+    status: pending
+    description: >
+      BACKLOG (medium-hard; scope after single-EKF flight). PX4 runs N EKF
+      instances on different IMU/mag combos and votes by consistency, catching
+      GRADUAL sensor degradation single-instance NIS gating sees late
+      (gap-analysis #3g/#8). falcon already has the per-instance consistency
+      metric (NIS); the missing piece is the multi-instance selector + redundant
+      sensor inputs. The selector logic is verifiable; the cost is N x estimator
+      compute + redundant hardware.
+    tags: [falcon, px4-parity, multi-ekf, voting, redundancy, fdi, backlog, harder, v1.102, planned]
+    fields:
+      release-target: "N-instance EKF selector keyed on NIS consistency (verified selector) + redundant sensor wiring"
+      px4-equivalent: "PX4 EKF2 multi-instance + sensor voting — falcon adds a verified selector over its NIS metric"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-018
+
+  - id: FEAT-FALCON-v1.103
+    type: feature
+    title: "v1.103 — In-flight PID autotune (system identification) [backlog: param-dependent, safety-sensitive]"
+    status: pending
+    description: >
+      BACKLOG (hard; param-system-dependent + safety-sensitive; scope after
+      params + calibration). PX4 runs in-flight SISO sysid (2-pole/2-zero,
+      injecting roll/pitch/yaw disturbances over ~40s) then computes gains
+      (gap-analysis #1/3a) — the single biggest USABILITY gap (lets non-experts
+      get a flyable tune). The sysid/least-squares core is verifiable leaf work,
+      but the in-air excitation + apply-on-land loop is safety-sensitive and
+      needs the v1.96 param store. Worth scoping LAST of the thread.
+    tags: [falcon, px4-parity, autotune, sysid, tuning, backlog, harder, v1.103, planned]
+    fields:
+      release-target: "SISO sysid (verified least-squares) + bounded in-air excitation + apply-on-land; gains -> param store"
+      px4-equivalent: "PX4 multicopter autotune — falcon adds verified sysid + bounded excitation"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-006
