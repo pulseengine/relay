@@ -24,8 +24,10 @@
 #![forbid(unsafe_code)]
 
 pub mod crc;
+pub mod float16;
 pub mod id;
 pub mod msg;
+pub mod sensors;
 pub mod tail;
 pub mod transfer;
 

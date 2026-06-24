@@ -133,8 +133,8 @@ artifacts:
 
   - id: FEAT-FALCON-v1.94
     type: feature
-    title: "v1.94 — DroneCAN sensor ingest (DC-P03): gnss.Fix2 + mag + baro + BatteryInfo decoders"
-    status: pending
+    title: "v1.94 — DroneCAN sensor ingest (DC-P03): float16 + esc.Status + mag + baro + BatteryInfo decoders"
+    status: implemented
     description: >
       PLANNED. The DroneCAN sensor-ingest decoders, completing the peripheral
       family over CAN (the SPI/I2C drivers' CAN-bus counterparts):
@@ -166,8 +166,11 @@ artifacts:
     title: "v1.95 — DroneCAN node pump (DC-P04): DroneCanNode async loop + NodeStatus heartbeat"
     status: pending
     description: >
-      PLANNED. The runtime that ties the transfer layer + decoders to the CanBus
-      seam: DroneCanNode<C: CanBus> — an async pump (mirrors UbxReader) that
+      PLANNED. Also folds in gnss.Fix2 (DTID 1063, the variable covariance-tail
+      message moved from v1.94): decode the flight-relevant fixed fields
+      (lat/lon 1e-8 deg, height, sats, fix status). Then the runtime that ties
+      the transfer layer + decoders to the CanBus seam:
+      DroneCanNode<C: CanBus> — an async pump (mirrors UbxReader) that
       reads frames, drives the TransferReassembler, dispatches completed
       transfers to the per-DTID decoders, and broadcasts the node's own
       NodeStatus heartbeat at 1 Hz. Static node-ID in this slice; the dynamic

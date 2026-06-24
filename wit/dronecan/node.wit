@@ -5,12 +5,14 @@ interface node-ports {
     type canframe = list<u8>;
     type escrawcommand = list<u8>;
     type nodestatus = list<u8>;
+    type sensorsample = list<u8>;
     type transfer = list<u8>;
 
     frames-in: func() -> canframe;
     set-transfer-out: func(val: transfer);
     set-status-out: func(val: nodestatus);
     command-in: func() -> escrawcommand;
+    set-sample-out: func(val: sensorsample);
 }
 
 world node-world {
@@ -18,4 +20,5 @@ world node-world {
     export reassemble: func();
     export heartbeat: func();
     export command: func();
+    export decode: func();
 }

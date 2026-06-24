@@ -74,6 +74,16 @@ public
       Data_Model::Data_Representation => Struct;
   end EscRawCommand;
 
+  data SensorSample
+    -- A decoded DroneCAN sensor-ingest message (DC-P03): esc.Status (1034,
+    -- RPM/voltage/current/temp, the FDI source), MagneticFieldStrength (1002),
+    -- StaticPressure (1028), or BatteryInfo (1092, the power-monitor prefix).
+    -- The float16 telemetry uses the shared f16_to_f32 primitive; the decoders
+    -- are pure fixed-offset bodies over the reassembled transfer payload.
+    properties
+      Data_Model::Data_Representation => Struct;
+  end SensorSample;
+
   -- ══════════════════════════════════════════════════════════════
   -- The transfer-reassembly process — frames in, transfers out.
   -- ══════════════════════════════════════════════════════════════
@@ -84,6 +94,7 @@ public
       transfer_out: out data port Transfer;        -- a completed, CRC-checked transfer
       status_out:   out data port NodeStatus;      -- this node's own 1 Hz heartbeat
       command_in:   in  data port EscRawCommand;   -- the mixer's per-motor throttles (DC-P02)
+      sample_out:   out data port SensorSample;    -- a decoded sensor-ingest message (DC-P03)
     -- The mitigating sinks: the transfer-CRC kills a corrupted multi-frame
     -- (ValueError), the fixed-buffer bound kills an oversized transfer
     -- (SequenceError), and the toggle + transfer-id state kills a re-ordered or
@@ -109,6 +120,7 @@ public
       reassemble: thread Reassemble;  -- per-frame: tail decode, accumulate, CRC-check, emit
       heartbeat:  thread Heartbeat;   -- broadcast this node's NodeStatus at 1 Hz
       command:    thread Command;     -- encode + emit esc.RawCommand at the control rate
+      decode:     thread Decode;      -- decode a sensor-ingest transfer (DC-P03)
   end TransferReassembler.Fixed;
 
   thread Reassemble
@@ -145,6 +157,18 @@ public
       Period => 2500 us;
       Compute_Execution_Time => 2 us .. 8 us;
   end Command;
+
+  thread Decode
+    -- Decode a completed sensor-ingest transfer (esc.Status / mag / baro /
+    -- battery) into a SensorSample for the estimator + FDI. Dispatched per
+    -- completed transfer; bounded by the telemetry rate (the fastest, esc.Status,
+    -- is ~50 Hz per ESC). The fixed-offset decoders + f16_to_f32 are the bodies;
+    -- read_bits is Kani-bounded (DC-K08), the float16 values proptest-gated.
+    properties
+      Dispatch_Protocol => Sporadic;
+      Period => 2000 us;  -- min interarrival floor (~500 Hz aggregate telemetry)
+      Compute_Execution_Time => 2 us .. 6 us;
+  end Decode;
 
   -- ══════════════════════════════════════════════════════════════
   -- The CAN bus — the fault surface (bus-off / noise / overrun).
@@ -209,6 +233,7 @@ public
       Actual_Processor_Binding => (reference (cpu)) applies to node.reassemble;
       Actual_Processor_Binding => (reference (cpu)) applies to node.heartbeat;
       Actual_Processor_Binding => (reference (cpu)) applies to node.command;
+      Actual_Processor_Binding => (reference (cpu)) applies to node.decode;
   end DroneCanNode.Fmu;
 
 end Falcon_DroneCAN;

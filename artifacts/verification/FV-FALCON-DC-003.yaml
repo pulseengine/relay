@@ -1,0 +1,52 @@
+artifacts:
+  - id: FV-FALCON-DC-003
+    type: sw-verification
+    title: "DroneCAN sensor ingest — float16 + esc.Status/mag/baro/battery decoders, Kani read_bits bound (DC-P03, v1.94)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-DC-P03. relay-dronecan gains the float16 primitive
+      (float16.rs) and the sensor-ingest decoders (sensors.rs). Test-level
+      evidence (pulseengine.eu#89), each step a real named test/harness:
+        - float16::tests::known_half_vectors: canonical IEEE-half patterns decode
+          exactly (0x3C00->1.0, 0x4000->2.0, 0xC000->-2.0, 0x7C00->+inf, NaN).
+        - float16::tests::smallest_normal_and_subnormal: 2^-14 / 2^-24 edges.
+        - float16::proptests::decode_total_and_matches_reference: never panics
+          for ANY bit pattern; inf/NaN/finite classification is consistent.
+        - sensors::tests::esc_status_decodes_fields: error_count/voltage/current/
+          temperature/rpm at the right offsets (float16 + bit-packed rpm).
+        - sensors::tests::esc_status_rpm_negative_sign_extends: int18 rpm sign.
+        - sensors::tests::esc_status_rejects_short / short_payloads_reject_not_panic:
+          short payloads -> None, no panic.
+        - sensors::tests::mag_decodes_three_axes: ahrs_id + 3x float16.
+        - sensors::tests::baro_decodes_pressure_f32: float32 pressure + float16.
+        - sensors::tests::battery_prefix_decodes_voltage_current: the
+          BatteryMonitor inputs (temp/voltage/current) over CAN.
+        - sensors::proptests::sensor_decoders_never_panic: ALL decoders over
+          arbitrary bytes never panic; esc.Status fields within width.
+        - Kani DC-K08 verify_read_bits_bounded: the bit-reader is total and every
+          result < 2^nbits (the integer floor under esc.Status).
+      Architecture: spar analyze --root Falcon_DroneCAN::DroneCanNode.Fmu reports
+      0 errors with the Decode thread RTA 18us <= 2ms telemetry deadline;
+      wit/dronecan/node.wit (now with sample-out + decode export) in sync.
+      ORACLE: `cargo test -p relay-dronecan` green (36 tests); `cargo kani -p
+      relay-dronecan` VERIFICATION SUCCESSFUL for all eight harnesses.
+    tags: [verification, falcon, dronecan, sensors, float16, relay-dronecan, spar, kani, "v1.94"]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-dronecan float16::tests::known_half_vectors"
+        - run: "cargo test -p relay-dronecan float16::tests::smallest_normal_and_subnormal"
+        - run: "cargo test -p relay-dronecan float16::proptests::decode_total_and_matches_reference"
+        - run: "cargo test -p relay-dronecan sensors::tests::esc_status_decodes_fields"
+        - run: "cargo test -p relay-dronecan sensors::tests::esc_status_rpm_negative_sign_extends"
+        - run: "cargo test -p relay-dronecan sensors::tests::esc_status_rejects_short"
+        - run: "cargo test -p relay-dronecan sensors::tests::mag_decodes_three_axes"
+        - run: "cargo test -p relay-dronecan sensors::tests::baro_decodes_pressure_f32"
+        - run: "cargo test -p relay-dronecan sensors::tests::battery_prefix_decodes_voltage_current"
+        - run: "cargo test -p relay-dronecan sensors::tests::short_payloads_reject_not_panic"
+        - run: "cargo test -p relay-dronecan sensors::proptests::sensor_decoders_never_panic"
+        # Kani DC-K08 — gated by the kani.yml matrix (relay-dronecan entry)
+        - run: "cargo kani -p relay-dronecan --harness verify_read_bits_bounded"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-DC-P03
