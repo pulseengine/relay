@@ -1,0 +1,49 @@
+artifacts:
+  - id: SWREQ-FALCON-DC-P04
+    type: sw-req
+    title: "DC-P04: DroneCanNode async pump + NodeStatus heartbeat — the runtime over the CanBus seam"
+    status: implemented
+    description: >
+      Falcon shall provide the DroneCAN node runtime that ties the verified
+      transfer layer (DC-P01) to the relay-hal CanBus seam: an async pump that
+      receives CAN frames and dispatches completed transfers to the decoders, and
+      the node's own NodeStatus heartbeat. Static node-id; dynamic node-id
+      allocation is a follow-on.
+
+      Behaviour (crates/relay-dronecan, node.rs + msg.rs):
+        - DroneCanNode<C: CanBus>::poll() awaits one frame on the bus and feeds
+          the verified Reassembler, returning a completed Transfer (or None). The
+          async path adds ONLY the bus await — the dispatch is the v1.92
+          reassembler step (totality + buffer-bound already proven). A bus recv
+          error propagates (the async path is fallible — the health source).
+        - send_heartbeat() encodes the 7-byte NodeStatus and emits a single-frame
+          transfer, advancing the 5-bit transfer id. encode_node_status is the
+          inverse of decode_node_status: decode(encode(s)) == s for in-range
+          fields.
+        - The async pump and a sync reassembler fed the same frame yield an
+          identical Transfer (the runtime preserves the verified reassembler).
+
+      The architecture (spar/dronecan.aadl) already models the Reassemble +
+      Heartbeat threads (v1.92); the pump orchestrates them (no new spar thread).
+
+      SCOPE (deliberate, evidence-backed): gnss.Fix2 (DTID 1063) is DEFERRED. Its
+      DSDL uses int37 lat/lon + int27 heights (bit-packed, NOT byte-aligned) and
+      the uavcan.Timestamp width is ambiguous in the summarised spec — a
+      self-constructed round-trip test would pass even with wrong offsets, so a
+      GPS decoder cannot be shipped without validation against a real captured
+      frame / libcanard. It becomes its own validation-gated slice.
+    tags: [falcon, dronecan, node, heartbeat, async-pump, canbus, kani, v1.95]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-dronecan: poll() reassembles a frame identically to a sync push;
+        send_heartbeat() emits a frame that reassembles + decodes back to the
+        original NodeStatus; poll propagates a bus error. Kani DC-K09
+        verify_node_status_round_trip: decode(encode(s)) == Some(s) for any
+        in-range NodeStatus (the heartbeat a receiving node decodes byte-identical).
+        The async path is tested via a hand-rolled block_on over a mock CanBus
+        (the falcon-gnss-ubx pattern).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-008

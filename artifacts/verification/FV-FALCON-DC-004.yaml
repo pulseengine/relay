@@ -1,0 +1,38 @@
+artifacts:
+  - id: FV-FALCON-DC-004
+    type: sw-verification
+    title: "DroneCanNode async pump + NodeStatus heartbeat — sync/async equivalence + round-trip (DC-P04, v1.95)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-DC-P04. relay-dronecan gains the node runtime
+      (node.rs) and the heartbeat encoder (msg.rs encode_node_status).
+      Test-level evidence (pulseengine.eu#89), each step a real named
+      test/harness:
+        - msg::tests::node_status_encode_decode_round_trips: decode(encode(s)) == s.
+        - node::tests::poll_reassembles_like_sync_push: DroneCanNode::poll over a
+          mock CanBus yields the SAME Transfer as a sync Reassembler fed the same
+          frame (the runtime preserves the verified reassembler).
+        - node::tests::heartbeat_round_trips_through_reassembler: a heartbeat the
+          node emits reassembles + decodes back to the original NodeStatus
+          (TX path round-trips through RX).
+        - node::tests::poll_propagates_bus_error: a bus recv error -> Err (the
+          async path is fallible).
+        - Kani DC-K09 verify_node_status_round_trip: decode(encode(s)) == Some(s)
+          for ANY in-range NodeStatus (integer bit-packing; Kani-tractable).
+      The async path is driven by a hand-rolled block_on over a mock CanBus
+      (the falcon-gnss-ubx test-executor pattern), no_std/no_alloc.
+      ORACLE: `cargo test -p relay-dronecan` green (40 tests); `cargo kani -p
+      relay-dronecan` VERIFICATION SUCCESSFUL for all nine harnesses.
+    tags: [verification, falcon, dronecan, node, heartbeat, async, relay-dronecan, kani, "v1.95"]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-dronecan msg::tests::node_status_encode_decode_round_trips"
+        - run: "cargo test -p relay-dronecan node::tests::poll_reassembles_like_sync_push"
+        - run: "cargo test -p relay-dronecan node::tests::heartbeat_round_trips_through_reassembler"
+        - run: "cargo test -p relay-dronecan node::tests::poll_propagates_bus_error"
+        # Kani DC-K09 — gated by the kani.yml matrix (relay-dronecan entry)
+        - run: "cargo kani -p relay-dronecan --harness verify_node_status_round_trip"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-DC-P04

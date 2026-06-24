@@ -164,12 +164,9 @@ artifacts:
   - id: FEAT-FALCON-v1.95
     type: feature
     title: "v1.95 — DroneCAN node pump (DC-P04): DroneCanNode async loop + NodeStatus heartbeat"
-    status: pending
+    status: implemented
     description: >
-      PLANNED. Also folds in gnss.Fix2 (DTID 1063, the variable covariance-tail
-      message moved from v1.94): decode the flight-relevant fixed fields
-      (lat/lon 1e-8 deg, height, sats, fix status). Then the runtime that ties
-      the transfer layer + decoders to the CanBus seam:
+      The runtime that ties the transfer layer + decoders to the CanBus seam:
       DroneCanNode<C: CanBus> — an async pump (mirrors UbxReader) that
       reads frames, drives the TransferReassembler, dispatches completed
       transfers to the per-DTID decoders, and broadcasts the node's own
@@ -190,3 +187,28 @@ artifacts:
         target: SYSREQ-FALCON-008
       - type: depends-on
         target: FEAT-FALCON-v1.93
+
+  - id: FEAT-FALCON-v1.95g
+    type: feature
+    title: "v1.95g — DroneCAN gnss.Fix2 decoder [backlog: needs real-frame offset validation]"
+    status: pending
+    description: >
+      BACKLOG (deferred from v1.94/95). uavcan.equipment.gnss.Fix2 (DTID 1063):
+      decode the flight-relevant fields (longitude/latitude int37 1e-8 deg,
+      height_msl int27 mm, sats_used, fix status). Why deferred + gated: the DSDL
+      is BIT-PACKED (int37 lat/lon, int27 heights — not byte-aligned) and the
+      leading uavcan.Timestamp width is ambiguous in the summarised spec, so a
+      self-constructed round-trip test would pass even with WRONG offsets. A GPS
+      decoder is flight-critical — it must be validated against a real captured
+      Fix2 frame (or libcanard/pydronecan reference vectors), not just
+      self-tested. Needs a signed-bit-field reader (read_signed_bits) over the
+      v1.94 read_bits primitive + reference-vector tests.
+    tags: [falcon, dronecan, gnss, fix2, backlog, validation-gated, kani, planned]
+    fields:
+      release-target: "decode_gnss_fix2 (int37/int27 fields) validated against a real Fix2 frame / libcanard reference vectors; Kani read_signed_bits bound"
+      px4-equivalent: "DroneCAN GPS (Fix2) ingest — falcon adds a reference-validated, Kani-bounded decoder"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+      - type: depends-on
+        target: FEAT-FALCON-v1.94
