@@ -8,7 +8,7 @@
 
 use crate::dsdl;
 use crate::id::{decode_message_id, encode_message_id, MessageId};
-use crate::msg::{decode_node_status, encode_raw_command, MAX_ESC};
+use crate::msg::{decode_node_status, encode_node_status, encode_raw_command, NodeStatus, MAX_ESC};
 use crate::tail::{decode_tail, encode_tail};
 use crate::transfer::{encode_single_frame, CanFrame, Reassembler, MAX_PAYLOAD};
 
@@ -171,4 +171,20 @@ fn verify_dsdl_read_bounded() {
         assert!(v < (1u64 << w));
         i += 1;
     }
+}
+
+/// DC-K09 — the NodeStatus heartbeat round-trips: for ANY in-range NodeStatus,
+/// `decode_node_status(&encode_node_status(s)) == Some(s)`. The TX heartbeat the
+/// DroneCanNode emits is decoded byte-identical by a receiving node. Integer
+/// (bit-packing only) — Kani-tractable.
+#[kani::proof]
+fn verify_node_status_round_trip() {
+    let s = NodeStatus {
+        uptime_sec: kani::any(),
+        health: kani::any::<u8>() & 0x03,
+        mode: kani::any::<u8>() & 0x07,
+        sub_mode: kani::any::<u8>() & 0x07,
+        vendor_status: kani::any(),
+    };
+    assert!(decode_node_status(&encode_node_status(&s)) == Some(s));
 }

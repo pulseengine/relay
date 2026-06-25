@@ -58,6 +58,22 @@ pub fn decode_node_status(payload: &[u8]) -> Option<NodeStatus> {
     })
 }
 
+/// Encode a NodeStatus into its 7-byte single-frame payload (the inverse of
+/// [`decode_node_status`]). Each bit-field is masked to its DSDL width, so
+/// `decode_node_status(&encode_node_status(s))` round-trips for in-range fields.
+/// This node's own heartbeat (the DroneCanNode broadcasts it at 1 Hz). Total.
+pub fn encode_node_status(s: &NodeStatus) -> [u8; 7] {
+    let mut p = [0u8; 7];
+    p[..4].copy_from_slice(&s.uptime_sec.to_le_bytes());
+    // DSDL bit packing (conformance fix), the inverse of the dsdl::read_uint
+    // decode — NOT LSB-first. Matches the pydronecan canonical NodeStatus.
+    dsdl::write_uint(&mut p, 32, 2, (s.health & 0x03) as u64);
+    dsdl::write_uint(&mut p, 34, 3, (s.mode & 0x07) as u64);
+    dsdl::write_uint(&mut p, 37, 3, (s.sub_mode & 0x07) as u64);
+    p[5..7].copy_from_slice(&s.vendor_status.to_le_bytes());
+    p
+}
+
 /// Pack up to [`MAX_ESC`] int14 throttle commands (LSB-first) into `out`,
 /// returning the number of bytes written (0 if `out` is too small or no
 /// channels). Each value is clamped to the int14 range. Total: never panics;
@@ -136,6 +152,32 @@ mod tests {
     #[test]
     fn node_status_rejects_short_payload() {
         assert_eq!(decode_node_status(&[0; 6]), None);
+    }
+
+    #[test]
+    fn node_status_encode_decode_round_trips() {
+        let s = NodeStatus {
+            uptime_sec: 0x0102_0304,
+            health: 2,
+            mode: 5,
+            sub_mode: 3,
+            vendor_status: 0xBEEF,
+        };
+        assert_eq!(decode_node_status(&encode_node_status(&s)), Some(s));
+    }
+
+    /// CONFORMANCE: encode_node_status reproduces the canonical pydronecan bytes
+    /// (health=2/mode=3/sub_mode=1 -> byte 4 = 0x99), not just self-round-trips.
+    #[test]
+    fn node_status_encode_matches_pydronecan_reference() {
+        let s = NodeStatus {
+            uptime_sec: 0x0102_0304,
+            health: 2,
+            mode: 3,
+            sub_mode: 1,
+            vendor_status: 0xBEEF,
+        };
+        assert_eq!(encode_node_status(&s), [0x04, 0x03, 0x02, 0x01, 0x99, 0xEF, 0xBE]);
     }
 
     #[test]
