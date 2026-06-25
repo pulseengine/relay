@@ -24,6 +24,7 @@
 #![forbid(unsafe_code)]
 
 pub mod crc;
+pub mod dsdl;
 pub mod float16;
 pub mod id;
 pub mod msg;
