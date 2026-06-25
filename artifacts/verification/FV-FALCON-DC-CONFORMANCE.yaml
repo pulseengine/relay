@@ -1,0 +1,60 @@
+artifacts:
+  - id: FV-FALCON-DC-CONFORMANCE
+    type: sw-verification
+    title: "DroneCAN wire conformance — pydronecan reference-vector validation (fixes the DSDL bit-order bug)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-DC-P02 + SWREQ-FALCON-DC-P03 along the CONFORMANCE
+      axis (does the decode match the real DSDL?), which the prior FV-FALCON-DC-002
+      /003 (robustness + self-consistency) could not: every self-constructed
+      round-trip test passed because encode + decode shared the same WRONG bit
+      order.
+
+      THE BUG (found 2026-06 by running external reference vectors): the
+      hand-rolled bit-field decoders used LSB-first packing, but DroneCAN v0 DSDL
+      uses `be_from_le_bits` (8-bit-chunk reversal — byte-aligned fields are
+      little-endian, sub-byte/multi-byte bit fields are MSB-first-per-stream-byte).
+      Affected, against the pydronecan reference (the impl PX4/ArduPilot libcanard
+      conforms to):
+        - NodeStatus health/mode/sub_mode: read 1/6/4 instead of 2/3/1.
+        - esc.RawCommand int14 (FLIGHT-CRITICAL): [8191,0,-8192,4096] read as
+          [-1241,899,0,16] — falcon would have sent garbage throttles to a real ESC.
+        - esc.Status rpm/power_rating/esc_index: wrong bit fields.
+        - MagneticFieldStrength: a phantom ahrs_id (that field is in
+          MagneticFieldStrength2/1003), shifting the whole field by a byte.
+
+      THE FIX: a faithful DSDL bit codec (crate::dsdl, be_from_le_bits /
+      le_from_be_bits) replacing the LSB-first readers; the byte-aligned float16/
+      u32 paths (already correct) are unchanged. Validated against canonical
+      pydronecan payloads embedded as CONFORMANCE tests; the vectors are
+      regenerable via scripts/gen-dronecan-vectors.py.
+
+      Evidence (crates/relay-dronecan), each a real named test/harness:
+        - msg::tests::node_status_decodes_fields (canonical 0403020199efbe).
+        - msg::tests::raw_command_matches_pydronecan_reference (canonical
+          ff7c0000080010 decodes [8191,0,-8192,4096]; encode reproduces the bytes).
+        - sensors::tests::esc_status_decodes_fields (070000000049003c885c8813190c).
+        - sensors::tests::mag_decodes_three_axes (003c00c00038, no ahrs_id).
+        - sensors::tests::baro_decodes_pressure_f32 / battery_prefix_decodes_voltage_current.
+        - dsdl::tests::raw_command_int14_against_reference / write_reproduces_reference_bytes.
+        - Kani DC-K08 verify_dsdl_read_bounded (the codec is total + result < 2^w).
+      ORACLE: `cargo test -p relay-dronecan` green (42 tests); the pydronecan
+      vectors decode to their canonical field values.
+    tags: [verification, falcon, dronecan, conformance, pydronecan, reference-vectors, relay-dronecan, kani, fix]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-dronecan dsdl::tests::raw_command_int14_against_reference"
+        - run: "cargo test -p relay-dronecan dsdl::tests::write_reproduces_reference_bytes"
+        - run: "cargo test -p relay-dronecan msg::tests::node_status_decodes_fields"
+        - run: "cargo test -p relay-dronecan msg::tests::raw_command_matches_pydronecan_reference"
+        - run: "cargo test -p relay-dronecan sensors::tests::esc_status_decodes_fields"
+        - run: "cargo test -p relay-dronecan sensors::tests::mag_decodes_three_axes"
+        - run: "cargo test -p relay-dronecan sensors::tests::baro_decodes_pressure_f32"
+        - run: "cargo test -p relay-dronecan sensors::tests::battery_prefix_decodes_voltage_current"
+        - run: "cargo kani -p relay-dronecan --harness verify_dsdl_read_bounded"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-DC-P02
+      - type: verifies
+        target: SWREQ-FALCON-DC-P03
