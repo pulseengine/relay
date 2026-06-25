@@ -42,6 +42,12 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
+      # CI-HARDENING (rivet OOM): cap parallel rustc so a cold rivet/cargo build
+      # cannot OOM the self-hosted runner. Default is nproc parallel rustc, each
+      # GB-scale during codegen/link — on a memory-constrained box that spikes
+      # past RAM and the kernel OOM-kills the build. This bounds peak memory for
+      # the rivet install AND every per-artifact cargo test the gate runs.
+      CARGO_BUILD_JOBS: "2"
       # No workflow-level -D warnings (see ci.yml comment): pre-existing
       # cFS cfg(kani) lints would block rivet install + cargo test on
       # the wider workspace. Falcon crates compile clean.
@@ -64,14 +70,20 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Install rivet (skip if cached)
+      - name: Install rivet v0.19.0 (pinned; skip if cached)
         shell: bash
+        # PINNED (was unpinned --git main): every push to rivet master forced a
+        # cold recompile here — the OOM-prone step. Pinning to a tag means the
+        # self-hosted runner's cached binary stays valid across runs, so the
+        # heavy compile happens only on a deliberate bump (mirrors the spar pin).
+        # Bump this tag AND re-run `rivet validate` locally when updating.
         run: |
-          if command -v rivet >/dev/null 2>&1; then
-            echo "rivet already on PATH: $(rivet --version)"
+          if rivet --version 2>/dev/null | grep -q "0.19.0"; then
+            echo "rivet 0.19.0 already on PATH"
           else
             cargo install --locked \
               --git https://github.com/pulseengine/rivet \
+              --tag v0.19.0 \
               --bin rivet \
               rivet-cli
           fi
