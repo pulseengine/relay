@@ -6,9 +6,9 @@
 //! target (totality + bounds), out of Verus's productive range.
 #![cfg(kani)]
 
+use crate::dsdl;
 use crate::id::{decode_message_id, encode_message_id, MessageId};
 use crate::msg::{decode_node_status, encode_raw_command, MAX_ESC};
-use crate::sensors::read_bits;
 use crate::tail::{decode_tail, encode_tail};
 use crate::transfer::{encode_single_frame, CanFrame, Reassembler, MAX_PAYLOAD};
 
@@ -139,20 +139,18 @@ fn verify_encode_single_frame_bounded() {
     }
 }
 
-/// DC-K08 — the sensor bit-reader is total and range-bounded: for ANY payload,
-/// bit offset, and width (<= 18, the widest esc.Status field), `read_bits` never
-/// panics / never indexes out of bounds, and the result is `< 2^nbits`. The
-/// integer floor under the esc.Status decode (the float16 telemetry values are
-/// proptest-gated — Kani on f32 is intractable).
+/// DC-K08 — the DSDL bit-codec is total and range-bounded: for ANY payload, bit
+/// offset, and width (<= 18, the widest esc.Status bit-field), `dsdl::read_uint`
+/// never panics / never indexes out of bounds, and the result is `< 2^w`. The
+/// integer floor under every DSDL bit-field decode (the conformance core; the
+/// float16 telemetry values are proptest-gated — Kani on f32 is intractable).
 #[kani::proof]
-fn verify_read_bits_bounded() {
+fn verify_dsdl_read_bounded() {
     let payload: [u8; 14] = kani::any();
-    let bit_off: usize = kani::any();
-    kani::assume(bit_off <= 112); // within the 14-byte (112-bit) esc.Status frame
-    let nbits: u32 = kani::any();
-    kani::assume(nbits <= 18);
-    let v = read_bits(&payload, bit_off, nbits);
-    if nbits < 32 {
-        assert!(v < (1u32 << nbits));
-    }
+    let o: usize = kani::any();
+    kani::assume(o <= 112); // within the 14-byte (112-bit) esc.Status frame
+    let w: usize = kani::any();
+    kani::assume(w >= 1 && w <= 18);
+    let v = dsdl::read_uint(&payload, o, w);
+    assert!(v < (1u64 << w));
 }
