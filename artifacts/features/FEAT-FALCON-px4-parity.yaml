@@ -188,3 +188,34 @@ artifacts:
     links:
       - type: implements
         target: SYSREQ-FALCON-006
+
+  - id: FEAT-FALCON-v1.104
+    type: feature
+    title: "v1.104 — wire-decoder conformance: external reference vectors for SBUS/CRSF/UBX/MAVLink"
+    status: pending
+    description: >
+      QUEUED (prompted by the DroneCAN conformance bug, 2026-06: the LSB-first
+      bit-order error that all self-referential tests missed, caught only by
+      pydronecan reference vectors). The same risk applies to every hand-rolled
+      wire decoder — self-constructed round-trips prove ROBUSTNESS, not
+      CONFORMANCE. Add an EXTERNAL reference oracle to each, matching the
+      DroneCAN pattern (scripts/gen-dronecan-vectors.py + the CONFORMANCE tests):
+        - MAVLink (relay-mavlink): pymavlink — canonical HEARTBEAT / COMMAND_LONG
+          / GLOBAL_POSITION_INT byte vectors (CRC_EXTRA already anchors framing,
+          but field offsets are self-tested today).
+        - u-blox UBX (falcon-gnss-ubx): u-center / a captured NAV-PVT frame, or
+          pyubx2 reference vectors (the Fletcher checksum anchors framing).
+        - SBUS / CRSF (relay-rc): a captured frame or a reference encoder
+          (sbus2/crsf-rs vectors) — lower risk (documented byte layout, CRSF
+          CRC-8), but still self-constructed.
+      Each becomes a committed reference-vector table + a generator script, the
+      permanent conformance guard. Lower urgency than DroneCAN (those are
+      checksummed/simpler) but the same class of latent bug.
+      See memory: relay-wire-decoders-need-external-reference-vectors.
+    tags: [falcon, conformance, reference-vectors, mavlink, ubx, sbus, crsf, decoders, planned]
+    fields:
+      release-target: "pymavlink/pyubx2/captured reference vectors -> CONFORMANCE tests for relay-mavlink, falcon-gnss-ubx, relay-rc; generator scripts committed"
+      px4-equivalent: "PX4 interops by construction (shared libs); falcon adds explicit reference-vector conformance proof"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-006
