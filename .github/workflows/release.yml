@@ -61,6 +61,10 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # CI-HARDENING: cap parallel rustc on the from-git tool installs (rivet/cross/
+  # cyclonedx) so a cold compile cannot OOM. (create-release is on ubuntu-latest
+  # so the risk is lower than the self-hosted gate, but keep it consistent.)
+  CARGO_BUILD_JOBS: "2"
   # Opt the Node-20 JS actions (upload-/download-artifact@v4) into Node 24
   # ahead of GitHub's 2026-06-16 forced cutover; Node 20 removed 2026-09-16. (#153)
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -207,15 +211,18 @@ jobs:
       # SHA256SUMS so the snapshot's digest enters the sums file.
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install rivet (skip if cached)
+      - name: Install rivet v0.19.0 (pinned; skip if cached)
         shell: bash
+        # Pinned to match the verification gate (reproducible snapshots; no
+        # recompile on rivet master pushes). Bump in lockstep with the gate.
         run: |
           set -euo pipefail
-          if command -v rivet >/dev/null 2>&1; then
-            echo "rivet already on PATH: $(rivet --version)"
+          if rivet --version 2>/dev/null | grep -q "0.19.0"; then
+            echo "rivet 0.19.0 already on PATH"
           else
             cargo install --locked \
               --git https://github.com/pulseengine/rivet \
+              --tag v0.19.0 \
               --bin rivet \
               rivet-cli
           fi

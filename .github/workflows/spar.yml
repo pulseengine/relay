@@ -23,6 +23,10 @@ jobs:
   spar:
     name: Spar AADL gate
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    env:
+      # CI-HARDENING: cap parallel rustc so a cold spar build cannot OOM the
+      # self-hosted runner (same class as the rivet OOM in verification-gate.yml).
+      CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@v7
 
