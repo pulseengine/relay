@@ -354,6 +354,7 @@ name = "falcon-core"
 version = "0.1.0"
 dependencies = [
  "relay-adrc",
+ "relay-calib",
  "relay-fsm",
  "relay-geo",
  "relay-iekf",
@@ -1161,6 +1162,13 @@ dependencies = [
 [[package]]
 name = "relay-bus"
 version = "0.1.0"
+
+[[package]]
+name = "relay-calib"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "relay-ccsds"

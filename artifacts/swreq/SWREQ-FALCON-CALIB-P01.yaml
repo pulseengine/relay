@@ -1,0 +1,38 @@
+artifacts:
+  - id: SWREQ-FALCON-CALIB-P01
+    type: sw-req
+    title: "CALIB-P01: verified sensor-calibration math the estimator applies before the IEKF"
+    status: implemented
+    description: >
+      Falcon shall provide verified sensor-calibration math (relay-calib) that
+      solves per-sensor offsets and applies them to raw IMU/magnetometer samples
+      BEFORE the verified estimator, replacing the prior identity-remap placeholder
+      (raw samples flowed in uncorrected). The solvers are: gyro null-rate (bias =
+      mean of at-rest samples), accel 6-orientation (per-axis bias + scale from the
+      ±g face readings), and magnetometer hard-iron offset + diagonal soft-iron
+      scale (the min/max sweep). The application `corrected = scale·(raw − bias)`
+      (gyro: bias only) is run by the FlightCore each control cycle; the identity
+      calibration (zero bias, unit scale) is a no-op. The solved offsets serialise
+      to the relay-param store ([[SWREQ-FALCON-PARAM-P01]]) under PX4-style CAL_*
+      ids so a ground station can read/persist them. The solvers shall be TOTAL
+      (never panic, never divide by a zero range) and shall RECOVER a known
+      injected bias/scale from synthetic data.
+    tags: [falcon, calibration, sensors, estimator, imu, mag, px4-parity, kani, v1.98]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        relay-calib: identity is a no-op (apply == input); gyro_null recovers a
+        known bias; accel_6point recovers a known bias+scale and applying it
+        corrects a +g face to +G; mag_hardiron recovers a sphere-centre offset;
+        mag_softiron equalises axis ranges; empty inputs and degenerate (zero-
+        range / pos==neg) axes are total (zero/unit, no divide-by-zero); to_named
+        emits the 15 CAL_* params. Kani: identity no-op for any finite sample;
+        gyro_null total over any sample count; mag_hardiron total + the offset
+        lies within the per-axis [min,max]. proptest: the accel solve recovers any
+        in-range synthetic bias/scale. falcon-core: the FlightCore applies the
+        calibration to gyro/accel/mag each step (identity by default, installed via
+        set_calibration). relay-calib is in the Kani CI matrix.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-018

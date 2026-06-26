@@ -108,6 +108,11 @@ pub struct FlightCore {
     /// into the verified IEKF as a vertical anchor (a position update whose z is
     /// the baro), so altitude AND its rate survive GPS-vertical loss.
     baro_var: f32,
+    /// Sensor calibration applied to raw IMU/mag samples before the estimator
+    /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
+    /// `set_calibration` installs solved offsets — the explicit replacement for
+    /// the prior identity-remap placeholder (raw samples flowed in uncorrected).
+    calib: relay_calib::CalParams,
 }
 
 impl FlightCore {
@@ -142,7 +147,19 @@ impl FlightCore {
             pos_int: [0.0; 2],
             pos_int_max: 1.5,
             baro_var: 0.05, // ≈ (0.2 m)² baro noise; trusted less than a clean GPS-z
+            calib: relay_calib::CalParams::identity(),
         }
+    }
+
+    /// Install the sensor calibration the estimator applies to raw IMU/mag
+    /// samples each `step` (identity = no-op until solved offsets are loaded).
+    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        self.calib = calib;
+    }
+
+    /// The calibration currently applied to raw samples.
+    pub fn calibration(&self) -> relay_calib::CalParams {
+        self.calib
     }
 
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
@@ -195,16 +212,21 @@ impl FlightCore {
     /// (stabilize to level, hold heading) → allocate → actuate.
     pub fn step<B: FlightBackend>(&mut self, b: &mut B) {
         let dt = b.dt();
-        let imu = b.read_imu();
+        let raw = b.read_imu();
+        // ── Calibrate (relay-calib): de-bias/scale the raw sample before the
+        // estimator. Identity by default (a no-op) until set_calibration installs
+        // solved offsets. ──
+        let gyro = self.calib.apply_gyro(raw.gyro);
+        let accel = self.calib.apply_accel(raw.accel);
 
         // ── Estimate ──
-        self.iekf.propagate(IekfImu { gyro: imu.gyro, accel: imu.accel }, dt);
-        self.iekf.update_gravity(imu.accel, self.grav_var);
+        self.iekf.propagate(IekfImu { gyro, accel }, dt);
+        self.iekf.update_gravity(accel, self.grav_var);
         if let Some(p) = b.read_position() {
             self.iekf.update_position(p, self.pos_var);
         }
         if let Some(m) = b.read_mag() {
-            self.iekf.update_magnetometer(m, 0.0, self.mag_var);
+            self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
         }
         // v1.20 — barometer: feed it into the verified IEKF as a vertical anchor
         // (a position update whose horizontal is the current estimate, a no-op,
@@ -269,8 +291,8 @@ impl FlightCore {
         }
 
         // ── Attitude ── geometric desired-rate from a_cmd (hold heading 0) →
-        // ADRC torque on filtered gyro.
-        let gyro_f = self.gyro_lpf.filter(imu.gyro);
+        // ADRC torque on filtered (calibrated) gyro.
+        let gyro_f = self.gyro_lpf.filter(gyro);
         let omega_d = self.geo.desired_rate(est.q, a_cmd, 0.0);
         let torque = self.adrc.tick(gyro_f, omega_d, dt);
 
@@ -383,6 +405,19 @@ impl FlightSupervisor {
 
     pub fn state(&self) -> NavState {
         self.core.state()
+    }
+
+    /// Install the sensor calibration applied to raw IMU/mag samples each cycle.
+    /// Solved by relay-calib (gyro null / accel 6-point / mag iron) and typically
+    /// loaded from the relay-param store; identity until then. Delegates to the
+    /// FlightCore, where the estimator applies it.
+    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        self.core.set_calibration(calib);
+    }
+
+    /// The calibration currently applied to raw samples.
+    pub fn calibration(&self) -> relay_calib::CalParams {
+        self.core.calibration()
     }
 
     /// Feed the latest pre-arm / commander check inputs. The integration calls
@@ -1120,6 +1155,59 @@ mod tests {
     /// The backend is a SEAM, not a fixed simulator: a trivial stand-in
     /// backend (constant level IMU, no fixes) drives the core with zero panics
     /// and bounded motors — i.e. any `FlightBackend` impl works.
+    /// v1.98 — the estimator CONSUMES the calibration. A constant yaw-gyro bias
+    /// is unobservable without a heading reference, so it integrates into yaw
+    /// drift; with a calibration that cancels the bias the estimate does NOT
+    /// drift — so the calibrated and uncalibrated trajectories diverge. Proves the
+    /// calibration is in the estimation loop (replacing the identity placeholder),
+    /// not silently ignored.
+    #[test]
+    fn estimator_consumes_calibration() {
+        use relay_calib::CalParams;
+        struct BiasedGyro {
+            bias_z: f32,
+        }
+        impl FlightBackend for BiasedGyro {
+            fn read_imu(&mut self) -> ImuSample {
+                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0, 0.0, self.bias_z] }
+            }
+            fn read_position(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn read_mag(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn write_motors(&mut self, _: &[f32]) {}
+            fn dt(&self) -> f32 {
+                0.004
+            }
+        }
+        let bias = 0.2_f32; // rad/s yaw-gyro bias → ~0.2 rad yaw over 1 s
+
+        let mut uncal = FlightCore::new(0.5, 250.0);
+        let mut bu = BiasedGyro { bias_z: bias };
+        for _ in 0..250 {
+            uncal.step(&mut bu);
+        }
+
+        let mut cal = FlightCore::new(0.5, 250.0);
+        cal.set_calibration(CalParams { gyro_bias: [0.0, 0.0, bias], ..CalParams::identity() });
+        let mut bc = BiasedGyro { bias_z: bias };
+        for _ in 0..250 {
+            cal.step(&mut bc);
+        }
+
+        let qu = uncal.state().q;
+        let qc = cal.state().q;
+        let diff = (qu[0] - qc[0]).abs()
+            + (qu[1] - qc[1]).abs()
+            + (qu[2] - qc[2]).abs()
+            + (qu[3] - qc[3]).abs();
+        assert!(diff > 0.05, "calibration must change the estimate (yaw drift suppressed): diff {diff}");
+        // the installed calibration is reported back.
+        assert_eq!(cal.calibration().gyro_bias, [0.0, 0.0, bias]);
+    }
+
     #[test]
     fn arbitrary_backend_drives_the_core() {
         struct NullBackend {
