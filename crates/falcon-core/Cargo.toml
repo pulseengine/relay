@@ -18,6 +18,7 @@ relay-geo = { path = "../relay-geo" }
 relay-adrc = { path = "../relay-adrc" }
 relay-mix-quad = { path = "../relay-mix-quad" }
 relay-fsm = { path = "../relay-fsm" }
+relay-preflight = { path = "../relay-preflight" }
 
 [lints]
 workspace = true

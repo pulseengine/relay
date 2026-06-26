@@ -71,6 +71,13 @@ pub struct Gates {
     pub throttle_low: bool,
     /// A valid position fix is available.
     pub have_position: bool,
+    /// The pre-arm / commander check verdict: every precondition (sensor health,
+    /// estimator convergence, calibration, geofence, battery, failsafe config)
+    /// holds. Computed by `relay_preflight::arm_check` in the falcon-core seam and
+    /// passed in here — the FSM stays a pure state machine. Arming requires it
+    /// (the entry gate, the architectural complement of the never-disarm-airborne
+    /// exit invariant); PX4's commander pre-flight checks made provable.
+    pub prearm_ok: bool,
 }
 
 /// The flight-mode state machine.
@@ -105,8 +112,9 @@ impl FlightFsm {
         use Event::*;
         use Mode::*;
         let next = match (self.mode, ev) {
-            // arm only from the ground, level + throttle idle
-            (Disarmed, Arm) if g.level && g.throttle_low => Armed,
+            // arm only from the ground: level + throttle idle + the pre-arm
+            // commander checks all hold (relay-preflight arm_check == Allowed)
+            (Disarmed, Arm) if g.level && g.throttle_low && g.prearm_ok => Armed,
             // disarm ONLY on the ground (Armed) or after Touchdown (Land)
             (Armed, RequestDisarm) => Disarmed,
             (Land, Touchdown) => Disarmed,
@@ -144,7 +152,9 @@ mod tests {
     use super::*;
 
     fn g(level: bool, throttle_low: bool, have_position: bool) -> Gates {
-        Gates { level, throttle_low, have_position }
+        // prearm_ok defaults true here so the existing physical-gate tests are
+        // unchanged; the prearm-blocks-arm cases set it explicitly below.
+        Gates { level, throttle_low, have_position, prearm_ok: true }
     }
 
     #[test]
@@ -165,6 +175,17 @@ mod tests {
         let mut f = FlightFsm::new();
         assert_eq!(f.on(Event::Arm, g(false, true, true)), Mode::Disarmed); // tilted
         assert_eq!(f.on(Event::Arm, g(true, false, true)), Mode::Disarmed); // throttle up
+        assert_eq!(f.on(Event::Arm, g(true, true, true)), Mode::Armed);
+    }
+
+    #[test]
+    fn cannot_arm_when_prearm_checks_fail() {
+        // Physically ready (level + throttle idle) but the commander pre-arm
+        // verdict is false → arming is refused, the motors stay safe.
+        let mut f = FlightFsm::new();
+        let blocked = Gates { level: true, throttle_low: true, have_position: true, prearm_ok: false };
+        assert_eq!(f.on(Event::Arm, blocked), Mode::Disarmed);
+        // and once the checks pass, the same physical state arms.
         assert_eq!(f.on(Event::Arm, g(true, true, true)), Mode::Armed);
     }
 
@@ -231,10 +252,40 @@ mod kani_harness {
             level: kani::any(),
             throttle_low: kani::any(),
             have_position: kani::any(),
+            prearm_ok: kani::any(),
         };
         let next = f.on(any_event(), g);
         if next == Mode::Disarmed {
             assert!(matches!(start, Mode::Disarmed | Mode::Armed | Mode::Land));
+        }
+    }
+
+    /// SAFETY INVARIANT 3 — the ARM ENTRY GATE (FSM-K03, the v1.97 property): the
+    /// FSM can transition to `Armed` ONLY from `Disarmed` and ONLY when every gate
+    /// holds — level AND throttle_low AND prearm_ok (the relay-preflight commander
+    /// verdict). So motors can never spin up with a failed pre-arm check, for ANY
+    /// starting mode / event / gate combination. The architectural complement of
+    /// the never-disarm-airborne exit invariant: a proven entry gate + a proven
+    /// exit gate bracket the armed lifecycle.
+    #[kani::proof]
+    fn verify_arm_requires_preconditions() {
+        let start = any_mode();
+        let mut f = FlightFsm { mode: start };
+        let g = Gates {
+            level: kani::any(),
+            throttle_low: kani::any(),
+            have_position: kani::any(),
+            prearm_ok: kani::any(),
+        };
+        let ev = any_event();
+        let before = f.mode();
+        let next = f.on(ev, g);
+        // If we just entered Armed, it MUST have been an Arm event from Disarmed
+        // with all three gates satisfied — nothing else can produce Armed.
+        if next == Mode::Armed && before != Mode::Armed {
+            assert!(before == Mode::Disarmed);
+            assert!(ev == Event::Arm);
+            assert!(g.level && g.throttle_low && g.prearm_ok);
         }
     }
 
@@ -249,6 +300,7 @@ mod kani_harness {
             level: kani::any(),
             throttle_low: kani::any(),
             have_position: kani::any(),
+            prearm_ok: kani::any(),
         };
         let next = f.on(Event::Failsafe, g);
         assert!(matches!(next, Mode::Rtl | Mode::Land));

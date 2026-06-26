@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-FALCON-PREARM-P01
+    type: sw-req
+    title: "PREARM-P01: the FSM arm transition is gated on the pre-arm commander verdict (proven entry gate)"
+    status: implemented
+    description: >
+      Falcon shall gate the flight-mode FSM's transition into Armed on the pre-arm
+      / commander verdict: the vehicle enters Armed ONLY from Disarmed, ONLY on an
+      Arm event, and ONLY when it is physically ready (level + throttle idle) AND
+      every pre-flight check passes ([[SWREQ-FALCON-PREFLIGHT-P01]]'s
+      `relay_preflight::arm_check` == Allowed). This WIRES the pre-flight predicate
+      into the state machine — previously the predicate existed but nothing gated
+      arming on it. The integration is the falcon-core seam (FlightSupervisor
+      computes the verdict and passes it as the relay-fsm Gates `prearm_ok`); the
+      FSM stays a pure state machine. The supervisor shall also surface the first
+      failing check (the reason arming is refused) for the ground station.
+      Motors shall never spin up with a failed pre-arm check — the entry-gate
+      complement of the never-disarm-airborne exit invariant ([[SWREQ-FALCON-FSM-P01]]).
+    tags: [falcon, prearm, commander, arming, fsm, safety, px4-parity, kani, v1.97]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-fsm Kani verify_arm_requires_preconditions (FSM-K03): for ANY start
+        state / event / gates, entering Armed implies (from Disarmed, Arm event,
+        level && throttle_low && prearm_ok). falcon-core seam: with the default
+        all-pass checks arming succeeds; with PreflightChecks::default (all
+        failing) arming is refused and arm_blocked_reason() == Sensors; with only
+        battery failing the reason == Battery and arming is refused; once every
+        check passes the same physical state arms. relay-preflight arm_check
+        (PREFLIGHT-K01/K02) proves the verdict itself. relay-fsm + relay-preflight
+        are in the Kani CI matrix (the harnesses run on every PR).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011

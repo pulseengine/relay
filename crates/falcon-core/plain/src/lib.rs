@@ -339,6 +339,12 @@ pub struct FlightSupervisor {
     zones: [KeepoutZone; MAX_KEEPOUT_ZONES],
     zone_count: usize,
     rtl_latched: bool,
+    /// The latest pre-arm / commander check inputs (sensor health, estimator
+    /// convergence, calibration, geofence, battery, failsafe config). Fed by
+    /// `set_preflight`; `command(Arm, …)` gates arming on `arm_check` of these
+    /// (relay-preflight). Defaults all-passing for back-compat; an integration
+    /// that wires real health signals tightens it.
+    preflight: relay_preflight::PreflightChecks,
 }
 
 impl FlightSupervisor {
@@ -358,6 +364,16 @@ impl FlightSupervisor {
             zones: [KeepoutZone { center: home, radius: 0.0 }; MAX_KEEPOUT_ZONES],
             zone_count: 0,
             rtl_latched: false,
+            // back-compat default: all checks pass (an integration that feeds real
+            // health via set_preflight tightens this to a fail-safe gate).
+            preflight: relay_preflight::PreflightChecks {
+                sensors_healthy: true,
+                estimator_converged: true,
+                calibration_present: true,
+                geofence_loaded: true,
+                battery_ok: true,
+                failsafe_configured: true,
+            },
         }
     }
 
@@ -369,9 +385,30 @@ impl FlightSupervisor {
         self.core.state()
     }
 
+    /// Feed the latest pre-arm / commander check inputs. The integration calls
+    /// this each cycle from the real health sources (estimator convergence,
+    /// battery, sensor/RC presence, …); `command(Arm, …)` then gates on them.
+    pub fn set_preflight(&mut self, checks: relay_preflight::PreflightChecks) {
+        self.preflight = checks;
+    }
+
+    /// Why arming would be refused right now (the first failing pre-arm check),
+    /// or `None` if all checks pass — the reason a GCS surfaces to the operator.
+    pub fn arm_blocked_reason(&self) -> Option<relay_preflight::CheckFail> {
+        match relay_preflight::arm_check(self.preflight) {
+            relay_preflight::ArmVerdict::Allowed => None,
+            relay_preflight::ArmVerdict::Blocked(reason) => Some(reason),
+        }
+    }
+
     /// Inject an external command/event (Arm, RequestTakeoff, RequestMission…).
+    /// An `Arm` is gated on the pre-arm / commander checks (relay-preflight): the
+    /// FSM only enters `Armed` when every check passes AND the vehicle is level
+    /// with throttle idle — the Kani-proven entry gate (relay-fsm FSM-K03).
     pub fn command(&mut self, ev: relay_fsm::Event, level: bool, throttle_low: bool) {
-        let g = relay_fsm::Gates { level, throttle_low, have_position: true };
+        let prearm_ok =
+            matches!(relay_preflight::arm_check(self.preflight), relay_preflight::ArmVerdict::Allowed);
+        let g = relay_fsm::Gates { level, throttle_low, have_position: true, prearm_ok };
         self.fsm.on(ev, g);
     }
 
@@ -473,7 +510,7 @@ impl FlightSupervisor {
         let dy = est.p[1] - self.home[1];
         let dist_home = relay_math::sqrtf(dx * dx + dy * dy);
         let alt_agl = -est.p[2]; // NED z negative = up
-        let g = Gates { level: true, throttle_low: true, have_position: true };
+        let g = Gates { level: true, throttle_low: true, have_position: true, prearm_ok: true };
 
         // ── FAILSAFE actuation (the audit's gap): geofence breach OR low
         // battery from any flying state ⇒ Failsafe ⇒ the FSM commands RTL. ──
@@ -1824,6 +1861,47 @@ mod tests {
 
     /// The altitude integral rejects the thrust lapse: the vehicle reaches and
     /// holds 20 m even though air-density loss reduces thrust there.
+    /// v1.97 pre-arm gate (the seam): the FlightSupervisor refuses to arm unless
+    /// every commander check passes, surfaces the first failing reason, and arms
+    /// once they all pass — even when the vehicle is physically level + idle.
+    #[test]
+    fn prearm_checks_gate_arming() {
+        use relay_preflight::{CheckFail, PreflightChecks};
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+
+        // all checks FAILING (Default = all false): arming refused, reason = first.
+        sup.set_preflight(PreflightChecks::default());
+        sup.command(relay_fsm::Event::Arm, true, true); // level + throttle idle
+        assert_eq!(sup.mode(), relay_fsm::Mode::Disarmed, "no arm with failed pre-arm checks");
+        assert_eq!(sup.arm_blocked_reason(), Some(CheckFail::Sensors));
+
+        // only the battery failing → blocked on Battery, still won't arm.
+        sup.set_preflight(PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: false,
+            failsafe_configured: true,
+        });
+        assert_eq!(sup.arm_blocked_reason(), Some(CheckFail::Battery));
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Disarmed);
+
+        // every check passing → arms.
+        sup.set_preflight(PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        });
+        assert_eq!(sup.arm_blocked_reason(), None);
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Armed, "arms once every pre-arm check passes");
+    }
+
     #[test]
     fn holds_altitude_under_thrust_lapse() {
         let alt = final_altitude_under_lapse(20.0, 0.01, Some(0.02)); // integral ON
