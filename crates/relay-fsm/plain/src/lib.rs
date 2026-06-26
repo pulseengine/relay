@@ -37,10 +37,18 @@ pub enum Mode {
     Land,
     /// Return to launch (fly home, then land).
     Rtl,
+    /// FLIGHT TERMINATED — motors cut, last resort. Entered on attitude runaway
+    /// (a tumble the controller cannot recover), where a controlled RTL/Land is
+    /// impossible and cutting thrust limits damage/injury. Absorbing: nothing
+    /// re-arms or recovers from here without an on-the-ground reset. Distinct from
+    /// Disarmed (a SAFE on-ground state) — Terminated is a deliberate airborne cut.
+    Terminated,
 }
 
 impl Mode {
-    /// Airborne in the dangerous sense (motors must NOT be cut here).
+    /// Airborne in the dangerous sense (motors must NOT be cut here). Terminated
+    /// is EXCLUDED: its motors are already cut by design (the termination is the
+    /// intentional last-resort), so the never-cut-motors-airborne concern is moot.
     pub fn is_airborne(self) -> bool {
         matches!(self, Mode::Takeoff | Mode::Loiter | Mode::Mission | Mode::Rtl | Mode::Land)
     }
@@ -60,6 +68,10 @@ pub enum Event {
     ReachedHome,
     Touchdown,
     Failsafe,
+    /// FLIGHT TERMINATION — the last-resort motor cut (attitude runaway). From
+    /// ANY state this forces [`Mode::Terminated`]; it overrides every other
+    /// transition because nothing is more urgent than killing a tumble.
+    Terminate,
 }
 
 /// Physical preconditions the FSM checks (from the estimator/sensors).
@@ -139,7 +151,12 @@ impl FlightFsm {
                 }
             }
             (Rtl, Failsafe) => Land,
-            // everything else: no-op (total)
+            // FLIGHT TERMINATION — from ANY state, the last-resort motor cut.
+            // Overrides everything; Terminated is absorbing (handled by the
+            // no-op default below: no event leaves Terminated).
+            (_, Terminate) => Terminated,
+            // everything else: no-op (total) — includes (Terminated, _) ⇒
+            // Terminated, so termination is absorbing.
             (m, _) => m,
         };
         self.mode = next;
@@ -198,6 +215,28 @@ mod tests {
     }
 
     #[test]
+    fn terminate_cuts_motors_from_any_state_and_latches() {
+        // from every mode, Terminate → Terminated.
+        for start in [
+            Mode::Disarmed,
+            Mode::Armed,
+            Mode::Takeoff,
+            Mode::Loiter,
+            Mode::Mission,
+            Mode::Land,
+            Mode::Rtl,
+        ] {
+            let mut f = FlightFsm { mode: start };
+            assert_eq!(f.on(Event::Terminate, g(true, true, true)), Mode::Terminated, "{start:?} → Terminated");
+        }
+        // and Terminated is absorbing: no event leaves it.
+        let mut f = FlightFsm { mode: Mode::Terminated };
+        for ev in [Event::Arm, Event::RequestTakeoff, Event::Failsafe, Event::Touchdown, Event::RequestDisarm] {
+            assert_eq!(f.on(ev, g(true, true, true)), Mode::Terminated, "Terminated absorbs {ev:?}");
+        }
+    }
+
+    #[test]
     fn failsafe_recovers_from_flight() {
         for start in [Mode::Takeoff, Mode::Loiter, Mode::Mission] {
             let mut f = FlightFsm { mode: start };
@@ -213,19 +252,20 @@ mod kani_harness {
     use super::*;
 
     fn any_mode() -> Mode {
-        match kani::any::<u8>() % 7 {
+        match kani::any::<u8>() % 8 {
             0 => Mode::Disarmed,
             1 => Mode::Armed,
             2 => Mode::Takeoff,
             3 => Mode::Loiter,
             4 => Mode::Mission,
             5 => Mode::Land,
-            _ => Mode::Rtl,
+            6 => Mode::Rtl,
+            _ => Mode::Terminated,
         }
     }
 
     fn any_event() -> Event {
-        match kani::any::<u8>() % 11 {
+        match kani::any::<u8>() % 12 {
             0 => Event::Arm,
             1 => Event::RequestTakeoff,
             2 => Event::RequestMission,
@@ -236,7 +276,8 @@ mod kani_harness {
             7 => Event::ReachedAltitude,
             8 => Event::ReachedHome,
             9 => Event::Touchdown,
-            _ => Event::Failsafe,
+            10 => Event::Failsafe,
+            _ => Event::Terminate,
         }
     }
 
@@ -287,6 +328,37 @@ mod kani_harness {
             assert!(ev == Event::Arm);
             assert!(g.level && g.throttle_low && g.prearm_ok);
         }
+    }
+
+    /// SAFETY INVARIANT 4 — FLIGHT TERMINATION is unconditional (FSM-K04): a
+    /// Terminate event from ANY mode, under ANY gates, forces Terminated. The
+    /// last-resort motor cut can never be blocked by the current mode or a gate.
+    #[kani::proof]
+    fn verify_terminate_is_unconditional() {
+        let start = any_mode();
+        let mut f = FlightFsm { mode: start };
+        let g = Gates {
+            level: kani::any(),
+            throttle_low: kani::any(),
+            have_position: kani::any(),
+            prearm_ok: kani::any(),
+        };
+        assert!(f.on(Event::Terminate, g) == Mode::Terminated);
+    }
+
+    /// SAFETY INVARIANT 5 — Terminated is ABSORBING (FSM-K05): once terminated,
+    /// NO event under ANY gates leaves the Terminated state — there is no path
+    /// back to an armed/flying mode without an on-ground reset (a fresh FSM).
+    #[kani::proof]
+    fn verify_terminated_is_absorbing() {
+        let mut f = FlightFsm { mode: Mode::Terminated };
+        let g = Gates {
+            level: kani::any(),
+            throttle_low: kani::any(),
+            have_position: kani::any(),
+            prearm_ok: kani::any(),
+        };
+        assert!(f.on(any_event(), g) == Mode::Terminated);
     }
 
     /// SAFETY INVARIANT 2 — a failsafe from any flying state commands a

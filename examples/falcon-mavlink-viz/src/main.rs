@@ -138,6 +138,7 @@ fn mode_str(m: Mode) -> &'static str {
         Mode::Mission => "MISSION",
         Mode::Land => "LAND",
         Mode::Rtl => "RTL",
+        Mode::Terminated => "TERMINATED",
     }
 }
 

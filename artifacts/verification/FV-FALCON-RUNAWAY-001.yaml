@@ -1,0 +1,47 @@
+artifacts:
+  - id: FV-FALCON-RUNAWAY-001
+    type: sw-verification
+    title: "Attitude-runaway flight termination — FSM Kani + in-flight detector (falcon v1.99 expanded failsafe)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-RUNAWAY-P01: a sustained unrecoverable tilt cuts the
+      motors via a new FSM termination state.
+
+      FSM (relay-fsm) — the new Terminated mode + Terminate event, proven:
+        * verify_terminate_is_unconditional (FSM-K04): for ANY start mode and ANY
+          gates, Terminate forces Terminated — the cut can never be blocked.
+        * verify_terminated_is_absorbing (FSM-K05): from Terminated, NO event under
+          ANY gates leaves Terminated — no recovery without an on-ground reset.
+        * the existing invariants STILL hold over the expanded state/event space:
+          verify_never_disarm_airborne (Terminated ≠ Disarmed, so Disarmed stays
+          unreachable airborne), verify_failsafe_recovers, verify_arm_requires_
+          preconditions. 5 harnesses total, 0 failures.
+        * unit: terminate_cuts_motors_from_any_state_and_latches.
+
+      DETECTOR (falcon-core) — attitude_runaway_terminates_in_flight: a vehicle
+      armed + taken off and held LEVEL is NOT terminated; once a sustained extreme
+      tilt is presented (gravity measured off the body-down axis, driving the IEKF
+      attitude past TILT_RUNAWAY_LIMIT for TILT_RUNAWAY_CYCLES), the FSM reaches
+      Terminated — the motors are cut. The detector is debounced (transients do not
+      trip the irreversible cut).
+
+      ENFORCEMENT: relay-fsafe added to the Kani CI matrix — its FSAFE-K01..K04
+      arbiter harnesses (incl the Terminate severity) ran only locally before.
+
+      Evidence (each a real named test/harness): relay-fsm
+      kani_harness::verify_terminate_is_unconditional /
+      verify_terminated_is_absorbing, tests::terminate_cuts_motors_from_any_state_and_latches;
+      falcon-core tests::attitude_runaway_terminates_in_flight.
+      ORACLE: `cargo kani -p relay-fsm` (5/5) + `cargo test -p relay-fsm` +
+      `cargo test -p falcon-core attitude_runaway_terminates_in_flight` green.
+    tags: [verification, falcon, failsafe, termination, fsm, relay-fsm, falcon-core, kani, safety, v1.99]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo kani -p relay-fsm --harness verify_terminate_is_unconditional"
+        - run: "cargo kani -p relay-fsm --harness verify_terminated_is_absorbing"
+        - run: "cargo test -p relay-fsm tests::terminate_cuts_motors_from_any_state_and_latches"
+        - run: "cargo test -p falcon-core tests::attitude_runaway_terminates_in_flight"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-RUNAWAY-P01

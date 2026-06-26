@@ -71,6 +71,7 @@ pub const fn custom_mode_code(mode: Mode) -> u32 {
         Mode::Mission => 4,
         Mode::Land => 5,
         Mode::Rtl => 6,
+        Mode::Terminated => 7,
     }
 }
 
@@ -134,11 +135,13 @@ pub fn mode_to_heartbeat(mode: Mode) -> Heartbeat {
         Mode::Mission | Mode::Rtl | Mode::Land => {
             MavModeFlag::AUTO_ENABLED.or(MavModeFlag::STABILIZE_ENABLED)
         }
+        // Flight terminated: motors cut, no active control.
+        Mode::Terminated => MavModeFlag::CUSTOM_MODE_ENABLED,
     });
-    let system_status = if matches!(mode, Mode::Disarmed) {
-        MavState::Standby
-    } else {
-        MavState::Active
+    let system_status = match mode {
+        Mode::Disarmed => MavState::Standby,
+        Mode::Terminated => MavState::FlightTermination,
+        _ => MavState::Active,
     };
     Heartbeat {
         custom_mode: custom_mode_code(mode),

@@ -117,17 +117,24 @@ artifacts:
   - id: FEAT-FALCON-v1.99
     type: feature
     title: "v1.99 — Expanded failsafes: high-wind, motor-failure reallocation, attitude-runaway termination"
-    status: pending
+    status: in-progress
     description: >
-      PLANNED. Three failsafe responses PX4 has that the unified arbiter lacks
+      Three failsafe responses PX4 has that the unified arbiter lacks
       (gap-analysis #5), covering the failure classes most likely to be fatal:
-        - high-wind: a wind/tilt-saturation threshold -> RTL/land.
-        - motor-failure: an ESC current/RPM anomaly (from esc.Status, v1.94) ->
-          control-allocation reallocation (the hardest; touches relay-mix-*).
         - attitude-runaway: a sustained-tilt-beyond-limit -> flight termination.
+          DONE (falcon-v1.100, SWREQ-FALCON-RUNAWAY-P01): a new FSM Terminated
+          mode + Terminate event (Kani FSM-K04 unconditional, FSM-K05 absorbing) +
+          the supervisor's debounced tilt-runaway detector. relay-fsafe added to
+          the Kani matrix.
+        - high-wind: a wind/tilt-saturation threshold -> RTL/land. PLANNED (the
+          mixer-saturation proxy, maps to the existing Event::Failsafe RTL path).
+        - motor-failure: an ESC current/RPM anomaly (from esc.Status, v1.94) ->
+          control-allocation reallocation (the HARDEST; multi-subsystem — ESC
+          health voting + the attitude controller's yaw-authority gate + the
+          mix_rotor_out reconfiguration; deferred as a follow-on feature).
       The arbiter is already unified; these are new bounded inputs + actions with
-      Kani-provable response bounds. Easy-to-medium except motor reallocation.
-    tags: [falcon, px4-parity, failsafe, high-wind, motor-failure, termination, safety, kani, v1.99, planned]
+      Kani-provable response bounds.
+    tags: [falcon, px4-parity, failsafe, high-wind, motor-failure, termination, safety, kani, v1.99]
     fields:
       release-target: "3 new arbiter inputs+actions (high-wind/motor-fail/attitude-runaway) with Kani response-bound proofs"
       px4-equivalent: "PX4 wind/actuator/lockdown failsafes — falcon adds proven response bounds"
