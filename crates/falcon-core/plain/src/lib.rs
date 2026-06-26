@@ -671,8 +671,7 @@ impl FlightSupervisor {
         if self.fsm.is_airborne()
             && self.fsm.mode() != Mode::Land
             && self.core.max_motor() >= WIND_SAT_THRESHOLD
-            && tilt >= WIND_TILT_MIN
-            && tilt <= WIND_TILT_CEIL
+            && (WIND_TILT_MIN..=WIND_TILT_CEIL).contains(&tilt)
         {
             self.wind_count = self.wind_count.saturating_add(1);
             if self.wind_count >= WIND_CYCLES {
