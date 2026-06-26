@@ -105,12 +105,7 @@ impl<const N: usize> ParamStore<N> {
     }
 
     fn index_of(&self, id: &ParamId) -> Option<usize> {
-        for i in 0..self.count {
-            if &self.params[i].def.id == id {
-                return Some(i);
-            }
-        }
-        None
+        self.params[..self.count].iter().position(|p| &p.def.id == id)
     }
 
     /// The current value of a parameter (for PARAM_VALUE).
@@ -152,9 +147,7 @@ impl<const N: usize> ParamStore<N> {
 
 #[inline]
 fn clamp(x: f32, lo: f32, hi: f32) -> f32 {
-    if !x.is_finite() {
-        lo
-    } else if x < lo {
+    if !x.is_finite() || x < lo {
         lo
     } else if x > hi {
         hi

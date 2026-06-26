@@ -1,0 +1,207 @@
+-- Falcon Param — the verified MAVLink parameter service (AADL model).
+--
+-- The architectural source of truth for falcon's PX4-style parameter system: the
+-- keystone that unblocks field-tuning, calibration, geofence/battery thresholds,
+-- and QGroundControl integration (FEAT-FALCON-v1.96, gap-analysis #1). A ground
+-- station lists, reads, and (validity-gated) writes the vehicle's parameters over
+-- MAVLink; the typed schema + the BOUNDED set live in crates/relay-param, the
+-- PARAM_* wire framing in crates/relay-mavlink, and the seam in crates/falcon-param.
+--
+-- The differentiator from PX4: a BOUNDED param system — every parameter declares
+-- an inclusive [min, max], and a write outside it (or NaN) is REJECTED with the
+-- stored value unchanged. That safety property is proven (Kani PARAM-K01); this
+-- model's EMV2 sink is its fault-propagation counterpart.
+--
+-- The service interface WIT is GENERATED from this model:
+--   spar codegen --root Falcon_Param::ParamStore.Fmu --format wit spar/*.aadl
+--
+-- The EMV2 error model: an out-of-range PARAM_SET (a mis-tuned gain, a corrupted
+-- frame's value field, a hostile GCS) is a ValueError that the bounds check SINKS
+-- (the stored value never moves) — the architectural form of the relay-param
+-- safety proof. An unknown param-id is sunk likewise (no write occurs). A
+-- corrupted PARAM_SET frame (bad CRC) is caught UPSTREAM by the MAVLink frame
+-- codec (relay-mavlink), so it never reaches this service — modelled as a sink on
+-- the inbound port. There is no unmaskable propagation: the store cannot be driven
+-- out of bounds by any input.
+
+package Falcon_Param
+public
+  with Data_Model;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Wire/value data types — mirror crates/relay-param + the PARAM_*
+  -- messages in crates/relay-mavlink field-for-field.
+  -- ══════════════════════════════════════════════════════════════
+
+  data ParamId
+    -- A 16-byte MAVLink parameter id (NUL-padded), as on the wire. The store key.
+    properties
+      Data_Size => 16 Bytes;
+  end ParamId;
+
+  data ParamDef
+    -- The schema for one parameter: id(16B) || min(f32) || max(f32) || default(f32).
+    -- The DECLARED bound is the safety contract — a write is accepted iff it lands
+    -- in [min, max] and is finite. Mirrors relay-param::ParamDef.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 28 Bytes;  -- 16 + 4 + 4 + 4
+  end ParamDef;
+
+  data ParamSet
+    -- MAVLink PARAM_SET (msg 23, 23-byte payload): param_value(f32) ||
+    -- target_system(u8) || target_component(u8) || param_id(char[16]) ||
+    -- param_type(u8). The inbound write request from the GCS.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 23 Bytes;
+  end ParamSet;
+
+  data ParamRequestRead
+    -- MAVLink PARAM_REQUEST_READ (msg 20, 20-byte payload): param_index(i16) ||
+    -- target_system(u8) || target_component(u8) || param_id(char[16]). Read one
+    -- parameter (by id when index = -1, else by index).
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 20 Bytes;
+  end ParamRequestRead;
+
+  data ParamRequestList
+    -- MAVLink PARAM_REQUEST_LIST (msg 21, 2-byte payload): target_system(u8) ||
+    -- target_component(u8). Dump every parameter (a burst of PARAM_VALUE emits).
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 2 Bytes;
+  end ParamRequestList;
+
+  data ParamValue
+    -- MAVLink PARAM_VALUE (msg 22, 25-byte payload): param_value(f32) ||
+    -- param_count(u16) || param_index(u16) || param_id(char[16]) || param_type(u8).
+    -- The outbound response: the current value + the (index, count) for GCS
+    -- progress. Emitted on every read, list item, and accepted write (the ack).
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 25 Bytes;
+  end ParamValue;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- The parameter service — requests in, PARAM_VALUE responses out.
+  -- ══════════════════════════════════════════════════════════════
+
+  process ParamService
+    features
+      set_in:    in  data port ParamSet;          -- a GCS write request (PARAM_SET)
+      read_in:   in  data port ParamRequestRead;  -- read one parameter
+      list_in:   in  data port ParamRequestList;  -- dump all parameters
+      value_out: out data port ParamValue;        -- the PARAM_VALUE response / ack
+    -- The mitigating sinks: the bounds check kills an out-of-range write
+    -- (ValueError) — the stored value never moves, the architectural form of the
+    -- PARAM-K01 proof; an unknown param-id is likewise sunk (no write occurs).
+    -- A corrupted PARAM_SET frame (bad MAVLink CRC) is killed upstream by the
+    -- frame codec and never arrives — modelled as a sink on set_in. NOTHING drives
+    -- the store out of bounds: there is no out-propagation of ValueError.
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        set_in    : in  propagation {ValueError, ServiceError};
+        value_out : out propagation {ServiceOmission};
+      flows
+        bounds_sink  : error sink set_in {ValueError};      -- out-of-range / NaN write rejected (PARAM-K01)
+        unknown_sink : error sink set_in {ServiceError};    -- unknown param-id: no write
+        miss_pass    : error path set_in {ServiceOmission} -> value_out {ServiceOmission}; -- a dropped request = no ack (GCS retries)
+      end propagations;
+    **};
+  end ParamService;
+
+  process implementation ParamService.Bounded
+    subcomponents
+      apply: thread Apply;  -- PARAM_SET -> bounded store write -> PARAM_VALUE ack
+      serve: thread Serve;  -- PARAM_REQUEST_READ / LIST -> PARAM_VALUE emit(s)
+  end ParamService.Bounded;
+
+  thread Apply
+    -- Handle one PARAM_SET: look up the param-id, range-check the value against the
+    -- declared [min, max] (and finiteness), store iff in-range, and emit a
+    -- PARAM_VALUE ack carrying the resulting (possibly unchanged) value. The
+    -- bounded set is the relay-param::ParamStore::set body — the verified core
+    -- (PARAM-K01: out-of-range never lands). Sporadic, GCS-driven; far off the
+    -- control hot path, so a generous deadline — parameters are config, not control.
+    properties
+      Dispatch_Protocol => Sporadic;
+      Period => 20 ms;  -- min interarrival (a GCS param write burst is ~50 Hz max)
+      Compute_Execution_Time => 2 us .. 10 us;
+  end Apply;
+
+  thread Serve
+    -- Handle a PARAM_REQUEST_READ (one param) or PARAM_REQUEST_LIST (iterate every
+    -- registered param via ParamStore::nth, emitting a PARAM_VALUE each with the
+    -- right (index, count) for GCS progress). Sporadic; the LIST burst is bounded
+    -- by the registered-param count (a fixed-capacity store), not unbounded.
+    properties
+      Dispatch_Protocol => Sporadic;
+      Period => 20 ms;
+      Compute_Execution_Time => 2 us .. 15 us;
+  end Serve;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- The MAVLink comms link — the inbound fault surface (a corrupted
+  -- or hostile PARAM_SET). The frame codec's CRC is the first sink;
+  -- the bounds check is the second (defence in depth).
+  -- ══════════════════════════════════════════════════════════════
+
+  bus MavlinkLink
+    -- The MAVLink v2 transport (telemetry radio / USB) carrying the PARAM_*
+    -- messages. EMV2 source: a corrupted or adversarial PARAM_SET (ValueError) —
+    -- caught by the relay-mavlink frame CRC, then by the relay-param bounds check.
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        link : out propagation {ValueError};
+      flows
+        corrupt : error source link {ValueError};  -- PARAM-CORRUPT (bad value / hostile GCS)
+      end propagations;
+    **};
+  end MavlinkLink;
+
+  -- The ground control station (QGroundControl / MAVSDK): the SOURCE of the
+  -- PARAM_* requests. Modelling it explicitly completes the EMV2 chain — its
+  -- requests cross the MavlinkLink, which injects the corrupt-value fault the
+  -- service's bounds check must sink.
+  device GroundStation
+    features
+      set_out: out data port ParamSet;
+  end GroundStation;
+
+  -- The FMU core that runs the parameter service. relay-param is no_std +
+  -- no_alloc + forbid(unsafe), fixed-capacity static storage, so it runs on the
+  -- flight MCU alongside the control cascade (off its hot path).
+  processor FmuCore
+    properties
+      Scheduling_Protocol => (RATE_MONOTONIC_PROTOCOL);
+      Clock_Period => 1 ms;  -- params are config-rate, not control-rate
+  end FmuCore;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- The concrete on-FMU service — the codegen root for the param WIT:
+  --   spar codegen --root Falcon_Param::ParamStore.Fmu --format wit
+  -- ══════════════════════════════════════════════════════════════
+
+  system ParamStore
+  end ParamStore;
+
+  system implementation ParamStore.Fmu
+    subcomponents
+      service: process ParamService.Bounded;
+      gcs:     device GroundStation;        -- a QGC / MAVSDK ground station
+      link:    bus MavlinkLink;
+      cpu:     processor FmuCore;
+    connections
+      sx: port gcs.set_out -> service.set_in
+        { Actual_Connection_Binding => (reference (link)); };  -- requests cross the MAVLink link
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to service;
+      Actual_Processor_Binding => (reference (cpu)) applies to service.apply;
+      Actual_Processor_Binding => (reference (cpu)) applies to service.serve;
+  end ParamStore.Fmu;
+
+end Falcon_Param;

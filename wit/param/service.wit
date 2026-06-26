@@ -1,0 +1,20 @@
+// Generated from AADL process: Falcon_Param::service
+package falcon-param:service;
+
+interface service-ports {
+    type paramrequestlist = u16;
+    type paramrequestread = list<u8>;
+    type paramset = list<u8>;
+    type paramvalue = list<u8>;
+
+    set-in: func() -> paramset;
+    read-in: func() -> paramrequestread;
+    list-in: func() -> paramrequestlist;
+    set-value-out: func(val: paramvalue);
+}
+
+world service-world {
+    import service-ports;
+    export apply: func();
+    export serve: func();
+}

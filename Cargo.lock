@@ -457,6 +457,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "falcon-param"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "relay-mavlink",
+ "relay-param",
+]
+
+[[package]]
 name = "falcon-sitl-gz"
 version = "0.1.0"
 dependencies = [

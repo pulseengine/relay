@@ -52,6 +52,7 @@ members = [
     "crates/relay-hal",
     "crates/falcon-core",
     "crates/falcon-mavlink",
+    "crates/falcon-param",
     "crates/falcon-imu-icm42688",
     "crates/falcon-gnss-ubx",
     "crates/falcon-esc-dshot",

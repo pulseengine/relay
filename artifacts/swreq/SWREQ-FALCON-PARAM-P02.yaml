@@ -1,0 +1,39 @@
+artifacts:
+  - id: SWREQ-FALCON-PARAM-P02
+    type: sw-req
+    title: "PARAM-P02: MAVLink PARAM protocol binding drives the bounded store (conformant + bound-preserving)"
+    status: implemented
+    description: >
+      Falcon shall bind the MAVLink parameter protocol (PARAM_REQUEST_LIST,
+      PARAM_REQUEST_READ, PARAM_SET, PARAM_VALUE) to the bounded parameter store
+      of [[SWREQ-FALCON-PARAM-P01]], so a QGroundControl / MAVSDK ground station
+      can list, read, and (validity-gated) write the vehicle's parameters. The
+      wire codecs (relay-mavlink::param) shall be CONFORMANT to the canonical
+      MAVLink encoding — exact CRC_EXTRA and the size-sorted field order —
+      validated against external pymavlink reference vectors, not merely
+      self-consistent round-trips. The seam (falcon-param) shall translate an
+      inbound PARAM_SET into a bounded store write and emit a PARAM_VALUE ack
+      that carries the store's CURRENT value, so a rejected (out-of-range) write
+      is observable to the GCS as the unchanged value — the end-to-end form of
+      the PARAM-K01 safety property. An unknown parameter shall produce no ack
+      and no state change.
+    tags: [falcon, parameters, mavlink, config, px4-parity, conformance, pymavlink, v1.96]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        relay-mavlink::param: each of PARAM_REQUEST_LIST (id 21, crc_extra 159),
+        PARAM_REQUEST_READ (20, 214), PARAM_SET (23, 168), PARAM_VALUE (22, 220)
+        encodes to and decodes from its exact pymavlink reference payload;
+        decode rejects wrong-length payloads (total); PARAM_SET/PARAM_VALUE
+        round-trip for arbitrary fields. falcon-param seam: an in-range PARAM_SET
+        applies and the ack carries the new value; an out-of-range / NaN PARAM_SET
+        is rejected and the ack carries the OLD value (store unchanged); an
+        unknown id yields no ack; PARAM_REQUEST_READ by id and by index and
+        PARAM_REQUEST_LIST iteration return the correct PARAM_VALUE; a full
+        MAVLink v2 frame round-trip (encode_frame -> parse_frame -> seam) drives
+        the store; proptest: for ANY PARAM_SET value the stored value stays in
+        bounds and the ack equals the stored value.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
