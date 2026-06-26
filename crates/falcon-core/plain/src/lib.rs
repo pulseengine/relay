@@ -451,7 +451,7 @@ impl FlightSupervisor {
     /// cycle (v1.99 — the pre-arm gate fed by real signals, not all-pass
     /// defaults). Four of the six are wired here:
     ///   * estimator_converged — the IEKF attitude uncertainty has settled below
-    ///     [`PREARM_ATT_UNCERT_MAX`] (a divergent/just-started filter blocks arming);
+    ///     [`PREARM_TILT_UNCERT_MAX`] (a divergent/just-started filter blocks arming);
     ///   * calibration_present — a non-identity sensor calibration is installed;
     ///   * battery_ok — the pack voltage is at/above the arming threshold;
     ///   * geofence_loaded — a positive fence radius is configured.
