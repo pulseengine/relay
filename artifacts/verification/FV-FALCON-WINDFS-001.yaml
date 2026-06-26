@@ -1,0 +1,44 @@
+artifacts:
+  - id: FV-FALCON-WINDFS-001
+    type: sw-verification
+    title: "High-wind failsafe — saturation+tilt → RTL, distinct from termination (falcon v1.101)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-WINDFS-P01: sustained control saturation while leaning
+      hard (but short of a tumble) commands an RTL-class recovery.
+
+      falcon-core high_wind_saturation_commands_rtl: a vehicle armed + taken off
+      and held level does NOT trip the failsafe; once a sustained ~28° tilt with
+      the rate loop pinned (max_motor ≥ WIND_SAT_THRESHOLD, tilt in the
+      [WIND_TILT_MIN, WIND_TILT_CEIL] band) holds for WIND_CYCLES, the RTL-class
+      failsafe latches (rtl_latched) from normal flight (Takeoff → Rtl/Land
+      recovery) and the vehicle does NOT terminate — high wind RECOVERS, it does
+      not cut motors.
+
+      The DISCRIMINATION from attitude-runaway is proven by the unchanged
+      attitude_runaway_terminates_in_flight test ([[FV-FALCON-RUNAWAY-001]]): a
+      developing tumble crosses the wind band (~47 cycles, measured) far faster
+      than the wind debounce (WIND_CYCLES), so it RESETS the wind counter on
+      exceeding WIND_TILT_CEIL and TERMINATES instead — the runaway path strictly
+      dominates. So the two failsafes share the tilt axis without conflicting:
+      moderate sustained tilt → RTL, an unrecoverable tumble → termination.
+
+      Supporting: FlightCore::max_motor exposes the saturation signal (the largest
+      last commanded motor output); the detector reuses the proven FSM Failsafe →
+      Rtl path (no new FSM invariant).
+
+      Evidence (real named tests): falcon-core
+      tests::high_wind_saturation_commands_rtl (the wind RTL) +
+      tests::attitude_runaway_terminates_in_flight (the discrimination: tumble
+      still terminates with the wind detector present).
+      ORACLE: `cargo test -p falcon-core high_wind_saturation_commands_rtl
+      attitude_runaway_terminates_in_flight` green.
+    tags: [verification, falcon, failsafe, high-wind, rtl, falcon-core, safety, v1.101]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p falcon-core tests::high_wind_saturation_commands_rtl"
+        - run: "cargo test -p falcon-core tests::attitude_runaway_terminates_in_flight"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WINDFS-P01
