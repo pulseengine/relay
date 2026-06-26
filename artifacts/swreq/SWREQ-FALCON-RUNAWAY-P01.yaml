@@ -1,0 +1,38 @@
+artifacts:
+  - id: SWREQ-FALCON-RUNAWAY-P01
+    type: sw-req
+    title: "RUNAWAY-P01: attitude-runaway flight termination — a sustained unrecoverable tilt cuts the motors"
+    status: implemented
+    description: >
+      Falcon shall TERMINATE flight (cut the motors) when the estimated tilt
+      exceeds an unrecoverable limit ([`TILT_RUNAWAY_LIMIT`], ~60°) continuously
+      for a debounce window ([`TILT_RUNAWAY_CYCLES`]) while airborne — a tumble
+      that a controlled RTL or land cannot arrest, where cutting thrust limits
+      damage and injury (the first PX4-parity expanded failsafe, gap-analysis #5).
+
+      The FSM gains a TERMINATED mode and a TERMINATE event ([[SWREQ-FALCON-FSM-P01]]):
+      Terminate from ANY mode under ANY gates forces Terminated (the cut can never
+      be blocked), and Terminated is ABSORBING (no event recovers without an
+      on-ground reset). Terminated is distinct from Disarmed (a safe on-ground
+      state) — it is a deliberate airborne motor cut, so the never-disarm-airborne
+      invariant is unaffected (Disarmed remains unreachable airborne). The
+      FlightSupervisor detects the sustained over-tilt from the IEKF attitude
+      (NavState::tilt_rad) and fires Terminate; the detector is debounced so a
+      brief aggressive manoeuvre or a transient estimate spike does not trip the
+      irreversible termination. Telemetry reports MAV_STATE_FLIGHT_TERMINATION.
+    tags: [falcon, failsafe, termination, attitude-runaway, fsm, safety, px4-parity, kani, v1.99]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        relay-fsm: Terminate from every mode → Terminated; Terminated absorbs every
+        event (unit + Kani FSM-K04 terminate-unconditional, FSM-K05
+        terminated-absorbing); the never-disarm-airborne + failsafe-recovery +
+        arm-entry invariants still hold over the expanded state/event space.
+        falcon-core: an airborne vehicle held level is NOT terminated, but a
+        sustained extreme tilt (gravity measured off-axis) drives the FSM to
+        Terminated. relay-fsafe (FailsafeAction::Terminate severity) added to the
+        Kani CI matrix.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011

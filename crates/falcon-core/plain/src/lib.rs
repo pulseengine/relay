@@ -339,6 +339,18 @@ const WAYPOINT_RADIUS: f32 = 1.2;
 /// rest yet block a just-started or diverging filter.
 const PREARM_TILT_UNCERT_MAX: f32 = 0.02;
 
+/// Attitude-runaway termination threshold (v1.99 expanded failsafe): an estimated
+/// tilt beyond this (rad) is past any recoverable flight attitude — a tumble. At
+/// ~1.05 rad (60°) the lift vector can no longer arrest a fall; PX4 lockdown uses
+/// a similar tilt-limit. Sustained for [`TILT_RUNAWAY_CYCLES`] it forces flight
+/// termination (motor cut), the one failure where cutting thrust beats RTL/land.
+const TILT_RUNAWAY_LIMIT: f32 = 1.05;
+
+/// Consecutive over-tilt cycles required before terminating — a debounce so a
+/// brief aggressive manoeuvre or a transient estimate spike does not trip the
+/// (irreversible) motor cut. 50 cycles ≈ 0.2 s at 250 Hz.
+const TILT_RUNAWAY_CYCLES: u32 = 50;
+
 /// Maximum stored keep-out zones (no_std fixed capacity).
 pub const MAX_KEEPOUT_ZONES: usize = 8;
 
@@ -381,6 +393,10 @@ pub struct FlightSupervisor {
     zones: [KeepoutZone; MAX_KEEPOUT_ZONES],
     zone_count: usize,
     rtl_latched: bool,
+    /// Consecutive cycles the estimated tilt has exceeded TILT_RUNAWAY_LIMIT
+    /// while airborne — the attitude-runaway detector (v1.99 expanded failsafe).
+    /// On reaching TILT_RUNAWAY_CYCLES it fires Event::Terminate (motor cut).
+    runaway_count: u32,
     /// The latest pre-arm / commander check inputs (sensor health, estimator
     /// convergence, calibration, geofence, battery, failsafe config). Fed by
     /// `set_preflight`; `command(Arm, …)` gates arming on `arm_check` of these
@@ -406,6 +422,7 @@ impl FlightSupervisor {
             zones: [KeepoutZone { center: home, radius: 0.0 }; MAX_KEEPOUT_ZONES],
             zone_count: 0,
             rtl_latched: false,
+            runaway_count: 0,
             // back-compat default: all checks pass (an integration that feeds real
             // health via set_preflight tightens this to a fail-safe gate).
             preflight: relay_preflight::PreflightChecks {
@@ -455,6 +472,7 @@ impl FlightSupervisor {
     ///   * calibration_present — a non-identity sensor calibration is installed;
     ///   * battery_ok — the pack voltage is at/above the arming threshold;
     ///   * geofence_loaded — a positive fence radius is configured.
+    ///
     /// `sensors_healthy` and `failsafe_configured` are left as last set (default
     /// true / via [`set_preflight`]) — they need a sensor-health / arbiter input
     /// the backend does not yet provide (documented follow-up).
@@ -598,6 +616,20 @@ impl FlightSupervisor {
             self.rtl_latched = true;
         }
 
+        // ── ATTITUDE-RUNAWAY termination (v1.99 expanded failsafe): a tilt past
+        // any recoverable attitude, sustained while airborne, is a tumble that
+        // RTL/Land cannot arrest — cut the motors. Debounced over TILT_RUNAWAY_
+        // CYCLES so a brief aggressive manoeuvre or a transient estimate spike
+        // does not trip the irreversible termination. ──
+        if self.fsm.is_airborne() && est.tilt_rad() > TILT_RUNAWAY_LIMIT {
+            self.runaway_count = self.runaway_count.saturating_add(1);
+            if self.runaway_count >= TILT_RUNAWAY_CYCLES {
+                self.fsm.on(Event::Terminate, g);
+            }
+        } else {
+            self.runaway_count = 0;
+        }
+
         // ── milestone events ──
         match self.fsm.mode() {
             Mode::Takeoff if alt_agl > self.cruise_alt - 0.2 => {
@@ -653,7 +685,8 @@ impl FlightSupervisor {
             Mode::Mission => self.current_waypoint(), // fly the active leg (its own altitude)
             Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
             Mode::Land => [self.home[0], self.home[1], -self.cruise_alt], // hold home; rate-descend
-            Mode::Disarmed | Mode::Armed => [est.p[0], est.p[1], est.p[2]], // hold (idle)
+            // idle / motors-off states: setpoint is moot (no thrust commanded).
+            Mode::Disarmed | Mode::Armed | Mode::Terminated => [est.p[0], est.p[1], est.p[2]],
         };
         // ── v1.31: reactive keep-out avoidance ── deflect the horizontal
         // setpoint around any no-fly zone the vehicle is near (no-op when none
@@ -1991,6 +2024,62 @@ mod tests {
 
     /// The altitude integral rejects the thrust lapse: the vehicle reaches and
     /// holds 20 m even though air-density loss reduces thrust there.
+    /// v1.99 expanded failsafe — an attitude RUNAWAY (a sustained, unrecoverable
+    /// tilt while airborne) cuts the motors: the FSM reaches Terminated. A level
+    /// airborne vehicle is NOT terminated; only the sustained tumble is.
+    #[test]
+    fn attitude_runaway_terminates_in_flight() {
+        use relay_calib::CalParams;
+        struct TumbleBackend {
+            tilted: bool,
+        }
+        impl FlightBackend for TumbleBackend {
+            fn read_imu(&mut self) -> ImuSample {
+                // tilted: gravity measured along body-x ⇒ the estimate converges
+                // to a ~90° tilt (well past the runaway limit); else level.
+                let accel = if self.tilted { [GRAVITY, 0.0, 0.0] } else { [0.0, 0.0, -GRAVITY] };
+                ImuSample { accel, gyro: [0.0; 3] }
+            }
+            fn read_position(&mut self) -> Option<Vec3> {
+                Some([0.0, 0.0, 0.0])
+            }
+            fn read_mag(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn read_battery_v(&mut self) -> f32 {
+                16.0
+            }
+            fn write_motors(&mut self, _: &[f32]) {}
+            fn dt(&self) -> f32 {
+                0.004
+            }
+        }
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        let mut b = TumbleBackend { tilted: false };
+
+        // converge level, then arm + take off (airborne, still level).
+        for _ in 0..1500 {
+            sup.step(&mut b);
+        }
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Armed);
+        sup.command(relay_fsm::Event::RequestTakeoff, true, false);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Takeoff, "airborne");
+        // a level airborne vehicle is NOT terminated.
+        for _ in 0..200 {
+            sup.step(&mut b);
+        }
+        assert_ne!(sup.mode(), relay_fsm::Mode::Terminated, "level flight must not terminate");
+
+        // now a sustained tumble → flight termination (motor cut).
+        b.tilted = true;
+        for _ in 0..3000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), relay_fsm::Mode::Terminated, "sustained attitude runaway cuts motors");
+    }
+
     /// v1.99 — the pre-arm gate is fed by REAL vehicle state via update_preflight
     /// (called each step). A fresh, uncalibrated vehicle is refused arming
     /// (no calibration, estimator not converged); after installing a calibration
