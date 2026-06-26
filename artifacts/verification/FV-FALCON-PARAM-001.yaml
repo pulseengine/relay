@@ -11,8 +11,14 @@ artifacts:
       full store, stored value always in bounds). Two Kani harnesses: PARAM-K01
       an out-of-range write never lands (value bit-identical after), PARAM-K02
       set total + in-range applies. The MAVLink PARAM_* wire framing (relay-
-      mavlink) is the integration layer that drives this store.
-    tags: [verification, falcon, parameters, relay-param, kani, v1.47]
+      mavlink) is the integration layer that drives this store ([[SWREQ-FALCON-PARAM-P02]]).
+
+      v1.96 ENFORCEMENT: relay-param was added to the Kani CI matrix
+      (.github/workflows/kani.yml) — until then PARAM-K01/K02 existed but NO gate
+      ran them (the same "harness present but unenforced" gap that hid for ~40
+      releases on relay-rc). Both harnesses now verify on every PR (2/2
+      SUCCESSFUL, 0 failures).
+    tags: [verification, falcon, parameters, relay-param, kani, v1.47, v1.96]
     fields:
       method: formal-verification
       steps:

@@ -1,0 +1,47 @@
+artifacts:
+  - id: FV-FALCON-PARAM-002
+    type: sw-verification
+    title: "MAVLink PARAM binding — pymavlink wire conformance + bounded-store seam (falcon v1.96)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-PARAM-P02. Two layers, each independently checked:
+
+      WIRE (relay-mavlink::param) — the four PARAM_* codecs validated against
+      CANONICAL pymavlink payloads (the impl QGC/MAVSDK/PX4/ArduPilot conform to),
+      regenerable via scripts/gen-mavlink-param-vectors.py. encode REPRODUCES the
+      reference bytes and decode RECOVERS the fields, so a wrong size-sorted field
+      order or CRC_EXTRA is caught — a self-referential round-trip could not (the
+      DroneCAN int14 bit-order lesson, [[relay-wire-decoders-need-external-reference-vectors]]).
+
+      SEAM (falcon-param) — the pure handler wiring the codec to the bounded store
+      of [[SWREQ-FALCON-PARAM-P01]]: an in-range PARAM_SET applies and acks the new
+      value; an out-of-range / NaN PARAM_SET is rejected and acks the OLD value
+      (the end-to-end form of Kani PARAM-K01); an unknown id yields no ack;
+      read-by-id / read-by-index / list-iteration return the correct PARAM_VALUE;
+      a full MAVLink v2 frame round-trip drives the store; proptest holds the
+      stored value in bounds for any input.
+
+      Evidence (each a real named test):
+        relay-mavlink: param::tests::param_request_list_matches_pymavlink_reference,
+        param_request_read_matches_pymavlink_reference,
+        param_set_matches_pymavlink_reference, param_value_matches_pymavlink_reference,
+        decode_rejects_wrong_lengths, param_set_round_trip, param_value_round_trip.
+        falcon-param: tests::in_range_set_applies_and_acks_new_value,
+        out_of_range_set_rejected_acks_old_value, unknown_param_no_ack,
+        request_read_by_id_and_index, request_list_iterates_then_terminates,
+        full_frame_param_set_drives_store, proptests::seam_keeps_store_in_bounds.
+      ORACLE: `cargo test -p relay-mavlink param` + `cargo test -p falcon-param` green.
+    tags: [verification, falcon, parameters, mavlink, conformance, pymavlink, falcon-param, relay-mavlink, v1.96]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-mavlink param::tests::param_request_list_matches_pymavlink_reference"
+        - run: "cargo test -p relay-mavlink param::tests::param_request_read_matches_pymavlink_reference"
+        - run: "cargo test -p relay-mavlink param::tests::param_set_matches_pymavlink_reference"
+        - run: "cargo test -p relay-mavlink param::tests::param_value_matches_pymavlink_reference"
+        - run: "cargo test -p falcon-param tests::out_of_range_set_rejected_acks_old_value"
+        - run: "cargo test -p falcon-param tests::full_frame_param_set_drives_store"
+        - run: "cargo test -p falcon-param proptests::seam_keeps_store_in_bounds"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PARAM-P02

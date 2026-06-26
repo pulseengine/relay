@@ -1,0 +1,22 @@
+[package]
+name = "falcon-param"
+description = "Falcon parameter bridge — the no_std/no_alloc seam between the MAVLink PARAM_* wire (QGroundControl / MAVSDK) and the verified bounded parameter store. Inbound: PARAM_SET → relay-param bounded write; PARAM_REQUEST_READ / PARAM_REQUEST_LIST → store lookup. Outbound: PARAM_VALUE ack/reply. The codec (relay-mavlink) and the store (relay-param, Kani PARAM-K01: out-of-range never lands) stay pure; this crate is only the translation (FEAT-FALCON-v1.96, the PX4-parity keystone)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+relay-param = { path = "../relay-param" }
+relay-mavlink = { path = "../relay-mavlink" }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

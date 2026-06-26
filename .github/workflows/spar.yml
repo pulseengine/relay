@@ -57,6 +57,7 @@ jobs:
             "Relay_Transport::SecureTransport.Link" \
             "Relay_Transport::SecureEndpoint.Channel" \
             "Falcon_DroneCAN::DroneCanNode.Fmu" \
+            "Falcon_Param::ParamStore.Fmu" \
             "Falcon_System::Falcon.Quad"; do
             echo "== spar analyze --root $root =="
             out=$(spar analyze --root "$root" spar/*.aadl 2>&1) || true
@@ -95,3 +96,17 @@ jobs:
           fi
           rm -rf generated
           echo "DroneCAN node WIT in sync"
+
+      - name: Generated param service WIT is in sync (no drift)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf generated
+          spar codegen --root Falcon_Param::ParamStore.Fmu --format wit spar/*.aadl
+          if ! diff -u wit/param/service.wit generated/wit/service.wit; then
+            echo "::error::wit/param/service.wit is stale — regenerate: spar codegen --root Falcon_Param::ParamStore.Fmu --format wit spar/*.aadl"
+            rm -rf generated
+            exit 1
+          fi
+          rm -rf generated
+          echo "param service WIT in sync"

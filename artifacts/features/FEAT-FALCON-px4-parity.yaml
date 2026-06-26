@@ -21,9 +21,17 @@ artifacts:
   - id: FEAT-FALCON-v1.96
     type: feature
     title: "v1.96 — Parameter system (the keystone): typed bounded param store + MAVLink PARAM binding"
-    status: pending
+    status: implemented
     description: >
-      PLANNED. The single highest-leverage gap vs PX4 (gap-analysis #1). PX4 has
+      IMPLEMENTED (v1.96). The bounded store pre-existed (relay-param,
+      SWREQ-FALCON-PARAM-P01, Kani PARAM-K01/K02 — now CI-ENFORCED via the kani.yml
+      matrix, previously unrun). The v1.96 work is the MAVLink PARAM binding
+      (SWREQ-FALCON-PARAM-P02): the four PARAM_* wire codecs in relay-mavlink
+      (pymavlink reference-vector conformant) + the falcon-param seam (PARAM_SET ->
+      bounded store -> PARAM_VALUE ack) + the spar Falcon_Param model (param.aadl)
+      and generated wit/param/service.wit.
+
+      The single highest-leverage gap vs PX4 (gap-analysis #1). PX4 has
       hundreds of typed, persisted, GCS-readable/writable parameters; falcon tunes
       via code constants. Without a param store you cannot field-tune gains, run
       calibration, set geofence/battery thresholds, or integrate QGC — autotune,
