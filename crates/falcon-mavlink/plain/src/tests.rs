@@ -22,6 +22,7 @@ fn gates(level: bool, throttle_low: bool, have_position: bool) -> Gates {
         level,
         throttle_low,
         have_position,
+        prearm_ok: true,
     }
 }
 

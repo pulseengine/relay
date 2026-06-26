@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-FALCON-PREARM-001
+    type: sw-verification
+    title: "Pre-arm entry gate — FSM-K03 + falcon-core seam (falcon v1.97)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-PREARM-P01: the FSM arm transition is gated on the
+      pre-arm commander verdict, proven and wired end-to-end.
+
+      PROOF (relay-fsm) — verify_arm_requires_preconditions (FSM-K03): Kani checks
+      that for ANY start mode / event / gate combination, the FSM enters Armed
+      ONLY from Disarmed on an Arm event with level && throttle_low && prearm_ok
+      all true. Nothing else can produce Armed, so a failed pre-arm check
+      provably blocks motor spin-up. The complement of verify_never_disarm_airborne
+      (the exit gate) — a proven entry + proven exit bracket the armed lifecycle.
+
+      SEAM (falcon-core) — prearm_checks_gate_arming: the FlightSupervisor computes
+      `relay_preflight::arm_check` over its PreflightChecks and passes the verdict
+      as the FSM `prearm_ok` gate. With all checks failing, command(Arm) leaves the
+      vehicle Disarmed and arm_blocked_reason() == Sensors; with only battery
+      failing, the reason == Battery; once every check passes, the same physical
+      command arms. The predicate itself is proven by relay-preflight PREFLIGHT-K01/
+      K02 (out-of-checks never allows; Blocked names a truly-failed check).
+
+      ENFORCEMENT: relay-fsm + relay-preflight added to the Kani CI matrix — the
+      three FSM harnesses + the two preflight harnesses run on every PR.
+
+      Evidence (each a real named test/harness):
+        - relay-fsm: kani_harness::verify_arm_requires_preconditions (FSM-K03).
+        - falcon-core: tests::prearm_checks_gate_arming (the end-to-end seam).
+        - relay-preflight: arm_check tests + PREFLIGHT-K01/K02.
+      ORACLE: `cargo kani -p relay-fsm` (3/3) + `cargo test -p falcon-core` green.
+    tags: [verification, falcon, prearm, commander, fsm, falcon-core, relay-preflight, kani, safety, v1.97]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo kani -p relay-fsm --harness verify_arm_requires_preconditions"
+        - run: "cargo test -p falcon-core tests::prearm_checks_gate_arming"
+        - run: "cargo kani -p relay-preflight"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PREARM-P01

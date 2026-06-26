@@ -359,6 +359,7 @@ dependencies = [
  "relay-iekf",
  "relay-math",
  "relay-mix-quad",
+ "relay-preflight",
 ]
 
 [[package]]

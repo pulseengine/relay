@@ -14,21 +14,29 @@ artifacts:
          event from any flying state (Takeoff/Loiter/Mission/Rtl) commands a
          recovery mode (Rtl or Land), never Disarmed and never a no-op.
 
-      3. Unit (4 tests, clippy clean): the nominal arm→takeoff→loiter→mission→
-         land→disarm lifecycle; arming refused while tilted or throttle-up;
-         disarm no-ops in each airborne state; failsafe → Rtl with a position
-         fix, Land without.
+      3. Kani verify_arm_requires_preconditions (FSM-K03, the v1.97 ENTRY GATE):
+         VERIFICATION SUCCESSFUL — for ANY start state / event / gates, if the FSM
+         enters Armed it MUST have been an Arm event from Disarmed with level AND
+         throttle_low AND prearm_ok all true. Motors can never spin up with a
+         failed pre-arm check — the architectural complement of invariant 1.
 
-      This is the autonomy layer the clean-room audit found missing, sitting
-      over the relay-arm arming gate. Wiring it into the integrated flight loop
-      (driving takeoff/land/RTL setpoints) + the geofence→RTL actuation is v1.8.
-    tags: [verification, falcon, fsm, autonomy, safety, kani, v1.7]
+      4. Unit (5 tests, clippy clean): the nominal arm→takeoff→loiter→mission→
+         land→disarm lifecycle; arming refused while tilted or throttle-up;
+         arming refused when the pre-arm checks fail; disarm no-ops in each
+         airborne state; failsafe → Rtl with a position fix, Land without.
+
+      v1.97 ENFORCEMENT: relay-fsm was added to the Kani CI matrix
+      (.github/workflows/kani.yml) — all three harnesses now run on every PR as
+      the dedicated Kani gate (belt-and-suspenders with this artifact's steps,
+      which the rivet verification gate executes).
+    tags: [verification, falcon, fsm, autonomy, safety, kani, v1.7, v1.97]
     fields:
       method: formal-verification
       steps:
         - run: "cargo test -p relay-fsm"
         - run: "cargo kani -p relay-fsm --harness verify_never_disarm_airborne"
         - run: "cargo kani -p relay-fsm --harness verify_failsafe_recovers"
+        - run: "cargo kani -p relay-fsm --harness verify_arm_requires_preconditions"
     links:
       - type: verifies
         target: SWREQ-FALCON-FSM-P01

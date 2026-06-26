@@ -50,8 +50,8 @@ fn q_rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
 /// Touchdown) reaches Disarmed.
 fn fsm_sequence() -> (Mode, bool) {
     let mut fsm = FlightFsm::new();
-    let ground = Gates { level: true, throttle_low: true, have_position: true };
-    let flying = Gates { level: true, throttle_low: false, have_position: true };
+    let ground = Gates { level: true, throttle_low: true, have_position: true, prearm_ok: true };
+    let flying = Gates { level: true, throttle_low: false, have_position: true, prearm_ok: true };
 
     fsm.on(Event::Arm, ground);
     fsm.on(Event::RequestTakeoff, flying);

@@ -56,11 +56,20 @@ artifacts:
   - id: FEAT-FALCON-v1.97
     type: feature
     title: "v1.97 — Pre-arm / commander checks: arm only when preconditions provably hold"
-    status: pending
+    status: implemented
     description: >
-      PLANNED. The #1 real-world crash-preventer (gap-analysis #2). falcon's FSM
+      IMPLEMENTED (v1.97). The pre-arm predicate pre-existed (relay-preflight,
+      SWREQ-FALCON-PREFLIGHT-P01, Kani PREFLIGHT-K01/K02); v1.97 WIRES it into the
+      FSM arm gate (SWREQ-FALCON-PREARM-P01): relay-fsm Gates gains prearm_ok, the
+      Arm transition requires it, and the new Kani harness FSM-K03
+      (verify_arm_requires_preconditions) proves arm-entry ⇒ all gates held — the
+      entry-gate complement of never-disarm-airborne. The falcon-core seam computes
+      arm_check and surfaces the blocking reason. ALSO closed: relay-fsm +
+      relay-preflight added to the Kani CI matrix (the harnesses were unenforced).
+
+      The #1 real-world crash-preventer (gap-analysis #2). falcon's FSM
       proves the EXIT invariant (never-disarm-airborne); PX4's commander enforces
-      a broad ENTRY gate. Add the pre-arm predicate: gate arming on sensor health,
+      a broad ENTRY gate. Gate arming on sensor health,
       EKF convergence (NIS in-band), calibration-present, GPS-lock-for-mode,
       battery-min, RC-present.
       Excellent verified fit: a pure predicate over already-available health
