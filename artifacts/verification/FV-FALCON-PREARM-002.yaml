@@ -1,0 +1,40 @@
+artifacts:
+  - id: FV-FALCON-PREARM-002
+    type: sw-verification
+    title: "Pre-arm gate fed by real state — update_preflight + live-signal arming (falcon v1.99)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-PREARM-P02: the FlightSupervisor derives the pre-arm
+      checks from real vehicle state each cycle, so the Kani-proven arm gate
+      operates on live signals.
+
+      falcon-core prearm_gate_fed_by_real_state (the end-to-end test): a level,
+      at-rest backend with a healthy battery + a loaded fence is stepped 1500
+      cycles to settle the estimator; with NO calibration installed, command(Arm)
+      leaves the vehicle Disarmed and arm_blocked_reason() == Calibration (the
+      estimator has converged, so calibration is the first failing check);
+      installing a non-identity calibration and stepping once → arm_blocked_reason
+      None and command(Arm) reaches Armed; a separate run with a 13 V pack (below
+      the 14 V threshold) refuses arming with reason Battery. So a divergent
+      estimator / missing calibration / low battery / unset fence each block
+      arming on LIVE signals — the gate is no longer inert all-pass defaults.
+
+      Supporting: FlightCore::tilt_uncertainty (roll+pitch covariance trace) is the
+      gravity-observable convergence metric update_preflight thresholds; the arm
+      transition itself stays gated by relay-fsm FSM-K03
+      ([[FV-FALCON-PREARM-001]], unchanged).
+
+      Evidence (each a real named test): falcon-core
+      tests::prearm_gate_fed_by_real_state (live-signal arming) + the still-passing
+      tests::prearm_checks_gate_arming (the v1.97 seam) +
+      tests::estimator_consumes_calibration (v1.98).
+      ORACLE: `cargo test -p falcon-core prearm_gate_fed_by_real_state` green.
+    tags: [verification, falcon, prearm, commander, estimator, calibration, falcon-core, safety, v1.99]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p falcon-core tests::prearm_gate_fed_by_real_state"
+        - run: "cargo test -p falcon-core tests::prearm_checks_gate_arming"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PREARM-P02

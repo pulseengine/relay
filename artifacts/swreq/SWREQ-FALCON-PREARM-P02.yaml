@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWREQ-FALCON-PREARM-P02
+    type: sw-req
+    title: "PREARM-P02: the pre-arm gate is fed by real vehicle state, not all-pass defaults"
+    status: implemented
+    description: >
+      The FlightSupervisor shall derive, each control cycle, the pre-arm checks it
+      can know from its own state and backend inputs, so the Kani-proven arm gate
+      ([[SWREQ-FALCON-PREARM-P01]]) operates on LIVE signals rather than the
+      all-pass defaults that left it inert. Four of the six checks are wired
+      (update_preflight, called in step):
+        * estimator_converged — the IEKF TILT uncertainty (roll²+pitch², the
+          gravity-observable attitude, mag-independent) is at/below a threshold;
+        * calibration_present — a non-identity sensor calibration ([[SWREQ-FALCON-CALIB-P01]])
+          is installed;
+        * battery_ok — the pack voltage (backend read_battery_v) is at/above the
+          arming threshold;
+        * geofence_loaded — a positive fence radius is configured.
+      A just-started or divergent estimator, an uncalibrated vehicle, a low
+      battery, or an unset fence shall each BLOCK arming, with the first failing
+      check surfaced ([`arm_blocked_reason`]). `sensors_healthy` and
+      `failsafe_configured` remain externally-fed / defaulted — a sensor-health
+      vote and a failsafe-arbiter input the backend does not yet provide
+      (documented follow-up).
+    tags: [falcon, prearm, commander, arming, estimator, calibration, battery, safety, v1.99]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        falcon-core: with a level at-rest backend and NO calibration, after the
+        estimator settles arming is refused with reason Calibration; installing a
+        calibration and refreshing → arm_blocked_reason None and command(Arm)
+        reaches Armed; a low pack voltage (13 V < 14 V threshold) refuses arming
+        with reason Battery. FlightCore::tilt_uncertainty returns the roll+pitch
+        covariance trace, which shrinks below PREARM_TILT_UNCERT_MAX as gravity
+        updates arrive. The arm transition itself is gated (relay-fsm FSM-K03,
+        unchanged).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011
