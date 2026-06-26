@@ -162,6 +162,18 @@ impl FlightCore {
         self.calib
     }
 
+    /// The estimator's TILT uncertainty: the roll+pitch part of the attitude
+    /// block of the IEKF error covariance (δθ_x² + δθ_y², rad²). Tilt is the
+    /// gravity-observable attitude — it converges from any sensor set (yaw needs a
+    /// magnetometer, so it is deliberately EXCLUDED so the metric is meaningful
+    /// without a heading reference). It starts large and SHRINKS as gravity
+    /// updates arrive; the pre-arm `estimator_converged` check thresholds it
+    /// (v1.99), so arming waits for a settled, level estimate.
+    pub fn tilt_uncertainty(&self) -> f32 {
+        let p = self.iekf.covariance();
+        p[0][0] + p[1][1]
+    }
+
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
     pub fn set_altitude(&mut self, ned_z: f32) {
         self.setpoint[2] = ned_z;
@@ -319,6 +331,14 @@ pub const MAX_WAYPOINTS: usize = 16;
 /// fully settle on each leg.
 const WAYPOINT_RADIUS: f32 = 1.2;
 
+/// Pre-arm estimator-convergence ceiling (v1.99): the IEKF tilt-uncertainty
+/// (roll²+pitch², rad²) must be at/below this for `estimator_converged` to pass.
+/// The filter starts well above it and settles below as gravity updates arrive,
+/// so arming waits for a converged, level estimate. ~0.02 rad² ≈ a 0.14 rad (8°)
+/// 1σ tilt uncertainty over the two axes — generous enough to clear quickly at
+/// rest yet block a just-started or diverging filter.
+const PREARM_TILT_UNCERT_MAX: f32 = 0.02;
+
 /// Maximum stored keep-out zones (no_std fixed capacity).
 pub const MAX_KEEPOUT_ZONES: usize = 8;
 
@@ -425,6 +445,25 @@ impl FlightSupervisor {
     /// battery, sensor/RC presence, …); `command(Arm, …)` then gates on them.
     pub fn set_preflight(&mut self, checks: relay_preflight::PreflightChecks) {
         self.preflight = checks;
+    }
+
+    /// Derive the pre-arm checks the supervisor can know from its OWN state, each
+    /// cycle (v1.99 — the pre-arm gate fed by real signals, not all-pass
+    /// defaults). Four of the six are wired here:
+    ///   * estimator_converged — the IEKF attitude uncertainty has settled below
+    ///     [`PREARM_ATT_UNCERT_MAX`] (a divergent/just-started filter blocks arming);
+    ///   * calibration_present — a non-identity sensor calibration is installed;
+    ///   * battery_ok — the pack voltage is at/above the arming threshold;
+    ///   * geofence_loaded — a positive fence radius is configured.
+    /// `sensors_healthy` and `failsafe_configured` are left as last set (default
+    /// true / via [`set_preflight`]) — they need a sensor-health / arbiter input
+    /// the backend does not yet provide (documented follow-up).
+    pub fn update_preflight<B: FlightBackend>(&mut self, b: &mut B) {
+        self.preflight.estimator_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
+        self.preflight.calibration_present =
+            self.core.calibration() != relay_calib::CalParams::identity();
+        self.preflight.battery_ok = b.read_battery_v() >= self.low_batt_v;
+        self.preflight.geofence_loaded = self.fence_radius > 0.0;
     }
 
     /// Why arming would be refused right now (the first failing pre-arm check),
@@ -540,6 +579,9 @@ impl FlightSupervisor {
     /// One supervised control step.
     pub fn step<B: FlightBackend>(&mut self, b: &mut B) {
         use relay_fsm::{Event, Gates, Mode};
+        // v1.99 — refresh the pre-arm checks from real vehicle state each cycle,
+        // so a later command(Arm) gates on live signals, not all-pass defaults.
+        self.update_preflight(b);
         let est = self.core.state();
         let dx = est.p[0] - self.home[0];
         let dy = est.p[1] - self.home[1];
@@ -1949,6 +1991,66 @@ mod tests {
 
     /// The altitude integral rejects the thrust lapse: the vehicle reaches and
     /// holds 20 m even though air-density loss reduces thrust there.
+    /// v1.99 — the pre-arm gate is fed by REAL vehicle state via update_preflight
+    /// (called each step). A fresh, uncalibrated vehicle is refused arming
+    /// (no calibration, estimator not converged); after installing a calibration
+    /// and letting the estimator settle, with a healthy battery + a loaded fence,
+    /// arming is permitted. Proves the gate is no longer inert all-pass defaults.
+    #[test]
+    fn prearm_gate_fed_by_real_state() {
+        use relay_calib::CalParams;
+        struct RestBackend {
+            batt: f32,
+        }
+        impl FlightBackend for RestBackend {
+            fn read_imu(&mut self) -> ImuSample {
+                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+            }
+            fn read_position(&mut self) -> Option<Vec3> {
+                Some([0.0, 0.0, 0.0])
+            }
+            fn read_mag(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn read_battery_v(&mut self) -> f32 {
+                self.batt
+            }
+            fn write_motors(&mut self, _: &[f32]) {}
+            fn dt(&self) -> f32 {
+                0.004
+            }
+        }
+        // fence_radius 50 (loaded), low_batt_v 14.
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        let mut b = RestBackend { batt: 16.0 };
+
+        // settle the estimator, but with NO calibration installed.
+        for _ in 0..1500 {
+            sup.step(&mut b);
+        }
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Disarmed, "must not arm without calibration");
+        assert_eq!(sup.arm_blocked_reason(), Some(relay_preflight::CheckFail::Calibration));
+
+        // install a (non-identity) calibration → step once to refresh → arms.
+        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        sup.step(&mut b);
+        assert_eq!(sup.arm_blocked_reason(), None, "all real checks pass");
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Armed, "arms once the real signals are good");
+
+        // a low battery (read each step) blocks re-arming after a disarm.
+        let mut low = RestBackend { batt: 13.0 };
+        let mut sup2 = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup2.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        for _ in 0..1500 {
+            sup2.step(&mut low);
+        }
+        sup2.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup2.mode(), relay_fsm::Mode::Disarmed, "low battery blocks arming");
+        assert_eq!(sup2.arm_blocked_reason(), Some(relay_preflight::CheckFail::Battery));
+    }
+
     /// v1.97 pre-arm gate (the seam): the FlightSupervisor refuses to arm unless
     /// every commander check passes, surfaces the first failing reason, and arms
     /// once they all pass — even when the vehicle is physically level + idle.

@@ -1,0 +1,28 @@
+artifacts:
+  - id: FEAT-FALCON-prearm-realsignals
+    type: feature
+    title: "v1.99 — Pre-arm gate fed by real vehicle state (the v1.96/97/98 convergence)"
+    status: implemented
+    description: >
+      IMPLEMENTED (v1.99). Closes the loop across the PX4-parity arc: the v1.97
+      pre-arm gate was Kani-proven (FSM-K03: arm ⇒ prearm_ok) but FED BY ALL-PASS
+      DEFAULTS, so it was effectively inert. v1.99 derives the pre-arm checks from
+      the FlightSupervisor's OWN state each cycle (update_preflight, called in
+      step): estimator_converged (the IEKF tilt-uncertainty has settled below a
+      threshold — gravity-observable, mag-independent), calibration_present (a
+      non-identity v1.98 calibration is installed), battery_ok (pack voltage at/
+      above the arming threshold), geofence_loaded (a positive fence radius). So
+      arming now gates on LIVE signals — a just-started/divergent estimator, an
+      uncalibrated vehicle, a low battery, or an unset fence each block arming, and
+      the blocked reason is surfaced for the GCS. sensors_healthy and
+      failsafe_configured remain externally-fed (no sensor-health / failsafe-
+      arbiter backend input yet — a documented follow-up). The numbering is a label
+      (per this roadmap's convention); FEAT-FALCON-v1.99 (expanded failsafes)
+      stays planned.
+    tags: [falcon, px4-parity, prearm, commander, arming, estimator, calibration, safety, v1.99]
+    fields:
+      release-target: "FlightSupervisor.update_preflight derives 4 of 6 pre-arm checks from real state; arming gates on live signals not defaults"
+      px4-equivalent: "PX4 commander reads live EKF/battery/sensor health — falcon wires the same into its Kani-proven arm gate"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-011
