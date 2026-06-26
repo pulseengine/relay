@@ -126,8 +126,11 @@ artifacts:
           mode + Terminate event (Kani FSM-K04 unconditional, FSM-K05 absorbing) +
           the supervisor's debounced tilt-runaway detector. relay-fsafe added to
           the Kani matrix.
-        - high-wind: a wind/tilt-saturation threshold -> RTL/land. PLANNED (the
-          mixer-saturation proxy, maps to the existing Event::Failsafe RTL path).
+        - high-wind: a wind/tilt-saturation threshold -> RTL/land. DONE
+          (falcon-v1.101, SWREQ-FALCON-WINDFS-P01): sustained control saturation +
+          a moderate (sub-runaway) tilt → the existing Event::Failsafe RTL path,
+          with the tilt band capped below the runaway limit so a tumble terminates
+          instead (the runaway path strictly dominates).
         - motor-failure: an ESC current/RPM anomaly (from esc.Status, v1.94) ->
           control-allocation reallocation (the HARDEST; multi-subsystem — ESC
           health voting + the attitude controller's yaw-authority gate + the

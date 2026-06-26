@@ -1,0 +1,42 @@
+artifacts:
+  - id: SWREQ-FALCON-WINDFS-P01
+    type: sw-req
+    title: "WINDFS-P01: high-wind failsafe — sustained control saturation while leaning hard commands RTL"
+    status: implemented
+    description: >
+      Falcon shall command a Return-To-Launch when the control allocation is
+      SATURATED (a motor output at/above [`WIND_SAT_THRESHOLD`]) WHILE the vehicle
+      is moderately tilted (in [`WIND_TILT_MIN`, `WIND_TILT_CEIL`]) continuously
+      for a debounce window ([`WIND_CYCLES`]) while airborne — the signature of a
+      wind disturbance beyond the rate loop's authority: the vehicle is at its
+      control limit and leaning hard but is NOT tumbling (the second PX4-parity
+      expanded failsafe, gap-analysis #5). Distinct from [[SWREQ-FALCON-WIND-P01]]
+      (the position-loop integral that REJECTS in-authority wind); this is the
+      failsafe for wind BEYOND authority.
+
+      The detector reuses the FSM's existing Failsafe path ([[SWREQ-FALCON-FSM-P01]]):
+      Failsafe from a flying state → Rtl (with a position fix) or Land. It is
+      DISTINCT from attitude-runaway termination ([[SWREQ-FALCON-RUNAWAY-P01]]): the
+      tilt band is capped BELOW the runaway limit and the count RESETS when the
+      tilt exceeds the ceiling, so a developing tumble (which blows through the
+      band far faster than the debounce) TERMINATES rather than merely RTLs — the
+      runaway path strictly dominates. Saturation ALONE (e.g. an aggressive level
+      climb) is not high wind; saturation WHILE moderately tilted is. Debounced so
+      a gust or brief manoeuvre does not trip it.
+    tags: [falcon, failsafe, high-wind, saturation, rtl, safety, px4-parity, v1.99]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        falcon-core: a level airborne vehicle does NOT trip the wind failsafe; a
+        sustained moderate tilt (~28°) with the motors pinned fires the RTL-class
+        failsafe (rtl_latched) from normal flight (Takeoff → Rtl/Land recovery) and
+        does NOT terminate (the tilt is below the runaway limit). The detector
+        reads FlightCore::max_motor (the largest last commanded motor output) and
+        the IEKF tilt (NavState::tilt_rad). A developing tumble crosses the wind
+        band in far fewer cycles than the debounce, so attitude-runaway termination
+        (not RTL) fires for a true tumble (verified by the runaway test reaching
+        Terminated unaffected by the wind detector).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011

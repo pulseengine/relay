@@ -174,6 +174,15 @@ impl FlightCore {
         p[0][0] + p[1][1]
     }
 
+    /// The largest of the last commanded motor outputs (0..1). At/near 1.0 the
+    /// control allocation is SATURATED — the rate loop is at its authority limit.
+    /// Sustained saturation while tilted is the high-wind proxy (v1.101): the
+    /// vehicle is fighting a disturbance beyond what it can hold.
+    pub fn max_motor(&self) -> f32 {
+        let m = self.mixer.last_motors();
+        m[0].max(m[1]).max(m[2]).max(m[3])
+    }
+
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
     pub fn set_altitude(&mut self, ned_z: f32) {
         self.setpoint[2] = ned_z;
@@ -351,6 +360,23 @@ const TILT_RUNAWAY_LIMIT: f32 = 1.05;
 /// (irreversible) motor cut. 50 cycles ≈ 0.2 s at 250 Hz.
 const TILT_RUNAWAY_CYCLES: u32 = 50;
 
+/// High-wind detector (v1.101): control allocation saturated at/above this motor
+/// output (0..1) means the rate loop is at its authority limit.
+const WIND_SAT_THRESHOLD: f32 = 0.95;
+
+/// ...AND the tilt is within [WIND_TILT_MIN, WIND_TILT_CEIL] (rad) — the vehicle
+/// is leaning hard into a disturbance but NOT tumbling. Saturation alone (e.g. an
+/// aggressive climb) is not high wind; saturation WHILE moderately tilted is. The
+/// ceiling is below TILT_RUNAWAY_LIMIT and RESETS the count when exceeded, so a
+/// developing tumble (which blows through the band far faster than the debounce)
+/// terminates rather than merely RTLs — the runaway path strictly dominates.
+const WIND_TILT_MIN: f32 = 0.30;
+const WIND_TILT_CEIL: f32 = 0.70;
+
+/// Consecutive saturated-and-tilted cycles before commanding RTL — debounced over
+/// ~0.5 s at 250 Hz so a transient gust or manoeuvre does not trip it.
+const WIND_CYCLES: u32 = 125;
+
 /// Maximum stored keep-out zones (no_std fixed capacity).
 pub const MAX_KEEPOUT_ZONES: usize = 8;
 
@@ -397,6 +423,10 @@ pub struct FlightSupervisor {
     /// while airborne — the attitude-runaway detector (v1.99 expanded failsafe).
     /// On reaching TILT_RUNAWAY_CYCLES it fires Event::Terminate (motor cut).
     runaway_count: u32,
+    /// Consecutive cycles of control saturation + moderate tilt while airborne —
+    /// the high-wind detector (v1.101). On reaching WIND_CYCLES it commands RTL
+    /// (the vehicle is fighting a disturbance beyond its control authority).
+    wind_count: u32,
     /// The latest pre-arm / commander check inputs (sensor health, estimator
     /// convergence, calibration, geofence, battery, failsafe config). Fed by
     /// `set_preflight`; `command(Arm, …)` gates arming on `arm_check` of these
@@ -423,6 +453,7 @@ impl FlightSupervisor {
             zone_count: 0,
             rtl_latched: false,
             runaway_count: 0,
+            wind_count: 0,
             // back-compat default: all checks pass (an integration that feeds real
             // health via set_preflight tightens this to a fail-safe gate).
             preflight: relay_preflight::PreflightChecks {
@@ -628,6 +659,27 @@ impl FlightSupervisor {
             }
         } else {
             self.runaway_count = 0;
+        }
+
+        // ── HIGH-WIND failsafe (v1.101): control allocation saturated WHILE the
+        // vehicle leans hard (but short of a tumble) is the signature of a wind
+        // disturbance beyond the rate loop's authority — it cannot hold station.
+        // Sustained, command RTL via the FSM's Failsafe path (→ Rtl with a
+        // position fix, else Land). Debounced so a gust/manoeuvre does not trip
+        // it; runaway termination above takes precedence for a true tumble. ──
+        let tilt = est.tilt_rad();
+        if self.fsm.is_airborne()
+            && self.fsm.mode() != Mode::Land
+            && self.core.max_motor() >= WIND_SAT_THRESHOLD
+            && (WIND_TILT_MIN..=WIND_TILT_CEIL).contains(&tilt)
+        {
+            self.wind_count = self.wind_count.saturating_add(1);
+            if self.wind_count >= WIND_CYCLES {
+                self.fsm.on(Event::Failsafe, g);
+                self.rtl_latched = true;
+            }
+        } else {
+            self.wind_count = 0;
         }
 
         // ── milestone events ──
@@ -2072,12 +2124,88 @@ mod tests {
         }
         assert_ne!(sup.mode(), relay_fsm::Mode::Terminated, "level flight must not terminate");
 
-        // now a sustained tumble → flight termination (motor cut).
+        // now a sustained tumble → flight termination. The tilt blows through the
+        // high-wind band (~47 cycles, < the wind debounce) into the runaway range,
+        // so termination — not RTL — fires (the runaway path strictly dominates).
         b.tilted = true;
         for _ in 0..3000 {
             sup.step(&mut b);
         }
         assert_eq!(sup.mode(), relay_fsm::Mode::Terminated, "sustained attitude runaway cuts motors");
+    }
+
+    /// v1.101 expanded failsafe — HIGH WIND: control saturation while leaning hard
+    /// (but NOT tumbling) is a disturbance beyond the rate loop's authority →
+    /// RTL. A sustained moderate tilt with the motors pinned, away from home,
+    /// drives the FSM to Rtl (it does not terminate — the tilt stays below the
+    /// runaway limit — and does not land, being away from home).
+    #[test]
+    fn high_wind_saturation_commands_rtl() {
+        use relay_calib::CalParams;
+        struct WindBackend {
+            windy: bool,
+        }
+        impl FlightBackend for WindBackend {
+            fn read_imu(&mut self) -> ImuSample {
+                // windy: gravity measured at ~28° off body-down → the estimate
+                // holds a ~0.49 rad tilt (inside the wind band [0.30, 0.70]) and
+                // the rate loop saturates fighting it; else level.
+                let accel = if self.windy {
+                    [GRAVITY * 0.469, 0.0, -GRAVITY * 0.883]
+                } else {
+                    [0.0, 0.0, -GRAVITY]
+                };
+                ImuSample { accel, gyro: [0.0; 3] }
+            }
+            fn read_position(&mut self) -> Option<Vec3> {
+                Some([100.0, 0.0, 0.0]) // away from home: an RTL flies, never lands
+            }
+            fn read_mag(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn read_battery_v(&mut self) -> f32 {
+                16.0
+            }
+            fn write_motors(&mut self, _: &[f32]) {}
+            fn dt(&self) -> f32 {
+                0.004
+            }
+        }
+        // effectively-infinite fence so the tilt-corrupted position estimate can
+        // never trip the GEOFENCE failsafe — isolating the high-wind path.
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 1.0e9, 2.0, 14.0);
+        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        let mut b = WindBackend { windy: false };
+        // converge level, arm, take off.
+        for _ in 0..1500 {
+            sup.step(&mut b);
+        }
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Armed);
+        sup.command(relay_fsm::Event::RequestTakeoff, true, false);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Takeoff, "airborne");
+        // sustained high wind: moderate tilt + saturation fires the RTL-class
+        // failsafe (rtl_latched), and the vehicle RECOVERS — it does NOT terminate
+        // (the tilt is below the runaway limit). It also leaves normal flight. The
+        // exact recovery mode then follows the standard RTL path (Rtl→Land as the
+        // tilt-corrupted position estimate reads near home); the discriminating
+        // property vs attitude-runaway is recover-not-terminate.
+        b.windy = true;
+        let mut fired_at_takeoff = false;
+        for _ in 0..400 {
+            let before = sup.mode();
+            sup.step(&mut b);
+            // the FIRST failsafe to fire does so from Takeoff → Rtl (recovery).
+            if sup.rtl_latched && before == relay_fsm::Mode::Takeoff {
+                fired_at_takeoff = sup.mode() == relay_fsm::Mode::Rtl || sup.mode() == relay_fsm::Mode::Land;
+            }
+            if sup.rtl_latched {
+                break;
+            }
+        }
+        assert!(sup.rtl_latched, "sustained high-wind saturation must fire the RTL-class failsafe");
+        assert!(fired_at_takeoff, "the failsafe fired from normal flight (Takeoff → RTL recovery)");
+        assert_ne!(sup.mode(), relay_fsm::Mode::Terminated, "high wind recovers (RTL), it does NOT terminate");
     }
 
     /// v1.99 — the pre-arm gate is fed by REAL vehicle state via update_preflight
