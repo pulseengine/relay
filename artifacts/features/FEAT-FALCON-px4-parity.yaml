@@ -86,9 +86,19 @@ artifacts:
   - id: FEAT-FALCON-v1.98
     type: feature
     title: "v1.98 — Sensor calibration routines: accel/gyro/mag/level offsets the estimator consumes"
-    status: pending
+    status: implemented
     description: >
-      PLANNED. An uncalibrated mag/accel diverges even a proven estimator
+      IMPLEMENTED (v1.98). New relay-calib crate (SWREQ-FALCON-CALIB-P01): gyro
+      null-rate, accel 6-orientation bias/scale, mag hard-iron + diagonal
+      soft-iron solvers + the apply transform, all verified (synthetic-recovery
+      proptest + Kani totality, relay-calib in the Kani matrix). The FlightCore
+      now applies the calibration to raw gyro/accel/mag each step (identity by
+      default — the explicit replacement for the identity-remap placeholder —
+      installed via set_calibration); offsets serialise to the param store via
+      CalParams::to_named (CAL_* ids). Follow-up: the full off-diagonal mag
+      ellipsoid fit, and feeding calibration_present into the v1.97 pre-arm gate.
+
+      An uncalibrated mag/accel diverges even a proven estimator
       (gap-analysis #3; was under-scoped as 'validation' on the known-gaps list).
       The guided calibration that solves bias/scale/axis-remap + board-level
       offsets, landing them in the v1.96 param store.

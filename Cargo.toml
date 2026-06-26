@@ -26,6 +26,7 @@ members = [
     "crates/relay-rc",
     "crates/relay-dronecan",
     "crates/relay-param",
+    "crates/relay-calib",
     "crates/relay-log",
     "crates/relay-mix-multi",
     "crates/relay-sensvote",

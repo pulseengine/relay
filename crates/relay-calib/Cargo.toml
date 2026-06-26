@@ -1,0 +1,18 @@
+[package]
+name = "relay-calib"
+description = "Relay Calib — verified sensor-calibration math: gyro null-rate bias, accel 6-orientation bias/scale solve, magnetometer hard/soft-iron, and the apply transform the estimator runs on raw IMU/mag samples. no_std/no_alloc/forbid(unsafe). The offsets land in the relay-param store; CalParams::identity() is the explicit replacement for the estimator's prior identity-remap placeholder (FEAT-FALCON-v1.98, PX4-parity gap #3)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

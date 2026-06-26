@@ -1,0 +1,52 @@
+artifacts:
+  - id: FV-FALCON-CALIB-001
+    type: sw-verification
+    title: "Sensor calibration — synthetic-recovery + Kani totality + estimator consumption (falcon v1.98)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-CALIB-P01. Three layers:
+
+      MATH (relay-calib) — synthetic ground truth is the oracle: identity is a
+      no-op; gyro_null recovers a known at-rest bias; accel_6point recovers a known
+      bias+scale and applying the result corrects a +g face reading to +G;
+      mag_hardiron recovers a sphere-centre offset; mag_softiron equalises the
+      axis ranges; empty inputs and degenerate (pos==neg / zero-range) axes are
+      total (zero / unit scale, no divide-by-zero); to_named emits the 15 CAL_*
+      params. proptest: the accel solve recovers ANY in-range bias/scale and the
+      applied correction returns +G; gyro_null returns the constant bias for any
+      buffer length.
+
+      TOTALITY (Kani) — verify_identity_is_noop (identity returns any finite sample
+      unchanged); verify_gyro_null_total_and_finite (the mean is total and finite
+      for bounded inputs, n≥1 divisor); verify_mag_hardiron_bounded (total + the
+      offset lies within the per-axis [min,max] of the sweep). The numerical
+      recovery + the divide-bearing solvers' guards are proptest/unit-gated — f32
+      least-squares and CBMC's NaN-on-division check make them Kani-intractable,
+      the codebase's standard f32 split.
+
+      CONSUMPTION (falcon-core) — estimator_consumes_calibration: a constant
+      yaw-gyro bias (unobservable without a heading reference) drives the
+      uncalibrated estimate to drift while a cancelling calibration suppresses it,
+      so the two trajectories diverge — proving the FlightCore applies the
+      calibration in the estimation loop (replacing the identity-remap placeholder).
+
+      Evidence (each a real named test/harness):
+        - relay-calib: tests::identity_is_a_no_op, gyro_null_recovers_known_bias,
+          accel_6point_recovers_bias_and_scale, mag_hardiron_recovers_offset,
+          mag_softiron_equalises_axis_ranges, degenerate_axis_keeps_unit_scale,
+          to_named_has_15_cal_params; proptests::accel_solve_recovers_synthetic;
+          kani_proofs::verify_identity_is_noop / verify_gyro_null_total_and_finite /
+          verify_mag_hardiron_bounded.
+        - falcon-core: tests::estimator_consumes_calibration.
+      ORACLE: `cargo test -p relay-calib` + `cargo kani -p relay-calib` (3/3) +
+      `cargo test -p falcon-core estimator_consumes_calibration` green.
+    tags: [verification, falcon, calibration, sensors, relay-calib, falcon-core, kani, v1.98]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-calib"
+        - run: "cargo kani -p relay-calib"
+        - run: "cargo test -p falcon-core estimator_consumes_calibration"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-CALIB-P01

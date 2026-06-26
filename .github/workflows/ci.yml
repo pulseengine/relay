@@ -62,7 +62,7 @@ jobs:
       - name: Clippy on v0.1 falcon crates
         run: |
           cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
-            -p falcon-param -p relay-fsm -p relay-preflight \
+            -p falcon-param -p relay-fsm -p relay-preflight -p relay-calib \
             --all-targets -- -D warnings
 
   test:

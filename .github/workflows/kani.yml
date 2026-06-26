@@ -58,6 +58,7 @@ jobs:
           - relay-param
           - relay-fsm
           - relay-preflight
+          - relay-calib
     steps:
       - uses: actions/checkout@v7
       - name: Kani verify ${{ matrix.engine }}
