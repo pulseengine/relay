@@ -38,6 +38,24 @@ artifacts:
       rotor-out allocator above) ran only via this artifact's step
       before; now the dedicated Kani gate runs all six on every PR
       (belt-and-suspenders), closing the orphaned-proof gap.
+
+      v1.103 PRODUCTION WIRING: the detect→reconfigure chain — composed
+      only in the falcon-sitl-gz example (4) before — is now in the
+      PRODUCTION FlightCore::step. The core runs the RotorFaultDetector
+      on the per-rotor commanded-vs-achieved residual (achieved from ESC
+      RPM via the new FlightBackend::read_motor_rpm seam), and on
+      isolation switches the control law to relay-geo moment_reduced +
+      relay-mix-quad mix_rotor_out (the same composition proven above);
+      the supervisor then commands LAND (a 3-rotor quad has no yaw
+      authority to navigate home). Deterministic falcon-core tests
+      (RPM is a direct backend input, not estimator-derived):
+        - fdi_isolates_dead_rotor_and_reconfigures: a healthy quad is
+          never isolated; a rotor whose RPM drops to 0 under a nonzero
+          command is isolated within a few cycles, after which the
+          reconfigured allocator commands it 0 and the healthy three
+          stay in [floor,1].
+        - motor_failure_commands_land: an airborne vehicle that loses a
+          rotor is commanded to Land (not RTL).
     tags: [verification, falcon, fault-tolerance, rotor-loss, kani, v0.26]
     fields:
       method: formal-verification
@@ -49,6 +67,8 @@ artifacts:
         - run: cargo test -p relay-iekf
         - run: cargo test -p relay-geo
         - run: cargo test -p falcon-sitl-gz fault_tolerance
+        - run: cargo test -p falcon-core fdi_isolates_dead_rotor_and_reconfigures
+        - run: cargo test -p falcon-core motor_failure_commands_land
     links:
       - type: verifies
         target: SWREQ-FALCON-FAULT-P02
