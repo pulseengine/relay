@@ -63,7 +63,7 @@ jobs:
         run: |
           cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
             -p falcon-param -p relay-fsm -p relay-preflight -p relay-calib \
-            -p falcon-core \
+            -p falcon-core -p relay-mix-quad \
             --all-targets -- -D warnings
 
   test:

@@ -31,6 +31,13 @@ artifacts:
          reduced-attitude + MIX-P08, MIX-P08 holds every step, and
          the body does not tumble (peak tilt <80°) and settles
          upright (final <29°).
+
+      v1.102 ENFORCEMENT: relay-mix-quad was added to the Kani CI
+      matrix (.github/workflows/kani.yml) + the -D warnings clippy
+      gate. Its six harnesses (MIX-P05..P08, incl the MIX-P08
+      rotor-out allocator above) ran only via this artifact's step
+      before; now the dedicated Kani gate runs all six on every PR
+      (belt-and-suspenders), closing the orphaned-proof gap.
     tags: [verification, falcon, fault-tolerance, rotor-loss, kani, v0.26]
     fields:
       method: formal-verification

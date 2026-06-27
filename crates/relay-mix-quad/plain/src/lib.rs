@@ -991,6 +991,7 @@ mod tests {
 
     /// from_geometry(quad-X angles) reproduces the hand-tuned MIXER_X matrix.
     #[test]
+    #[allow(clippy::needless_range_loop)] // index used in failure messages
     fn mixern_from_geometry_reproduces_quad_matrix() {
         let g = MixerN::from_geometry(&[
             (deg(45.0), false),  // front-right CW
@@ -1013,6 +1014,7 @@ mod tests {
     /// Hexa-X: at zero torque every one of the 6 rotors carries the same
     /// (collective) command — rotational symmetry of a balanced airframe.
     #[test]
+    #[allow(clippy::needless_range_loop)] // index used in failure messages
     fn mixern_hexa_zero_torque_is_uniform() {
         let h = MixerN::hexa_x();
         assert_eq!(h.n(), 6);
@@ -1028,6 +1030,7 @@ mod tests {
     /// Hexa-X resolves a pure yaw command using its 6 rotors (CW vs CCW
     /// split), staying in [0,1].
     #[test]
+    #[allow(clippy::needless_range_loop)] // index used in failure messages
     fn mixern_hexa_yaw_uses_spin_split() {
         let h = MixerN::hexa_x();
         let out = h.mix([0.0, 0.0, 0.15], 0.5);
