@@ -3,6 +3,7 @@ artifacts:
     type: sw-verification
     title: "Single-rotor-loss fault tolerance — Kani MIX-P08 + FDI contract + reduced-attitude + end-to-end composition (v0.26)"
     status: implemented
+    release: falcon-v1.103.0
     description: >
       Three independently-verified components plus an end-to-end
       composition test:
