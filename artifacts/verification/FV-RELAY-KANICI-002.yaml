@@ -1,0 +1,76 @@
+artifacts:
+  - id: FV-RELAY-KANICI-002
+    type: sw-verification
+    title: "Flight-critical control + estimator Kani harnesses enforced in CI (orphaned-proof closure)"
+    status: implemented
+    release: falcon-v1.104.0
+    description: >
+      Closes the highest-value subset of a systemic orphaned-proof gap. A
+      workspace scan found 36 of 142 Kani harnesses (25%) were authored but
+      never added to .github/workflows/kani.yml's matrix, so CI never ran
+      them — the same gap that left relay-rc unenforced for ~40 releases and
+      relay-mix-quad's MIX-P05..08 unenforced until v1.102. This artifact
+      enforces the 8 flight-critical control + estimator proofs (4 crates),
+      all of which VERIFY locally with 0 failures and now run on every PR:
+
+        relay-arm  (2)  verify_arming_total          — tick() is total: never
+                                                        panics, output finite,
+                                                        phase in range, for any
+                                                        (tilt, arm_request)
+                        verify_arming_torque_gated    — torque_authority is true
+                                                        ONLY in ARMED; the level
+                                                        gate is the sole edge in
+        relay-adrc (2)  verify_command_filter_saturation — the reference command
+                                                        filter output stays within
+                                                        the configured saturation
+                        verify_from_bandwidth_separation — gains derived from a
+                                                        bandwidth separation are
+                                                        finite + ordered
+        relay-geo  (1)  verify_shield_contract        — the geometric safety-shield
+                                                        contract (reduced-attitude)
+                                                        holds for any input
+        relay-iekf (3)  verify_nis3_total             — the 3-DOF NIS chi-square
+                                                        gate is total under any
+                                                        innovation (incl non-finite)
+                        verify_spoof_monitor_no_false_alarm — no spoof alarm while
+                                                        residuals stay within slack
+                        verify_clamp_factor_bounded   — the gain clamp factor is
+                                                        bounded for any input
+
+      ENFORCEMENT: the 4 crates were added to the kani.yml model-checking matrix
+      (the roll-up "Kani gate" required check now covers them) AND to the ci.yml
+      `-D warnings` clippy gate. Bringing relay-arm under the clippy gate
+      surfaced a latent collapsible_match in the arming state machine
+      (DISARMED arm); it was refactored to a match guard and BOTH relay-arm
+      Kani harnesses re-verified SUCCESSFUL, proving the refactor preserved
+      semantics. The other three crates were already clippy-clean.
+
+      This is the orphaned-verified pattern closed at the highest-safety subset;
+      the remaining 12 orphaned crates (flight-support + HAL drivers + infra,
+      ~28 harnesses) are the next enforcement slice. Companion to
+      FV-RELAY-KANICI-001 (the cFS-engine Kani CI gate).
+    tags: [verification, relay, falcon, control, estimator, kani, ci]
+    fields:
+      method: model-checking
+      kani-properties: >
+        verify_arming_total, verify_arming_torque_gated,
+        verify_command_filter_saturation, verify_from_bandwidth_separation,
+        verify_shield_contract, verify_nis3_total,
+        verify_spoof_monitor_no_false_alarm, verify_clamp_factor_bounded
+      steps:
+        - run: "cargo kani -p relay-arm   # Kani CI workflow (CBMC; heavy)"
+        - run: "cargo kani -p relay-adrc  # Kani CI workflow"
+        - run: "cargo kani -p relay-geo   # Kani CI workflow"
+        - run: "cargo kani -p relay-iekf  # Kani CI workflow"
+        - run: cargo clippy -p relay-arm -p relay-adrc -p relay-geo -p relay-iekf --all-targets -- -D warnings
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-ARM-P01
+      - type: verifies
+        target: SWREQ-FALCON-ADRC-P05
+      - type: verifies
+        target: SWREQ-FALCON-SHIELD-P01
+      - type: verifies
+        target: SWREQ-FALCON-IEKF-P01
+      - type: verifies
+        target: SWREQ-FALCON-SPOOF-P01

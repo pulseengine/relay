@@ -64,6 +64,7 @@ jobs:
           cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
             -p falcon-param -p relay-fsm -p relay-preflight -p relay-calib \
             -p falcon-core -p relay-mix-quad \
+            -p relay-arm -p relay-adrc -p relay-geo -p relay-iekf \
             --all-targets -- -D warnings
 
   test:

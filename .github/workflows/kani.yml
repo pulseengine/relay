@@ -61,6 +61,20 @@ jobs:
           - relay-calib
           - relay-fsafe
           - relay-mix-quad
+          # Flight-critical control + estimator proofs. These harnesses were
+          # authored alongside the engines but never added to this matrix, so
+          # CI never ran them (the same orphaned-proof gap that bit relay-rc
+          # for ~40 releases and relay-mix-quad's MIX-P05..08). A workspace
+          # scan found 36/142 Kani harnesses unenforced across 16 crates; this
+          # closes the highest-value subset — the 8 control/estimator proofs:
+          #   relay-arm   verify_arming_total / verify_arming_torque_gated
+          #   relay-adrc  verify_command_filter_saturation / _from_bandwidth_separation
+          #   relay-geo   verify_shield_contract
+          #   relay-iekf  verify_nis3_total / _spoof_monitor_no_false_alarm / _clamp_factor_bounded
+          - relay-arm
+          - relay-adrc
+          - relay-geo
+          - relay-iekf
     steps:
       - uses: actions/checkout@v7
       - name: Kani verify ${{ matrix.engine }}
@@ -68,9 +82,9 @@ jobs:
         with:
           working-directory: crates/${{ matrix.engine }}
 
-  # Roll-up over the 21-engine matrix: ONE required context for branch
+  # Roll-up over the full engine matrix: ONE required context for branch
   # protection ("Kani gate"), so the formal-verification result gates merges
-  # without registering 21 separate required checks.
+  # without registering a separate required check per engine.
   kani-gate:
     name: Kani gate
     runs-on: [self-hosted, linux, x64, light]

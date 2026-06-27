@@ -108,11 +108,9 @@ impl ArmingSequencer {
     ///   SpinUp; ignored in later phases (the machine latches forward).
     pub fn tick(&mut self, tilt_rad: f32, arm_request: bool) -> ArmingOutput {
         match self.phase {
-            DISARMED => {
-                if arm_request {
-                    self.phase = SPINUP;
-                    self.tick_in_phase = 0;
-                }
+            DISARMED if arm_request => {
+                self.phase = SPINUP;
+                self.tick_in_phase = 0;
             }
             SPINUP => {
                 self.tick_in_phase = self.tick_in_phase.saturating_add(1);
