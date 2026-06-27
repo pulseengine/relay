@@ -20,8 +20,8 @@
 #![allow(clippy::needless_range_loop)]
 
 use relay_adrc::{AdrcRate, GyroLpf};
-use relay_geo::{GeoAtt, GeoGains};
-use relay_iekf::{Iekf, Imu as IekfImu, NavState, Vec3};
+use relay_geo::{quat_to_rotmat, thrust_axis_ned, GeoAtt, GeoGains};
+use relay_iekf::{Iekf, Imu as IekfImu, NavState, RotorFaultDetector, Vec3};
 use relay_mix_quad::{motors_to_torque_signs, QuadMixer};
 
 /// One inertial-measurement sample in the body frame.
@@ -59,6 +59,14 @@ pub trait FlightBackend {
     /// barometer. An INDEPENDENT vertical source the core fuses so altitude
     /// survives GPS-vertical loss (v1.20). Default `None`.
     fn read_baro(&mut self) -> Option<f32> {
+        None
+    }
+    /// Per-rotor reported RPM (from ESC telemetry, e.g. DroneCAN esc.Status), or
+    /// `None` if the ESCs report no RPM. The ACHIEVED-per-rotor source for the
+    /// single-rotor-out FDI: the core compares it against the commanded throttle
+    /// to form the effectiveness residual (v1.103). Default `None` = no telemetry,
+    /// so a backend without ESC feedback simply runs without rotor-fault detection.
+    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
         None
     }
 }
@@ -108,6 +116,14 @@ pub struct FlightCore {
     /// into the verified IEKF as a vertical anchor (a position update whose z is
     /// the baro), so altitude AND its rate survive GPS-vertical loss.
     baro_var: f32,
+    /// Single-rotor-out fault detection & isolation (relay-iekf CUSUM on the
+    /// per-rotor commanded-vs-achieved effectiveness residual). On isolation,
+    /// `failed_motor` latches and the control law switches to reduced-attitude +
+    /// the reconfigured allocator (v1.103 — the SITL-verified recovery, promoted
+    /// into the production loop).
+    fdi: RotorFaultDetector,
+    /// The isolated failed rotor (latched), or `None`. Drives the degraded path.
+    failed_motor: Option<usize>,
     /// Sensor calibration applied to raw IMU/mag samples before the estimator
     /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
     /// `set_calibration` installs solved offsets — the explicit replacement for
@@ -147,6 +163,9 @@ impl FlightCore {
             pos_int: [0.0; 2],
             pos_int_max: 1.5,
             baro_var: 0.05, // ≈ (0.2 m)² baro noise; trusted less than a clean GPS-z
+            // CUSUM thresholds matching the SITL-verified fault-tolerance chain.
+            fdi: RotorFaultDetector::new(0.5, 0.1),
+            failed_motor: None,
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -181,6 +200,12 @@ impl FlightCore {
     pub fn max_motor(&self) -> f32 {
         let m = self.mixer.last_motors();
         m[0].max(m[1]).max(m[2]).max(m[3])
+    }
+
+    /// The isolated failed rotor (latched), or `None` — the supervisor lands the
+    /// vehicle when this is set (a 3-rotor quad cannot navigate; v1.103).
+    pub fn failed_motor(&self) -> Option<usize> {
+        self.failed_motor
     }
 
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
@@ -311,14 +336,42 @@ impl FlightCore {
             a_cmd[1] *= s;
         }
 
-        // ── Attitude ── geometric desired-rate from a_cmd (hold heading 0) →
-        // ADRC torque on filtered (calibrated) gyro.
+        // advance the (stateful) gyro low-pass every cycle so it stays warm.
         let gyro_f = self.gyro_lpf.filter(gyro);
-        let omega_d = self.geo.desired_rate(est.q, a_cmd, 0.0);
-        let torque = self.adrc.tick(gyro_f, omega_d, dt);
 
-        // ── Allocate + actuate ──
-        let motors = self.mixer.mix(torque, thrust);
+        // ── Attitude + allocate ──
+        let motors = if let Some(failed) = self.failed_motor {
+            // DEGRADED (single-rotor-out): reduced-attitude S² drives the thrust
+            // axis and RELINQUISHES yaw, and the reconfigured allocator pins the
+            // failed rotor to 0 (MIX-P08) — the SITL-verified recovery path,
+            // promoted into the production loop (v1.103).
+            let r = quat_to_rotmat(est.q);
+            let b3_d = thrust_axis_ned(a_cmd).unwrap_or([0.0, 0.0, 1.0]);
+            let torque = self.geo.moment_reduced(&r, gyro, b3_d);
+            self.mixer.mix_rotor_out(failed, torque, thrust, ROTOR_OUT_FLOOR)
+        } else {
+            // NORMAL: full-attitude geometric desired-rate → ADRC torque → mix.
+            let omega_d = self.geo.desired_rate(est.q, a_cmd, 0.0);
+            let torque = self.adrc.tick(gyro_f, omega_d, dt);
+            self.mixer.mix(torque, thrust)
+        };
+
+        // ── Single-rotor-out FDI ── form the per-rotor effectiveness residual
+        // |commanded − achieved| from ESC RPM telemetry and feed the CUSUM; on
+        // isolation, latch the failed rotor (next step runs the degraded path).
+        if self.failed_motor.is_none() {
+            if let Some(rpm) = b.read_motor_rpm() {
+                let mut resid = [0.0f32; 4];
+                let mut i = 0;
+                while i < 4 {
+                    let achieved = (rpm[i] as f32 / ESC_RPM_FULL).clamp(0.0, 2.0);
+                    resid[i] = (motors[i] - achieved).abs();
+                    i += 1;
+                }
+                self.failed_motor = self.fdi.update(resid);
+            }
+        }
+
         b.write_motors(&motors);
     }
 }
@@ -339,6 +392,16 @@ pub const MAX_WAYPOINTS: usize = 16;
 /// faithfully flown, loose enough that the underdamped position loop need not
 /// fully settle on each leg.
 const WAYPOINT_RADIUS: f32 = 1.2;
+
+/// Nominal ESC RPM at full throttle — normalises reported RPM to a per-rotor
+/// EFFECTIVENESS (≈ commanded throttle when healthy) for the single-rotor-out FDI
+/// residual (v1.103). Only the ratio matters; a per-airframe value scales it.
+const ESC_RPM_FULL: f32 = 8000.0;
+
+/// Thrust floor for the reconfigured (single-rotor-out) allocator — the three
+/// healthy rotors are kept at/above this so the body retains tilt authority while
+/// it stabilises on S². Matches the SITL-verified fault-tolerance composition.
+const ROTOR_OUT_FLOOR: f32 = 0.15;
 
 /// Pre-arm estimator-convergence ceiling (v1.99): the IEKF tilt-uncertainty
 /// (roll²+pitch², rad²) must be at/below this for `estimator_converged` to pass.
@@ -751,6 +814,20 @@ impl FlightSupervisor {
         };
         self.core.set_position(sp);
         self.core.step(b);
+
+        // ── MOTOR-FAILURE failsafe (v1.103): once the core's FDI isolates a
+        // rotor, LAND ASAP — a 3-rotor quad has no yaw authority to navigate home,
+        // so RTL is unsafe. Fire Failsafe with have_position=false, which the FSM
+        // maps to Land (not Rtl) from any flying state. The core has already
+        // switched to the reduced-attitude + reconfigured allocator. ──
+        if self.core.failed_motor().is_some()
+            && self.fsm.is_airborne()
+            && self.fsm.mode() != Mode::Land
+        {
+            let land = Gates { level: true, throttle_low: true, have_position: false, prearm_ok: true };
+            self.fsm.on(Event::Failsafe, land);
+            self.rtl_latched = true;
+        }
     }
 }
 
@@ -1333,6 +1410,139 @@ mod tests {
         assert!(diff > 0.05, "calibration must change the estimate (yaw drift suppressed): diff {diff}");
         // the installed calibration is reported back.
         assert_eq!(cal.calibration().gyro_bias, [0.0, 0.0, bias]);
+    }
+
+    /// v1.103 — the supervisor LANDS on a motor failure: an airborne vehicle that
+    /// loses a rotor (detected by the core's FDI) is commanded to Land (not RTL —
+    /// a 3-rotor quad has no yaw authority to navigate home).
+    #[test]
+    fn motor_failure_commands_land() {
+        use relay_calib::CalParams;
+        struct RpmBackend {
+            last: [f32; 4],
+            inject: bool,
+        }
+        impl FlightBackend for RpmBackend {
+            fn read_imu(&mut self) -> ImuSample {
+                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+            }
+            fn read_position(&mut self) -> Option<Vec3> {
+                Some([0.0, 0.0, -2.0]) // at the 2 m cruise altitude
+            }
+            fn read_mag(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn read_battery_v(&mut self) -> f32 {
+                16.0
+            }
+            fn write_motors(&mut self, m: &[f32]) {
+                self.last = [m[0], m[1], m[2], m[3]];
+            }
+            fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+                let mut rpm = [0i32; 4];
+                let mut i = 0;
+                while i < 4 {
+                    rpm[i] = (self.last[i] * ESC_RPM_FULL) as i32;
+                    i += 1;
+                }
+                if self.inject {
+                    rpm[1] = 0; // rotor 1 dies
+                }
+                Some(rpm)
+            }
+            fn dt(&self) -> f32 {
+                0.004
+            }
+        }
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 200.0, 2.0, 14.0);
+        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        let mut b = RpmBackend { last: [0.5; 4], inject: false };
+
+        for _ in 0..1500 {
+            sup.step(&mut b);
+        }
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Armed);
+        sup.command(relay_fsm::Event::RequestTakeoff, true, false);
+        assert!(sup.mode().is_airborne(), "airborne after takeoff");
+
+        // a rotor dies → the core's FDI isolates it → the supervisor lands.
+        b.inject = true;
+        for _ in 0..40 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), relay_fsm::Mode::Land, "motor failure commands Land");
+    }
+
+    /// v1.103 — the production FlightCore detects a dead rotor from ESC RPM and
+    /// reconfigures: healthy rotors are never isolated, but a rotor whose RPM
+    /// drops to 0 under a nonzero command is isolated by the CUSUM FDI within a
+    /// few cycles, after which the reconfigured allocator commands that rotor 0
+    /// and keeps the healthy three in [floor, 1] (MIX-P08). Deterministic — the
+    /// RPM is a direct backend input, not estimator-derived.
+    #[test]
+    fn fdi_isolates_dead_rotor_and_reconfigures() {
+        struct RpmBackend {
+            last: [f32; 4],
+            failed: usize,
+            inject: bool,
+        }
+        impl FlightBackend for RpmBackend {
+            fn read_imu(&mut self) -> ImuSample {
+                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+            }
+            fn read_position(&mut self) -> Option<Vec3> {
+                Some([0.0, 0.0, -5.0]) // holding 5 m up
+            }
+            fn read_mag(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn write_motors(&mut self, m: &[f32]) {
+                self.last = [m[0], m[1], m[2], m[3]];
+            }
+            fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+                // reported RPM tracks the last command, except a dead rotor reads 0.
+                let mut rpm = [0i32; 4];
+                let mut i = 0;
+                while i < 4 {
+                    rpm[i] = (self.last[i] * ESC_RPM_FULL) as i32;
+                    i += 1;
+                }
+                if self.inject {
+                    rpm[self.failed] = 0;
+                }
+                Some(rpm)
+            }
+            fn dt(&self) -> f32 {
+                0.004
+            }
+        }
+        let mut core = FlightCore::new(0.5, 250.0);
+        core.set_altitude(-5.0); // hold 5 m → commands hover thrust to all rotors
+        let mut b = RpmBackend { last: [0.5; 4], failed: 2, inject: false };
+
+        // healthy: the FDI never isolates a rotor.
+        for _ in 0..100 {
+            core.step(&mut b);
+        }
+        assert_eq!(core.failed_motor(), None, "healthy rotors must not be isolated");
+
+        // rotor 2 dies (RPM → 0 under a nonzero command) → isolated quickly.
+        b.inject = true;
+        for _ in 0..30 {
+            core.step(&mut b);
+        }
+        assert_eq!(core.failed_motor(), Some(2), "the CUSUM FDI isolates the dead rotor");
+
+        // the reconfigured allocator commands the failed rotor 0 and the three
+        // healthy rotors within [floor, 1] (MIX-P08 in the production loop).
+        core.step(&mut b);
+        assert_eq!(b.last[2], 0.0, "failed rotor commanded 0");
+        for (i, &v) in b.last.iter().enumerate() {
+            if i != 2 {
+                assert!((ROTOR_OUT_FLOOR - 1e-6..=1.0 + 1e-6).contains(&v), "healthy rotor {i} = {v}");
+            }
+        }
     }
 
     #[test]
