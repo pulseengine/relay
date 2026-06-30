@@ -65,6 +65,21 @@ jobs:
           repository: pulseengine/rules_rocq_rust
           path: rules_rocq_rust
 
+      # ubuntu-latest ships ~14 GB free, but the Lean 4.29.1 toolchain +
+      # Mathlib v4.29.1 oleans + the transitive rules_* toolchain graph
+      # (wac/wkg/meld/loom/spar/witness/synth/rocq, pulled in by the sibling
+      # checkouts above) overran it ("No space left on device" extracting the
+      # Lean toolchain). Reclaim the ~25 GB of preinstalled SDKs this job does
+      # not use. Plain rm (no third-party action) to keep the CI dependency
+      # surface minimal.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/lib/jvm "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune --all --force || true
+          df -h /
+
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@a7ad9c4f0c65208097f4d34f3cfa1913b80cce5c # pinned — supply-chain
 
