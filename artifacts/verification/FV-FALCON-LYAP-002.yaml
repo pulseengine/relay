@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-LYAP-002
     type: sw-verification
     title: "Strict (cross-term) Lyapunov — exponential-decay inequality + CI-gated Lean proofs (v1.105)"
-    status: implemented
+    status: verified
     release: falcon-v1.105.0
     description: >
       Advances the deferred dynamic step of the geometric-controller stability
@@ -41,11 +41,14 @@ artifacts:
          PR. A Mathlib/toolchain bump or a proof-breaking edit can no longer
          land silently.
 
-      VERIFICATION STATUS: kernel-check is performed by the new lean.yml gate.
-      Local kernel-checking was unavailable this cycle (Mathlib's multi-GB
-      build did not fit the host disk), so the first green lean.yml run is the
-      verifying oracle for StrictLyapunov.lean; this artifact moves to
-      `verified` once that gate is green on main.
+      VERIFICATION STATUS: KERNEL-CHECKED. The new lean.yml gate ran
+      `bazel test //proofs/lean:all` green — "Executed 6 out of 6 tests: 6
+      tests pass", including //proofs/lean:strict_lyapunov_test — confirming
+      StrictLyapunov.lean and all five pre-existing proofs kernel-check at
+      Lean 4.29.1 / Mathlib v4.29.1. (Local kernel-checking was unavailable
+      this cycle — Mathlib's multi-GB build did not fit the host disk — so the
+      lean.yml gate is the verifying oracle, and it is now also the permanent
+      enforcement that the previously-orphaned Lean proofs lacked.)
 
       Honest scope: the algebraic certificate (Sylvester positivity + the
       c_hi·V̇ ≤ −c_D·V assembly) is machine-checked. Supplying the bound
