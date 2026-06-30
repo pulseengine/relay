@@ -1,0 +1,66 @@
+artifacts:
+  - id: FV-FALCON-LYAP-002
+    type: sw-verification
+    title: "Strict (cross-term) Lyapunov — exponential-decay inequality + CI-gated Lean proofs (v1.105)"
+    status: verified
+    release: falcon-v1.105.0
+    description: >
+      Advances the deferred dynamic step of the geometric-controller stability
+      argument (FV-FALCON-LYAP-001), and closes a long-standing orphaned-proof
+      gap on the Lean track.
+
+      1. STRICT LYAPUNOV CERTIFICATE (proofs/lean/StrictLyapunov.lean) — the
+         negative-DEFINITE upgrade of the negative-semidefinite core. Where
+         GeometricLyapunov/PositionLyapunov prove V̇ ≤ 0 and DEFER the
+         "trajectory ⇒ converges" step to LaSalle (absent from Mathlib),
+         this file follows Lee 2010 Prop. 2: a cross-term-coupled Lyapunov
+         function makes V̇ negative-definite, certified via Sylvester's 2×2
+         criterion, and assembles the EXPONENTIAL-DECAY inequality
+         c_hi·V̇ ≤ −c_D·V. Theorems (all in the ring/nlinarith fragment, no
+         sorry, no axiom):
+           quad_complete         — Sylvester completing-the-square ring identity
+           quad_form_nonneg      — 2×2 PSD criterion (leading>0 ∧ det≥0)
+           quad_radial_lower     — form ≥ λ(r²+s²): the dissipation/PD floor
+           quad_radial_upper     — form ≤ Λ(r²+s²): the radial cap on V
+           exp_decay_inequality  — c_hi·V̇ ≤ −c_D·V from cap + floor
+           strict_lyapunov_exp_decay — the assembled certificate
+           (example)             — non-vacuity witness: concrete gains give γ=½
+         SIGNIFICANCE: c_hi·V̇ ≤ −c_D·V is exactly the GRÖNWALL hypothesis,
+         and Mathlib DOES have flows/Grönwall (arXiv:2602.13247). So the
+         remaining deferred step shrinks from "formalize LaSalle" (multi-year)
+         to "apply Grönwall to the closed-loop flow" — V(t) ≤ V(0)e^(−γt) → 0.
+
+      2. CI ENFORCEMENT (.github/workflows/lean.yml) — the proofs/lean/ Lean
+         proofs were authored + locally kernel-verified but never gated in any
+         CI workflow (the same orphaned-proof gap that left the Kani control/
+         estimator harnesses unenforced until v1.104). New lean.yml runs
+         `bazel test //proofs/lean:all` (Lean 4.29.1 + Mathlib v4.29.1 via
+         rules_lean) as a required check, so all six Lean proofs — WcetAnalysis,
+         BackpressureSafety, CompositionalWcet, GeometricLyapunov,
+         PositionLyapunov, and the new StrictLyapunov — are re-checked on every
+         PR. A Mathlib/toolchain bump or a proof-breaking edit can no longer
+         land silently.
+
+      VERIFICATION STATUS: KERNEL-CHECKED. The new lean.yml gate ran
+      `bazel test //proofs/lean:all` green — "Executed 6 out of 6 tests: 6
+      tests pass", including //proofs/lean:strict_lyapunov_test — confirming
+      StrictLyapunov.lean and all five pre-existing proofs kernel-check at
+      Lean 4.29.1 / Mathlib v4.29.1. (Local kernel-checking was unavailable
+      this cycle — Mathlib's multi-GB build did not fit the host disk — so the
+      lean.yml gate is the verifying oracle, and it is now also the permanent
+      enforcement that the previously-orphaned Lean proofs lacked.)
+
+      Honest scope: the algebraic certificate (Sylvester positivity + the
+      c_hi·V̇ ≤ −c_D·V assembly) is machine-checked. Supplying the bound
+      constants (c_lo, c_hi, c_D) for the real relay-geo gains + coupling, and
+      the Grönwall flow-integration to exponential convergence, are the next
+      slices (now Grönwall-blocked, not LaSalle-blocked).
+    tags: [verification, falcon, lyapunov, stability, lean, ci, v1.105]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //proofs/lean:strict_lyapunov_test
+        - run: bazel test //proofs/lean:all
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LYAP-P01

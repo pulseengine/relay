@@ -87,3 +87,22 @@ lean_proof_test(
     srcs = ["PositionLyapunov.lean"],
     deps = [":position_lyapunov", "@mathlib//:Mathlib"],
 )
+
+# ── Strict (cross-term) Lyapunov — exponential-decay inequality (v1.105) ──
+# The negative-DEFINITE upgrade of the semidefinite V̇ ≤ 0 core: Sylvester's
+# 2×2 criterion + assembly into c_hi·V̇ ≤ −c_D·V (Lee 2010 Prop. 2, algebraic
+# core). This is the Grönwall hypothesis — it reduces the deferred dynamic
+# step from "formalize LaSalle" (absent from Mathlib) to "apply Grönwall"
+# (present). No sorry, no axiom.
+
+lean_library(
+    name = "strict_lyapunov",
+    srcs = ["StrictLyapunov.lean"],
+    deps = ["@mathlib//:Mathlib"],
+)
+
+lean_proof_test(
+    name = "strict_lyapunov_test",
+    srcs = ["StrictLyapunov.lean"],
+    deps = [":strict_lyapunov", "@mathlib//:Mathlib"],
+)
