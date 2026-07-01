@@ -11,6 +11,7 @@ Lean 4 kernel against Mathlib. Built with Bazel via `rules_lean`.
 | `GeometricLyapunov.lean` | Geometric SE(3) controller: closed-loop `V̇ = −k_Ω‖ω‖² ≤ 0` (v0.23) |
 | `PositionLyapunov.lean` | Translational + full-state `V̇ = −k_Ω‖ω‖² − k_v‖e_v‖² ≤ 0` (v0.38) |
 | `StrictLyapunov.lean` | Strict (cross-term) Lyapunov: `c_hi·V̇ ≤ −c_D·V` — the exponential-decay/Grönwall inequality (v1.105) |
+| `LyapunovConvergence.lean` | `V̇ ≤ −γV ⇒ V(t) ≤ V(0)e^(−γt) → 0` — the deferred "trajectory ⇒ converges" step, via integrating factor (v1.107) |
 
 ## Pinned versions (reproducibility)
 

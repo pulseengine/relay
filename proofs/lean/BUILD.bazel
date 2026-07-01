@@ -106,3 +106,21 @@ lean_proof_test(
     srcs = ["StrictLyapunov.lean"],
     deps = [":strict_lyapunov", "@mathlib//:Mathlib"],
 )
+
+# ── Lyapunov exponential convergence — the deferred step, discharged (v1.107) ──
+# Closes "trajectory ⇒ converges" for the exponential Lyapunov certificate via
+# the integrating-factor argument (w=v·exp(γt) antitone ⇒ v ≤ v(0)·exp(−γt) → 0)
+# — no LaSalle, no ODE flow API. The final piece that all prior Lyapunov files
+# deferred. No sorry, no axiom.
+
+lean_library(
+    name = "lyapunov_convergence",
+    srcs = ["LyapunovConvergence.lean"],
+    deps = ["@mathlib//:Mathlib"],
+)
+
+lean_proof_test(
+    name = "lyapunov_convergence_test",
+    srcs = ["LyapunovConvergence.lean"],
+    deps = [":lyapunov_convergence", "@mathlib//:Mathlib"],
+)
