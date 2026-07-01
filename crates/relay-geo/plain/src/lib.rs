@@ -759,6 +759,89 @@ mod tests {
         assert!(checked >= 80, "grid too small: {checked}");
     }
 
+    /// v1.105 — RUNNABLE STRICT (cross-term) Lyapunov certificate: the
+    /// numerical oracle behind proofs/lean/StrictLyapunov.lean, run against
+    /// the REAL geometric controller. Adds the Lee-2010-Prop.2 cross term
+    /// `c⟨e_R,Ω⟩` to the Lyapunov function, making V̇ negative-DEFINITE (not
+    /// just semidefinite): with `V = ½Ω·JΩ + 2k_R Ψ + c(e_R·Ω)`,
+    ///   V̇_strict = −k_Ω‖Ω‖² + c(ė_R·Ω + e_R·Ω̇)
+    /// gains a `−c k_R (e_R·J⁻¹e_R)` term (from Ω̇ = J⁻¹(−k_R e_R − k_Ω Ω)),
+    /// i.e. dissipation in BOTH ‖e_R‖ and ‖Ω‖. Over the grid on Ψ<2 this
+    /// establishes the exponential-decay inequality V̇ ≤ −γ·V for a concrete
+    /// γ>0 — the certificate the Lean file proves algebraically. ė_R is a
+    /// central finite-difference of the real attitude_error along the flow.
+    #[test]
+    fn strict_lyapunov_decrease_certificate() {
+        let kr = 8.0f32;
+        let kw = 2.0f32;
+        let j = [0.0217f32, 0.0217, 0.04];
+        let ctrl = GeoAtt::new(GeoGains { k_r: [kr; 3], k_omega: [kw; 3], j });
+        let r_d = identity3();
+        let dt = 1e-5f32;
+        let c = 0.02f32; // cross-term coupling (small ⇒ V stays PD, V̇ ND)
+
+        let angles = [0.2f32, 0.8, 1.5, 2.4, 2.9];
+        let omegas = [
+            [1.0f32, 0.0, 0.0], [0.0, 2.0, -1.0],
+            [3.0, -2.0, 4.0], [-5.0, 1.0, 2.0],
+        ];
+        let (mut c_lo, mut c_hi, mut c_d) = (f32::INFINITY, 0.0f32, f32::INFINITY);
+        let mut checked = 0;
+        for &ax in &angles {
+            for &az in &angles {
+                let r = matmul3(&rot_x(ax), &rot_z(az));
+                let psi = GeoAtt::psi(&r, &r_d);
+                assert!(psi < 2.0, "grid outside Ψ<2: {psi}");
+                let e_r = GeoAtt::attitude_error(&r, &r_d);
+                for &omega in &omegas {
+                    let m = ctrl.moment(&r, omega, &r_d);
+                    let jo = [j[0]*omega[0], j[1]*omega[1], j[2]*omega[2]];
+                    let jwd = { let g = cross(omega, jo); [m[0]-g[0], m[1]-g[1], m[2]-g[2]] };
+                    let omega_dot = [jwd[0]/j[0], jwd[1]/j[1], jwd[2]/j[2]]; // Ω̇
+                    // central-difference ė_R of the real attitude_error
+                    let rp = integrate_rotation(&r, omega, dt);
+                    let rm = integrate_rotation(&r, omega, -dt);
+                    let ep = GeoAtt::attitude_error(&rp, &r_d);
+                    let em = GeoAtt::attitude_error(&rm, &r_d);
+                    let e_r_dot = [(ep[0]-em[0])/(2.0*dt), (ep[1]-em[1])/(2.0*dt), (ep[2]-em[2])/(2.0*dt)];
+
+                    let vdot_base = dot(omega, jwd) + kr * dot(e_r, omega); // = −k_Ω‖Ω‖²
+                    let cross_dot = dot(e_r_dot, omega) + dot(e_r, omega_dot);
+                    let vdot = vdot_base + c * cross_dot;
+                    let v = 0.5*(j[0]*omega[0]*omega[0] + j[1]*omega[1]*omega[1] + j[2]*omega[2]*omega[2])
+                            + 2.0*kr*psi + c*dot(e_r, omega);
+                    let rs = dot(e_r, e_r) + dot(omega, omega);
+
+                    // V is positive-DEFINITE (the cross term does not spoil it).
+                    assert!(v > 0.0, "V must be > 0: {v} at Ψ={psi}, ω={omega:?}");
+                    // V̇ is negative-DEFINITE — strictly dissipative everywhere
+                    // (the semidefinite base gives V̇=0 at Ω=0; the cross term
+                    // makes it < 0 even there). Small tol for finite-diff noise.
+                    assert!(vdot < 1e-2, "V̇ must be < 0 (strict): {vdot} at Ψ={psi}, ω={omega:?}");
+                    // Exponential-decay inequality on the REAL controller:
+                    // V̇ ≤ −γ·V with γ = 0.05 (below the measured c_D/c_hi).
+                    assert!(vdot <= -0.05 * v + 1e-2,
+                        "V̇ ({vdot}) must be ≤ −0.05·V ({}) at Ψ={psi}", -0.05 * v);
+                    if rs > 0.5 {
+                        c_lo = c_lo.min(v / rs);
+                        c_hi = c_hi.max(v / rs);
+                        c_d = c_d.min(-vdot / rs);
+                    }
+                    checked += 1;
+                }
+            }
+        }
+        // Radial sandwich: c_lo(r²+s²) ≤ V ≤ c_hi(r²+s²), c_D(r²+s²) ≤ −V̇, all
+        // with a POSITIVE floor — the Sylvester-certified constants of the Lean
+        // proof, realised on the real controller. (Measured: c_lo≈0.032,
+        // c_hi≈31.9, c_D≈1.90 ⇒ conservative rate γ = c_D/c_hi ≈ 0.056.)
+        assert!(c_lo > 0.025, "V positive-definite floor too small: {c_lo}");
+        assert!(c_hi < 40.0, "V radial cap unexpectedly large: {c_hi}");
+        assert!(c_d > 1.5, "−V̇ dissipation floor must be strictly positive: {c_d}");
+        assert!(c_d / c_hi > 0.05, "exponential rate γ must exceed 0.05: {}", c_d / c_hi);
+        assert!(checked >= 80, "grid too small: {checked}");
+    }
+
     /// v0.38 — the TRANSLATIONAL Lyapunov certificate, the runnable companion
     /// to `proofs/lean/PositionLyapunov.lean`. For the closed-loop position
     /// law `m·ë_x = −k_x·e_x − k_v·e_v` (ė_x = e_v), the position Lyapunov

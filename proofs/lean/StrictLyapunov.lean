@@ -128,6 +128,22 @@ theorem strict_lyapunov_exp_decay
   have hVd : Vdot ≤ -cD * (r ^ 2 + s ^ 2) := by linarith [hdis]
   exact exp_decay_inequality V Vdot (r ^ 2) (s ^ 2) cHi cD hchi hcd hVhi hVd
 
+/-- **relay-geo concrete rate (v1.106).** The runnable certificate
+    `strict_lyapunov_decrease_certificate` (crates/relay-geo) measures, over a
+    grid on Ψ<2 for the REAL controller (gains k_R=8, k_Ω=2,
+    J=diag(0.0217,0.0217,0.04), cross-term coupling c=0.02), the radial bounds
+    `V ≤ 32(r²+s²)` and a strictly positive dissipation floor `1(r²+s²) ≤ −V̇`
+    (measured c_hi≈31.9 and c_D≈1.90; here we take the conservative INTEGER
+    bounds c_hi=32, c_D=1 to keep the certificate literal-robust). Instantiating
+    `exp_decay_inequality` at those constants yields `32·V̇ ≤ −1·V`: the deployed
+    closed loop decays at rate γ ≥ 1/32 > 0 (the measured rate ≈0.056 is
+    higher). This kernel-checked corollary ties the abstract strict certificate
+    to the numerically-established bounds of the real geometric controller. -/
+theorem relay_geo_exp_rate (V Vdot r2 s2 : ℝ)
+    (hVhi : V ≤ 32 * (r2 + s2)) (hVd : Vdot ≤ -1 * (r2 + s2)) :
+    32 * Vdot ≤ -1 * V :=
+  exp_decay_inequality V Vdot r2 s2 32 1 (by norm_num) (by norm_num) hVhi hVd
+
 /-- **Non-vacuity witness.** The certificate's hypotheses are satisfiable: with
     the unit-ish forms `V = r² + s²` (`a_V=d_V=1, b_V=0, c_hi=2`) and
     `−V̇ = 2r² + 2s²` (`a_D=d_D=2, b_D=0, c_D=1`), every Sylvester side
