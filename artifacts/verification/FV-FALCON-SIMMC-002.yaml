@@ -1,0 +1,56 @@
+artifacts:
+  - id: FV-FALCON-SIMMC-002
+    type: sw-verification
+    title: "Three-way fail-safe campaigns — validating the safety NET across a dispersed regime sweep (v1.110)"
+    status: implemented
+    release: falcon-v1.110.0
+    description: >
+      Extends the dispersion-campaign discipline (FV-FALCON-SIMMC-001) from
+      NOMINAL recovery to the FAIL-SAFES themselves, with the three-way envelope
+      classification: inside the recoverable set no fail-safe fires (no false
+      positive), and OUTSIDE it the CORRECT fail-safe (terminate vs RTL) fires
+      and latches. Where the point-tests
+      (attitude_runaway_terminates_in_flight / high_wind_saturation_commands_rtl)
+      prove ONE condition each, these sweep the regime and validate BOTH the
+      "fires when it must" and "never false-fires" halves — a one-sided pass
+      (a detector wired always-on, or always-off) trips the well-sampled
+      assertion. Each trial drives the FULL production FlightSupervisor (real
+      IEKF + geometric controller + mixer + FSM) via a tilt-injecting backend,
+      the same mechanism as the point-tests.
+
+      crates/falcon-core (mod failsafe_campaign), two campaigns, both pass, both
+      regimes well-sampled (≈60 each), reproducible from (seed, index):
+
+        failsafe_runaway_terminate_campaign — runaway regime: a sustained tilt
+          drawn from (1.15, 1.50) rad, strictly above TILT_RUNAWAY_LIMIT (1.05),
+          MUST drive the FSM to Terminated and LATCH (stays Terminated after the
+          tilt returns to level). No-terminate regime: a tilt drawn from
+          [0, 0.95] rad, strictly below the limit, must NEVER terminate (an RTL
+          via the wind path is not a false terminate). Also asserts no
+          termination during the level take-off.
+        failsafe_wind_rtl_campaign — wind regime: a sustained tilt drawn from
+          [0.38, 0.62] rad (inside the saturation band [0.30, 0.70]) away from
+          home MUST latch the RTL-class failsafe (rtl_latched). No-RTL regime: a
+          tilt drawn from [0, 0.20] rad (below the band) must NEVER latch RTL.
+
+      Honest scope: these are currently DETERMINISTIC tilt sweeps (60/regime
+      densely covers the 1-D range) — the injected tilt is exact, so the
+      "dispersion" is the tilt magnitude + position, not yet sensor noise. Adding
+      gyro/accel noise + bias walk + gust profiles (the full stochastic
+      dispersion vector) is the next slice; that is when the trial count rises to
+      the rule-of-three ~1000/behavior. NAMED GATE: the ci.yml "Closed-loop
+      simulation + Monte-Carlo campaigns" job now also runs
+      `cargo test -p falcon-core failsafe`, so the fail-safe campaigns join the
+      nominal-recovery campaigns as a first-class visible required check.
+    tags: [verification, falcon, simulation, monte-carlo, failsafe, three-way, v1.110]
+    fields:
+      method: simulation
+      test-count: 2
+      steps:
+        - run: cargo test -p falcon-core failsafe_runaway_terminate_campaign
+        - run: cargo test -p falcon-core failsafe_wind_rtl_campaign
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-RUNAWAY-P01
+      - type: verifies
+        target: SWREQ-FALCON-WINDFS-P01
