@@ -1,0 +1,76 @@
+artifacts:
+  - id: FV-RELAY-KANICI-003
+    type: sw-verification
+    title: "Orphaned-proof sweep completed — flight-support + HAL + infra Kani harnesses enforced in CI (v1.108)"
+    status: implemented
+    release: falcon-v1.108.0
+    description: >
+      Completes the systemic orphaned-proof closure begun in v1.104
+      (FV-RELAY-KANICI-002). A workspace scan found 36 of 142 Kani harnesses
+      (25%) authored but absent from the kani.yml matrix — CI never ran them.
+      v1.104 gated the 8 flight-critical control/estimator proofs; this closes
+      the remaining tractable sweep: 26 harnesses across 11 crates, all
+      VERIFICATION SUCCESSFUL locally (cargo kani), now run on every PR:
+
+        relay-avoid       (2)  collision-prevention bounds
+        relay-flowrange   (2)  optical-flow / range fusion bounds
+        relay-mix-multi   (1)  multi-rotor mixer allocation bound
+        relay-nid         (5)  MAVLink network-id / message framing
+        relay-offboard    (3)  offboard-setpoint timeout / validity
+        relay-sensvote    (3)  sensor-voting agreement / fault isolation
+        falcon-baromag    (2)  BMP388 baro + IST8310 mag register decode
+        falcon-esc-dshot  (3)  DShot ESC frame encode / telemetry decode
+        falcon-gnss-ubx   (1)  u-blox UBX GNSS parse bound
+        relay-log         (2)  logging ring / record framing
+        relay-modextra    (2)  mode-extension transition totality
+
+      ENFORCEMENT: the 11 crates were added to the kani.yml model-checking
+      matrix (the roll-up "Kani gate" required check now covers them). With
+      v1.104's 4 crates, the Kani gate now enforces 33 of the 34 previously-
+      orphaned harnesses.
+
+      DEFERRED (logged, not silently dropped): relay-traj (2 harnesses,
+      incl. verify_peak_jerk_sound) is NOT gated — its harness hangs CBMC
+      (>1200 s local timeout; the known f32/symbolic-slice intractability, see
+      the f32-Kani discipline). Gating it would hang the Kani CI job. It needs
+      unwind bounds + input concretisation before it can join the matrix; that
+      bounding is the follow-up. This is the only remaining unenforced Kani
+      crate after this release.
+    tags: [verification, relay, falcon, kani, ci, orphaned-proofs, v1.108]
+    fields:
+      method: model-checking
+      steps:
+        - run: "cargo kani -p relay-avoid   # Kani CI workflow (CBMC; heavy)"
+        - run: "cargo kani -p relay-flowrange"
+        - run: "cargo kani -p relay-mix-multi"
+        - run: "cargo kani -p relay-nid"
+        - run: "cargo kani -p relay-offboard"
+        - run: "cargo kani -p relay-sensvote"
+        - run: "cargo kani -p falcon-baromag"
+        - run: "cargo kani -p falcon-esc-dshot"
+        - run: "cargo kani -p falcon-gnss-ubx"
+        - run: "cargo kani -p relay-log"
+        - run: "cargo kani -p relay-modextra"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-CPREV-P01
+      - type: verifies
+        target: SWREQ-FALCON-FLOWRANGE-P01
+      - type: verifies
+        target: SWREQ-FALCON-MIXMULTI-P01
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P01
+      - type: verifies
+        target: SWREQ-FALCON-OFFB-P01
+      - type: verifies
+        target: SWREQ-FALCON-SENSVOTE-P01
+      - type: verifies
+        target: SWREQ-FALCON-BAROMAGDRV-P01
+      - type: verifies
+        target: SWREQ-FALCON-ESCDRV-P01
+      - type: verifies
+        target: SWREQ-FALCON-DC-P04
+      - type: verifies
+        target: SWREQ-FALCON-LOG-P01
+      - type: verifies
+        target: SWREQ-FALCON-MODEXTRA-P01

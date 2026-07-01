@@ -75,6 +75,24 @@ jobs:
           - relay-adrc
           - relay-geo
           - relay-iekf
+          # The rest of the orphaned-proof sweep (v1.108): flight-support,
+          # HAL sensor drivers, and infra crates whose Kani harnesses were
+          # authored but never gated. All 26 harnesses across these 11 crates
+          # verify SUCCESSFUL locally (cargo kani). This closes the systemic
+          # 36/142 unenforced gap down to a single deferred crate: relay-traj,
+          # whose verify_peak_jerk_sound hangs CBMC (>1200s, f32 intractability)
+          # and needs unwind/concretisation bounding before it can be gated.
+          - relay-avoid
+          - relay-flowrange
+          - relay-mix-multi
+          - relay-nid
+          - relay-offboard
+          - relay-sensvote
+          - falcon-baromag
+          - falcon-esc-dshot
+          - falcon-gnss-ubx
+          - relay-log
+          - relay-modextra
     steps:
       - uses: actions/checkout@v7
       - name: Kani verify ${{ matrix.engine }}
