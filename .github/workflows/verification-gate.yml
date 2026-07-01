@@ -38,7 +38,14 @@ jobs:
   gate:
     name: Verification gate (rivet-driven)
     runs-on: [self-hosted, linux, x64, rust-cpu]
-    timeout-minutes: 30
+    # 45 (was 30): the gate executes every artifact's non-bench-only cargo step
+    # serially. When a PR touches a CENTRAL crate (e.g. falcon-core), the shared
+    # build cache is invalidated and many artifact steps rebuild cold, so the
+    # ~370-artifact sweep can exceed 30 min on a disk-constrained runner — it
+    # timed out at 373/… all-PASS. The extra headroom lets the sweep finish; the
+    # verification itself was never failing. (Root cause to watch: self-hosted
+    # runner disk pressure — see the 94% post-job-hook cleanups.)
+    timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
