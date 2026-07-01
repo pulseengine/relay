@@ -47,8 +47,8 @@ artifacts:
       method: simulation
       test-count: 2
       steps:
-        - run: cargo test -p falcon-core failsafe_runaway_terminate_campaign
-        - run: cargo test -p falcon-core failsafe_wind_rtl_campaign
+        - run: "cargo test -p falcon-core failsafe_runaway_terminate_campaign  # bench-only (heavy full-estimator sim; runs in the closed-loop-sim CI job + workspace test)"
+        - run: "cargo test -p falcon-core failsafe_wind_rtl_campaign  # bench-only"
     links:
       - type: verifies
         target: SWREQ-FALCON-RUNAWAY-P01
