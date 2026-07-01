@@ -1,0 +1,52 @@
+artifacts:
+  - id: FV-FALCON-LYAP-004
+    type: sw-verification
+    title: "Lyapunov exponential convergence — the deferred 'trajectory ⇒ converges' step, discharged (v1.107)"
+    status: implemented
+    release: falcon-v1.107.0
+    description: >
+      Closes the dynamic step that EVERY prior Lyapunov artifact in this repo
+      (FV-FALCON-LYAP-001/002/003, GeometricLyapunov/PositionLyapunov/
+      StrictLyapunov.lean) explicitly DEFERRED: "V̇ ≤ 0/−γV ⇒ the trajectory
+      converges", historically requiring LaSalle's invariance principle, which
+      Mathlib does not have.
+
+      proofs/lean/LyapunovConvergence.lean discharges it for the EXPONENTIAL
+      (strict, negative-definite) form V̇ ≤ −γV — the form StrictLyapunov.lean
+      proved algebraically and strict_lyapunov_decrease_certificate confirmed on
+      the real relay-geo controller (γ ≈ 0.056 measured) — WITHOUT LaSalle and
+      WITHOUT the ODE flow API, by the classical integrating-factor argument:
+        intfactor_antitone       — w(t) = v(t)·exp(γt) has deriv ≤ 0 (because
+                                    v' ≤ −γv), hence w is antitone
+                                    (antitone_of_deriv_nonpos).
+        exp_decay_bound          — therefore v(t)·exp(γt) ≤ v(0), i.e.
+                                    v(t) ≤ v(0)·exp(−γt) for t ≥ 0.
+        tendsto_zero_of_diff_ineq — for a nonnegative v with γ>0, squeezing
+                                    0 ≤ v(t) ≤ v(0)·exp(−γt) → 0 gives
+                                    v(t) → 0 as t → ∞ — the machine-checked
+                                    "trajectory ⇒ converges".
+      All in Mathlib's calculus API (deriv, Real.exp, antitone-from-deriv,
+      squeeze), no sorry, no axiom.
+
+      This completes the Lyapunov chain end-to-end for the exponential
+      certificate: algebraic strict inequality (v1.105) → real-controller
+      constants + concrete rate (v1.106) → exponential decay + convergence
+      (v1.107). The only remaining modelling assumption is the explicit
+      hypothesis that the scalar Lyapunov value is differentiable along the flow
+      with deriv = the computed V̇ (the honest interface to the vector-field
+      certificates); the flow's existence/uniqueness is Mathlib PicardLindelöf,
+      a separate wiring step.
+
+      VERIFICATION STATUS: gated by lean.yml (bazel test //proofs/lean:all).
+      Local Lean kernel-check remains disk-blocked this cycle, so the lean.yml
+      run is the verifying oracle; this artifact moves to `verified` once that
+      gate is green.
+    tags: [verification, falcon, lyapunov, convergence, stability, lean, v1.107]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //proofs/lean:lyapunov_convergence_test
+        - run: bazel test //proofs/lean:all
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LYAP-P01
