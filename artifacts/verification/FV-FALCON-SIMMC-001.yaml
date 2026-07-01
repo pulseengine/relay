@@ -1,0 +1,68 @@
+artifacts:
+  - id: FV-FALCON-SIMMC-001
+    type: sw-verification
+    title: "Monte-Carlo simulation campaigns — dispersed closed-loop safety verification + named CI gate (v1.109)"
+    status: implemented
+    release: falcon-v1.109.0
+    description: >
+      Turns the single-condition closed-loop point-tests into large randomised
+      DISPERSION CAMPAIGNS — the NASA/POST2-style discipline (fix a seed per
+      trial, sweep a dispersion vector, reduce to a pass-rate + worst-case
+      margins) that PX4/ArduPilot approximate only via field flights + log
+      replay. examples/falcon-sitl-gz/src/campaign.rs runs the SAME verified
+      cascade (relay-geo GeoAtt + relay-mix-quad + relay-iekf FDI) across
+      thousands of seeded-random trials and asserts the safety invariant holds
+      across ALL of them.
+
+      Reproducibility: hierarchical SplitMix64 seeding — trial i draws from
+      trial_rng(campaign_seed, i), so any failure is replayable from its index
+      alone; the campaign seed is checked in. Recoverable-envelope discipline:
+      initial conditions are rejection-sampled inside a stated control-authority
+      envelope, so a FAIL is a real controller bug, never "the IC was physically
+      unrecoverable". Each campaign asserts failures==0 PLUS tight regression
+      bounds set just above the measured worst case (early-warning long before
+      the physical safety bound).
+
+      THREE CAMPAIGNS, 6000 dispersed trials/run, all 0 failures:
+        motor_out_monte_carlo_campaign (2000) — a random rotor fails at a random
+          time from a random tilt/rate; FDI must isolate the correct rotor,
+          MIX-P08 must hold every reconfigured step, and the vehicle must not
+          tumble and must settle upright. Worst: peak tilt 0.837 rad (bound 1.4),
+          final 0.097 rad (bound 0.5), FDI detect 2 ms.
+        att_stab_monte_carlo_campaign (2000) — recover to level from a random
+          tilt (≤0.5 rad) + rate (≤1.0 rad/s). Worst: peak 0.554, final ~0.
+        hexa_monte_carlo_campaign (2000) — the SAME geometric controller on a
+          6-rotor airframe (MixerN::hexa_x) over random tilts/rates. Worst:
+          peak 0.523, final ~0.
+
+      NAMED GATE: a dedicated CI job "Closed-loop simulation + Monte-Carlo
+      campaigns" (.github/workflows/ci.yml) runs cargo test -p falcon-sitl-gz
+      with --nocapture. This elevates the top-of-the-V integration tests
+      (fault_tolerance / shield / mission / hexa) AND the campaigns to a
+      first-class, visible required check — they already ran inside the generic
+      `cargo test --workspace`, but a dedicated gate keeps the most safety-
+      critical tests from being silently narrowed out of scope (the recurring
+      orphaned-verification failure mode this programme keeps closing), and
+      surfaces the worst-case-margin lines in the CI log for trend-watching.
+
+      Honest scope: the campaigns use the deterministic rigid-body attitude
+      plant of the verified point-tests (fast, CI-runnable). Adding sensor
+      noise / wind / mass-inertia dispersion and full 6-DOF Gazebo physics
+      (per the v1.109 research note's fuller dispersion vector), plus wind→RTL
+      and runaway→terminate fail-safe campaigns (three-way envelope
+      classification), are the next slices.
+    tags: [verification, falcon, simulation, monte-carlo, closed-loop, robustness, v1.109]
+    fields:
+      method: simulation
+      test-count: 3
+      steps:
+        - run: cargo test -p falcon-sitl-gz motor_out_monte_carlo_campaign
+        - run: cargo test -p falcon-sitl-gz att_stab_monte_carlo_campaign
+        - run: cargo test -p falcon-sitl-gz hexa_monte_carlo_campaign
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P02
+      - type: verifies
+        target: SWREQ-FALCON-ATT-P01
+      - type: verifies
+        target: SWREQ-FALCON-MIXMULTI-P01

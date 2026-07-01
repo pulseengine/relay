@@ -99,3 +99,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run falcon-hello UDP-loopback demo
         run: bash scripts/falcon-hello-demo.sh
+
+  # The closed-loop SAFETY suite as a first-class, named gate. These are the
+  # top-of-the-V integration tests — the whole verified cascade actually
+  # flying/recovering as a system — plus the Monte-Carlo dispersion campaigns
+  # (thousands of randomised trials per safety behaviour). They already run
+  # inside `cargo test --workspace`, but that buries the most safety-critical
+  # tests among hundreds; a dedicated required check makes them visible and
+  # keeps them from being silently narrowed out of scope (the recurring
+  # orphaned-verification failure mode). `--nocapture` surfaces the campaign
+  # worst-case-margin lines in the CI log for trend-watching.
+  closed-loop-sim:
+    name: Closed-loop simulation + Monte-Carlo campaigns
+    runs-on: [self-hosted, linux, x64, rust-cpu]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Closed-loop safety suite + dispersion campaigns
+        run: cargo test -p falcon-sitl-gz -- --nocapture
