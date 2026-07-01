@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-LYAP-003
     type: sw-verification
     title: "Strict Lyapunov on the REAL controller — runnable exponential-decay certificate + concrete rate (v1.106)"
-    status: implemented
+    status: verified
     release: falcon-v1.106.0
     description: >
       Grounds the abstract strict-Lyapunov certificate (FV-FALCON-LYAP-002 /
@@ -36,11 +36,11 @@ artifacts:
          Ties the abstract Lean certificate to the numerically-established
          controller bounds. Gated by lean.yml (bazel test //proofs/lean:all).
 
-      VERIFICATION STATUS: the runnable certificate is LOCALLY VERIFIED
-      (cargo test -p relay-geo strict_lyapunov_decrease_certificate — pass;
-      relay-geo suite 13/13). The Lean relay_geo_exp_rate corollary is gated by
-      lean.yml; this artifact moves to `verified` once that gate is green on
-      main (local Lean kernel-check remains disk-blocked this cycle).
+      VERIFICATION STATUS: VERIFIED. The runnable certificate passes locally
+      (cargo test -p relay-geo strict_lyapunov_decrease_certificate; relay-geo
+      suite 13/13), and the Lean relay_geo_exp_rate corollary kernel-checked
+      green on the lean.yml gate (bazel test //proofs/lean:all — the "Lean
+      proofs" required check passed on PR #245, 44/44 checks green).
 
       Honest scope: this establishes the exponential-decay INEQUALITY
       V̇ ≤ −γV on the real controller over a grid + a kernel-checked concrete
