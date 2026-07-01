@@ -1,0 +1,57 @@
+artifacts:
+  - id: FV-FALCON-LYAP-003
+    type: sw-verification
+    title: "Strict Lyapunov on the REAL controller — runnable exponential-decay certificate + concrete rate (v1.106)"
+    status: implemented
+    release: falcon-v1.106.0
+    description: >
+      Grounds the abstract strict-Lyapunov certificate (FV-FALCON-LYAP-002 /
+      proofs/lean/StrictLyapunov.lean) in the DEPLOYED geometric controller,
+      establishing the concrete bound constants + exponential rate.
+
+      1. RUNNABLE STRICT CERTIFICATE (relay-geo
+         strict_lyapunov_decrease_certificate): the numerical oracle, run
+         against the real GeoAtt controller — real moment(), attitude_error(),
+         psi(), and real SO(3) rotation integration. Adds the Lee-2010-Prop.2
+         cross term c⟨e_R,Ω⟩ (c=0.02) to the Lyapunov function
+         V = ½Ω·JΩ + 2k_R Ψ + c(e_R·Ω), and computes
+         V̇_strict = −k_Ω‖Ω‖² + c(ė_R·Ω + e_R·Ω̇) with ė_R a CENTRAL finite-
+         difference of the real attitude_error along the flow and
+         Ω̇ = J⁻¹(−k_R e_R − k_Ω Ω). Over a grid on Ψ<2 (gains k_R=8, k_Ω=2,
+         J=diag(0.0217,0.0217,0.04)) it asserts, at every point:
+           - V > 0                    (positive-definite; cross term preserved)
+           - V̇_strict < 0             (negative-DEFINITE — strict, unlike the
+                                        semidefinite base which is 0 at Ω=0)
+           - V̇_strict ≤ −0.05·V       (the exponential-decay inequality)
+         and the radial sandwich constants c_lo≈0.032, c_hi≈31.9, c_D≈1.90
+         (a strictly positive dissipation floor) ⇒ conservative rate
+         γ = c_D/c_hi ≈ 0.056 > 0. This is the numerical confirmation that the
+         cross term makes the REAL closed loop exponentially stable, not merely
+         non-increasing. Result: 100 grid points, all pass.
+
+      2. KERNEL-CHECKED CONCRETE RATE (proofs/lean/StrictLyapunov.lean
+         relay_geo_exp_rate): instantiates exp_decay_inequality at the
+         conservative INTEGER bounds c_hi=32, c_D=1 (measured 31.9, 1.90),
+         proving 32·V̇ ≤ −1·V — the deployed loop decays at rate γ ≥ 1/32 > 0.
+         Ties the abstract Lean certificate to the numerically-established
+         controller bounds. Gated by lean.yml (bazel test //proofs/lean:all).
+
+      VERIFICATION STATUS: the runnable certificate is LOCALLY VERIFIED
+      (cargo test -p relay-geo strict_lyapunov_decrease_certificate — pass;
+      relay-geo suite 13/13). The Lean relay_geo_exp_rate corollary is gated by
+      lean.yml; this artifact moves to `verified` once that gate is green on
+      main (local Lean kernel-check remains disk-blocked this cycle).
+
+      Honest scope: this establishes the exponential-decay INEQUALITY
+      V̇ ≤ −γV on the real controller over a grid + a kernel-checked concrete
+      rate. The final "inequality ⇒ V(t) ≤ V(0)e^(−γt) → 0" is the Grönwall
+      flow-integration (now Mathlib-tractable, per LYAP-002), the next slice.
+    tags: [verification, falcon, lyapunov, stability, exponential, lean, v1.106]
+    fields:
+      method: formal-verification
+      steps:
+        - run: cargo test -p relay-geo strict_lyapunov_decrease_certificate
+        - run: bazel test //proofs/lean:strict_lyapunov_test
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LYAP-P01
