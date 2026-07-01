@@ -61,7 +61,9 @@ theorem exp_decay_bound (v : ℝ → ℝ) (γ : ℝ)
     {t : ℝ} (ht : 0 ≤ t) :
     v t ≤ v 0 * Real.exp (-γ * t) := by
   have h := intfactor_antitone v γ hv hineq ht
-  rw [mul_zero, Real.exp_zero, mul_one] at h
+  -- `Antitone`-application leaves the lambda unreduced; `simp only` beta-reduces
+  -- and simplifies `exp (γ*0) = 1`.
+  simp only [mul_zero, Real.exp_zero, mul_one] at h
   have hmul := mul_le_mul_of_nonneg_right h (le_of_lt (Real.exp_pos (-γ * t)))
   have heq : v t * Real.exp (γ * t) * Real.exp (-γ * t) = v t := by
     have h0 : γ * t + -γ * t = 0 := by ring
@@ -86,7 +88,7 @@ theorem tendsto_zero_of_diff_ineq (v : ℝ → ℝ) (γ : ℝ) (hγ : 0 < γ)
       hexp.const_mul (v 0)
     simpa [neg_mul, mul_zero] using hmul
   refine squeeze_zero' ?_ ?_ hg
-  · exact Filter.eventually_of_forall (fun t => hnonneg t)
+  · exact Filter.Eventually.of_forall (fun t => hnonneg t)
   · filter_upwards [eventually_ge_atTop (0 : ℝ)] with t ht
     exact exp_decay_bound v γ hv hineq ht
 
