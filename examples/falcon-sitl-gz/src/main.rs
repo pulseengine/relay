@@ -17,6 +17,7 @@
 //!           open-loop 70 % PWM smoke test is reachable via
 //!           `--scenario=open-loop-climb`.
 
+mod campaign;
 mod pace;
 mod physics;
 
