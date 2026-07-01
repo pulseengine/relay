@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-LYAP-004
     type: sw-verification
     title: "Lyapunov exponential convergence — the deferred 'trajectory ⇒ converges' step, discharged (v1.107)"
-    status: implemented
+    status: verified
     release: falcon-v1.107.0
     description: >
       Closes the dynamic step that EVERY prior Lyapunov artifact in this repo
@@ -37,10 +37,13 @@ artifacts:
       certificates); the flow's existence/uniqueness is Mathlib PicardLindelöf,
       a separate wiring step.
 
-      VERIFICATION STATUS: gated by lean.yml (bazel test //proofs/lean:all).
-      Local Lean kernel-check remains disk-blocked this cycle, so the lean.yml
-      run is the verifying oracle; this artifact moves to `verified` once that
-      gate is green.
+      VERIFICATION STATUS: VERIFIED. Kernel-checked by lean.yml —
+      //proofs/lean:lyapunov_convergence_test PASSED (Executed 7 out of 7
+      tests: 7 tests pass). intfactor_antitone (the HasDerivAt core) compiled
+      clean on the first run; two downstream fixes (beta-reduce an
+      Antitone-application; Filter.Eventually.of_forall rename) landed green.
+      (Local Lean kernel-check remained disk-blocked this cycle; the lean.yml
+      gate is the verifying oracle.)
     tags: [verification, falcon, lyapunov, convergence, stability, lean, v1.107]
     fields:
       method: formal-verification
