@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIMMC-002
     type: sw-verification
     title: "Three-way fail-safe campaigns — validating the safety NET across a dispersed regime sweep (v1.110)"
-    status: implemented
+    status: verified
     release: falcon-v1.110.0
     description: >
       Extends the dispersion-campaign discipline (FV-FALCON-SIMMC-001) from

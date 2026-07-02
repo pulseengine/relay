@@ -778,3 +778,204 @@ mod campaign2_tests {
         );
     }
 }
+
+// ── Estimator-robustness campaign (IEKF under noisy sensors + GNSS dropout) ──
+//
+// Drives the real relay_iekf::Iekf against a static-hover truth with dispersed
+// gyro/accel/GNSS noise and a randomised GNSS-dropout window, asserting the
+// estimate's tilt + position error stay bounded, that it dead-reckons through
+// the dropout and RECONVERGES once GNSS returns, and that NEES (the chi-square
+// consistency statistic) never blows up. Noise is intrinsic here, so this is a
+// genuinely stochastic Monte-Carlo (unlike the deterministic attitude sweeps).
+
+/// Box-Muller Gaussian from two uniforms (mean 0, unit variance).
+fn gaussian(rng: &mut SplitMix64) -> f32 {
+    let u1 = rng.unit().max(1e-7);
+    let u2 = rng.unit();
+    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EstimatorTrial {
+    gyro_sigma: f32,
+    accel_sigma: f32,
+    gnss_sigma: f32,
+    dropout_start: u32,
+    dropout_dur: u32,
+}
+
+// Recoverable envelope: realistic sensor noise + a GNSS dropout short enough
+// that dead-reckoning drift stays bounded and the filter reconverges when GNSS
+// returns. Conservative (inside the true envelope) so a FAIL is a real bug.
+const EST_GYRO_SIGMA: (f32, f32) = (0.001, 0.02); // rad/s
+const EST_ACCEL_SIGMA: (f32, f32) = (0.02, 0.30); // m/s²
+const EST_GNSS_SIGMA: (f32, f32) = (0.10, 1.00); // m
+const EST_DROPOUT_MAX: u32 = 300; // 3 s at dt = 0.01
+
+fn sample_estimator(rng: &mut SplitMix64) -> EstimatorTrial {
+    EstimatorTrial {
+        gyro_sigma: rng.range(EST_GYRO_SIGMA.0, EST_GYRO_SIGMA.1),
+        accel_sigma: rng.range(EST_ACCEL_SIGMA.0, EST_ACCEL_SIGMA.1),
+        gnss_sigma: rng.range(EST_GNSS_SIGMA.0, EST_GNSS_SIGMA.1),
+        dropout_start: 500 + (rng.next_u64() % 300) as u32, // 5.0–8.0 s
+        dropout_dur: 100 + (rng.next_u64() % (EST_DROPOUT_MAX - 100 + 1) as u64) as u32, // 1–3 s
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct EstimatorOutcome {
+    peak_tilt_err: f32,
+    peak_dropout_pos_err: f32,
+    reconverged_pos_err: f32,
+    peak_nees: f32,
+    nan: bool,
+}
+
+fn run_estimator_trial(t: EstimatorTrial, rng: &mut SplitMix64) -> EstimatorOutcome {
+    use relay_iekf::{Iekf, Imu as IekfImu};
+    let p_true = [2.0f32, -1.0, -10.0];
+    let dt = 0.01f32;
+    let steps = 1500u32;
+    let mut f = Iekf::level();
+    let mut o = EstimatorOutcome::default();
+    let dropout_end = t.dropout_start + t.dropout_dur;
+    for step in 0..steps {
+        let imu = IekfImu {
+            gyro: [
+                gaussian(rng) * t.gyro_sigma,
+                gaussian(rng) * t.gyro_sigma,
+                gaussian(rng) * t.gyro_sigma,
+            ],
+            accel: [
+                gaussian(rng) * t.accel_sigma,
+                gaussian(rng) * t.accel_sigma,
+                -9.81 + gaussian(rng) * t.accel_sigma,
+            ],
+        };
+        f.propagate(imu, dt);
+        let _ = f.update_gravity(imu.accel, (t.accel_sigma * t.accel_sigma).max(0.01));
+        let in_dropout = step >= t.dropout_start && step < dropout_end;
+        if step % 20 == 0 && !in_dropout {
+            let z = [
+                p_true[0] + gaussian(rng) * t.gnss_sigma,
+                p_true[1] + gaussian(rng) * t.gnss_sigma,
+                p_true[2] + gaussian(rng) * t.gnss_sigma,
+            ];
+            let _ = f.update_position(z, (t.gnss_sigma * t.gnss_sigma).max(0.01));
+        }
+        let s = f.state();
+        let perr = ((s.p[0] - p_true[0]).powi(2)
+            + (s.p[1] - p_true[1]).powi(2)
+            + (s.p[2] - p_true[2]).powi(2))
+        .sqrt();
+        if step > 400 {
+            // after the initial convergence transient
+            o.peak_tilt_err = o.peak_tilt_err.max(s.tilt_rad());
+            let nees = f.nees_position(p_true);
+            if nees.is_finite() {
+                o.peak_nees = o.peak_nees.max(nees);
+            }
+        }
+        if in_dropout {
+            o.peak_dropout_pos_err = o.peak_dropout_pos_err.max(perr);
+        }
+        if step >= steps - 200 {
+            // reconvergence window: well after GNSS resumes
+            o.reconverged_pos_err = o.reconverged_pos_err.max(perr);
+        }
+        if !s.p[0].is_finite() || !s.q[0].is_finite() {
+            o.nan = true;
+        }
+    }
+    o
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct EstimatorReport {
+    pub trials: u32,
+    pub failures: u32,
+    pub worst_tilt_err: f32,
+    pub worst_dropout_pos_err: f32,
+    pub worst_reconverged_pos_err: f32,
+    pub worst_nees: f32,
+    pub failing: Vec<(u32, String)>,
+}
+
+pub fn run_estimator_campaign(n: u32, campaign_seed: u64) -> EstimatorReport {
+    let mut rep = EstimatorReport {
+        trials: n,
+        ..Default::default()
+    };
+    for i in 0..n {
+        let mut rng = trial_rng(campaign_seed, i);
+        let t = sample_estimator(&mut rng);
+        let o = run_estimator_trial(t, &mut rng);
+        rep.worst_tilt_err = rep.worst_tilt_err.max(o.peak_tilt_err);
+        rep.worst_dropout_pos_err = rep.worst_dropout_pos_err.max(o.peak_dropout_pos_err);
+        rep.worst_reconverged_pos_err = rep.worst_reconverged_pos_err.max(o.reconverged_pos_err);
+        rep.worst_nees = rep.worst_nees.max(o.peak_nees);
+
+        let mut reason = String::new();
+        if o.nan {
+            reason = "NaN in estimate".into();
+        } else if o.peak_tilt_err >= 0.30 {
+            reason = format!("tilt error {:.3} rad", o.peak_tilt_err);
+        } else if o.reconverged_pos_err >= 2.5 {
+            reason = format!("did not reconverge: {:.2} m", o.reconverged_pos_err);
+        } else if o.peak_nees >= 150.0 {
+            reason = format!("NEES blew up: {:.1}", o.peak_nees);
+        } else if o.peak_dropout_pos_err >= 40.0 {
+            reason = format!("dead-reckoning diverged: {:.1} m", o.peak_dropout_pos_err);
+        }
+        if !reason.is_empty() {
+            rep.failures += 1;
+            if rep.failing.len() < 20 {
+                rep.failing.push((i, format!("{t:?}: {reason}")));
+            }
+        }
+    }
+    rep
+}
+
+#[cfg(test)]
+mod campaign3_tests {
+    use super::*;
+
+    const EST_SEED: u64 = 0x0FA1_C0DE_E57E_0001;
+    const EST_TRIALS: u32 = 600; // stochastic campaign (real noise) -- rule-of-three 3/600 = 99.5% @ 95%
+
+    #[test]
+    fn estimator_robustness_monte_carlo_campaign() {
+        let rep = run_estimator_campaign(EST_TRIALS, EST_SEED);
+        eprintln!(
+            "estimator campaign: {} trials, {} failures | worst tilt-err {:.4} rad, worst dropout pos-err {:.3} m, worst reconverged pos-err {:.3} m, worst NEES {:.2}",
+            rep.trials, rep.failures, rep.worst_tilt_err, rep.worst_dropout_pos_err,
+            rep.worst_reconverged_pos_err, rep.worst_nees
+        );
+        assert_eq!(
+            rep.failures, 0,
+            "estimator robustness failed in {}/{} trials; first: {:#?}",
+            rep.failures, rep.trials, rep.failing
+        );
+        // Regression bounds set just above the measured worst case over 2000
+        // trials at seed 0x0FA1_C0DE_E57E_0001 (tilt-err 0.017 rad, dropout
+        // drift 19.8 m, reconverged 1.86 m, NEES 57) — a change that degrades
+        // the estimator (looser tilt aiding, slower reconvergence, or an
+        // overconfident covariance) trips these.
+        assert!(
+            rep.worst_tilt_err < 0.05,
+            "REGRESSION: worst tilt err {:.4} rad exceeded 0.05 (was ~0.017)",
+            rep.worst_tilt_err
+        );
+        assert!(
+            rep.worst_reconverged_pos_err < 2.5,
+            "REGRESSION: worst reconverged pos err {:.2} m exceeded 2.5 (was ~1.86)",
+            rep.worst_reconverged_pos_err
+        );
+        assert!(
+            rep.worst_nees < 90.0,
+            "REGRESSION: worst NEES {:.1} exceeded 90 (was ~57 — a spike above this means overconfident covariance)",
+            rep.worst_nees
+        );
+    }
+}
