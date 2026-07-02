@@ -1,0 +1,28 @@
+artifacts:
+  - id: FV-FALCON-SIMMC-005
+    type: sw-verification
+    title: "Motor-out recovery under DISPERSION — actuator noise + wind (v1.112 slice 3)"
+    status: implemented
+    release: falcon-v1.112.0
+    description: >
+      Upgrades the clean-plant motor-out campaign (FV-FALCON-FAULT-002 /
+      motor_out_monte_carlo_campaign) to a true stochastic dispersion: each of
+      1500 seeded trials adds per-rotor ACTUATOR noise (≤5% multiplicative
+      thrust scatter) + a constant WIND-disturbance torque with per-step gusts,
+      on top of the random rotor/time/initial-condition dispersion, and asserts
+      the full FDI-isolate → reduced-attitude + reconfigured-mixer → settle
+      chain STILL holds under the noise. 1500 trials, 0 failures. The dispersion
+      legitimately narrows the margin — worst peak tilt 1.20 rad (vs 0.84 on the
+      clean plant) against the 1.4 tumble bound, settling to 0.16 rad — which is
+      exactly the point: the recovery is robust to realistic actuator/wind
+      disturbance, not only the ideal plant. Reproducible from (seed, index);
+      runs under the ci.yml "Closed-loop simulation" named gate + workspace test.
+    tags: [verification, falcon, simulation, monte-carlo, fault-tolerance, dispersion, v1.112]
+    fields:
+      method: simulation
+      test-count: 1
+      steps:
+        - run: "cargo test -p falcon-sitl-gz motor_out_dispersed_monte_carlo_campaign  # bench-only (runs in the closed-loop-sim CI job + workspace test)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P02

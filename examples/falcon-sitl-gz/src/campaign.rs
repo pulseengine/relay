@@ -1268,3 +1268,155 @@ mod campaign5_tests {
         assert!(detected > 150 && clean > 150, "both regimes well-sampled ({detected}/{clean})");
     }
 }
+
+// ── Motor-out recovery UNDER DISPERSION (actuator noise + wind) ──
+//
+// The motor_out campaign above is a clean-plant deterministic sweep; this adds
+// the stochastic dispersion a real vehicle sees during the recovery — per-rotor
+// ACTUATOR noise (thrust scatter) + a constant WIND-disturbance torque with
+// per-step gusts — and asserts the FDI-isolate → reconfigure → settle chain
+// still holds. Same physics as run_motor_out_trial with the noise injected.
+
+#[derive(Clone, Copy, Debug)]
+struct MotorOutDispTrial {
+    base: MotorOutTrial,
+    act_sigma: f32,      // per-rotor multiplicative thrust noise
+    wind_torque: [f32; 3], // constant disturbance torque
+    gust_sigma: f32,     // per-step gust torque
+}
+
+const MO_ACT_SIGMA: (f32, f32) = (0.0, 0.05); // ≤5% actuator scatter
+const MO_WIND_TORQUE: f32 = 0.03; // constant disturbance amplitude
+const MO_GUST_SIGMA: (f32, f32) = (0.0, 0.02);
+
+fn sample_motor_out_disp(rng: &mut SplitMix64) -> MotorOutDispTrial {
+    let base = sample_motor_out(rng);
+    MotorOutDispTrial {
+        base,
+        act_sigma: rng.range(MO_ACT_SIGMA.0, MO_ACT_SIGMA.1),
+        wind_torque: [
+            rng.range(-MO_WIND_TORQUE, MO_WIND_TORQUE),
+            rng.range(-MO_WIND_TORQUE, MO_WIND_TORQUE),
+            rng.range(-MO_WIND_TORQUE, MO_WIND_TORQUE),
+        ],
+        gust_sigma: rng.range(MO_GUST_SIGMA.0, MO_GUST_SIGMA.1),
+    }
+}
+
+fn run_motor_out_disp_trial(t: MotorOutDispTrial, rng: &mut SplitMix64) -> MotorOutOutcome {
+    let ctrl = GeoAtt::new(GeoGains::FALCON_QUAD);
+    let j = GeoGains::FALCON_QUAD.j;
+    let b3_d = [0.0f32, 0.0, 1.0];
+    let level = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut r = tilt_rotation(t.base.roll0, t.base.pitch0);
+    let mut omega = t.base.omega0;
+    let mut fdi = RotorFaultDetector::new(0.5, 0.1);
+    let mut isolated: Option<usize> = None;
+    let mut detect_step: Option<u32> = None;
+    let mut peak_tilt_after = 0.0f32;
+    let mut mix_ok = true;
+    let mut nan = false;
+
+    for step in 0..4000u32 {
+        let (_torque, motors_cmd) = if let Some(f) = isolated {
+            let tq = ctrl.moment_reduced(&r, omega, b3_d);
+            (tq, QuadMixer::new().mix_rotor_out(f, tq, HOVER, FLOOR))
+        } else {
+            let tq = ctrl.moment(&r, omega, &level);
+            (tq, QuadMixer::new().mix_thrust_floor(tq, HOVER, FLOOR))
+        };
+        if let Some(f) = isolated {
+            if motors_cmd[f] != 0.0 {
+                mix_ok = false;
+            }
+            for (i, &v) in motors_cmd.iter().enumerate() {
+                if i != f && !(FLOOR - 1e-6..=1.0 + 1e-6).contains(&v) {
+                    mix_ok = false;
+                }
+            }
+        }
+        // Physics: failure + per-rotor ACTUATOR NOISE on the achieved thrust.
+        let mut motors_real = motors_cmd;
+        for m in motors_real.iter_mut() {
+            *m *= 1.0 + gaussian(rng) * t.act_sigma;
+        }
+        if step >= t.base.fail_step {
+            motors_real[t.base.failed_rotor] = 0.0;
+        }
+        if isolated.is_none() {
+            let mut resid = [0.0f32; 4];
+            for i in 0..4 {
+                resid[i] = (motors_cmd[i] - motors_real[i]).abs();
+            }
+            if let Some(f) = fdi.update(resid) {
+                isolated = Some(f);
+                detect_step = Some(step);
+            }
+        }
+        // Rigid-body update + WIND disturbance torque (constant + gust).
+        let bt = motors_to_torque_signs(motors_real);
+        let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+        let gyro = [
+            omega[1] * jo[2] - omega[2] * jo[1],
+            omega[2] * jo[0] - omega[0] * jo[2],
+            omega[0] * jo[1] - omega[1] * jo[0],
+        ];
+        for i in 0..3 {
+            let body_t = bt[i] * SCALE + t.wind_torque[i] + gaussian(rng) * t.gust_sigma;
+            omega[i] += DT * (body_t - gyro[i]) / j[i];
+        }
+        r = integ_rot(&r, omega, DT);
+        if !omega[0].is_finite() || !r[2][2].is_finite() {
+            nan = true;
+        }
+        if step > t.base.fail_step + 300 {
+            peak_tilt_after = peak_tilt_after.max(tilt_of(&r));
+        }
+    }
+    MotorOutOutcome {
+        isolated,
+        detect_latency_steps: match (detect_step, Some(t.base.fail_step)) {
+            (Some(d), Some(f)) if d >= f => d - f,
+            _ => u32::MAX,
+        },
+        peak_tilt_after,
+        final_tilt: tilt_of(&r),
+        mix_ok,
+        nan,
+    }
+}
+
+#[cfg(test)]
+mod campaign6_tests {
+    use super::*;
+
+    const MOD_SEED: u64 = 0x0FA1_C0DE_D157_0001;
+    const MOD_TRIALS: u32 = 1500;
+
+    #[test]
+    fn motor_out_dispersed_monte_carlo_campaign() {
+        let (mut fails, mut worst_peak, mut worst_final) = (0u32, 0.0f32, 0.0f32);
+        for i in 0..MOD_TRIALS {
+            let mut rng = trial_rng(MOD_SEED, i);
+            let t = sample_motor_out_disp(&mut rng);
+            let o = run_motor_out_disp_trial(t, &mut rng);
+            worst_peak = worst_peak.max(o.peak_tilt_after);
+            worst_final = worst_final.max(o.final_tilt);
+            let bad = o.nan
+                || o.isolated != Some(t.base.failed_rotor)
+                || !o.mix_ok
+                || o.peak_tilt_after >= 1.4
+                || o.final_tilt >= 0.5;
+            if bad {
+                fails += 1;
+            }
+        }
+        eprintln!(
+            "motor-out DISPERSED campaign: {} trials, {} failures | worst peak tilt {:.3} rad, worst final tilt {:.3} rad",
+            MOD_TRIALS, fails, worst_peak, worst_final
+        );
+        assert_eq!(fails, 0, "dispersed motor-out recovery failed in {fails}/{MOD_TRIALS}");
+        assert!(worst_peak < 1.4, "worst peak tilt {:.3}", worst_peak);
+        assert!(worst_final < 0.5, "worst final tilt {:.3}", worst_final);
+    }
+}
