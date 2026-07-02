@@ -979,3 +979,292 @@ mod campaign3_tests {
         );
     }
 }
+
+// ── Maneuvering-truth estimator campaign (IEKF under motion + noise) ──
+//
+// The static-hover estimator campaign isolates noise rejection; this one adds
+// a horizontal MANEUVER (the truth accelerates on a random sinusoidal path)
+// with an unmodelled accelerometer scale error, and checks the IEKF stays
+// consistent UNDER MOTION via nees_velocity (the harder observability case the
+// v0.21 filter failed). Genuinely stochastic (noise + random maneuver/scale).
+
+#[derive(Clone, Copy, Debug)]
+struct ManeuverTrial {
+    ax: f32,
+    ay: f32,
+    fx: f32,
+    fy: f32,
+    scale_err: f32,
+    accel_sigma: f32,
+    gnss_sigma: f32,
+}
+
+const MAN_ACCEL_AMP: (f32, f32) = (0.5, 2.5); // m/s² (bounded position swing at these freqs)
+const MAN_FREQ: (f32, f32) = (0.5, 1.0); // rad/s
+const MAN_SCALE_ERR: (f32, f32) = (0.0, 0.05); // unmodelled accel scale
+const MAN_ACCEL_SIGMA: (f32, f32) = (0.01, 0.10);
+const MAN_GNSS_SIGMA: (f32, f32) = (0.05, 0.30);
+
+fn sample_maneuver(rng: &mut SplitMix64) -> ManeuverTrial {
+    ManeuverTrial {
+        ax: rng.range(MAN_ACCEL_AMP.0, MAN_ACCEL_AMP.1),
+        ay: rng.range(MAN_ACCEL_AMP.0, MAN_ACCEL_AMP.1),
+        fx: rng.range(MAN_FREQ.0, MAN_FREQ.1),
+        fy: rng.range(MAN_FREQ.0, MAN_FREQ.1),
+        scale_err: rng.range(MAN_SCALE_ERR.0, MAN_SCALE_ERR.1),
+        accel_sigma: rng.range(MAN_ACCEL_SIGMA.0, MAN_ACCEL_SIGMA.1),
+        gnss_sigma: rng.range(MAN_GNSS_SIGMA.0, MAN_GNSS_SIGMA.1),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ManeuverOutcome {
+    peak_pos_err: f32,
+    peak_vel_nees: f32,
+    peak_tilt: f32,
+    nan: bool,
+}
+
+fn run_maneuver_trial(t: ManeuverTrial, rng: &mut SplitMix64) -> ManeuverOutcome {
+    use relay_iekf::{Iekf, Imu as IekfImu, NavState};
+    let dt = 0.01f32;
+    let steps = 2500u32;
+    let mut f = Iekf::new(NavState::identity());
+    let mut o = ManeuverOutcome::default();
+    let (mut tp, mut tv) = ([0.0f32; 3], [0.0f32; 3]);
+    for step in 0..steps {
+        let time = step as f32 * dt;
+        let a_true = [t.ax * (t.fx * time).sin(), t.ay * (t.fy * time).cos(), 0.0];
+        for i in 0..3 {
+            tp[i] += tv[i] * dt + 0.5 * a_true[i] * dt * dt;
+            tv[i] += a_true[i] * dt;
+        }
+        let accel = [
+            (1.0 + t.scale_err) * a_true[0] + gaussian(rng) * t.accel_sigma,
+            (1.0 + t.scale_err) * a_true[1] + gaussian(rng) * t.accel_sigma,
+            -9.81 + gaussian(rng) * t.accel_sigma,
+        ];
+        f.propagate(IekfImu { gyro: [0.0; 3], accel }, dt);
+        // NO gravity aiding under motion: specific force != gravity (aiding here
+        // would read the maneuver accel as a tilt). gyro=0 keeps attitude level.
+        if step % 20 == 0 {
+            let z = [
+                tp[0] + gaussian(rng) * t.gnss_sigma,
+                tp[1] + gaussian(rng) * t.gnss_sigma,
+                tp[2] + gaussian(rng) * t.gnss_sigma,
+            ];
+            let _ = f.update_position(z, (t.gnss_sigma * t.gnss_sigma).max(0.01));
+        }
+        let s = f.state();
+        if step > 800 {
+            let perr = ((s.p[0] - tp[0]).powi(2)
+                + (s.p[1] - tp[1]).powi(2)
+                + (s.p[2] - tp[2]).powi(2))
+            .sqrt();
+            o.peak_pos_err = o.peak_pos_err.max(perr);
+            o.peak_tilt = o.peak_tilt.max(s.tilt_rad());
+            let nees = f.nees_velocity(tv);
+            if nees.is_finite() {
+                o.peak_vel_nees = o.peak_vel_nees.max(nees);
+            }
+        }
+        if !s.p[0].is_finite() || !s.q[0].is_finite() {
+            o.nan = true;
+        }
+    }
+    o
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ManeuverReport {
+    pub trials: u32,
+    pub failures: u32,
+    pub worst_pos_err: f32,
+    pub worst_vel_nees: f32,
+    pub worst_tilt: f32,
+    pub failing: Vec<(u32, String)>,
+}
+
+pub fn run_maneuver_campaign(n: u32, campaign_seed: u64) -> ManeuverReport {
+    let mut rep = ManeuverReport {
+        trials: n,
+        ..Default::default()
+    };
+    for i in 0..n {
+        let mut rng = trial_rng(campaign_seed, i);
+        let t = sample_maneuver(&mut rng);
+        let o = run_maneuver_trial(t, &mut rng);
+        rep.worst_pos_err = rep.worst_pos_err.max(o.peak_pos_err);
+        rep.worst_vel_nees = rep.worst_vel_nees.max(o.peak_vel_nees);
+        rep.worst_tilt = rep.worst_tilt.max(o.peak_tilt);
+        let mut reason = String::new();
+        if o.nan {
+            reason = "NaN".into();
+        } else if o.peak_pos_err >= 4.0 {
+            reason = format!("pos err {:.2} m", o.peak_pos_err);
+        } else if o.peak_tilt >= 0.15 {
+            reason = format!("tilt {:.3} rad", o.peak_tilt);
+        } else if o.peak_vel_nees >= 60.0 {
+            reason = format!("vel-NEES {:.1}", o.peak_vel_nees);
+        }
+        if !reason.is_empty() {
+            rep.failures += 1;
+            if rep.failing.len() < 20 {
+                rep.failing.push((i, format!("{t:?}: {reason}")));
+            }
+        }
+    }
+    rep
+}
+
+#[cfg(test)]
+mod campaign4_tests {
+    use super::*;
+
+    const MAN_SEED: u64 = 0x0FA1_C0DE_3A17_0001;
+    const MAN_TRIALS: u32 = 500;
+
+    #[test]
+    fn maneuvering_estimator_monte_carlo_campaign() {
+        let rep = run_maneuver_campaign(MAN_TRIALS, MAN_SEED);
+        eprintln!(
+            "maneuver campaign: {} trials, {} failures | worst pos-err {:.3} m, worst vel-NEES {:.2}, worst tilt {:.4} rad",
+            rep.trials, rep.failures, rep.worst_pos_err, rep.worst_vel_nees, rep.worst_tilt
+        );
+        assert_eq!(
+            rep.failures, 0,
+            "maneuvering estimator failed in {}/{}; first: {:#?}",
+            rep.failures, rep.trials, rep.failing
+        );
+        // Regression bounds just above the measured worst (seed 0x0FA1_C0DE_3A17_0001:
+        // pos-err 0.91 m, vel-NEES 11.2, tilt 0.064 rad).
+        assert!(rep.worst_pos_err < 2.0, "REGRESSION: worst pos err {:.2} m (was ~0.91)", rep.worst_pos_err);
+        assert!(rep.worst_tilt < 0.12, "REGRESSION: worst tilt {:.3} rad (was ~0.064)", rep.worst_tilt);
+        assert!(rep.worst_vel_nees < 30.0, "REGRESSION: worst vel-NEES {:.1} (was ~11.2)", rep.worst_vel_nees);
+    }
+}
+
+// ── GNSS-spoof-injection campaign (validates the SpoofMonitor) ──
+//
+// Two-sided (like the fail-safe campaigns): LEGIT trials feed the SpoofMonitor
+// the real zero-mean-noise GNSS innovation — it must NOT false-alarm; SPOOF
+// trials walk the GNSS measurement off with a consistent bias FASTER than the
+// noise floor — the monitor must DETECT (and latch) within a budget. Truth is
+// at the origin (no convergence transient to bias the CUSUM), the monitor drift
+// is scaled to the GNSS noise (2σ — a spoof slower than the noise is physically
+// undetectable, so the envelope keeps the spoof above it), and the innovation
+// fed is the position residual z − est.p each GNSS fix (the production wiring).
+
+#[derive(Clone, Copy, Debug)]
+struct SpoofTrial {
+    spoof: bool,
+    onset_step: u32,
+    spoof_mult: f32, // spoof bias per fix, as a MULTIPLE of the GNSS σ
+    gnss_sigma: f32,
+}
+
+const SPOOF_MULT: (f32, f32) = (4.0, 8.0); // spoof rate = mult × σ (above the 2σ drift)
+const SPOOF_GNSS_SIGMA: (f32, f32) = (0.10, 0.50);
+const SPOOF_DETECT_BUDGET: u32 = 30; // GNSS fixes
+
+fn sample_spoof(rng: &mut SplitMix64, spoof: bool) -> SpoofTrial {
+    SpoofTrial {
+        spoof,
+        onset_step: 200 + (rng.next_u64() % 200) as u32, // 2–4 s in
+        spoof_mult: rng.range(SPOOF_MULT.0, SPOOF_MULT.1),
+        gnss_sigma: rng.range(SPOOF_GNSS_SIGMA.0, SPOOF_GNSS_SIGMA.1),
+    }
+}
+
+/// Returns (spoofed_flag, detect_latency_fixes) — latency from onset (u32::MAX
+/// if never detected).
+fn run_spoof_trial(t: SpoofTrial, rng: &mut SplitMix64) -> (bool, u32) {
+    use relay_iekf::{Iekf, Imu as IekfImu, SpoofMonitor};
+    let p_true = [0.0f32, 0.0, 0.0];
+    let dt = 0.01f32;
+    let steps = 1500u32;
+    let mut f = Iekf::level();
+    // Drift scaled to the noise: legit zero-mean noise stays below it; a
+    // sustained bias > drift accumulates.
+    let mut mon = SpoofMonitor::new(2.0, 2.0 * t.gnss_sigma);
+    let spoof_rate = t.spoof_mult * t.gnss_sigma; // m per fix
+    let mut detect_step: Option<u32> = None;
+    let accel_sigma = 0.05f32;
+    for step in 0..steps {
+        let imu = IekfImu {
+            gyro: [0.0; 3],
+            accel: [
+                gaussian(rng) * accel_sigma,
+                gaussian(rng) * accel_sigma,
+                -9.81 + gaussian(rng) * accel_sigma,
+            ],
+        };
+        f.propagate(imu, dt);
+        let _ = f.update_gravity(imu.accel, 0.01);
+        if step % 20 == 0 {
+            let offset = if t.spoof && step >= t.onset_step {
+                spoof_rate * ((step - t.onset_step) / 20) as f32
+            } else {
+                0.0
+            };
+            let z = [
+                p_true[0] + offset + gaussian(rng) * t.gnss_sigma,
+                p_true[1] + gaussian(rng) * t.gnss_sigma,
+                p_true[2] + gaussian(rng) * t.gnss_sigma,
+            ];
+            let s = f.state();
+            let innov = [z[0] - s.p[0], z[1] - s.p[1], z[2] - s.p[2]];
+            // Let the covariance settle a few fixes before arming the monitor.
+            if step >= 100 && mon.update(innov) && detect_step.is_none() {
+                detect_step = Some(step);
+            }
+            let _ = f.update_position(z, (t.gnss_sigma * t.gnss_sigma).max(0.01));
+        }
+    }
+    let latency = match detect_step {
+        Some(d) if d >= t.onset_step => (d - t.onset_step) / 20,
+        Some(_) => 0, // detected before onset ⇒ a false alarm on a spoof trial
+        None => u32::MAX,
+    };
+    (mon.spoofed(), latency)
+}
+
+#[cfg(test)]
+mod campaign5_tests {
+    use super::*;
+
+    const SPOOF_SEED: u64 = 0x0FA1_C0DE_5900_0001;
+    const SPOOF_TRIALS: u32 = 400;
+
+    #[test]
+    fn gnss_spoof_monte_carlo_campaign() {
+        let (mut detected, mut clean, mut worst_latency) = (0u32, 0u32, 0u32);
+        for i in 0..SPOOF_TRIALS {
+            let spoof = i % 2 == 0;
+            let mut rng = trial_rng(SPOOF_SEED, i);
+            let t = sample_spoof(&mut rng, spoof);
+            let (spoofed, latency) = run_spoof_trial(t, &mut rng);
+            if spoof {
+                assert!(
+                    spoofed,
+                    "trial {i}: spoof (rate {:.2}×σ) NOT detected",
+                    t.spoof_mult
+                );
+                assert!(
+                    latency <= SPOOF_DETECT_BUDGET,
+                    "trial {i}: spoof detected in {latency} fixes > budget {SPOOF_DETECT_BUDGET}"
+                );
+                worst_latency = worst_latency.max(latency);
+                detected += 1;
+            } else {
+                assert!(!spoofed, "trial {i}: FALSE spoof alarm on legit noisy GNSS");
+                clean += 1;
+            }
+        }
+        eprintln!(
+            "spoof campaign: {} trials | {detected} detected (worst latency {worst_latency} fixes), {clean} no-false-alarm",
+            SPOOF_TRIALS
+        );
+        assert!(detected > 150 && clean > 150, "both regimes well-sampled ({detected}/{clean})");
+    }
+}
