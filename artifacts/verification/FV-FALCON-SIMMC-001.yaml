@@ -56,9 +56,9 @@ artifacts:
       method: simulation
       test-count: 3
       steps:
-        - run: cargo test -p falcon-sitl-gz motor_out_monte_carlo_campaign
-        - run: cargo test -p falcon-sitl-gz att_stab_monte_carlo_campaign
-        - run: cargo test -p falcon-sitl-gz hexa_monte_carlo_campaign
+        - run: "cargo test -p falcon-sitl-gz motor_out_monte_carlo_campaign  # bench-only (2000-trial dispersion; runs in the closed-loop-sim CI job + workspace test)"
+        - run: "cargo test -p falcon-sitl-gz att_stab_monte_carlo_campaign  # bench-only"
+        - run: "cargo test -p falcon-sitl-gz hexa_monte_carlo_campaign  # bench-only"
     links:
       - type: verifies
         target: SWREQ-FALCON-FAULT-P02

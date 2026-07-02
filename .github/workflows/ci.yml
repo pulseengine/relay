@@ -117,4 +117,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Closed-loop safety suite + dispersion campaigns
-        run: cargo test -p falcon-sitl-gz -- --nocapture
+        run: |
+          # falcon-sitl-gz: integration safety tests + the nominal-recovery
+          # Monte-Carlo campaigns (motor-out / attitude / hexa).
+          cargo test -p falcon-sitl-gz -- --nocapture
+          # falcon-core: the THREE-WAY fail-safe campaigns (runaway→terminate,
+          # wind→RTL) that drive the full production FlightSupervisor.
+          cargo test -p falcon-core failsafe -- --nocapture
