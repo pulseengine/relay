@@ -472,6 +472,7 @@ name = "falcon-sitl-gz"
 version = "0.1.0"
 dependencies = [
  "falcon-config",
+ "falcon-core",
  "gz-transport-rs",
  "libm",
  "prost",

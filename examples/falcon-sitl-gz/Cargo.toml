@@ -36,6 +36,10 @@ falcon-config = { path = "../../host/falcon-config" }
 relay-pos = { path = "../../crates/relay-pos" }
 relay-lc = { path = "../../crates/relay-lc" }
 relay-sc = { path = "../../crates/relay-sc" }
+# v1.113 — the PRODUCTION flight core, flown through the SITL plant via the
+# `FlightBackend`→`Physics` adapter (src/flightcore.rs). The sim now exercises
+# the same verified cascade + rotor-out FDI that ships, not a parallel copy.
+falcon-core = { path = "../../crates/falcon-core" }
 libm = "0.2"
 
 # Optional — only when feature `gazebo` is on.

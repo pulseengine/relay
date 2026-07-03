@@ -82,6 +82,13 @@ pub struct MockPhysics {
     pub p_ned: [f32; 3],
     /// Velocity in NED frame (m/s).
     pub v_ned: [f32; 3],
+    /// Specific force in the NED frame from the last `step` — the non-gravity
+    /// part of the kinematic acceleration (`thrust − drag`). An accelerometer
+    /// measures specific force (`a_kinematic − g_gravity`), so `measure` rotates
+    /// this into the body frame. At hover it is `[0,0,−g]` (the reaction to
+    /// gravity), matching the pre-v1.113 constant; during a climb it carries the
+    /// thrust reaction the full IEKF needs to keep vertical velocity observable.
+    pub spec_force_ned: [f32; 3],
     /// xorshift state for the IMU noise generator.
     pub rng: u64,
 }
@@ -93,6 +100,7 @@ impl MockPhysics {
             q: [1.0, 0.0, 0.0, 0.0],
             p_ned: [0.0; 3],
             v_ned: [0.0; 3],
+            spec_force_ned: [0.0, 0.0, -GRAVITY], // at rest: reaction to gravity
             rng: 0xCAFE_BABE_DEAD_BEEF,
         }
     }
@@ -157,6 +165,10 @@ impl Physics for MockPhysics {
             let g = if i == 2 { GRAVITY } else { 0.0 };
             let drag = DRAG_COEFFICIENT * self.v_ned[i];
             let a = thrust_ned[i] + g - drag;
+            // Specific force = kinematic accel − gravity = thrust − drag. This
+            // is what an accelerometer reads (the full IEKF integrates it, so a
+            // constant-gravity fake would starve its vertical-velocity estimate).
+            self.spec_force_ned[i] = thrust_ned[i] - drag;
             self.v_ned[i] += a * dt;
             self.p_ned[i] += self.v_ned[i] * dt;
         }
@@ -168,14 +180,19 @@ impl Physics for MockPhysics {
             self.omega[1] + noise_std * self.next_unit_normal(),
             self.omega[2] + noise_std * self.next_unit_normal(),
         ];
-        // Body-frame accel: gravity rotated into body via q. Simplified
-        // — at small attitude angles the accel reads [0, 0, -g] body
-        // plus thrust contribution; we approximate as the body-frame
-        // thrust the controller would feel for closed-loop testing.
+        // Body-frame accelerometer: the NED specific force (thrust − drag,
+        // computed in `step`) rotated into the body frame via conj(q). At
+        // hover/level this reduces to [0, 0, −g] (the reaction to gravity), so
+        // the near-level scenarios are unchanged; under a climb it carries the
+        // thrust reaction the full IEKF integrates for vertical velocity.
+        let f = self.spec_force_ned;
+        let qv = [0.0, f[0], f[1], f[2]];
+        let qc = [self.q[0], -self.q[1], -self.q[2], -self.q[3]];
+        let fb = quat_mul(qc, quat_mul(qv, self.q)); // v_body = conj(q)·v_ned·q
         let accel_body = [
-            noise_std * self.next_unit_normal(),
-            noise_std * self.next_unit_normal(),
-            -GRAVITY + noise_std * self.next_unit_normal(),
+            fb[1] + noise_std * self.next_unit_normal(),
+            fb[2] + noise_std * self.next_unit_normal(),
+            fb[3] + noise_std * self.next_unit_normal(),
         ];
         let sample = ImuSample {
             time: relay_ekf::Timestamp { seconds: 0, fraction: 0 },

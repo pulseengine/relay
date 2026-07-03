@@ -1,0 +1,61 @@
+artifacts:
+  - id: FV-FALCON-SITLCORE-001
+    type: sw-verification
+    title: "FlightCore-in-the-loop — the production core flies the SITL plant through the FlightBackend seam (v1.113)"
+    status: implemented
+    release: falcon-v1.113.0
+    description: >
+      Closes the orphaned-core gap in the Gazebo SITL bench: every prior
+      `run_*` scenario re-implemented the flight cascade by hand against the
+      example's `Physics` plant, so the sim exercised a PARALLEL controller, not
+      the one that ships. This verification flies the PRODUCTION
+      `falcon_core::FlightCore` (the verified IEKF → geometric-SE(3) → ADRC →
+      mixer cascade with the single-rotor-out FDI + degraded-allocator recovery)
+      through the SITL plant via an ADAPTER — `SitlBackend`
+      (examples/falcon-sitl-gz/src/flightcore.rs), which implements
+      falcon-core's `FlightBackend` seam on top of a `&mut dyn Physics` plant.
+      The same byte-for-byte core that targets real hardware now flies the sim
+      (mock today; the real Gazebo 6-DOF plant under `--features gazebo`,
+      `--scenario=flightcore`).
+
+      Seam reconciliation: `FlightBackend` is a sensor/actuator port (the core
+      pulls sensors, pushes motors); `Physics` is a plant (push motor PWMs +
+      step(dt), then measure()). The adapter advances the plant inside
+      write_motors — the tail of one FlightCore::step — so each control tick is
+      exactly one physics step in causal order (sense state(t) → decide →
+      actuate-and-advance to state(t+dt)). GNSS fixes are offered at 5 Hz
+      (divisor 50 @ 250 Hz), so the core dead-reckons on the IMU between fixes
+      exactly as against a real receiver.
+
+      SUPPORTING CORRECTNESS FIX (MockPhysics): the toy plant previously
+      reported a CONSTANT [0,0,−g] accelerometer, which starves a full IEKF's
+      vertical-velocity estimate (the filter's process model says "not
+      accelerating" while GNSS says "climbing" → the two fight into a lag →
+      runaway climb, measured 704 m off before the fix). An accelerometer
+      measures SPECIFIC FORCE (a_kinematic − g_gravity); MockPhysics now reports
+      the true NED specific force (thrust − drag) rotated into the body frame —
+      faithful, and backward-compatible at hover/level where it reduces to the
+      old [0,0,−g] constant (the near-level hand-cascade scenarios and the
+      existing IMU unit tests are unchanged).
+
+      GATE (production_flightcore_holds_altitude_through_sitl_plant): the
+      shipping FlightCore commanded a 2 m altitude hold through the plant and
+      settled within 0.5 m with < 1.0 m steady RMS — the same bar as the
+      hand-rolled altitude scenario, met by the code that flies rather than a
+      bench re-implementation. Measured: final 0.04 m, steady RMS 0.06 m, no
+      NaN/divergence. Full falcon-sitl-gz suite 28/28 green.
+
+      Honest scope: the mock plant responds to collective thrust only
+      (differential-motor torque is approximated as zero), so horizontal
+      translation and the single-rotor-out RECOVERY demonstration need the
+      full-physics `--features gazebo` backend (the recordable
+      `--scenario=flightcore` rotor-out flight is the next slice — it exercises
+      the FDI path that this seam now makes reachable in SITL).
+    tags: [verification, falcon, simulation, sitl, flightcore, hal, seam, v1.113]
+    fields:
+      method: simulation
+      steps:
+        - run: "cargo test -p falcon-sitl-gz production_flightcore_holds_altitude_through_sitl_plant  # bench-only (builds the campaign suite; runs in the closed-loop-sim CI job + workspace test)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HAL-P01

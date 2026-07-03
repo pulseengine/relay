@@ -18,9 +18,12 @@
 //!           `--scenario=open-loop-climb`.
 
 mod campaign;
+mod flightcore;
 mod pace;
 mod physics;
 
+use falcon_core::FlightCore;
+use flightcore::SitlBackend;
 use physics::{GazeboPhysics, MockPhysics, Physics};
 use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
 use relay_iekf::{Iekf, Imu as IekfImu, NavState};
@@ -188,6 +191,7 @@ fn run_scenario(
         "arming-ungated" => run_arming_check(physics, duration_s, false),
         "geo-hover" => run_geo_hover(physics, duration_s, evidence),
         "mission" => run_mission(physics, duration_s, evidence),
+        "flightcore" => run_flightcore(physics, 2.0, duration_s, evidence),
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -1223,6 +1227,111 @@ fn run_alt_only_hover(
     final_dist < 0.5 && rms_steady < 1.0
 }
 
+/// v1.113 — **FlightCore-in-the-loop**. Flies the PRODUCTION
+/// [`falcon_core::FlightCore`] (the verified IEKF → geometric-SE(3) → ADRC →
+/// mixer cascade, with the single-rotor-out FDI + degraded-allocator recovery)
+/// through the SITL plant via the [`SitlBackend`] adapter — instead of the
+/// hand-rolled cascade every other scenario re-implements. The sim now exercises
+/// the code that SHIPS, not a parallel copy of it.
+///
+/// Commands an altitude hold at `target_alt_m` — the closed loop the mock plant
+/// can demonstrate (it responds to collective thrust; differential-motor torque
+/// is approximated as zero, so horizontal translation and rotor-out recovery
+/// need the full-physics `--features gazebo` backend, the next slice). The same
+/// `FlightCore::step` drives both plants unchanged.
+///
+/// PASS = the true altitude settles within 0.5 m of the target with < 1.0 m
+/// steady RMS — the same bar as [`run_alt_only_hover`], but met by the *shipping*
+/// core rather than a bench re-implementation.
+fn run_flightcore(
+    physics: &mut dyn Physics,
+    target_alt_m: f32,
+    duration_s: f32,
+    mut evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    let dt = 0.004_f32; // 250 Hz — the falcon-quad control-loop rate.
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    // Capture these before the adapter borrows the plant for the whole run.
+    let name = physics.name();
+    let pace_real_time = physics.counters().is_some();
+    // Mock plant hovers at ~0.49 (THRUST_SCALE 20 m/s² vs g 9.81); the gz body
+    // needs ~0.72. The altitude integral trims the residual either way.
+    let hover_thrust = if name == "mock" { 0.49 } else { 0.72 };
+
+    let mut core = FlightCore::new(hover_thrust, 1.0 / dt);
+    core.set_altitude(-target_alt_m); // NED z: negative = up.
+
+    let mut peak_dist_err = 0.0_f32;
+    let mut min_dist_seen = f32::INFINITY;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0usize;
+    let steady_start_t = (duration_s - 5.0).max(0.0);
+    let mut last_true = [0.0_f32; 3];
+
+    let started_at = Instant::now();
+    // The adapter owns the plant for the whole run (its 5 Hz GNSS-divisor tick
+    // counter must persist across steps — reconstructing it per tick would
+    // suppress every fix). GNSS divisor 50 @ 250 Hz = 5 Hz fixes.
+    {
+        let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
+        for step in 0..n {
+            let tick_start = Instant::now();
+            let t = step as f32 * dt;
+
+            core.step(&mut backend); // ← one PRODUCTION control tick + plant step
+            last_true = backend.last_true_pos();
+
+            let alt_err = -target_alt_m - last_true[2]; // NED z error
+            let dist = alt_err.abs();
+            if dist > peak_dist_err {
+                peak_dist_err = dist;
+            }
+            if dist < min_dist_seen {
+                min_dist_seen = dist;
+            }
+            if t >= steady_start_t {
+                sum_sq_steady += dist * dist;
+                steady_count += 1;
+            }
+            if let Some(ref mut e) = evidence {
+                let (accel, gyro) = backend.last_imu();
+                e.write_tick(step, t, last_true, accel, gyro, backend.last_motors(), None);
+            }
+            if pace_real_time {
+                let used = tick_start.elapsed();
+                if used < tick_period {
+                    std::thread::sleep(tick_period - used);
+                }
+            }
+        }
+    } // backend dropped — the plant borrow is released for the verdict below.
+
+    let wall = started_at.elapsed();
+    let final_dist = (-target_alt_m - last_true[2]).abs();
+    let rms_steady = if steady_count > 0 {
+        (sum_sq_steady / steady_count as f32).sqrt()
+    } else {
+        f32::NAN
+    };
+    let counters = physics.counters();
+    let est = core.state();
+    println!(
+        "  verdict: backend={} scenario=flightcore steps={} target={:.1}m final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m est_z={:.2}m wall={:.2}s",
+        name, n, target_alt_m, final_dist, peak_dist_err, rms_steady, est.p[2], wall.as_secs_f32(),
+    );
+    if let Some((imu_recv, navsat_recv, motor_send)) = counters {
+        println!(
+            "  counters: imu_recv={imu_recv} navsat_recv={navsat_recv} motor_send={motor_send}",
+        );
+    }
+    if let Some(ref mut e) = evidence {
+        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
+                              min_dist_seen, wall.as_secs_f32(), counters);
+    }
+    final_dist < 0.5 && rms_steady < 1.0
+}
+
 /// v0.19.4 — closed-loop hover. Mirrors `falcon-sitl-hover`'s
 /// `run_mission` cascade pattern, but inputs come from the bridge
 /// (gz IMU + NavSat) and outputs feed the bridge's motor publish.
@@ -1780,6 +1889,30 @@ mod tests {
             assert!(p.omega[i].is_finite(), "omega[{i}] = {}", p.omega[i]);
             assert!(p.v_ned[i].is_finite(), "v_ned[{i}] = {}", p.v_ned[i]);
         }
+    }
+
+    /// v1.113 — the PRODUCTION `falcon_core::FlightCore` (the verified
+    /// IEKF → geo → ADRC → mixer cascade that ships) holds altitude when flown
+    /// through the SITL plant via the `SitlBackend` adapter. This is the
+    /// orphan-elimination gate: the sim exercises the shipping core, not a
+    /// bench re-implementation of it. Same PASS bar as the hand-rolled
+    /// altitude scenarios (settles < 0.5 m, steady RMS < 1.0 m).
+    #[test]
+    fn production_flightcore_holds_altitude_through_sitl_plant() {
+        let mut p = MockPhysics::at_rest();
+        let ok = run_flightcore(&mut p, 2.0, 25.0, None);
+        assert!(ok, "production FlightCore failed to hold 2 m altitude on the SITL plant");
+        // The true state stayed finite (no divergence / NaN escape).
+        for i in 0..3 {
+            assert!(p.p_ned[i].is_finite(), "p_ned[{i}] = {}", p.p_ned[i]);
+            assert!(p.v_ned[i].is_finite(), "v_ned[{i}] = {}", p.v_ned[i]);
+        }
+        // Settled near the 2 m (NED z = −2) target, not drifted off.
+        assert!(
+            (p.p_ned[2] + 2.0).abs() < 0.5,
+            "final NED z = {} (want ≈ −2)",
+            p.p_ned[2]
+        );
     }
 
     /// v0.19.0 — when --evidence-dir is set, the runner produces two
