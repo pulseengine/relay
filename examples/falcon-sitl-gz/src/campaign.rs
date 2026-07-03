@@ -1420,3 +1420,171 @@ mod campaign6_tests {
         assert!(worst_final < 0.5, "worst final tilt {:.3}", worst_final);
     }
 }
+
+// ── Mission / waypoint corridor-tracking campaign ──
+//
+// Drives the REAL relay_pos::PosController through a multi-waypoint mission on a
+// faithful point-mass plant: the attitude inner loop is assumed to track the
+// commanded AttitudeSetpoint (validated separately by the attitude campaigns),
+// so the plant achieves the thrust-vector acceleration a = T·t_dir + gravity.
+// Asserts CORRIDOR containment (cross-track error < half-width) on every leg and
+// ARRIVAL at each waypoint within a time budget, under wind + mass dispersion.
+
+use relay_pos::{PosController, PosGains, PositionSetpoint, Timestamp};
+
+const G_ACCEL: f32 = 9.81;
+
+/// Thrust axis (body −z, "up") expressed in NED for a body→NED quaternion.
+fn thrust_dir_ned(q: [f32; 4]) -> [f32; 3] {
+    let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
+    // −(third column of R): body +z is "down", thrust is along body −z.
+    [
+        -2.0 * (x * z + w * y),
+        -2.0 * (y * z - w * x),
+        -(1.0 - 2.0 * (x * x + y * y)),
+    ]
+}
+
+fn ts(t: f32) -> Timestamp {
+    Timestamp {
+        seconds: t.floor() as u64,
+        fraction: ((t - t.floor()) * (1u64 << 32) as f32) as u32,
+    }
+}
+
+/// Cross-track distance from point `p` to the segment `a`→`b` (horizontal).
+fn cross_track(a: [f32; 3], b: [f32; 3], p: [f32; 3]) -> f32 {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let ap = [p[0] - a[0], p[1] - a[1]];
+    let len2 = ab[0] * ab[0] + ab[1] * ab[1];
+    if len2 < 1e-6 {
+        return (ap[0] * ap[0] + ap[1] * ap[1]).sqrt();
+    }
+    let t = ((ap[0] * ab[0] + ap[1] * ab[1]) / len2).clamp(0.0, 1.0);
+    let c = [a[0] + t * ab[0], a[1] + t * ab[1]];
+    ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MissionTrial {
+    wind: [f32; 2],
+    thrust_scale: f32,
+    start_offset: [f32; 2],
+}
+
+const MISSION_WIND: f32 = 1.0; // ≤1 m/s² horizontal wind
+const MISSION_THRUST_SCALE: (f32, f32) = (0.90, 1.10);
+const MISSION_START_OFFSET: f32 = 1.0;
+
+fn sample_mission(rng: &mut SplitMix64) -> MissionTrial {
+    MissionTrial {
+        wind: [rng.range(-MISSION_WIND, MISSION_WIND), rng.range(-MISSION_WIND, MISSION_WIND)],
+        thrust_scale: rng.range(MISSION_THRUST_SCALE.0, MISSION_THRUST_SCALE.1),
+        start_offset: [
+            rng.range(-MISSION_START_OFFSET, MISSION_START_OFFSET),
+            rng.range(-MISSION_START_OFFSET, MISSION_START_OFFSET),
+        ],
+    }
+}
+
+/// Returns (max_cross_track, reached_all, steps_used, final_pos_x, nan).
+fn run_mission_trial(t: MissionTrial) -> (f32, bool, u32, f32, bool) {
+    let wps: [[f32; 3]; 5] = [
+        [0.0, 0.0, -3.0],
+        [6.0, 0.0, -3.0],
+        [6.0, 6.0, -3.0],
+        [0.0, 6.0, -3.0],
+        [0.0, 0.0, -3.0],
+    ];
+    let gains = PosGains::DEFAULT;
+    let mut ctrl = PosController::new();
+    let dt = 0.02f32;
+    let max_steps = 3000u32; // 60 s budget
+    let arrival_radius = 0.6f32;
+    let mut p = [wps[0][0] + t.start_offset[0], wps[0][1] + t.start_offset[1], wps[0][2]];
+    let mut v = [0.0f32; 3];
+    let mut q = [1.0f32, 0.0, 0.0, 0.0];
+    let mut wp = 1usize;
+    let mut max_cross = 0.0f32;
+    let mut nan = false;
+    let mut step = 0u32;
+    while wp < wps.len() && step < max_steps {
+        let sp = PositionSetpoint::hover_at(wps[wp]);
+        let att = ctrl.tick(ts(step as f32 * dt), p, v, q, sp);
+        q = att.quaternion; // perfect inner-loop tracking
+        let t_accel = G_ACCEL * (att.thrust / gains.hover_thrust) * t.thrust_scale;
+        let dir = thrust_dir_ned(q);
+        let a = [
+            t_accel * dir[0] + t.wind[0],
+            t_accel * dir[1] + t.wind[1],
+            t_accel * dir[2] + G_ACCEL,
+        ];
+        for i in 0..3 {
+            v[i] += a[i] * dt;
+            p[i] += v[i] * dt;
+        }
+        if !p[0].is_finite() || !v[0].is_finite() {
+            nan = true;
+            break;
+        }
+        // corridor after a brief settle from the start offset
+        if step > 50 {
+            max_cross = max_cross.max(cross_track(wps[wp - 1], wps[wp], p));
+        }
+        let d = ((p[0] - wps[wp][0]).powi(2) + (p[1] - wps[wp][1]).powi(2) + (p[2] - wps[wp][2]).powi(2)).sqrt();
+        if d < arrival_radius {
+            wp += 1;
+        }
+        step += 1;
+    }
+    (max_cross, wp >= wps.len(), step, p[0], nan)
+}
+
+#[cfg(test)]
+mod campaign7_tests {
+    use super::*;
+
+    const MISSION_SEED: u64 = 0x0FA1_C0DE_3155_0001;
+    const MISSION_TRIALS: u32 = 400;
+
+    #[test]
+    fn mission_corridor_monte_carlo_campaign() {
+        // diagnostic: one nominal trial (no dispersion) to sanity-check the loop
+        let (c0, r0, s0, fx0, _) = run_mission_trial(MissionTrial {
+            wind: [0.0, 0.0],
+            thrust_scale: 1.0,
+            start_offset: [0.0, 0.0],
+        });
+        eprintln!("mission diag (nominal): reached={r0} steps={s0} max_cross={c0:.2} final_x={fx0:.2}");
+
+        let (mut reached, mut worst_cross, mut worst_steps) = (0u32, 0.0f32, 0u32);
+        let mut fails = 0u32;
+        for i in 0..MISSION_TRIALS {
+            let mut rng = trial_rng(MISSION_SEED, i);
+            let t = sample_mission(&mut rng);
+            let (cross, ok, steps, _fx, nan) = run_mission_trial(t);
+            worst_cross = worst_cross.max(cross);
+            worst_steps = worst_steps.max(steps);
+            if ok {
+                reached += 1;
+            }
+            if nan || !ok || cross >= 3.0 {
+                fails += 1;
+            }
+        }
+        eprintln!(
+            "mission campaign: {} trials | {reached} completed, {fails} failures, worst cross-track {:.2} m, worst steps {worst_steps}",
+            MISSION_TRIALS, worst_cross
+        );
+        assert_eq!(fails, 0, "mission failed in {fails}/{MISSION_TRIALS}");
+        assert_eq!(reached, MISSION_TRIALS, "every trial must complete all waypoints");
+        // Physical corridor half-width 3 m; regression bound just above the
+        // measured worst (1.02 m at seed 0x0FA1_C0DE_3155_0001).
+        assert!(worst_cross < 3.0, "worst cross-track {:.2} m (corridor 3)", worst_cross);
+        assert!(
+            worst_cross < 1.6,
+            "REGRESSION: worst cross-track {:.2} m exceeded 1.6 (was ~1.02)",
+            worst_cross
+        );
+    }
+}

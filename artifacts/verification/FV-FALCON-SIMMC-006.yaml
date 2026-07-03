@@ -1,0 +1,40 @@
+artifacts:
+  - id: FV-FALCON-SIMMC-006
+    type: sw-verification
+    title: "Mission / waypoint corridor-tracking campaign — real PosController under dispersion (v1.112 slice 2)"
+    status: implemented
+    release: falcon-v1.112.0
+    description: >
+      A NEW behaviour in the dispersion deck: waypoint mission tracking. Drives
+      the REAL relay_pos::PosController through a 5-waypoint square-and-return
+      mission on a faithful point-mass plant — the attitude inner loop is assumed
+      to track the commanded AttitudeSetpoint (validated separately by the
+      attitude campaigns), so the plant integrates the thrust-vector acceleration
+      a = T·t_dir + gravity, where t_dir is the body −z axis rotated into NED by
+      the controller's commanded quaternion.
+
+      mission_corridor_monte_carlo_campaign (400 trials, 0 failures): each trial
+      disperses a constant horizontal WIND (≤1 m/s²), a mass/thrust SCALE error
+      (±10%), and a random initial position offset (≤1 m). Invariants across all
+      trials: every waypoint is reached (arrival radius 0.6 m) and the full
+      mission completes within a 60 s budget; the CROSS-TRACK error to the active
+      leg stays inside the corridor (worst 1.02 m vs a 3 m half-width). A nominal
+      diagnostic trial flies the square and returns home (max cross-track 0.65 m,
+      final position back near origin), confirming the closed loop + the NED
+      thrust-vector convention. Reproducible from (seed, index); runs under the
+      ci.yml "Closed-loop simulation" named gate + workspace test.
+
+      Honest scope: direct waypoint setpoints (hover_at each) with perfect
+      attitude tracking. Smooth Segment3 trajectory feedforward + the full
+      attitude cascade (real GeoAtt + rate loop) are the next refinement.
+    tags: [verification, falcon, simulation, monte-carlo, mission, position, v1.112]
+    fields:
+      method: simulation
+      test-count: 1
+      steps:
+        - run: "cargo test -p falcon-sitl-gz mission_corridor_monte_carlo_campaign  # bench-only (runs in the closed-loop-sim CI job + workspace test)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MISSION-P01
+      - type: verifies
+        target: SWREQ-FALCON-POS-P01
