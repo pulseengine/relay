@@ -1,0 +1,46 @@
+artifacts:
+  - id: FV-FALCON-SIMMC-004
+    type: sw-verification
+    title: "Maneuvering-truth estimator + GNSS-spoof-injection campaigns (v1.112 slice 1)"
+    status: implemented
+    release: falcon-v1.112.0
+    description: >
+      Two stochastic estimator campaigns extending the static-hover one
+      (FV-FALCON-SIMMC-003) — both drive the real relay_iekf::Iekf. Part of the
+      v1.112 Comprehensive Simulation Validation release.
+
+      1. maneuvering_estimator_monte_carlo_campaign (500 trials, 0 failures):
+         the truth ACCELERATES on a random horizontal sinusoidal path (amp
+         0.5-2.5 m/s², freq 0.5-1.0 rad/s) with a random unmodelled accel scale
+         error (≤5%) + dispersed accel/GNSS noise. Asserts the IEKF stays
+         consistent UNDER MOTION via nees_velocity (the observability case the
+         v0.21 filter failed) — worst position error 0.91 m, worst velocity-NEES
+         11.2, worst tilt 0.064 rad. KEY FIX captured: gravity tilt-aiding must
+         be OMITTED under motion (specific force ≠ gravity; aiding reads the
+         maneuver accel as a tilt and diverges the filter — 476/500 failures
+         before the fix).
+
+      2. gnss_spoof_monte_carlo_campaign (400 trials, two-sided): validates the
+         SpoofMonitor (per-axis CUSUM on the position innovation z − est.p).
+         LEGIT trials (200) feed zero-mean noisy GNSS — the monitor must NOT
+         false-alarm; SPOOF trials (200) walk the GNSS off with a bias 4-8× the
+         noise σ — the monitor must DETECT + latch (worst latency 5 fixes).
+         The monitor drift is scaled to the GNSS noise (2σ); a spoof slower than
+         the noise floor is physically undetectable, so the envelope keeps the
+         spoof above it (three-way discipline: real bug vs physics).
+
+      Both reproducible from (seed, index); regression bounds sit just above the
+      measured worst. Run under the ci.yml "Closed-loop simulation" named gate +
+      workspace test; rivet steps bench-only.
+    tags: [verification, falcon, simulation, monte-carlo, estimator, spoof, iekf, v1.112]
+    fields:
+      method: simulation
+      test-count: 2
+      steps:
+        - run: "cargo test -p falcon-sitl-gz maneuvering_estimator_monte_carlo_campaign  # bench-only (heavy IEKF sim; runs in the closed-loop-sim CI job + workspace test)"
+        - run: "cargo test -p falcon-sitl-gz gnss_spoof_monte_carlo_campaign  # bench-only"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-IEKF-P01
+      - type: verifies
+        target: SWREQ-FALCON-SPOOF-P01

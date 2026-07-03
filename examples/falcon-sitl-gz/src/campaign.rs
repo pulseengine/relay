@@ -979,3 +979,612 @@ mod campaign3_tests {
         );
     }
 }
+
+// ── Maneuvering-truth estimator campaign (IEKF under motion + noise) ──
+//
+// The static-hover estimator campaign isolates noise rejection; this one adds
+// a horizontal MANEUVER (the truth accelerates on a random sinusoidal path)
+// with an unmodelled accelerometer scale error, and checks the IEKF stays
+// consistent UNDER MOTION via nees_velocity (the harder observability case the
+// v0.21 filter failed). Genuinely stochastic (noise + random maneuver/scale).
+
+#[derive(Clone, Copy, Debug)]
+struct ManeuverTrial {
+    ax: f32,
+    ay: f32,
+    fx: f32,
+    fy: f32,
+    scale_err: f32,
+    accel_sigma: f32,
+    gnss_sigma: f32,
+}
+
+const MAN_ACCEL_AMP: (f32, f32) = (0.5, 2.5); // m/s² (bounded position swing at these freqs)
+const MAN_FREQ: (f32, f32) = (0.5, 1.0); // rad/s
+const MAN_SCALE_ERR: (f32, f32) = (0.0, 0.05); // unmodelled accel scale
+const MAN_ACCEL_SIGMA: (f32, f32) = (0.01, 0.10);
+const MAN_GNSS_SIGMA: (f32, f32) = (0.05, 0.30);
+
+fn sample_maneuver(rng: &mut SplitMix64) -> ManeuverTrial {
+    ManeuverTrial {
+        ax: rng.range(MAN_ACCEL_AMP.0, MAN_ACCEL_AMP.1),
+        ay: rng.range(MAN_ACCEL_AMP.0, MAN_ACCEL_AMP.1),
+        fx: rng.range(MAN_FREQ.0, MAN_FREQ.1),
+        fy: rng.range(MAN_FREQ.0, MAN_FREQ.1),
+        scale_err: rng.range(MAN_SCALE_ERR.0, MAN_SCALE_ERR.1),
+        accel_sigma: rng.range(MAN_ACCEL_SIGMA.0, MAN_ACCEL_SIGMA.1),
+        gnss_sigma: rng.range(MAN_GNSS_SIGMA.0, MAN_GNSS_SIGMA.1),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ManeuverOutcome {
+    peak_pos_err: f32,
+    peak_vel_nees: f32,
+    peak_tilt: f32,
+    nan: bool,
+}
+
+fn run_maneuver_trial(t: ManeuverTrial, rng: &mut SplitMix64) -> ManeuverOutcome {
+    use relay_iekf::{Iekf, Imu as IekfImu, NavState};
+    let dt = 0.01f32;
+    let steps = 2500u32;
+    let mut f = Iekf::new(NavState::identity());
+    let mut o = ManeuverOutcome::default();
+    let (mut tp, mut tv) = ([0.0f32; 3], [0.0f32; 3]);
+    for step in 0..steps {
+        let time = step as f32 * dt;
+        let a_true = [t.ax * (t.fx * time).sin(), t.ay * (t.fy * time).cos(), 0.0];
+        for i in 0..3 {
+            tp[i] += tv[i] * dt + 0.5 * a_true[i] * dt * dt;
+            tv[i] += a_true[i] * dt;
+        }
+        let accel = [
+            (1.0 + t.scale_err) * a_true[0] + gaussian(rng) * t.accel_sigma,
+            (1.0 + t.scale_err) * a_true[1] + gaussian(rng) * t.accel_sigma,
+            -9.81 + gaussian(rng) * t.accel_sigma,
+        ];
+        f.propagate(IekfImu { gyro: [0.0; 3], accel }, dt);
+        // NO gravity aiding under motion: specific force != gravity (aiding here
+        // would read the maneuver accel as a tilt). gyro=0 keeps attitude level.
+        if step % 20 == 0 {
+            let z = [
+                tp[0] + gaussian(rng) * t.gnss_sigma,
+                tp[1] + gaussian(rng) * t.gnss_sigma,
+                tp[2] + gaussian(rng) * t.gnss_sigma,
+            ];
+            let _ = f.update_position(z, (t.gnss_sigma * t.gnss_sigma).max(0.01));
+        }
+        let s = f.state();
+        if step > 800 {
+            let perr = ((s.p[0] - tp[0]).powi(2)
+                + (s.p[1] - tp[1]).powi(2)
+                + (s.p[2] - tp[2]).powi(2))
+            .sqrt();
+            o.peak_pos_err = o.peak_pos_err.max(perr);
+            o.peak_tilt = o.peak_tilt.max(s.tilt_rad());
+            let nees = f.nees_velocity(tv);
+            if nees.is_finite() {
+                o.peak_vel_nees = o.peak_vel_nees.max(nees);
+            }
+        }
+        if !s.p[0].is_finite() || !s.q[0].is_finite() {
+            o.nan = true;
+        }
+    }
+    o
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ManeuverReport {
+    pub trials: u32,
+    pub failures: u32,
+    pub worst_pos_err: f32,
+    pub worst_vel_nees: f32,
+    pub worst_tilt: f32,
+    pub failing: Vec<(u32, String)>,
+}
+
+pub fn run_maneuver_campaign(n: u32, campaign_seed: u64) -> ManeuverReport {
+    let mut rep = ManeuverReport {
+        trials: n,
+        ..Default::default()
+    };
+    for i in 0..n {
+        let mut rng = trial_rng(campaign_seed, i);
+        let t = sample_maneuver(&mut rng);
+        let o = run_maneuver_trial(t, &mut rng);
+        rep.worst_pos_err = rep.worst_pos_err.max(o.peak_pos_err);
+        rep.worst_vel_nees = rep.worst_vel_nees.max(o.peak_vel_nees);
+        rep.worst_tilt = rep.worst_tilt.max(o.peak_tilt);
+        let mut reason = String::new();
+        if o.nan {
+            reason = "NaN".into();
+        } else if o.peak_pos_err >= 4.0 {
+            reason = format!("pos err {:.2} m", o.peak_pos_err);
+        } else if o.peak_tilt >= 0.15 {
+            reason = format!("tilt {:.3} rad", o.peak_tilt);
+        } else if o.peak_vel_nees >= 60.0 {
+            reason = format!("vel-NEES {:.1}", o.peak_vel_nees);
+        }
+        if !reason.is_empty() {
+            rep.failures += 1;
+            if rep.failing.len() < 20 {
+                rep.failing.push((i, format!("{t:?}: {reason}")));
+            }
+        }
+    }
+    rep
+}
+
+#[cfg(test)]
+mod campaign4_tests {
+    use super::*;
+
+    const MAN_SEED: u64 = 0x0FA1_C0DE_3A17_0001;
+    const MAN_TRIALS: u32 = 500;
+
+    #[test]
+    fn maneuvering_estimator_monte_carlo_campaign() {
+        let rep = run_maneuver_campaign(MAN_TRIALS, MAN_SEED);
+        eprintln!(
+            "maneuver campaign: {} trials, {} failures | worst pos-err {:.3} m, worst vel-NEES {:.2}, worst tilt {:.4} rad",
+            rep.trials, rep.failures, rep.worst_pos_err, rep.worst_vel_nees, rep.worst_tilt
+        );
+        assert_eq!(
+            rep.failures, 0,
+            "maneuvering estimator failed in {}/{}; first: {:#?}",
+            rep.failures, rep.trials, rep.failing
+        );
+        // Regression bounds just above the measured worst (seed 0x0FA1_C0DE_3A17_0001:
+        // pos-err 0.91 m, vel-NEES 11.2, tilt 0.064 rad).
+        assert!(rep.worst_pos_err < 2.0, "REGRESSION: worst pos err {:.2} m (was ~0.91)", rep.worst_pos_err);
+        assert!(rep.worst_tilt < 0.12, "REGRESSION: worst tilt {:.3} rad (was ~0.064)", rep.worst_tilt);
+        assert!(rep.worst_vel_nees < 30.0, "REGRESSION: worst vel-NEES {:.1} (was ~11.2)", rep.worst_vel_nees);
+    }
+}
+
+// ── GNSS-spoof-injection campaign (validates the SpoofMonitor) ──
+//
+// Two-sided (like the fail-safe campaigns): LEGIT trials feed the SpoofMonitor
+// the real zero-mean-noise GNSS innovation — it must NOT false-alarm; SPOOF
+// trials walk the GNSS measurement off with a consistent bias FASTER than the
+// noise floor — the monitor must DETECT (and latch) within a budget. Truth is
+// at the origin (no convergence transient to bias the CUSUM), the monitor drift
+// is scaled to the GNSS noise (2σ — a spoof slower than the noise is physically
+// undetectable, so the envelope keeps the spoof above it), and the innovation
+// fed is the position residual z − est.p each GNSS fix (the production wiring).
+
+#[derive(Clone, Copy, Debug)]
+struct SpoofTrial {
+    spoof: bool,
+    onset_step: u32,
+    spoof_mult: f32, // spoof bias per fix, as a MULTIPLE of the GNSS σ
+    gnss_sigma: f32,
+}
+
+const SPOOF_MULT: (f32, f32) = (4.0, 8.0); // spoof rate = mult × σ (above the 2σ drift)
+const SPOOF_GNSS_SIGMA: (f32, f32) = (0.10, 0.50);
+const SPOOF_DETECT_BUDGET: u32 = 30; // GNSS fixes
+
+fn sample_spoof(rng: &mut SplitMix64, spoof: bool) -> SpoofTrial {
+    SpoofTrial {
+        spoof,
+        onset_step: 200 + (rng.next_u64() % 200) as u32, // 2–4 s in
+        spoof_mult: rng.range(SPOOF_MULT.0, SPOOF_MULT.1),
+        gnss_sigma: rng.range(SPOOF_GNSS_SIGMA.0, SPOOF_GNSS_SIGMA.1),
+    }
+}
+
+/// Returns (spoofed_flag, detect_latency_fixes) — latency from onset (u32::MAX
+/// if never detected).
+fn run_spoof_trial(t: SpoofTrial, rng: &mut SplitMix64) -> (bool, u32) {
+    use relay_iekf::{Iekf, Imu as IekfImu, SpoofMonitor};
+    let p_true = [0.0f32, 0.0, 0.0];
+    let dt = 0.01f32;
+    let steps = 1500u32;
+    let mut f = Iekf::level();
+    // Drift scaled to the noise: legit zero-mean noise stays below it; a
+    // sustained bias > drift accumulates.
+    let mut mon = SpoofMonitor::new(2.0, 2.0 * t.gnss_sigma);
+    let spoof_rate = t.spoof_mult * t.gnss_sigma; // m per fix
+    let mut detect_step: Option<u32> = None;
+    let accel_sigma = 0.05f32;
+    for step in 0..steps {
+        let imu = IekfImu {
+            gyro: [0.0; 3],
+            accel: [
+                gaussian(rng) * accel_sigma,
+                gaussian(rng) * accel_sigma,
+                -9.81 + gaussian(rng) * accel_sigma,
+            ],
+        };
+        f.propagate(imu, dt);
+        let _ = f.update_gravity(imu.accel, 0.01);
+        if step % 20 == 0 {
+            let offset = if t.spoof && step >= t.onset_step {
+                spoof_rate * ((step - t.onset_step) / 20) as f32
+            } else {
+                0.0
+            };
+            let z = [
+                p_true[0] + offset + gaussian(rng) * t.gnss_sigma,
+                p_true[1] + gaussian(rng) * t.gnss_sigma,
+                p_true[2] + gaussian(rng) * t.gnss_sigma,
+            ];
+            let s = f.state();
+            let innov = [z[0] - s.p[0], z[1] - s.p[1], z[2] - s.p[2]];
+            // Let the covariance settle a few fixes before arming the monitor.
+            if step >= 100 && mon.update(innov) && detect_step.is_none() {
+                detect_step = Some(step);
+            }
+            let _ = f.update_position(z, (t.gnss_sigma * t.gnss_sigma).max(0.01));
+        }
+    }
+    let latency = match detect_step {
+        Some(d) if d >= t.onset_step => (d - t.onset_step) / 20,
+        Some(_) => 0, // detected before onset ⇒ a false alarm on a spoof trial
+        None => u32::MAX,
+    };
+    (mon.spoofed(), latency)
+}
+
+#[cfg(test)]
+mod campaign5_tests {
+    use super::*;
+
+    const SPOOF_SEED: u64 = 0x0FA1_C0DE_5900_0001;
+    const SPOOF_TRIALS: u32 = 400;
+
+    #[test]
+    fn gnss_spoof_monte_carlo_campaign() {
+        let (mut detected, mut clean, mut worst_latency) = (0u32, 0u32, 0u32);
+        for i in 0..SPOOF_TRIALS {
+            let spoof = i % 2 == 0;
+            let mut rng = trial_rng(SPOOF_SEED, i);
+            let t = sample_spoof(&mut rng, spoof);
+            let (spoofed, latency) = run_spoof_trial(t, &mut rng);
+            if spoof {
+                assert!(
+                    spoofed,
+                    "trial {i}: spoof (rate {:.2}×σ) NOT detected",
+                    t.spoof_mult
+                );
+                assert!(
+                    latency <= SPOOF_DETECT_BUDGET,
+                    "trial {i}: spoof detected in {latency} fixes > budget {SPOOF_DETECT_BUDGET}"
+                );
+                worst_latency = worst_latency.max(latency);
+                detected += 1;
+            } else {
+                assert!(!spoofed, "trial {i}: FALSE spoof alarm on legit noisy GNSS");
+                clean += 1;
+            }
+        }
+        eprintln!(
+            "spoof campaign: {} trials | {detected} detected (worst latency {worst_latency} fixes), {clean} no-false-alarm",
+            SPOOF_TRIALS
+        );
+        assert!(detected > 150 && clean > 150, "both regimes well-sampled ({detected}/{clean})");
+    }
+}
+
+// ── Motor-out recovery UNDER DISPERSION (actuator noise + wind) ──
+//
+// The motor_out campaign above is a clean-plant deterministic sweep; this adds
+// the stochastic dispersion a real vehicle sees during the recovery — per-rotor
+// ACTUATOR noise (thrust scatter) + a constant WIND-disturbance torque with
+// per-step gusts — and asserts the FDI-isolate → reconfigure → settle chain
+// still holds. Same physics as run_motor_out_trial with the noise injected.
+
+#[derive(Clone, Copy, Debug)]
+struct MotorOutDispTrial {
+    base: MotorOutTrial,
+    act_sigma: f32,      // per-rotor multiplicative thrust noise
+    wind_torque: [f32; 3], // constant disturbance torque
+    gust_sigma: f32,     // per-step gust torque
+}
+
+const MO_ACT_SIGMA: (f32, f32) = (0.0, 0.05); // ≤5% actuator scatter
+const MO_WIND_TORQUE: f32 = 0.03; // constant disturbance amplitude
+const MO_GUST_SIGMA: (f32, f32) = (0.0, 0.02);
+
+fn sample_motor_out_disp(rng: &mut SplitMix64) -> MotorOutDispTrial {
+    let base = sample_motor_out(rng);
+    MotorOutDispTrial {
+        base,
+        act_sigma: rng.range(MO_ACT_SIGMA.0, MO_ACT_SIGMA.1),
+        wind_torque: [
+            rng.range(-MO_WIND_TORQUE, MO_WIND_TORQUE),
+            rng.range(-MO_WIND_TORQUE, MO_WIND_TORQUE),
+            rng.range(-MO_WIND_TORQUE, MO_WIND_TORQUE),
+        ],
+        gust_sigma: rng.range(MO_GUST_SIGMA.0, MO_GUST_SIGMA.1),
+    }
+}
+
+fn run_motor_out_disp_trial(t: MotorOutDispTrial, rng: &mut SplitMix64) -> MotorOutOutcome {
+    let ctrl = GeoAtt::new(GeoGains::FALCON_QUAD);
+    let j = GeoGains::FALCON_QUAD.j;
+    let b3_d = [0.0f32, 0.0, 1.0];
+    let level = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut r = tilt_rotation(t.base.roll0, t.base.pitch0);
+    let mut omega = t.base.omega0;
+    let mut fdi = RotorFaultDetector::new(0.5, 0.1);
+    let mut isolated: Option<usize> = None;
+    let mut detect_step: Option<u32> = None;
+    let mut peak_tilt_after = 0.0f32;
+    let mut mix_ok = true;
+    let mut nan = false;
+
+    for step in 0..4000u32 {
+        let (_torque, motors_cmd) = if let Some(f) = isolated {
+            let tq = ctrl.moment_reduced(&r, omega, b3_d);
+            (tq, QuadMixer::new().mix_rotor_out(f, tq, HOVER, FLOOR))
+        } else {
+            let tq = ctrl.moment(&r, omega, &level);
+            (tq, QuadMixer::new().mix_thrust_floor(tq, HOVER, FLOOR))
+        };
+        if let Some(f) = isolated {
+            if motors_cmd[f] != 0.0 {
+                mix_ok = false;
+            }
+            for (i, &v) in motors_cmd.iter().enumerate() {
+                if i != f && !(FLOOR - 1e-6..=1.0 + 1e-6).contains(&v) {
+                    mix_ok = false;
+                }
+            }
+        }
+        // Physics: failure + per-rotor ACTUATOR NOISE on the achieved thrust.
+        let mut motors_real = motors_cmd;
+        for m in motors_real.iter_mut() {
+            *m *= 1.0 + gaussian(rng) * t.act_sigma;
+        }
+        if step >= t.base.fail_step {
+            motors_real[t.base.failed_rotor] = 0.0;
+        }
+        if isolated.is_none() {
+            let mut resid = [0.0f32; 4];
+            for i in 0..4 {
+                resid[i] = (motors_cmd[i] - motors_real[i]).abs();
+            }
+            if let Some(f) = fdi.update(resid) {
+                isolated = Some(f);
+                detect_step = Some(step);
+            }
+        }
+        // Rigid-body update + WIND disturbance torque (constant + gust).
+        let bt = motors_to_torque_signs(motors_real);
+        let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+        let gyro = [
+            omega[1] * jo[2] - omega[2] * jo[1],
+            omega[2] * jo[0] - omega[0] * jo[2],
+            omega[0] * jo[1] - omega[1] * jo[0],
+        ];
+        for i in 0..3 {
+            let body_t = bt[i] * SCALE + t.wind_torque[i] + gaussian(rng) * t.gust_sigma;
+            omega[i] += DT * (body_t - gyro[i]) / j[i];
+        }
+        r = integ_rot(&r, omega, DT);
+        if !omega[0].is_finite() || !r[2][2].is_finite() {
+            nan = true;
+        }
+        if step > t.base.fail_step + 300 {
+            peak_tilt_after = peak_tilt_after.max(tilt_of(&r));
+        }
+    }
+    MotorOutOutcome {
+        isolated,
+        detect_latency_steps: match (detect_step, Some(t.base.fail_step)) {
+            (Some(d), Some(f)) if d >= f => d - f,
+            _ => u32::MAX,
+        },
+        peak_tilt_after,
+        final_tilt: tilt_of(&r),
+        mix_ok,
+        nan,
+    }
+}
+
+#[cfg(test)]
+mod campaign6_tests {
+    use super::*;
+
+    const MOD_SEED: u64 = 0x0FA1_C0DE_D157_0001;
+    const MOD_TRIALS: u32 = 1500;
+
+    #[test]
+    fn motor_out_dispersed_monte_carlo_campaign() {
+        let (mut fails, mut worst_peak, mut worst_final) = (0u32, 0.0f32, 0.0f32);
+        for i in 0..MOD_TRIALS {
+            let mut rng = trial_rng(MOD_SEED, i);
+            let t = sample_motor_out_disp(&mut rng);
+            let o = run_motor_out_disp_trial(t, &mut rng);
+            worst_peak = worst_peak.max(o.peak_tilt_after);
+            worst_final = worst_final.max(o.final_tilt);
+            let bad = o.nan
+                || o.isolated != Some(t.base.failed_rotor)
+                || !o.mix_ok
+                || o.peak_tilt_after >= 1.4
+                || o.final_tilt >= 0.5;
+            if bad {
+                fails += 1;
+            }
+        }
+        eprintln!(
+            "motor-out DISPERSED campaign: {} trials, {} failures | worst peak tilt {:.3} rad, worst final tilt {:.3} rad",
+            MOD_TRIALS, fails, worst_peak, worst_final
+        );
+        assert_eq!(fails, 0, "dispersed motor-out recovery failed in {fails}/{MOD_TRIALS}");
+        assert!(worst_peak < 1.4, "worst peak tilt {:.3}", worst_peak);
+        assert!(worst_final < 0.5, "worst final tilt {:.3}", worst_final);
+    }
+}
+
+// ── Mission / waypoint corridor-tracking campaign ──
+//
+// Drives the REAL relay_pos::PosController through a multi-waypoint mission on a
+// faithful point-mass plant: the attitude inner loop is assumed to track the
+// commanded AttitudeSetpoint (validated separately by the attitude campaigns),
+// so the plant achieves the thrust-vector acceleration a = T·t_dir + gravity.
+// Asserts CORRIDOR containment (cross-track error < half-width) on every leg and
+// ARRIVAL at each waypoint within a time budget, under wind + mass dispersion.
+
+use relay_pos::{PosController, PosGains, PositionSetpoint, Timestamp};
+
+const G_ACCEL: f32 = 9.81;
+
+/// Thrust axis (body −z, "up") expressed in NED for a body→NED quaternion.
+fn thrust_dir_ned(q: [f32; 4]) -> [f32; 3] {
+    let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
+    // −(third column of R): body +z is "down", thrust is along body −z.
+    [
+        -2.0 * (x * z + w * y),
+        -2.0 * (y * z - w * x),
+        -(1.0 - 2.0 * (x * x + y * y)),
+    ]
+}
+
+fn ts(t: f32) -> Timestamp {
+    Timestamp {
+        seconds: t.floor() as u64,
+        fraction: ((t - t.floor()) * (1u64 << 32) as f32) as u32,
+    }
+}
+
+/// Cross-track distance from point `p` to the segment `a`→`b` (horizontal).
+fn cross_track(a: [f32; 3], b: [f32; 3], p: [f32; 3]) -> f32 {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let ap = [p[0] - a[0], p[1] - a[1]];
+    let len2 = ab[0] * ab[0] + ab[1] * ab[1];
+    if len2 < 1e-6 {
+        return (ap[0] * ap[0] + ap[1] * ap[1]).sqrt();
+    }
+    let t = ((ap[0] * ab[0] + ap[1] * ab[1]) / len2).clamp(0.0, 1.0);
+    let c = [a[0] + t * ab[0], a[1] + t * ab[1]];
+    ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MissionTrial {
+    wind: [f32; 2],
+    thrust_scale: f32,
+    start_offset: [f32; 2],
+}
+
+const MISSION_WIND: f32 = 1.0; // ≤1 m/s² horizontal wind
+const MISSION_THRUST_SCALE: (f32, f32) = (0.90, 1.10);
+const MISSION_START_OFFSET: f32 = 1.0;
+
+fn sample_mission(rng: &mut SplitMix64) -> MissionTrial {
+    MissionTrial {
+        wind: [rng.range(-MISSION_WIND, MISSION_WIND), rng.range(-MISSION_WIND, MISSION_WIND)],
+        thrust_scale: rng.range(MISSION_THRUST_SCALE.0, MISSION_THRUST_SCALE.1),
+        start_offset: [
+            rng.range(-MISSION_START_OFFSET, MISSION_START_OFFSET),
+            rng.range(-MISSION_START_OFFSET, MISSION_START_OFFSET),
+        ],
+    }
+}
+
+/// Returns (max_cross_track, reached_all, steps_used, final_pos_x, nan).
+fn run_mission_trial(t: MissionTrial) -> (f32, bool, u32, f32, bool) {
+    let wps: [[f32; 3]; 5] = [
+        [0.0, 0.0, -3.0],
+        [6.0, 0.0, -3.0],
+        [6.0, 6.0, -3.0],
+        [0.0, 6.0, -3.0],
+        [0.0, 0.0, -3.0],
+    ];
+    let gains = PosGains::DEFAULT;
+    let mut ctrl = PosController::new();
+    let dt = 0.02f32;
+    let max_steps = 3000u32; // 60 s budget
+    let arrival_radius = 0.6f32;
+    let mut p = [wps[0][0] + t.start_offset[0], wps[0][1] + t.start_offset[1], wps[0][2]];
+    let mut v = [0.0f32; 3];
+    let mut q = [1.0f32, 0.0, 0.0, 0.0];
+    let mut wp = 1usize;
+    let mut max_cross = 0.0f32;
+    let mut nan = false;
+    let mut step = 0u32;
+    while wp < wps.len() && step < max_steps {
+        let sp = PositionSetpoint::hover_at(wps[wp]);
+        let att = ctrl.tick(ts(step as f32 * dt), p, v, q, sp);
+        q = att.quaternion; // perfect inner-loop tracking
+        let t_accel = G_ACCEL * (att.thrust / gains.hover_thrust) * t.thrust_scale;
+        let dir = thrust_dir_ned(q);
+        let a = [
+            t_accel * dir[0] + t.wind[0],
+            t_accel * dir[1] + t.wind[1],
+            t_accel * dir[2] + G_ACCEL,
+        ];
+        for i in 0..3 {
+            v[i] += a[i] * dt;
+            p[i] += v[i] * dt;
+        }
+        if !p[0].is_finite() || !v[0].is_finite() {
+            nan = true;
+            break;
+        }
+        // corridor after a brief settle from the start offset
+        if step > 50 {
+            max_cross = max_cross.max(cross_track(wps[wp - 1], wps[wp], p));
+        }
+        let d = ((p[0] - wps[wp][0]).powi(2) + (p[1] - wps[wp][1]).powi(2) + (p[2] - wps[wp][2]).powi(2)).sqrt();
+        if d < arrival_radius {
+            wp += 1;
+        }
+        step += 1;
+    }
+    (max_cross, wp >= wps.len(), step, p[0], nan)
+}
+
+#[cfg(test)]
+mod campaign7_tests {
+    use super::*;
+
+    const MISSION_SEED: u64 = 0x0FA1_C0DE_3155_0001;
+    const MISSION_TRIALS: u32 = 400;
+
+    #[test]
+    fn mission_corridor_monte_carlo_campaign() {
+        // diagnostic: one nominal trial (no dispersion) to sanity-check the loop
+        let (c0, r0, s0, fx0, _) = run_mission_trial(MissionTrial {
+            wind: [0.0, 0.0],
+            thrust_scale: 1.0,
+            start_offset: [0.0, 0.0],
+        });
+        eprintln!("mission diag (nominal): reached={r0} steps={s0} max_cross={c0:.2} final_x={fx0:.2}");
+
+        let (mut reached, mut worst_cross, mut worst_steps) = (0u32, 0.0f32, 0u32);
+        let mut fails = 0u32;
+        for i in 0..MISSION_TRIALS {
+            let mut rng = trial_rng(MISSION_SEED, i);
+            let t = sample_mission(&mut rng);
+            let (cross, ok, steps, _fx, nan) = run_mission_trial(t);
+            worst_cross = worst_cross.max(cross);
+            worst_steps = worst_steps.max(steps);
+            if ok {
+                reached += 1;
+            }
+            if nan || !ok || cross >= 3.0 {
+                fails += 1;
+            }
+        }
+        eprintln!(
+            "mission campaign: {} trials | {reached} completed, {fails} failures, worst cross-track {:.2} m, worst steps {worst_steps}",
+            MISSION_TRIALS, worst_cross
+        );
+        assert_eq!(fails, 0, "mission failed in {fails}/{MISSION_TRIALS}");
+        assert_eq!(reached, MISSION_TRIALS, "every trial must complete all waypoints");
+        // Physical corridor half-width 3 m; regression bound just above the
+        // measured worst (1.02 m at seed 0x0FA1_C0DE_3155_0001).
+        assert!(worst_cross < 3.0, "worst cross-track {:.2} m (corridor 3)", worst_cross);
+        assert!(
+            worst_cross < 1.6,
+            "REGRESSION: worst cross-track {:.2} m exceeded 1.6 (was ~1.02)",
+            worst_cross
+        );
+    }
+}
