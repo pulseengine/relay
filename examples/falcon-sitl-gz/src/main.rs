@@ -191,7 +191,12 @@ fn run_scenario(
         "arming-ungated" => run_arming_check(physics, duration_s, false),
         "geo-hover" => run_geo_hover(physics, duration_s, evidence),
         "mission" => run_mission(physics, duration_s, evidence),
-        "flightcore" => run_flightcore(physics, 2.0, duration_s, evidence),
+        "flightcore" => run_flightcore(physics, 2.0, duration_s, None, evidence),
+        "flightcore-rotorout" => {
+            // Hover, then lose rotor 0 at the midpoint; the production FDI must
+            // isolate it (RPM residual) and the loop keeps the vehicle aloft.
+            run_flightcore(physics, 2.0, duration_s, Some((0, duration_s * 0.5)), evidence)
+        }
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -1247,10 +1252,12 @@ fn run_flightcore(
     physics: &mut dyn Physics,
     target_alt_m: f32,
     duration_s: f32,
+    fail: Option<(usize, f32)>,
     mut evidence: Option<&mut EvidenceSink>,
 ) -> bool {
     let dt = 0.004_f32; // 250 Hz — the falcon-quad control-loop rate.
     let n = (duration_s / dt) as u32;
+    let fail_step = fail.map(|(r, ts)| (r, (ts / dt) as u32));
     let tick_period = Duration::from_secs_f32(dt);
     // Capture these before the adapter borrows the plant for the whole run.
     let name = physics.name();
@@ -1278,6 +1285,14 @@ fn run_flightcore(
         for step in 0..n {
             let tick_start = Instant::now();
             let t = step as f32 * dt;
+
+            // Stage the rotor failure at its scheduled step (the fault a real
+            // airframe suffers mid-flight).
+            if let Some((rotor, fs)) = fail_step {
+                if step == fs {
+                    backend.fail_rotor(rotor);
+                }
+            }
 
             core.step(&mut backend); // ← one PRODUCTION control tick + plant step
             last_true = backend.last_true_pos();
@@ -1316,9 +1331,13 @@ fn run_flightcore(
     };
     let counters = physics.counters();
     let est = core.state();
+    // Rotor-out mode: the production FDI must have ISOLATED the injected rotor
+    // (via the commanded-vs-achieved RPM residual carried across the SITL seam).
+    let isolated = core.failed_motor();
+    let scen = if fail.is_some() { "flightcore-rotorout" } else { "flightcore" };
     println!(
-        "  verdict: backend={} scenario=flightcore steps={} target={:.1}m final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m est_z={:.2}m wall={:.2}s",
-        name, n, target_alt_m, final_dist, peak_dist_err, rms_steady, est.p[2], wall.as_secs_f32(),
+        "  verdict: backend={} scenario={} steps={} target={:.1}m final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m est_z={:.2}m isolated={:?} wall={:.2}s",
+        name, scen, n, target_alt_m, final_dist, peak_dist_err, rms_steady, est.p[2], isolated, wall.as_secs_f32(),
     );
     if let Some((imu_recv, navsat_recv, motor_send)) = counters {
         println!(
@@ -1329,7 +1348,24 @@ fn run_flightcore(
         e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
                               min_dist_seen, wall.as_secs_f32(), counters);
     }
-    final_dist < 0.5 && rms_steady < 1.0
+    match fail {
+        // Rotor-out: PASS = the production FDI ISOLATED the CORRECT (failed)
+        // rotor — the full chain fired across the SITL seam (plant RPM → adapter
+        // read_motor_rpm → FlightCore's commanded-vs-achieved residual → CUSUM →
+        // latch) — and the sim stayed finite (no divergence). The mock has NO
+        // differential-motor torque, so it CANNOT demonstrate the 3D
+        // tilt-recovery or a post-failure altitude hold; asserting those on it
+        // would be an artifact, not a proof. The full recovery is the gz-backed
+        // recordable flight (real per-rotor torque). Honest scope: this gates
+        // the FDI TELEMETRY PLUMBING the recovery depends on.
+        Some((rotor, _)) => {
+            let finite =
+                last_true.iter().all(|v| v.is_finite()) && est.p.iter().all(|v| v.is_finite());
+            isolated == Some(rotor) && finite
+        }
+        // Nominal hover: the tight altitude bar.
+        None => final_dist < 0.5 && rms_steady < 1.0,
+    }
 }
 
 /// v0.19.4 — closed-loop hover. Mirrors `falcon-sitl-hover`'s
@@ -1900,7 +1936,7 @@ mod tests {
     #[test]
     fn production_flightcore_holds_altitude_through_sitl_plant() {
         let mut p = MockPhysics::at_rest();
-        let ok = run_flightcore(&mut p, 2.0, 25.0, None);
+        let ok = run_flightcore(&mut p, 2.0, 25.0, None, None);
         assert!(ok, "production FlightCore failed to hold 2 m altitude on the SITL plant");
         // The true state stayed finite (no divergence / NaN escape).
         for i in 0..3 {
@@ -1913,6 +1949,33 @@ mod tests {
             "final NED z = {} (want ≈ −2)",
             p.p_ned[2]
         );
+    }
+
+    /// v1.113 — the production FlightCore's single-rotor-out FDI fires THROUGH
+    /// the SITL seam. A rotor is failed mid-flight; the mock reports its dead
+    /// rotor at 0 RPM, the `SitlBackend` adapter carries that ESC telemetry to
+    /// the core's `read_motor_rpm`, and the core's CUSUM must ISOLATE exactly
+    /// the failed rotor. This gates the telemetry plumbing the rotor-out
+    /// recovery depends on — before this wiring the FDI was inert in SITL. The
+    /// mock has no differential-motor torque, so the 3D tilt-recovery itself is
+    /// the gz-backed recordable flight, not this test.
+    #[test]
+    fn production_flightcore_fdi_isolates_failed_rotor_through_sitl_seam() {
+        let mut p = MockPhysics::at_rest();
+        // Rotor 2 fails at t = 12 s of a 28 s flight.
+        let ok = run_flightcore(&mut p, 2.0, 28.0, Some((2, 12.0)), None);
+        assert!(
+            ok,
+            "production FDI failed to isolate the failed rotor through the SITL seam"
+        );
+        // The plant actually staged the failure and stayed finite.
+        assert_eq!(p.failed_rotor, Some(2), "plant should have rotor 2 failed");
+        for i in 0..3 {
+            assert!(p.p_ned[i].is_finite(), "p_ned[{i}] = {}", p.p_ned[i]);
+        }
+        // The dead rotor reports 0 RPM (the residual source).
+        let rpm = p.motor_rpm().expect("mock reports RPM");
+        assert_eq!(rpm[2], 0, "failed rotor must report 0 RPM, got {}", rpm[2]);
     }
 
     /// v0.19.0 — when --evidence-dir is set, the runner produces two

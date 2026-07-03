@@ -38,24 +38,37 @@ artifacts:
       old [0,0,−g] constant (the near-level hand-cascade scenarios and the
       existing IMU unit tests are unchanged).
 
-      GATE (production_flightcore_holds_altitude_through_sitl_plant): the
+      GATE 1 (production_flightcore_holds_altitude_through_sitl_plant): the
       shipping FlightCore commanded a 2 m altitude hold through the plant and
       settled within 0.5 m with < 1.0 m steady RMS — the same bar as the
       hand-rolled altitude scenario, met by the code that flies rather than a
       bench re-implementation. Measured: final 0.04 m, steady RMS 0.06 m, no
-      NaN/divergence. Full falcon-sitl-gz suite 28/28 green.
+      NaN/divergence.
+
+      GATE 2 (production_flightcore_fdi_isolates_failed_rotor_through_sitl_seam):
+      the single-rotor-out FDI fires THROUGH the SITL seam. The seam gained a
+      per-rotor RPM channel (Physics::motor_rpm) + a fault-injection hook
+      (Physics::fail_rotor), and the adapter now forwards read_motor_rpm — before
+      this the FDI was INERT in SITL (no ESC telemetry reached the core). A rotor
+      is failed mid-flight; the mock reports it at 0 RPM; the core's
+      commanded-vs-achieved CUSUM (relay-iekf RotorFaultDetector) isolates
+      EXACTLY the failed rotor (verified for rotors 0 and 2). This gates the
+      telemetry PLUMBING the recovery depends on. Full falcon-sitl-gz suite
+      29/29 green.
 
       Honest scope: the mock plant responds to collective thrust only
-      (differential-motor torque is approximated as zero), so horizontal
-      translation and the single-rotor-out RECOVERY demonstration need the
-      full-physics `--features gazebo` backend (the recordable
-      `--scenario=flightcore` rotor-out flight is the next slice — it exercises
-      the FDI path that this seam now makes reachable in SITL).
+      (differential-motor torque is approximated as zero), so it can prove FDI
+      ISOLATION (the RPM residual) but NOT the 3D tilt-recovery or a post-failure
+      altitude hold — those need the full-physics `--features gazebo` backend
+      (the recordable `--scenario=flightcore-rotorout` flight, now reachable via
+      this seam, is the next slice).
     tags: [verification, falcon, simulation, sitl, flightcore, hal, seam, v1.113]
     fields:
       method: simulation
       steps:
-        - run: "cargo test -p falcon-sitl-gz production_flightcore_holds_altitude_through_sitl_plant  # bench-only (builds the campaign suite; runs in the closed-loop-sim CI job + workspace test)"
+        - run: "cargo test -p falcon-sitl-gz production_flightcore  # bench-only (builds the campaign suite; runs in the closed-loop-sim CI job + workspace test)"
     links:
       - type: verifies
         target: SWREQ-FALCON-HAL-P01
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P02

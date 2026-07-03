@@ -68,6 +68,22 @@ pub trait Physics {
     /// v0.22 — latest body-frame magnetometer reading (Tesla, NED body
     /// frame), or `None` if no magnetometer. The real heading source.
     fn mag_body_ned(&self) -> Option<[f32; 3]> { None }
+
+    /// v1.113 — per-rotor reported RPM (ESC telemetry), or `None` if the plant
+    /// has no rotor feedback. This is the ACHIEVED-per-rotor source the
+    /// production `FlightCore` compares against the commanded throttle to form
+    /// the single-rotor-out FDI residual (v1.103): a dead rotor reads ~0 RPM
+    /// while the controller still commands it → the residual fires the CUSUM.
+    /// Without it the FDI is inert, so a SITL rotor-out flight cannot exercise
+    /// the recovery. Default `None` (backends without ESC feedback fly without
+    /// rotor-fault detection, exactly as the `FlightBackend` default intends).
+    fn motor_rpm(&self) -> Option<[i32; 4]> { None }
+
+    /// v1.113 — inject a single-rotor failure: rotor `rotor`'s thrust (and its
+    /// reported RPM) drop to zero from now on. The hook the rotor-out scenario
+    /// uses to stage the fault a real airframe would suffer. Default no-op (a
+    /// plant that cannot model a rotor loss simply ignores it).
+    fn fail_rotor(&mut self, _rotor: usize) {}
 }
 
 /// In-process reference impl — same toy integrator as
@@ -89,6 +105,13 @@ pub struct MockPhysics {
     /// gravity), matching the pre-v1.113 constant; during a climb it carries the
     /// thrust reaction the full IEKF needs to keep vertical velocity observable.
     pub spec_force_ned: [f32; 3],
+    /// A single failed rotor (its thrust + RPM forced to zero), or `None`.
+    /// Set by `fail_rotor`; defaults off so every existing scenario is
+    /// unaffected.
+    pub failed_rotor: Option<usize>,
+    /// The ACHIEVED per-rotor throttle from the last `step` (post-failure) —
+    /// the basis for the reported RPM the production FDI consumes.
+    pub achieved_motors: [f32; 4],
     /// xorshift state for the IMU noise generator.
     pub rng: u64,
 }
@@ -101,6 +124,8 @@ impl MockPhysics {
             p_ned: [0.0; 3],
             v_ned: [0.0; 3],
             spec_force_ned: [0.0, 0.0, -GRAVITY], // at rest: reaction to gravity
+            failed_rotor: None,
+            achieved_motors: [0.0; 4],
             rng: 0xCAFE_BABE_DEAD_BEEF,
         }
     }
@@ -130,8 +155,19 @@ impl Physics for MockPhysics {
         // full mixer-to-physics torque mapping lives in falcon-sitl-
         // hover; this stub keeps the cascade running so the scaffold
         // ends with a complete loop).
+        // A failed rotor delivers no thrust regardless of command; record the
+        // ACHIEVED per-rotor throttle so the reported RPM reflects the loss (the
+        // production FDI keys off commanded-vs-achieved). With no failure this
+        // is the command verbatim, so nominal flight is byte-for-byte unchanged.
+        let mut achieved = motor_pwm;
+        if let Some(f) = self.failed_rotor {
+            if f < 4 {
+                achieved[f] = 0.0;
+            }
+        }
+        self.achieved_motors = achieved;
         let thrust_normalised =
-            ((motor_pwm[0] + motor_pwm[1] + motor_pwm[2] + motor_pwm[3]) / 4.0).clamp(0.0, 1.0);
+            ((achieved[0] + achieved[1] + achieved[2] + achieved[3]) / 4.0).clamp(0.0, 1.0);
 
         // Rotational dynamics under (zero) torque + friction.
         for i in 0..3 {
@@ -200,6 +236,24 @@ impl Physics for MockPhysics {
             gyro_body,
         };
         (sample, self.p_ned)
+    }
+
+    fn motor_rpm(&self) -> Option<[i32; 4]> {
+        // rpm = achieved throttle × full-scale RPM, matching falcon-core's
+        // ESC_RPM_FULL (8000) so the FDI residual (rpm/8000 vs command) is
+        // scaled correctly. The failed rotor reads 0 → the residual fires.
+        const ESC_RPM_FULL: f32 = 8000.0;
+        let a = &self.achieved_motors;
+        Some([
+            (a[0] * ESC_RPM_FULL) as i32,
+            (a[1] * ESC_RPM_FULL) as i32,
+            (a[2] * ESC_RPM_FULL) as i32,
+            (a[3] * ESC_RPM_FULL) as i32,
+        ])
+    }
+
+    fn fail_rotor(&mut self, rotor: usize) {
+        self.failed_rotor = Some(rotor);
     }
 }
 

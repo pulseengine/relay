@@ -83,6 +83,13 @@ impl<'a> SitlBackend<'a> {
     pub fn last_imu(&self) -> ([f32; 3], [f32; 3]) {
         (self.last_imu.accel, self.last_imu.gyro)
     }
+
+    /// Stage a single-rotor failure on the underlying plant (the scenario calls
+    /// this at the injection time; the adapter owns the plant, so the fault must
+    /// route through here rather than a separate borrow).
+    pub fn fail_rotor(&mut self, rotor: usize) {
+        self.plant.fail_rotor(rotor);
+    }
 }
 
 impl FlightBackend for SitlBackend<'_> {
@@ -114,6 +121,13 @@ impl FlightBackend for SitlBackend<'_> {
         // MockPhysics has no magnetometer (returns None); the real gz bridge
         // supplies one. Forward whatever the plant exposes.
         self.plant.mag_body_ned()
+    }
+
+    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+        // Carry the plant's per-rotor ESC telemetry to the core's rotor-out FDI.
+        // Without this the FDI is inert in SITL (a rotor loss goes undetected),
+        // so this is the plumbing a recordable rotor-out flight depends on.
+        self.plant.motor_rpm()
     }
 
     fn write_motors(&mut self, motors: &[f32]) {
