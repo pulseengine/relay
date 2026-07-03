@@ -63,6 +63,12 @@ field flights + EKF log-replay, and which is a differentiator here.
 | `maneuvering_estimator_monte_carlo_campaign` | 500 | random horizontal maneuver + unmodelled accel scale + noise | consistent under motion (velocity-NEES) | pos 0.91 m, vel-NEES 11.2, tilt 0.064 |
 | `gnss_spoof_monte_carlo_campaign` | 400 | legit-vs-spoof; spoof rate 4–8×σ, onset, noise | SpoofMonitor: no false alarm on noise; detects + latches a walk-off | worst detect latency 5 fixes |
 
+### Mission tracking (real relay-pos PosController, point-mass plant)
+
+| campaign | trials | dispersion vector | invariants | worst margin |
+|---|---|---|---|---|
+| `mission_corridor_monte_carlo_campaign` | 400 | wind (≤1 m/s²), mass/thrust scale (±10%), start offset | every waypoint reached in budget; cross-track inside the corridor | cross-track 1.02 m (<3 m half-width) |
+
 ## Key discipline notes captured
 
 - **Gravity aiding is invalid under motion.** `update_gravity` assumes the
@@ -79,6 +85,7 @@ field flights + EKF log-replay, and which is a differentiator here.
 
 ## Next slices
 
-Mission/waypoint corridor tracking (full position+attitude cascade);
-maneuvering-truth GNSS-dropout; a nightly heavy tier (10k/behavior); and
-recordable `--scenario=rotor-out` Gazebo flights for release video.
+Smooth Segment3 trajectory feedforward + the full attitude cascade under the
+mission (currently direct waypoint setpoints + perfect inner-loop); a nightly
+heavy tier (10k/behavior); and recordable `--scenario=rotor-out` Gazebo flights
+for release video.
