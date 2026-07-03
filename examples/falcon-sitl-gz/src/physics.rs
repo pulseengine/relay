@@ -327,7 +327,7 @@ impl Physics for GazeboPhysics {
 mod gz_real {
     use super::{Physics, ImuSample};
     use std::sync::{Arc, Mutex};
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
     use tokio::sync::mpsc;
 
     /// `gz.msgs.Actuators` — locally defined because gz-transport-rs
@@ -487,6 +487,16 @@ mod gz_real {
         imu_recv: Arc<AtomicU64>,
         navsat_recv: Arc<AtomicU64>,
         motor_send: Arc<AtomicU64>,
+        /// v1.113 — a staged single-rotor failure (index 0-3, or -1 = none).
+        /// When set, `step` zeros that rotor's command to gz (so the REAL 6-DOF
+        /// plant loses its thrust + reaction torque → a genuine attitude upset
+        /// the production reduced-attitude law must recover from) and reports it
+        /// at 0 RPM (so the FDI residual fires). AtomicI32 for lock-free access
+        /// from `&self` (motor_rpm) and `&mut self` (step/fail_rotor).
+        failed_rotor: Arc<AtomicI32>,
+        /// v1.113 — the ACHIEVED per-rotor throttle from the last `step`
+        /// (post-failure): the RPM source the production FDI consumes.
+        last_achieved: Arc<Mutex<[f32; 4]>>,
         /// Tokio runtime kept alive for the duration of this instance.
         /// Dropped on shutdown which joins subscriber + publisher tasks.
         _runtime: tokio::runtime::Runtime,
@@ -552,6 +562,8 @@ mod gz_real {
             let imu_recv = Arc::new(AtomicU64::new(0));
             let navsat_recv = Arc::new(AtomicU64::new(0));
             let motor_send = Arc::new(AtomicU64::new(0));
+            let failed_rotor = Arc::new(AtomicI32::new(-1)); // -1 = no failure
+            let last_achieved = Arc::new(Mutex::new([0.0_f32; 4]));
 
             // v0.19.2 — one channel carrying [m0, m1, m2, m3] tuples.
             let (rotors_tx, mut rotors_rx) = mpsc::unbounded_channel::<[f32; 4]>();
@@ -757,6 +769,8 @@ mod gz_real {
                 imu_recv,
                 navsat_recv,
                 motor_send,
+                failed_rotor,
+                last_achieved,
                 _runtime: runtime,
             })
         }
@@ -783,14 +797,25 @@ mod gz_real {
         fn name(&self) -> &'static str { "gazebo" }
 
         fn step(&mut self, motor_pwm: [f32; 4], _dt: f32) {
+            // v1.113 — apply a staged rotor failure: the failed rotor is
+            // commanded to zero rad/s, so the REAL MulticopterMotorModel stops
+            // it and the 6-DOF plant loses its thrust + reaction torque (a
+            // genuine attitude upset). `achieved` is what actually drove the
+            // plant → the RPM the production FDI reads.
+            let failed = self.failed_rotor.load(Ordering::Relaxed);
+            let mut achieved = motor_pwm;
+            if (0..4).contains(&failed) {
+                achieved[failed as usize] = 0.0;
+            }
+            *self.last_achieved.lock().unwrap() = achieved;
             // v0.19.2 — send one [4×rad/s] tuple per tick on the
             // single mpsc; the publisher task encodes a single
             // gz.msgs.Actuators and writes it to /<model>/cmd_vel.
             let rad_per_s = [
-                Self::pwm_to_rad_per_s(motor_pwm[0]),
-                Self::pwm_to_rad_per_s(motor_pwm[1]),
-                Self::pwm_to_rad_per_s(motor_pwm[2]),
-                Self::pwm_to_rad_per_s(motor_pwm[3]),
+                Self::pwm_to_rad_per_s(achieved[0]),
+                Self::pwm_to_rad_per_s(achieved[1]),
+                Self::pwm_to_rad_per_s(achieved[2]),
+                Self::pwm_to_rad_per_s(achieved[3]),
             ];
             let _ = self.rotors_tx.send(rad_per_s);
             // One `motor_send` tick per call. With the v0.19.2 fix
@@ -829,6 +854,27 @@ mod gz_real {
 
         fn mag_body_ned(&self) -> Option<[f32; 3]> {
             *self.latest_mag_body_ned.lock().unwrap()
+        }
+
+        fn motor_rpm(&self) -> Option<[i32; 4]> {
+            // Report the ACHIEVED throttle scaled to RPM (ESC_RPM_FULL = 8000,
+            // matching falcon-core): a failed rotor reads 0 → the production
+            // FDI's commanded-vs-achieved residual fires. Enables the real-gz
+            // rotor-out FDI + reduced-attitude recovery.
+            const ESC_RPM_FULL: f32 = 8000.0;
+            let a = *self.last_achieved.lock().unwrap();
+            Some([
+                (a[0] * ESC_RPM_FULL) as i32,
+                (a[1] * ESC_RPM_FULL) as i32,
+                (a[2] * ESC_RPM_FULL) as i32,
+                (a[3] * ESC_RPM_FULL) as i32,
+            ])
+        }
+
+        fn fail_rotor(&mut self, rotor: usize) {
+            if rotor < 4 {
+                self.failed_rotor.store(rotor as i32, Ordering::Relaxed);
+            }
         }
     }
 
