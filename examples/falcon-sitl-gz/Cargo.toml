@@ -15,12 +15,13 @@ path = "src/main.rs"
 # Default: stub GazeboPhysics (v0.16.1 contract) — every default build
 # stays lean. No gz-transport deps.
 default = []
-# v0.18: real gz-transport bridge. Pulls in tokio + gz-transport-rs +
-# zmq (libzmq compiled from C source via zeromq-src). ~30-60 s extra
-# build time; opt-in only. v0.19.2 added `prost` direct dep for the
-# locally-defined gz.msgs.Actuators message (not exported by
-# gz-transport-rs 0.1.0).
-gazebo = ["dep:tokio", "dep:gz-transport-rs", "dep:prost"]
+# v1.113: real gz bridge on the C++-backed `gz-transport` crate (links the
+# installed gz-transport13 via gz-transport-sys + pkg-config). Replaces the
+# pure-Rust `gz-transport-rs` 0.1.0, which discovers but cannot complete the
+# subscription handshake with Harmonic (see the gz-transport-rs diagnosis).
+# Needs the gz-transport13 dev libs + PKG_CONFIG_PATH incl. the brew pkgconfig
+# dir. Opt-in only. gz-msgs supplies the protobuf message types.
+gazebo = ["dep:gz-transport", "dep:gz-msgs", "dep:crossbeam-channel"]
 
 [dependencies]
 relay-ekf = { path = "../../crates/relay-ekf" }
@@ -42,10 +43,9 @@ relay-sc = { path = "../../crates/relay-sc" }
 falcon-core = { path = "../../crates/falcon-core" }
 libm = "0.2"
 
-# Optional — only when feature `gazebo` is on.
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"], optional = true }
-gz-transport-rs = { version = "0.1", optional = true }
-# v0.19.2 — local `gz.msgs.Actuators` definition so the bridge can talk
-# to Harmonic's MulticopterMotorModel plugin (which subscribes Actuators,
-# not the per-rotor Double the v0.18 bridge published).
-prost = { version = "0.13", features = ["derive"], optional = true }
+# Optional — only when feature `gazebo` is on. C++-backed gz-transport that
+# links the installed gz-transport13 (Harmonic); gz-msgs supplies the protobuf
+# message types (IMU/NavSat/Actuators/Pose_V/Magnetometer/Odometry).
+gz-transport = { version = "0.10", features = ["harmonic"], optional = true }
+gz-msgs = { version = "0.10", features = ["harmonic"], optional = true }
+crossbeam-channel = { version = "0.5", optional = true }

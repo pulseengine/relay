@@ -326,76 +326,20 @@ impl Physics for GazeboPhysics {
 #[cfg(feature = "gazebo")]
 mod gz_real {
     use super::{Physics, ImuSample};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
-    use tokio::sync::mpsc;
+    use crossbeam_channel::Receiver;
+    use gz_msgs::actuators::Actuators;
+    use gz_msgs::imu::IMU;
+    use gz_msgs::magnetometer::Magnetometer;
+    use gz_msgs::navsat::NavSat;
+    use gz_msgs::odometry::Odometry;
+    use gz_msgs::pose_v::Pose_V;
+    use gz_transport::{Node, Publisher};
 
-    /// `gz.msgs.Actuators` — locally defined because gz-transport-rs
-    /// 0.1.0 doesn't ship `actuators.proto`. Wire-compatible with
-    /// Harmonic's MulticopterMotorModel plugin, which subscribes
-    /// this message type on the model-level `/<model>/cmd_vel` topic
-    /// (each plugin reads its `<motorNumber>` index from `velocity`).
-    ///
-    /// Proto definition (gz/msgs/actuators.proto):
-    /// ```proto
-    /// syntax = "proto3";
-    /// package gz.msgs;
-    /// import "gz/msgs/header.proto";
-    /// message Actuators {
-    ///   Header header = 1;
-    ///   repeated double position = 2;
-    ///   repeated double velocity = 3;
-    ///   repeated double normalized = 4;
-    /// }
-    /// ```
-    ///
-    /// Discovered the per-rotor `gz.msgs.Double` publish *didn't* drive
-    /// the rotors on 2026-05-26 — the first gz-sim bench evidence
-    /// showed `motor_send=1000` but `climb=0`. See
-    /// `bench-evidence/gz-sim/2026-05-26-first-bench-findings.md`.
-    #[derive(Clone, PartialEq, prost::Message)]
-    pub struct Actuators {
-        #[prost(message, optional, tag = "1")]
-        pub header: ::core::option::Option<gz_transport_rs::msgs::Header>,
-        #[prost(double, repeated, packed = "true", tag = "2")]
-        pub position: ::prost::alloc::vec::Vec<f64>,
-        #[prost(double, repeated, packed = "true", tag = "3")]
-        pub velocity: ::prost::alloc::vec::Vec<f64>,
-        #[prost(double, repeated, packed = "true", tag = "4")]
-        pub normalized: ::prost::alloc::vec::Vec<f64>,
-    }
-
-    /// v0.19.7 — minimal `gz.msgs.Odometry` (twist only) for the true body
-    /// velocity. (The OdometryPublisher leaves `pose.orientation` unset =
-    /// zero, so heading comes from the `/model/.../pose` Pose_V instead —
-    /// see `PoseV`.) prost skips the unparsed `header`(1)/`pose`(2) tags.
-    #[derive(Clone, PartialEq, prost::Message)]
-    pub struct Odometry {
-        #[prost(message, optional, tag = "3")]
-        pub twist: ::core::option::Option<gz_transport_rs::msgs::Twist>,
-    }
-
-    /// v0.22 — `gz.msgs.Pose_V` (repeated Pose) on `/model/<m>/pose`. The
-    /// model root pose carries the TRUE orientation (the OdometryPublisher
-    /// does not), our heading reference / "compass" — yaw is unobservable
-    /// from IMU+GPS alone.
-    #[derive(Clone, PartialEq, prost::Message)]
-    pub struct PoseV {
-        // gz.msgs.Pose_V = { Header header = 1; repeated Pose pose = 2; }
-        #[prost(message, repeated, tag = "2")]
-        pub pose: ::std::vec::Vec<gz_transport_rs::msgs::Pose>,
-    }
-
-    /// v0.22 — `gz.msgs.Magnetometer` on the mag_sensor topic. The REAL,
-    /// non-truth heading reference: the Earth field (world `magnetic_field`)
-    /// read in body frame. `{ Header header=1; Vector3d field_tesla=2; }` —
-    /// prost skips the unparsed header. Replaces the gz-truth `PoseV`
-    /// heading cheat once the body-frame conversion is validated.
-    #[derive(Clone, PartialEq, prost::Message)]
-    pub struct Magnetometer {
-        #[prost(message, optional, tag = "2")]
-        pub field_tesla: ::core::option::Option<gz_transport_rs::msgs::Vector3d>,
-    }
+    // The gz.msgs types (Actuators / IMU / NavSat / Pose_V / Magnetometer /
+    // Odometry) now come from the `gz-msgs` crate (protobuf), imported above —
+    // the pure-Rust bridge's hand-written prost definitions are gone.
 
     /// gz-sim uses ENU body frame (X forward, Y left, Z up);
     /// falcon uses NED body frame (X forward, Y right, Z down).
@@ -453,380 +397,242 @@ mod gz_real {
         pub model_name: String,
         /// Launch-site anchor for the NavSat → NED projection.
         pub home: Home,
-        /// Latest IMU sample observed on the imu_sensor topic.
-        /// `None` until first frame arrives.
-        latest_imu: Arc<Mutex<Option<ImuSample>>>,
-        /// Latest NED position (m). v0.18.0: stub `[0,0,0]`. v0.18.1:
-        /// populated from `gz.msgs.NavSat` on the navsat topic, via
-        /// `Home::project_to_ned_m`.
-        latest_position_ned_m: Arc<Mutex<[f32; 3]>>,
-        /// v0.19.7 — latest TRUE NED body velocity (m/s) from the
-        /// OdometryPublisher twist. Deterministic, unlike finite-diff
-        /// NavSat. `None` until the first odometry frame.
-        latest_velocity_ned: Arc<Mutex<Option<[f32; 3]>>>,
-        /// v0.22 — latest TRUE NED heading (yaw, rad) from the
-        /// OdometryPublisher pose orientation. The compass reference.
-        latest_heading_ned: Arc<Mutex<Option<f32>>>,
-        /// v0.22 — latest body-frame magnetometer reading (Tesla, NED body
-        /// frame). The REAL (non-truth) heading source from the SDF
-        /// magnetometer sensor; `None` until the first frame.
-        latest_mag_body_ned: Arc<Mutex<Option<[f32; 3]>>>,
-        /// v0.19.2 — single mpsc carrying all 4 motor velocities.
-        /// One receiver task owns the gz-transport Publisher and
-        /// emits a single `gz.msgs.Actuators` message per send.
-        /// Replaced the v0.18 per-rotor 4× fanout after the
-        /// 2026-05-26 bench evidence showed plugins subscribe
-        /// `gz.msgs.Actuators` on a shared `/<model>/cmd_vel`, not
-        /// per-rotor Double topics.
-        rotors_tx: mpsc::UnboundedSender<[f32; 4]>,
-        /// v0.19 diagnostic counters — incremented from the async
-        /// subscriber tasks (`imu_recv`, `navsat_recv`) and from
-        /// `step()` itself (`motor_send`). Surface through
-        /// `Physics::counters()` so a bench operator can read
-        /// "did gz publish anything?" without scraping logs.
-        imu_recv: Arc<AtomicU64>,
-        navsat_recv: Arc<AtomicU64>,
-        motor_send: Arc<AtomicU64>,
-        /// v1.113 — a staged single-rotor failure (index 0-3, or -1 = none).
-        /// When set, `step` zeros that rotor's command to gz (so the REAL 6-DOF
-        /// plant loses its thrust + reaction torque → a genuine attitude upset
-        /// the production reduced-attitude law must recover from) and reports it
-        /// at 0 RPM (so the FDI residual fires). AtomicI32 for lock-free access
-        /// from `&self` (motor_rpm) and `&mut self` (step/fail_rotor).
-        failed_rotor: Arc<AtomicI32>,
-        /// v1.113 — the ACHIEVED per-rotor throttle from the last `step`
-        /// (post-failure): the RPM source the production FDI consumes.
-        last_achieved: Arc<Mutex<[f32; 4]>>,
-        /// Tokio runtime kept alive for the duration of this instance.
-        /// Dropped on shutdown which joins subscriber + publisher tasks.
-        _runtime: tokio::runtime::Runtime,
+        /// The gz-transport node — owns the subscriptions + publisher; kept
+        /// alive for the instance's lifetime (dropping it tears down transport).
+        _node: Node,
+        /// Actuators publisher on `/<model>/command/motor_speed`.
+        publisher: Publisher<Actuators>,
+        // Inbound channels — filled asynchronously by gz-transport's C++
+        // receiver threads; drained to the caches below by `pump()`.
+        imu_rx: Receiver<IMU>,
+        navsat_rx: Receiver<NavSat>,
+        odom_rx: Receiver<Odometry>,
+        pose_rx: Receiver<Pose_V>,
+        mag_rx: Option<Receiver<Magnetometer>>,
+        // Latest-value caches (persist between the sensors' own update rates).
+        latest_imu: Mutex<Option<ImuSample>>,
+        latest_position_ned_m: Mutex<[f32; 3]>,
+        latest_velocity_ned: Mutex<Option<[f32; 3]>>,
+        latest_heading_ned: Mutex<Option<f32>>,
+        latest_mag_body_ned: Mutex<Option<[f32; 3]>>,
+        imu_recv: AtomicU64,
+        navsat_recv: AtomicU64,
+        motor_send: AtomicU64,
+        /// Staged single-rotor failure (0-3, or -1 = none). See the rotor-out slice.
+        failed_rotor: AtomicI32,
+        /// ACHIEVED per-rotor throttle from the last `step` (post-failure) — the
+        /// RPM source the production FDI consumes.
+        last_achieved: Mutex<[f32; 4]>,
     }
 
     impl GazeboPhysics {
-        /// Alias for `connect` — mirrors the stub `GazeboPhysics::new`
-        /// signature so the CLI binary uses the same call regardless
-        /// of feature flag. Panics on connect failure (the connect
-        /// attempt is a programmer error in the CLI surface; library
-        /// users should call `connect` directly for `Result`).
-        pub fn new(
-            world: impl Into<String>,
-            model: impl Into<String>,
-        ) -> Self {
-            Self::connect_with_home(world, model, Home::ORIGIN)
-                .expect("GazeboPhysics::new: gz-transport connect failed; is `gz sim` running?")
+        /// Alias for `connect` mirroring the stub signature; panics on failure
+        /// (the CLI surface treats a failed connect as a programmer error).
+        pub fn new(world: impl Into<String>, model: impl Into<String>) -> Self {
+            Self::connect_with_home(world, model, Home::ORIGIN).expect(
+                "GazeboPhysics::new: gz-transport Node::new failed; is `gz sim` running \
+                 and gz-transport13 on the library path?",
+            )
         }
 
-        /// Connect to the gz-transport network and start subscriber
-        /// + publisher tasks. Blocks until the Node is online.
-        /// Home anchor defaults to world origin (0,0,0); use
-        /// `connect_with_home` to supply a launch-site lat/lon/alt.
-        pub fn connect(
-            world: impl Into<String>,
-            model: impl Into<String>,
-        ) -> Result<Self, gz_transport_rs::Error> {
+        /// Connect with the world-origin home anchor.
+        pub fn connect(world: impl Into<String>, model: impl Into<String>) -> Option<Self> {
             Self::connect_with_home(world, model, Home::ORIGIN)
         }
 
-        /// v0.18.1 — connect + supply the launch-site home for the
-        /// NavSat → NED projection. Without this the NavSat
-        /// subscriber still runs but `measure()` returns positions
-        /// relative to `Home::ORIGIN` (lat=0, lon=0, alt=0), which
-        /// is almost certainly not what you want for a bench run.
+        /// Connect via the C++-backed `gz-transport`: create a Node, subscribe
+        /// the sensor topics (channel-backed), advertise the Actuators
+        /// publisher. The C++ transport honours `GZ_IP` / `GZ_PARTITION` from
+        /// the environment, so no manual partition handling is needed (unlike
+        /// the old pure-Rust bridge). Returns `None` if the node or any
+        /// essential subscription/advertise fails.
         pub fn connect_with_home(
             world: impl Into<String>,
             model: impl Into<String>,
             home: Home,
-        ) -> Result<Self, gz_transport_rs::Error> {
+        ) -> Option<Self> {
             let world = world.into();
             let model = model.into();
+            let mut node = Node::new()?;
 
-            // v0.19.2 — `multi_thread` worker pool instead of
-            // `current_thread`. Spawned subscriber + publisher
-            // tasks need a runtime that actively drives them after
-            // `block_on(setup)` returns; current_thread only drives
-            // during explicit block_on and orphans everything else.
-            // First v0.19.2 bench round showed Actuators publish
-            // never reached the wire (`gz topic -i` 0 publishers
-            // mid-run) — root cause was the runtime model.
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
+            let imu_topic = format!(
+                "/world/{world}/model/{model}/link/base_link/sensor/imu_sensor/imu"
+            );
+            let navsat_topic = format!(
+                "/world/{world}/model/{model}/link/base_link/sensor/navsat_sensor/navsat"
+            );
+            let odom_topic = format!("/model/{model}/odometry");
+            let pose_topic = format!("/model/{model}/pose");
+            let mag_topic = format!(
+                "/world/{world}/model/{model}/link/base_link/sensor/mag_sensor/magnetometer"
+            );
+            // The SDF's MulticopterMotorModel <commandSubTopic> = command/motor_speed.
+            let cmd_topic = format!("/{model}/command/motor_speed");
 
-            let latest_imu: Arc<Mutex<Option<ImuSample>>> = Arc::new(Mutex::new(None));
-            let latest_position_ned_m = Arc::new(Mutex::new([0.0_f32; 3]));
-            let latest_velocity_ned: Arc<Mutex<Option<[f32; 3]>>> = Arc::new(Mutex::new(None));
-            let latest_heading_ned: Arc<Mutex<Option<f32>>> = Arc::new(Mutex::new(None));
-            let latest_mag_body_ned: Arc<Mutex<Option<[f32; 3]>>> = Arc::new(Mutex::new(None));
-            let imu_recv = Arc::new(AtomicU64::new(0));
-            let navsat_recv = Arc::new(AtomicU64::new(0));
-            let motor_send = Arc::new(AtomicU64::new(0));
-            let failed_rotor = Arc::new(AtomicI32::new(-1)); // -1 = no failure
-            let last_achieved = Arc::new(Mutex::new([0.0_f32; 4]));
+            let imu_rx = node.subscribe_channel::<IMU>(&imu_topic, 200)?;
+            let navsat_rx = node.subscribe_channel::<NavSat>(&navsat_topic, 50)?;
+            let odom_rx = node.subscribe_channel::<Odometry>(&odom_topic, 50)?;
+            let pose_rx = node.subscribe_channel::<Pose_V>(&pose_topic, 50)?;
+            // Magnetometer is optional (best-effort heading enhancement).
+            let mag_rx = node.subscribe_channel::<Magnetometer>(&mag_topic, 50);
+            let publisher = node.advertise::<Actuators>(&cmd_topic)?;
 
-            // v0.19.2 — one channel carrying [m0, m1, m2, m3] tuples.
-            let (rotors_tx, mut rotors_rx) = mpsc::unbounded_channel::<[f32; 4]>();
-
-            // Tasks run on the runtime; the result of the setup
-            // (Node + publishers) returns to the caller, errors
-            // propagate.
-            let imu_ref = latest_imu.clone();
-            let position_ref = latest_position_ned_m.clone();
-            let velocity_ref = latest_velocity_ned.clone();
-            let heading_ref = latest_heading_ned.clone();
-            let mag_ref = latest_mag_body_ned.clone();
-            let imu_recv_ref = imu_recv.clone();
-            let navsat_recv_ref = navsat_recv.clone();
-            let home_for_setup = home;
-            let world_for_setup = world.clone();
-            let model_for_setup = model.clone();
-            runtime.block_on(async move {
-                use gz_transport_rs::Node;
-                use gz_transport_rs::msgs::{Double, Imu, NavSat};
-
-                let mut node = Node::new(None).await?;
-                // v0.19.3 — gz CLI uses the node's effective partition
-                // (GZ_PARTITION env or `hostname:username` default) in
-                // the topic FQN. Publishing with an empty partition
-                // produces a different FQN, and gz-sim's plugins —
-                // which subscribed on the default partition — never
-                // see our messages. v0.19.2 confirmed: bridge motor_send
-                // ticked 1000:1000 but body never moved while gz CLI on
-                // the same topic + msg lifted it.
-                let node_partition = node.partition();
-                let imu_topic = format!(
-                    "/world/{world_for_setup}/model/{model_for_setup}/link/base_link/sensor/imu_sensor/imu"
-                );
-                let mut sub = node.subscribe::<Imu>(&imu_topic).await?;
-                tokio::spawn(async move {
-                    while let Some((msg, _meta)) = sub.recv().await {
-                        let (ax, ay, az) = msg.linear_acceleration
-                            .as_ref()
-                            .map(|v| (v.x as f32, v.y as f32, v.z as f32))
-                            .unwrap_or((0.0, 0.0, 0.0));
-                        let (gx, gy, gz) = msg.angular_velocity
-                            .as_ref()
-                            .map(|v| (v.x as f32, v.y as f32, v.z as f32))
-                            .unwrap_or((0.0, 0.0, 0.0));
-                        let sample = ImuSample {
-                            time: relay_ekf::Timestamp { seconds: 0, fraction: 0 },
-                            accel_body: enu_to_ned([ax, ay, az]),
-                            gyro_body: enu_to_ned([gx, gy, gz]),
-                        };
-                        *imu_ref.lock().unwrap() = Some(sample);
-                        imu_recv_ref.fetch_add(1, Ordering::Relaxed);
-                    }
-                });
-
-                // v0.18.1 — NavSat subscriber: lat/lon/alt deg from
-                // the SDF NavSat plugin → local NED via Home.
-                let navsat_topic = format!(
-                    "/world/{world_for_setup}/model/{model_for_setup}/link/base_link/sensor/navsat_sensor/navsat"
-                );
-                let mut navsat_sub = node.subscribe::<NavSat>(&navsat_topic).await?;
-                tokio::spawn(async move {
-                    while let Some((msg, _meta)) = navsat_sub.recv().await {
-                        let ned = home_for_setup.project_to_ned_m(
-                            msg.latitude_deg,
-                            msg.longitude_deg,
-                            msg.altitude,
-                        );
-                        *position_ref.lock().unwrap() = ned;
-                        navsat_recv_ref.fetch_add(1, Ordering::Relaxed);
-                    }
-                });
-
-                // v0.19.7 — Odometry subscriber: TRUE body velocity
-                // (twist.linear, ENU) → NED. Deterministic velocity for
-                // the altitude velocity-cascade; finite-diff NavSat left
-                // it marginally stable.
-                let odom_topic = format!("/model/{model_for_setup}/odometry");
-                let mut odom_sub = node.subscribe::<Odometry>(&odom_topic).await?;
-                tokio::spawn(async move {
-                    while let Some((msg, _meta)) = odom_sub.recv().await {
-                        if let Some(tw) = msg.twist.as_ref() {
-                            if let Some(lin) = tw.linear.as_ref() {
-                                let v = enu_to_ned([lin.x as f32, lin.y as f32, lin.z as f32]);
-                                *velocity_ref.lock().unwrap() = Some(v);
-                            }
-                        }
-                    }
-                });
-
-                // v0.22 — Pose_V subscriber for the TRUE heading. The
-                // model root pose's ENU orientation → NED yaw. (The
-                // OdometryPublisher leaves orientation unset.)
-                let pose_topic = format!("/model/{model_for_setup}/pose");
-                let mut pose_sub = node.subscribe::<PoseV>(&pose_topic).await?;
-                tokio::spawn(async move {
-                    while let Some((msg, _meta)) = pose_sub.recv().await {
-                        // Model root pose: the first entry with a non-zero
-                        // (set) orientation quaternion.
-                        for p in &msg.pose {
-                            if let Some(o) = p.orientation.as_ref() {
-                                let n2 = o.w * o.w + o.x * o.x + o.y * o.y + o.z * o.z;
-                                if n2 > 0.5 {
-                                    let yaw = enu_quat_to_ned_yaw(o.w, o.x, o.y, o.z);
-                                    if yaw.is_finite() {
-                                        *heading_ref.lock().unwrap() = Some(yaw);
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                });
-
-                // v0.22 — Magnetometer subscriber: the REAL heading source.
-                // The SDF mag_sensor reports the world magnetic_field in
-                // BODY frame (gz ENU body); convert to NED body with the
-                // same flip as the IMU.
-                let mag_topic = format!(
-                    "/world/{world_for_setup}/model/{model_for_setup}/link/base_link/sensor/mag_sensor/magnetometer"
-                );
-                if let Ok(mut mag_sub) = node.subscribe::<Magnetometer>(&mag_topic).await {
-                    tokio::spawn(async move {
-                        while let Some((msg, _meta)) = mag_sub.recv().await {
-                            if let Some(f) = msg.field_tesla.as_ref() {
-                                // gz's magnetometer is NED-NATIVE (legacy
-                                // ArduPilot/PX4 heritage: it converts the
-                                // world <magnetic_field> ENU→NED internally),
-                                // UNLIKE the IMU (ENU body). Empirically (vs
-                                // the truth-heading oracle at NED yaw 90°)
-                                // the gz mag frame relates to our NED body
-                                // by Rz(−90°): (x,y,z)_ned = (y, −x, z)_gz.
-                                // [Caveat: confirmed at one heading; a
-                                // yaw-sweep oracle would fully pin it.]
-                                let (x, y, z) = (f.x as f32, f.y as f32, f.z as f32);
-                                let v = [y, -x, z];
-                                if v.iter().all(|c| c.is_finite()) {
-                                    *mag_ref.lock().unwrap() = Some(v);
-                                }
-                            }
-                        }
-                    });
-                }
-
-                // v0.19.2 — single publisher emitting one
-                // `gz.msgs.Actuators` per tick. The four
-                // MulticopterMotorModel plugins share this topic and
-                // pick their `<motorNumber>` index from `velocity`.
-                //
-                // v0.19.3 — topic name aligned with PX4's standard
-                // (`command/motor_speed`). v0.19.2's `/<model>/cmd_vel`
-                // worked at the wire-protocol level but the v0.19.2
-                // bench evidence + first-light SDF showed the
-                // MulticopterMotorModel plugin's `<commandSubTopic>`
-                // value is what gz constructs the topic from —
-                // `<commandSubTopic>cmd_vel</commandSubTopic>` →
-                // `/<model>/cmd_vel`,
-                // `<commandSubTopic>command/motor_speed</commandSubTopic>`
-                // → `/<model>/command/motor_speed`. The SDF + bridge
-                // must agree; v0.19.3 picks PX4's standard naming so
-                // the bench world drops cleanly into PX4-x500-derived
-                // muscle memory.
-                let actuators_topic = format!("/{model_for_setup}/command/motor_speed");
-                let publisher = node
-                    .advertise::<Actuators>(&actuators_topic, "gz.msgs.Actuators")
-                    .await?;
-                let publish_partition = node_partition.clone();
-                tokio::spawn(async move {
-                    while let Some(cmd) = rotors_rx.recv().await {
-                        let msg = Actuators {
-                            header: None,
-                            position: Vec::new(),
-                            velocity: vec![
-                                cmd[0] as f64,
-                                cmd[1] as f64,
-                                cmd[2] as f64,
-                                cmd[3] as f64,
-                            ],
-                            normalized: Vec::new(),
-                        };
-                        // v0.19.3 — pass node's effective partition so
-                        // FQN matches what gz-sim's subscribers expect.
-                        let _ = publisher.publish(&publish_partition, &msg);
-                    }
-                });
-
-                // Double + NavSat imports preserved for any downstream
-                // re-extension; warning-suppressed below.
-                let _ = std::mem::size_of::<Double>();
-                Ok::<_, gz_transport_rs::Error>(())
-            })?;
-
-            Ok(Self {
+            Some(Self {
                 world_name: world,
                 model_name: model,
                 home,
-                latest_imu,
-                latest_position_ned_m,
-                latest_velocity_ned,
-                latest_heading_ned,
-                latest_mag_body_ned,
-                rotors_tx,
-                imu_recv,
-                navsat_recv,
-                motor_send,
-                failed_rotor,
-                last_achieved,
-                _runtime: runtime,
+                _node: node,
+                publisher,
+                imu_rx,
+                navsat_rx,
+                odom_rx,
+                pose_rx,
+                mag_rx,
+                latest_imu: Mutex::new(None),
+                latest_position_ned_m: Mutex::new([0.0; 3]),
+                latest_velocity_ned: Mutex::new(None),
+                latest_heading_ned: Mutex::new(None),
+                latest_mag_body_ned: Mutex::new(None),
+                imu_recv: AtomicU64::new(0),
+                navsat_recv: AtomicU64::new(0),
+                motor_send: AtomicU64::new(0),
+                failed_rotor: AtomicI32::new(-1),
+                last_achieved: Mutex::new([0.0; 4]),
             })
         }
 
-        /// Map a [0, 1] mixer output (normalised THRUST fraction) to a
-        /// Gazebo motor command (rad/s).
-        ///
-        /// v0.25 — SQRT map. gz's MulticopterMotorModel produces
-        /// `thrust = motorConstant·ω²`, so a LINEAR `ω = pwm·max` made
-        /// actual thrust ∝ pwm², violating the mixer's linear-thrust
-        /// assumption and making the effective control gain
-        /// throttle-dependent (∂τ/∂pwm ∝ pwm) — a gain-scheduling hazard
-        /// that destabilised the (weakest, laggiest) yaw axis
-        /// conditionally/bistably. Mapping `ω = √pwm · max` makes
-        /// `thrust ∝ ω² ∝ pwm` (linear) and the gain throttle-invariant —
-        /// the "monotone thrust→PWM curve" the allocation SOTA calls for.
-        fn pwm_to_rad_per_s(pwm: f32) -> f32 {
+        /// Drain all pending inbound messages into the latest-value caches.
+        /// Called at the top of `measure` (the per-tick entry) so the `&self`
+        /// read methods see fresh values; keeps only the newest per topic.
+        fn pump(&self) {
+            // IMU: ENU body → NED body (accel + gyro).
+            let mut got_imu = 0u64;
+            let mut last_imu = None;
+            for msg in self.imu_rx.try_iter() {
+                got_imu += 1;
+                let accel = msg
+                    .linear_acceleration
+                    .as_ref()
+                    .map(|v| [v.x as f32, v.y as f32, v.z as f32])
+                    .unwrap_or([0.0; 3]);
+                let gyro = msg
+                    .angular_velocity
+                    .as_ref()
+                    .map(|v| [v.x as f32, v.y as f32, v.z as f32])
+                    .unwrap_or([0.0; 3]);
+                last_imu = Some(ImuSample {
+                    time: relay_ekf::Timestamp { seconds: 0, fraction: 0 },
+                    accel_body: enu_to_ned(accel),
+                    gyro_body: enu_to_ned(gyro),
+                });
+            }
+            if let Some(s) = last_imu {
+                *self.latest_imu.lock().unwrap() = Some(s);
+                self.imu_recv.fetch_add(got_imu, Ordering::Relaxed);
+            }
+            // NavSat: lat/lon/alt → local NED via Home.
+            let mut got_nav = 0u64;
+            let mut last_pos = None;
+            for msg in self.navsat_rx.try_iter() {
+                got_nav += 1;
+                last_pos = Some(self.home.project_to_ned_m(
+                    msg.latitude_deg,
+                    msg.longitude_deg,
+                    msg.altitude,
+                ));
+            }
+            if let Some(p) = last_pos {
+                *self.latest_position_ned_m.lock().unwrap() = p;
+                self.navsat_recv.fetch_add(got_nav, Ordering::Relaxed);
+            }
+            // Odometry twist: TRUE body velocity ENU → NED.
+            let mut last_vel = None;
+            for msg in self.odom_rx.try_iter() {
+                if let Some(tw) = msg.twist.as_ref() {
+                    if let Some(lin) = tw.linear.as_ref() {
+                        last_vel =
+                            Some(enu_to_ned([lin.x as f32, lin.y as f32, lin.z as f32]));
+                    }
+                }
+            }
+            if let Some(v) = last_vel {
+                *self.latest_velocity_ned.lock().unwrap() = Some(v);
+            }
+            // Pose_V: model-root orientation → NED yaw (heading "compass").
+            let mut last_yaw = None;
+            for msg in self.pose_rx.try_iter() {
+                for p in &msg.pose {
+                    if let Some(o) = p.orientation.as_ref() {
+                        let n2 = o.w * o.w + o.x * o.x + o.y * o.y + o.z * o.z;
+                        if n2 > 0.5 {
+                            let yaw = enu_quat_to_ned_yaw(o.w, o.x, o.y, o.z);
+                            if yaw.is_finite() {
+                                last_yaw = Some(yaw);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(y) = last_yaw {
+                *self.latest_heading_ned.lock().unwrap() = Some(y);
+            }
+            // Magnetometer (optional): gz NED-native field → our NED body via Rz(−90°).
+            if let Some(rx) = &self.mag_rx {
+                let mut last_mag = None;
+                for msg in rx.try_iter() {
+                    if let Some(f) = msg.field_tesla.as_ref() {
+                        let (x, y, z) = (f.x as f32, f.y as f32, f.z as f32);
+                        let v = [y, -x, z];
+                        if v.iter().all(|c| c.is_finite()) {
+                            last_mag = Some(v);
+                        }
+                    }
+                }
+                if let Some(m) = last_mag {
+                    *self.latest_mag_body_ned.lock().unwrap() = Some(m);
+                }
+            }
+        }
+
+        /// Map a [0,1] mixer output (normalised thrust) to a gz motor command
+        /// (rad/s). SQRT map so gz's `thrust ∝ ω²` is LINEAR in the mixer
+        /// command (throttle-invariant gain) — the v0.25 stability fix.
+        pub fn pwm_to_rad_per_s(pwm: f32) -> f32 {
             const MAX_MOTOR_RAD_S: f32 = 1000.0;
             libm::sqrtf(pwm.clamp(0.0, 1.0)) * MAX_MOTOR_RAD_S
         }
     }
 
     impl Physics for GazeboPhysics {
-        fn name(&self) -> &'static str { "gazebo" }
+        fn name(&self) -> &'static str {
+            "gazebo"
+        }
 
         fn step(&mut self, motor_pwm: [f32; 4], _dt: f32) {
-            // v1.113 — apply a staged rotor failure: the failed rotor is
-            // commanded to zero rad/s, so the REAL MulticopterMotorModel stops
-            // it and the 6-DOF plant loses its thrust + reaction torque (a
-            // genuine attitude upset). `achieved` is what actually drove the
-            // plant → the RPM the production FDI reads.
+            // Apply a staged rotor failure: the failed rotor → 0 rad/s, so the
+            // real MulticopterMotorModel loses its thrust + reaction torque.
             let failed = self.failed_rotor.load(Ordering::Relaxed);
             let mut achieved = motor_pwm;
             if (0..4).contains(&failed) {
                 achieved[failed as usize] = 0.0;
             }
             *self.last_achieved.lock().unwrap() = achieved;
-            // v0.19.2 — send one [4×rad/s] tuple per tick on the
-            // single mpsc; the publisher task encodes a single
-            // gz.msgs.Actuators and writes it to /<model>/cmd_vel.
-            let rad_per_s = [
-                Self::pwm_to_rad_per_s(achieved[0]),
-                Self::pwm_to_rad_per_s(achieved[1]),
-                Self::pwm_to_rad_per_s(achieved[2]),
-                Self::pwm_to_rad_per_s(achieved[3]),
-            ];
-            let _ = self.rotors_tx.send(rad_per_s);
-            // One `motor_send` tick per call. With the v0.19.2 fix
-            // this is also one Actuators message published per tick
-            // (the v0.18 path was 4× Double messages per tick to the
-            // wrong topics — first gz bench showed motor_send=1000
-            // with climb=0).
+            let msg = Actuators {
+                velocity: vec![
+                    Self::pwm_to_rad_per_s(achieved[0]) as f64,
+                    Self::pwm_to_rad_per_s(achieved[1]) as f64,
+                    Self::pwm_to_rad_per_s(achieved[2]) as f64,
+                    Self::pwm_to_rad_per_s(achieved[3]) as f64,
+                ],
+                ..Default::default()
+            };
+            let _ = self.publisher.publish(&msg);
             self.motor_send.fetch_add(1, Ordering::Relaxed);
         }
 
         fn measure(&mut self, _noise_std: f32) -> (ImuSample, [f32; 3]) {
+            self.pump();
             let sample = self.latest_imu.lock().unwrap().clone().unwrap_or(ImuSample {
                 time: relay_ekf::Timestamp { seconds: 0, fraction: 0 },
                 accel_body: [0.0; 3],
@@ -857,10 +663,8 @@ mod gz_real {
         }
 
         fn motor_rpm(&self) -> Option<[i32; 4]> {
-            // Report the ACHIEVED throttle scaled to RPM (ESC_RPM_FULL = 8000,
-            // matching falcon-core): a failed rotor reads 0 → the production
-            // FDI's commanded-vs-achieved residual fires. Enables the real-gz
-            // rotor-out FDI + reduced-attitude recovery.
+            // ACHIEVED throttle × ESC_RPM_FULL (8000, matching falcon-core): the
+            // failed rotor reads 0 → the production FDI residual fires.
             const ESC_RPM_FULL: f32 = 8000.0;
             let a = *self.last_achieved.lock().unwrap();
             Some([
