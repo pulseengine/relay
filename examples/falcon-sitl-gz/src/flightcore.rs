@@ -123,6 +123,14 @@ impl FlightBackend for SitlBackend<'_> {
         self.plant.mag_body_ned()
     }
 
+    fn read_heading(&mut self) -> Option<f32> {
+        // The clean absolute yaw (NED). MockPhysics has none; the gz bridge
+        // resolves it from the Pose_V truth orientation — the "compass" that
+        // makes yaw observable (the raw gz-mag frame is unvalidated, so this is
+        // the heading reference the hover uses).
+        self.plant.heading_ned()
+    }
+
     fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
         // Carry the plant's per-rotor ESC telemetry to the core's rotor-out FDI.
         // Without this the FDI is inert in SITL (a rotor loss goes undetected),

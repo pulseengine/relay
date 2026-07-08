@@ -46,6 +46,16 @@ pub trait FlightBackend {
     /// Latest magnetometer field in the body frame (direction only), or
     /// `None` if unavailable.
     fn read_mag(&mut self) -> Option<Vec3>;
+    /// Latest absolute heading (yaw, rad, NED — CW from North), or `None` if no
+    /// heading source. A DIRECT yaw reference (a fused compass, a dual-antenna
+    /// GNSS heading, or a sim's truth heading) fed straight to the IEKF's
+    /// `update_yaw` — the alternative to inferring yaw from the raw
+    /// magnetometer field via `read_mag`, for backends that already resolve a
+    /// clean heading. Default `None` (v1.113). A backend supplies at most one of
+    /// `read_mag`/`read_heading`; both feed the same unobservable yaw state.
+    fn read_heading(&mut self) -> Option<f32> {
+        None
+    }
     /// Write the per-rotor commands ∈ [0,1] to the actuators.
     fn write_motors(&mut self, motors: &[f32]);
     /// Control period (s) for this tick.
@@ -134,6 +144,14 @@ pub struct FlightCore {
     /// production core against the gz plant, where achieved starts at 0).
     step_count: u32,
     fdi_warmup_steps: u32,
+    /// Commanded heading (yaw, rad, NED). A quad HOLDS its launch heading, not
+    /// North — so when a heading reference first arrives (`read_heading`), the
+    /// initial heading is captured here and the geometric controller drives yaw
+    /// to it (not to 0, which would demand an unachievable snap-to-North on
+    /// takeoff and saturate the mixer). v1.113. Stays 0 for backends with no
+    /// heading source (unchanged behaviour).
+    yaw_setpoint: f32,
+    yaw_captured: bool,
     /// Sensor calibration applied to raw IMU/mag samples before the estimator
     /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
     /// `set_calibration` installs solved offsets — the explicit replacement for
@@ -177,6 +195,8 @@ impl FlightCore {
             fdi: RotorFaultDetector::new(0.5, 0.1),
             failed_motor: None,
             step_count: 0,
+            yaw_setpoint: 0.0,
+            yaw_captured: false,
             // Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
             // achieved rotor state has caught the command by then, so the
             // effectiveness residual reflects real faults, not the spin-up jump.
@@ -221,6 +241,11 @@ impl FlightCore {
     /// vehicle when this is set (a 3-rotor quad cannot navigate; v1.103).
     pub fn failed_motor(&self) -> Option<usize> {
         self.failed_motor
+    }
+
+    /// The captured heading-hold setpoint (yaw, rad, NED). For telemetry/tests.
+    pub fn yaw_setpoint(&self) -> f32 {
+        self.yaw_setpoint
     }
 
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
@@ -288,6 +313,29 @@ impl FlightCore {
         }
         if let Some(m) = b.read_mag() {
             self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
+        }
+        // v1.113 — direct heading update: a backend that resolves a clean
+        // absolute yaw (fused compass / GNSS heading / sim truth) feeds it
+        // straight to the IEKF, making the otherwise-unobservable yaw observable
+        // without inferring it from a raw magnetometer field.
+        if let Some(yaw) = b.read_heading() {
+            self.iekf.update_yaw(yaw, self.mag_var);
+            // Capture the launch heading as the hold setpoint — the vehicle holds
+            // THIS heading, not North. Captured AFTER the estimator+heading have
+            // settled (past the warmup), NOT on the first raw sample, which can
+            // be an init transient (gz's first Pose_V gave 1.57 rad while the
+            // true heading was 0.94 — a frozen 0.6 rad error saturated the mixer).
+            if !self.yaw_captured {
+                // TRACK the heading during warmup (setpoint = current heading →
+                // no yaw error while the estimate + gz init settle), then FREEZE
+                // it as the hold setpoint. Freezing on the first raw sample
+                // instead would lock in an init transient (gz's first Pose_V:
+                // 1.57 rad vs the true 0.94 → a frozen error that saturates yaw).
+                self.yaw_setpoint = yaw;
+                if self.step_count >= self.fdi_warmup_steps {
+                    self.yaw_captured = true;
+                }
+            }
         }
         // v1.20 — barometer: feed it into the verified IEKF as a vertical anchor
         // (a position update whose horizontal is the current estimate, a no-op,
@@ -366,7 +414,7 @@ impl FlightCore {
             self.mixer.mix_rotor_out(failed, torque, thrust, ROTOR_OUT_FLOOR)
         } else {
             // NORMAL: full-attitude geometric desired-rate → ADRC torque → mix.
-            let omega_d = self.geo.desired_rate(est.q, a_cmd, 0.0);
+            let omega_d = self.geo.desired_rate(est.q, a_cmd, self.yaw_setpoint);
             let torque = self.adrc.tick(gyro_f, omega_d, dt);
             self.mixer.mix(torque, thrust)
         };

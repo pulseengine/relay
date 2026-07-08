@@ -1308,9 +1308,9 @@ fn run_flightcore(
                 );
                 let m = backend.last_motors();
                 eprintln!(
-                    "t={:.2} true_z={:.2} est_z={:.2} est_vz={:.2} est_xy=[{:.1},{:.1}] yaw={:.2} q=[{:.2},{:.2},{:.2},{:.2}] accel_z={:.2} gyro=[{:.2},{:.2},{:.2}] mot=[{:.2},{:.2},{:.2},{:.2}]",
-                    t, last_true[2], e.p[2], e.v[2], e.p[0], e.p[1], yaw,
-                    q[0], q[1], q[2], q[3], a[2], g[0], g[1], g[2], m[0], m[1], m[2], m[3],
+                    "t={:.2} true_z={:.2} est_z={:.2} est_vz={:.2} est_xy=[{:.1},{:.1}] yaw={:.2} yaw_sp={:.2} accel_z={:.2} gyro=[{:.2},{:.2},{:.2}] mot=[{:.2},{:.2},{:.2},{:.2}]",
+                    t, last_true[2], e.p[2], e.v[2], e.p[0], e.p[1], yaw, core.yaw_setpoint(),
+                    a[2], g[0], g[1], g[2], m[0], m[1], m[2], m[3],
                 );
             }
 
