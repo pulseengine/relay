@@ -1,6 +1,6 @@
 # relay
 
-**Formally verified stream-based component framework for safety-critical real-time systems.**
+**Stream-based component framework for safety-critical real-time systems, with formal proofs of specific safety properties (Kani bounded model checking + Lean).**
 
 Relay is a flight-software substrate: WIT-typed `stream<T>` components,
 fused statically at build time by [meld](https://github.com/pulseengine/meld),
@@ -21,7 +21,7 @@ Part of the [pulseengine](https://github.com/pulseengine) toolchain.
 
 | layer | what it is | crates |
 |---|---|---|
-| **cFS-DNA** (mission/ops) | A formally verified port of NASA cFS apps and core services. Drop-in replacements for the cFS framework that flew JWST, Artemis, OSIRIS-REx. | `relay-{sch, sc, sca, lc, hk, cs, ds, fm, hs, tbl, ci, to, md, mm, ccsds, cfdp}` |
+| **cFS-DNA** (mission/ops) | A port of NASA cFS apps and core services, with Kani (bounded model checking) proofs on the flight-critical crates. Drop-in replacements for the cFS framework that flew JWST, Artemis, OSIRIS-REx. | `relay-{sch, sc, sca, lc, hk, cs, ds, fm, hs, tbl, ci, to, md, mm, ccsds, cfdp}` |
 | **PX4-DNA** (control/dynamics) | A formally verifiable multicopter control cascade as `no_std` crates + WIT components: an **Invariant-EKF** estimator (SE₂(3)), **geometric SE(3)** attitude control (Lean-proven Lyapunov), an **ADRC** inner loop, control allocation, trajectory generation, a flight-mode FSM, and a backend-agnostic flight core. | `relay-{iekf, geo, adrc, mix-quad, traj, fsm, math, mavlink}`, `falcon-core` |
 
 Composition is through stream wiring via `meld` (build-time static
