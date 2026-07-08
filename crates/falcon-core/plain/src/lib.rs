@@ -376,7 +376,21 @@ impl FlightCore {
         // isolation, latch the failed rotor (next step runs the degraded path).
         // Held off for `fdi_warmup_steps` (spin-up guard) — see the field docs.
         self.step_count = self.step_count.saturating_add(1);
-        if self.failed_motor.is_none() && self.step_count >= self.fdi_warmup_steps {
+        // ATTITUDE/RATE GATE: a rotor-out residual is only DISTINGUISHABLE in
+        // near-level, low-rate flight. During an attitude transient the
+        // controller commands large asymmetric motors, so |commanded − achieved|
+        // spikes on the throttled/saturated rotors and would false-trip the CUSUM
+        // — you cannot diagnose a dead rotor while the airframe is tumbling. Only
+        // run the detector when the vehicle is roughly level and not spinning
+        // (v1.113 — caught a phantom rotor-out during an attitude transient on gz).
+        let tilt_cos = 1.0 - 2.0 * (est.q[1] * est.q[1] + est.q[2] * est.q[2]); // R[2][2]
+        let rate2 =
+            gyro_f[0] * gyro_f[0] + gyro_f[1] * gyro_f[1] + gyro_f[2] * gyro_f[2];
+        let fdi_steady = tilt_cos > 0.90 && rate2 < 1.0; // ≲26° tilt, ≲1 rad/s
+        if self.failed_motor.is_none()
+            && self.step_count >= self.fdi_warmup_steps
+            && fdi_steady
+        {
             if let Some(rpm) = b.read_motor_rpm() {
                 let mut resid = [0.0f32; 4];
                 let mut i = 0;

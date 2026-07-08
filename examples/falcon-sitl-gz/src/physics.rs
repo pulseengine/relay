@@ -697,6 +697,12 @@ mod gz_real {
         }
 
         fn motor_rpm(&self) -> Option<[i32; 4]> {
+            // FC_NO_RPM=1 — diagnostic: withhold ESC telemetry so the core's FDI
+            // is fully inert, isolating whether an instability is FDI-driven or
+            // an independent attitude/frame issue.
+            if std::env::var_os("FC_NO_RPM").is_some() {
+                return None;
+            }
             // ACHIEVED throttle × ESC_RPM_FULL (8000, matching falcon-core): the
             // failed rotor reads 0 → the production FDI residual fires.
             const ESC_RPM_FULL: f32 = 8000.0;
