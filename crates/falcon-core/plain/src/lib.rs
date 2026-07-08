@@ -124,6 +124,16 @@ pub struct FlightCore {
     fdi: RotorFaultDetector,
     /// The isolated failed rotor (latched), or `None`. Drives the degraded path.
     failed_motor: Option<usize>,
+    /// Control-step counter, for the FDI spin-up guard. At arm/spin-up the ESC
+    /// RPM lags the commanded throttle (real actuators, or a sim reporting the
+    /// achieved rotor state), so the commanded-vs-achieved effectiveness
+    /// residual spikes on EVERY rotor for the first fraction of a second — which
+    /// would false-trip the CUSUM and drop a healthy vehicle into the degraded
+    /// 3-rotor law. The FDI is held off until the actuators have spun up
+    /// (`fdi_warmup_steps`), then runs normally (v1.113 — caught flying the
+    /// production core against the gz plant, where achieved starts at 0).
+    step_count: u32,
+    fdi_warmup_steps: u32,
     /// Sensor calibration applied to raw IMU/mag samples before the estimator
     /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
     /// `set_calibration` installs solved offsets — the explicit replacement for
@@ -166,6 +176,11 @@ impl FlightCore {
             // CUSUM thresholds matching the SITL-verified fault-tolerance chain.
             fdi: RotorFaultDetector::new(0.5, 0.1),
             failed_motor: None,
+            step_count: 0,
+            // Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
+            // achieved rotor state has caught the command by then, so the
+            // effectiveness residual reflects real faults, not the spin-up jump.
+            fdi_warmup_steps: ((loop_hz * 0.2) as u32).max(10),
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -359,7 +374,9 @@ impl FlightCore {
         // ── Single-rotor-out FDI ── form the per-rotor effectiveness residual
         // |commanded − achieved| from ESC RPM telemetry and feed the CUSUM; on
         // isolation, latch the failed rotor (next step runs the degraded path).
-        if self.failed_motor.is_none() {
+        // Held off for `fdi_warmup_steps` (spin-up guard) — see the field docs.
+        self.step_count = self.step_count.saturating_add(1);
+        if self.failed_motor.is_none() && self.step_count >= self.fdi_warmup_steps {
             if let Some(rpm) = b.read_motor_rpm() {
                 let mut resid = [0.0f32; 4];
                 let mut i = 0;
