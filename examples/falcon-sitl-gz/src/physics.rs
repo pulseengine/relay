@@ -477,6 +477,30 @@ mod gz_real {
             let mag_rx = node.subscribe_channel::<Magnetometer>(&mag_topic, 50);
             let publisher = node.advertise::<Actuators>(&cmd_topic)?;
 
+            // Auto-capture the LAUNCH DATUM: if no explicit home was supplied
+            // (still ORIGIN), take the first NavSat fix as the home reference so
+            // NED position is relative to the launch point. The gz world sits at
+            // a non-zero MSL elevation (e.g. falcon-quad.sdf = 488 m Zürich);
+            // without this the raw MSL altitude leaks straight into the
+            // estimator as a −488 m offset (diagnosed flying the production core:
+            // the vehicle looked 488 m "runaway" when it was sitting still).
+            let mut home = home;
+            if home.lat_deg == 0.0 && home.lon_deg == 0.0 && home.alt_m == 0.0 {
+                let start = std::time::Instant::now();
+                while start.elapsed().as_secs_f32() < 3.0 {
+                    if let Ok(fix) =
+                        navsat_rx.recv_timeout(std::time::Duration::from_millis(100))
+                    {
+                        home = Home {
+                            lat_deg: fix.latitude_deg,
+                            lon_deg: fix.longitude_deg,
+                            alt_m: fix.altitude,
+                        };
+                        break;
+                    }
+                }
+            }
+
             Some(Self {
                 world_name: world,
                 model_name: model,
@@ -659,7 +683,17 @@ mod gz_real {
         }
 
         fn mag_body_ned(&self) -> Option<[f32; 3]> {
-            *self.latest_mag_body_ned.lock().unwrap()
+            // DISABLED: the gz-mag→NED-body frame conversion is UNVALIDATED (its
+            // own note: "confirmed at one heading; a yaw-sweep oracle would pin
+            // it"). Feeding it drove the IEKF's yaw to ~0.88 rad (50°) at rest,
+            // so the geometric controller fought a phantom yaw error → the
+            // attitude-priority mixer saturated to [1,0,1,0] (pure yaw) → lost
+            // collective → the quad never left the ground (diagnosed v1.113).
+            // Without a heading reference the IEKF holds yaw at its initial 0,
+            // which is correct for a hover demo. Re-enable once the mag frame is
+            // pinned with a yaw-sweep oracle. (`latest_mag_body_ned` still
+            // populated for that future validation.)
+            None
         }
 
         fn motor_rpm(&self) -> Option<[i32; 4]> {

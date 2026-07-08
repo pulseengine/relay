@@ -1297,6 +1297,23 @@ fn run_flightcore(
             core.step(&mut backend); // ← one PRODUCTION control tick + plant step
             last_true = backend.last_true_pos();
 
+            // FC_DEBUG — per-tick estimator trace to diagnose the gz divergence.
+            if std::env::var_os("FC_DEBUG").is_some() && step % 125 == 0 {
+                let e = core.state();
+                let (a, g) = backend.last_imu();
+                let q = e.q; // [w,x,y,z]
+                let yaw = libm::atan2f(
+                    2.0 * (q[0] * q[3] + q[1] * q[2]),
+                    1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+                );
+                let m = backend.last_motors();
+                eprintln!(
+                    "t={:.2} true_z={:.2} est_z={:.2} est_vz={:.2} est_xy=[{:.1},{:.1}] yaw={:.2} q=[{:.2},{:.2},{:.2},{:.2}] accel_z={:.2} gyro=[{:.2},{:.2},{:.2}] mot=[{:.2},{:.2},{:.2},{:.2}]",
+                    t, last_true[2], e.p[2], e.v[2], e.p[0], e.p[1], yaw,
+                    q[0], q[1], q[2], q[3], a[2], g[0], g[1], g[2], m[0], m[1], m[2], m[3],
+                );
+            }
+
             let alt_err = -target_alt_m - last_true[2]; // NED z error
             let dist = alt_err.abs();
             if dist > peak_dist_err {
