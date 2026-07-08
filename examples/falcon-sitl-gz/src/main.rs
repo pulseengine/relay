@@ -187,6 +187,7 @@ fn run_scenario(
         "frame-roll" => run_frame_check(physics, 0, duration_s),
         "frame-pitch" => run_frame_check(physics, 1, duration_s),
         "frame-yaw" => run_frame_check(physics, 2, duration_s),
+        "yaw-probe" => run_yaw_probe(physics, duration_s),
         "arming" => run_arming_check(physics, duration_s, true),
         "arming-ungated" => run_arming_check(physics, duration_s, false),
         "geo-hover" => run_geo_hover(physics, duration_s, evidence),
@@ -266,6 +267,70 @@ fn run_frame_check(physics: &mut dyn Physics, axis: usize, duration_s: f32) -> b
         cmd_corrected, mean_rate, if agrees { "AGREE ✓" } else { "OPPOSE ✗" },
     );
     agrees
+}
+
+/// v1.113 — YAW-SIGN ORACLE. Commands a constant OPEN-LOOP +yaw torque (no
+/// attitude control) and runs the IEKF alongside, so all four links of the yaw
+/// chain can be compared in one run:
+///   commanded +yaw torque → (a) gz TRUTH heading rate  [mixer→gz mapping]
+///                          → (b) sensed gyro_z          [gyro enu→ned]
+///                          → (c) IEKF est-yaw rate      [heading→estimator]
+/// For a stable closed loop all three must share the sign of the command. The
+/// closed-loop spin with a CORRECT gyro sign (frame-yaw AGREES) points at (c):
+/// the est-yaw sign disagreeing with the physical/gyro convention makes the
+/// geometric controller drive yaw the wrong way. This oracle prints the signs.
+fn run_yaw_probe(physics: &mut dyn Physics, duration_s: f32) -> bool {
+    let mut mixer = QuadMixer::new();
+    let mut iekf = Iekf::level();
+    let dt = 0.004_f32;
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let pace_real_time = physics.counters().is_some();
+    let hover = 0.72_f32;
+    let yaw_cmd = 0.15_f32; // constant +yaw torque
+
+    let yaw_of = |q: [f32; 4]| -> f32 {
+        libm::atan2f(
+            2.0 * (q[0] * q[3] + q[1] * q[2]),
+            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+        )
+    };
+    let mut h_prev: Option<f32> = None;
+    let mut ey_prev: Option<f32> = None;
+
+    for step in 0..n {
+        let tick_start = Instant::now();
+        let t = step as f32 * dt;
+        let (imu, pos) = physics.measure(0.0);
+        // Estimator: propagate + gravity + direct heading (the FlightCore path).
+        iekf.propagate(IekfImu { gyro: imu.gyro_body, accel: imu.accel_body }, dt);
+        iekf.update_gravity(imu.accel_body, 0.5);
+        iekf.update_position(pos, 0.01);
+        if let Some(h) = physics.heading_ned() {
+            iekf.update_yaw(h, 0.1);
+        }
+        let motors = mixer.mix([0.0, 0.0, yaw_cmd], hover);
+        physics.step(motors, dt);
+
+        if step % 125 == 0 {
+            let truth_h = physics.heading_ned().unwrap_or(f32::NAN);
+            let est_yaw = yaw_of(iekf.state().q);
+            let dh = h_prev.map(|p| truth_h - p).unwrap_or(0.0);
+            let dey = ey_prev.map(|p| est_yaw - p).unwrap_or(0.0);
+            eprintln!(
+                "t={:.2} cmd_yaw=+{:.2} truth_head={:.2} (Δ{:+.2}) est_yaw={:.2} (Δ{:+.2}) gyro_z={:+.2}",
+                t, yaw_cmd, truth_h, dh, est_yaw, dey, imu.gyro_body[2],
+            );
+            h_prev = Some(truth_h);
+            ey_prev = Some(est_yaw);
+        }
+        if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period { std::thread::sleep(tick_period - used); }
+        }
+    }
+    println!("  yaw-probe: compare signs of Δtruth_head, Δest_yaw, gyro_z vs cmd_yaw=+");
+    true
 }
 
 /// v0.19.9 — arming-sequencer ORACLE + position-hold DIAGNOSTIC.
