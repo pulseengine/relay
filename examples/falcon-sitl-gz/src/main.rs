@@ -1335,6 +1335,14 @@ fn run_flightcore(
 
     let mut core = FlightCore::new(hover_thrust, 1.0 / dt);
     core.set_altitude(-target_alt_m); // NED z: negative = up.
+    if name != "mock" {
+        // The default pos_var (0.01 = 1 cm²) over-trusts the gz NavSat: on a long
+        // static hover the position covariance COLLAPSES, so the NIS outlier gate
+        // then rejects the (correct) fixes and the estimate goes deaf → the true
+        // altitude drifts unbounded. A realistic metre-class variance keeps P
+        // alive and the fixes accepted (diagnosed v1.113 — est_z froze at ~17 s).
+        core.set_pos_var(0.25);
+    }
     // No altitude integral: with hover_thrust matched to the real gz hover (0.57)
     // the P-D loop settles at the target with ~0 steady-state error, and the
     // integral wound up into a slow runaway on the gz plant's lagged thrust.
@@ -1376,11 +1384,13 @@ fn run_flightcore(
                     2.0 * (q[0] * q[3] + q[1] * q[2]),
                     1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
                 );
-                let od = core.last_omega_d();
-                let tq = core.last_torque();
+                let m = backend.last_motors();
+                let mot_mean = (m[0] + m[1] + m[2] + m[3]) / 4.0;
+                let cnt = backend.counters();
                 eprintln!(
-                    "t={:.2} yaw={:.2} yaw_sp={:.2} gyro_z={:+.2} | omega_d_z={:+.3} torque_z={:+.3} | true_z={:.2} est_z={:.2}",
-                    t, yaw, core.yaw_setpoint(), g[2], od[2], tq[2], last_true[2], e.p[2],
+                    "t={:.2} true_z={:.2} est_z={:.2} (err {:+.2}) est_vz={:+.2} accel_z={:+.2} mot_mean={:.3} navsat={}",
+                    t, last_true[2], e.p[2], last_true[2] - e.p[2], e.v[2], a[2], mot_mean,
+                    cnt.map(|c| c.1).unwrap_or(0),
                 );
             }
 

@@ -84,6 +84,11 @@ impl<'a> SitlBackend<'a> {
         (self.last_imu.accel, self.last_imu.gyro)
     }
 
+    /// Plant diagnostic counters `(imu_recv, navsat_recv, motor_send)`.
+    pub fn counters(&self) -> Option<(u64, u64, u64)> {
+        self.plant.counters()
+    }
+
     /// Stage a single-rotor failure on the underlying plant (the scenario calls
     /// this at the injection time; the adapter owns the plant, so the fault must
     /// route through here rather than a separate borrow).
