@@ -326,13 +326,19 @@ impl FlightCore {
             // be an init transient (gz's first Pose_V gave 1.57 rad while the
             // true heading was 0.94 — a frozen 0.6 rad error saturated the mixer).
             if !self.yaw_captured {
-                // TRACK the heading during warmup (setpoint = current heading →
-                // no yaw error while the estimate + gz init settle), then FREEZE
-                // it as the hold setpoint. Freezing on the first raw sample
-                // instead would lock in an init transient (gz's first Pose_V:
-                // 1.57 rad vs the true 0.94 → a frozen error that saturates yaw).
-                self.yaw_setpoint = yaw;
-                if self.step_count >= self.fdi_warmup_steps {
+                // TRACK the ESTIMATE's yaw (not the raw heading) as the setpoint
+                // while it settles, then FREEZE. Tracking the estimate keeps the
+                // yaw error ≈ 0 during startup, so NO yaw torque is commanded —
+                // tracking the raw heading instead left a transient mismatch
+                // (heading 1.57 vs a lagging est 0.14) that commanded an initial
+                // yaw torque and spun the airframe up. Freeze at 5× the warmup
+                // (~1 s), by when the estimate has converged to the true heading.
+                let e = self.iekf.state();
+                self.yaw_setpoint = relay_math::atan2f(
+                    2.0 * (e.q[0] * e.q[3] + e.q[1] * e.q[2]),
+                    1.0 - 2.0 * (e.q[2] * e.q[2] + e.q[3] * e.q[3]),
+                );
+                if self.step_count >= self.fdi_warmup_steps * 5 {
                     self.yaw_captured = true;
                 }
             }
@@ -416,7 +422,14 @@ impl FlightCore {
             // NORMAL: full-attitude geometric desired-rate → ADRC torque → mix.
             let omega_d = self.geo.desired_rate(est.q, a_cmd, self.yaw_setpoint);
             let torque = self.adrc.tick(gyro_f, omega_d, dt);
-            self.mixer.mix(torque, thrust)
+            // THRUST-PRIORITY mix (MIX-P05): scale torque down to keep every
+            // motor in [floor,1] rather than sacrificing collective — so a large
+            // transient torque (e.g. the yaw slew to the launch heading) cannot
+            // steal lift and pin the vehicle to the ground. The gz bench needs
+            // this: attitude-priority `mix` collapsed collective near saturation
+            // → never lifted. Zero-sum torque columns keep the mean (collective)
+            // exactly `thrust` (v1.113).
+            self.mixer.mix_thrust_floor(torque, thrust, 0.0)
         };
 
         // ── Single-rotor-out FDI ── form the per-rotor effectiveness residual
