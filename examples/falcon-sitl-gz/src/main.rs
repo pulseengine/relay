@@ -1331,7 +1331,7 @@ fn run_flightcore(
     // falcon-quad hovers at ~0.57 (ω_hover≈757 of maxRotVel 1000; pwm=(757/1000)²
     // via the √pwm thrust map). A too-high hover feedforward leaves a steady-state
     // altitude offset the P-loop can't null, so the altitude INTEGRAL trims it.
-    let hover_thrust = if name == "mock" { 0.49 } else { 0.57 };
+    let hover_thrust = if name == "mock" { 0.49 } else { 0.585 };
 
     let mut core = FlightCore::new(hover_thrust, 1.0 / dt);
     core.set_altitude(-target_alt_m); // NED z: negative = up.
@@ -1347,7 +1347,16 @@ fn run_flightcore(
         // correlation alive → GNSS keeps correcting velocity → the estimate
         // tracks the truth indefinitely (a diagonal clamp let the velocity
         // free-run and the estimate diverged; additive Q is the fix).
-        core.set_process_floor(0.05, 0.01);
+        core.set_process_floor(0.30, 0.05);
+        // Stiffen the altitude loop for the gz plant: the gentle default (0.05,
+        // 0.30) climbs asymptotically to below the target then slowly oscillates
+        // back down (underdamped/too-soft). A firmer kp holds altitude; kd damps.
+        core.set_altitude_gains(0.15, 1.00);
+        // Small integral to null the residual settle offset (hover feedforward
+        // isn't exact + run-to-run variation). Safe now: the loop is well-damped
+        // and the estimate tracks, so it trims to 2 m without the windup that hit
+        // when the estimator was still diverging.
+        core.set_altitude_integral_gain(0.03);
     }
     // No altitude integral: with hover_thrust matched to the real gz hover (0.57)
     // the P-D loop settles at the target with ~0 steady-state error, and the

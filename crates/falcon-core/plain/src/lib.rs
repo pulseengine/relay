@@ -303,6 +303,15 @@ impl FlightCore {
         self.pos_var = var;
     }
 
+    /// Set the altitude P and D gains (v1.113). The defaults (0.05, 0.30) are
+    /// gentle, tuned for the analytic plant; a stiffer plant (real gz) wants a
+    /// higher kp to hold altitude firmly and a matched kd to damp the slow
+    /// climb/overshoot oscillation the soft loop leaves.
+    pub fn set_altitude_gains(&mut self, kp: f32, kd: f32) {
+        self.kp_alt = kp;
+        self.kd_alt = kd;
+    }
+
     /// Set the IEKF velocity/position covariance-diagonal floor (m²/s², m²)
     /// (v1.113). 0 = off (default). Keeps the estimator from going deaf on a
     /// long static hover (the covariance would otherwise collapse and the NIS
