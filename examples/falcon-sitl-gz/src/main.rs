@@ -1342,6 +1342,12 @@ fn run_flightcore(
         // altitude drifts unbounded. A realistic metre-class variance keeps P
         // alive and the fixes accepted (diagnosed v1.113 — est_z froze at ~17 s).
         core.set_pos_var(0.25);
+        // Extra δv/δp process noise (variance/s) so a long static hover can't
+        // starve the filter: velocity ~5× the base q_accel keeps the δv↔δp
+        // correlation alive → GNSS keeps correcting velocity → the estimate
+        // tracks the truth indefinitely (a diagonal clamp let the velocity
+        // free-run and the estimate diverged; additive Q is the fix).
+        core.set_process_floor(0.05, 0.01);
     }
     // No altitude integral: with hover_thrust matched to the real gz hover (0.57)
     // the P-D loop settles at the target with ~0 steady-state error, and the

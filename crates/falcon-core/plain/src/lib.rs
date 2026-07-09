@@ -303,6 +303,14 @@ impl FlightCore {
         self.pos_var = var;
     }
 
+    /// Set the IEKF velocity/position covariance-diagonal floor (m²/s², m²)
+    /// (v1.113). 0 = off (default). Keeps the estimator from going deaf on a
+    /// long static hover (the covariance would otherwise collapse and the NIS
+    /// gate reject the correct fixes). See `Iekf::set_process_floor`.
+    pub fn set_process_floor(&mut self, vel: f32, pos: f32) {
+        self.iekf.set_process_floor(vel, pos);
+    }
+
     /// The estimated nav state (for telemetry / tests).
     pub fn state(&self) -> NavState {
         self.iekf.state()
