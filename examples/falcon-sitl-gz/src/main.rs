@@ -1327,12 +1327,17 @@ fn run_flightcore(
     // Capture these before the adapter borrows the plant for the whole run.
     let name = physics.name();
     let pace_real_time = physics.counters().is_some();
-    // Mock plant hovers at ~0.49 (THRUST_SCALE 20 m/s² vs g 9.81); the gz body
-    // needs ~0.72. The altitude integral trims the residual either way.
-    let hover_thrust = if name == "mock" { 0.49 } else { 0.72 };
+    // Mock plant hovers at ~0.49 (THRUST_SCALE 20 m/s² vs g 9.81); the real gz
+    // falcon-quad hovers at ~0.57 (ω_hover≈757 of maxRotVel 1000; pwm=(757/1000)²
+    // via the √pwm thrust map). A too-high hover feedforward leaves a steady-state
+    // altitude offset the P-loop can't null, so the altitude INTEGRAL trims it.
+    let hover_thrust = if name == "mock" { 0.49 } else { 0.57 };
 
     let mut core = FlightCore::new(hover_thrust, 1.0 / dt);
     core.set_altitude(-target_alt_m); // NED z: negative = up.
+    // No altitude integral: with hover_thrust matched to the real gz hover (0.57)
+    // the P-D loop settles at the target with ~0 steady-state error, and the
+    // integral wound up into a slow runaway on the gz plant's lagged thrust.
 
     let mut peak_dist_err = 0.0_f32;
     let mut min_dist_seen = f32::INFINITY;
@@ -1371,11 +1376,11 @@ fn run_flightcore(
                     2.0 * (q[0] * q[3] + q[1] * q[2]),
                     1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
                 );
-                let m = backend.last_motors();
+                let od = core.last_omega_d();
+                let tq = core.last_torque();
                 eprintln!(
-                    "t={:.2} true_z={:.2} est_z={:.2} est_vz={:.2} est_xy=[{:.1},{:.1}] yaw={:.2} yaw_sp={:.2} accel_z={:.2} gyro=[{:.2},{:.2},{:.2}] mot=[{:.2},{:.2},{:.2},{:.2}]",
-                    t, last_true[2], e.p[2], e.v[2], e.p[0], e.p[1], yaw, core.yaw_setpoint(),
-                    a[2], g[0], g[1], g[2], m[0], m[1], m[2], m[3],
+                    "t={:.2} yaw={:.2} yaw_sp={:.2} gyro_z={:+.2} | omega_d_z={:+.3} torque_z={:+.3} | true_z={:.2} est_z={:.2}",
+                    t, yaw, core.yaw_setpoint(), g[2], od[2], tq[2], last_true[2], e.p[2],
                 );
             }
 

@@ -152,6 +152,10 @@ pub struct FlightCore {
     /// heading source (unchanged behaviour).
     yaw_setpoint: f32,
     yaw_captured: bool,
+    /// Diagnostics: the last geometric desired body rate + ADRC torque (for the
+    /// gz yaw-loop investigation). Not part of the control state.
+    last_omega_d: Vec3,
+    last_torque: Vec3,
     /// Sensor calibration applied to raw IMU/mag samples before the estimator
     /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
     /// `set_calibration` installs solved offsets — the explicit replacement for
@@ -197,6 +201,8 @@ impl FlightCore {
             step_count: 0,
             yaw_setpoint: 0.0,
             yaw_captured: false,
+            last_omega_d: [0.0; 3],
+            last_torque: [0.0; 3],
             // Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
             // achieved rotor state has caught the command by then, so the
             // effectiveness residual reflects real faults, not the spin-up jump.
@@ -246,6 +252,14 @@ impl FlightCore {
     /// The captured heading-hold setpoint (yaw, rad, NED). For telemetry/tests.
     pub fn yaw_setpoint(&self) -> f32 {
         self.yaw_setpoint
+    }
+
+    /// Diagnostics: last geometric desired body rate + last ADRC torque.
+    pub fn last_omega_d(&self) -> Vec3 {
+        self.last_omega_d
+    }
+    pub fn last_torque(&self) -> Vec3 {
+        self.last_torque
     }
 
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
@@ -422,6 +436,8 @@ impl FlightCore {
             // NORMAL: full-attitude geometric desired-rate → ADRC torque → mix.
             let omega_d = self.geo.desired_rate(est.q, a_cmd, self.yaw_setpoint);
             let torque = self.adrc.tick(gyro_f, omega_d, dt);
+            self.last_omega_d = omega_d;
+            self.last_torque = torque;
             // THRUST-PRIORITY mix (MIX-P05): scale torque down to keep every
             // motor in [floor,1] rather than sacrificing collective — so a large
             // transient torque (e.g. the yaw slew to the launch heading) cannot
