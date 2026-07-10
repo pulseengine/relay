@@ -61,6 +61,20 @@ artifacts:
       lands near-upright (touchdown tilt < 0.35 rad) — a controlled
       spin-descent, not a tumble.
 
+      DISPERSED GUARD — closing the campaign blind spot (v1.114).
+      The Monte-Carlo `run_motor_out_campaign` dispersed over the SAME
+      idealised attitude-only sim as FV-002 (its header says so), so
+      thousands of trials could not falsify the flip — dispersion adds
+      breadth, not fidelity. New `run_fullloop_motor_out_campaign` disperses
+      200 trials over the FULL production FlightCore (IEKF + altitude + FDI +
+      rank-3 allocation, rot_drag plant) across failed-rotor, hover altitude,
+      rotational drag, and sensor-noise axes, asserting no-flip + bounded
+      spin + correct FDI + no-NaN. Measured worst case: peak tilt 0.274 rad,
+      yaw 5.7 rad/s, FDI detect 5 steps, 0/200 failures. A parasitic-moment
+      regression drives peak tilt toward π and trips this guard — the guard
+      the idealised campaign could not provide. (Altitude after the loss is
+      the FlightSupervisor's LAND job — reported, not gated, here.)
+
       PLANT FIDELITY (v1.114).
       SimBackend gains quadratic ROTATIONAL aero drag (rot_drag, τ =
       −c·ω·|ω|, opt-in like drag_quad/wind/turbulence, default off).
@@ -85,6 +99,7 @@ artifacts:
         - run: cargo test -p relay-mix-quad mix_p08_rotor_out_preserves_moment_direction
         - run: cargo test -p relay-mix-quad mix_p08_rotor_out_small_command_is_exact
         - run: cargo test -p falcon-core survives_single_rotor_failure_without_flipping
+        - run: cargo test -p falcon-sitl-gz fullloop_motor_out_monte_carlo_campaign
         - run: cargo test -p falcon-sitl-gz fault_tolerance_chain_recovers_from_rotor_loss
     links:
       - type: verifies

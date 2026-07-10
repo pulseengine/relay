@@ -2155,7 +2155,9 @@ mod tests {
             // then reduced-attitude + the reconfigured allocator).
             let (torque, motors_cmd) = if let Some(f) = isolated {
                 let tq = ctrl.moment_reduced(&r, omega, b3_d);
-                (tq, QuadMixer::new().mix_rotor_out(f, tq, hover, floor))
+                // Rank-3 allocation (v1.114): floor 0 so the diagonal-opposite
+                // rotor can rest at 0 (matching production ROTOR_OUT_FLOOR).
+                (tq, QuadMixer::new().mix_rotor_out(f, tq, hover, 0.0))
             } else {
                 let tq = ctrl.moment(&r, omega, &level);
                 (tq, QuadMixer::new().mix_thrust_floor(tq, hover, floor))
@@ -2169,7 +2171,8 @@ mod tests {
                 assert_eq!(motors_cmd[f], 0.0, "failed rotor must be commanded 0");
                 for (i, &v) in motors_cmd.iter().enumerate() {
                     if i != f {
-                        assert!(v >= floor - 1e-6 && v <= 1.0 + 1e-6, "healthy motor bound: {v}");
+                        // Rank-3 floor is 0 (diagonal-opposite rotor rests at 0).
+                        assert!(v >= -1e-6 && v <= 1.0 + 1e-6, "healthy motor bound: {v}");
                     }
                 }
             }

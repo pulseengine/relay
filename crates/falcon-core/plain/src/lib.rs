@@ -1246,6 +1246,13 @@ impl SimBackend {
         self.failed_rotor = Some(i);
     }
 
+    /// Reseed the deterministic noise LCG (v1.114): lets a Monte-Carlo campaign
+    /// give each trial an independent noise realisation (otherwise every fresh
+    /// backend replays the same sequence). A zero seed is nudged off 0.
+    pub fn reseed(&mut self, seed: u32) {
+        self.rng = if seed == 0 { 0x9E37_79B9 } else { seed };
+    }
+
     /// Body-frame tilt from level (rad): the angle of the body z-axis from NED down.
     pub fn tilt(&self) -> f32 {
         relay_math::acosf(self.r[2][2].clamp(-1.0, 1.0))
