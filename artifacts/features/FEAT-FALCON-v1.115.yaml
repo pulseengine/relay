@@ -3,6 +3,7 @@ artifacts:
     type: feature
     title: "v1.115 — rotor-out robustness + verification-fidelity follow-ups"
     status: proposed
+    release: falcon-v1.115.0
     description: >
       PROPOSED (release falcon-v1.115.0). The follow-ups surfaced by the v1.114
       rotor-out work — where a parasitic-moment allocation flipped the vehicle

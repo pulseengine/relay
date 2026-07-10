@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "FAULT-P03 — single-rotor-out FDI robustness under sensor noise"
     status: proposed
+    release: falcon-v1.115.0
     description: >
       On loss of a single rotor the FDI shall isolate the failed rotor within
       a bounded latency across the realistic GNSS/gyro sensor-noise envelope —
