@@ -1391,7 +1391,7 @@ fn run_flightcore(
             last_true = backend.last_true_pos();
 
             // FC_DEBUG — per-tick estimator trace to diagnose the gz divergence.
-            if std::env::var_os("FC_DEBUG").is_some() && step % 125 == 0 {
+            if std::env::var_os("FC_DEBUG").is_some() && step % 25 == 0 {
                 let e = core.state();
                 let (a, g) = backend.last_imu();
                 let q = e.q; // [w,x,y,z]
@@ -1400,12 +1400,12 @@ fn run_flightcore(
                     1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
                 );
                 let m = backend.last_motors();
-                let mot_mean = (m[0] + m[1] + m[2] + m[3]) / 4.0;
-                let cnt = backend.counters();
+                let tilt_deg = libm::acosf((1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2])).clamp(-1.0, 1.0))
+                    * 57.2958;
                 eprintln!(
-                    "t={:.2} true_z={:.2} est_z={:.2} (err {:+.2}) est_vz={:+.2} accel_z={:+.2} mot_mean={:.3} navsat={}",
-                    t, last_true[2], e.p[2], last_true[2] - e.p[2], e.v[2], a[2], mot_mean,
-                    cnt.map(|c| c.1).unwrap_or(0),
+                    "t={:.2} true_z={:.2} tilt={:.0}deg gyro=[{:+.1},{:+.1},{:+.1}] failed={:?} mot=[{:.2},{:.2},{:.2},{:.2}]",
+                    t, last_true[2], tilt_deg, g[0], g[1], g[2], core.failed_motor(),
+                    m[0], m[1], m[2], m[3],
                 );
             }
 
