@@ -1,0 +1,32 @@
+artifacts:
+  - id: SWREQ-FALCON-FAULT-P04
+    type: sw-req
+    title: "FAULT-P04 — supervisor-driven controlled landing after single-rotor loss"
+    status: proposed
+    description: >
+      On single-rotor loss the FlightSupervisor shall command LAND and bring the
+      vehicle down in a CONTROLLED descent to touchdown — bounded sink rate,
+      thrust axis kept upright, settled on the surface — managing the ALTITUDE
+      the reduced-attitude core (FAULT-P02) deliberately does not. Rationale: a
+      3-rotor quad is near neutrally-buoyant on this airframe (two rotors at max
+      thrust ≈ hover weight), so the bare FlightCore holds/drifts altitude rather
+      than descending; the v1.114 full-loop campaign therefore GUARDS attitude
+      (no flip, bounded spin) but only REPORTS altitude ("supervisor's LAND
+      job"). This requirement closes that scope with a supervisor-driven
+      full-loop rotor-out landing oracle/campaign, and pairs it with a clean gz
+      confirmation run + the recordable recovery video (the v1.114 gz run showed
+      the correct rank-3 allocation but a degenerate pose feed).
+      GitHub: pulseengine/relay#256.
+    tags: [falcon, fault-tolerance, rotor-loss, supervisor, landing, gz, v1.115, proposed]
+    fields:
+      req-type: safety
+      priority: should
+      verification-criteria: >
+        Supervisor-driven full-loop rotor-out oracle/campaign: an injected rotor
+        loss ⇒ the supervisor commands LAND, and the vehicle descends (net
+        altitude lost) at a bounded sink rate to an upright touchdown, thrust
+        axis within the FAULT-P02 tilt bound throughout. Plus a clean gz run
+        demonstrating the same on the higher-fidelity plant.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005

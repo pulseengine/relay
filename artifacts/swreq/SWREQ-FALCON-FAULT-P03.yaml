@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-FAULT-P03
+    type: sw-req
+    title: "FAULT-P03 — single-rotor-out FDI robustness under sensor noise"
+    status: proposed
+    description: >
+      On loss of a single rotor the FDI shall isolate the failed rotor within
+      a bounded latency across the realistic GNSS/gyro sensor-noise envelope —
+      not only in the low-noise regime. The v1.114 dispersed full-loop campaign
+      (FV-FALCON-FAULT-003) showed the CUSUM FDI's detection latency blows up
+      under heavier noise (gps σ up to 0.3 m, gyro-white up to 0.02 rad/s):
+      isolation reached ~1882 steps in early trials and a few mis-isolated or
+      never isolated, because the near-level/low-rate detection gate
+      (tilt_cos > 0.90 && rate2 < 1.0) is pushed shut by noise on the rate.
+      v1.114 scoped its guard to a modest envelope (gps σ ≤ 0.12, gyro ≤ 0.006)
+      where detection is reliable (worst 5 steps); this requirement covers the
+      heavier regime — filter the effectiveness residual, adapt the gate, or add
+      hysteresis so the RECOVERY (already parasitic-free and non-flipping) is not
+      gated behind a delayed/missed isolation. Not a v1.114 regression
+      (pre-existing). GitHub: pulseengine/relay#255.
+    tags: [falcon, fault-tolerance, rotor-loss, fdi, robustness, sensor-noise, v1.115, proposed]
+    fields:
+      req-type: safety
+      priority: should
+      verification-criteria: >
+        Dispersed full-loop rotor-out campaign at the heavier envelope
+        (gps σ up to 0.3 m, gyro-white up to 0.02 rad/s): the FDI isolates the
+        CORRECT rotor within a bounded latency for the whole recoverable
+        envelope, with zero mis-isolation and zero missed isolation. Regression
+        bound on worst detection latency set just above the measured worst case.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005

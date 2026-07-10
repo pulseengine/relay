@@ -1,0 +1,34 @@
+artifacts:
+  - id: FEAT-FALCON-v1.115
+    type: feature
+    title: "v1.115 — rotor-out robustness + verification-fidelity follow-ups"
+    status: proposed
+    description: >
+      PROPOSED (release falcon-v1.115.0). The follow-ups surfaced by the v1.114
+      rotor-out work — where a parasitic-moment allocation flipped the vehicle
+      on the real plant despite being "verified" and dispersed over thousands of
+      Monte-Carlo trials, because the campaign and point-test both ran an
+      IDEALISED attitude-only sim (constant thrust, true-state feedback, no
+      estimator, no rotational drag). The lesson, now driving this release:
+      dispersion is breadth, not fidelity.
+
+      Scope:
+        - SWREQ-FALCON-FAULT-P03 — single-rotor-out FDI robustness under heavy
+          GNSS/gyro sensor noise (detection latency blew up in the dispersed
+          full-loop campaign at the heavier envelope). GitHub #255.
+        - SWREQ-FALCON-FAULT-P04 — supervisor-driven controlled landing after a
+          rotor loss (close the altitude scope the v1.114 campaign reports but
+          does not gate) + a clean gz confirmation run and the recordable
+          recovery video. GitHub #256.
+        - Verification-fidelity audit (GitHub #257): sweep the other
+          safety-behaviour campaigns/point-tests for the idealised-harness blind
+          spot and promote the safety-critical ones to full-production-loop
+          guards (the pattern v1.114 established with
+          run_fullloop_motor_out_campaign).
+
+      Builds on v1.114 (FV-FALCON-FAULT-003): the rank-3 allocation, the
+      full-loop recovery oracle, and the dispersed full-loop campaign.
+    tags: [falcon, fault-tolerance, rotor-loss, verification-fidelity, roadmap, v1.115, proposed]
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-005
