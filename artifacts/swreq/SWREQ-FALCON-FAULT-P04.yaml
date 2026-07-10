@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "FAULT-P04 — supervisor-driven controlled landing after single-rotor loss"
     status: proposed
-    release: falcon-v1.115.0
+    release: falcon-v1.116.0
     description: >
       On single-rotor loss the FlightSupervisor shall command LAND and bring the
       vehicle down in a CONTROLLED descent to touchdown — bounded sink rate,

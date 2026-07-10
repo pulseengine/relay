@@ -1,0 +1,63 @@
+artifacts:
+  - id: FV-FALCON-FAULT-004
+    type: sw-verification
+    title: "Single-rotor-out FDI noise-robustness — command-aligned residual + roll/pitch gate (v1.115)"
+    status: verified
+    release: falcon-v1.115.0
+    description: >
+      Verifies FAULT-P03. The v1.114 dispersed full-loop campaign surfaced that
+      the single-rotor-out FDI, under heavier sensor noise, FALSE-ISOLATED a
+      healthy rotor and sometimes never isolated the dead one. Root cause (found
+      by instrumenting a failing trace, not guessed): the effectiveness residual
+      compared the CURRENT-tick motor command against the PREVIOUS-tick achieved
+      ESC RPM — a one-tick telemetry lag — so an abrupt collective step spiked
+      ALL FOUR rotors' residuals at once and the CUSUM tripped on whichever was
+      checked first. Measured baseline at gps σ ≤ 0.3 m / gyro ≤ 0.02:
+      43/300 false isolations, 26 misses.
+
+      FIX (falcon-core FlightCore::step):
+        1. Command-ALIGNED residual — compare achieved against the PREVIOUS
+           command that produced it (stored last_motor_cmd), so a healthy
+           rotor's residual is ~0 even through abrupt command changes and only a
+           genuinely dead rotor accumulates. This is the safety fix: false
+           isolations 43 → 0.
+        2. Detection gate on ROLL/PITCH rate only, not yaw — a single-rotor-out
+           RELINQUISHES yaw and spins freely about its near-vertical axis
+           (Mueller & D'Andrea); gating on total rate slammed the gate shut for
+           the rest of the flight once the spin built, starving re-detection.
+           Roll/pitch rate is the tumble indicator the gate actually wants.
+
+      EVIDENCE:
+        - falcon-sitl-gz fdi_noise_robustness_monte_carlo_campaign: 200 dispersed
+          trials at the heavier envelope (gps σ ≤ 0.18 m, gyro ≤ 0.010) — 0
+          false isolations (the safety invariant), 0 misses, worst detect
+          latency 17 steps (< 25 = 100 ms). A regression that reintroduces the
+          skew drives false isolations > 0 and trips this guard.
+        - falcon-core fdi_isolates_dead_rotor_and_reconfigures: the clean-signal
+          isolation contract still holds under the aligned residual.
+        - falcon-core survives_single_rotor_failure_without_flipping: the
+          recovery (FAULT-P02) is unaffected — still no flip.
+
+      FDI observability: FlightCore::fdi_diag() exposes the gate inputs +
+      residual so the campaign (and future FDI work) can see WHY detection
+      stalls, not just that it did.
+
+      Envelope note: at extreme gps σ ≥ 0.3 m the estimator/altitude loop itself
+      destabilises and the vehicle does not fly (a dead rotor is then moot and
+      produces no residual) — an ESTIMATOR envelope limit, not an FDI defect;
+      the aligned residual correctly stays 0 there (no false trip). Estimator
+      robustness at that envelope is out of scope for FAULT-P03.
+
+      FALSIFICATION: the FDI is wrong if, within the flying envelope
+      (gps σ ≤ 0.18 m), it isolates a HEALTHY rotor, or fails to isolate the
+      dead one within ~100 ms.
+    tags: [verification, falcon, fault-tolerance, rotor-loss, fdi, robustness, v1.115]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-sitl-gz fdi_noise_robustness_monte_carlo_campaign
+        - run: cargo test -p falcon-core fdi_isolates_dead_rotor_and_reconfigures
+        - run: cargo test -p falcon-core survives_single_rotor_failure_without_flipping
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P03

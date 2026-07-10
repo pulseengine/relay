@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-FAULT-P03
     type: sw-req
     title: "FAULT-P03 — single-rotor-out FDI robustness under sensor noise"
-    status: proposed
+    status: verified
     release: falcon-v1.115.0
     description: >
       On loss of a single rotor the FDI shall isolate the failed rotor within

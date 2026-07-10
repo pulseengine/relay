@@ -144,6 +144,18 @@ pub struct FlightCore {
     /// production core against the gz plant, where achieved starts at 0).
     step_count: u32,
     fdi_warmup_steps: u32,
+    /// Previous control tick's per-rotor command (v1.115, FAULT-P03). The ESC
+    /// RPM telemetry read at the top of a step reflects the command from the
+    /// PREVIOUS step (one-tick actuation/telemetry lag), so the effectiveness
+    /// residual must compare achieved against THIS, not the current command —
+    /// otherwise an abrupt collective step spikes every rotor's residual at once
+    /// and the FDI false-isolates a healthy rotor.
+    last_motor_cmd: [f32; 4],
+    /// FDI observability (v1.115): last `(rate2, tilt_cos, gate_open, resid)`
+    /// evaluated in the single-rotor-out detector — surfaced via `fdi_diag()`
+    /// so the dispersed campaign can see WHY detection stalls under noise (the
+    /// rate gate closing vs the residual), not just that it did.
+    dbg_fdi: (f32, f32, bool, [f32; 4]),
     /// Commanded heading (yaw, rad, NED). A quad HOLDS its launch heading, not
     /// North — so when a heading reference first arrives (`read_heading`), the
     /// initial heading is captured here and the geometric controller drives yaw
@@ -207,6 +219,8 @@ impl FlightCore {
             // achieved rotor state has caught the command by then, so the
             // effectiveness residual reflects real faults, not the spin-up jump.
             fdi_warmup_steps: ((loop_hz * 0.2) as u32).max(10),
+            last_motor_cmd: [0.0; 4],
+            dbg_fdi: (0.0, 1.0, false, [0.0; 4]),
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -252,6 +266,14 @@ impl FlightCore {
     /// The captured heading-hold setpoint (yaw, rad, NED). For telemetry/tests.
     pub fn yaw_setpoint(&self) -> f32 {
         self.yaw_setpoint
+    }
+
+    /// FDI observability (v1.115): `(rate2, tilt_cos, gate_open, resid[4])` from
+    /// the last single-rotor-out detector evaluation. `gate_open` is the
+    /// near-level/low-rate gate; when it stays false under sensor noise the
+    /// detector never sees the residual — the FAULT-P03 failure mode.
+    pub fn fdi_diag(&self) -> (f32, f32, bool, [f32; 4]) {
+        self.dbg_fdi
     }
 
     /// Diagnostics: last geometric desired body rate + last ADRC torque.
@@ -478,9 +500,18 @@ impl FlightCore {
         // run the detector when the vehicle is roughly level and not spinning
         // (v1.113 — caught a phantom rotor-out during an attitude transient on gz).
         let tilt_cos = 1.0 - 2.0 * (est.q[1] * est.q[1] + est.q[2] * est.q[2]); // R[2][2]
-        let rate2 =
-            gyro_f[0] * gyro_f[0] + gyro_f[1] * gyro_f[1] + gyro_f[2] * gyro_f[2];
-        let fdi_steady = tilt_cos > 0.90 && rate2 < 1.0; // ≲26° tilt, ≲1 rad/s
+        // ROLL/PITCH rate only — NOT yaw (v1.115, FAULT-P03). The gate exists to
+        // avoid diagnosing a dead rotor mid-TUMBLE (a roll/pitch upset spikes
+        // the residual on saturated rotors). But a single-rotor-out RELINQUISHES
+        // yaw: the body then spins freely about its near-vertical axis at several
+        // rad/s — normal, not tumbling. Including yaw here slammed the gate shut
+        // for the rest of the flight, so any fault not caught in the brief window
+        // before the spin built was NEVER caught (26/300 misses + 43 mis-isolations
+        // under heavy sensor noise). Roll/pitch rate stays low through the spin,
+        // keeping detection available while still blocking a real tumble.
+        let rp_rate2 = gyro_f[0] * gyro_f[0] + gyro_f[1] * gyro_f[1];
+        let fdi_steady = tilt_cos > 0.90 && rp_rate2 < 1.0; // ≲26° tilt, ≲1 rad/s roll+pitch
+        let mut dbg_resid = [0.0f32; 4];
         if self.failed_motor.is_none()
             && self.step_count >= self.fdi_warmup_steps
             && fdi_steady
@@ -490,12 +521,19 @@ impl FlightCore {
                 let mut i = 0;
                 while i < 4 {
                     let achieved = (rpm[i] as f32 / ESC_RPM_FULL).clamp(0.0, 2.0);
-                    resid[i] = (motors[i] - achieved).abs();
+                    // Compare achieved against the PREVIOUS command that produced
+                    // it (v1.115): the telemetry lags one tick, so using the
+                    // current command spikes every residual on an abrupt step.
+                    resid[i] = (self.last_motor_cmd[i] - achieved).abs();
                     i += 1;
                 }
+                dbg_resid = resid;
                 self.failed_motor = self.fdi.update(resid);
             }
         }
+        self.dbg_fdi = (rp_rate2, tilt_cos, fdi_steady, dbg_resid);
+        // Record this tick's command for next tick's residual alignment.
+        self.last_motor_cmd = motors;
 
         b.write_motors(&motors);
     }
@@ -1513,6 +1551,7 @@ impl FlightBackend for SimBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
 
     /// The SAME verified cascade, run through the HAL seam against the sim
     /// backend, recovers a tilted body to level — demonstrating the flight
