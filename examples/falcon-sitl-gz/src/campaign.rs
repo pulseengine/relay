@@ -612,6 +612,111 @@ mod fullloop_tests {
     }
 }
 
+// ── FDI noise-robustness campaign (v1.115, FAULT-P03) ────────────────────────
+//
+// The full-loop recovery campaign above runs at a MODEST sensor-noise envelope
+// (gps σ ≤ 0.12 m, gyro ≤ 0.006). This one stresses the single-rotor-out FDI
+// under HEAVIER noise (gps σ ≤ 0.18 m, gyro ≤ 0.010) — the regime where the
+// pre-v1.115 detector false-isolated a HEALTHY rotor. Cause: the effectiveness
+// residual compared the CURRENT-tick command against the PREVIOUS-tick achieved
+// RPM (a one-tick telemetry lag), so an abrupt collective step spiked every
+// rotor's residual at once and the CUSUM tripped on whichever was checked first
+// (43/300 false isolations, 0 with alignment). Fixed by comparing achieved
+// against the command that produced it + gating detection on ROLL/PITCH rate
+// only (a rotor-out relinquishes yaw and spins — not a tumble).
+
+fn sample_fdi_noise(rng: &mut SplitMix64, index: u32) -> FullLoopTrial {
+    FullLoopTrial {
+        failed_rotor: (rng.next_u64() % 4) as usize,
+        setpoint_alt: -rng.range(2.0, 4.0),
+        rot_drag: rng.range(0.015, 0.035),
+        gyro_white: rng.range(0.0, 0.010),
+        gps_noise: rng.range(0.0, 0.18),
+        seed: index.wrapping_mul(2_654_435_761) ^ 0x0FD1_0FD1,
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FdiReport {
+    pub trials: u32,
+    pub misses: u32, // never isolated within the window
+    pub wrong: u32,  // isolated a HEALTHY rotor (false positive — the safety bug)
+    pub worst_latency_steps: u32,
+    pub failing: Vec<(u32, String)>,
+}
+
+/// Run `n` dispersed FDI noise-robustness trials from `campaign_seed`.
+pub fn run_fdi_noise_campaign(n: u32, campaign_seed: u64) -> FdiReport {
+    let mut rep = FdiReport {
+        trials: n,
+        ..Default::default()
+    };
+    for i in 0..n {
+        let mut rng = trial_rng(campaign_seed, i);
+        let t = sample_fdi_noise(&mut rng, i);
+        let o = run_fullloop_trial(&t);
+        match o.isolated {
+            None => {
+                rep.misses += 1;
+                if rep.failing.len() < 20 {
+                    rep.failing.push((i, format!("{t:?}: never isolated")));
+                }
+            }
+            Some(f) if f != t.failed_rotor => {
+                rep.wrong += 1;
+                if rep.failing.len() < 20 {
+                    rep.failing
+                        .push((i, format!("{t:?}: isolated {f}, expected {}", t.failed_rotor)));
+                }
+            }
+            Some(_) => {
+                if o.detect_latency_steps != u32::MAX {
+                    rep.worst_latency_steps = rep.worst_latency_steps.max(o.detect_latency_steps);
+                }
+            }
+        }
+    }
+    rep
+}
+
+#[cfg(test)]
+mod fdi_noise_tests {
+    use super::*;
+
+    const FDI_SEED: u64 = 0x00FD_1000_0000_1150;
+    const FDI_TRIALS: u32 = 200;
+
+    #[test]
+    fn fdi_noise_robustness_monte_carlo_campaign() {
+        let rep = run_fdi_noise_campaign(FDI_TRIALS, FDI_SEED);
+        eprintln!(
+            "FDI noise-robustness campaign: {} trials | misses {}, wrong-isolations {}, worst detect latency {} steps",
+            rep.trials, rep.misses, rep.wrong, rep.worst_latency_steps
+        );
+
+        // SAFETY (the v1.115 fix): NEVER isolate a healthy rotor. A false
+        // positive drops a healthy vehicle into degraded rotor-out mode — the
+        // command-alignment fix must hold this at 0 across the whole envelope.
+        assert_eq!(
+            rep.wrong, 0,
+            "FDI false-isolated a healthy rotor in {}/{} trials: {:#?}",
+            rep.wrong, rep.trials, rep.failing
+        );
+        // FUNCTIONAL: within the flying envelope the correct rotor is isolated
+        // (no miss) with bounded latency.
+        assert_eq!(
+            rep.misses, 0,
+            "FDI never isolated the dead rotor in {}/{} trials: {:#?}",
+            rep.misses, rep.trials, rep.failing
+        );
+        assert!(
+            rep.worst_latency_steps < 25, // < 100 ms at 250 Hz
+            "worst FDI detect latency {} steps exceeded 25",
+            rep.worst_latency_steps
+        );
+    }
+}
+
 // ── Attitude-stabilisation campaign (random tilt, no fault) ──────────────────
 
 /// A single dispersed attitude-recovery trial: the aircraft starts tilted and
