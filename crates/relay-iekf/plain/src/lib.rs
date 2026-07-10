@@ -354,6 +354,17 @@ pub struct Iekf {
     /// Error-state covariance (ordering [δθ, δv, δp, δb_g, δb_a]).
     p: Mat,
     cfg: IekfConfig,
+    /// EXTRA velocity/position process-noise rate (variance per second) added to
+    /// the δv/δp diagonal each propagate — on TOP of `q_accel`. This is additive
+    /// process noise, NOT a diagonal clamp: the propagation turns the sustained
+    /// δv uncertainty into a live δv↔δp CORRELATION, which is what lets a GNSS
+    /// position fix correct VELOCITY (a diagonal clamp leaves that correlation
+    /// collapsed → the velocity free-runs). Keeps the filter from going deaf on
+    /// a long static hover (P would otherwise collapse, the gain with it, and the
+    /// NIS gate reject the correct fixes). 0 = off (default; the estimator
+    /// campaigns are unchanged). Set via `set_process_floor`.
+    q_vel_extra: f32,
+    q_pos_extra: f32,
 }
 
 impl Iekf {
@@ -372,11 +383,21 @@ impl Iekf {
                 p[blk * 3 + i][blk * 3 + i] = v[blk];
             }
         }
-        Iekf { state, p, cfg }
+        Iekf { state, p, cfg, q_vel_extra: 0.0, q_pos_extra: 0.0 }
     }
 
     pub fn level() -> Self {
         Self::new(NavState::identity())
+    }
+
+    /// Set the EXTRA velocity/position process-noise rate (variance/s), added to
+    /// the base `q_accel` (see `q_vel_extra`). 0 disables it (default). A
+    /// metre-class deployment on a long static hover wants a velocity term
+    /// comparable to a few × `q_accel` so the δv covariance — and its coupling
+    /// to δp — never collapses and the filter keeps trusting its position fixes.
+    pub fn set_process_floor(&mut self, vel: f32, pos: f32) {
+        self.q_vel_extra = vel.max(0.0);
+        self.q_pos_extra = pos.max(0.0);
     }
 
     pub fn state(&self) -> NavState {
@@ -521,6 +542,15 @@ impl Iekf {
             self.p[3 + i][3 + i] += self.cfg.q_accel * accel_infl * dt; // δv
             self.p[9 + i][9 + i] += self.cfg.q_bias_gyro * dt; // δb_g
             self.p[12 + i][12 + i] += self.cfg.q_bias_accel * dt; // δb_a
+        }
+        // Extra δv/δp process noise (0 = off): additive, so the propagation
+        // builds the δv↔δp correlation a GNSS fix needs to correct velocity —
+        // keeps a long static hover from starving the filter into rejecting its
+        // own fixes. (A diagonal clamp would leave the correlation collapsed and
+        // the velocity would free-run.)
+        for i in 0..3 {
+            self.p[3 + i][3 + i] += self.q_vel_extra * dt; // δv
+            self.p[6 + i][6 + i] += self.q_pos_extra * dt; // δp
         }
         symmetrise(&mut self.p);
     }

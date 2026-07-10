@@ -46,6 +46,16 @@ pub trait FlightBackend {
     /// Latest magnetometer field in the body frame (direction only), or
     /// `None` if unavailable.
     fn read_mag(&mut self) -> Option<Vec3>;
+    /// Latest absolute heading (yaw, rad, NED — CW from North), or `None` if no
+    /// heading source. A DIRECT yaw reference (a fused compass, a dual-antenna
+    /// GNSS heading, or a sim's truth heading) fed straight to the IEKF's
+    /// `update_yaw` — the alternative to inferring yaw from the raw
+    /// magnetometer field via `read_mag`, for backends that already resolve a
+    /// clean heading. Default `None` (v1.113). A backend supplies at most one of
+    /// `read_mag`/`read_heading`; both feed the same unobservable yaw state.
+    fn read_heading(&mut self) -> Option<f32> {
+        None
+    }
     /// Write the per-rotor commands ∈ [0,1] to the actuators.
     fn write_motors(&mut self, motors: &[f32]);
     /// Control period (s) for this tick.
@@ -124,6 +134,28 @@ pub struct FlightCore {
     fdi: RotorFaultDetector,
     /// The isolated failed rotor (latched), or `None`. Drives the degraded path.
     failed_motor: Option<usize>,
+    /// Control-step counter, for the FDI spin-up guard. At arm/spin-up the ESC
+    /// RPM lags the commanded throttle (real actuators, or a sim reporting the
+    /// achieved rotor state), so the commanded-vs-achieved effectiveness
+    /// residual spikes on EVERY rotor for the first fraction of a second — which
+    /// would false-trip the CUSUM and drop a healthy vehicle into the degraded
+    /// 3-rotor law. The FDI is held off until the actuators have spun up
+    /// (`fdi_warmup_steps`), then runs normally (v1.113 — caught flying the
+    /// production core against the gz plant, where achieved starts at 0).
+    step_count: u32,
+    fdi_warmup_steps: u32,
+    /// Commanded heading (yaw, rad, NED). A quad HOLDS its launch heading, not
+    /// North — so when a heading reference first arrives (`read_heading`), the
+    /// initial heading is captured here and the geometric controller drives yaw
+    /// to it (not to 0, which would demand an unachievable snap-to-North on
+    /// takeoff and saturate the mixer). v1.113. Stays 0 for backends with no
+    /// heading source (unchanged behaviour).
+    yaw_setpoint: f32,
+    yaw_captured: bool,
+    /// Diagnostics: the last geometric desired body rate + ADRC torque (for the
+    /// gz yaw-loop investigation). Not part of the control state.
+    last_omega_d: Vec3,
+    last_torque: Vec3,
     /// Sensor calibration applied to raw IMU/mag samples before the estimator
     /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
     /// `set_calibration` installs solved offsets — the explicit replacement for
@@ -166,6 +198,15 @@ impl FlightCore {
             // CUSUM thresholds matching the SITL-verified fault-tolerance chain.
             fdi: RotorFaultDetector::new(0.5, 0.1),
             failed_motor: None,
+            step_count: 0,
+            yaw_setpoint: 0.0,
+            yaw_captured: false,
+            last_omega_d: [0.0; 3],
+            last_torque: [0.0; 3],
+            // Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
+            // achieved rotor state has caught the command by then, so the
+            // effectiveness residual reflects real faults, not the spin-up jump.
+            fdi_warmup_steps: ((loop_hz * 0.2) as u32).max(10),
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -206,6 +247,19 @@ impl FlightCore {
     /// vehicle when this is set (a 3-rotor quad cannot navigate; v1.103).
     pub fn failed_motor(&self) -> Option<usize> {
         self.failed_motor
+    }
+
+    /// The captured heading-hold setpoint (yaw, rad, NED). For telemetry/tests.
+    pub fn yaw_setpoint(&self) -> f32 {
+        self.yaw_setpoint
+    }
+
+    /// Diagnostics: last geometric desired body rate + last ADRC torque.
+    pub fn last_omega_d(&self) -> Vec3 {
+        self.last_omega_d
+    }
+    pub fn last_torque(&self) -> Vec3 {
+        self.last_torque
     }
 
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
@@ -249,6 +303,23 @@ impl FlightCore {
         self.pos_var = var;
     }
 
+    /// Set the altitude P and D gains (v1.113). The defaults (0.05, 0.30) are
+    /// gentle, tuned for the analytic plant; a stiffer plant (real gz) wants a
+    /// higher kp to hold altitude firmly and a matched kd to damp the slow
+    /// climb/overshoot oscillation the soft loop leaves.
+    pub fn set_altitude_gains(&mut self, kp: f32, kd: f32) {
+        self.kp_alt = kp;
+        self.kd_alt = kd;
+    }
+
+    /// Set the IEKF velocity/position covariance-diagonal floor (m²/s², m²)
+    /// (v1.113). 0 = off (default). Keeps the estimator from going deaf on a
+    /// long static hover (the covariance would otherwise collapse and the NIS
+    /// gate reject the correct fixes). See `Iekf::set_process_floor`.
+    pub fn set_process_floor(&mut self, vel: f32, pos: f32) {
+        self.iekf.set_process_floor(vel, pos);
+    }
+
     /// The estimated nav state (for telemetry / tests).
     pub fn state(&self) -> NavState {
         self.iekf.state()
@@ -273,6 +344,35 @@ impl FlightCore {
         }
         if let Some(m) = b.read_mag() {
             self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
+        }
+        // v1.113 — direct heading update: a backend that resolves a clean
+        // absolute yaw (fused compass / GNSS heading / sim truth) feeds it
+        // straight to the IEKF, making the otherwise-unobservable yaw observable
+        // without inferring it from a raw magnetometer field.
+        if let Some(yaw) = b.read_heading() {
+            self.iekf.update_yaw(yaw, self.mag_var);
+            // Capture the launch heading as the hold setpoint — the vehicle holds
+            // THIS heading, not North. Captured AFTER the estimator+heading have
+            // settled (past the warmup), NOT on the first raw sample, which can
+            // be an init transient (gz's first Pose_V gave 1.57 rad while the
+            // true heading was 0.94 — a frozen 0.6 rad error saturated the mixer).
+            if !self.yaw_captured {
+                // TRACK the ESTIMATE's yaw (not the raw heading) as the setpoint
+                // while it settles, then FREEZE. Tracking the estimate keeps the
+                // yaw error ≈ 0 during startup, so NO yaw torque is commanded —
+                // tracking the raw heading instead left a transient mismatch
+                // (heading 1.57 vs a lagging est 0.14) that commanded an initial
+                // yaw torque and spun the airframe up. Freeze at 5× the warmup
+                // (~1 s), by when the estimate has converged to the true heading.
+                let e = self.iekf.state();
+                self.yaw_setpoint = relay_math::atan2f(
+                    2.0 * (e.q[0] * e.q[3] + e.q[1] * e.q[2]),
+                    1.0 - 2.0 * (e.q[2] * e.q[2] + e.q[3] * e.q[3]),
+                );
+                if self.step_count >= self.fdi_warmup_steps * 5 {
+                    self.yaw_captured = true;
+                }
+            }
         }
         // v1.20 — barometer: feed it into the verified IEKF as a vertical anchor
         // (a position update whose horizontal is the current estimate, a no-op,
@@ -351,15 +451,40 @@ impl FlightCore {
             self.mixer.mix_rotor_out(failed, torque, thrust, ROTOR_OUT_FLOOR)
         } else {
             // NORMAL: full-attitude geometric desired-rate → ADRC torque → mix.
-            let omega_d = self.geo.desired_rate(est.q, a_cmd, 0.0);
+            let omega_d = self.geo.desired_rate(est.q, a_cmd, self.yaw_setpoint);
             let torque = self.adrc.tick(gyro_f, omega_d, dt);
-            self.mixer.mix(torque, thrust)
+            self.last_omega_d = omega_d;
+            self.last_torque = torque;
+            // THRUST-PRIORITY mix (MIX-P05): scale torque down to keep every
+            // motor in [floor,1] rather than sacrificing collective — so a large
+            // transient torque (e.g. the yaw slew to the launch heading) cannot
+            // steal lift and pin the vehicle to the ground. The gz bench needs
+            // this: attitude-priority `mix` collapsed collective near saturation
+            // → never lifted. Zero-sum torque columns keep the mean (collective)
+            // exactly `thrust` (v1.113).
+            self.mixer.mix_thrust_floor(torque, thrust, 0.0)
         };
 
         // ── Single-rotor-out FDI ── form the per-rotor effectiveness residual
         // |commanded − achieved| from ESC RPM telemetry and feed the CUSUM; on
         // isolation, latch the failed rotor (next step runs the degraded path).
-        if self.failed_motor.is_none() {
+        // Held off for `fdi_warmup_steps` (spin-up guard) — see the field docs.
+        self.step_count = self.step_count.saturating_add(1);
+        // ATTITUDE/RATE GATE: a rotor-out residual is only DISTINGUISHABLE in
+        // near-level, low-rate flight. During an attitude transient the
+        // controller commands large asymmetric motors, so |commanded − achieved|
+        // spikes on the throttled/saturated rotors and would false-trip the CUSUM
+        // — you cannot diagnose a dead rotor while the airframe is tumbling. Only
+        // run the detector when the vehicle is roughly level and not spinning
+        // (v1.113 — caught a phantom rotor-out during an attitude transient on gz).
+        let tilt_cos = 1.0 - 2.0 * (est.q[1] * est.q[1] + est.q[2] * est.q[2]); // R[2][2]
+        let rate2 =
+            gyro_f[0] * gyro_f[0] + gyro_f[1] * gyro_f[1] + gyro_f[2] * gyro_f[2];
+        let fdi_steady = tilt_cos > 0.90 && rate2 < 1.0; // ≲26° tilt, ≲1 rad/s
+        if self.failed_motor.is_none()
+            && self.step_count >= self.fdi_warmup_steps
+            && fdi_steady
+        {
             if let Some(rpm) = b.read_motor_rpm() {
                 let mut resid = [0.0f32; 4];
                 let mut i = 0;
@@ -398,10 +523,15 @@ const WAYPOINT_RADIUS: f32 = 1.2;
 /// residual (v1.103). Only the ratio matters; a per-airframe value scales it.
 const ESC_RPM_FULL: f32 = 8000.0;
 
-/// Thrust floor for the reconfigured (single-rotor-out) allocator — the three
-/// healthy rotors are kept at/above this so the body retains tilt authority while
-/// it stabilises on S². Matches the SITL-verified fault-tolerance composition.
-const ROTOR_OUT_FLOOR: f32 = 0.15;
+/// Thrust floor for the reconfigured (single-rotor-out) allocator. With the
+/// rank-3 allocation (v1.114) the diagonal-opposite of the failed rotor
+/// legitimately rests at 0 — that couple-cancelling zero is what gives the
+/// pair a PARASITIC-FREE pure-lift axis — so the floor is 0: a positive floor
+/// would clamp that rotor up and reinject the very moment the allocation
+/// removes (and, being below the desaturation base, would collapse all
+/// roll/pitch authority to zero). Tilt authority now comes from the solved
+/// allocation, not a floor.
+const ROTOR_OUT_FLOOR: f32 = 0.0;
 
 /// Pre-arm estimator-convergence ceiling (v1.99): the IEKF tilt-uncertainty
 /// (roll²+pitch², rad²) must be at/below this for `estimator_converged` to pass.
@@ -1007,6 +1137,14 @@ pub struct SimBackend {
     /// wind term it grows with v², so it dominates during fast motion (mission
     /// legs) and caps the drift speed; it is also a stabilising damping force.
     pub drag_quad: f32,
+    /// Quadratic ROTATIONAL (aerodynamic) drag coefficient (v1.114): a body-rate
+    /// damping torque τ = −c·ω·|ω| per axis. Quadratic so it is negligible at
+    /// normal attitude rates (≲1 rad/s) yet bounds a runaway spin — the effect
+    /// that caps a real single-rotor-out quad's yaw spin (both surviving lift
+    /// rotors share a spin sense, so the reaction torque is otherwise
+    /// unopposed). Off (0) by default so existing tests are unchanged; the
+    /// rotor-out recovery opts in, as it does for the other aero pathologies.
+    pub rot_drag: f32,
     /// Barometer present? (v1.20) When true, `read_baro` returns the altitude.
     pub baro_enabled: bool,
     /// Barometric altitude noise stddev (m) (v1.20).
@@ -1050,6 +1188,11 @@ pub struct SimBackend {
     rng: u32,
     /// Dryden-like turbulence gust state (OU process, horizontal x/y) (v1.25).
     turb_state: Vec3,
+    /// Injected SINGLE-ROTOR FAILURE (v1.114): the named rotor produces no
+    /// thrust or torque (its lagged actual is pinned to 0) and its ESC reports
+    /// RPM 0, so the same rigid-body plant exercises the FDI + reduced-attitude
+    /// recovery that only the gz bench used to see. `None` = all healthy.
+    failed_rotor: Option<usize>,
 }
 
 const GRAVITY: f32 = 9.81;
@@ -1070,6 +1213,7 @@ impl SimBackend {
             wind: [0.0; 3],
             gust_amp: 0.0,
             drag_quad: 0.0,
+            rot_drag: 0.0,
             baro_enabled: false,
             baro_noise: 0.0,
             battery_v: 16.0,
@@ -1085,6 +1229,7 @@ impl SimBackend {
             gyro_bias: [0.0; 3],
             rng: 0x9E3779B9, // a fixed, non-zero seed (golden-ratio constant)
             turb_state: [0.0; 3],
+            failed_rotor: None,
         }
     }
 
@@ -1092,6 +1237,20 @@ impl SimBackend {
     pub fn with_pathology(mut self, path: Pathology) -> Self {
         self.path = path;
         self
+    }
+
+    /// Kill rotor `i` (v1.114): from now on it produces no thrust/torque and its
+    /// ESC reports RPM 0, driving the core's FDI + reduced-attitude recovery on
+    /// the analytic plant (the offline twin of the gz rotor-out bench).
+    pub fn fail_rotor(&mut self, i: usize) {
+        self.failed_rotor = Some(i);
+    }
+
+    /// Reseed the deterministic noise LCG (v1.114): lets a Monte-Carlo campaign
+    /// give each trial an independent noise realisation (otherwise every fresh
+    /// backend replays the same sequence). A zero seed is nudged off 0.
+    pub fn reseed(&mut self, seed: u32) {
+        self.rng = if seed == 0 { 0x9E37_79B9 } else { seed };
     }
 
     /// Body-frame tilt from level (rad): the angle of the body z-axis from NED down.
@@ -1114,7 +1273,10 @@ impl SimBackend {
             self.omega[0] * jo[1] - self.omega[1] * jo[0],
         ];
         for i in 0..3 {
-            self.omega[i] += self.dt * (torque[i] - gyro[i]) / self.j[i];
+            // Quadratic rotational aero drag τ_d = −c·ω·|ω| (v1.114): bounds a
+            // rotor-out spin, negligible at normal rates. Uses the pre-update ω.
+            let drag = self.rot_drag * self.omega[i] * relay_math::fabsf(self.omega[i]);
+            self.omega[i] += self.dt * (torque[i] - gyro[i] - drag) / self.j[i];
         }
         // first-order rotation integration (Rᵢ₊₁ = Rᵢ·(I + [ω]ₓdt))
         let wd = [self.omega[0] * self.dt, self.omega[1] * self.dt, self.omega[2] * self.dt];
@@ -1203,7 +1365,6 @@ impl FlightBackend for SimBackend {
         // ACTUAL, not the command — exactly the actuator lag the ADRC ESO is
         // built to absorb (v0.25). τ = 0 ⇒ instantaneous (prior behaviour).
         let mut m4 = [0.0f32; 4];
-        let mut collective = 0.0f32;
         for i in 0..4 {
             let cmd = motors.get(i).copied().unwrap_or(0.0);
             if self.motor_tau > 0.0 {
@@ -1212,8 +1373,18 @@ impl FlightBackend for SimBackend {
             } else {
                 m4[i] = cmd;
             }
-            collective += m4[i];
         }
+        // v1.114 — a FAILED rotor produces no thrust/torque regardless of the
+        // (lagged) command. Pin it to 0 BEFORE the collective/torque sums so
+        // the plant experiences the true rotor-out upset the recovery fights.
+        if let Some(f) = self.failed_rotor {
+            m4[f] = 0.0;
+        }
+        let mut collective = 0.0f32;
+        for &v in m4.iter() {
+            collective += v;
+        }
+        self.motor_state = m4; // achieved state (what the ESCs report back)
         // attitude: allocated torque + the injected disturbance the ESO rejects
         let tq = motors_to_torque_signs(m4);
         let torque = [
@@ -1326,6 +1497,16 @@ impl FlightBackend for SimBackend {
         } else {
             None
         }
+    }
+    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+        // ACHIEVED per-rotor RPM from the lagged actual motor state — a failed
+        // rotor reads 0 (it was pinned in `write_motors`). This is the FDI's
+        // commanded-vs-achieved source; with no failure it tracks the command.
+        let mut rpm = [0i32; 4];
+        for (r, &s) in rpm.iter_mut().zip(self.motor_state.iter()) {
+            *r = (s * ESC_RPM_FULL) as i32;
+        }
+        Some(rpm)
     }
 }
 
@@ -1543,6 +1724,81 @@ mod tests {
                 assert!((ROTOR_OUT_FLOOR - 1e-6..=1.0 + 1e-6).contains(&v), "healthy rotor {i} = {v}");
             }
         }
+    }
+
+    /// v1.114 — the RECOVERY, not just the isolation: the production core flown
+    /// on the analytic rigid-body plant survives a real single-rotor loss
+    /// without flipping. This is the offline twin of the gz rotor-out bench —
+    /// before v1.114 the rotor-out mixer injected a parasitic moment ≈
+    /// collective toward the dead corner (proven by the mix-quad diagnostic),
+    /// tipping the vehicle monotonically past 90° into an inverted crash on gz.
+    /// The rank-3 allocation removes that moment, so the reduced-attitude law
+    /// keeps the thrust axis upright while the body spins freely in yaw.
+    #[test]
+    fn survives_single_rotor_failure_without_flipping() {
+        let dt = 0.004f32;
+        let r0 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]; // level
+        let mut backend = SimBackend::new(r0, dt);
+        // Realistic aero for a rotor-out: rotational drag bounds the yaw spin
+        // (both surviving lift rotors share a spin sense), and ground contact
+        // lets the controlled spin-descent settle instead of falling through.
+        backend.rot_drag = 0.02;
+        backend.ground_contact = true;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-3.0); // hold ~3 m
+
+        // Reach a settled, level hover first (the FDI's gate only isolates a
+        // dead rotor from a near-level, low-rate state — you cannot diagnose
+        // one mid-tumble).
+        for _ in 0..3000 {
+            core.step(&mut backend);
+        }
+        let hover_tilt = backend.tilt();
+        assert!(hover_tilt < 0.1, "must reach a level hover first: {hover_tilt} rad");
+        assert_eq!(core.failed_motor(), None, "no false isolation while healthy");
+
+        // Rotor 0 dies. A 3-rotor quad cannot hover, so the honest recovery is
+        // a controlled spin-DESCENT: hold the thrust axis near-level while the
+        // vehicle comes down and lands. Track the worst tilt + yaw rate while
+        // AIRBORNE, and capture the attitude at touchdown.
+        backend.fail_rotor(0);
+        let mut peak_tilt = 0.0f32;
+        let mut peak_yaw = 0.0f32;
+        let mut touchdown_tilt: Option<f32> = None;
+        for _ in 0..2000 {
+            core.step(&mut backend);
+            let alt = -backend.pos[2];
+            if alt > 0.15 {
+                // airborne — this is the recovery flight we're grading
+                peak_tilt = peak_tilt.max(backend.tilt());
+                peak_yaw = peak_yaw.max(relay_math::fabsf(backend.omega[2]));
+            } else if touchdown_tilt.is_none() {
+                touchdown_tilt = Some(backend.tilt()); // attitude as it lands
+            }
+        }
+
+        assert_eq!(core.failed_motor(), Some(0), "FDI must isolate the dead rotor");
+        // The whole point: the thrust axis never tips anywhere near inverted. A
+        // pre-v1.114 run blew through 90° to ~180° (parasitic-moment flip); the
+        // rank-3 allocation holds it near-level throughout the descent (the
+        // trajectory stayed < ~6° in steady descent, with a brief startup
+        // transient).
+        assert!(
+            peak_tilt < 0.5,
+            "vehicle must stay near-level after rotor-out: peak tilt {peak_tilt} \
+             rad ({} deg)",
+            peak_tilt * 180.0 / core::f32::consts::PI,
+        );
+        // Yaw is relinquished, so the body spins — but rotational drag bounds
+        // it (an unbounded spin corrupts the estimator). A few rad/s, not tens.
+        assert!(
+            peak_yaw < 10.0,
+            "rotor-out yaw spin must stay bounded: peak {peak_yaw} rad/s",
+        );
+        // It descended and LANDED (a 3-rotor quad must come down), arriving
+        // near-upright — a controlled spin-landing, not a sideways crash.
+        let td = touchdown_tilt.expect("vehicle must descend and land");
+        assert!(td < 0.35, "must land near-upright: touchdown tilt {td} rad");
     }
 
     #[test]

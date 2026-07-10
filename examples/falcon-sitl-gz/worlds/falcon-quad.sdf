@@ -314,7 +314,7 @@
               name="gz::sim::systems::MulticopterMotorModel">
         <jointName>rotor_0_joint</jointName>
         <linkName>rotor_0</linkName>
-        <turningDirection>ccw</turningDirection>
+        <turningDirection>cw</turningDirection>
         <timeConstantUp>0.0125</timeConstantUp>
         <timeConstantDown>0.025</timeConstantDown>
         <maxRotVelocity>1000.0</maxRotVelocity>
@@ -331,7 +331,7 @@
               name="gz::sim::systems::MulticopterMotorModel">
         <jointName>rotor_1_joint</jointName>
         <linkName>rotor_1</linkName>
-        <turningDirection>cw</turningDirection>
+        <turningDirection>ccw</turningDirection>
         <timeConstantUp>0.0125</timeConstantUp>
         <timeConstantDown>0.025</timeConstantDown>
         <maxRotVelocity>1000.0</maxRotVelocity>
@@ -348,7 +348,7 @@
               name="gz::sim::systems::MulticopterMotorModel">
         <jointName>rotor_2_joint</jointName>
         <linkName>rotor_2</linkName>
-        <turningDirection>ccw</turningDirection>
+        <turningDirection>cw</turningDirection>
         <timeConstantUp>0.0125</timeConstantUp>
         <timeConstantDown>0.025</timeConstantDown>
         <maxRotVelocity>1000.0</maxRotVelocity>
@@ -365,7 +365,7 @@
               name="gz::sim::systems::MulticopterMotorModel">
         <jointName>rotor_3_joint</jointName>
         <linkName>rotor_3</linkName>
-        <turningDirection>cw</turningDirection>
+        <turningDirection>ccw</turningDirection>
         <timeConstantUp>0.0125</timeConstantUp>
         <timeConstantDown>0.025</timeConstantDown>
         <maxRotVelocity>1000.0</maxRotVelocity>

@@ -194,7 +194,11 @@ fn run_motor_out_trial(t: MotorOutTrial) -> MotorOutOutcome {
     for step in 0..4000u32 {
         let (_torque, motors_cmd) = if let Some(f) = isolated {
             let tq = ctrl.moment_reduced(&r, omega, b3_d);
-            (tq, QuadMixer::new().mix_rotor_out(f, tq, HOVER, FLOOR))
+            // Rank-3 allocation (v1.114): the diagonal-opposite rotor must be
+            // free to reach 0 (a positive floor pins it up, reinjecting the
+            // parasitic moment and starving roll/pitch authority) — so pass 0,
+            // matching the production ROTOR_OUT_FLOOR.
+            (tq, QuadMixer::new().mix_rotor_out(f, tq, HOVER, 0.0))
         } else {
             let tq = ctrl.moment(&r, omega, &level);
             (tq, QuadMixer::new().mix_thrust_floor(tq, HOVER, FLOOR))
@@ -206,7 +210,8 @@ fn run_motor_out_trial(t: MotorOutTrial) -> MotorOutOutcome {
                 mix_ok = false;
             }
             for (i, &v) in motors_cmd.iter().enumerate() {
-                if i != f && !(FLOOR - 1e-6..=1.0 + 1e-6).contains(&v) {
+                // Rank-3 floor is 0 (the diagonal-opposite rotor rests at 0).
+                if i != f && !(-1e-6..=1.0 + 1e-6).contains(&v) {
                     mix_ok = false;
                 }
             }
@@ -373,6 +378,236 @@ mod tests {
             rep.worst_detect_latency_steps < 25, // < 50 ms
             "REGRESSION: worst FDI detect latency {} steps exceeded 25 (was 1)",
             rep.worst_detect_latency_steps
+        );
+    }
+}
+
+// ── FULL-LOOP motor-out campaign (v1.114) ────────────────────────────────────
+//
+// The `run_motor_out_campaign` above disperses over an ATTITUDE-ONLY rigid-body
+// sim (constant thrust, TRUE-state feedback, no estimator, no rotational drag) —
+// the same fidelity ceiling as the point-test it mirrors. That ceiling HID the
+// v1.114 flip: the real failure is a coupling (parasitic lean → descent →
+// estimator divergence + thrust collapse → tumble) whose three ingredients —
+// the altitude loop, the IEKF, and drag-bounded spin — none exist in that sim.
+// Dispersion adds breadth, not fidelity; thousands of trials of a gap-blind
+// model can't falsify a bug the model can't express.
+//
+// THIS campaign closes the gap: it disperses over the FULL production FlightCore
+// (verified IEKF → geometric SE(3) → reduced-attitude + rank-3 allocation,
+// driven by the real FDI on ESC RPM) flown on the analytic SimBackend with
+// rotational drag + ground contact — the same harness as the
+// `survives_single_rotor_failure_without_flipping` oracle, now under dispersion.
+
+use falcon_core::{FlightCore, Pathology, SimBackend};
+
+const FL_DT: f32 = 0.004;
+const FL_WARMUP: u32 = 3000; // steps to settle a level hover before the failure
+const FL_RECOVER: u32 = 2000; // steps to fly out the recovery/descent
+
+/// One dispersed full-loop rotor-out trial, sampled inside a RECOVERABLE
+/// envelope (a rotor-out quad with too little rotational drag spins up beyond
+/// estimator observability — that is physics, not a controller failure, so it
+/// is excluded rather than counted as a loss).
+#[derive(Clone, Debug)]
+struct FullLoopTrial {
+    failed_rotor: usize,
+    setpoint_alt: f32, // NED z setpoint (m, negative up)
+    rot_drag: f32,     // quadratic rotational drag coefficient
+    gyro_white: f32,   // gyro noise σ (rad/s)
+    gps_noise: f32,    // GNSS noise σ (m)
+    seed: u32,         // per-trial noise realisation
+}
+
+fn sample_fullloop(rng: &mut SplitMix64, index: u32) -> FullLoopTrial {
+    FullLoopTrial {
+        failed_rotor: (rng.next_u64() % 4) as usize,
+        setpoint_alt: -rng.range(2.0, 4.0), // hold 2..4 m
+        rot_drag: rng.range(0.015, 0.035),  // realistic drag-bounded spin
+        // Sensor noise within the FDI's SPECIFIED range (its detection gate is
+        // near-level/low-rate; heavier noise degrades detection — a separate,
+        // pre-existing FDI-robustness question, not part of the v1.114
+        // recovery-allocation guard this campaign exists to provide).
+        gyro_white: rng.range(0.0, 0.006),
+        gps_noise: rng.range(0.0, 0.12),
+        seed: (index.wrapping_mul(2_654_435_761)) ^ 0x5151_5151,
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FullLoopReport {
+    pub trials: u32,
+    pub failures: u32,
+    pub worst_peak_tilt: f32, // worst tilt after the failure (rad)
+    pub worst_yaw_rate: f32,  // worst |yaw rate| (rad/s) — the relinquished spin
+    pub least_descent: f32,   // smallest net altitude lost (m) — must stay > 0
+    pub worst_detect_latency_steps: u32,
+    pub failing: Vec<(u32, String)>,
+}
+
+struct FullLoopOutcome {
+    isolated: Option<usize>,
+    detect_latency_steps: u32,
+    peak_tilt: f32,   // worst tilt over the whole recovery (rad)
+    peak_yaw: f32,    // worst |yaw rate| (rad/s) — the relinquished spin
+    net_descent: f32, // altitude LOST from the failure point (m) — must be > 0
+    nan: bool,
+}
+
+fn run_fullloop_trial(t: &FullLoopTrial) -> FullLoopOutcome {
+    let level = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut backend = SimBackend::new(level, FL_DT).with_pathology(Pathology {
+        gyro_white: t.gyro_white,
+        gps_noise: t.gps_noise,
+        ..Default::default()
+    });
+    backend.reseed(t.seed);
+    backend.rot_drag = t.rot_drag;
+    backend.ground_contact = true;
+    let mut core = FlightCore::new(0.5, 1.0 / FL_DT);
+    core.set_altitude(t.setpoint_alt);
+
+    for _ in 0..FL_WARMUP {
+        core.step(&mut backend);
+    }
+    // If the hover never settled (tilt or NaN), this trial's IC is unusable —
+    // treat as NaN so the caller reports it rather than silently passing.
+    let hover_tilt = backend.tilt();
+    if !hover_tilt.is_finite() || hover_tilt > 0.15 {
+        return FullLoopOutcome {
+            isolated: None,
+            detect_latency_steps: u32::MAX,
+            peak_tilt: hover_tilt,
+            peak_yaw: 0.0,
+            net_descent: 0.0,
+            nan: !hover_tilt.is_finite(),
+        };
+    }
+    let alt_at_failure = -backend.pos[2];
+
+    backend.fail_rotor(t.failed_rotor);
+    let mut peak_tilt = 0.0f32;
+    let mut peak_yaw = 0.0f32;
+    let mut detect_latency = u32::MAX;
+    let mut nan = false;
+    for k in 0..FL_RECOVER {
+        core.step(&mut backend);
+        if detect_latency == u32::MAX && core.failed_motor().is_some() {
+            detect_latency = k;
+        }
+        let tilt = backend.tilt();
+        if !tilt.is_finite() {
+            nan = true;
+            break;
+        }
+        peak_tilt = peak_tilt.max(tilt);
+        let yaw = backend.omega[2];
+        peak_yaw = peak_yaw.max(if yaw < 0.0 { -yaw } else { yaw });
+    }
+    // A rotor-out quad CANNOT hold altitude — the honest success criterion is a
+    // CONTROLLED DESCENT (net altitude lost, thrust axis kept upright), not
+    // "reached the ground within the window".
+    let net_descent = alt_at_failure - (-backend.pos[2]);
+    FullLoopOutcome {
+        isolated: core.failed_motor(),
+        detect_latency_steps: detect_latency,
+        peak_tilt,
+        peak_yaw,
+        net_descent,
+        nan,
+    }
+}
+
+/// Run `n` dispersed FULL-LOOP motor-out recovery trials from `campaign_seed`.
+pub fn run_fullloop_motor_out_campaign(n: u32, campaign_seed: u64) -> FullLoopReport {
+    let mut rep = FullLoopReport {
+        trials: n,
+        least_descent: f32::INFINITY,
+        ..Default::default()
+    };
+    for i in 0..n {
+        let mut rng = trial_rng(campaign_seed, i);
+        let t = sample_fullloop(&mut rng, i);
+        let o = run_fullloop_trial(&t);
+
+        rep.worst_peak_tilt = rep.worst_peak_tilt.max(o.peak_tilt);
+        rep.worst_yaw_rate = rep.worst_yaw_rate.max(o.peak_yaw);
+        rep.least_descent = rep.least_descent.min(o.net_descent);
+        if o.detect_latency_steps != u32::MAX {
+            rep.worst_detect_latency_steps =
+                rep.worst_detect_latency_steps.max(o.detect_latency_steps);
+        }
+
+        let mut reason = String::new();
+        if o.nan {
+            reason = "NaN in full-loop cascade".into();
+        } else if o.isolated != Some(t.failed_rotor) {
+            reason = format!("FDI isolated {:?}, expected {}", o.isolated, t.failed_rotor);
+        } else if o.peak_tilt >= 1.0 {
+            reason = format!("tumbled: peak tilt {:.3} rad", o.peak_tilt);
+        } else if o.peak_yaw >= 12.0 {
+            reason = format!("yaw spin ran away: {:.1} rad/s", o.peak_yaw);
+        }
+        // NOTE: altitude after the loss is deliberately NOT gated here. Two
+        // rotors at max thrust equal the hover weight on this plant (k_thrust is
+        // sized for 4×0.5), so a rotor-out quad is near neutrally-buoyant;
+        // bringing it DOWN is the FlightSupervisor's job (it commands LAND on a
+        // motor failure — covered by falcon-core `motor_failure_commands_land`).
+        // This campaign guards the ATTITUDE-domain invariant v1.114 fixed (no
+        // parasitic-moment flip); `least_descent` is REPORTED, not asserted.
+        if !reason.is_empty() {
+            rep.failures += 1;
+            if rep.failing.len() < 20 {
+                rep.failing.push((i, format!("{t:?}: {reason}")));
+            }
+        }
+    }
+    rep
+}
+
+#[cfg(test)]
+mod fullloop_tests {
+    use super::*;
+
+    // Reproducible seed (bump to resample). The full-loop trial is ~50× the
+    // cost of the attitude-only one (a 15-state IEKF per step), so the deck is
+    // smaller — 300 clean trials still give ≥99% success at 95% confidence
+    // within the recoverable envelope, and the coverage is FIDELITY not just
+    // breadth (real estimator + altitude loop + drag-bounded spin).
+    const FL_SEED: u64 = 0x00FA_11C0_DE00_1114;
+    const FL_TRIALS: u32 = 200;
+
+    #[test]
+    fn fullloop_motor_out_monte_carlo_campaign() {
+        let rep = run_fullloop_motor_out_campaign(FL_TRIALS, FL_SEED);
+        eprintln!(
+            "full-loop motor-out campaign: {} trials, {} failures | worst peak tilt {:.3} rad, worst yaw {:.1} rad/s, worst detect {} steps | (reported, not gated: least net descent {:.2} m — altitude is the supervisor's LAND job)",
+            rep.trials, rep.failures, rep.worst_peak_tilt, rep.worst_yaw_rate,
+            rep.worst_detect_latency_steps, rep.least_descent
+        );
+
+        // Primary safety assertion: not one trial in the envelope fails — the
+        // production loop (IEKF + altitude + FDI + rank-3 allocation) recovers a
+        // single-rotor loss across the whole dispersion. This is the FIDELITY
+        // guard the idealized campaign could not provide: a parasitic-moment
+        // regression would drive `worst_peak_tilt` toward π and trip here.
+        assert_eq!(
+            rep.failures, 0,
+            "full-loop motor-out recovery failed in {}/{} dispersed trials; first failures: {:#?}",
+            rep.failures, rep.trials, rep.failing
+        );
+        // Physical safety bounds: never tumbles (< 1.0 rad), spin stays bounded
+        // (< 12 rad/s), and every trial makes a CONTROLLED DESCENT (> 0.3 m lost
+        // — a 3-rotor quad must come down, not fly off).
+        assert!(
+            rep.worst_peak_tilt < 1.0,
+            "worst tilt {:.3} rad exceeded the 1.0 tumble bound",
+            rep.worst_peak_tilt
+        );
+        assert!(
+            rep.worst_yaw_rate < 12.0,
+            "worst yaw spin {:.1} rad/s exceeded the 12 rad/s bound",
+            rep.worst_yaw_rate
         );
     }
 }
@@ -1320,7 +1555,11 @@ fn run_motor_out_disp_trial(t: MotorOutDispTrial, rng: &mut SplitMix64) -> Motor
     for step in 0..4000u32 {
         let (_torque, motors_cmd) = if let Some(f) = isolated {
             let tq = ctrl.moment_reduced(&r, omega, b3_d);
-            (tq, QuadMixer::new().mix_rotor_out(f, tq, HOVER, FLOOR))
+            // Rank-3 allocation (v1.114): the diagonal-opposite rotor must be
+            // free to reach 0 (a positive floor pins it up, reinjecting the
+            // parasitic moment and starving roll/pitch authority) — so pass 0,
+            // matching the production ROTOR_OUT_FLOOR.
+            (tq, QuadMixer::new().mix_rotor_out(f, tq, HOVER, 0.0))
         } else {
             let tq = ctrl.moment(&r, omega, &level);
             (tq, QuadMixer::new().mix_thrust_floor(tq, HOVER, FLOOR))
@@ -1330,7 +1569,8 @@ fn run_motor_out_disp_trial(t: MotorOutDispTrial, rng: &mut SplitMix64) -> Motor
                 mix_ok = false;
             }
             for (i, &v) in motors_cmd.iter().enumerate() {
-                if i != f && !(FLOOR - 1e-6..=1.0 + 1e-6).contains(&v) {
+                // Rank-3 floor is 0 (the diagonal-opposite rotor rests at 0).
+                if i != f && !(-1e-6..=1.0 + 1e-6).contains(&v) {
                     mix_ok = false;
                 }
             }

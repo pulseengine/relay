@@ -367,22 +367,117 @@ impl QuadMixer {
     ) -> [f32; 4] {
         let t = clamp01(sanitise(thrust));
         let floor = clamp01(sanitise(floor));
-        let r = sanitise(torque_body[0]);
-        let p = sanitise(torque_body[1]);
+        // Bound the (normalised) torque command: real controller output is
+        // |τ| ≲ 1, but this keeps the 3×3 Cramer solve below f32 overflow so a
+        // pathological huge input cannot make `det3` reach ∞ and thence
+        // ∞−∞ = NaN (MIX-P08 Kani: "NaN on division"). Well outside any real
+        // command, so it never bites in flight.
+        const TAU_BOUND: f32 = 8.0;
+        let r = sanitise(torque_body[0]).clamp(-TAU_BOUND, TAU_BOUND);
+        let p = sanitise(torque_body[1]).clamp(-TAU_BOUND, TAU_BOUND);
         // yaw = torque_body[2] is RELINQUISHED — never allocated.
-        let mut m = [0.0_f32; 4];
-        for i in 0..4 {
-            if i == failed {
-                m[i] = 0.0; // failed rotor OFF (below the healthy floor, by design)
-            } else {
+
+        if failed >= 4 {
+            // No failure: allocate thrust + roll + pitch over all four (no
+            // yaw), clamped to [floor, 1] — the zero-sum torque columns keep
+            // the collective decoupled, so no parasitic moment arises here.
+            let mut m = [0.0_f32; 4];
+            for i in 0..4 {
                 let row = &MIXER_X[i];
-                // thrust + roll + pitch only (no yaw term), clamped to [floor,1].
                 m[i] = clamp_floor(sanitise(t + row[1] * r + row[2] * p), floor);
             }
+            self.last_motors = m;
+            return m;
         }
+
+        // RANK-3 allocation over the three HEALTHY rotors (v1.114). Reusing
+        // the 4-rotor rows with one rotor zeroed breaks the zero-sum of each
+        // torque column, so the collective leaks into roll/pitch — a
+        // parasitic moment ≈ `collective` toward the dead corner that the
+        // reduced-attitude law can only fight from a growing tilt (proven by
+        // `rotor_out_parasitic_moment_diagnostic`; it is what tipped the gz
+        // recovery into a flip). Instead SOLVE the 3×3 system for the healthy
+        // commands that produce exactly (collective, roll, pitch), yaw free:
+        // this kills the diagonal-opposite rotor and drives the through-CoM
+        // pair — pure lift, zero parasitic tilt, controlled yaw spin.
+        let h = [(failed + 1) % 4, (failed + 2) % 4, (failed + 3) % 4];
+        // Collective SUM target over the healthy rotors: 3·t keeps the
+        // average healthy command at the per-rotor baseline `t` and — unlike
+        // targeting the full 4·t hover collective — leaves every healthy
+        // rotor headroom to swing for ROLL/PITCH authority rather than
+        // pinning them saturated (attitude authority > altitude hold in a
+        // rotor-out; the residual lift deficit is an honest controlled
+        // descent the altitude loop rides down).
+        let c = 3.0 * t;
+        let a = [
+            [1.0, 1.0, 1.0],
+            [MIXER_X[h[0]][1], MIXER_X[h[1]][1], MIXER_X[h[2]][1]],
+            [MIXER_X[h[0]][2], MIXER_X[h[1]][2], MIXER_X[h[2]][2]],
+        ];
+        // Split the allocation into a pure-COLLECTIVE base and a
+        // zero-collective MOMENT delta (the solve is linear, so
+        // `solve(c,r,p) = solve(c,0,0) + solve(0,r,p)`). The delta's
+        // collective row is 0, so it never disturbs total lift — it only
+        // redistributes for roll/pitch. Under saturation we then scale the
+        // delta (not the base) so MOMENT DIRECTION and COLLECTIVE are both
+        // preserved and a naive clamp cannot flip a moment's sign (the same
+        // priority the nominal `mix_thrust_floor` gives collective over
+        // torque). Singular/degenerate solve ⇒ safe zero allocation.
+        let mut base = [0.0_f32; 4];
+        let mut delta = [0.0_f32; 4];
+        if let (Some(b), Some(d)) = (solve3(a, [c, 0.0, 0.0]), solve3(a, [0.0, r, p])) {
+            for k in 0..3 {
+                base[h[k]] = b[k];
+                delta[h[k]] = d[k];
+            }
+        }
+        let s = scale_to_fit(&base, &delta, floor);
+        let mut m = [0.0_f32; 4];
+        for i in 0..4 {
+            if i != failed {
+                m[i] = clamp_floor(sanitise(base[i] + s * delta[i]), floor);
+            }
+        }
+        // failed rotor stays 0 (never allocated).
         self.last_motors = m;
         m
     }
+}
+
+/// Determinant of a 3×3 matrix (row-major), by cofactor expansion.
+#[inline]
+fn det3(a: [[f32; 3]; 3]) -> f32 {
+    a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+        - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+        + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
+}
+
+/// Solve `A·x = rhs` (3×3) by Cramer's rule. Returns `None` when `A` is
+/// singular or non-finite (|det| below eps) so the caller can fall back to a
+/// safe zero allocation rather than emit NaNs. Used by the rotor-out
+/// allocator to map (collective, roll, pitch) onto the healthy rotors.
+#[inline]
+fn solve3(a: [[f32; 3]; 3], rhs: [f32; 3]) -> Option<[f32; 3]> {
+    let det = det3(a);
+    if !det.is_finite() || libm_fabsf(det) < 1.0e-6 {
+        return None;
+    }
+    let mut x = [0.0_f32; 3];
+    for k in 0..3 {
+        let mut ak = a;
+        for (row, rk) in ak.iter_mut().zip(rhs.iter()) {
+            row[k] = *rk;
+        }
+        x[k] = det3(ak) / det;
+    }
+    Some(x)
+}
+
+/// `|x|` without pulling a math crate into this `no_std` leaf (the sign bit
+/// mask is exact and branch-free — this stays on the verified floor).
+#[inline]
+fn libm_fabsf(x: f32) -> f32 {
+    f32::from_bits(x.to_bits() & 0x7fff_ffff)
 }
 
 /// Clamp `x` into `[lo, 1]`. Total over all f32: NaN and values below
@@ -926,6 +1021,83 @@ mod tests {
         for v in r.iter() {
             assert_eq!(*v, 0.0, "negative thrust should clip to 0, got {:?}", r);
         }
+    }
+
+    #[test]
+    fn mix_p08_rotor_out_zero_torque_has_no_parasitic_moment() {
+        // MIX-P08 (v1.114): the rank-3 rotor-out allocator must NOT inject a
+        // parasitic roll/pitch moment at zero commanded torque. The naive
+        // "zero the failed rotor, keep the 4-rotor rows" allocation produced
+        // roll≈+collective / pitch≈−collective toward the dead corner (the
+        // gz-flip cause); the solved allocation produces ~0.
+        let mut m = QuadMixer::new();
+        let thrust = 0.585_f32; // gz hover collective
+        for failed in 0..4 {
+            let motors = m.mix_rotor_out(failed, [0.0, 0.0, 0.0], thrust, 0.0);
+            assert_eq!(motors[failed], 0.0, "failed rotor {failed} must be OFF");
+            let tq = motors_to_torque_signs(motors);
+            assert!(
+                libm_fabsf(tq[0]) < 1.0e-3 && libm_fabsf(tq[1]) < 1.0e-3,
+                "parasitic moment for failed={failed}: motors={motors:?} \
+                 roll={} pitch={}",
+                tq[0],
+                tq[1],
+            );
+        }
+    }
+
+    #[test]
+    fn mix_p08_rotor_out_preserves_moment_direction() {
+        // The solved allocation realises the COMMANDED roll/pitch when
+        // feasible, and under saturation produces `s·(roll,pitch)` for some
+        // `s ∈ [0,1]` — same DIRECTION, never overshooting or flipping sign
+        // (the base+delta / scale_to_fit split, mirroring `mix_thrust_floor`).
+        let mut m = QuadMixer::new();
+        let thrust = 0.5_f32;
+        let (rc, pc) = (0.1_f32, -0.08_f32);
+        for failed in 0..4 {
+            let motors = m.mix_rotor_out(failed, [rc, pc, 0.3], thrust, 0.0);
+            let tq = motors_to_torque_signs(motors);
+            // Parallel to the command (produced × command = 0) ⇒ direction kept.
+            let cross = tq[0] * pc - tq[1] * rc;
+            assert!(
+                libm_fabsf(cross) < 1.0e-3,
+                "failed={failed}: produced moment ({},{}) not parallel to \
+                 command ({rc},{pc}) — motors={motors:?}",
+                tq[0],
+                tq[1],
+            );
+            // No overshoot on either axis, and correct sign.
+            assert!(
+                tq[0] * rc >= -1.0e-6 && libm_fabsf(tq[0]) <= libm_fabsf(rc) + 1.0e-3,
+                "failed={failed}: roll {} overshoots/flips command {rc}",
+                tq[0],
+            );
+            assert!(
+                tq[1] * pc >= -1.0e-6 && libm_fabsf(tq[1]) <= libm_fabsf(pc) + 1.0e-3,
+                "failed={failed}: pitch {} overshoots/flips command {pc}",
+                tq[1],
+            );
+        }
+    }
+
+    #[test]
+    fn mix_p08_rotor_out_small_command_is_exact() {
+        // A small command in a FEASIBLE direction (the yaw spin rotates the
+        // 3-rotor authority cone, so only one side is reachable at a time)
+        // must be realised EXACTLY (s=1). failed=0 loses M0(FR); the naturally
+        // -off rotor is M2(BL), and a +roll/−pitch command raises it, staying
+        // interior.
+        let mut m = QuadMixer::new();
+        let motors = m.mix_rotor_out(0, [0.05, -0.05, 0.2], 0.5, 0.0);
+        let tq = motors_to_torque_signs(motors);
+        assert!(
+            libm_fabsf(tq[0] - 0.05) < 1.0e-3 && libm_fabsf(tq[1] + 0.05) < 1.0e-3,
+            "small feasible command not exact: produced roll={} pitch={} \
+             (motors={motors:?})",
+            tq[0],
+            tq[1],
+        );
     }
 
     #[test]

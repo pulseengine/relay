@@ -272,14 +272,20 @@ impl AdrcRate {
     /// whose actuator lag ADRC is here to reject).
     pub fn falcon_quad() -> Self {
         Self::new([
-            AdrcGains::with_tau(40.0, 12.0, 30.0, 0.0125),
-            AdrcGains::with_tau(40.0, 12.0, 30.0, 0.0125),
+            // b0 (control effectiveness ≈ τ_max/J) raised 30→60 for the gz
+            // plant: the real gz falcon-quad is ~2× more responsive than the
+            // analytic SimBackend the ADRC was matched to (motorConstant 8.55e-6
+            // × arm 0.088 / J 0.0217 → higher α per unit torque), so b0=30 left
+            // the rate-loop gain ~2× too high → tumble. The ESO absorbs the
+            // residual b0 error for the analytic plant (46) too. v1.113.
+            AdrcGains::with_tau(40.0, 12.0, 60.0, 0.0125),
+            AdrcGains::with_tau(40.0, 12.0, 60.0, 0.0125),
             // Yaw: ω_o high (fast observer) but ω_c low (control bw below
             // the motor pole 1/τ≈40), AND the actuator lag τ modelled in
             // the ESO (the dominant v0.25 fix — yaw drives large slow Δω
             // through this lag, so it must be in the plant, not left as an
             // "unmodeled disturbance" the ESO destabilisingly cancels).
-            AdrcGains::with_tau(30.0, 3.0, 6.0, 0.025),
+            AdrcGains::with_tau(30.0, 3.0, 18.0, 0.025),
         ])
     }
 
