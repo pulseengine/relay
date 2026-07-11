@@ -60,6 +60,22 @@ jobs:
       # the wider workspace. Falcon crates compile clean.
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The two-commit-rule check diffs against the PR base; a shallow
+          # single-commit checkout has no base to diff.
+          fetch-depth: 0
+
+      # ── Two-commit rule (v1.116, rivet hygiene) ──────────────────────
+      # A PR that changes implementation code must not ALSO promote any
+      # artifact to verified/accepted — verification sign-off arrives in a
+      # separate PR whose evidence this gate then executes. Runs FIRST so
+      # the violation is reported in seconds, not after the 30-min sweep.
+      - name: Two-commit rule (verification independence)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: scripts/check-verification-independence.sh "$BASE_SHA"
 
       - uses: dtolnay/rust-toolchain@stable
         with:

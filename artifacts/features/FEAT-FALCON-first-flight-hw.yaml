@@ -1,0 +1,47 @@
+artifacts:
+  - id: FEAT-FALCON-first-flight-hw
+    type: feature
+    title: "First-flight hardware arc — the infrastructure ring for the Pixhawk 6X-RT / X500 V2 vehicle"
+    status: approved
+    description: >
+      Roadmap umbrella for the 2026-07 gap-analysis findings (audit vs PX4
+      v1.16 / ArduPilot 4.6 / research frontier): the verified control core
+      is ahead of production practice, but the load-bearing infrastructure
+      ring around it is what blocks real flight. This arc closes that ring,
+      targeted at the FIRST REAL VEHICLE (ordered 2026-07):
+
+        - FMU: Holybro Pixhawk 6X-RT (NXP i.MX RT1176)
+        - Airframe: Holybro X500 V2 ARF quad (500 mm, ~1-1.2 kg AUW)
+        - GNSS: 2x Holybro M9N (u-blox M9N; primary + 2nd-GPS port)
+        - Rangefinder: Benewake TF02 Pro LiDAR (40 m, downward)
+        - Telemetry: Holybro SiK 433 MHz V3
+        - Power: Gens Ace 4S 5000 mAh 60C via PM02D power module
+
+      RELAY/JESS BOUNDARY (per relay#214 / jess#62): relay owns everything
+      above the peripheral seam — verified protocol decoders, record formats,
+      estimators, control, the requirements below. JESS owns the OS and
+      silicon integration: RTOS/scheduler, hardware watchdog, bootloader/
+      firmware update, and the SPI/I2C/UART/PWM/ADC/flash bus bindings on the
+      6X-RT. Requirements below that need a hardware binding say so and are
+      verifiable against mock backends until jess lands the binding.
+
+      Release ladder (each a normal feature loop, queryable via
+      `rivet release status`):
+        - v1.117: PARAM-P03 persistence (KEYSTONE) + CALIB-P02 flows
+                  (+ FAULT-P04 supervisor landing, moved from v1.116)
+        - v1.118: LOG-P02 blackbox + LOG-P03 bit-exact estimator replay
+        - v1.119: MAVLINK-P06 telemetry streaming + in-flight tuning (SiK)
+        - v1.120: BATTERY-P02 current/mAh/sag (PM02D)
+        - v1.121: GNSS-P02 dual-M9N blending/failover + RANGEDRV-P01 TF02 Pro
+        - v1.122: NOTCH-P01 RPM-notch + PREARM-P03 check breadth
+
+      Deliberately NOT in this arc (tracked elsewhere): the verification-
+      fidelity audit (#257), real-flight MC/DC (#145), relay-traj proof
+      bounding (#260), swarch decomposition + release-field/named-test
+      backfill (hygiene backlog issues), wind estimation / dead-reckoning
+      failsafe (research-parity, post-first-flight), autotune (needs
+      PARAM-P03 + flight data first).
+    tags: [falcon, roadmap, first-flight, hardware, infrastructure, pixhawk-6xrt, x500v2]
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-021

@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-LOG-P02
+    type: sw-req
+    title: "LOG-P02 — persistent flight blackbox (crash-surviving, full-rate estimator inputs)"
+    status: proposed
+    release: falcon-v1.118.0
+    description: >
+      Every flight shall produce a PERSISTENT log (non-volatile, not the
+      RAM ring of LOG-P01) containing at minimum: raw IMU samples at the
+      control rate, GNSS fixes, baro/mag samples, motor commands + achieved
+      RPM, estimator state + covariance diagonals, mode/failsafe events, and
+      parameter snapshot at boot — enough to REPLAY the estimator (LOG-P03)
+      and to reconstruct a crash post-hoc. Writes shall be power-loss-safe
+      (a crash truncates, never corrupts, earlier records) and shall keep up
+      at the control rate with bounded backpressure (drops are COUNTED and
+      reported, never silent). The storage seam (SD/flash on Pixhawk 6X-RT)
+      is jess's binding; the record format, rate budgeting, and
+      truncation-safety are relay's. This is the ulog/DataFlash equivalent —
+      the single biggest observability gap vs PX4/ArduPilot.
+    tags: [falcon, logging, blackbox, forensics, field-operations, v1.118]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Format: encode/decode lossless round-trip (Kani, extending LOG-P01's
+        proof). Truncation safety: a log cut at ANY byte offset decodes all
+        complete records before the cut (property test over cut points).
+        Rate: a simulated full-rate flight logs with zero silent drops (drop
+        counter matches injected backpressure). Completeness: the logged set
+        is sufficient for LOG-P03's bit-exact replay (shared oracle).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-021
