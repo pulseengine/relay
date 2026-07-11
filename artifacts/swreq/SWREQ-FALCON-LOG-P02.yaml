@@ -13,10 +13,15 @@ artifacts:
       and to reconstruct a crash post-hoc. Writes shall be power-loss-safe
       (a crash truncates, never corrupts, earlier records) and shall keep up
       at the control rate with bounded backpressure (drops are COUNTED and
-      reported, never silent). The storage seam (SD/flash on Pixhawk 6X-RT)
-      is jess's binding; the record format, rate budgeting, and
-      truncation-safety are relay's. This is the ulog/DataFlash equivalent —
-      the single biggest observability gap vs PX4/ArduPilot.
+      reported, never silent). SEAM (agreed with jess in jess#144, their
+      REQ-PIX-022): a distinct BLOCK/APPEND seam (NorFlash or SD block
+      device) — unlike the FRAM param seam, erase-block + power-loss
+      semantics DO cross it, so the split is explicit: JESS owns the
+      flush/commit ordering and torn-record DETECTABILITY at the media
+      level; RELAY owns the record codec, rate budgeting, and the
+      any-byte-offset truncation decode (verified against a mock block
+      device with injected torn writes). This is the ulog/DataFlash
+      equivalent — the single biggest observability gap vs PX4/ArduPilot.
     tags: [falcon, logging, blackbox, forensics, field-operations, v1.118]
     fields:
       req-type: functional

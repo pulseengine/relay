@@ -13,9 +13,13 @@ artifacts:
       corrupt or absent store shall fall back to schema defaults LOUDLY (a
       telemetry/pre-arm flag, never silent). Firmware upgrades shall migrate
       or explicitly reset parameters — never silently reinterpret them (the
-      PX4/ArduPilot param-migration discipline). The storage SEAM is relay's
-      (a verified record codec + wear-aware commit protocol behind a trait);
-      the flash/FRAM binding on the Pixhawk 6X-RT is jess's (jess#62).
+      PX4/ArduPilot param-migration discipline). SEAM (agreed with jess in
+      jess#144): a BYTE-addressable `embedded-storage-async` seam over the
+      6X-RT's FM25V02A FRAM (jess DD-016) — FRAM has no erase pages and
+      ~10^12 write endurance, so NO wear-aware layer is needed on this path
+      (wear-awareness becomes a requirement only if params ever move to
+      NOR). relay owns the verified record codec + commit protocol; jess
+      owns the FRAM binding (jess#62 / REQ-PIX-015).
       KEYSTONE: unblocks calibration persistence (CALIB-P02), field tuning,
       and autotune. From the 2026-07 gap analysis — the RAM-only store means
       every power cycle today resets all tuning to defaults.

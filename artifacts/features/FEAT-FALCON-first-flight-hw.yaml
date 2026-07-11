@@ -25,6 +25,25 @@ artifacts:
       6X-RT. Requirements below that need a hardware binding say so and are
       verifiable against mock backends until jess lands the binding.
 
+      SEAM DECISIONS SETTLED (jess#144, 2026-07-11; mirrored jess-side in
+      their REQ-PIX-022 / DD-024 / DD-022 ladder-sync table):
+        - Param NVM = byte seam over FM25V02A FRAM (no erase pages, no wear
+          layer needed); bulk log = a DISTINCT block/append seam where
+          jess owns flush ordering + torn-record detectability.
+        - Ordering confirmed: NVM (v1.117) before bulk logging (v1.118).
+        - ESC telemetry: bidir-DShot eRPM PRIMARY (stock X500 V2 BLHeli
+          ESCs; jess FlexIO+eDMA capture, relay falcon-esc-dshot decode);
+          DroneCAN esc.Status alternate.
+        - HIL: jess binds the physical transport, relay the framing.
+          CONSTRAINT: board interaction is READ-ONLY until an explicit
+          flight-readiness greenlight — HITL sensor-inject is a board
+          write, so on-hardware HITL is greenlight-gated (Renode first).
+        - jess silicon bindings are gated on the synth float poles
+          (synth#708 f32 + #369 f64) — relay building against mocks in the
+          meantime is the agreed plan.
+        - Frame: X500 V2 (per the order; jess's DD-022 said S500 — the
+          peripheral BOM is identical, no seam impact).
+
       Release ladder (each a normal feature loop, queryable via
       `rivet release status`):
         - v1.117: PARAM-P03 persistence (KEYSTONE) + CALIB-P02 flows

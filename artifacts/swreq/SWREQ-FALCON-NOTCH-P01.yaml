@@ -7,8 +7,14 @@ artifacts:
     description: >
       The rate-loop gyro path shall attenuate per-motor rotational vibration
       with harmonic notch filters whose center frequencies track ACHIEVED
-      motor RPM (from ESC telemetry — the read_motor_rpm seam the FDI already
-      consumes): fundamental + at least the 2nd harmonic per motor, with
+      motor RPM. RPM SOURCE (decided with jess, jess#144 / their DD-024):
+      bidir-DShot eRPM is PRIMARY — the X500 V2's stock BLHeli ESCs speak
+      DShot natively, jess binds the eRPM capture on the FlexIO+eDMA path
+      (REQ-PIX-012) and relay's falcon-esc-dshot decode sits on top, feeding
+      the same read_motor_rpm seam the rotor-out FDI already consumes.
+      DroneCAN esc.Status remains the alternate source (config change, not
+      re-architecture) for a future smart-ESC vehicle. Filtering:
+      fundamental + at least the 2nd harmonic per motor, with
       bounded added phase lag at the rate-loop crossover (< 10° at the
       current ADRC bandwidth — attenuating vibration must not destabilize
       the loop it protects). With RPM telemetry absent the notches shall
