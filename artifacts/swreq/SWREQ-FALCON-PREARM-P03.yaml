@@ -1,0 +1,36 @@
+artifacts:
+  - id: SWREQ-FALCON-PREARM-P03
+    type: sw-req
+    title: "PREARM-P03 — pre-arm check breadth: configuration, estimator, and hardware consistency"
+    status: proposed
+    release: falcon-v1.122.0
+    description: >
+      The pre-arm gate (PREARM-P01/P02) shall be extended toward the
+      PX4/ArduPilot check breadth — "most crashes are prevented on the
+      ground". Each added check shall block arming with a DISTINCT,
+      operator-readable reason (STATUSTEXT via MAVLINK-P06). Minimum added
+      set: (a) calibration validity + age (consumes CALIB-P02 flags);
+      (b) estimator health — innovation test ratios below bounds, variance
+      converged, dual-GNSS agreement (GNSS-P02 flag clear); (c) configuration
+      consistency — parameter store loaded from NVM (not defaults-fallback),
+      geofence sane (home inside fence), failsafe thresholds ordered
+      (low > critical); (d) hardware consistency — all expected sensors
+      present and fresh, ESC telemetry alive on all four motors, battery
+      above takeoff-minimum under load estimate, rangefinder returning
+      plausible ground distance; (e) safety state — RC and GCS links alive,
+      no failsafe latched. The check list shall be a TABLE (data), not
+      scattered conditionals, so coverage is enumerable and testable.
+    tags: [falcon, prearm, safety, checks, field-operations, v1.122]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Per-check pair tests: each check individually blocks arming with its
+        distinct reason code and passes when cleared (table-driven, one test
+        per row — coverage equals the table length by construction). Kani:
+        the gate is monotone (adding a failing check can never ALLOW arming)
+        and total. Integration: a SITL cold boot with defaults-fallback
+        parameters cannot arm; after a full CALIB-P02 flow + NVM load it can.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011

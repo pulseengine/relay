@@ -1,0 +1,31 @@
+artifacts:
+  - id: SWREQ-FALCON-CALIB-P02
+    type: sw-req
+    title: "CALIB-P02 — on-vehicle calibration flows with persisted results"
+    status: proposed
+    release: falcon-v1.117.0
+    description: >
+      The vehicle shall run its sensor calibration flows ON-VEHICLE and
+      persist the results: (a) gyro null — automatic at-rest bias capture
+      (< 5 s, motion-rejected: restart on |ω| above threshold); (b) accel
+      6-point — operator-guided orientation sequence with per-face quality
+      gates; (c) mag sweep — hard/soft-iron fit with a fit-quality metric
+      that REJECTS a bad sweep rather than storing it. Results persist via
+      PARAM-P03 and are consumed by the estimator on boot; the pre-arm gate
+      shall refuse arming with missing/stale calibration (age + validity
+      flags). The solver math is already verified (relay-calib, CALIB-P01);
+      this requirement is the missing FLOW + persistence around it. Target
+      hardware: Pixhawk 6X-RT IMUs + IST8310 mag on the X500 V2.
+    tags: [falcon, calibration, field-operations, prearm, v1.117]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Flow state-machine tests: motion during gyro-null restarts the
+        capture; an incomplete 6-point sequence never commits; a low-quality
+        mag fit is rejected with the metric exposed. Persistence: calibrate →
+        reboot (mock NVM) → estimator consumes the same CalParams. Pre-arm:
+        missing calibration blocks arming with a distinct reason code.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-021

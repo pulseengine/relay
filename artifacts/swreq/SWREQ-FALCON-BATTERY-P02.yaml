@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-BATTERY-P02
+    type: sw-req
+    title: "BATTERY-P02 — current-integrated energy monitoring with sag compensation"
+    status: proposed
+    release: falcon-v1.120.0
+    description: >
+      Battery state shall be estimated from VOLTAGE AND CURRENT (Pixhawk
+      6X-RT PM02D power module; 4S 5000 mAh Gens Ace on the X500 V2):
+      (a) consumed charge by current integration (mAh, drift-bounded);
+      (b) sag-compensated resting voltage (I·R with estimated internal
+      resistance) so a throttle punch does not false-trigger the low-battery
+      failsafe and a sagged pack does not hide a genuinely low state;
+      (c) failsafe thresholds (BATTERY-P01) driven by the compensated
+      state-of-charge, not raw voltage. Remaining-capacity shall degrade
+      GRACEFULLY when current sensing is absent (voltage-only fallback with
+      a wider margin, flagged). This closes the gap vs PX4 (BAT1_R_INTERNAL)
+      and ArduPilot (sag-compensated failsafes) identified 2026-07.
+    tags: [falcon, battery, energy, failsafe, pm02d, field-operations, v1.120]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Sag test: a simulated 60C punch on a half-full pack does NOT trip the
+        low-battery failsafe; the same resting voltage with high integrated
+        consumption DOES. Integration bound: mAh error < 2% over a simulated
+        20-min flight with a noisy current sense. Fallback: with current
+        absent, voltage-only thresholds apply with the wider margin and the
+        degraded mode is flagged in SYS_STATUS. Kani: the estimator is total
+        (any sensor input yields a bounded, finite state).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-019

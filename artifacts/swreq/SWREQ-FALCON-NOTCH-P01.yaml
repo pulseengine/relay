@@ -1,0 +1,41 @@
+artifacts:
+  - id: SWREQ-FALCON-NOTCH-P01
+    type: sw-req
+    title: "NOTCH-P01 — RPM-driven harmonic notch filtering on the gyro path"
+    status: proposed
+    release: falcon-v1.122.0
+    description: >
+      The rate-loop gyro path shall attenuate per-motor rotational vibration
+      with harmonic notch filters whose center frequencies track ACHIEVED
+      motor RPM. RPM SOURCE (decided with jess, jess#144 / their DD-024):
+      bidir-DShot eRPM is PRIMARY — the X500 V2's stock BLHeli ESCs speak
+      DShot natively, jess binds the eRPM capture on the FlexIO+eDMA path
+      (REQ-PIX-012) and relay's falcon-esc-dshot decode sits on top, feeding
+      the same read_motor_rpm seam the rotor-out FDI already consumes.
+      DroneCAN esc.Status remains the alternate source (config change, not
+      re-architecture) for a future smart-ESC vehicle. Filtering:
+      fundamental + at least the 2nd harmonic per motor, with
+      bounded added phase lag at the rate-loop crossover (< 10° at the
+      current ADRC bandwidth — attenuating vibration must not destabilize
+      the loop it protects). With RPM telemetry absent the notches shall
+      bypass cleanly (no filtering is safer than a mistracked notch). This is
+      production table stakes (PX4 IMU_GYRO_DNF, ArduPilot INS_HNTCH,
+      Betaflight RPM filter) and the identified stability risk for the real
+      X500 V2 airframe, whose 1045-prop vibration spectrum the current
+      single LPF cannot reject without eating phase margin.
+    tags: [falcon, filtering, notch, vibration, rpm-telemetry, rate-loop, v1.122]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Frequency response: ≥ 20 dB attenuation at the tracked RPM
+        fundamental across the hover-to-full band, with measured phase lag at
+        the rate-loop crossover < 10°. Tracking: a swept-RPM input keeps
+        attenuation within 3 dB of nominal. Bypass: absent RPM telemetry ⇒
+        transfer function is unity (bit-exact passthrough). Kani: filter
+        state totality (any input incl. non-finite yields finite output).
+        Closed-loop: the gz/SITL hover with injected per-motor vibration
+        shows reduced rate-loop noise vs the LPF-only baseline (measured).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002

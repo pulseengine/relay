@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-FALCON-MAVLINK-P06
+    type: sw-req
+    title: "MAVLINK-P06 — operator telemetry streaming + in-flight parameter tuning over the SiK link"
+    status: proposed
+    release: falcon-v1.119.0
+    description: >
+      The vehicle shall stream continuous state/health telemetry to the GCS
+      and accept in-flight parameter changes, over the real radio link
+      (Holybro SiK 433 MHz V3, ~57.6 kbps effective — rate budgeting is part
+      of the requirement, not an afterthought). Minimum streamed set at
+      operator-useful rates within the link budget: ATTITUDE (10 Hz),
+      GLOBAL_POSITION_INT (5 Hz), SYS_STATUS incl. battery (2 Hz),
+      GPS_RAW_INT (2 Hz), VFR_HUD (5 Hz), SERVO_OUTPUT_RAW (2 Hz),
+      STATUSTEXT for events/failsafes (on occurrence), plus the existing
+      HEARTBEAT (1 Hz). PARAM_SET in flight shall apply bounded values
+      immediately (via the verified relay-param schema) and nack out-of-range
+      writes. Message priority under link saturation: HEARTBEAT and
+      STATUSTEXT shall never be starved. Today the GCS is blind beyond
+      heartbeat — flight testing without this is flying without instruments.
+    tags: [falcon, mavlink, telemetry, sik-radio, tuning, field-operations, v1.119]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Wire-conformance against reference MAVLink vectors for each new
+        message (external vectors, not self-round-trip — the DroneCAN
+        bit-order lesson). Rate budget: at the SiK effective rate the
+        scheduled set fits with ≥ 20% headroom (measured, not asserted);
+        under an injected half-rate link, HEARTBEAT/STATUSTEXT still meet
+        their rates while others degrade. In-flight PARAM_SET: applied within
+        one control cycle in SITL, out-of-range nacked.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

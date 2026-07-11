@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-FALCON-RANGEDRV-P01
+    type: sw-req
+    title: "RANGEDRV-P01 — Benewake TF02 Pro rangefinder driver + landing/terrain assist"
+    status: proposed
+    release: falcon-v1.121.0
+    description: >
+      The stack shall decode the Benewake TF02 Pro LiDAR rangefinder
+      (UART/I2C, 0.1–40 m, the first vehicle's downward-facing unit) and use
+      it for (a) terrain-relative altitude during the landing phase — the
+      velocity-based touchdown (v1.27) currently trusts the baro/GNSS
+      estimate, which carries meters of error exactly where centimeters
+      matter; and (b) a ground-proximity input to the land detector. The
+      driver shall be the established pattern: pure decode (verified against
+      EXTERNAL reference frames — Benewake protocol documentation vectors,
+      per the DroneCAN conformance lesson), signal-quality/strength gating
+      (reject low-strength and out-of-range returns), totality under
+      arbitrary bytes (Kani). Fusion shall reject range returns inconsistent
+      with the estimator's height by an innovation gate (tall grass, steps,
+      overflight of obstacles must not fold the altitude estimate).
+    tags: [falcon, rangefinder, tf02-pro, lidar, landing, driver, v1.121]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Decode conformance against Benewake-documented frame vectors (not
+        self-round-trip). Kani: decoder totality over arbitrary byte streams.
+        Gating: low-strength and >40 m returns never reach the estimator.
+        Landing assist: SITL touchdown with a biased baro (+2 m) lands within
+        15 cm of true ground using range assist (vs the current baro-only
+        behavior); an injected false short-range return mid-descent (obstacle
+        overflight) does not fold the altitude estimate (innovation gate).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-018

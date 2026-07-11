@@ -1,0 +1,39 @@
+artifacts:
+  - id: SWREQ-FALCON-PARAM-P03
+    type: sw-req
+    title: "PARAM-P03 — parameter persistence across power cycles"
+    status: proposed
+    release: falcon-v1.117.0
+    description: >
+      Parameters (control gains, failsafe thresholds, geofence, calibration
+      offsets) shall persist across power cycles: on boot the flight core
+      shall load the last-saved parameter set from non-volatile storage, and
+      a parameter change shall be durably committed within 1 s of the write.
+      Storage shall be integrity-protected (checksum/CRC per record); a
+      corrupt or absent store shall fall back to schema defaults LOUDLY (a
+      telemetry/pre-arm flag, never silent). Firmware upgrades shall migrate
+      or explicitly reset parameters — never silently reinterpret them (the
+      PX4/ArduPilot param-migration discipline). SEAM (agreed with jess in
+      jess#144): a BYTE-addressable `embedded-storage-async` seam over the
+      6X-RT's FM25V02A FRAM (jess DD-016) — FRAM has no erase pages and
+      ~10^12 write endurance, so NO wear-aware layer is needed on this path
+      (wear-awareness becomes a requirement only if params ever move to
+      NOR). relay owns the verified record codec + commit protocol; jess
+      owns the FRAM binding (jess#62 / REQ-PIX-015).
+      KEYSTONE: unblocks calibration persistence (CALIB-P02), field tuning,
+      and autotune. From the 2026-07 gap analysis — the RAM-only store means
+      every power cycle today resets all tuning to defaults.
+    tags: [falcon, parameters, persistence, nvm, field-operations, keystone, v1.117]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Round-trip test through a mock NVM backend: set → commit → reboot
+        (re-init from the mock's bytes) → identical parameter set. Corruption
+        test: flipped bytes in any record ⇒ defaults + loud flag, never a
+        partially-applied set (Kani: the loader is total and never yields an
+        out-of-schema value). Migration test: a version-bumped schema loads an
+        old store without silent reinterpretation.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-021
