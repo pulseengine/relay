@@ -399,6 +399,7 @@ dependencies = [
  "relay-arm",
  "relay-att",
  "relay-ekf",
+ "relay-fsm",
  "relay-geo",
  "relay-iekf",
  "relay-lc",
@@ -871,6 +872,7 @@ name = "relay-calib"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "relay-param",
 ]
 
 [[package]]

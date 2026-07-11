@@ -717,6 +717,141 @@ mod fdi_noise_tests {
     }
 }
 
+// ── Supervised rotor-out LANDING campaign (v1.117, FAULT-P04) ────────────────
+//
+// The v1.114 full-loop campaign guards the ATTITUDE invariant and deliberately
+// reports-but-does-not-gate altitude ("the supervisor's LAND job"). THIS is
+// that job, dispersed: the FULL production FlightSupervisor (FSM + failsafes +
+// the same core) flies takeoff → settled hover → a rotor dies → the motor
+// failsafe commands LAND → land-where-you-are + the lift-deficit-compensated
+// velocity descent (both v1.117) put it on the ground upright → Disarmed.
+
+use falcon_core::FlightSupervisor;
+use relay_fsm::{Event as FsmEvent, Mode as FsmMode};
+
+#[derive(Clone, Debug)]
+struct SupLandTrial {
+    failed_rotor: usize,
+    cruise_alt: f32,
+    rot_drag: f32,
+    seed: u32,
+}
+
+fn sample_supland(rng: &mut SplitMix64, index: u32) -> SupLandTrial {
+    SupLandTrial {
+        failed_rotor: (rng.next_u64() % 4) as usize,
+        cruise_alt: rng.range(1.5, 3.5),
+        rot_drag: rng.range(0.015, 0.035),
+        seed: index.wrapping_mul(2_654_435_761) ^ 0x1A9D_0117,
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SupLandReport {
+    pub trials: u32,
+    /// Trials whose PRE-FAILURE hover never settled (rejection-sampled out —
+    /// they measure the warmup, not the recovery; reported, never silent).
+    pub unsettled: u32,
+    pub failures: u32,
+    pub worst_approach_sink: f32, // m/s below 0.5 m AGL
+    pub worst_tilt: f32,          // rad, airborne after the failure
+    pub failing: Vec<(u32, String)>,
+}
+
+/// Run `n` dispersed supervised rotor-out landing trials.
+pub fn run_supervised_rotorout_landing_campaign(n: u32, campaign_seed: u64) -> SupLandReport {
+    const DT: f32 = 0.002;
+    let level = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut rep = SupLandReport { trials: n, ..Default::default() };
+    for i in 0..n {
+        let mut rng = trial_rng(campaign_seed, i);
+        let t = sample_supland(&mut rng, i);
+        let mut b = SimBackend::new(level, DT);
+        b.reseed(t.seed);
+        b.rot_drag = t.rot_drag;
+        b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, t.cruise_alt, 14.0);
+        sup.command(FsmEvent::Arm, true, true);
+        sup.command(FsmEvent::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut b);
+        }
+        // Rejection sampling: the recovery is only measurable from a settled
+        // hover (the campaign discipline — an unsettled IC is not a finding).
+        if !((-b.pos[2] - t.cruise_alt).abs() < 0.3 && b.vel[2].abs() < 0.3) {
+            rep.unsettled += 1;
+            continue;
+        }
+
+        b.fail_rotor(t.failed_rotor);
+        let (mut landed, mut approach_sink, mut peak_tilt) = (false, 0.0f32, 0.0f32);
+        for _ in 0..20000 {
+            sup.step(&mut b);
+            let alt = -b.pos[2];
+            if alt > 0.15 {
+                peak_tilt = peak_tilt.max(b.tilt());
+                if alt < 0.5 {
+                    approach_sink = approach_sink.max(b.vel[2]);
+                }
+            }
+            if sup.mode() == FsmMode::Disarmed {
+                landed = true;
+                break;
+            }
+        }
+        rep.worst_approach_sink = rep.worst_approach_sink.max(approach_sink);
+        rep.worst_tilt = rep.worst_tilt.max(peak_tilt);
+
+        let mut reason = String::new();
+        if !landed {
+            reason = format!("never touched down (mode {:?}, alt {:.2})", sup.mode(), -b.pos[2]);
+        } else if approach_sink >= 1.2 {
+            reason = format!("hard approach: {approach_sink:.2} m/s");
+        } else if peak_tilt >= 0.6 {
+            reason = format!("tilted during descent: {peak_tilt:.2} rad");
+        } else if b.tilt() >= 0.35 {
+            reason = format!("tipped at touchdown: {:.2} rad", b.tilt());
+        }
+        if !reason.is_empty() {
+            rep.failures += 1;
+            if rep.failing.len() < 20 {
+                rep.failing.push((i, format!("{t:?}: {reason}")));
+            }
+        }
+    }
+    rep
+}
+
+#[cfg(test)]
+mod supland_tests {
+    use super::*;
+
+    const SL_SEED: u64 = 0x0117_1A9D_5EED_0001;
+    const SL_TRIALS: u32 = 150;
+
+    #[test]
+    fn supervised_rotorout_landing_monte_carlo_campaign() {
+        let rep = run_supervised_rotorout_landing_campaign(SL_TRIALS, SL_SEED);
+        eprintln!(
+            "supervised rotor-out landing campaign: {} trials ({} unsettled-rejected), {} failures | worst approach sink {:.2} m/s, worst tilt {:.2} rad",
+            rep.trials, rep.unsettled, rep.failures, rep.worst_approach_sink, rep.worst_tilt
+        );
+        // The rejection count must stay a small minority — if most trials
+        // can't even settle a hover, the campaign is measuring the wrong thing.
+        assert!(
+            rep.unsettled * 4 <= rep.trials,
+            "{}/{} trials never settled a hover — warmup/tuning problem",
+            rep.unsettled,
+            rep.trials
+        );
+        assert_eq!(
+            rep.failures, 0,
+            "supervised rotor-out landing failed in {}/{} trials: {:#?}",
+            rep.failures, rep.trials, rep.failing
+        );
+    }
+}
+
 // ── Attitude-stabilisation campaign (random tilt, no fault) ──────────────────
 
 /// A single dispersed attitude-recovery trial: the aircraft starts tilted and

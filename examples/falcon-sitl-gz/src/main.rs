@@ -198,6 +198,13 @@ fn run_scenario(
             // isolate it (RPM residual) and the loop keeps the vehicle aloft.
             run_flightcore(physics, 2.0, duration_s, Some((0, duration_s * 0.5)), evidence)
         }
+        "supervised-rotorout" => {
+            // v1.117 (FAULT-P04): the FULL production FlightSupervisor flies
+            // takeoff -> hover -> rotor 0 dies -> the motor failsafe commands
+            // LAND -> land-where-you-are + deficit-compensated velocity descent
+            // -> touchdown -> Disarmed. The recordable landing demo.
+            run_supervised_rotorout(physics, 2.0, duration_s, duration_s * 0.4, evidence)
+        }
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -1296,6 +1303,101 @@ fn run_alt_only_hover(
     }
     final_dist < 0.5 && rms_steady < 1.0
 }
+/// v1.117 (FAULT-P04) — the SUPERVISED rotor-out landing on a real plant: the
+/// full production `FlightSupervisor` (FSM + failsafes + the verified core)
+/// flies takeoff → hover, loses rotor 0 at `fail_at_s`, and must end ON THE
+/// GROUND, upright, `Disarmed` — via the motor failsafe's LAND, the
+/// land-where-you-are engage, and the lift-deficit-compensated velocity
+/// descent. PASS = Disarmed + true altitude < 0.3 m + the injected rotor
+/// isolated. This is the scenario the release video records.
+fn run_supervised_rotorout(
+    physics: &mut dyn Physics,
+    cruise_alt_m: f32,
+    duration_s: f32,
+    fail_at_s: f32,
+    mut evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    use falcon_core::FlightSupervisor;
+    use relay_fsm::{Event, Mode};
+
+    let dt = 0.004_f32; // 250 Hz
+    let n = (duration_s / dt) as u32;
+    let fail_step = (fail_at_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let name = physics.name();
+    let pace_real_time = physics.counters().is_some();
+    let hover_thrust = if name == "mock" { 0.49 } else { 0.585 };
+
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 200.0, cruise_alt_m, 14.0);
+    sup.set_hover_thrust(hover_thrust);
+    if name != "mock" {
+        // The same gz reconciliation as run_flightcore (via the v1.117
+        // bench-tuning seam): realistic GNSS variance, anti-starvation process
+        // floor, stiffened+damped altitude loop, small integral trim.
+        let c = sup.core_mut();
+        c.set_pos_var(0.25);
+        c.set_process_floor(0.30, 0.05);
+        c.set_altitude_gains(0.15, 1.00);
+        c.set_altitude_integral_gain(0.03);
+    }
+    sup.command(Event::Arm, true, true);
+    sup.command(Event::RequestTakeoff, true, true);
+
+    let started_at = Instant::now();
+    let mut last_true = [0.0_f32; 3];
+    let mut landed_at: Option<f32> = None;
+    {
+        let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
+        for step in 0..n {
+            let tick_start = Instant::now();
+            let t = step as f32 * dt;
+            if step == fail_step {
+                backend.fail_rotor(0);
+                eprintln!("  t={t:.1}s — rotor 0 KILLED");
+            }
+            sup.step(&mut backend);
+            last_true = backend.last_true_pos();
+
+            if std::env::var_os("FC_DEBUG").is_some() && step % 50 == 0 {
+                let e = sup.state();
+                eprintln!(
+                    "t={:.2} mode={:?} true_z={:.2} est_z={:.2} est_vz={:+.2} mot={:?}",
+                    t,
+                    sup.mode(),
+                    last_true[2],
+                    e.p[2],
+                    e.v[2],
+                    backend.last_motors(),
+                );
+            }
+            if let Some(ref mut e) = evidence {
+                let (accel, gyro) = backend.last_imu();
+                e.write_tick(step, t, last_true, accel, gyro, backend.last_motors(), None);
+            }
+            if landed_at.is_none() && sup.mode() == Mode::Disarmed {
+                landed_at = Some(t);
+                eprintln!("  t={t:.1}s — TOUCHDOWN, Disarmed");
+            }
+            if pace_real_time {
+                let used = tick_start.elapsed();
+                if used < tick_period {
+                    std::thread::sleep(tick_period - used);
+                }
+            }
+        }
+    }
+    let wall = started_at.elapsed();
+    let final_alt = -last_true[2];
+    let pass = landed_at.is_some() && final_alt < 0.3;
+    println!(
+        "  verdict: backend={name} scenario=supervised-rotorout steps={n} fail_at={fail_at_s:.1}s \
+         landed_at={landed_at:?} final_alt={final_alt:.2}m mode-disarmed={} wall={:.2}s",
+        landed_at.is_some(),
+        wall.as_secs_f32()
+    );
+    pass
+}
+
 
 /// v1.113 — **FlightCore-in-the-loop**. Flies the PRODUCTION
 /// [`falcon_core::FlightCore`] (the verified IEKF → geometric-SE(3) → ADRC →

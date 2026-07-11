@@ -156,6 +156,8 @@ fn clamp(x: f32, lo: f32, hi: f32) -> f32 {
     }
 }
 
+pub mod persist;
+
 #[cfg(kani)]
 mod kani_proofs;
 
@@ -211,6 +213,213 @@ mod tests {
         let mut s: ParamStore<1> = ParamStore::new();
         assert!(s.register(ParamDef { id: param_id("A"), min: 0.0, max: 1.0, default: 0.5 }));
         assert!(!s.register(ParamDef { id: param_id("B"), min: 0.0, max: 1.0, default: 0.5 }));
+    }
+}
+
+#[cfg(test)]
+mod persist_tests {
+    use super::persist::*;
+    use super::*;
+
+    const LAYOUT: Layout = Layout::new(4);
+    const CAP: usize = LAYOUT.required_capacity();
+    const VER: u32 = 1;
+
+    fn schema() -> ParamStore<4> {
+        let mut s = ParamStore::new();
+        s.register(ParamDef { id: param_id("MC_ROLL_P"), min: 0.0, max: 12.0, default: 6.5 });
+        s.register(ParamDef { id: param_id("BAT_LOW_V"), min: 10.0, max: 16.8, default: 14.0 });
+        s.register(ParamDef { id: param_id("GF_RADIUS"), min: 5.0, max: 500.0, default: 100.0 });
+        s
+    }
+
+    #[test]
+    fn fresh_device_loads_defaults_loudly() {
+        let nvm: ArrayNvm<CAP> = ArrayNvm::new();
+        let mut s = schema();
+        let r = load(&mut s, &nvm, LAYOUT, VER);
+        assert_eq!(r.outcome, LoadOutcome::FreshDefaults);
+        assert_eq!(s.get(&param_id("MC_ROLL_P")), Some(6.5));
+    }
+
+    #[test]
+    fn save_load_roundtrip_reboot() {
+        let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
+        let mut s = schema();
+        s.set(&param_id("MC_ROLL_P"), 8.25);
+        s.set(&param_id("GF_RADIUS"), 42.0);
+        save(&s, &mut nvm, LAYOUT, VER).unwrap();
+        // "Reboot": a fresh store built from the same schema.
+        let mut s2 = schema();
+        let r = load(&mut s2, &nvm, LAYOUT, VER);
+        assert_eq!(r.outcome, LoadOutcome::Loaded);
+        assert_eq!((r.applied, r.skipped_unknown, r.rejected), (3, 0, 0));
+        assert_eq!(s2.get(&param_id("MC_ROLL_P")), Some(8.25));
+        assert_eq!(s2.get(&param_id("GF_RADIUS")), Some(42.0));
+        assert_eq!(s2.get(&param_id("BAT_LOW_V")), Some(14.0));
+    }
+
+    #[test]
+    fn double_save_alternates_slots_and_newest_wins() {
+        let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
+        let mut s = schema();
+        s.set(&param_id("MC_ROLL_P"), 7.0);
+        save(&s, &mut nvm, LAYOUT, VER).unwrap();
+        s.set(&param_id("MC_ROLL_P"), 9.0);
+        save(&s, &mut nvm, LAYOUT, VER).unwrap();
+        let mut s2 = schema();
+        assert_eq!(load(&mut s2, &nvm, LAYOUT, VER).outcome, LoadOutcome::Loaded);
+        assert_eq!(s2.get(&param_id("MC_ROLL_P")), Some(9.0));
+    }
+
+    #[test]
+    fn torn_commit_keeps_previous_image() {
+        // Commit image #1, then simulate a crash MID-save of image #2: the new
+        // slot is half-written but the selector never flips. Load must return
+        // image #1 intact — the two-slot protocol's whole point.
+        let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
+        let mut s = schema();
+        s.set(&param_id("MC_ROLL_P"), 7.0);
+        save(&s, &mut nvm, LAYOUT, VER).unwrap();
+
+        // Torn second save: garbage into the INACTIVE slot region, no flip.
+        // (Selector is 0xA5 = slot A active; slot B starts at 16 + slot_len.)
+        let slot_b = 16 + LAYOUT.slot_len();
+        for i in 0..LAYOUT.slot_len() / 2 {
+            nvm.bytes[slot_b + i] = 0xDB;
+        }
+        let mut s2 = schema();
+        let r = load(&mut s2, &nvm, LAYOUT, VER);
+        assert_eq!(r.outcome, LoadOutcome::Loaded);
+        assert_eq!(s2.get(&param_id("MC_ROLL_P")), Some(7.0));
+    }
+
+    #[test]
+    fn corruption_sweep_never_yields_out_of_schema() {
+        // Flip EVERY byte of a committed image (one at a time): whatever the
+        // outcome (Corrupt / rejected records / still-valid), no load may ever
+        // leave a stored value outside its schema bounds, and none may panic.
+        let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
+        let mut s = schema();
+        s.set(&param_id("MC_ROLL_P"), 11.5);
+        save(&s, &mut nvm, LAYOUT, VER).unwrap();
+        for i in 0..CAP {
+            let mut evil = ArrayNvm::<CAP> { bytes: nvm.bytes };
+            evil.bytes[i] ^= 0xFF;
+            let mut s2 = schema();
+            let _ = load(&mut s2, &evil, LAYOUT, VER);
+            for p in 0..s2.len() {
+                let (id, v) = s2.nth(p).unwrap();
+                let d = s2.def(&id).unwrap();
+                assert!(
+                    v.is_finite() && v >= d.min && v <= d.max,
+                    "byte {i}: value {v} escaped [{}, {}]",
+                    d.min,
+                    d.max
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn schema_version_bump_resets_loudly() {
+        let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
+        let mut s = schema();
+        s.set(&param_id("MC_ROLL_P"), 8.0);
+        save(&s, &mut nvm, LAYOUT, VER).unwrap();
+        let mut s2 = schema();
+        let r = load(&mut s2, &nvm, LAYOUT, VER + 1); // firmware upgraded
+        assert_eq!(r.outcome, LoadOutcome::SchemaMismatch);
+        assert_eq!(s2.get(&param_id("MC_ROLL_P")), Some(6.5)); // defaults, not 8.0
+    }
+
+    #[test]
+    fn unknown_and_tightened_records_are_counted_not_applied() {
+        // Save under a schema with an extra param and a wide bound; load under
+        // a schema where that param is gone and the bound tightened. The
+        // orphan is skipped_unknown, the now-out-of-bounds value rejected —
+        // and BOTH are visible in the report (loud, never silent).
+        let mut wide = ParamStore::<4>::new();
+        wide.register(ParamDef { id: param_id("MC_ROLL_P"), min: 0.0, max: 50.0, default: 6.5 });
+        wide.register(ParamDef { id: param_id("OLD_PARAM"), min: 0.0, max: 1.0, default: 0.5 });
+        wide.set(&param_id("MC_ROLL_P"), 40.0); // legal then, illegal later
+        let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
+        save(&wide, &mut nvm, LAYOUT, VER).unwrap();
+
+        let mut tight = ParamStore::<4>::new();
+        tight.register(ParamDef { id: param_id("MC_ROLL_P"), min: 0.0, max: 12.0, default: 6.5 });
+        let r = load(&mut tight, &nvm, LAYOUT, VER);
+        assert_eq!(r.outcome, LoadOutcome::Loaded);
+        assert_eq!((r.applied, r.skipped_unknown, r.rejected), (0, 1, 1));
+        assert_eq!(tight.get(&param_id("MC_ROLL_P")), Some(6.5)); // default stands
+    }
+
+    #[test]
+    fn capacity_too_small_is_an_error_not_a_panic() {
+        let mut nvm: ArrayNvm<8> = ArrayNvm::new();
+        let s = schema();
+        assert_eq!(save(&s, &mut nvm, LAYOUT, VER), Err(SaveError::Capacity));
+        let mut s2 = schema();
+        assert_eq!(load(&mut s2, &nvm, LAYOUT, VER).outcome, LoadOutcome::FreshDefaults);
+    }
+}
+
+#[cfg(test)]
+mod persist_proptests {
+    use super::persist::*;
+    use super::*;
+    use proptest::prelude::*;
+
+    const LAYOUT: Layout = Layout::new(2);
+    const CAP: usize = LAYOUT.required_capacity();
+
+    fn schema() -> ParamStore<2> {
+        let mut s = ParamStore::new();
+        s.register(ParamDef { id: param_id("P"), min: -3.0, max: 7.0, default: 1.0 });
+        s.register(ParamDef { id: param_id("Q"), min: 0.0, max: 100.0, default: 50.0 });
+        s
+    }
+
+    proptest! {
+        /// Random in-schema values survive save → load bit-exactly.
+        #[test]
+        fn roundtrip_any_in_schema_values(p in -3.0f32..7.0, q in 0.0f32..100.0) {
+            let mut s = schema();
+            s.set(&param_id("P"), p);
+            s.set(&param_id("Q"), q);
+            let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
+            save(&s, &mut nvm, LAYOUT, 1).unwrap();
+            let mut s2 = schema();
+            let r = load(&mut s2, &nvm, LAYOUT, 1);
+            prop_assert_eq!(r.outcome, LoadOutcome::Loaded);
+            prop_assert_eq!(s2.get(&param_id("P")).unwrap().to_bits(), p.to_bits());
+            prop_assert_eq!(s2.get(&param_id("Q")).unwrap().to_bits(), q.to_bits());
+        }
+
+        /// MULTI-byte random corruption of a committed image never panics the
+        /// loader and never yields an out-of-schema stored value (the proptest
+        /// companion to the exhaustive single-byte sweep; Kani can't carry
+        /// nondet through the CRC — see kani_proofs.rs).
+        #[test]
+        fn random_corruption_never_escapes_schema(
+            positions in prop::collection::vec(0usize..CAP, 1..8),
+            values in prop::collection::vec(any::<u8>(), 8),
+        ) {
+            let mut s = schema();
+            s.set(&param_id("P"), 6.5);
+            let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
+            save(&s, &mut nvm, LAYOUT, 1).unwrap();
+            for (i, pos) in positions.iter().enumerate() {
+                nvm.bytes[*pos] = values[i % values.len()];
+            }
+            let mut s2 = schema();
+            let _ = load(&mut s2, &nvm, LAYOUT, 1);
+            for k in 0..s2.len() {
+                let (id, v) = s2.nth(k).unwrap();
+                let d = s2.def(&id).unwrap();
+                prop_assert!(v.is_finite() && v >= d.min && v <= d.max);
+            }
+        }
     }
 }
 
