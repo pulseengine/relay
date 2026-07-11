@@ -53,6 +53,11 @@ artifacts:
         - v1.120: BATTERY-P02 current/mAh/sag (PM02D)
         - v1.121: GNSS-P02 dual-M9N blending/failover + RANGEDRV-P01 TF02 Pro
         - v1.122: NOTCH-P01 RPM-notch + PREARM-P03 check breadth
+        - v1.123: PART-P01 estimator partition (M4) + PART-P02 F100
+                  actuator-path constraints — the 3-core RT1176 partition
+                  agreed in jess#144 (estimator M4 / cascade M7 / gale-gust
+                  failsafe F100; relay decides component→partition mapping,
+                  jess owns per-core ISA compile, gated on synth #708/#369)
 
       Deliberately NOT in this arc (tracked elsewhere): the verification-
       fidelity audit (#257), real-flight MC/DC (#145), relay-traj proof
