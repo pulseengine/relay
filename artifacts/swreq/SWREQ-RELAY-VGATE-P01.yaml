@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-VGATE-P01
     type: sw-req
     title: "VGATE-P01 — verification-gate integrity: no orphaned proofs, no self-verified changes"
-    status: implemented
+    status: verified
     release: falcon-v1.116.0
     description: >
       The CI verification gate shall enforce two integrity properties the
