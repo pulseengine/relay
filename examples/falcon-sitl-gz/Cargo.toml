@@ -41,6 +41,8 @@ relay-sc = { path = "../../crates/relay-sc" }
 # `FlightBackend`→`Physics` adapter (src/flightcore.rs). The sim now exercises
 # the same verified cascade + rotor-out FDI that ships, not a parallel copy.
 falcon-core = { path = "../../crates/falcon-core" }
+# FAULT-P04 campaign drives the FlightSupervisor (Arm/Takeoff events, Mode).
+relay-fsm = { path = "../../crates/relay-fsm" }
 libm = "0.2"
 
 # Optional — only when feature `gazebo` is on. C++-backed gz-transport that

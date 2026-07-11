@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-PARAM-P03
     type: sw-req
     title: "PARAM-P03 — parameter persistence across power cycles"
-    status: proposed
+    status: implemented
     release: falcon-v1.117.0
     description: >
       Parameters (control gains, failsafe thresholds, geofence, calibration

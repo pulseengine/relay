@@ -37,3 +37,29 @@ fn verify_set_total_and_in_range_applies() {
     assert!(s.set(&id, v) == SetResult::Applied);
     assert!(s.get(&id) == Some(v));
 }
+
+// ── PARAM-P03 persistence: WHY there is no direct Kani harness ──────────────
+//
+// Any nondet data through the persist layer's CRC-32 is CBMC-intractable
+// (measured: a fully-nondet 96-byte image >28 CPU-min, even a SINGLE nondet
+// byte at a nondet position >20 CPU-min — the relay-traj pattern, #260). A
+// proof that does not terminate provides no assurance and would hang the
+// required Kani CI gate. The persistence guarantees are instead established
+// COMPOSITIONALLY + exhaustively:
+//
+//   * Schema safety: `persist::load`'s ONLY store mutation is its single
+//     `store.set()` call site — and K01/K02 above PROVE `set` never lands an
+//     out-of-bounds/non-finite value. NVM content therefore cannot escape the
+//     schema regardless of corruption (the composition is a one-call-site
+//     inspection, not a conjecture).
+//   * Corruption totality: `corruption_sweep_never_yields_out_of_schema`
+//     exhaustively flips EVERY byte of a committed image (cargo test, ms),
+//     and `persist_proptests` fuzzes random multi-byte corruption + random
+//     value roundtrips at proptest scale.
+//   * Torn commits: `torn_commit_keeps_previous_image` (the two-slot
+//     protocol's guarantee).
+//
+// UPGRADE PATH (#265): ordeal (certificate-checked QF_BV) is the right tool
+// for the CRC step-equivalence + record-codec round-trip as UNBOUNDED
+// certificates — re-stating the removed harnesses' properties — once its
+// byte-layout (ordeal#64) and equivalence toolkit (ordeal#66) ship.

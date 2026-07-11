@@ -349,6 +349,39 @@ impl FlightCore {
 
     /// One control iteration against the backend: sense → estimate → control
     /// (stabilize to level, hold heading) → allocate → actuate.
+    /// ESTIMATE-ONLY tick (v1.117): run the full sensor→IEKF update chain and
+    /// command ZERO motors. The supervisor drives this in the idle states
+    /// (Disarmed / Armed / Terminated) so the estimator stays warm for the
+    /// pre-arm convergence gate while the actuators are provably off — found
+    /// on the gz plant, where the always-stepping flight loop flew a
+    /// "Disarmed" vehicle away (the analytic plant's ground had hidden it).
+    /// Mirrors `step`'s estimator block exactly (kept adjacent; drift between
+    /// them is a bug).
+    pub fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
+        let dt = b.dt();
+        let raw = b.read_imu();
+        let gyro = self.calib.apply_gyro(raw.gyro);
+        let accel = self.calib.apply_accel(raw.accel);
+        self.iekf.propagate(IekfImu { gyro, accel }, dt);
+        self.iekf.update_gravity(accel, self.grav_var);
+        if let Some(p) = b.read_position() {
+            self.iekf.update_position(p, self.pos_var);
+        }
+        if let Some(m) = b.read_mag() {
+            self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
+        }
+        if let Some(yaw) = b.read_heading() {
+            self.iekf.update_yaw(yaw, self.mag_var);
+        }
+        if let Some(bz) = b.read_baro() {
+            let e = self.iekf.state();
+            self.iekf.update_position([e.p[0], e.p[1], bz], self.baro_var);
+        }
+        // keep the gyro low-pass warm for the flight loop's first live tick.
+        let _ = self.gyro_lpf.filter(gyro);
+        b.write_motors(&[0.0, 0.0, 0.0, 0.0]);
+    }
+
     pub fn step<B: FlightBackend>(&mut self, b: &mut B) {
         let dt = b.dt();
         let raw = b.read_imu();
@@ -418,7 +451,19 @@ impl FlightCore {
             if alt_agl < 0.12 {
                 0.1 // touched down — idle (the ground holds the vehicle)
             } else {
-                (self.hover_thrust - self.kvz_land * (self.landing_descent - est.v[2]))
+                // ROTOR-OUT feed-forward (v1.117, FAULT-P04): the law is
+                // P-only around the hover baseline, so a 25% lift deficit
+                // (3 rotors carrying 4 rotors' weight) becomes a steady-state
+                // descent error of ~kvz⁻¹·Δhover ≈ +0.4 m/s — a hard landing.
+                // Compensate by raising the baseline to the 3-rotor per-rotor
+                // hover (×4/3); the rank-3 allocator's collective is 3·t, so
+                // 3·(4/3·hover) restores the 4-rotor hover collective exactly.
+                let hover_eff = if self.failed_motor.is_some() {
+                    self.hover_thrust * (4.0 / 3.0)
+                } else {
+                    self.hover_thrust
+                };
+                (hover_eff - self.kvz_land * (self.landing_descent - est.v[2]))
                     .clamp(0.0, 1.0)
             }
         } else {
@@ -698,6 +743,21 @@ impl FlightSupervisor {
         }
     }
 
+    /// Mutable access to the wrapped [`FlightCore`] — the BENCH-TUNING seam
+    /// (v1.117): a plant-specific bench (gz: hover thrust, GNSS variance,
+    /// altitude gains, estimator process floor) tunes the same core the
+    /// supervisor flies. Flight logic must not use this to bypass the
+    /// supervisor's mode/setpoint ownership.
+    pub fn core_mut(&mut self) -> &mut FlightCore {
+        &mut self.core
+    }
+
+    /// Set the hover-thrust feedforward on the wrapped core (per-plant: the
+    /// analytic sim hovers at ~0.49, the real gz falcon-quad at ~0.585).
+    pub fn set_hover_thrust(&mut self, t: f32) {
+        self.core.hover_thrust = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.5 };
+    }
+
     pub fn mode(&self) -> relay_fsm::Mode {
         self.fsm.mode()
     }
@@ -957,7 +1017,16 @@ impl FlightSupervisor {
         // BOTH near home AND slow, then drop straight down. (Speed alone is not
         // enough: it momentarily hits zero at the overshoot peak, far from home.)
         let horiz_speed = relay_math::sqrtf(est.v[0] * est.v[0] + est.v[1] * est.v[1]);
-        let landing = matches!(self.fsm.mode(), Mode::Land) && horiz_speed < 0.4 && dist_home < 0.5;
+        // ROTOR-OUT exception (v1.117, FAULT-P04): a 3-rotor quad lands WHERE
+        // IT IS, immediately — it must not commute to home first (no yaw
+        // authority to navigate, and the settle-over-home wait leaves the
+        // vertical on the position P-D, which cannot hold a 3-rotor hover:
+        // per-rotor demand rises 0.5 → ~0.67 and the loop sags to the ground
+        // at an uncontrolled ~3.4 m/s. The velocity-landing law arrests that
+        // and rides down at its commanded descent rate instead.)
+        let landing = matches!(self.fsm.mode(), Mode::Land)
+            && (self.core.failed_motor().is_some()
+                || (horiz_speed < 0.4 && dist_home < 0.5));
         self.core.set_landing(landing);
 
         // ── mode → setpoint ── (horizontal hold target; while landing the core's
@@ -967,6 +1036,11 @@ impl FlightSupervisor {
             Mode::Takeoff | Mode::Loiter => [est.p[0], est.p[1], -self.cruise_alt],
             Mode::Mission => self.current_waypoint(), // fly the active leg (its own altitude)
             Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
+            // Land holds HOME (rate-descend once settled) — except rotor-out,
+            // which holds the CURRENT position: land-where-you-are (v1.117).
+            Mode::Land if self.core.failed_motor().is_some() => {
+                [est.p[0], est.p[1], -self.cruise_alt]
+            }
             Mode::Land => [self.home[0], self.home[1], -self.cruise_alt], // hold home; rate-descend
             // idle / motors-off states: setpoint is moot (no thrust commanded).
             Mode::Disarmed | Mode::Armed | Mode::Terminated => [est.p[0], est.p[1], est.p[2]],
@@ -980,6 +1054,17 @@ impl FlightSupervisor {
         } else {
             sp
         };
+        // ── MOTORS OFF in idle states (v1.117, found on the gz plant) ──
+        // Disarmed/Armed/Terminated must COMMAND ZEROS, not keep stepping the
+        // flight loop: the analytic plant's ground quietly held the vehicle so
+        // the always-stepping core was invisible, but on gz a post-touchdown
+        // Disarmed kept the altitude loop live and flew the vehicle away
+        // (and "Terminate = motors cut" was only ever an FSM claim, never an
+        // actuator command — the software half of PART-P02's backstop).
+        if matches!(self.fsm.mode(), Mode::Disarmed | Mode::Armed | Mode::Terminated) {
+            self.core.step_estimate_only(b); // estimator warm, motors OFF
+            return;
+        }
         self.core.set_position(sp);
         self.core.step(b);
 
@@ -1686,7 +1771,13 @@ mod tests {
         sup.command(relay_fsm::Event::RequestTakeoff, true, false);
         assert!(sup.mode().is_airborne(), "airborne after takeoff");
 
-        // a rotor dies → the core's FDI isolates it → the supervisor lands.
+        // Fly past the FDI's SPIN-UP guard first: the warmup counts from the
+        // FLIGHT loop's start (v1.117 — idle-mode steps are estimate-only and
+        // no longer count; before, disarmed warm-up steps silently neutered
+        // the spin-up guard). Then a rotor dies → isolation → Land.
+        for _ in 0..250 {
+            sup.step(&mut b);
+        }
         b.inject = true;
         for _ in 0..40 {
             sup.step(&mut b);
@@ -3049,6 +3140,87 @@ mod tests {
         // disarmed position-hold settles just above it through ground effect — on
         // the surface (vs the ~1.3 m float without the velocity-landing).
         assert!(-b.pos[2] < 0.25, "must settle on the surface (not float): {} m", -b.pos[2]);
+    }
+
+    /// v1.117 (FAULT-P04) — the SUPERVISED rotor-out chain ends on the ground:
+    /// a rotor dies in Loiter → the FDI isolates → the motor failsafe commands
+    /// LAND → the vehicle makes a CONTROLLED descent (bounded sink rate, thrust
+    /// axis near-level on the rank-3 allocation) → velocity touchdown →
+    /// Disarmed. This closes the ALTITUDE scope the v1.114 campaign
+    /// deliberately reported-but-did-not-gate ("altitude is the supervisor's
+    /// LAND job" — this is that job, verified end to end on the full
+    /// production supervisor + rot_drag plant).
+    #[test]
+    fn supervised_rotor_out_lands_and_disarms() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32; // the rate the supervisor's loops are tuned at
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.rot_drag = 0.02; // drag-bounded rotor-out yaw spin (v1.114)
+        b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter after takeoff");
+        // The failure must be injected from a SETTLED hover — otherwise the
+        // sink metrics measure the pre-existing limit cycle, not the recovery
+        // (this precondition caught exactly that on first write).
+        assert!(
+            (-b.pos[2] - 2.0).abs() < 0.3 && b.vel[2].abs() < 0.3,
+            "hover must be settled before the failure: alt {} vz {}",
+            -b.pos[2],
+            b.vel[2]
+        );
+
+        // Rotor 1 dies mid-hover.
+        b.fail_rotor(1);
+        let (mut landed, mut land_cmded) = (false, false);
+        // Two sink metrics, deliberately separate: the LIFT-LOSS TRANSIENT
+        // (the first moments after the rotor dies — physics guarantees a drop
+        // until the FDI isolates and collective compensates; it must be
+        // BOUNDED and ARRESTED) vs the FINAL APPROACH (below 0.5 m — this is
+        // the "controlled descent" claim and must be GENTLE).
+        let (mut peak_sink_transient, mut approach_sink, mut peak_tilt) = (0.0f32, 0.0f32, 0.0f32);
+        for _ in 0..15000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Land {
+                land_cmded = true;
+            }
+            let alt = -b.pos[2];
+            if alt > 0.15 {
+                peak_sink_transient = peak_sink_transient.max(b.vel[2]); // NED +z = down
+                peak_tilt = peak_tilt.max(b.tilt());
+                if alt < 0.5 {
+                    approach_sink = approach_sink.max(b.vel[2]);
+                }
+            }
+            if sup.mode() == Mode::Disarmed {
+                landed = true;
+                break;
+            }
+        }
+        assert!(land_cmded, "motor failsafe must command Land (mode {:?})", sup.mode());
+        assert!(
+            landed,
+            "supervised rotor-out must touch down + disarm: mode {:?}, alt {} m",
+            sup.mode(),
+            -b.pos[2]
+        );
+        assert!(-b.pos[2] < 0.25, "must settle on the surface: {} m", -b.pos[2]);
+        // The lift-loss transient is bounded (arrested well short of freefall
+        // from 2 m ≈ 6.3 m/s) and the FINAL APPROACH is gentle (the velocity
+        // landing commands 0.5 m/s; allow margin for the rotor-out wobble).
+        assert!(
+            peak_sink_transient < 4.0,
+            "lift-loss transient must be arrested: peak {peak_sink_transient} m/s"
+        );
+        assert!(approach_sink < 1.0, "final approach must be gentle: {approach_sink} m/s");
+        assert!(peak_tilt < 0.5, "must stay near-level during the descent: peak {peak_tilt} rad");
+        // Upright on the ground.
+        assert!(b.tilt() < 0.35, "must be upright at touchdown: {} rad", b.tilt());
     }
 }
 
