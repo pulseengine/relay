@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-FALCON-LOG-003
+    type: sw-verification
+    title: "Bit-exact estimator replay from flight logs — the golden-log regression gate (v1.118)"
+    status: verified
+    release: falcon-v1.118.0
+    description: >
+      Verifies LOG-P03. Evidence run 2026-07-15 on the shipping tree
+      (post #273): falcon-core blackbox_replay_tests 3/3 —
+      (1) blackbox_replay_reproduces_estimator_bit_exactly: a 1500-tick
+      SimBackend flight (gyro white noise + GNSS noise + noisy baro +
+      rot_drag) recorded through LoggingBackend, then replayed via
+      ReplayBackend into a FRESH production FlightCore, reproduces the
+      logged estimator trajectory F32-BIT-EXACTLY — q, v, p AND the
+      covariance-diagonal summary, every tick — and a second replay is
+      identical (determinism). (2) golden_log_replay_regression: the
+      checked-in fixture (crates/falcon-core/tests-data/golden-v1118.bblog,
+      500 ticks recorded on this build) replays bit-exactly — the CI gate
+      that turns ANY estimator behavior change into a failing test until the
+      golden is DELIBERATELY regenerated (the ignored regen_golden_log test;
+      a reviewed diff, per the requirement's "explicit act").
+      (3) supervised_flight_logs_boot_ticks_and_events: the full record set
+      on the supervised stack — one Boot (schema + param snapshot), 8000
+      Ticks, and Event records on every mode transition — scans back with
+      zero torn tail. Every recorded flight is now an estimator regression
+      fixture: a change that alters a replayed trajectory is a MEASURED
+      behavioral diff, never an opinion (the ArduPilot-Replay capability,
+      native to the verified stack).
+
+      FALSIFICATION: wrong if a replay of any recorded log produces a single
+      f32 bit of estimator-state difference without a deliberate golden
+      regeneration in the same change.
+    tags: [verification, falcon, logging, replay, estimator, regression, verification-fidelity, v1.118]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-core blackbox_replay_tests::blackbox_replay_reproduces_estimator_bit_exactly
+        - run: cargo test -p falcon-core blackbox_replay_tests::golden_log_replay_regression
+        - run: cargo test -p falcon-core blackbox_replay_tests::supervised_flight_logs_boot_ticks_and_events
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LOG-P03
