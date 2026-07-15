@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-LOG-P02
     type: sw-req
     title: "LOG-P02 — persistent flight blackbox (crash-surviving, full-rate estimator inputs)"
-    status: proposed
+    status: implemented
     release: falcon-v1.118.0
     description: >
       Every flight shall produce a PERSISTENT log (non-volatile, not the

@@ -276,6 +276,7 @@ dependencies = [
  "relay-fsm",
  "relay-geo",
  "relay-iekf",
+ "relay-log",
  "relay-math",
  "relay-mix-quad",
  "relay-preflight",
