@@ -9,8 +9,10 @@
 //! emergency. NORMAL streams degrade gracefully instead (a due stream that
 //! does not fit stays due and sends when budget allows).
 //!
-//! Pure, `no_std`, fixed-capacity, total: the scheduler never panics and
-//! never emits more bytes per tick than the budget.
+//! Pure, `no_std`, fixed-capacity, total: the scheduler never panics, the
+//! NORMAL class never exceeds the per-tick budget, and criticals saturate
+//! PAST the budget rather than starve when `critical_fits` is violated
+//! (proven in `kani_proofs.rs`: MAV-K01..K03).
 
 /// Stream priority class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

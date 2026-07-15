@@ -35,6 +35,9 @@ pub mod param;
 pub mod telemetry;
 pub mod telemetry_sched;
 
+#[cfg(kani)]
+mod kani_proofs;
+
 pub use command_long::{
     COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID, COMMAND_LONG_PAYLOAD_LEN, CommandLong,
     MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_FLIGHTTERMINATION, MAV_CMD_MISSION_START,
