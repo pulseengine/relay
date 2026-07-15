@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-LOG-P03
     type: sw-req
     title: "LOG-P03 — bit-exact estimator replay from flight logs"
-    status: proposed
+    status: implemented
     release: falcon-v1.118.0
     description: >
       A host-side replay harness shall re-run the PRODUCTION IEKF (same
