@@ -486,8 +486,14 @@ mod gz_real {
             // the vehicle looked 488 m "runaway" when it was sitting still).
             let mut home = home;
             if home.lat_deg == 0.0 && home.lon_deg == 0.0 && home.alt_m == 0.0 {
+                // v1.117: wait LONGER (gz topic discovery on a loaded machine
+                // can exceed the old 3 s) and REFUSE to fly without a datum —
+                // proceeding silently left the raw MSL altitude (−488 m at the
+                // falcon world's Zürich elevation) in the estimator, which
+                // either "runaway-climbed" or refused to take off depending on
+                // message-arrival luck (2-in-3 runs raced on 2026-07-11).
                 let start = std::time::Instant::now();
-                while start.elapsed().as_secs_f32() < 3.0 {
+                while start.elapsed().as_secs_f32() < 15.0 {
                     if let Ok(fix) =
                         navsat_rx.recv_timeout(std::time::Duration::from_millis(100))
                     {
@@ -496,8 +502,21 @@ mod gz_real {
                             lon_deg: fix.longitude_deg,
                             alt_m: fix.altitude,
                         };
+                        eprintln!(
+                            "  gz datum captured after {:.1}s: alt {:.1} m MSL",
+                            start.elapsed().as_secs_f32(),
+                            home.alt_m
+                        );
                         break;
                     }
+                }
+                if home.lat_deg == 0.0 && home.lon_deg == 0.0 && home.alt_m == 0.0 {
+                    eprintln!(
+                        "  !! NO NavSat DATUM within 15 s — refusing to fly with \
+                         absolute MSL altitude (the −488 m leak). Is the gz \
+                         server running + publishing NavSat?"
+                    );
+                    return None;
                 }
             }
 

@@ -555,7 +555,15 @@ impl FlightCore {
         // under heavy sensor noise). Roll/pitch rate stays low through the spin,
         // keeping detection available while still blocking a real tumble.
         let rp_rate2 = gyro_f[0] * gyro_f[0] + gyro_f[1] * gyro_f[1];
-        let fdi_steady = tilt_cos > 0.90 && rp_rate2 < 1.0; // ≲26° tilt, ≲1 rad/s roll+pitch
+        // Rate gate at 2 rad/s (was 1): the REAL gz plant hovers with an
+        // attitude limit-cycle near 1 rad/s roll/pitch, which held this gate
+        // chronically shut — the FDI then lost the race against the runaway
+        // detector on a genuine rotor-out (gz, v1.117: Terminate fired at
+        // kill+0.6 s before isolation ever happened). A true tumble is
+        // > 3 rad/s, so 2 rad/s keeps the you-cannot-diagnose-mid-tumble
+        // purpose; the false-trip protection is carried by the v1.115
+        // command-ALIGNED residual, not this gate.
+        let fdi_steady = tilt_cos > 0.90 && rp_rate2 < 4.0; // ≲26° tilt, ≲2 rad/s roll+pitch
         let mut dbg_resid = [0.0f32; 4];
         if self.failed_motor.is_none()
             && self.step_count >= self.fdi_warmup_steps
