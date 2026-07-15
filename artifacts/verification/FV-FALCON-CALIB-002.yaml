@@ -1,0 +1,37 @@
+artifacts:
+  - id: FV-FALCON-CALIB-002
+    type: sw-verification
+    title: "On-vehicle calibration flows — quality-gated capture + persisted results (v1.117)"
+    status: verified
+    release: falcon-v1.117.0
+    description: >
+      Verifies CALIB-P02. Evidence run 2026-07-15 on the shipping tree:
+      relay-calib 19/19 — GyroNullFlow motion-rejected restart (bump or NaN
+      mid-window restarts; captured bias equals the Kani-verified gyro_null
+      solver over the accepted samples, equivalence-pinned),
+      Accel6PointFlow face recognition with per-face quality gates (a 45°
+      tilt is never recognised; shake mid-window restarts that face; a
+      captured face never re-records; the six endpoints feed the verified
+      accel_6point solver unchanged), MagSweepFlow coverage/anisotropy
+      fit-quality gate (a lazy thin sweep is REJECTED with the metric
+      exposed, never stored; an accepted sweep matches
+      mag_hardiron/mag_softiron_diag exactly), and the CALIB-P02 END-TO-END:
+      calibrate via all three flows → persist 15 CAL_* params + CAL_VALID
+      through the PARAM-P03 store → reboot (fresh store, same NVM) →
+      bit-identical CalParams; a never-calibrated device loads CAL_VALID=0 —
+      the value the pre-arm `calibration_present` gate consumes (the
+      supervisor's update_preflight derives it each cycle; Blocked
+      (Calibration) is its distinct pre-arm reason, relay-preflight).
+
+      FALSIFICATION: wrong if a rejected-quality capture (tilted face, thin
+      sweep, bumped gyro window) ever lands in CalParams, or a power cycle
+      loses/alters a stored calibration.
+    tags: [verification, falcon, calibration, flows, persistence, prearm, v1.117]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-calib flow_tests
+        - run: cargo test -p relay-calib flow_tests::calibrate_persist_reboot_roundtrip
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-CALIB-P02

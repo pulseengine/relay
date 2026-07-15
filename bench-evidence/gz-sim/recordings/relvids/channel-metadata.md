@@ -197,3 +197,18 @@ v1.60 lands the relay-side of the inter-core comms carrier (for jess / Pixhawk 6
 _video: falcon-v1.60.mp4_
 
 ---
+
+---
+
+## v1.117
+**Title:** Falcon v1.117 — A Motor Dies Mid-Flight | a formally-verified drone flight stack
+
+A quadcopter loses one of its four motors mid-hover — no warning, zero thrust. The verified falcon flight core detects the failure in milliseconds from ESC RPM feedback (a CUSUM detector on commanded-vs-achieved rotor speed), hands the vehicle to the flight supervisor, and lands it where it stands: yaw is deliberately given up (a 3-rotor quad spins — that's physics, so the controller embraces it), a rank-3 control allocation keeps the thrust axis level through the spin, and a lift-deficit-compensated velocity law flies it down to an upright touchdown. Then the motors are provably off — the state machine's disarmed state now commands zero actuation, not just claims it.
+
+Every layer of the cascade is proof-carrying: the Invariant-EKF estimator, geometric SE(3) attitude control, ADRC inner loop, and the Kani-verified mixer with the rotor-out allocator. The recovery isn't a demo one-off: 150 randomized rotor-failure trials in simulation — random rotor, altitude, aerodynamics, sensor noise — landed 150 times with zero crashes, worst approach sink 0.94 m/s.
+
+Falsifiable, as always: this release is wrong if a rotor-out from settled hover exceeds 45° of tilt, spins past 10 rad/s, or fails to land upright. Footage: Gazebo SITL flying the production flight code, unmodified.
+
+#drone #autopilot #faulttolerance #formalverification #rust #robotics
+
+_video: falcon-v1.117-narrated.mp4 (af_sky) / falcon-v1.117.mp4 (captions only)_
