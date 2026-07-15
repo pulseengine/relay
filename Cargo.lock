@@ -279,6 +279,7 @@ dependencies = [
  "relay-log",
  "relay-math",
  "relay-mix-quad",
+ "relay-param",
  "relay-preflight",
 ]
 
@@ -381,6 +382,7 @@ dependencies = [
 name = "falcon-param"
 version = "0.1.0"
 dependencies = [
+ "falcon-core",
  "proptest",
  "relay-mavlink",
  "relay-param",

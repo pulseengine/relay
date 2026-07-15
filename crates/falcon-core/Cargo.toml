@@ -21,6 +21,7 @@ relay-fsm = { path = "../relay-fsm" }
 relay-preflight = { path = "../relay-preflight" }
 relay-calib = { path = "../relay-calib" }
 relay-log = { path = "../relay-log" }
+relay-param = { path = "../relay-param" }
 
 [lints]
 workspace = true
