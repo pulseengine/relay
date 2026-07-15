@@ -357,7 +357,7 @@ impl FlightCore {
     /// Set the altitude-loop integral gain (v1.22). `0` disables it (P-D only) —
     /// used to show the altitude offset under thrust lapse the integral removes.
     pub fn set_altitude_integral_gain(&mut self, ki: f32) {
-        self.ki_alt = ki;
+        self.ki_alt = ki.clamp(0.0, 0.2);
         self.alt_int = 0.0;
     }
 
@@ -374,8 +374,8 @@ impl FlightCore {
     /// higher kp to hold altitude firmly and a matched kd to damp the slow
     /// climb/overshoot oscillation the soft loop leaves.
     pub fn set_altitude_gains(&mut self, kp: f32, kd: f32) {
-        self.kp_alt = kp;
-        self.kd_alt = kd;
+        self.kp_alt = kp.clamp(0.0, 1.0);
+        self.kd_alt = kd.clamp(0.0, 3.0);
     }
 
     /// Set the IEKF velocity/position covariance-diagonal floor (m²/s², m²)
