@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MAVLINK-P06
     type: sw-req
     title: "MAVLINK-P06 — operator telemetry streaming + in-flight parameter tuning over the SiK link"
-    status: implemented
+    status: verified
     release: falcon-v1.119.0
     description: >
       The vehicle shall stream continuous state/health telemetry to the GCS

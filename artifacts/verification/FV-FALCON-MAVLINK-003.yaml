@@ -1,0 +1,49 @@
+artifacts:
+  - id: FV-FALCON-MAVLINK-003
+    type: sw-verification
+    title: "MAVLINK-P06 — telemetry wire conformance + link-budget scheduling + in-flight tuning (v1.119)"
+    status: verified
+    release: falcon-v1.119.0
+    description: >
+      Verification of the v1.119 GCS telemetry slice, per SWREQ-FALCON-
+      MAVLINK-P06's criteria.
+
+      Wire conformance (EXTERNAL vectors, not self-round-trip — the
+      DroneCAN bit-order lesson): each of the six new encoders (ATTITUDE,
+      SYS_STATUS, GPS_RAW_INT, SERVO_OUTPUT_RAW, VFR_HUD, STATUSTEXT) is
+      byte-compared against a pymavlink 2.4.49-generated reference vector
+      embedded in telemetry.rs (generator:
+      scripts/gen-mavlink-telemetry-vectors.py). All six match.
+
+      Link budget (MEASURED, not asserted): at the SiK 433 MHz effective
+      rate (7200 B/s, 10 Hz scheduler ticks) the full falcon stream set
+      meets every declared rate with >= 20% headroom measured over 300
+      ticks (telemetry_sched::tests::full_set_fits_sik_budget_with_headroom).
+      Under degraded budgets HEARTBEAT/STATUSTEXT hold their exact rates
+      while normal streams degrade fairly with no stream fully starved
+      (criticals_emit_even_past_budget,
+      degraded_link_criticals_exact_normals_degrade).
+
+      Scheduler invariants PROVEN over all slot configurations and budgets
+      at N=4 (Kani MAV-K01..K03 in relay-mavlink kani_proofs.rs): tick()
+      totality + mask well-formedness; the Normal class never exceeds the
+      per-tick byte budget; a due Critical stream is never starved,
+      including at budget zero.
+
+      In-flight tuning: a PARAM_SET handled by the wire handler is live in
+      a FlightCore actively stepping the analytic plant on the very next
+      control cycle; an out-of-range PARAM_SET is rejected at the store
+      (ack carries the unchanged value) and the core never sees it
+      (falcon-param tuning_tests::param_set_applies_to_the_core_within_one_cycle).
+    tags: [verification, falcon, mavlink, telemetry, sik-radio, tuning, kani, v1.119]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-mavlink
+        - run: cargo test -p relay-mavlink --release
+        - run: cargo test -p falcon-param
+        - run: cargo test -p falcon-core
+        - run: cargo kani -p relay-mavlink
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P06
