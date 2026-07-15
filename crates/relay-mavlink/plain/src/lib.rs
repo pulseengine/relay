@@ -32,6 +32,8 @@ pub mod global_position_int;
 pub mod heartbeat;
 pub mod mission;
 pub mod param;
+pub mod telemetry;
+pub mod telemetry_sched;
 
 pub use command_long::{
     COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID, COMMAND_LONG_PAYLOAD_LEN, CommandLong,

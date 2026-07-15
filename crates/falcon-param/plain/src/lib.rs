@@ -114,6 +114,76 @@ pub fn on_param_request_list_item<const N: usize>(
 }
 
 #[cfg(test)]
+mod tuning_tests {
+    use super::*;
+    use falcon_core::tuning::{apply_tuning, register_tuning};
+    use falcon_core::{FlightCore, SimBackend};
+    use relay_mavlink::param::MAV_PARAM_TYPE_REAL32;
+    use relay_param::param_id;
+
+    /// MAVLINK-P06 in-flight tuning, end to end: a GCS PARAM_SET on the wire
+    /// handler lands in the RUNNING core after one apply cycle — bounded by
+    /// the K01-proven store write AND the setter clamps; an out-of-range set
+    /// is rejected at the store and the core keeps flying on the old value.
+    #[test]
+    fn param_set_applies_to_the_core_within_one_cycle() {
+        let mut store: ParamStore<8> = ParamStore::new();
+        assert!(register_tuning(&mut store));
+        // IN FLIGHT: the core is actually stepping against the analytic
+        // plant while the GCS tunes it — not a parked core.
+        let dt = 0.004f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut plant = SimBackend::new(level, dt);
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-2.0);
+        apply_tuning(&store, &mut core); // defaults land
+        assert_eq!(core.altitude_gains(), (0.05, 0.30));
+        for _ in 0..500 {
+            apply_tuning(&store, &mut core); // the per-cycle call site
+            core.step(&mut plant);
+        }
+
+        // GCS tunes the altitude P gain in flight.
+        let set = ParamSet {
+            target_system: 1,
+            target_component: 1,
+            param_id: param_id("MC_ALT_P"),
+            param_value: 0.15,
+            param_type: MAV_PARAM_TYPE_REAL32,
+        };
+        let ack = on_param_set(&mut store, &set).expect("known param");
+        assert_eq!(ack.param_value, 0.15);
+        apply_tuning(&store, &mut core); // the next control cycle
+        core.step(&mut plant);
+        assert_eq!(core.altitude_gains().0, 0.15, "live on the very next cycle");
+
+        // Out-of-range: rejected at the store; the core NEVER sees it.
+        let bad = ParamSet { param_value: 99.0, ..set };
+        let ack = on_param_set(&mut store, &bad).expect("known param");
+        assert_eq!(ack.param_value, 0.15, "ack reverts the GCS UI");
+        apply_tuning(&store, &mut core);
+        assert_eq!(core.altitude_gains().0, 0.15, "core unchanged");
+
+        // The other knobs apply too.
+        on_param_set(&mut store, &ParamSet {
+            param_id: param_id("MC_LAND_VZ"),
+            param_value: 0.8,
+            ..set
+        });
+        apply_tuning(&store, &mut core);
+        assert_eq!(core.landing_descent(), 0.8);
+
+        // Keep flying on the new tuning: still sane after 500 more cycles.
+        for _ in 0..500 {
+            apply_tuning(&store, &mut core);
+            core.step(&mut plant);
+        }
+        let est = core.state();
+        assert!(est.p.iter().all(|v| v.is_finite()), "flight stays finite");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use relay_mavlink::param::param_id;

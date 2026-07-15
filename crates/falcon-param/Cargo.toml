@@ -16,6 +16,7 @@ relay-param = { path = "../relay-param" }
 relay-mavlink = { path = "../relay-mavlink" }
 
 [dev-dependencies]
+falcon-core = { path = "../falcon-core" }
 proptest.workspace = true
 
 [lints]

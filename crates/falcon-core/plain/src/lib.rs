@@ -281,6 +281,37 @@ impl FlightCore {
         self.yaw_setpoint
     }
 
+    /// Set the hover-thrust feedforward (per-airframe; clamped to [0,1]).
+    pub fn set_hover_thrust_core(&mut self, t: f32) {
+        self.hover_thrust = if t.is_finite() { t.clamp(0.0, 1.0) } else { self.hover_thrust };
+    }
+
+    /// Set the landing descent rate (m/s, NED +down; clamped to [0.1, 2]).
+    pub fn set_landing_descent(&mut self, vz: f32) {
+        self.landing_descent =
+            if vz.is_finite() { vz.clamp(0.1, 2.0) } else { self.landing_descent };
+    }
+
+    /// Current altitude P/D gains (tuning observability, v1.119).
+    pub fn altitude_gains(&self) -> (f32, f32) {
+        (self.kp_alt, self.kd_alt)
+    }
+
+    /// Current altitude integral gain (tuning observability, v1.119).
+    pub fn altitude_integral_gain(&self) -> f32 {
+        self.ki_alt
+    }
+
+    /// Current hover-thrust feedforward (tuning observability, v1.119).
+    pub fn hover_thrust(&self) -> f32 {
+        self.hover_thrust
+    }
+
+    /// Current landing descent rate (tuning observability, v1.119).
+    pub fn landing_descent(&self) -> f32 {
+        self.landing_descent
+    }
+
     /// FDI observability (v1.115): `(rate2, tilt_cos, gate_open, resid[4])` from
     /// the last single-rotor-out detector evaluation. `gate_open` is the
     /// near-level/low-rate gate; when it stays false under sensor noise the
@@ -1655,6 +1686,7 @@ impl FlightBackend for SimBackend {
 }
 
 pub mod blackbox_backend;
+pub mod tuning;
 
 #[cfg(test)]
 mod blackbox_replay_tests {
