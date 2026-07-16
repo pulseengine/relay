@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-NOTCH-P01
     type: sw-req
     title: "NOTCH-P01 — RPM-driven harmonic notch filtering on the gyro path"
-    status: implemented
+    status: verified
     release: falcon-v1.122.0
     description: >
       The rate-loop gyro path shall attenuate per-motor rotational vibration
