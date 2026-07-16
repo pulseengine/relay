@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-GNSS-P02
     type: sw-req
     title: "GNSS-P02 — dual-receiver blending and failover (2× u-blox M9N)"
-    status: proposed
+    status: implemented
     release: falcon-v1.121.0
     description: >
       The estimator input shall support TWO GNSS receivers (the first

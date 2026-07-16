@@ -271,9 +271,11 @@ dependencies = [
 name = "falcon-core"
 version = "0.1.0"
 dependencies = [
+ "falcon-gnss-ubx",
  "relay-adrc",
  "relay-batt",
  "relay-calib",
+ "relay-flowrange",
  "relay-fsm",
  "relay-geo",
  "relay-iekf",

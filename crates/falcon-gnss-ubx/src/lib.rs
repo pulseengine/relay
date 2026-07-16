@@ -255,6 +255,8 @@ impl<R: embedded_io_async::Read> UbxReader<R> {
     }
 }
 
+pub mod dual;
+
 #[cfg(kani)]
 mod kani_proofs;
 

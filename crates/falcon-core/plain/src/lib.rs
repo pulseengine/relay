@@ -73,6 +73,26 @@ pub trait FlightBackend {
     fn read_battery_i(&mut self) -> Option<f32> {
         None
     }
+    /// BOTH GNSS receivers' fixes for this cycle (GNSS-P02, v1.121: the
+    /// first vehicle carries 2× M9N). `None` = the backend has no dual-GNSS
+    /// concept — the core falls back to the single [`read_position`] lane.
+    /// With `Some`, the core's dual-receiver selector (health gating,
+    /// inverse-variance blending, one-interval failover, latched divergence
+    /// flag) feeds the estimator instead.
+    fn read_gnss_dual(
+        &mut self,
+    ) -> Option<(Option<falcon_gnss_ubx::dual::NedFix>, Option<falcon_gnss_ubx::dual::NedFix>)>
+    {
+        None
+    }
+    /// Downward rangefinder distance (m), already wire-decoded and
+    /// quality-gated at the driver layer (TF02-Pro: relay-flowrange tf02,
+    /// RANGEDRV-P01). The core tilt-compensates it, innovation-gates it
+    /// against the estimated altitude, and fuses it as a tight vertical
+    /// anchor for the landing phase. Default `None`.
+    fn read_range(&mut self) -> Option<f32> {
+        None
+    }
     /// Barometric altitude (NED z, metres; negative = up), or `None` if no
     /// barometer. An INDEPENDENT vertical source the core fuses so altitude
     /// survives GPS-vertical loss (v1.20). Default `None`.
@@ -134,6 +154,19 @@ pub struct FlightCore {
     /// into the verified IEKF as a vertical anchor (a position update whose z is
     /// the baro), so altitude AND its rate survive GPS-vertical loss.
     baro_var: f32,
+    /// Latest gated terrain-relative AGL from the rangefinder (m), or `None`
+    /// (v1.121, RANGEDRV-P01): tilt-compensated, innovation-gated. The
+    /// landing law's altitude reference when present — centimetre truth
+    /// exactly where the baro/GNSS metres of error matter most.
+    range_agl: Option<f32>,
+    /// Dual-receiver GNSS selector (GNSS-P02, v1.121): health gating,
+    /// inverse-variance blending, one-interval failover, latched divergence.
+    dual_gnss: falcon_gnss_ubx::dual::DualGnss,
+    /// GNSS anti-spoof CUSUM (relay-iekf, previously an ORPHANED verified
+    /// leaf): fed the position innovation each GNSS update; a sustained
+    /// directional walk-off latches. OR-ed with the selector divergence into
+    /// [`nav_compromised`](Self::nav_compromised).
+    spoof: relay_iekf::SpoofMonitor,
     /// Single-rotor-out fault detection & isolation (relay-iekf CUSUM on the
     /// per-rotor commanded-vs-achieved effectiveness residual). On isolation,
     /// `failed_motor` latches and the control law switches to reduced-attitude +
@@ -215,6 +248,11 @@ impl FlightCore {
             pos_int: [0.0; 2],
             pos_int_max: 1.5,
             baro_var: 0.05, // ≈ (0.2 m)² baro noise; trusted less than a clean GPS-z
+            range_agl: None,
+            dual_gnss: falcon_gnss_ubx::dual::DualGnss::new(),
+            // threshold 60 m·steps, drift slack 0.15 m/step: rejects zero-mean
+            // GNSS noise, latches on a sustained directional walk-off.
+            spoof: relay_iekf::SpoofMonitor::new(60.0, 0.15),
             // CUSUM thresholds matching the SITL-verified fault-tolerance chain.
             fdi: RotorFaultDetector::new(0.5, 0.1),
             failed_motor: None,
@@ -280,6 +318,24 @@ impl FlightCore {
 
     /// The isolated failed rotor (latched), or `None` — the supervisor lands the
     /// vehicle when this is set (a 3-rotor quad cannot navigate; v1.103).
+    /// The latest gated terrain-relative AGL (m) from the rangefinder
+    /// (RANGEDRV-P01) — the land detector's ground-proximity input.
+    pub fn range_agl(&self) -> Option<f32> {
+        self.range_agl
+    }
+
+    /// Navigation-integrity flag (GNSS-P02): the anti-spoof CUSUM latched a
+    /// sustained innovation walk-off, OR the dual-receiver selector latched
+    /// receiver divergence. Consumed by pre-arm (and any failsafe policy).
+    pub fn nav_compromised(&self) -> bool {
+        self.spoof.spoofed() || self.dual_gnss.diverged()
+    }
+
+    /// The dual-GNSS selector's latched divergence flag alone (GNSS-P02).
+    pub fn gnss_diverged(&self) -> bool {
+        self.dual_gnss.diverged()
+    }
+
     pub fn failed_motor(&self) -> Option<usize> {
         self.failed_motor
     }
@@ -409,6 +465,31 @@ impl FlightCore {
     /// "Disarmed" vehicle away (the analytic plant's ground had hidden it).
     /// Mirrors `step`'s estimator block exactly (kept adjacent; drift between
     /// them is a bug).
+    /// GNSS estimator input, shared by [`step`](Self::step) and
+    /// [`step_estimate_only`](Self::step_estimate_only): the dual-receiver
+    /// selector (GNSS-P02) when the backend has one, else the legacy single
+    /// lane. Feeds the anti-spoof CUSUM with the position innovation.
+    fn fuse_gnss<B: FlightBackend>(&mut self, b: &mut B) {
+        if let Some((ga, gb)) = b.read_gnss_dual() {
+            // The innovation-gate reference engages after warm-up (a cold
+            // estimate would disqualify honest receivers).
+            let est_ref = if self.step_count >= self.fdi_warmup_steps * 5 {
+                Some(self.iekf.state().p)
+            } else {
+                None
+            };
+            let dec = self.dual_gnss.update(ga, gb, est_ref);
+            if let Some(p) = dec.pos {
+                if let Some(e) = est_ref {
+                    self.spoof.update([p[0] - e[0], p[1] - e[1], p[2] - e[2]]);
+                }
+                self.iekf.update_position(p, self.pos_var);
+            }
+        } else if let Some(p) = b.read_position() {
+            self.iekf.update_position(p, self.pos_var);
+        }
+    }
+
     pub fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
         let dt = b.dt();
         let raw = b.read_imu();
@@ -416,9 +497,7 @@ impl FlightCore {
         let accel = self.calib.apply_accel(raw.accel);
         self.iekf.propagate(IekfImu { gyro, accel }, dt);
         self.iekf.update_gravity(accel, self.grav_var);
-        if let Some(p) = b.read_position() {
-            self.iekf.update_position(p, self.pos_var);
-        }
+        self.fuse_gnss(b);
         if let Some(m) = b.read_mag() {
             self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
         }
@@ -446,9 +525,7 @@ impl FlightCore {
         // ── Estimate ──
         self.iekf.propagate(IekfImu { gyro, accel }, dt);
         self.iekf.update_gravity(accel, self.grav_var);
-        if let Some(p) = b.read_position() {
-            self.iekf.update_position(p, self.pos_var);
-        }
+        self.fuse_gnss(b);
         if let Some(m) = b.read_mag() {
             self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
         }
@@ -490,6 +567,29 @@ impl FlightCore {
             let e = self.iekf.state();
             self.iekf.update_position([e.p[0], e.p[1], bz], self.baro_var);
         }
+        // v1.121 — terrain-relative AGL (RANGEDRV-P01): the decoded,
+        // strength-gated TF02 return, tilt-compensated (relay-flowrange, the
+        // previously-orphaned verified leaf). NOT fused into the z state —
+        // three absolute references (biased GNSS-z, biased baro, true range)
+        // would fight and the estimate would settle metres off. Instead the
+        // range is the LANDING-PHASE altitude reference directly (the PX4
+        // terrain-estimator role): innovation-gated against the estimator's
+        // AGL so an obstacle overflight (sudden short return) is REJECTED —
+        // it can never fold the touchdown logic — while a biased-baro/GNSS
+        // descent still flares off the true ground.
+        self.range_agl = b.read_range().and_then(|r| {
+            let e = self.iekf.state();
+            // min 0.10 = the TF02 device floor: the touchdown threshold
+            // (0.12 m) must sit INSIDE the valid band, not in the blind
+            // zone below the gate (0.15 would go dark 3 cm too early).
+            relay_flowrange::range_to_altitude(r, e.tilt_rad(), 0.10, 35.0).filter(|agl| {
+                let est_agl = -e.p[2];
+                // gate 3 m: wider than credible baro/GNSS vertical bias (the
+                // assist must ENGAGE against lying references), narrower
+                // than an obstacle step worth rejecting.
+                (agl - est_agl) > -3.0 && (agl - est_agl) < 3.0
+            })
+        });
         let est = self.iekf.state();
 
         // ── Altitude loop ── velocity-based touchdown when landing, else the
@@ -499,7 +599,11 @@ impl FlightCore {
             // RATE (NED z positive = down), independent of the ground-effect
             // cushion the position loop floats on; cut to idle on touchdown so
             // the vehicle settles on the surface.
-            let alt_agl = -est.p[2];
+            // v1.121: terrain-relative AGL from the rangefinder when present
+            // (centimetre truth exactly where the flare needs it); estimator
+            // AGL otherwise. The gate above guarantees the two never differ
+            // by an obstacle-sized step.
+            let alt_agl = self.range_agl.unwrap_or(-est.p[2]);
             if alt_agl < 0.12 {
                 0.1 // touched down — idle (the ground holds the vehicle)
             } else {
@@ -878,11 +982,22 @@ impl FlightSupervisor {
         self.preflight.calibration_present =
             self.core.calibration() != relay_calib::CalParams::identity();
         self.preflight.battery_ok = !(self.batt_state.low || self.batt_state.critical);
+        // GNSS-P02: a latched receiver divergence or spoof walk-off blocks
+        // arming (the flag only clears via a ground reset).
+        if self.core.nav_compromised() {
+            self.preflight.sensors_healthy = false;
+        }
         self.preflight.geofence_loaded = self.fence_radius > 0.0;
     }
 
     /// Why arming would be refused right now (the first failing pre-arm check),
     /// or `None` if all checks pass — the reason a GCS surfaces to the operator.
+    /// Shared view of the wrapped [`FlightCore`] (estimator state, FDI,
+    /// GNSS-integrity flags) — the telemetry/pre-arm read seam.
+    pub fn core(&self) -> &FlightCore {
+        &self.core
+    }
+
     /// The latest estimated battery state (BATTERY-P02): sag-compensated SoC,
     /// coulomb count, failsafe flags, and the degraded (voltage-only) flag —
     /// the SYS_STATUS battery seam (map via `relay_batt::sys_status_fields`).
@@ -1367,6 +1482,33 @@ pub struct SimBackend {
     /// The collective thrust command from the last write_motors — the sim's
     /// battery LOAD (v1.120): drives the current sense read_battery_i exposes.
     last_collective: f32,
+    /// GNSS position bias (m, NED) — real receivers carry a slowly-varying
+    /// meters-class VERTICAL offset (multipath/atmosphere) that zero-mean
+    /// noise does not model: it does not average out. The biased-vertical
+    /// landing scenario (RANGEDRV-P01) needs it.
+    pub gps_pos_bias: [f32; 3],
+    /// Baro static bias (m, NED z) — the lying-baro landing scenario
+    /// (RANGEDRV-P01): baro altitude is off by metres exactly at the flare.
+    pub baro_bias: f32,
+    /// Rangefinder model (v1.121): when true, read_range returns the TRUE
+    /// AGL + noise (a decoded, gated TF02 return), overridden by
+    /// `range_fault` when set (obstacle overflight / false short return).
+    pub range_enabled: bool,
+    pub range_noise: f32,
+    /// Scripted rangefinder override (m) — obstacle injection.
+    pub range_fault: Option<f32>,
+    /// Dual-GNSS model (v1.121): when true, read_gnss_dual serves two
+    /// receivers derived from truth + per-receiver noise/offset/health
+    /// scripts; read_position is then unused by the core.
+    pub gnss_dual_enabled: bool,
+    /// Per-receiver scripted fault: None = healthy; Some(fix) overrides.
+    pub gnss_a_down: bool,
+    pub gnss_b_down: bool,
+    /// Additive NED offset on receiver B (divergence/spoof injection).
+    pub gnss_b_offset: [f32; 2],
+    /// Reported accuracy per receiver (m).
+    pub gnss_a_acc: f32,
+    pub gnss_b_acc: f32,
     /// Scripted current sense for tests (v1.120): returned by read_battery_i
     /// when the drain model is off. `None` = no current sense (fallback mode).
     pub battery_i: Option<f32>,
@@ -1434,6 +1576,17 @@ impl SimBackend {
             baro_noise: 0.0,
             battery_v: 16.0,
             battery_i: None,
+            gps_pos_bias: [0.0; 3],
+            baro_bias: 0.0,
+            range_enabled: false,
+            range_noise: 0.0,
+            range_fault: None,
+            gnss_dual_enabled: false,
+            gnss_a_down: false,
+            gnss_b_down: false,
+            gnss_b_offset: [0.0, 0.0],
+            gnss_a_acc: 1.0,
+            gnss_b_acc: 1.0,
             battery_drain: false,
             battery_charge: 1.0,
             thrust_lapse: 0.0,
@@ -1557,14 +1710,21 @@ impl FlightBackend for SimBackend {
             return None;
         }
         // v1.19 — continuous GNSS position noise (Gaussian per axis).
+        // v1.121 — plus the receiver's slowly-varying bias (multipath /
+        // atmosphere): a metres-class offset zero-mean noise cannot model.
+        let bias = self.gps_pos_bias;
         if p.gps_noise > 0.0 {
             return Some([
-                self.pos[0] + p.gps_noise * self.noise_unit(),
-                self.pos[1] + p.gps_noise * self.noise_unit(),
-                self.pos[2] + p.gps_noise * self.noise_unit(),
+                self.pos[0] + bias[0] + p.gps_noise * self.noise_unit(),
+                self.pos[1] + bias[1] + p.gps_noise * self.noise_unit(),
+                self.pos[2] + bias[2] + p.gps_noise * self.noise_unit(),
             ]);
         }
-        Some(self.pos) // full 6-DoF NED position (v1.3)
+        Some([
+            self.pos[0] + bias[0],
+            self.pos[1] + bias[1],
+            self.pos[2] + bias[2],
+        ]) // full 6-DoF NED position (v1.3) + receiver bias (v1.121)
     }
     fn read_mag(&mut self) -> Option<Vec3> {
         let mut m = self.to_body([1.0, 0.0, 0.0]); // NED north → yaw observable
@@ -1710,6 +1870,46 @@ impl FlightBackend for SimBackend {
     fn read_battery_v(&mut self) -> f32 {
         self.battery_v
     }
+    fn read_range(&mut self) -> Option<f32> {
+        if !self.range_enabled {
+            return None;
+        }
+        if let Some(f) = self.range_fault {
+            return Some(f);
+        }
+        let agl = -self.pos[2]; // flat terrain at z = 0
+        if !(0.1..=40.0).contains(&agl) {
+            return None; // outside the TF02 envelope (driver-gated)
+        }
+        Some(agl + self.range_noise * self.noise_unit())
+    }
+    fn read_gnss_dual(
+        &mut self,
+    ) -> Option<(Option<falcon_gnss_ubx::dual::NedFix>, Option<falcon_gnss_ubx::dual::NedFix>)>
+    {
+        use falcon_gnss_ubx::dual::NedFix;
+        if !self.gnss_dual_enabled {
+            return None;
+        }
+        let mut base = self.pos;
+        let n = self.path.gps_noise;
+        base[0] += n * self.noise_unit();
+        base[1] += n * self.noise_unit();
+        let a = if self.gnss_a_down {
+            None
+        } else {
+            Some(NedFix { pos: base, acc_m: self.gnss_a_acc, sats: 14, fix_ok: true })
+        };
+        let b = if self.gnss_b_down {
+            None
+        } else {
+            let mut pb = base;
+            pb[0] += self.gnss_b_offset[0];
+            pb[1] += self.gnss_b_offset[1];
+            Some(NedFix { pos: pb, acc_m: self.gnss_b_acc, sats: 14, fix_ok: true })
+        };
+        Some((a, b))
+    }
     fn read_battery_i(&mut self) -> Option<f32> {
         // Physically consistent with the drain model's sag (0.3·collective V
         // at R = 0.024 Ω): I = 12.5·collective A (25 A at hover). No current
@@ -1723,7 +1923,7 @@ impl FlightBackend for SimBackend {
     }
     fn read_baro(&mut self) -> Option<f32> {
         if self.baro_enabled {
-            Some(self.pos[2] + self.baro_noise * self.noise_unit()) // NED z, noisy
+            Some(self.pos[2] + self.baro_bias + self.baro_noise * self.noise_unit()) // NED z, noisy + bias
         } else {
             None
         }
@@ -2535,6 +2735,224 @@ mod tests {
             matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
             "low battery must trigger a failsafe recovery, mode {:?}",
             sup.mode()
+        );
+    }
+
+    /// GNSS-P02 failover: receiver A dies mid-hover — the estimator input
+    /// fails over within one fix interval with NO position-estimate step
+    /// beyond the healthy receiver's accuracy, and no estimator reset.
+    #[test]
+    fn dual_gnss_failover_holds_estimate() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.gnss_dual_enabled = true;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-3.0);
+        for _ in 0..4000 {
+            core.step(&mut b);
+        }
+        let before = core.state().p;
+        b.gnss_a_down = true; // receiver A dies
+        let mut max_step = 0.0f32;
+        let mut prev = before;
+        for _ in 0..1000 {
+            core.step(&mut b);
+            let p = core.state().p;
+            let d = relay_math::sqrtf((p[0] - prev[0]).powi(2) + (p[1] - prev[1]).powi(2));
+            max_step = max_step.max(d);
+            prev = p;
+        }
+        assert!(
+            max_step < 1.0,
+            "failover must not step the estimate beyond B's accuracy: {max_step} m"
+        );
+        assert!(!core.nav_compromised(), "a clean failover is not a spoof");
+    }
+
+    /// GNSS-P02 divergence: receiver B walks 12 m off. The selector latches
+    /// divergence, the estimate stays with the truth-consistent receiver,
+    /// and PRE-ARM blocks (nav_compromised via sensors_healthy).
+    #[test]
+    fn gnss_divergence_latches_and_blocks_arming() {
+        use relay_calib::CalParams;
+        let dt = 0.004f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.gnss_dual_enabled = true;
+        b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        for _ in 0..2000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.arm_blocked_reason(), None, "healthy dual-GNSS arms");
+        b.gnss_b_offset = [12.0, 0.0]; // B starts lying
+        for _ in 0..2000 {
+            sup.step(&mut b);
+        }
+        assert!(sup.core().gnss_diverged(), "sustained 12 m split must latch");
+        assert!(sup.arm_blocked_reason().is_some(), "divergence blocks arming");
+        let e = sup.core().state();
+        assert!(
+            relay_math::fabsf(e.p[0]) < 2.0,
+            "estimate must stay with the consistent receiver: {} m",
+            e.p[0]
+        );
+    }
+
+    /// GNSS-P02 dispersion mini-campaign (CI-sized): 40 LCG-dispersed trials
+    /// over fault type (A dropout / A accuracy collapse / B divergence walk /
+    /// nominal) and onset. The divergence flag fires in 100% of walk trials
+    /// and 0% of the others; no trial steps the estimate discontinuously.
+    #[test]
+    fn dual_gnss_dispersion_campaign() {
+        let mut lcg: u32 = 0xC0FFEE;
+        let mut rnd = move || {
+            lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
+            (lcg >> 8) as f32 / 16777216.0
+        };
+        let dt = 0.004f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for trial in 0..40 {
+            let fault = trial % 4; // 0 nominal, 1 A-drop, 2 A-acc-collapse, 3 B-walk
+            let onset = 2000 + (rnd() * 1000.0) as usize;
+            let mut b = SimBackend::new(level, dt);
+            b.gnss_dual_enabled = true;
+            b.path.gps_noise = 0.05 + rnd() * 0.1;
+            let mut core = FlightCore::new(0.5, 1.0 / dt);
+            core.set_altitude(-3.0);
+            let mut prev: Option<Vec3> = None;
+            let mut max_step = 0.0f32;
+            for k in 0..5000 {
+                if k == onset {
+                    match fault {
+                        1 => b.gnss_a_down = true,
+                        2 => b.gnss_a_acc = 50.0, // over the health ceiling
+                        3 => b.gnss_b_offset = [15.0, 0.0],
+                        _ => {}
+                    }
+                }
+                core.step(&mut b);
+                let p = core.state().p;
+                if let Some(q) = prev {
+                    let d = relay_math::sqrtf((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2));
+                    max_step = max_step.max(d);
+                }
+                prev = Some(p);
+            }
+            assert!(
+                max_step < 1.5,
+                "trial {trial} fault {fault}: estimate stepped {max_step} m"
+            );
+            if fault == 3 {
+                assert!(core.gnss_diverged(), "trial {trial}: walk must raise the flag");
+            } else {
+                assert!(!core.gnss_diverged(), "trial {trial} fault {fault}: false flag");
+            }
+        }
+    }
+
+    /// RANGEDRV-P01 landing assist: the baro lies by 2 m (reads HIGH — the
+    /// dangerous direction: the vehicle believes it is 2 m above its true
+    /// altitude and would fly into the ground). With the TF02 range anchor
+    /// the touchdown fires within 15 cm of TRUE ground.
+    #[test]
+    fn biased_baro_range_assisted_touchdown() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        // WITH the range anchor:
+        let mut b = SimBackend::new(level, dt);
+        b.ground_contact = true;
+        b.baro_enabled = true;
+        b.baro_bias = -2.0; // baro reads 2 m HIGHER than truth (NED z minus)
+        b.gps_pos_bias = [0.0, 0.0, -2.0]; // GNSS vertical carries the same lie
+        b.range_enabled = true;
+        b.range_noise = 0.02;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-3.0);
+        for _ in 0..4000 {
+            core.step(&mut b);
+        }
+        core.set_landing(true);
+        // Touchdown recognition = the landing law cutting to idle (the
+        // terrain-relative AGL crossing 0.12), visible as the collective
+        // dropping to 4×0.1. Record the TRUE altitude at that moment.
+        let mut true_alt_at_touchdown = None;
+        for _ in 0..20000 {
+            core.step(&mut b);
+            if b.last_collective < 0.45 {
+                true_alt_at_touchdown = Some(-b.pos[2]);
+                break;
+            }
+        }
+        let ta = true_alt_at_touchdown.expect("must recognize touchdown");
+        assert!(
+            ta.abs() <= 0.15,
+            "range-assisted touchdown must fire within 15 cm of true ground: {ta} m"
+        );
+
+        // WITHOUT range (the failure this slice fixes): the same biased baro
+        // leaves the estimate ~2 m high — touchdown never triggers before
+        // the vehicle is ground-clamped, i.e. it flies INTO the ground.
+        let mut b2 = SimBackend::new(level, dt);
+        b2.ground_contact = true;
+        b2.baro_enabled = true;
+        b2.baro_bias = -2.0;
+        b2.gps_pos_bias = [0.0, 0.0, -2.0];
+        let mut core2 = FlightCore::new(0.5, 1.0 / dt);
+        core2.set_altitude(-3.0);
+        for _ in 0..4000 {
+            core2.step(&mut b2);
+        }
+        core2.set_landing(true);
+        let mut touch_true_alt = None;
+        for _ in 0..20000 {
+            core2.step(&mut b2);
+            if b2.last_collective < 0.45 {
+                touch_true_alt = Some(-b2.pos[2]);
+                break;
+            }
+        }
+        match touch_true_alt {
+            None => {} // never recognized touchdown — flew into the clamp: the failure
+            Some(t) => assert!(
+                t.abs() > 0.15,
+                "without range the biased-vertical landing should NOT be clean ({t} m) — \
+                 if it is, the scenario no longer discriminates"
+            ),
+        }
+    }
+
+    /// RANGEDRV-P01 innovation gate: an obstacle overflight (sudden 4 m
+    /// short return) mid-descent must NOT fold the altitude estimate.
+    #[test]
+    fn obstacle_overflight_does_not_fold_altitude() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_contact = true;
+        b.baro_enabled = true;
+        b.range_enabled = true;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-8.0);
+        for _ in 0..6000 {
+            core.step(&mut b);
+        }
+        let est_before = -core.state().p[2];
+        // fly over a 5 m obstacle for 0.5 s: the range suddenly reads ~3 m.
+        b.range_fault = Some(3.0);
+        for _ in 0..250 {
+            core.step(&mut b);
+        }
+        assert!(
+            core.range_agl().is_none(),
+            "the innovation gate must REJECT the obstacle's short return"
+        );
+        let est_after = -core.state().p[2];
+        assert!(
+            (est_after - est_before).abs() < 0.5,
+            "altitude estimate folded over the obstacle: {est_before} -> {est_after}"
         );
     }
 

@@ -21,6 +21,8 @@ relay-fsm = { path = "../relay-fsm" }
 relay-preflight = { path = "../relay-preflight" }
 relay-calib = { path = "../relay-calib" }
 relay-batt = { path = "../relay-batt" }
+relay-flowrange = { path = "../relay-flowrange" }
+falcon-gnss-ubx = { path = "../falcon-gnss-ubx" }
 relay-log = { path = "../relay-log" }
 relay-param = { path = "../relay-param" }
 
