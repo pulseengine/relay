@@ -1,0 +1,48 @@
+artifacts:
+  - id: FV-FALCON-BATTERY-002
+    type: sw-verification
+    title: "BATTERY-P02 — sag-compensated coulomb-counted battery state + estimator-driven failsafe (v1.120)"
+    status: verified
+    release: falcon-v1.120.0
+    description: >
+      Verification of the v1.120 battery slice per SWREQ-FALCON-BATTERY-P02's
+      criteria.
+
+      Sag test (estimator AND supervisor level): a 60C/300 A punch on a
+      half-full pack sags the terminal voltage to 8.2 V — far below the old
+      14 V raw threshold — and does NOT trip the failsafe
+      (relay-batt tests::sag_punch_does_not_false_trigger; falcon-core
+      tests::sag_punch_does_not_trip_supervisor_failsafe); the same terminal
+      voltage sustained at near-zero current DOES trip
+      (tests::high_consumption_trips_at_healthy_voltage covers the coulomb
+      side: a healthy resting voltage with 92% consumed trips critical).
+
+      Integration bound (MEASURED): coulomb-count error < 2% over a
+      simulated 20-minute flight with ±2 A zero-mean current-sense noise
+      (tests::coulomb_error_under_two_percent_over_20min).
+
+      Fallback: without current sense the wider per-cell voltage-only
+      margins apply, the state is flagged degraded, and the SYS_STATUS
+      battery health bit reads unhealthy
+      (tests::fallback_is_wider_margin_and_flagged). The supervisor pre-arm
+      battery check and endurance-drain failsafe run through the estimator
+      (falcon-core tests::battery_drain_actuates_endurance_failsafe via the
+      SimBackend current sense, physically consistent with its sag model).
+
+      Kani totality (BATT-K01..K03 in relay-batt kani_proofs.rs, enrolled
+      in the kani.yml matrix): input sanitization is total and in-range for
+      ANY f32 (incl. NaN/±∞); a latched flag never clears; no trip without
+      a sustained excursion. The f32 arithmetic paths are proptest-gated
+      (tests::proptests::update_total — finite, bounded state over
+      arbitrary bit patterns), per the relay-rc verification split.
+    tags: [verification, falcon, battery, energy, failsafe, kani, v1.120]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-batt
+        - run: cargo test -p relay-batt --release
+        - run: cargo test -p falcon-core
+        - run: cargo kani -p relay-batt
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-BATTERY-P02
