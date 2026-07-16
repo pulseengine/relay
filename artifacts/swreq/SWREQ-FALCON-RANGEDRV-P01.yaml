@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-RANGEDRV-P01
     type: sw-req
     title: "RANGEDRV-P01 — Benewake TF02 Pro rangefinder driver + landing/terrain assist"
-    status: implemented
+    status: verified
     release: falcon-v1.121.0
     description: >
       The stack shall decode the Benewake TF02 Pro LiDAR rangefinder
