@@ -1,0 +1,51 @@
+artifacts:
+  - id: FV-FALCON-NOTCH-001
+    type: sw-verification
+    title: "NOTCH-P01 — RPM-tracked harmonic notch filtering: response, tracking, bypass, totality (v1.122)"
+    status: verified
+    release: falcon-v1.122.0
+    description: >
+      Verification of the gyro-path harmonic notch slice per
+      SWREQ-FALCON-NOTCH-P01.
+
+      Frequency response (MEASURED by DFT at the drive frequency, not
+      asserted from arithmetic): >= 20 dB attenuation at the tracked RPM
+      fundamental across the hover-to-full band
+      (relay-notch tests::twenty_db_at_fundamental_across_band); a stepped
+      20-point RPM sweep holds attenuation within 3 dB of nominal
+      (tests::swept_rpm_attenuation_within_3db); added phase lag at the
+      rate-loop crossover with the FULL 4-motor bank engaged measured
+      < 10 degrees (tests::phase_at_crossover_under_10_degrees).
+
+      Bypass: absent RPM telemetry => BIT-EXACT unity passthrough
+      (tests::bypass_is_bit_exact; proven for all inputs by NOTCH-K03).
+      Nyquist clamp: a notch never engages outside [10 Hz, 0.45 fs]
+      (tests::nyquist_clamp_per_notch; the trig-free band_ok gate is
+      Kani-proven over ALL inputs and unit-pinned to set()'s engagement in
+      tests::set_engagement_matches_band_ok).
+
+      Totality (Kani NOTCH-K01..K03): apply() is finite for ANY input bit
+      pattern and ANY poisoned internal state — operand sanitization means
+      no intermediate can even compute a NaN (CBMC's arithmetic
+      side-conditions pass, not just the final assert). The libm lesson is
+      pinned in the harness doc: symbolic trig is CBMC-intractable
+      (rem_pio2_large), hence the band_ok split.
+
+      Closed loop: with narrowband per-motor rotor-line vibration injected
+      on the SimBackend gyro, the tracking notch cuts settled-hover motor
+      thrash (RMS deviation of achieved motor state) to < 60% of the
+      bypass baseline, and the vehicle holds hover either way
+      (falcon-core tests::notch_reduces_rate_loop_noise_under_rotor_vibration
+      — the regression-metric shape for issue #270, whose gz limit-cycle
+      root-cause remains open there).
+    tags: [verification, falcon, filtering, notch, vibration, kani, v1.122]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-notch
+        - run: cargo test -p relay-notch --release
+        - run: cargo test -p falcon-core
+        - run: cargo kani -p relay-notch
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-NOTCH-P01

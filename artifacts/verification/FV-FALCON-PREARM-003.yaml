@@ -1,0 +1,48 @@
+artifacts:
+  - id: FV-FALCON-PREARM-003
+    type: sw-verification
+    title: "PREARM-P03 — table-driven pre-arm breadth: per-row gating, monotonicity, cold-boot NVM criterion (v1.122)"
+    status: verified
+    release: falcon-v1.122.0
+    description: >
+      Verification of the pre-arm check-table slice per
+      SWREQ-FALCON-PREARM-P03.
+
+      Per-check pair tests, TABLE-DRIVEN (coverage equals the table length
+      by construction — a row added to CheckId::ALL is automatically
+      covered): every one of the 19 rows individually blocks arming with
+      EXACTLY its own id and a DISTINCT operator-readable STATUSTEXT
+      reason, and clears when passed
+      (relay-preflight tests::every_row_blocks_alone_and_clears).
+      Undeclared breadth rows do not gate while the legacy six always do
+      (tests::undeclared_rows_do_not_gate_legacy_always_do).
+
+      Kani (PREFLIGHT-K03/K04, alongside the existing K01/K02 exhaustive
+      legacy-gate proofs): the table gate is EXACT (Allowed iff every
+      required row passes; a Blocked verdict always names a required,
+      failing row) and MONOTONE — failing any single row of an Allowed
+      table can never remain Allowed, i.e. adding a failing check can
+      never permit arming.
+
+      Integration (falcon-core): FlightSupervisor::command(Arm) gates on
+      the table (the legacy six mirrored as rows 0..=5 via set_preflight
+      and update_preflight); self-feedable rows refresh every step
+      (estimator innovation via the spoof CUSUM, GNSS agreement, geofence
+      sanity, battery takeoff margin, no-failsafe-latched, ESC telemetry
+      with declare-on-first-sight semantics). Cold-boot criterion on the
+      REAL PARAM-P03 seam: a defaults-fallback load (blank NVM, two-slot
+      image, LoadOutcome::FreshDefaults) cannot arm and reports
+      "PREARM: params are defaults (no NVM)"; after save + genuine reload
+      (LoadOutcome::Loaded) the same supervisor arms
+      (falcon-core tests::defaults_fallback_params_block_arming).
+    tags: [verification, falcon, prearm, safety, checks, kani, v1.122]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-preflight
+        - run: cargo test -p relay-preflight --release
+        - run: cargo test -p falcon-core
+        - run: cargo kani -p relay-preflight
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PREARM-P03
