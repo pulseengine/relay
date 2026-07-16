@@ -3196,7 +3196,8 @@ mod tests {
             "/../../bench-evidence/fixtures/f100-passthrough-v1.csv"
         );
         let on_disk = std::fs::read_to_string(path)
-            .expect("fixture missing — run the ignored regen test");
+            .expect("fixture missing — run the ignored regen test")
+            .replace("\r\n", "\n"); // Windows checkout normalization (belt to the .gitattributes eol=lf)
         assert_eq!(
             generated, on_disk,
             "f100 pass-through fixture drifted from the real mixer output — \

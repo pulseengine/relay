@@ -1,0 +1,2 @@
+# byte-exact conformance fixtures: never CRLF-translated
+bench-evidence/fixtures/*.csv text eol=lf
