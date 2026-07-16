@@ -1,0 +1,58 @@
+artifacts:
+  - id: SWDD-FALCON-FLOAT-001
+    type: sw-detail-design
+    title: "Float discipline: f32 flight core, f64 only at annotated geodetic/API boundaries"
+    status: implemented
+    release: falcon-v1.123.0
+    description: >
+      DESIGN DECISION (raised by external review, 2026-07): the flight core
+      is f32 BY REQUIREMENT, not convenience. Rationale, in force order:
+      (1) HARDWARE — the estimator partition runs on the i.MX RT1176
+      Cortex-M4, whose FPv4-SP FPU has no double-precision hardware; every
+      f64 op is soft-float (order-of-magnitude slower — a WCET blow-up on
+      the hottest loop). Pinned with jess (jess#144: estimator crates
+      f64-free for M4). (2) PRACTICE — PX4 EKF2 and ArduPilot NavEKF3 fly
+      f32 filters with the same mitigations relay-iekf carries
+      (local-frame navigation + covariance hygiene). (3) VERIFICATION —
+      f32 is already at CBMC's tractability edge; f64 would render several
+      existing proof suites intractable.
+
+      f64 is REQUIRED at exactly one class of site: geodetic absolutes.
+      An f32 latitude quantizes at ~0.6 m (24-bit mantissa at mid
+      latitudes); absolute lat/lon math is f64 (falcon-mavlink NED->LLH;
+      the gz bridge's LLH->NED projection), casting only the small local
+      NED delta down to f32. Wire formats stay integer (UBX 1e-7 deg i32).
+      Test oracles deliberately use f64 (more precise than the article
+      under test).
+
+      ENFORCEMENT (this release): scripts/check-float-discipline.sh runs in
+      CI — denies the f64 token in the flight-partition crates' non-test
+      code; a file may opt out only via a visible header annotation
+      ("float-discipline: allow-f64 (<why>)"; today exactly one:
+      falcon-mavlink's geodetic boundary).
+
+      HARDENING (this release, from the same review): the relay-iekf
+      standard-form covariance update `P <- (I-KH)P` can in f32 round a
+      diagonal negative — symmetrise() cannot see that. floor_variances()
+      now runs after every measurement update: diagonals healed into
+      [VAR_FLOOR, VAR_CEIL] (an infinite diagonal heals to the CEILING —
+      maximal uncertainty — never the floor, which would fabricate
+      certainty; the Kani harness caught +infinity passing the naive
+      floor-only check), stale correlations of corrupt rows zeroed, every
+      event counted LOUDLY in Iekf::variance_floor_hits (zero across all
+      existing campaigns — a guard, not a crutch).
+    tags: [falcon, float-discipline, f32, wcet, iekf, numerical-health, v1.123]
+    fields:
+      verification-criteria: >
+        Gate: check-float-discipline.sh green in CI on every PR; seeding an
+        f64 into a flight crate fails the gate. Floor: Kani proves the
+        post-condition (every diagonal finite and within [floor, ceil] for
+        ANY input including NaN/+-inf); unit tests cover negative-diagonal
+        heal + correlation zeroing + NaN; a 50k-cycle healthy run asserts
+        ZERO floor hits (behavior-neutral on healthy inputs); the full
+        relay-iekf suite (29) and falcon-core suite are unchanged.
+    links:
+      - type: refines
+        target: SWARCH-FALCON-001
+      - type: implements
+        target: SYSREQ-FALCON-002

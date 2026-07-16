@@ -1,4 +1,5 @@
 //! Falcon MAVLink bridge — the translation seam between the MAVLink v2
+//! float-discipline: allow-f64 (geodetic boundary: absolute lat/lon must be f64 — f32 degrees quantize at ~0.6 m; only local NED deltas are cast down)
 //! wire (QGroundControl / MAVSDK / PX4-ecosystem GCS) and falcon's flight
 //! supervisor.
 //!
