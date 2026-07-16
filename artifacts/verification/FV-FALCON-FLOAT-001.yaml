@@ -1,0 +1,45 @@
+artifacts:
+  - id: FV-FALCON-FLOAT-001
+    type: sw-verification
+    title: "Float discipline: CI f64 gate + IEKF variance floor/ceiling (v1.123)"
+    status: verified
+    release: falcon-v1.123.0
+    description: >
+      Verification of SWDD-FALCON-FLOAT-001.
+
+      Gate: scripts/check-float-discipline.sh runs as a CI step (ci.yml,
+      ahead of clippy) over the 21 flight-partition crates; green on main.
+      The oracle itself is negative-tested: a seeded f64 at a flight-crate
+      file top FAILS the gate; the clean tree passes. The gate already
+      caught two of its own defects before landing: BSD awk's missing \y
+      word boundary made local runs vacuous (portable character-class
+      boundary now), and falcon-mavlink's separate tests.rs sat outside
+      the cfg(test) exemption (test files skipped explicitly). Exactly one
+      annotated boundary exists (falcon-mavlink: geodetic — absolute
+      lat/lon must be f64; f32 degrees quantize at ~0.6 m).
+
+      Variance floor (the review's finding): floor_variances runs after
+      every relay-iekf measurement update. Kani proves the post-condition
+      for ANY covariance content including NaN/±∞ — every diagonal finite
+      and within [1e-9, 1e6] (4/4 harnesses; the harness CAUGHT the first
+      implementation: +∞ passed the naive floor-only check, and an
+      infinite variance must heal to the CEILING — maximal uncertainty —
+      never the floor). Unit tests: negative-diagonal heal with stale-
+      correlation zeroing, NaN heal, healthy-matrix no-op
+      (variance_floor_tests::*). Behavior-neutrality: a 50k-cycle healthy
+      run asserts ZERO floor hits
+      (variance_floor_tests::floor_never_fires_on_healthy_long_run), and
+      the pre-existing relay-iekf (26) and falcon-core (56) suites are
+      unchanged. The event counter (Iekf::variance_floor_hits) is public
+      and LOUD.
+    tags: [verification, falcon, float-discipline, iekf, kani, v1.123]
+    fields:
+      method: automated-test
+      steps:
+        - run: ./scripts/check-float-discipline.sh
+        - run: cargo test -p relay-iekf
+        - run: cargo test -p falcon-core
+        - run: cargo kani -p relay-iekf
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FLOAT-P01
