@@ -65,7 +65,7 @@ jobs:
             -p falcon-param -p relay-fsm -p relay-preflight -p relay-calib \
             -p falcon-core -p relay-mix-quad \
             -p relay-arm -p relay-adrc -p relay-geo -p relay-iekf \
-            -p relay-batt -p relay-flowrange -p falcon-gnss-ubx \
+            -p relay-batt -p relay-flowrange -p falcon-gnss-ubx -p relay-notch \
             --all-targets -- -D warnings
 
   test:

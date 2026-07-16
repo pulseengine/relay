@@ -27,6 +27,7 @@ members = [
     "crates/relay-dronecan",
     "crates/relay-param",
     "crates/relay-batt",
+    "crates/relay-notch",
     "crates/relay-calib",
     "crates/relay-log",
     "crates/relay-mix-multi",

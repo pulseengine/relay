@@ -167,6 +167,13 @@ pub struct FlightCore {
     /// directional walk-off latches. OR-ed with the selector divergence into
     /// [`nav_compromised`](Self::nav_compromised).
     spoof: relay_iekf::SpoofMonitor,
+    /// RPM-tracked harmonic notch bank on the CONTROL-path gyro (NOTCH-P01,
+    /// v1.122): per-motor fundamental + 2nd harmonic, driven by the same
+    /// read_motor_rpm seam the FDI consumes; clean unity bypass without RPM
+    /// telemetry. The estimator keeps the raw (calibrated) gyro — the IEKF's
+    /// gravity/mag updates already reject zero-mean vibration, and filtering
+    /// the estimator input would add lag where it is not needed.
+    notch: relay_notch::HarmonicNotchBank<4>,
     /// Single-rotor-out fault detection & isolation (relay-iekf CUSUM on the
     /// per-rotor commanded-vs-achieved effectiveness residual). On isolation,
     /// `failed_motor` latches and the control law switches to reduced-attitude +
@@ -253,6 +260,7 @@ impl FlightCore {
             // threshold 60 m·steps, drift slack 0.15 m/step: rejects zero-mean
             // GNSS noise, latches on a sustained directional walk-off.
             spoof: relay_iekf::SpoofMonitor::new(60.0, 0.15),
+            notch: relay_notch::HarmonicNotchBank::new(loop_hz),
             // CUSUM thresholds matching the SITL-verified fault-tolerance chain.
             fdi: RotorFaultDetector::new(0.5, 0.1),
             failed_motor: None,
@@ -659,8 +667,14 @@ impl FlightCore {
             a_cmd[1] *= s;
         }
 
+        // v1.122 — RPM-tracked harmonic notches on the CONTROL path, ahead
+        // of the low-pass (NOTCH-P01): read the achieved RPM once per step
+        // (shared with the FDI below), track or bypass cleanly.
+        let rpm_now = b.read_motor_rpm();
+        self.notch.update_rpm(rpm_now);
+        let gyro_ctrl = self.notch.apply(gyro);
         // advance the (stateful) gyro low-pass every cycle so it stays warm.
-        let gyro_f = self.gyro_lpf.filter(gyro);
+        let gyro_f = self.gyro_lpf.filter(gyro_ctrl);
 
         // ── Attitude + allocate ──
         let motors = if let Some(failed) = self.failed_motor {
@@ -670,7 +684,7 @@ impl FlightCore {
             // promoted into the production loop (v1.103).
             let r = quat_to_rotmat(est.q);
             let b3_d = thrust_axis_ned(a_cmd).unwrap_or([0.0, 0.0, 1.0]);
-            let torque = self.geo.moment_reduced(&r, gyro, b3_d);
+            let torque = self.geo.moment_reduced(&r, gyro_ctrl, b3_d);
             self.mixer.mix_rotor_out(failed, torque, thrust, ROTOR_OUT_FLOOR)
         } else {
             // NORMAL: full-attitude geometric desired-rate → ADRC torque → mix.
@@ -725,7 +739,7 @@ impl FlightCore {
             && self.step_count >= self.fdi_warmup_steps
             && fdi_steady
         {
-            if let Some(rpm) = b.read_motor_rpm() {
+            if let Some(rpm) = rpm_now {
                 let mut resid = [0.0f32; 4];
                 let mut i = 0;
                 while i < 4 {
@@ -874,6 +888,13 @@ pub struct FlightSupervisor {
     /// the high-wind detector (v1.101). On reaching WIND_CYCLES it commands RTL
     /// (the vehicle is fighting a disturbance beyond its control authority).
     wind_count: u32,
+    /// The PREARM-P03 check TABLE (v1.122): the legacy six checks mirrored
+    /// as rows 0..=5 plus the breadth rows (estimator/nav integrity, config
+    /// consistency, hardware consistency, safety state). Self-populatable
+    /// rows are refreshed every step; integration-fed rows (RC/GCS link,
+    /// params-from-NVM, sensor freshness, …) enter via [`set_check`] —
+    /// setting one DECLARES it required from then on.
+    check_table: relay_preflight::CheckTable,
     /// The latest pre-arm / commander check inputs (sensor health, estimator
     /// convergence, calibration, geofence, battery, failsafe config). Fed by
     /// `set_preflight`; `command(Arm, …)` gates arming on `arm_check` of these
@@ -908,6 +929,18 @@ impl FlightSupervisor {
             rtl_latched: false,
             runaway_count: 0,
             wind_count: 0,
+            check_table: {
+                // back-compat: mirror the default-true legacy six (below) —
+                // a supervisor that has never stepped can still be armed by
+                // the bring-up tests; the first update_preflight refreshes
+                // every row with real signals.
+                let mut t = relay_preflight::CheckTable::new();
+                use relay_preflight::CheckId;
+                for id in CheckId::ALL.iter().take(6) {
+                    t.set(*id, true);
+                }
+                t
+            },
             // back-compat default: all checks pass (an integration that feeds real
             // health via set_preflight tightens this to a fail-safe gate).
             preflight: relay_preflight::PreflightChecks {
@@ -962,6 +995,16 @@ impl FlightSupervisor {
     /// battery, sensor/RC presence, …); `command(Arm, …)` then gates on them.
     pub fn set_preflight(&mut self, checks: relay_preflight::PreflightChecks) {
         self.preflight = checks;
+        // keep the PREARM-P03 table's legacy rows in lockstep — the arm
+        // gate reads the TABLE (which embeds these as rows 0..=5).
+        use relay_preflight::CheckId;
+        let t = &mut self.check_table;
+        t.set(CheckId::SensorsHealthy, checks.sensors_healthy);
+        t.set(CheckId::EstimatorConverged, checks.estimator_converged);
+        t.set(CheckId::CalibrationPresent, checks.calibration_present);
+        t.set(CheckId::GeofenceLoaded, checks.geofence_loaded);
+        t.set(CheckId::BatteryOk, checks.battery_ok);
+        t.set(CheckId::FailsafeConfigured, checks.failsafe_configured);
     }
 
     /// Derive the pre-arm checks the supervisor can know from its OWN state, each
@@ -987,6 +1030,34 @@ impl FlightSupervisor {
         if self.core.nav_compromised() {
             self.preflight.sensors_healthy = false;
         }
+        // PREARM-P03: mirror the legacy six into the table and refresh every
+        // row the supervisor can feed itself.
+        use relay_preflight::CheckId;
+        let t = &mut self.check_table;
+        t.set(CheckId::SensorsHealthy, self.preflight.sensors_healthy);
+        t.set(CheckId::EstimatorConverged, self.preflight.estimator_converged);
+        t.set(CheckId::CalibrationPresent, self.preflight.calibration_present);
+        t.set(CheckId::GeofenceLoaded, self.preflight.geofence_loaded);
+        t.set(CheckId::BatteryOk, self.preflight.battery_ok);
+        t.set(CheckId::FailsafeConfigured, self.preflight.failsafe_configured);
+        t.set(CheckId::EstimatorInnovation, !self.core.nav_compromised());
+        t.set(CheckId::GnssAgreement, !self.core.gnss_diverged());
+        t.set(
+            CheckId::GeofenceSane,
+            self.fence_radius.is_finite()
+                && self.fence_radius > 0.0
+                && self.home.iter().all(|v| v.is_finite()),
+        );
+        // Battery must clear the low threshold WITH margin for the takeoff
+        // draw — arming at low+ε means an RTL seconds after liftoff.
+        t.set(
+            CheckId::BatteryTakeoffMargin,
+            self.batt_state.degraded || self.batt_state.soc >= 0.30,
+        );
+        t.set(
+            CheckId::NoFailsafeLatched,
+            !self.rtl_latched && !self.batt_state.low && !self.batt_state.critical,
+        );
         self.preflight.geofence_loaded = self.fence_radius > 0.0;
     }
 
@@ -1005,6 +1076,24 @@ impl FlightSupervisor {
         self.batt_state
     }
 
+    /// PREARM-P03 integration seam: feed an integration-owned check row
+    /// (RC/GCS link, params-from-NVM, calibration age, sensor freshness,
+    /// rangefinder plausibility). Setting a row DECLARES it — the arm gate
+    /// is thereafter blocked whenever it fails (monotone, PREFLIGHT-K04).
+    pub fn set_check(&mut self, id: relay_preflight::CheckId, pass: bool) {
+        self.check_table.set(id, pass);
+    }
+
+    /// Why arming would be refused by the PREARM-P03 table (the first
+    /// failing required row), with the operator STATUSTEXT via
+    /// `CheckId::reason_text`. `None` = the table allows.
+    pub fn arm_blocked_check(&self) -> Option<relay_preflight::CheckId> {
+        match relay_preflight::arm_check_table(&self.check_table) {
+            relay_preflight::TableVerdict::Allowed => None,
+            relay_preflight::TableVerdict::Blocked(id) => Some(id),
+        }
+    }
+
     pub fn arm_blocked_reason(&self) -> Option<relay_preflight::CheckFail> {
         match relay_preflight::arm_check(self.preflight) {
             relay_preflight::ArmVerdict::Allowed => None,
@@ -1017,8 +1106,12 @@ impl FlightSupervisor {
     /// FSM only enters `Armed` when every check passes AND the vehicle is level
     /// with throttle idle — the Kani-proven entry gate (relay-fsm FSM-K03).
     pub fn command(&mut self, ev: relay_fsm::Event, level: bool, throttle_low: bool) {
-        let prearm_ok =
-            matches!(relay_preflight::arm_check(self.preflight), relay_preflight::ArmVerdict::Allowed);
+        // v1.122: the PREARM-P03 table is the gate — it embeds the legacy
+        // six as rows 0..=5 and adds the declared breadth rows.
+        let prearm_ok = matches!(
+            relay_preflight::arm_check_table(&self.check_table),
+            relay_preflight::TableVerdict::Allowed
+        );
         let g = relay_fsm::Gates { level, throttle_low, have_position: true, prearm_ok };
         self.fsm.on(ev, g);
     }
@@ -1133,6 +1226,18 @@ impl FlightSupervisor {
         // current sense) — a throttle-punch sag does not false-trigger, and a
         // rebounding spent pack cannot hide.
         self.batt_state = self.batt_est.update(b.dt(), b.read_battery_v(), b.read_battery_i());
+        // PREARM-P03 hardware row: ESC/eRPM telemetry alive (the notch's and
+        // FDI's source). DECLARE-ON-FIRST-SIGHT: a vehicle that has never
+        // shown eRPM (no bidir-DShot) is not gated on it, but once seen,
+        // its LOSS blocks arming (one-way, like every declared row).
+        match b.read_motor_rpm() {
+            Some(_) => self.check_table.set(relay_preflight::CheckId::EscTelemetry, true),
+            None => {
+                if self.check_table.is_required(relay_preflight::CheckId::EscTelemetry) {
+                    self.check_table.set(relay_preflight::CheckId::EscTelemetry, false);
+                }
+            }
+        }
         let batt_fail = self.batt_state.low || self.batt_state.critical;
         let breach = dist_home > self.fence_radius || batt_fail;
         if breach && self.fsm.is_airborne() && self.fsm.mode() != Mode::Land {
@@ -1482,6 +1587,15 @@ pub struct SimBackend {
     /// The collective thrust command from the last write_motors — the sim's
     /// battery LOAD (v1.120): drives the current sense read_battery_i exposes.
     last_collective: f32,
+    /// Rotor-harmonic gyro vibration amplitude (rad/s) — NARROWBAND lines at
+    /// each motor's rotation frequency (v1.122, NOTCH-P01's contaminant; the
+    /// broadband `vibration` pathology cannot exercise a notch).
+    pub rotor_vib: f32,
+    /// Per-motor vibration phase accumulators (rad).
+    rotor_vib_phase: [f32; 4],
+    /// RPM telemetry available? (bidir-DShot present). false = read_motor_rpm
+    /// returns None: the notch bank must bypass and the FDI loses its source.
+    pub rpm_telemetry: bool,
     /// GNSS position bias (m, NED) — real receivers carry a slowly-varying
     /// meters-class VERTICAL offset (multipath/atmosphere) that zero-mean
     /// noise does not model: it does not average out. The biased-vertical
@@ -1576,6 +1690,9 @@ impl SimBackend {
             baro_noise: 0.0,
             battery_v: 16.0,
             battery_i: None,
+            rotor_vib: 0.0,
+            rotor_vib_phase: [0.0; 4],
+            rpm_telemetry: true,
             gps_pos_bias: [0.0; 3],
             baro_bias: 0.0,
             range_enabled: false,
@@ -1688,10 +1805,25 @@ impl FlightBackend for SimBackend {
         // v1.9 — the measured gyro carries the accumulated (drifting) bias the
         // IEKF bias state must estimate out. v1.18 — plus optional white noise.
         let gw = self.path.gyro_white;
+        // v1.122 — per-motor rotational vibration: a LINE at each rotor's
+        // rotation frequency (phase advanced from the lagged motor state),
+        // split across roll/pitch like a real airframe transmits it.
+        let mut vib = [0.0f32; 3];
+        if self.rotor_vib > 0.0 {
+            for m in 0..4 {
+                let f = self.motor_state[m] * ESC_RPM_FULL / 60.0;
+                self.rotor_vib_phase[m] += 2.0 * core::f32::consts::PI * f * self.dt;
+                if self.rotor_vib_phase[m] > 2.0 * core::f32::consts::PI {
+                    self.rotor_vib_phase[m] -= 2.0 * core::f32::consts::PI;
+                }
+                vib[0] += self.rotor_vib * relay_math::sinf(self.rotor_vib_phase[m]);
+                vib[1] += self.rotor_vib * relay_math::cosf(self.rotor_vib_phase[m]);
+            }
+        }
         let gyro = [
-            self.omega[0] + self.gyro_bias[0] + gw * self.noise_unit(),
-            self.omega[1] + self.gyro_bias[1] + gw * self.noise_unit(),
-            self.omega[2] + self.gyro_bias[2] + gw * self.noise_unit(),
+            self.omega[0] + self.gyro_bias[0] + vib[0] + gw * self.noise_unit(),
+            self.omega[1] + self.gyro_bias[1] + vib[1] + gw * self.noise_unit(),
+            self.omega[2] + self.gyro_bias[2] + vib[2] + gw * self.noise_unit(),
         ];
         ImuSample { accel, gyro }
     }
@@ -1929,6 +2061,9 @@ impl FlightBackend for SimBackend {
         }
     }
     fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+        if !self.rpm_telemetry {
+            return None;
+        }
         // ACHIEVED per-rotor RPM from the lagged actual motor state — a failed
         // rotor reads 0 (it was pinned in `write_motors`). This is the FDI's
         // commanded-vs-achieved source; with no failure it tracks the command.
@@ -2146,6 +2281,11 @@ mod blackbox_replay_tests {
         std::fs::write(path, &b.writer.inner().0).unwrap();
         std::eprintln!("golden written: {path}");
     }
+}
+
+#[cfg(test)]
+fn falcon_core_tuning_register(store: &mut relay_param::ParamStore<8>) -> bool {
+    crate::tuning::register_tuning(store)
 }
 
 #[cfg(test)]
@@ -2735,6 +2875,105 @@ mod tests {
             matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
             "low battery must trigger a failsafe recovery, mode {:?}",
             sup.mode()
+        );
+    }
+
+    /// PREARM-P03 integration criterion: a SITL cold boot whose parameter
+    /// store fell back to defaults (blank NVM) CANNOT arm — with the
+    /// distinct operator reason — and after a save + genuine NVM load it
+    /// can. Runs the REAL PARAM-P03 persistence seam (two-slot FRAM image
+    /// over the ArrayNvm mock), not a hand-set flag.
+    #[test]
+    fn defaults_fallback_params_block_arming() {
+        use relay_param::persist::{load, save, ArrayNvm, Layout, LoadOutcome};
+        use relay_param::ParamStore;
+        use relay_preflight::CheckId;
+
+        let dt = 0.004f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.set_calibration(relay_calib::CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..relay_calib::CalParams::identity()
+        });
+
+        // COLD BOOT: blank NVM → defaults-fallback; the integration reports
+        // the load outcome into the check table.
+        let mut nvm: ArrayNvm<2048> = ArrayNvm::new();
+        let layout = Layout::new(16);
+        let mut store: ParamStore<8> = ParamStore::new();
+        assert!(falcon_core_tuning_register(&mut store));
+        let rep = load(&mut store, &nvm, layout, 1);
+        assert_eq!(rep.outcome, LoadOutcome::FreshDefaults);
+        sup.set_check(CheckId::ParamsFromNvm, rep.outcome == LoadOutcome::Loaded);
+
+        for _ in 0..2000 {
+            sup.step(&mut b);
+        }
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Disarmed, "defaults-fallback must not arm");
+        assert_eq!(sup.arm_blocked_check(), Some(CheckId::ParamsFromNvm));
+        assert_eq!(
+            CheckId::ParamsFromNvm.reason_text(),
+            "PREARM: params are defaults (no NVM)"
+        );
+
+        // field save + reboot-reload: a GENUINE NVM image now loads.
+        save(&store, &mut nvm, layout, 1).expect("save");
+        let mut store2: ParamStore<8> = ParamStore::new();
+        assert!(falcon_core_tuning_register(&mut store2));
+        let rep2 = load(&mut store2, &nvm, layout, 1);
+        assert_eq!(rep2.outcome, LoadOutcome::Loaded);
+        sup.set_check(CheckId::ParamsFromNvm, rep2.outcome == LoadOutcome::Loaded);
+        sup.step(&mut b);
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), relay_fsm::Mode::Armed, "arms after the NVM load");
+    }
+
+    /// NOTCH-P01 closed-loop criterion: hover with per-motor rotor-line
+    /// vibration injected on the gyro. With RPM telemetry (notch TRACKING)
+    /// the rate-loop noise — measured as motor-command thrash — is
+    /// SUBSTANTIALLY below the bypass baseline; and the vehicle holds an
+    /// upright hover either way (the notch helps, it must not be required
+    /// for basic stability at this amplitude).
+    #[test]
+    fn notch_reduces_rate_loop_noise_under_rotor_vibration() {
+        fn hover_thrash(rpm_telemetry: bool) -> f32 {
+            let dt = 0.004f32; // 250 Hz — the flight loop rate
+            let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+            let mut b = SimBackend::new(level, dt);
+            b.rotor_vib = 0.8; // rad/s per motor line — a rough 1045 airframe
+            b.rpm_telemetry = rpm_telemetry;
+            let mut core = FlightCore::new(0.5, 1.0 / dt);
+            core.set_altitude(-3.0);
+            for _ in 0..4000 {
+                core.step(&mut b);
+            }
+            // measure: RMS deviation of motor 0's ACHIEVED state over 8 s of
+            // settled hover — command thrash is the limit-cycle/vibration
+            // symptom (#270's regression metric shape).
+            let n = 2000usize;
+            let mut sum = 0.0f64;
+            let mut sum2 = 0.0f64;
+            for _ in 0..n {
+                core.step(&mut b);
+                let m = b.motor_state[0] as f64;
+                sum += m;
+                sum2 += m * m;
+            }
+            let mean = sum / n as f64;
+            let var = (sum2 / n as f64 - mean * mean).max(0.0);
+            assert!(b.tilt() < 0.2, "hover must hold (telemetry={rpm_telemetry})");
+            (var.sqrt()) as f32
+        }
+        let with_notch = hover_thrash(true);
+        let baseline = hover_thrash(false);
+        assert!(
+            with_notch < 0.6 * baseline,
+            "tracking notch must cut motor thrash substantially: \
+             with {with_notch:.4} vs bypass {baseline:.4}"
         );
     }
 

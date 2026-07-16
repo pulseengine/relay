@@ -282,6 +282,7 @@ dependencies = [
  "relay-log",
  "relay-math",
  "relay-mix-quad",
+ "relay-notch",
  "relay-param",
  "relay-preflight",
 ]
@@ -1094,6 +1095,14 @@ name = "relay-nid"
 version = "0.1.0"
 dependencies = [
  "proptest",
+]
+
+[[package]]
+name = "relay-notch"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "relay-math",
 ]
 
 [[package]]
