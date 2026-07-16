@@ -212,3 +212,18 @@ Falsifiable, as always: this release is wrong if a rotor-out from settled hover 
 #drone #autopilot #faulttolerance #formalverification #rust #robotics
 
 _video: falcon-v1.117-narrated.mp4 (af_sky) / falcon-v1.117.mp4 (captions only)_
+
+---
+
+## v1.118–v1.122 (combined arc)
+**Title:** Falcon v1.118→v1.122 — The Vehicle Grew Instruments | five verified releases in one arc
+
+Five releases that turned a proven flight stack into a field-ready instrument — and every claim on screen is machine-checked. v1.118: a crash-safe flight blackbox whose estimator replay is f32 bit-EXACT (a checked-in golden log gates CI — every flight becomes a permanent regression test). v1.119: GCS telemetry, six MAVLink messages byte-exact against pymavlink reference vectors, with a link scheduler whose heartbeat provably never starves, plus bounded in-flight tuning. v1.120: a sag-compensated, coulomb-counted battery estimator — a 300 A punch that sags the pack through the old voltage threshold no longer false-triggers, and a rebounding empty pack can no longer hide. v1.121: dual-GPS blending with one-interval failover and a latched divergence flag, plus a TF02 rangefinder that lands the vehicle within 15 cm of TRUE ground while barometer and GPS both lie by two meters. v1.122: an RPM-tracked harmonic notch filter (bit-exact bypass proven, <10° phase cost measured) and a 19-row pre-arm check table whose monotonicity is a theorem — adding a failing check can NEVER allow arming.
+
+Every data animation in the video is rendered from the actual test traces in the repo — nothing is illustrative. The proofs caught bugs the tests missed: an ∞−∞ NaN in the GPS blend weights and a float rounding escape in the rangefinder decode. All five releases are tagged on green CI and cosign-signed.
+
+Falsifiable, as always: this arc is wrong if a replayed log diverges from its recording by one bit, if HEARTBEAT misses its rate on a half-budget link, if a sag punch trips the failsafe on a half-full pack, if a dual-GPS failover steps the estimate beyond the healthy receiver's accuracy, or if the notch bank fails to bypass bit-exactly without RPM telemetry.
+
+#drone #autopilot #formalverification #kani #rust #robotics #embedded #gps #battery #filtering
+
+_video: falcon-v1.118-122-narrated.mp4 (af_sky, data segments rendered from real test traces)_
