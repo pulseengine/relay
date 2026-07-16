@@ -65,6 +65,14 @@ pub trait FlightBackend {
     fn read_battery_v(&mut self) -> f32 {
         16.0
     }
+    /// Battery discharge current (A) from the power module's current sense
+    /// (PM02D), or `None` when no current sensing exists. With current the
+    /// supervisor's battery estimate is coulomb-counted and sag-compensated
+    /// (BATTERY-P02); without it the estimator runs a FLAGGED voltage-only
+    /// fallback with wider margins. Default `None`.
+    fn read_battery_i(&mut self) -> Option<f32> {
+        None
+    }
     /// Barometric altitude (NED z, metres; negative = up), or `None` if no
     /// barometer. An INDEPENDENT vertical source the core fuses so altitude
     /// survives GPS-vertical loss (v1.20). Default `None`.
@@ -738,7 +746,14 @@ pub struct FlightSupervisor {
     home: Vec3,
     fence_radius: f32,
     cruise_alt: f32,
-    low_batt_v: f32,
+    /// The verified battery estimator (BATTERY-P02, v1.120): coulomb count +
+    /// sag compensation with current sense, flagged voltage-only fallback
+    /// without. Its debounced, latched flags — not raw voltage — drive the
+    /// low-battery failsafe and the pre-arm battery check.
+    batt_est: relay_batt::BatteryEstimator,
+    /// The latest battery state, refreshed every step (telemetry seam:
+    /// SYS_STATUS battery fields + degraded flag come from here).
+    batt_state: relay_batt::BattState,
     /// Stored mission legs (NED), flown in order while in Mission mode.
     waypoints: [Vec3; MAX_WAYPOINTS],
     wp_count: usize,
@@ -773,7 +788,14 @@ impl FlightSupervisor {
             home,
             fence_radius,
             cruise_alt,
-            low_batt_v,
+            // Fallback thresholds preserve the constructor's contract: the
+            // configured low_batt_v is the (4S) voltage-only LOW threshold.
+            batt_est: relay_batt::BatteryEstimator::new(relay_batt::BattConfig {
+                low_v_cell_fallback: low_batt_v / 4.0,
+                crit_v_cell_fallback: low_batt_v / 4.0 - 0.15,
+                ..relay_batt::BattConfig::default()
+            }),
+            batt_state: relay_batt::BattState::default(),
             waypoints: [home; MAX_WAYPOINTS],
             wp_count: 0,
             wp_index: 0,
@@ -844,22 +866,30 @@ impl FlightSupervisor {
     ///   * estimator_converged — the IEKF attitude uncertainty has settled below
     ///     [`PREARM_TILT_UNCERT_MAX`] (a divergent/just-started filter blocks arming);
     ///   * calibration_present — a non-identity sensor calibration is installed;
-    ///   * battery_ok — the pack voltage is at/above the arming threshold;
+    ///   * battery_ok — the estimated battery state (BATTERY-P02: debounced,
+    ///     latched low/critical flags) is clear;
     ///   * geofence_loaded — a positive fence radius is configured.
     ///
     /// `sensors_healthy` and `failsafe_configured` are left as last set (default
     /// true / via [`set_preflight`]) — they need a sensor-health / arbiter input
     /// the backend does not yet provide (documented follow-up).
-    pub fn update_preflight<B: FlightBackend>(&mut self, b: &mut B) {
+    pub fn update_preflight<B: FlightBackend>(&mut self, _b: &mut B) {
         self.preflight.estimator_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
         self.preflight.calibration_present =
             self.core.calibration() != relay_calib::CalParams::identity();
-        self.preflight.battery_ok = b.read_battery_v() >= self.low_batt_v;
+        self.preflight.battery_ok = !(self.batt_state.low || self.batt_state.critical);
         self.preflight.geofence_loaded = self.fence_radius > 0.0;
     }
 
     /// Why arming would be refused right now (the first failing pre-arm check),
     /// or `None` if all checks pass — the reason a GCS surfaces to the operator.
+    /// The latest estimated battery state (BATTERY-P02): sag-compensated SoC,
+    /// coulomb count, failsafe flags, and the degraded (voltage-only) flag —
+    /// the SYS_STATUS battery seam (map via `relay_batt::sys_status_fields`).
+    pub fn battery(&self) -> relay_batt::BattState {
+        self.batt_state
+    }
+
     pub fn arm_blocked_reason(&self) -> Option<relay_preflight::CheckFail> {
         match relay_preflight::arm_check(self.preflight) {
             relay_preflight::ArmVerdict::Allowed => None,
@@ -983,8 +1013,13 @@ impl FlightSupervisor {
 
         // ── FAILSAFE actuation (the audit's gap): geofence breach OR low
         // battery from any flying state ⇒ Failsafe ⇒ the FSM commands RTL. ──
-        let batt = b.read_battery_v();
-        let breach = dist_home > self.fence_radius || batt < self.low_batt_v;
+        // BATTERY-P02: the failsafe acts on the ESTIMATED battery state (sag-
+        // compensated + coulomb-counted; flagged voltage-only fallback when no
+        // current sense) — a throttle-punch sag does not false-trigger, and a
+        // rebounding spent pack cannot hide.
+        self.batt_state = self.batt_est.update(b.dt(), b.read_battery_v(), b.read_battery_i());
+        let batt_fail = self.batt_state.low || self.batt_state.critical;
+        let breach = dist_home > self.fence_radius || batt_fail;
         if breach && self.fsm.is_airborne() && self.fsm.mode() != Mode::Land {
             self.fsm.on(Event::Failsafe, g);
             self.rtl_latched = true;
@@ -1329,6 +1364,12 @@ pub struct SimBackend {
     /// charge and load, not set: V = 12.6 + 4.2·charge − R·I (open-circuit +
     /// sag), so the failsafe fires on a real endurance limit.
     pub battery_v: f32,
+    /// The collective thrust command from the last write_motors — the sim's
+    /// battery LOAD (v1.120): drives the current sense read_battery_i exposes.
+    last_collective: f32,
+    /// Scripted current sense for tests (v1.120): returned by read_battery_i
+    /// when the drain model is off. `None` = no current sense (fallback mode).
+    pub battery_i: Option<f32>,
     /// Drain the battery with motor load? (v1.21) Off = a fixed `battery_v`
     /// (v1.8 behaviour). On = the LinearBattery-style draining model below.
     pub battery_drain: bool,
@@ -1392,11 +1433,13 @@ impl SimBackend {
             baro_enabled: false,
             baro_noise: 0.0,
             battery_v: 16.0,
+            battery_i: None,
             battery_drain: false,
             battery_charge: 1.0,
             thrust_lapse: 0.0,
             motor_tau: 0.0,
             motor_state: [0.5; 4], // start at hover collective
+            last_collective: 2.0,
             ground_effect: 0.0,
             ground_contact: false,
             path: Pathology::default(),
@@ -1654,6 +1697,7 @@ impl FlightBackend for SimBackend {
         // v1.21 — draining battery (LinearBattery-style): the motor collective is
         // the current draw; charge depletes; terminal voltage = open-circuit +
         // load sag. The supervisor's failsafe then fires on real endurance.
+        self.last_collective = collective;
         if self.battery_drain {
             let current = collective; // ∝ total motor power
             self.battery_charge = (self.battery_charge - current * 5.0e-5 * self.dt / 0.002).max(0.0);
@@ -1665,6 +1709,17 @@ impl FlightBackend for SimBackend {
     }
     fn read_battery_v(&mut self) -> f32 {
         self.battery_v
+    }
+    fn read_battery_i(&mut self) -> Option<f32> {
+        // Physically consistent with the drain model's sag (0.3·collective V
+        // at R = 0.024 Ω): I = 12.5·collective A (25 A at hover). No current
+        // sense when the drain model is off — those tests exercise the
+        // flagged voltage-only fallback.
+        if self.battery_drain {
+            Some(12.5 * self.last_collective)
+        } else {
+            self.battery_i
+        }
     }
     fn read_baro(&mut self) -> Option<f32> {
         if self.baro_enabled {
@@ -2470,12 +2525,59 @@ mod tests {
         }
         assert_eq!(sup.mode(), Mode::Loiter);
         backend.battery_v = 13.2; // sag below the 14 V threshold
-        for _ in 0..200 {
+        // 4 s: past the estimator's 2 s sustained-excursion debounce (a raw
+        // instantaneous compare would fire in one step — BATTERY-P02 requires
+        // the sustained excursion so a transient can never false-trigger).
+        for _ in 0..2000 {
             sup.step(&mut backend);
         }
         assert!(
             matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
             "low battery must trigger a failsafe recovery, mode {:?}",
+            sup.mode()
+        );
+    }
+
+    /// BATTERY-P02's sag criterion AT THE SUPERVISOR: a 60C punch on a
+    /// half-full pack sags the terminal voltage far below the raw threshold
+    /// (which would have fired the OLD `v < low_batt_v` failsafe) — the
+    /// sag-compensated estimate does NOT trip; the SAME terminal voltage
+    /// sustained at near-zero current (a genuinely spent, rebounding pack
+    /// reads even lower resting) DOES.
+    #[test]
+    fn sag_punch_does_not_trip_supervisor_failsafe() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        backend.battery_i = Some(20.0); // cruise draw, current sense present
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut backend);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter);
+        assert!(!sup.battery().degraded, "current sense present ⇒ compensated path");
+
+        // 4-second 300 A punch: terminal sags to 8.2 V — WAY below the 14 V
+        // raw threshold that used to gate the failsafe directly.
+        backend.battery_v = 3.85 * 4.0 - 300.0 * 0.024;
+        backend.battery_i = Some(300.0);
+        for _ in 0..2000 {
+            sup.step(&mut backend);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "sag must not false-trigger the failsafe");
+
+        // Same terminal voltage, near-zero current, sustained: nothing to
+        // credit back — a pack genuinely THIS low at rest is an emergency.
+        backend.battery_i = Some(1.0);
+        for _ in 0..2000 {
+            sup.step(&mut backend);
+        }
+        assert!(
+            matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
+            "the same voltage at rest must trip, mode {:?}",
             sup.mode()
         );
     }

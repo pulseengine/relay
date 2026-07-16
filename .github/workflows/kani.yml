@@ -62,6 +62,7 @@ jobs:
           - relay-fsafe
           - relay-mix-quad
           - relay-mavlink
+          - relay-batt
           # Flight-critical control + estimator proofs. These harnesses were
           # authored alongside the engines but never added to this matrix, so
           # CI never ran them (the same orphaned-proof gap that bit relay-rc

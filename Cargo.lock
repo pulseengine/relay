@@ -272,6 +272,7 @@ name = "falcon-core"
 version = "0.1.0"
 dependencies = [
  "relay-adrc",
+ "relay-batt",
  "relay-calib",
  "relay-fsm",
  "relay-geo",
@@ -864,6 +865,13 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "relay-math",
+]
+
+[[package]]
+name = "relay-batt"
+version = "0.1.0"
+dependencies = [
+ "proptest",
 ]
 
 [[package]]
