@@ -30,6 +30,14 @@ jobs:
     name: Component Model cascade
     runs-on: ubuntu-latest
     steps:
+      # The cascade build (wasmtime 45 + full crate universe) has outgrown
+      # the hosted runner's free disk (ENOSPC at 23 MB free, 2026-07-16,
+      # twice on identical inputs — capacity, not flake). Drop the runner
+      # image's preinstalled bloat (~15 GB) before building.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc             /usr/local/.ghcup /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h / | tail -1
       - name: Checkout relay
         uses: actions/checkout@v7
         with:
