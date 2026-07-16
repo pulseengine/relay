@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-BATTERY-P02
     type: sw-req
     title: "BATTERY-P02 — current-integrated energy monitoring with sag compensation"
-    status: implemented
+    status: verified
     release: falcon-v1.120.0
     description: >
       Battery state shall be estimated from VOLTAGE AND CURRENT (Pixhawk
