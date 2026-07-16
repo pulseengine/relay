@@ -113,16 +113,201 @@ pub trait FlightBackend {
 /// controllers; one [`step`](FlightCore::step) reads the backend's sensors,
 /// estimates state, computes the stabilizing control, allocates it, and
 /// writes the motors back — all on the verified `no_std` crates.
-pub struct FlightCore {
+/// The ESTIMATOR partition (PART-P01, v1.124): IEKF propagate + every
+/// measurement update (gravity, dual-GNSS position, magnetometer, yaw,
+/// baro) + calibration application — the M4 half of the agreed RT1176
+/// core mapping (jess#144 / DD-023). Publishes [`NavState`] (16×f32,
+/// 64 bytes) as its SOLE output; the only other data crossing the
+/// partition boundary is the sensor fan-out the hardware bus provides to
+/// both cores (the raw IMU sample + heading), passed in by the caller so
+/// a sim backend's one sample is never drawn twice.
+pub struct EstimatorPartition {
+
     iekf: Iekf,
+    grav_var: f32,
+    pos_var: f32,
+    mag_var: f32,
+    /// Barometric-altitude measurement variance (m²) (v1.20). The baro is fed
+    /// into the verified IEKF as a vertical anchor (a position update whose z is
+    /// the baro), so altitude AND its rate survive GPS-vertical loss.
+    baro_var: f32,
+    /// Dual-receiver GNSS selector (GNSS-P02, v1.121): health gating,
+    /// inverse-variance blending, one-interval failover, latched divergence.
+    dual_gnss: falcon_gnss_ubx::dual::DualGnss,
+    /// GNSS anti-spoof CUSUM (relay-iekf, previously an ORPHANED verified
+    /// leaf): fed the position innovation each GNSS update; a sustained
+    /// directional walk-off latches. OR-ed with the selector divergence into
+    /// [`nav_compromised`](Self::nav_compromised).
+    spoof: relay_iekf::SpoofMonitor,
+    /// Sensor calibration applied to raw IMU/mag samples before the estimator
+    /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
+    /// `set_calibration` installs solved offsets — the explicit replacement for
+    /// the prior identity-remap placeholder (raw samples flowed in uncorrected).
+    calib: relay_calib::CalParams,    /// Control-step counter, for the FDI spin-up guard. At arm/spin-up the ESC
+    /// RPM lags the commanded throttle (real actuators, or a sim reporting the
+    /// achieved rotor state), so the commanded-vs-achieved effectiveness
+    /// residual spikes on EVERY rotor for the first fraction of a second — which
+    /// would false-trip the CUSUM and drop a healthy vehicle into the degraded
+    /// 3-rotor law. The FDI is held off until the actuators have spun up
+    /// (`fdi_warmup_steps`), then runs normally (v1.113 — caught flying the
+    /// production core against the gz plant, where achieved starts at 0).
+    step_count: u32,
+    fdi_warmup_steps: u32,
+}
+
+impl EstimatorPartition {
+    fn new(warmup: u32) -> Self {
+        EstimatorPartition {
+
+            iekf: Iekf::level(),
+            grav_var: 0.5,
+            pos_var: 0.01,
+            mag_var: 0.1,
+            baro_var: 0.05, // ≈ (0.2 m)² baro noise; trusted less than a clean GPS-z
+            dual_gnss: falcon_gnss_ubx::dual::DualGnss::new(),
+            // threshold 60 m·steps, drift slack 0.15 m/step: rejects zero-mean
+            // GNSS noise, latches on a sustained directional walk-off.
+            spoof: relay_iekf::SpoofMonitor::new(60.0, 0.15),
+            step_count: 0,
+            fdi_warmup_steps: warmup,
+            calib: relay_calib::CalParams::identity(),
+        }
+    }
+
+    /// The estimator's TILT uncertainty: the roll+pitch part of the attitude
+    /// block of the IEKF error covariance (δθ_x² + δθ_y², rad²). Tilt is the
+    /// gravity-observable attitude — it converges from any sensor set (yaw needs a
+    /// magnetometer, so it is deliberately EXCLUDED so the metric is meaningful
+    /// without a heading reference). It starts large and SHRINKS as gravity
+    /// updates arrive; the pre-arm `estimator_converged` check thresholds it
+    /// (v1.99), so arming waits for a settled, level estimate.
+    pub fn tilt_uncertainty(&self) -> f32 {
+        let p = self.iekf.covariance();
+        p[0][0] + p[1][1]
+    }
+    /// Covariance-diagonal SUMMARY [attitude, velocity, position] — the
+    /// per-block diagonal sums of the 15x15 error covariance. The blackbox
+    /// logs these (LOG-P02) so a post-hoc analysis can see estimator health
+    /// alongside the state, and the replay oracle covers them bit-exactly.
+    pub fn cov_summary(&self) -> [f32; 3] {
+        let p = self.iekf.covariance();
+        [
+            p[0][0] + p[1][1] + p[2][2],
+            p[3][3] + p[4][4] + p[5][5],
+            p[6][6] + p[7][7] + p[8][8],
+        ]
+    }
+    /// Navigation-integrity flag (GNSS-P02): the anti-spoof CUSUM latched a
+    /// sustained innovation walk-off, OR the dual-receiver selector latched
+    /// receiver divergence. Consumed by pre-arm (and any failsafe policy).
+    pub fn nav_compromised(&self) -> bool {
+        self.spoof.spoofed() || self.dual_gnss.diverged()
+    }
+    /// The dual-GNSS selector's latched divergence flag alone (GNSS-P02).
+    pub fn gnss_diverged(&self) -> bool {
+        self.dual_gnss.diverged()
+    }
+    /// Set the IEKF position-measurement variance (m²) (v1.19). This must match
+    /// the ACTUAL GNSS fix noise: the default (0.01 = 1 cm²) over-trusts a
+    /// metre-class fix, injecting noise the loop chases into instability. Set it
+    /// to ≈ stddev² of the real receiver.
+    pub fn set_pos_var(&mut self, var: f32) {
+        self.pos_var = var;
+    }
+    /// Set the IEKF velocity/position covariance-diagonal floor (m²/s², m²)
+    /// (v1.113). 0 = off (default). Keeps the estimator from going deaf on a
+    /// long static hover (the covariance would otherwise collapse and the NIS
+    /// gate reject the correct fixes). See `Iekf::set_process_floor`.
+    pub fn set_process_floor(&mut self, vel: f32, pos: f32) {
+        self.iekf.set_process_floor(vel, pos);
+    }
+    /// The estimated nav state (for telemetry / tests).
+    pub fn state(&self) -> NavState {
+        self.iekf.state()
+    }
+
+    /// GNSS estimator input, shared by [`step`](Self::step) and
+    /// [`step_estimate_only`](Self::step_estimate_only): the dual-receiver
+    /// selector (GNSS-P02) when the backend has one, else the legacy single
+    /// lane. Feeds the anti-spoof CUSUM with the position innovation.
+    fn fuse_gnss<B: FlightBackend>(&mut self, b: &mut B) {
+        if let Some((ga, gb)) = b.read_gnss_dual() {
+            // The innovation-gate reference engages after warm-up (a cold
+            // estimate would disqualify honest receivers).
+            let est_ref = if self.step_count >= self.fdi_warmup_steps * 5 {
+                Some(self.iekf.state().p)
+            } else {
+                None
+            };
+            let dec = self.dual_gnss.update(ga, gb, est_ref);
+            if let Some(p) = dec.pos {
+                if let Some(e) = est_ref {
+                    self.spoof.update([p[0] - e[0], p[1] - e[1], p[2] - e[2]]);
+                }
+                self.iekf.update_position(p, self.pos_var);
+            }
+        } else if let Some(p) = b.read_position() {
+            self.iekf.update_position(p, self.pos_var);
+        }
+    }
+
+
+    /// One estimator tick: fanned-out IMU sample + heading, own reads of
+    /// GNSS/mag/baro, publish the estimate. The partition's ONLY output.
+    pub fn step<B: FlightBackend>(
+        &mut self,
+        b: &mut B,
+        raw: ImuSample,
+        heading: Option<f32>,
+        dt: f32,
+    ) -> NavState {
+        // ── Calibrate (relay-calib): de-bias/scale the raw sample before the
+        // estimator. Identity by default (a no-op) until set_calibration installs
+        // solved offsets. ──
+        let gyro = self.calib.apply_gyro(raw.gyro);
+        let accel = self.calib.apply_accel(raw.accel);
+
+        // ── Estimate ──
+        self.iekf.propagate(IekfImu { gyro, accel }, dt);
+        self.iekf.update_gravity(accel, self.grav_var);
+        self.fuse_gnss(b);
+        if let Some(m) = b.read_mag() {
+            self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
+        }
+        // v1.113 — direct heading update: a backend that resolves a clean
+        // absolute yaw (fused compass / GNSS heading / sim truth) feeds it
+        // straight to the IEKF, making the otherwise-unobservable yaw observable
+        // without inferring it from a raw magnetometer field.
+        if let Some(yaw) = heading {
+            self.iekf.update_yaw(yaw, self.mag_var);
+        }
+        // v1.20 — barometer: feed it into the verified IEKF as a vertical anchor
+        // (a position update whose horizontal is the current estimate, a no-op,
+        // and whose z is the baro). This keeps the IEKF's altitude AND vertical
+        // velocity bounded through a GPS-vertical outage, reusing the filter's
+        // estimation rather than a hand-rolled complementary filter.
+        if let Some(bz) = b.read_baro() {
+            let e = self.iekf.state();
+            self.iekf.update_position([e.p[0], e.p[1], bz], self.baro_var);
+        }
+        self.step_count = self.step_count.saturating_add(1);
+        self.iekf.state()
+    }
+}
+
+/// The CASCADE partition (PART-P01, v1.124): geometric attitude, ADRC,
+/// mixer + rotor-out FDI/reconfiguration, position/altitude loops,
+/// RPM-notch gyro path and terrain-relative landing reference — the M7
+/// half. Consumes the estimator partition's [`NavState`] (in the fused
+/// core: same tick; across the MU/RPMsg hop: delayed — the delay
+/// campaign is the requirement's oracle) plus the same fanned-out IMU
+/// sample (the rate loop reads the gyro directly, as on hardware).
+pub struct CascadePartition {
     geo: GeoAtt,
     adrc: AdrcRate,
     gyro_lpf: GyroLpf,
     mixer: QuadMixer,
     hover_thrust: f32,
-    grav_var: f32,
-    pos_var: f32,
-    mag_var: f32,
     /// Target position (NED metres; z negative = up). v1.2 altitude + v1.3
     /// horizontal hold.
     setpoint: Vec3,
@@ -150,23 +335,11 @@ pub struct FlightCore {
     /// as a position offset. Anti-windup clamps its acceleration contribution.
     pos_int: [f32; 2],
     pos_int_max: f32,
-    /// Barometric-altitude measurement variance (m²) (v1.20). The baro is fed
-    /// into the verified IEKF as a vertical anchor (a position update whose z is
-    /// the baro), so altitude AND its rate survive GPS-vertical loss.
-    baro_var: f32,
     /// Latest gated terrain-relative AGL from the rangefinder (m), or `None`
     /// (v1.121, RANGEDRV-P01): tilt-compensated, innovation-gated. The
     /// landing law's altitude reference when present — centimetre truth
     /// exactly where the baro/GNSS metres of error matter most.
     range_agl: Option<f32>,
-    /// Dual-receiver GNSS selector (GNSS-P02, v1.121): health gating,
-    /// inverse-variance blending, one-interval failover, latched divergence.
-    dual_gnss: falcon_gnss_ubx::dual::DualGnss,
-    /// GNSS anti-spoof CUSUM (relay-iekf, previously an ORPHANED verified
-    /// leaf): fed the position innovation each GNSS update; a sustained
-    /// directional walk-off latches. OR-ed with the selector divergence into
-    /// [`nav_compromised`](Self::nav_compromised).
-    spoof: relay_iekf::SpoofMonitor,
     /// RPM-tracked harmonic notch bank on the CONTROL-path gyro (NOTCH-P01,
     /// v1.122): per-motor fundamental + 2nd harmonic, driven by the same
     /// read_motor_rpm seam the FDI consumes; clean unity bypass without RPM
@@ -182,16 +355,6 @@ pub struct FlightCore {
     fdi: RotorFaultDetector,
     /// The isolated failed rotor (latched), or `None`. Drives the degraded path.
     failed_motor: Option<usize>,
-    /// Control-step counter, for the FDI spin-up guard. At arm/spin-up the ESC
-    /// RPM lags the commanded throttle (real actuators, or a sim reporting the
-    /// achieved rotor state), so the commanded-vs-achieved effectiveness
-    /// residual spikes on EVERY rotor for the first fraction of a second — which
-    /// would false-trip the CUSUM and drop a healthy vehicle into the degraded
-    /// 3-rotor law. The FDI is held off until the actuators have spun up
-    /// (`fdi_warmup_steps`), then runs normally (v1.113 — caught flying the
-    /// production core against the gz plant, where achieved starts at 0).
-    step_count: u32,
-    fdi_warmup_steps: u32,
     /// Previous control tick's per-rotor command (v1.115, FAULT-P03). The ESC
     /// RPM telemetry read at the top of a step reflects the command from the
     /// PREVIOUS step (one-tick actuation/telemetry lag), so the effectiveness
@@ -216,26 +379,29 @@ pub struct FlightCore {
     /// gz yaw-loop investigation). Not part of the control state.
     last_omega_d: Vec3,
     last_torque: Vec3,
-    /// Sensor calibration applied to raw IMU/mag samples before the estimator
-    /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
-    /// `set_calibration` installs solved offsets — the explicit replacement for
-    /// the prior identity-remap placeholder (raw samples flowed in uncorrected).
+    /// Control-step counter, for the FDI spin-up guard. At arm/spin-up the ESC
+    /// RPM lags the commanded throttle (real actuators, or a sim reporting the
+    /// achieved rotor state), so the commanded-vs-achieved effectiveness
+    /// residual spikes on EVERY rotor for the first fraction of a second — which
+    /// would false-trip the CUSUM and drop a healthy vehicle into the degraded
+    /// 3-rotor law. The FDI is held off until the actuators have spun up
+    /// (`fdi_warmup_steps`), then runs normally (v1.113 — caught flying the
+    /// production core against the gz plant, where achieved starts at 0).
+    step_count: u32,
+    fdi_warmup_steps: u32,
+    /// The cascade's own copy of the sensor calibration (the M7 sees the
+    /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
 }
 
-impl FlightCore {
-    /// New core, level estimator, falcon-quad gains. `hover_thrust` ∈ [0,1].
-    pub fn new(hover_thrust: f32, loop_hz: f32) -> Self {
-        FlightCore {
-            iekf: Iekf::level(),
+impl CascadePartition {
+    fn new(hover_thrust: f32, loop_hz: f32, warmup: u32) -> Self {
+        CascadePartition {
             geo: GeoAtt::new(GeoGains::FALCON_QUAD),
             adrc: AdrcRate::falcon_quad(),
             gyro_lpf: GyroLpf::new(60.0, loop_hz),
             mixer: QuadMixer::new(),
             hover_thrust,
-            grav_var: 0.5,
-            pos_var: 0.01,
-            mag_var: 0.1,
             setpoint: [0.0; 3],
             kp_alt: 0.05,
             kd_alt: 0.30,
@@ -254,65 +420,21 @@ impl FlightCore {
             a_cmd_max: 1.0,
             pos_int: [0.0; 2],
             pos_int_max: 1.5,
-            baro_var: 0.05, // ≈ (0.2 m)² baro noise; trusted less than a clean GPS-z
             range_agl: None,
-            dual_gnss: falcon_gnss_ubx::dual::DualGnss::new(),
-            // threshold 60 m·steps, drift slack 0.15 m/step: rejects zero-mean
-            // GNSS noise, latches on a sustained directional walk-off.
-            spoof: relay_iekf::SpoofMonitor::new(60.0, 0.15),
             notch: relay_notch::HarmonicNotchBank::new(loop_hz),
             // CUSUM thresholds matching the SITL-verified fault-tolerance chain.
             fdi: RotorFaultDetector::new(0.5, 0.1),
             failed_motor: None,
-            step_count: 0,
             yaw_setpoint: 0.0,
             yaw_captured: false,
             last_omega_d: [0.0; 3],
             last_torque: [0.0; 3],
-            // Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
-            // achieved rotor state has caught the command by then, so the
-            // effectiveness residual reflects real faults, not the spin-up jump.
-            fdi_warmup_steps: ((loop_hz * 0.2) as u32).max(10),
             last_motor_cmd: [0.0; 4],
             dbg_fdi: (0.0, 1.0, false, [0.0; 4]),
+            step_count: 0,
+            fdi_warmup_steps: warmup,
             calib: relay_calib::CalParams::identity(),
         }
-    }
-
-    /// Install the sensor calibration the estimator applies to raw IMU/mag
-    /// samples each `step` (identity = no-op until solved offsets are loaded).
-    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
-        self.calib = calib;
-    }
-
-    /// The calibration currently applied to raw samples.
-    pub fn calibration(&self) -> relay_calib::CalParams {
-        self.calib
-    }
-
-    /// The estimator's TILT uncertainty: the roll+pitch part of the attitude
-    /// block of the IEKF error covariance (δθ_x² + δθ_y², rad²). Tilt is the
-    /// gravity-observable attitude — it converges from any sensor set (yaw needs a
-    /// magnetometer, so it is deliberately EXCLUDED so the metric is meaningful
-    /// without a heading reference). It starts large and SHRINKS as gravity
-    /// updates arrive; the pre-arm `estimator_converged` check thresholds it
-    /// (v1.99), so arming waits for a settled, level estimate.
-    pub fn tilt_uncertainty(&self) -> f32 {
-        let p = self.iekf.covariance();
-        p[0][0] + p[1][1]
-    }
-
-    /// Covariance-diagonal SUMMARY [attitude, velocity, position] — the
-    /// per-block diagonal sums of the 15x15 error covariance. The blackbox
-    /// logs these (LOG-P02) so a post-hoc analysis can see estimator health
-    /// alongside the state, and the replay oracle covers them bit-exactly.
-    pub fn cov_summary(&self) -> [f32; 3] {
-        let p = self.iekf.covariance();
-        [
-            p[0][0] + p[1][1] + p[2][2],
-            p[3][3] + p[4][4] + p[5][5],
-            p[6][6] + p[7][7] + p[8][8],
-        ]
     }
 
     /// The largest of the last commanded motor outputs (0..1). At/near 1.0 the
@@ -323,7 +445,6 @@ impl FlightCore {
         let m = self.mixer.last_motors();
         m[0].max(m[1]).max(m[2]).max(m[3])
     }
-
     /// The isolated failed rotor (latched), or `None` — the supervisor lands the
     /// vehicle when this is set (a 3-rotor quad cannot navigate; v1.103).
     /// The latest gated terrain-relative AGL (m) from the rangefinder
@@ -331,59 +452,38 @@ impl FlightCore {
     pub fn range_agl(&self) -> Option<f32> {
         self.range_agl
     }
-
-    /// Navigation-integrity flag (GNSS-P02): the anti-spoof CUSUM latched a
-    /// sustained innovation walk-off, OR the dual-receiver selector latched
-    /// receiver divergence. Consumed by pre-arm (and any failsafe policy).
-    pub fn nav_compromised(&self) -> bool {
-        self.spoof.spoofed() || self.dual_gnss.diverged()
-    }
-
-    /// The dual-GNSS selector's latched divergence flag alone (GNSS-P02).
-    pub fn gnss_diverged(&self) -> bool {
-        self.dual_gnss.diverged()
-    }
-
     pub fn failed_motor(&self) -> Option<usize> {
         self.failed_motor
     }
-
     /// The captured heading-hold setpoint (yaw, rad, NED). For telemetry/tests.
     pub fn yaw_setpoint(&self) -> f32 {
         self.yaw_setpoint
     }
-
     /// Set the hover-thrust feedforward (per-airframe; clamped to [0,1]).
     pub fn set_hover_thrust_core(&mut self, t: f32) {
         self.hover_thrust = if t.is_finite() { t.clamp(0.0, 1.0) } else { self.hover_thrust };
     }
-
     /// Set the landing descent rate (m/s, NED +down; clamped to [0.1, 2]).
     pub fn set_landing_descent(&mut self, vz: f32) {
         self.landing_descent =
             if vz.is_finite() { vz.clamp(0.1, 2.0) } else { self.landing_descent };
     }
-
     /// Current altitude P/D gains (tuning observability, v1.119).
     pub fn altitude_gains(&self) -> (f32, f32) {
         (self.kp_alt, self.kd_alt)
     }
-
     /// Current altitude integral gain (tuning observability, v1.119).
     pub fn altitude_integral_gain(&self) -> f32 {
         self.ki_alt
     }
-
     /// Current hover-thrust feedforward (tuning observability, v1.119).
     pub fn hover_thrust(&self) -> f32 {
         self.hover_thrust
     }
-
     /// Current landing descent rate (tuning observability, v1.119).
     pub fn landing_descent(&self) -> f32 {
         self.landing_descent
     }
-
     /// FDI observability (v1.115): `(rate2, tilt_cos, gate_open, resid[4])` from
     /// the last single-rotor-out detector evaluation. `gate_open` is the
     /// near-level/low-rate gate; when it stays false under sensor noise the
@@ -391,7 +491,6 @@ impl FlightCore {
     pub fn fdi_diag(&self) -> (f32, f32, bool, [f32; 4]) {
         self.dbg_fdi
     }
-
     /// Diagnostics: last geometric desired body rate + last ADRC torque.
     pub fn last_omega_d(&self) -> Vec3 {
         self.last_omega_d
@@ -399,12 +498,10 @@ impl FlightCore {
     pub fn last_torque(&self) -> Vec3 {
         self.last_torque
     }
-
     /// Command a target altitude (NED z, metres; negative = up). v1.2.
     pub fn set_altitude(&mut self, ned_z: f32) {
         self.setpoint[2] = ned_z;
     }
-
     /// Engage/disengage the velocity-based touchdown controller (v1.27). When
     /// on, the altitude loop descends at a constant rate (pushing through the
     /// ground-effect cushion) and cuts thrust on touchdown — the clean landing
@@ -412,12 +509,10 @@ impl FlightCore {
     pub fn set_landing(&mut self, on: bool) {
         self.landing = on;
     }
-
     /// Command a full NED position target (metres; z negative = up). v1.3.
     pub fn set_position(&mut self, ned: Vec3) {
         self.setpoint = ned;
     }
-
     /// Set the horizontal position-loop integral gain (v1.16). `0` disables the
     /// integral (P-D only) — used to show the steady-wind offset the integral
     /// removes. Resets the accumulated integral.
@@ -425,22 +520,12 @@ impl FlightCore {
         self.ki_pos = ki;
         self.pos_int = [0.0; 2];
     }
-
     /// Set the altitude-loop integral gain (v1.22). `0` disables it (P-D only) —
     /// used to show the altitude offset under thrust lapse the integral removes.
     pub fn set_altitude_integral_gain(&mut self, ki: f32) {
         self.ki_alt = ki.clamp(0.0, 0.2);
         self.alt_int = 0.0;
     }
-
-    /// Set the IEKF position-measurement variance (m²) (v1.19). This must match
-    /// the ACTUAL GNSS fix noise: the default (0.01 = 1 cm²) over-trusts a
-    /// metre-class fix, injecting noise the loop chases into instability. Set it
-    /// to ≈ stddev² of the real receiver.
-    pub fn set_pos_var(&mut self, var: f32) {
-        self.pos_var = var;
-    }
-
     /// Set the altitude P and D gains (v1.113). The defaults (0.05, 0.30) are
     /// gentle, tuned for the analytic plant; a stiffer plant (real gz) wants a
     /// higher kp to hold altitude firmly and a matched kd to damp the slow
@@ -450,99 +535,29 @@ impl FlightCore {
         self.kd_alt = kd.clamp(0.0, 3.0);
     }
 
-    /// Set the IEKF velocity/position covariance-diagonal floor (m²/s², m²)
-    /// (v1.113). 0 = off (default). Keeps the estimator from going deaf on a
-    /// long static hover (the covariance would otherwise collapse and the NIS
-    /// gate reject the correct fixes). See `Iekf::set_process_floor`.
-    pub fn set_process_floor(&mut self, vel: f32, pos: f32) {
-        self.iekf.set_process_floor(vel, pos);
-    }
-
-    /// The estimated nav state (for telemetry / tests).
-    pub fn state(&self) -> NavState {
-        self.iekf.state()
-    }
-
-    /// One control iteration against the backend: sense → estimate → control
-    /// (stabilize to level, hold heading) → allocate → actuate.
-    /// ESTIMATE-ONLY tick (v1.117): run the full sensor→IEKF update chain and
-    /// command ZERO motors. The supervisor drives this in the idle states
-    /// (Disarmed / Armed / Terminated) so the estimator stays warm for the
-    /// pre-arm convergence gate while the actuators are provably off — found
-    /// on the gz plant, where the always-stepping flight loop flew a
-    /// "Disarmed" vehicle away (the analytic plant's ground had hidden it).
-    /// Mirrors `step`'s estimator block exactly (kept adjacent; drift between
-    /// them is a bug).
-    /// GNSS estimator input, shared by [`step`](Self::step) and
-    /// [`step_estimate_only`](Self::step_estimate_only): the dual-receiver
-    /// selector (GNSS-P02) when the backend has one, else the legacy single
-    /// lane. Feeds the anti-spoof CUSUM with the position innovation.
-    fn fuse_gnss<B: FlightBackend>(&mut self, b: &mut B) {
-        if let Some((ga, gb)) = b.read_gnss_dual() {
-            // The innovation-gate reference engages after warm-up (a cold
-            // estimate would disqualify honest receivers).
-            let est_ref = if self.step_count >= self.fdi_warmup_steps * 5 {
-                Some(self.iekf.state().p)
-            } else {
-                None
-            };
-            let dec = self.dual_gnss.update(ga, gb, est_ref);
-            if let Some(p) = dec.pos {
-                if let Some(e) = est_ref {
-                    self.spoof.update([p[0] - e[0], p[1] - e[1], p[2] - e[2]]);
-                }
-                self.iekf.update_position(p, self.pos_var);
-            }
-        } else if let Some(p) = b.read_position() {
-            self.iekf.update_position(p, self.pos_var);
-        }
-    }
-
-    pub fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
-        let dt = b.dt();
-        let raw = b.read_imu();
+    /// Keep stateful filters warm while idle (estimate-only mode): the
+    /// gyro low-pass tracks so the first live tick has no filter jump.
+    fn keep_warm(&mut self, raw: ImuSample) {
         let gyro = self.calib.apply_gyro(raw.gyro);
-        let accel = self.calib.apply_accel(raw.accel);
-        self.iekf.propagate(IekfImu { gyro, accel }, dt);
-        self.iekf.update_gravity(accel, self.grav_var);
-        self.fuse_gnss(b);
-        if let Some(m) = b.read_mag() {
-            self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
-        }
-        if let Some(yaw) = b.read_heading() {
-            self.iekf.update_yaw(yaw, self.mag_var);
-        }
-        if let Some(bz) = b.read_baro() {
-            let e = self.iekf.state();
-            self.iekf.update_position([e.p[0], e.p[1], bz], self.baro_var);
-        }
-        // keep the gyro low-pass warm for the flight loop's first live tick.
         let _ = self.gyro_lpf.filter(gyro);
-        b.write_motors(&[0.0, 0.0, 0.0, 0.0]);
     }
 
-    pub fn step<B: FlightBackend>(&mut self, b: &mut B) {
-        let dt = b.dt();
-        let raw = b.read_imu();
-        // ── Calibrate (relay-calib): de-bias/scale the raw sample before the
-        // estimator. Identity by default (a no-op) until set_calibration installs
-        // solved offsets. ──
+    /// One cascade tick: NavState + fanned IMU in, motor commands out.
+    /// `heading_present` gates the launch-heading capture exactly as the
+    /// fused core did (the capture reads the ESTIMATE, not the heading —
+    /// moved here from mid-fusion, a seam change active only during the
+    /// ~1 s pre-freeze window on heading-equipped vehicles; the analytic
+    /// plant provides no heading, so the golden replay is bit-exact).
+    pub fn step<B: FlightBackend>(
+        &mut self,
+        b: &mut B,
+        est: &NavState,
+        raw: ImuSample,
+        heading_present: bool,
+        dt: f32,
+    ) {
         let gyro = self.calib.apply_gyro(raw.gyro);
-        let accel = self.calib.apply_accel(raw.accel);
-
-        // ── Estimate ──
-        self.iekf.propagate(IekfImu { gyro, accel }, dt);
-        self.iekf.update_gravity(accel, self.grav_var);
-        self.fuse_gnss(b);
-        if let Some(m) = b.read_mag() {
-            self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
-        }
-        // v1.113 — direct heading update: a backend that resolves a clean
-        // absolute yaw (fused compass / GNSS heading / sim truth) feeds it
-        // straight to the IEKF, making the otherwise-unobservable yaw observable
-        // without inferring it from a raw magnetometer field.
-        if let Some(yaw) = b.read_heading() {
-            self.iekf.update_yaw(yaw, self.mag_var);
+        if heading_present && !self.yaw_captured {
             // Capture the launch heading as the hold setpoint — the vehicle holds
             // THIS heading, not North. Captured AFTER the estimator+heading have
             // settled (past the warmup), NOT on the first raw sample, which can
@@ -556,7 +571,7 @@ impl FlightCore {
                 // (heading 1.57 vs a lagging est 0.14) that commanded an initial
                 // yaw torque and spun the airframe up. Freeze at 5× the warmup
                 // (~1 s), by when the estimate has converged to the true heading.
-                let e = self.iekf.state();
+                let e = *est;
                 self.yaw_setpoint = relay_math::atan2f(
                     2.0 * (e.q[0] * e.q[3] + e.q[1] * e.q[2]),
                     1.0 - 2.0 * (e.q[2] * e.q[2] + e.q[3] * e.q[3]),
@@ -565,15 +580,6 @@ impl FlightCore {
                     self.yaw_captured = true;
                 }
             }
-        }
-        // v1.20 — barometer: feed it into the verified IEKF as a vertical anchor
-        // (a position update whose horizontal is the current estimate, a no-op,
-        // and whose z is the baro). This keeps the IEKF's altitude AND vertical
-        // velocity bounded through a GPS-vertical outage, reusing the filter's
-        // estimation rather than a hand-rolled complementary filter.
-        if let Some(bz) = b.read_baro() {
-            let e = self.iekf.state();
-            self.iekf.update_position([e.p[0], e.p[1], bz], self.baro_var);
         }
         // v1.121 — terrain-relative AGL (RANGEDRV-P01): the decoded,
         // strength-gated TF02 return, tilt-compensated (relay-flowrange, the
@@ -586,7 +592,7 @@ impl FlightCore {
         // it can never fold the touchdown logic — while a biased-baro/GNSS
         // descent still flares off the true ground.
         self.range_agl = b.read_range().and_then(|r| {
-            let e = self.iekf.state();
+            let e = *est;
             // min 0.10 = the TF02 device floor: the touchdown threshold
             // (0.12 m) must sit INSIDE the valid band, not in the blind
             // zone below the gate (0.15 would go dark 3 cm too early).
@@ -598,7 +604,6 @@ impl FlightCore {
                 (agl - est_agl) > -3.0 && (agl - est_agl) < 3.0
             })
         });
-        let est = self.iekf.state();
 
         // ── Altitude loop ── velocity-based touchdown when landing, else the
         // position P-I-D.
@@ -759,6 +764,245 @@ impl FlightCore {
         self.last_motor_cmd = motors;
 
         b.write_motors(&motors);
+    }
+}
+
+/// The verified flight core — now the FUSED composition of the two
+/// partitions (PART-P01): one struct, the same public API, and the type
+/// system proves the only estimator→cascade crossing is [`NavState`].
+pub struct FlightCore {
+    /// The estimator partition (M4 half) — public for the partitioned
+    /// deployment shape and the delay-robustness harness.
+    pub est: EstimatorPartition,
+    /// The cascade partition (M7 half).
+    pub casc: CascadePartition,
+}
+
+impl FlightCore {
+    pub fn new(hover_thrust: f32, loop_hz: f32) -> Self {
+        // Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
+        // achieved rotor state has caught the command by then. The same
+        // count seeds the estimator's innovation-gate warm-up (×5).
+        let warmup = ((loop_hz * 0.2) as u32).max(10);
+        FlightCore {
+            est: EstimatorPartition::new(warmup),
+            casc: CascadePartition::new(hover_thrust, loop_hz, warmup),
+        }
+    }
+
+    /// Install solved sensor offsets — synced to BOTH partitions (each
+    /// core applies the same calibration to its copy of the IMU stream).
+    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        self.est.calib = calib;
+        self.casc.calib = calib;
+    }
+
+    pub fn calibration(&self) -> relay_calib::CalParams {
+        self.est.calib
+    }
+
+    pub fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
+        let dt = b.dt();
+        let raw = b.read_imu();
+        let heading = b.read_heading();
+        let _ = self.est.step(b, raw, heading, dt);
+        self.casc.keep_warm(raw);
+        b.write_motors(&[0.0, 0.0, 0.0, 0.0]);
+    }
+
+    /// One fused control tick: sensor fan-out → estimator partition →
+    /// NavState → cascade partition (zero transport delay). The
+    /// partitioned deployment inserts the MU/RPMsg hop exactly at the
+    /// NavState hand-off (the delay-robustness campaign is its oracle).
+    pub fn step<B: FlightBackend>(&mut self, b: &mut B) {
+        let dt = b.dt();
+        let raw = b.read_imu();
+        let heading = b.read_heading();
+        let ns = self.est.step(b, raw, heading, dt);
+        self.casc.step(b, &ns, raw, heading.is_some(), dt);
+    }
+
+    pub fn tilt_uncertainty(&self) -> f32 {
+        self.est.tilt_uncertainty()
+    }
+
+    pub fn cov_summary(&self) -> [f32; 3] {
+        self.est.cov_summary()
+    }
+
+    pub fn nav_compromised(&self) -> bool {
+        self.est.nav_compromised()
+    }
+
+    pub fn gnss_diverged(&self) -> bool {
+        self.est.gnss_diverged()
+    }
+
+    pub fn set_pos_var(&mut self, var: f32) {
+        self.est.set_pos_var(var)
+    }
+
+    pub fn set_process_floor(&mut self, vel: f32, pos: f32) {
+        self.est.set_process_floor(vel, pos)
+    }
+
+    pub fn state(&self) -> NavState {
+        self.est.state()
+    }
+
+    pub fn max_motor(&self) -> f32 {
+        self.casc.max_motor()
+    }
+
+    pub fn range_agl(&self) -> Option<f32> {
+        self.casc.range_agl()
+    }
+
+    pub fn failed_motor(&self) -> Option<usize> {
+        self.casc.failed_motor()
+    }
+
+    pub fn yaw_setpoint(&self) -> f32 {
+        self.casc.yaw_setpoint()
+    }
+
+    pub fn set_hover_thrust_core(&mut self, t: f32) {
+        self.casc.set_hover_thrust_core(t)
+    }
+
+    pub fn set_landing_descent(&mut self, vz: f32) {
+        self.casc.set_landing_descent(vz)
+    }
+
+    pub fn altitude_gains(&self) -> (f32, f32) {
+        self.casc.altitude_gains()
+    }
+
+    pub fn altitude_integral_gain(&self) -> f32 {
+        self.casc.altitude_integral_gain()
+    }
+
+    pub fn hover_thrust(&self) -> f32 {
+        self.casc.hover_thrust()
+    }
+
+    pub fn landing_descent(&self) -> f32 {
+        self.casc.landing_descent()
+    }
+
+    pub fn fdi_diag(&self) -> (f32, f32, bool, [f32; 4]) {
+        self.casc.fdi_diag()
+    }
+
+    pub fn last_omega_d(&self) -> Vec3 {
+        self.casc.last_omega_d()
+    }
+
+    pub fn last_torque(&self) -> Vec3 {
+        self.casc.last_torque()
+    }
+
+    pub fn set_altitude(&mut self, ned_z: f32) {
+        self.casc.set_altitude(ned_z)
+    }
+
+    pub fn set_landing(&mut self, on: bool) {
+        self.casc.set_landing(on)
+    }
+
+    pub fn set_position(&mut self, ned: Vec3) {
+        self.casc.set_position(ned)
+    }
+
+    pub fn set_position_integral_gain(&mut self, ki: f32) {
+        self.casc.set_position_integral_gain(ki)
+    }
+
+    pub fn set_altitude_integral_gain(&mut self, ki: f32) {
+        self.casc.set_altitude_integral_gain(ki)
+    }
+
+    pub fn set_altitude_gains(&mut self, kp: f32, kd: f32) {
+        self.casc.set_altitude_gains(kp, kd)
+    }
+
+}
+
+/// The PARTITIONED deployment shape (PART-P01, v1.124): the two halves of
+/// [`FlightCore`] with the inter-core transport hop modeled between them —
+/// the estimator's published [`NavState`] reaches the cascade DELAYED (and
+/// optionally jittered), as it will across the RT1176's MU/RPMsg seam.
+/// `delay_ticks = 0` reproduces the fused core exactly (same code path);
+/// the delay-robustness campaign runs 1–2 ticks ± 1 tick of jitter.
+pub struct PartitionedCore {
+    pub est: EstimatorPartition,
+    pub casc: CascadePartition,
+    /// NavState transport buffer, newest at index 0 (bounded: the hop is
+    /// at most a few ticks; 8 is headroom, not a target).
+    buf: [NavState; 8],
+    buf_len: usize,
+    /// Base transport delay in ticks (0 = fused-equivalent).
+    delay_ticks: usize,
+    /// Per-tick jitter schedule: an LCG draws −1/0/+1 around the base
+    /// delay when enabled (deterministic per seed — campaigns replicate).
+    jitter: bool,
+    lcg: u32,
+}
+
+impl PartitionedCore {
+    pub fn new(hover_thrust: f32, loop_hz: f32, delay_ticks: usize, jitter: bool, seed: u32) -> Self {
+        let warmup = ((loop_hz * 0.2) as u32).max(10);
+        PartitionedCore {
+            est: EstimatorPartition::new(warmup),
+            casc: CascadePartition::new(hover_thrust, loop_hz, warmup),
+            buf: [NavState::identity(); 8],
+            buf_len: 0,
+            delay_ticks: delay_ticks.min(6),
+            jitter,
+            lcg: seed | 1,
+        }
+    }
+
+    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        self.est.calib = calib;
+        self.casc.calib = calib;
+    }
+
+    pub fn set_altitude(&mut self, ned_z: f32) {
+        self.casc.set_altitude(ned_z);
+    }
+
+    pub fn state(&self) -> NavState {
+        self.est.state()
+    }
+
+    fn draw_jitter(&mut self) -> i32 {
+        self.lcg = self.lcg.wrapping_mul(1664525).wrapping_add(1013904223);
+        ((self.lcg >> 8) % 3) as i32 - 1 // −1, 0, +1
+    }
+
+    /// One control tick with the transport hop: the estimator publishes,
+    /// the cascade consumes the estimate from `delay ± jitter` ticks ago
+    /// (clamped to what has been published — start-up serves the oldest
+    /// available rather than inventing a state).
+    pub fn step<B: FlightBackend>(&mut self, b: &mut B) {
+        let dt = b.dt();
+        let raw = b.read_imu();
+        let heading = b.read_heading();
+        let ns = self.est.step(b, raw, heading, dt);
+        // push newest at 0
+        for i in (1..self.buf.len()).rev() {
+            self.buf[i] = self.buf[i - 1];
+        }
+        self.buf[0] = ns;
+        self.buf_len = (self.buf_len + 1).min(self.buf.len());
+        let mut d = self.delay_ticks as i32;
+        if self.jitter {
+            d += self.draw_jitter();
+        }
+        let idx = d.clamp(0, self.buf_len as i32 - 1) as usize;
+        let delayed = self.buf[idx];
+        self.casc.step(b, &delayed, raw, heading.is_some(), dt);
     }
 }
 
@@ -966,7 +1210,7 @@ impl FlightSupervisor {
     /// Set the hover-thrust feedforward on the wrapped core (per-plant: the
     /// analytic sim hovers at ~0.49, the real gz falcon-quad at ~0.585).
     pub fn set_hover_thrust(&mut self, t: f32) {
-        self.core.hover_thrust = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.5 };
+        self.core.casc.hover_thrust = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.5 };
     }
 
     pub fn mode(&self) -> relay_fsm::Mode {
@@ -2290,6 +2534,8 @@ fn falcon_core_tuning_register(store: &mut relay_param::ParamStore<8>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
 
 
@@ -2930,6 +3176,230 @@ mod tests {
         sup.step(&mut b);
         sup.command(relay_fsm::Event::Arm, true, true);
         assert_eq!(sup.mode(), relay_fsm::Mode::Armed, "arms after the NVM load");
+    }
+
+    /// PART-P02 (a): the F100 pass-through conformance fixture for gale#65.
+    /// A DETERMINISTIC per-motor command stream from the REAL mixer —
+    /// nominal hover, a saturated attitude transient, and the rank-3
+    /// rotor-out asymmetric sets including legitimately ZERO motors — with
+    /// f32 bit patterns, because pass-through fidelity is byte-exact:
+    /// gust must forward these unmodified (no re-mix, no per-motor floor;
+    /// an independent allocation authority downstream would reintroduce
+    /// the v1.114 parasitic-moment failure class). This test is the drift
+    /// gate: it regenerates the stream and asserts it matches the
+    /// checked-in fixture gale's tests consume.
+    #[test]
+    fn f100_passthrough_fixture_is_current() {
+        let generated = gen_f100_fixture();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../bench-evidence/fixtures/f100-passthrough-v1.csv"
+        );
+        let on_disk = std::fs::read_to_string(path)
+            .expect("fixture missing — run the ignored regen test")
+            .replace("\r\n", "\n"); // Windows checkout normalization (belt to the .gitattributes eol=lf)
+        assert_eq!(
+            generated, on_disk,
+            "f100 pass-through fixture drifted from the real mixer output — \
+             regen deliberately (ignored test) and coordinate gale#65"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn regen_f100_fixture() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../bench-evidence/fixtures/f100-passthrough-v1.csv"
+        );
+        std::fs::write(path, gen_f100_fixture()).unwrap();
+    }
+
+    fn gen_f100_fixture() -> std::string::String {
+        use std::fmt::Write as _;
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.rot_drag = 0.02;
+        b.ground_contact = true;
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_altitude(-3.0);
+        let mut out = std::string::String::from(
+            "# F100/gust pass-through conformance fixture (PART-P02, falcon v1.124)\n\
+             # phase,m0_bits,m1_bits,m2_bits,m3_bits  — f32 bit patterns (hex);\n\
+             # EXPECTED F100 OUTPUT == INPUT, byte-exact (no re-mix, no floors).\n",
+        );
+        let cap = |core: &mut FlightCore, b: &mut SimBackend, phase: &str, n: usize, every: usize, out: &mut std::string::String| {
+            for k in 0..n {
+                core.step(b);
+                if k % every == 0 {
+                    let m = core.casc.last_motor_cmd;
+                    writeln!(
+                        out,
+                        "{phase},{:08x},{:08x},{:08x},{:08x}",
+                        m[0].to_bits(),
+                        m[1].to_bits(),
+                        m[2].to_bits(),
+                        m[3].to_bits()
+                    )
+                    .unwrap();
+                }
+            }
+        };
+        cap(&mut core, &mut b, "hover", 3000, 300, &mut out);
+        // saturated transient: a hard lateral setpoint step
+        core.set_position([6.0, -4.0, -3.0]);
+        cap(&mut core, &mut b, "saturated", 1200, 100, &mut out);
+        // rotor-out: the asymmetric rank-3 sets incl. the legitimate zeros
+        b.fail_rotor(0);
+        cap(&mut core, &mut b, "rotor_out", 2400, 100, &mut out);
+        out
+    }
+
+    /// PART-P02 (b): the SOFTWARE half of the silence safe-state — the
+    /// Kani-proven FSM Terminate reaches motors-off actuation within the
+    /// proposed 100 ms bound (the F100's own heartbeat-timeout backstop
+    /// for a silent M7 is gale's evidence, gale#65/TEST-PIX-019).
+    #[test]
+    fn terminate_reaches_motors_off_within_bound() {
+        let dt = 0.004f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(relay_fsm::Event::Arm, true, true);
+        sup.command(relay_fsm::Event::RequestTakeoff, true, true);
+        for _ in 0..4000 {
+            sup.step(&mut b);
+        }
+        assert!(sup.mode() != relay_fsm::Mode::Disarmed, "airborne first");
+        sup.command(relay_fsm::Event::Terminate, false, false);
+        let bound_ticks = (0.100 / dt) as usize; // 100 ms
+        let mut off_at = None;
+        for k in 0..bound_ticks {
+            sup.step(&mut b);
+            if b.last_collective == 0.0 {
+                off_at = Some(k);
+                break;
+            }
+        }
+        let k = off_at.expect("motors must reach OFF within 100 ms of Terminate");
+        assert!(
+            (k as f32 + 1.0) * dt <= 0.100,
+            "motors-off took {} s",
+            (k as f32 + 1.0) * dt
+        );
+    }
+
+    /// PART-P01 equivalence oracle: the PARTITIONED core at ZERO transport
+    /// delay reproduces the fused FlightCore trajectory f32-BIT-EXACTLY on
+    /// the analytic plant — same inputs, same motor stream, same estimate,
+    /// step for step. (The golden-log replay separately pins the fused
+    /// core itself to the pre-partition v1.118 fixture.)
+    #[test]
+    fn partitioned_zero_delay_is_bit_exact_with_fused() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b1 = SimBackend::new(level, dt);
+        b1.path.gps_noise = 0.08; // identical RNG streams: same seed, same draws
+        let mut b2 = SimBackend::new(level, dt);
+        b2.path.gps_noise = 0.08;
+        let mut fused = FlightCore::new(0.5, 1.0 / dt);
+        fused.set_altitude(-3.0);
+        let mut part = PartitionedCore::new(0.5, 1.0 / dt, 0, false, 1);
+        part.set_altitude(-3.0);
+        for k in 0..6000 {
+            fused.step(&mut b1);
+            part.step(&mut b2);
+            let (e1, e2) = (fused.state(), part.state());
+            for i in 0..3 {
+                assert_eq!(
+                    e1.p[i].to_bits(),
+                    e2.p[i].to_bits(),
+                    "estimate diverged at tick {k} axis {i}"
+                );
+            }
+            for m in 0..4 {
+                assert_eq!(
+                    b1.motor_state[m].to_bits(),
+                    b2.motor_state[m].to_bits(),
+                    "motors diverged at tick {k} rotor {m}"
+                );
+            }
+        }
+    }
+
+    /// PART-P01 delay robustness (the requirement's teeth): with NavState
+    /// delayed 1 and 2 ticks and jittered ±1 tick across the transport
+    /// hop, the vehicle holds hover within the existing envelopes —
+    /// dispersed over noise seeds (measured, not asserted).
+    #[test]
+    fn partitioned_delay_holds_hover() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for delay in [1usize, 2] {
+            for (t, jitter) in [(11u32, false), (29, true), (47, true)] {
+                let mut b = SimBackend::new(level, dt);
+                b.path.gps_noise = 0.08;
+                b.path.gyro_white = 0.004;
+                let mut core = PartitionedCore::new(0.5, 1.0 / dt, delay, jitter, t);
+                core.set_altitude(-3.0);
+                let mut worst_tilt = 0.0f32;
+                for k in 0..15000 {
+                    core.step(&mut b);
+                    if k > 5000 {
+                        worst_tilt = worst_tilt.max(b.tilt());
+                        let alt_err = (-b.pos[2] - 3.0).abs();
+                        assert!(
+                            alt_err < 1.0,
+                            "delay {delay} jitter {jitter} seed {t}: altitude ran away ({alt_err} m)"
+                        );
+                    }
+                }
+                assert!(
+                    worst_tilt < 0.25,
+                    "delay {delay} jitter {jitter} seed {t}: settled tilt {worst_tilt} rad"
+                );
+            }
+        }
+    }
+
+    /// PART-P01 delay robustness under FAULT: the rotor-out recovery
+    /// envelope (near-level thrust axis, upright touchdown — the v1.114
+    /// bounds) holds with the estimator output delayed 2 ticks and
+    /// jittered — the transport hop must not reintroduce the flip.
+    #[test]
+    fn partitioned_delay_rotor_out_recovers() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for (seed, jitter) in [(3u32, true), (17, true), (31, false)] {
+            let mut b = SimBackend::new(level, dt);
+            b.rot_drag = 0.02;
+            b.ground_contact = true;
+            let mut core = PartitionedCore::new(0.5, 1.0 / dt, 2, jitter, seed);
+            core.set_altitude(-3.0);
+            for _ in 0..3000 {
+                core.step(&mut b);
+            }
+            assert!(b.tilt() < 0.1, "seed {seed}: hover first");
+            b.fail_rotor(0);
+            let mut peak_tilt = 0.0f32;
+            let mut touchdown_tilt = None;
+            for _ in 0..4000 {
+                core.step(&mut b);
+                let alt = -b.pos[2];
+                if alt > 0.15 {
+                    peak_tilt = peak_tilt.max(b.tilt());
+                } else if touchdown_tilt.is_none() {
+                    touchdown_tilt = Some(b.tilt());
+                }
+            }
+            assert!(
+                peak_tilt < 0.8,
+                "seed {seed} jitter {jitter}: thrust axis must stay recoverable ({peak_tilt} rad)"
+            );
+            let td = touchdown_tilt.expect("must land");
+            assert!(td < 0.35, "seed {seed}: upright touchdown ({td} rad)");
+        }
     }
 
     /// NOTCH-P01 closed-loop criterion: hover with per-motor rotor-line

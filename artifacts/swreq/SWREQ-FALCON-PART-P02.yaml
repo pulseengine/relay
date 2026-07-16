@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-PART-P02
     type: sw-req
     title: "PART-P02 — actuator-path constraints on the F100 failsafe partition (relay specifies, gale implements)"
-    status: proposed
+    status: implemented
     release: falcon-v1.124.0
     description: >
       The F100 I/O-failsafe partition (gale/gust-owned per jess#144 — NOT a
