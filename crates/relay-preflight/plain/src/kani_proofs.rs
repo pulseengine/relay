@@ -50,3 +50,45 @@ fn verify_blocked_reason_is_real() {
         }
     }
 }
+
+fn any_table() -> CheckTable {
+    let mut t = CheckTable::new();
+    // exercise every combination of declared/undeclared + pass/fail for
+    // the breadth rows, and pass/fail for the always-required six.
+    for id in CheckId::ALL {
+        if kani::any() {
+            t.set(id, kani::any());
+        }
+    }
+    t
+}
+
+/// PREFLIGHT-K03 (PREARM-P03) — the table gate is EXACTLY all-required-
+/// pass, and a Blocked verdict always names a required, failing row.
+#[kani::proof]
+fn verify_table_gate_exact() {
+    let t = any_table();
+    match arm_check_table(&t) {
+        TableVerdict::Allowed => {
+            for id in CheckId::ALL {
+                assert!(!t.is_required(id) || t.passed(id));
+            }
+        }
+        TableVerdict::Blocked(id) => {
+            assert!(t.is_required(id) && !t.passed(id));
+        }
+    }
+}
+
+/// PREFLIGHT-K04 (PREARM-P03) — MONOTONE: failing any single row of an
+/// Allowed table can never remain Allowed (adding a failing check can
+/// never ALLOW arming; declaring + failing a new row always blocks).
+#[kani::proof]
+fn verify_table_gate_monotone() {
+    let mut t = any_table();
+    kani::assume(arm_check_table(&t) == TableVerdict::Allowed);
+    let which: usize = kani::any();
+    kani::assume(which < CHECK_COUNT);
+    t.set(CheckId::ALL[which], false);
+    assert!(arm_check_table(&t) != TableVerdict::Allowed);
+}

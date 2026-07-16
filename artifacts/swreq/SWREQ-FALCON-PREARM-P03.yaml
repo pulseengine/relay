@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-PREARM-P03
     type: sw-req
     title: "PREARM-P03 — pre-arm check breadth: configuration, estimator, and hardware consistency"
-    status: proposed
+    status: implemented
     release: falcon-v1.122.0
     description: >
       The pre-arm gate (PREARM-P01/P02) shall be extended toward the
