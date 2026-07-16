@@ -100,6 +100,12 @@ impl<B: FlightBackend, L: BlockLog> FlightBackend for LoggingBackend<'_, B, L> {
     fn read_battery_v(&mut self) -> f32 {
         self.inner.read_battery_v()
     }
+    fn read_battery_i(&mut self) -> Option<f32> {
+        // Forwarded, NOT logged yet: battery samples are not in the v1.118
+        // TickRecord schema (extending it regenerates the shipped golden —
+        // a deliberate schema-v2 slice, tracked on the campaign board).
+        self.inner.read_battery_i()
+    }
     fn write_motors(&mut self, motors: &[f32]) {
         for (i, m) in self.cur.motors.iter_mut().enumerate() {
             *m = motors.get(i).copied().unwrap_or(0.0);

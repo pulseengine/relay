@@ -20,6 +20,7 @@ relay-mix-quad = { path = "../relay-mix-quad" }
 relay-fsm = { path = "../relay-fsm" }
 relay-preflight = { path = "../relay-preflight" }
 relay-calib = { path = "../relay-calib" }
+relay-batt = { path = "../relay-batt" }
 relay-log = { path = "../relay-log" }
 relay-param = { path = "../relay-param" }
 
