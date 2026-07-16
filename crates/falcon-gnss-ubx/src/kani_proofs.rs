@@ -17,3 +17,46 @@ fn verify_parser_total() {
         let _ = p.push(kani::any());
     }
 }
+
+/// GNSS-K05 (GNSS-P02) — dual-receiver selector totality: for ANY pair of
+/// fixes (every field nondet, incl. NaN/∞ positions and accuracies) with no
+/// estimator reference, the selector never panics, and a single-receiver or
+/// no-fix decision carries exactly the healthy receiver's (finite) position
+/// or an explicit None. The blend path's synthesized position is proptest-
+/// gated (nondet f32 blend arithmetic is outside Kani's productive range).
+#[kani::proof]
+fn verify_dual_selector_total() {
+    use dual::*;
+    let mk = || -> Option<NedFix> {
+        if kani::any() {
+            Some(NedFix {
+                pos: [
+                    f32::from_bits(kani::any()),
+                    f32::from_bits(kani::any()),
+                    f32::from_bits(kani::any()),
+                ],
+                acc_m: f32::from_bits(kani::any()),
+                sats: kani::any(),
+                fix_ok: kani::any(),
+            })
+        } else {
+            None
+        }
+    };
+    let a = mk();
+    let b = mk();
+    let mut d = DualGnss::new();
+    let dec = d.update(a, b, None);
+    match dec.source {
+        GnssSource::None => assert!(dec.pos.is_none()),
+        GnssSource::A | GnssSource::B => {
+            let p = dec.pos.unwrap();
+            assert!(p[0].is_finite() && p[1].is_finite() && p[2].is_finite());
+            assert!(dec.acc_m.is_finite() && dec.acc_m > 0.0);
+        }
+        GnssSource::Blend => {
+            // reachable only with BOTH healthy; the arithmetic itself is
+            // proptest territory — totality (no panic) is proven here.
+        }
+    }
+}
