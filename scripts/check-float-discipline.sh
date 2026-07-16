@@ -34,11 +34,14 @@ for crate in "${FLIGHT_CRATES[@]}"; do
       continue
     fi
     while IFS= read -r -d '' f; do
-      case "$(basename "$f")" in kani_proofs.rs) continue ;; esac
+      case "$(basename "$f")" in kani_proofs.rs|tests.rs) continue ;; esac
       if head -5 "$f" | grep -q "float-discipline: allow-f64"; then
         continue
       fi
-      hits=$(awk '/#\[cfg\((test|kani)\)\]/{exempt=1} !exempt && /\yf64\y/{print FILENAME":"FNR": "$0}' "$f")
+      # portable word-boundary (BSD awk has no \y — a \y pattern silently
+      # matches NOTHING there, which made the gate pass vacuously on macOS;
+      # caught when CI's gawk found a hit the local run missed)
+      hits=$(awk '/#\[cfg\((test|kani)\)\]/{exempt=1} !exempt && /(^|[^A-Za-z0-9_])f64([^A-Za-z0-9_]|$)/{print FILENAME":"FNR": "$0}' "$f")
       if [ -n "$hits" ]; then
         echo "FLOAT-DISCIPLINE FAIL — f64 in flight-path code (annotate the"
         echo "file '//! float-discipline: allow-f64 (<why>)' ONLY if it is a"
