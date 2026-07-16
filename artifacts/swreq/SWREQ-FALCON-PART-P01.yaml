@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-PART-P01
     type: sw-req
     title: "PART-P01 — separable estimator partition (M4) with transport-delay-robust cascade (M7)"
-    status: implemented
+    status: verified
     release: falcon-v1.124.0
     description: >
       The flight stack shall decompose into an ESTIMATOR partition and a
