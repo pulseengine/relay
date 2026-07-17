@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MATHF32-P02
     type: sw-req
     title: "MATHF32-P02 — exhaustive worst-case accuracy bound for the f32 sin/cos kernels"
-    status: implemented
+    status: verified
     release: falcon-v1.126.0
     description: >
       The f32 sin/cos kernels (MATHF32-P01) shall carry an EXHAUSTIVELY
