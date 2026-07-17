@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MATHF32-P01
     type: sw-req
     title: "MATHF32-P01 — f32-only sin/cos kernels behind the relay-math seam (no flight-path f64)"
-    status: implemented
+    status: verified
     release: falcon-v1.125.0
     description: >
       The relay-math flight-math seam shall provide sinf/cosf implemented

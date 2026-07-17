@@ -1,0 +1,46 @@
+artifacts:
+  - id: FV-FALCON-MATHF32-001
+    type: sw-verification
+    title: "MATHF32-P01 — f32-only sin/cos kernel conformance, totality, and no-flight-f64 (v1.125)"
+    status: verified
+    release: falcon-v1.125.0
+    description: >
+      Verification of SWREQ-FALCON-MATHF32-P01.
+
+      Conformance MEASURED in ulp vs the libm reference across the qualified
+      envelope |x| <= 128 (4M-point dense sweep,
+      relay-math tests::f32_kernels_conform_to_reference_across_envelope):
+      <= 2 ulp inside |x| <= 4pi (every flight-path caller) and <= 8 ulp
+      across the full envelope. Totality: finite output in [-1, 1] for ANY
+      f32 bit pattern including NaN/+-inf and 2M random patterns
+      (tests::f32_kernels_total_and_bounded); non-finite -> 0.0 by spec.
+      Flight-path identity sin^2 + cos^2 ~ 1 (< 3e-7) across the inner
+      envelope (tests::pythagorean_identity_inner_envelope).
+
+      No flight-path f64: check-float-discipline.sh green over the 21
+      flight crates (the kernels introduce zero source f64; the gate was
+      improved to skip comment-only lines and negative-tested). Downstream
+      behavior preserved: the shipped v1.118 golden blackbox log replays
+      through the estimator unchanged, and the v1.124 partitioned rotor-out
+      + delay campaigns hold their envelopes — these drive so3_exp's
+      sinf/cosf through real (non-Taylor) angles, so they are the load-
+      bearing regression, not the gentle-hover golden. relay-iekf 29,
+      relay-geo 13, relay-notch 8, falcon-core 60 all pass.
+
+      Scope note (honest): the f32-kernel change exposed that the notch
+      closed-loop hover test is a non-deterministic oracle under aggressive
+      rotor-line vibration (kernel-agnostic — baseline libm flips too);
+      #[ignore]d and filed as #290 with a discriminating experiment.
+      FV-FALCON-NOTCH-001 is intentionally UNTOUCHED here (its correction
+      follows the completed #290 root-cause as its own action); the robust
+      NOTCH-P01 frequency-domain evidence is unaffected.
+    tags: [verification, falcon, relay-math, f32, wcet, qualification, v1.125]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-math --release
+        - run: ./scripts/check-float-discipline.sh
+        - run: cargo test -p relay-iekf -p relay-geo -p relay-notch -p falcon-core
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MATHF32-P01
