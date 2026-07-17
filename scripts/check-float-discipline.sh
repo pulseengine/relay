@@ -41,7 +41,12 @@ for crate in "${FLIGHT_CRATES[@]}"; do
       # portable word-boundary (BSD awk has no \y — a \y pattern silently
       # matches NOTHING there, which made the gate pass vacuously on macOS;
       # caught when CI's gawk found a hit the local run missed)
-      hits=$(awk '/#\[cfg\((test|kani)\)\]/{exempt=1} !exempt && /(^|[^A-Za-z0-9_])f64([^A-Za-z0-9_]|$)/{print FILENAME":"FNR": "$0}' "$f")
+      # Match f64 in CODE only: exempt the cfg(test)/cfg(kani) region and
+      # skip comment-only lines (a doc/line comment discussing the f64
+      # policy — like relay-math's kernel notes — is not an f64 dependency).
+      hits=$(awk '/#\[cfg\((test|kani)\)\]/{exempt=1}
+                  { line=$0; sub(/^[[:space:]]+/,"",line) }
+                  !exempt && line !~ /^\/\// && /(^|[^A-Za-z0-9_])f64([^A-Za-z0-9_]|$)/{print FILENAME":"FNR": "$0}' "$f")
       if [ -n "$hits" ]; then
         echo "FLOAT-DISCIPLINE FAIL — f64 in flight-path code (annotate the"
         echo "file '//! float-discipline: allow-f64 (<why>)' ONLY if it is a"
