@@ -1,0 +1,55 @@
+artifacts:
+  - id: FV-FALCON-SUPLAND-002
+    type: sw-verification
+    title: "Supervised rotor-out landing — land-where-you-are, deficit-compensated descent, motors provably off (v1.117)"
+    status: verified
+    release: falcon-v1.117.0
+    description: >
+      Verifies FAULT-P04 — the ALTITUDE half of the rotor-out story that the
+      v1.114 attitude campaign deliberately reported-but-did-not-gate. Three
+      implementation pieces, each forced by an oracle or the real plant:
+      (1) LAND-WHERE-YOU-ARE — on rotor-out the supervisor engages the
+      velocity landing immediately at the current position (the
+      settle-over-home wait left the vertical on the sagging 3-rotor
+      position loop: a measured 3.4 m/s uncontrolled fall); (2) LIFT-DEFICIT
+      FEED-FORWARD — the P-only velocity law around the 4-rotor hover
+      baseline carries a ~+0.4 m/s steady descent error on 3 rotors; the
+      baseline lifts ×4/3 when a motor is out; (3) MOTORS OFF IN IDLE MODES —
+      Disarmed/Armed/Terminated run step_estimate_only (estimator warm for
+      pre-arm, actuators commanded zero): found on the gz plant, where a
+      post-touchdown "Disarmed" kept the flight loop live and flew the
+      vehicle away, and "Terminate = motors cut" had only ever been an FSM
+      claim, never an actuator command (the software half of PART-P02's
+      backstop). Companion gz-plant fixes in #271: the FDI near-level gate
+      widened to 2 rad/s roll/pitch (the gz hover limit-cycle #270 held it
+      shut and the runaway detector beat the FDI to a genuine rotor kill)
+      and the NavSat datum guard (refuse-to-fly without a datum).
+
+      EVIDENCE (run 2026-07-15 on the shipping tree):
+      - falcon-core supervised_rotor_out_lands_and_disarms — settled-hover
+        precondition, kill ⇒ Land commanded ⇒ net descent with the lift-loss
+        transient arrested (< 4 m/s), GENTLE final approach (< 1 m/s below
+        0.5 m), near-level throughout (< 0.5 rad), settled on the surface,
+        Disarmed.
+      - falcon-sitl-gz supervised_rotorout_landing_monte_carlo_campaign —
+        150 dispersed full-supervisor flights (rotor, altitude, drag, seed):
+        0 failures, 0 unsettled-rejected, worst approach sink 0.94 m/s,
+        worst tilt 0.03 rad.
+      - REAL gz plant (bench, recorded): supervised-rotorout scenario PASS
+        repeatedly — kill 12.0 s → isolation → touchdown + Disarmed
+        13.2–15.6 s, motors [0,0,0,0] after disarm; footage shipped as the
+        v1.117 release video (relvids/falcon-v1.117[-narrated].mp4).
+
+      FALSIFICATION: wrong if a rotor-out from settled hover fails to reach
+      an upright touchdown + Disarmed, exceeds 1 m/s on the final approach
+      (below 0.5 m), or any idle-mode tick commands nonzero motors.
+    tags: [verification, falcon, fault-tolerance, rotor-loss, supervisor, landing, v1.117]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-core supervised_rotor_out_lands_and_disarms
+        - run: cargo test -p falcon-sitl-gz supervised_rotorout_landing_monte_carlo_campaign
+        - run: cargo run -q -p falcon-sitl-gz --features gazebo -- --backend=gazebo --scenario=supervised-rotorout --duration=30
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P04

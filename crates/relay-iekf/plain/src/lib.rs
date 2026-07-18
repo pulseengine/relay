@@ -224,6 +224,49 @@ fn symmetrise(p: &mut Mat) {
     }
 }
 
+/// Diagonal variance floor (v1.123, the f32-discipline audit): the
+/// measurement update is the cheap standard form `P ← (I−KH)P`, which in
+/// f32 can round a small diagonal NEGATIVE under a strong update —
+/// `symmetrise` cannot see that, and a non-positive variance corrupts
+/// every later gain. Floor each diagonal at `VAR_FLOOR` and, when a
+/// non-positive one is caught, zero its row/column correlations (they are
+/// no longer trustworthy) — the PX4-style practical mitigation, kept
+/// LOUD via the returned hit count (surfaced as `variance_floor_hits`).
+const VAR_FLOOR: f32 = 1.0e-9;
+/// Variance ceiling: an over-ceiling or +∞ diagonal is healed to MAXIMAL
+/// uncertainty, not the floor — flooring it would CLAIM certainty exactly
+/// where there is none (the Kani harness caught +∞ passing `d >= FLOOR`).
+const VAR_CEIL: f32 = 1.0e6;
+
+fn floor_variances(p: &mut Mat) -> u32 {
+    let mut hits = 0u32;
+    for i in 0..N {
+        let d = p[i][i];
+        let healthy = d.is_finite() && (VAR_FLOOR..=VAR_CEIL).contains(&d);
+        if !healthy {
+            // negative, NaN or infinite: the row/column correlations are no
+            // longer trustworthy either.
+            if !(d.is_finite() && d > 0.0) {
+                for j in 0..N {
+                    if j != i {
+                        p[i][j] = 0.0;
+                        p[j][i] = 0.0;
+                    }
+                }
+            }
+            p[i][i] = if d.is_finite() {
+                d.clamp(VAR_FLOOR, VAR_CEIL)
+            } else if d == f32::INFINITY {
+                VAR_CEIL
+            } else {
+                VAR_FLOOR // NaN / −∞: no usable information — smallest honest value
+            };
+            hits += 1;
+        }
+    }
+    hits
+}
+
 /// Write a (scaled) 3×3 block into `m` at top-left `(r0, c0)`.
 fn set_block3(m: &mut Mat, r0: usize, c0: usize, b: &[[f32; 3]; 3], scale: f32) {
     for i in 0..3 {
@@ -354,6 +397,22 @@ pub struct Iekf {
     /// Error-state covariance (ordering [δθ, δv, δp, δb_g, δb_a]).
     p: Mat,
     cfg: IekfConfig,
+    /// EXTRA velocity/position process-noise rate (variance per second) added to
+    /// the δv/δp diagonal each propagate — on TOP of `q_accel`. This is additive
+    /// process noise, NOT a diagonal clamp: the propagation turns the sustained
+    /// δv uncertainty into a live δv↔δp CORRELATION, which is what lets a GNSS
+    /// position fix correct VELOCITY (a diagonal clamp leaves that correlation
+    /// collapsed → the velocity free-runs). Keeps the filter from going deaf on
+    /// a long static hover (P would otherwise collapse, the gain with it, and the
+    /// NIS gate reject the correct fixes). 0 = off (default; the estimator
+    /// campaigns are unchanged). Set via `set_process_floor`.
+    q_vel_extra: f32,
+    q_pos_extra: f32,
+    /// LOUD diagnostic (v1.123): how many times a covariance diagonal had
+    /// to be floored (an f32 roundoff event in the standard-form update).
+    /// Zero in every campaign to date; a nonzero value in the field is a
+    /// numerical-health signal, not routine.
+    pub variance_floor_hits: u32,
 }
 
 impl Iekf {
@@ -372,11 +431,21 @@ impl Iekf {
                 p[blk * 3 + i][blk * 3 + i] = v[blk];
             }
         }
-        Iekf { state, p, cfg }
+        Iekf { state, p, cfg, q_vel_extra: 0.0, q_pos_extra: 0.0, variance_floor_hits: 0 }
     }
 
     pub fn level() -> Self {
         Self::new(NavState::identity())
+    }
+
+    /// Set the EXTRA velocity/position process-noise rate (variance/s), added to
+    /// the base `q_accel` (see `q_vel_extra`). 0 disables it (default). A
+    /// metre-class deployment on a long static hover wants a velocity term
+    /// comparable to a few × `q_accel` so the δv covariance — and its coupling
+    /// to δp — never collapses and the filter keeps trusting its position fixes.
+    pub fn set_process_floor(&mut self, vel: f32, pos: f32) {
+        self.q_vel_extra = vel.max(0.0);
+        self.q_pos_extra = pos.max(0.0);
     }
 
     pub fn state(&self) -> NavState {
@@ -522,7 +591,17 @@ impl Iekf {
             self.p[9 + i][9 + i] += self.cfg.q_bias_gyro * dt; // δb_g
             self.p[12 + i][12 + i] += self.cfg.q_bias_accel * dt; // δb_a
         }
+        // Extra δv/δp process noise (0 = off): additive, so the propagation
+        // builds the δv↔δp correlation a GNSS fix needs to correct velocity —
+        // keeps a long static hover from starving the filter into rejecting its
+        // own fixes. (A diagonal clamp would leave the correlation collapsed and
+        // the velocity would free-run.)
+        for i in 0..3 {
+            self.p[3 + i][3 + i] += self.q_vel_extra * dt; // δv
+            self.p[6 + i][6 + i] += self.q_pos_extra * dt; // δp
+        }
         symmetrise(&mut self.p);
+        self.variance_floor_hits += floor_variances(&mut self.p);
     }
 
     /// Right-invariant NED **position** measurement update (e.g. GPS, or
@@ -645,6 +724,7 @@ impl Iekf {
         }
         self.p = mat_mul(&imkh, &self.p);
         symmetrise(&mut self.p);
+        self.variance_floor_hits += floor_variances(&mut self.p);
         true
     }
 
@@ -700,6 +780,7 @@ impl Iekf {
             }
         }
         symmetrise(&mut self.p);
+        self.variance_floor_hits += floor_variances(&mut self.p);
         true
     }
 
@@ -874,6 +955,7 @@ impl Iekf {
         }
         self.p = mat_mul(&imkh, &self.p);
         symmetrise(&mut self.p);
+        self.variance_floor_hits += floor_variances(&mut self.p);
         true
     }
 
@@ -1820,6 +1902,63 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod variance_floor_tests {
+    extern crate std;
+    use super::*;
+
+    /// A negative diagonal (the f32 standard-form-update failure mode) is
+    /// floored, its stale correlations zeroed, and the event COUNTED.
+    #[test]
+    fn negative_diagonal_floored_loudly() {
+        let mut p = mat_zero();
+        for i in 0..N {
+            p[i][i] = 0.01;
+        }
+        p[4][4] = -1.0e-6; // roundoff casualty
+        p[4][7] = 5.0e-4; // stale correlation
+        p[7][4] = 5.0e-4;
+        let hits = floor_variances(&mut p);
+        assert_eq!(hits, 1);
+        assert!(p[4][4] >= VAR_FLOOR);
+        assert_eq!(p[4][7], 0.0, "stale correlation cleared");
+        assert_eq!(p[7][4], 0.0);
+        assert_eq!(p[0][0], 0.01, "healthy entries untouched");
+    }
+
+    /// NaN diagonals are healed too (totality), and a healthy matrix is a
+    /// strict no-op with zero hits.
+    #[test]
+    fn nan_healed_healthy_untouched() {
+        let mut p = mat_zero();
+        for i in 0..N {
+            p[i][i] = 0.5;
+        }
+        assert_eq!(floor_variances(&mut p), 0, "healthy P: no hits");
+        p[2][2] = f32::NAN;
+        let hits = floor_variances(&mut p);
+        assert_eq!(hits, 1);
+        assert!(p[2][2] >= VAR_FLOOR && p[2][2].is_finite());
+    }
+
+    /// Long-run health: 50k propagate+update cycles on a static vehicle —
+    /// the floor NEVER fires on healthy inputs (it is a guard, not a
+    /// crutch), and every diagonal stays at/above the floor throughout.
+    #[test]
+    fn floor_never_fires_on_healthy_long_run() {
+        let mut f = Iekf::level();
+        let imu = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        for k in 0..50_000 {
+            f.propagate(imu, 0.004);
+            f.update_gravity(imu.accel, 0.5);
+            if k % 50 == 0 {
+                f.update_position([0.0, 0.0, -2.0], 0.25);
+            }
+        }
+        assert_eq!(f.variance_floor_hits, 0, "healthy run must never floor");
+    }
+}
+
 #[cfg(kani)]
 mod kani_harness {
     use super::*;
@@ -1876,5 +2015,27 @@ mod kani_harness {
         // result is always finite-or-+∞ and non-negative (never NaN/−∞)
         assert!(d2 >= 0.0);
         assert!(d2.is_finite() || d2 == f32::INFINITY);
+    }
+
+    /// IEKF-K: `floor_variances` is TOTAL and establishes its post-condition
+    /// for ANY covariance content (every entry nondet incl. NaN/±∞): after
+    /// the call every diagonal is finite and >= VAR_FLOOR. Pure comparisons
+    /// and assignments — fully tractable. (N=15 full-nondet matrix is 225
+    /// symbols; restrict to nondet DIAGONAL + one nondet off-diagonal pair,
+    /// which is the entire behavior surface of the function.)
+    #[kani::proof]
+    fn verify_variance_floor_postcondition() {
+        let mut p = mat_zero();
+        for i in 0..N {
+            p[i][i] = f32::from_bits(kani::any());
+        }
+        p[1][3] = f32::from_bits(kani::any());
+        p[3][1] = p[1][3];
+        let _hits = floor_variances(&mut p);
+        for i in 0..N {
+            assert!(p[i][i].is_finite());
+            assert!(p[i][i] >= VAR_FLOOR);
+            assert!(p[i][i] <= VAR_CEIL);
+        }
     }
 }

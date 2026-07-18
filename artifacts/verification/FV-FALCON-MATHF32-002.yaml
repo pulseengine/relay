@@ -1,0 +1,36 @@
+artifacts:
+  - id: FV-FALCON-MATHF32-002
+    type: sw-verification
+    title: "MATHF32-P02 — exhaustive worst-case accuracy bound (all ~2.2e9 envelope f32) (v1.126)"
+    status: verified
+    release: falcon-v1.126.0
+    description: >
+      Verification of SWREQ-FALCON-MATHF32-P02.
+
+      The f32 sin/cos kernels are checked against a high-precision f64
+      reference over EVERY f32 in the qualified envelope |x| <= 128
+      (~2.2e9 values, parallel enumeration — the qualified-single-precision
+      / CORE-MATH method, not a sample; a sample cannot bound worst-case
+      error and the v1.125 4M grid was hiding the near-zero behaviour). The
+      exhaustively established bound: worst ABSOLUTE error 1.19e-7 (= 1 ulp
+      at unit magnitude) over all inputs, and <= 2 ulp wherever
+      |value| >= 1e-3. Near the function zeros ulp inflates on a vanishing
+      magnitude (up to ~14 ulp) but the absolute error stays <= 1.19e-7 —
+      not accuracy loss, and absolute error is the flight-relevant metric
+      (so3_exp / mixer geometry / notch coefficients consume the values).
+      relay-math tests::f32_kernels_exhaustive_worst_case_bound (ignored /
+      nightly); the fast 4M tests::f32_kernels_conform_to_reference_across_
+      envelope uses the same honest off-zeros metric as the per-PR gate.
+
+      This is the EMPIRICAL foundation; a machine-checked error-bound proof
+      (Gappa + Coq-Interval + Flocq) is a separate track gated on the
+      rules_rocq_rust toolchain enhancement (rules_rocq_rust#37).
+    tags: [verification, falcon, relay-math, f32, exhaustive, qualification, v1.126]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-math --release
+        - run: cargo test -p relay-math --release -- --ignored f32_kernels_exhaustive_worst_case_bound
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MATHF32-P02

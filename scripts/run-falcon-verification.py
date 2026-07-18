@@ -42,7 +42,13 @@ from typing import Any
 # by command shape rather than a comment marker. Add to the list as
 # new infra-needs appear; remove when CI gains the tool.
 BENCH_PATTERNS = [
-    re.compile(r"\bcargo\s+kani\b"),                  # kani-verifier + CBMC
+    # NOTE (v1.116): `cargo kani -p <crate>` is no longer blindly bench-only —
+    # it is CROSS-CHECKED against the kani.yml CI matrix (kani_matrix_crates):
+    # in-matrix ⇒ "enforced-by-kani-gate" (the required `Kani gate` check runs
+    # it on every PR), out-of-matrix ⇒ FAIL (an orphaned proof CI never runs —
+    # the traceability-audit finding). Only a kani step WITHOUT `-p` (run from
+    # inside a crate dir) still falls through to bench-only.
+    re.compile(r"\bcargo\s+kani\b(?!.*\s-p\s)"),      # kani without -p: bench-only
     re.compile(r"\bcargo\s+\+nightly\s+miri\b"),      # miri nightly component
     re.compile(r"^\s*MIRIFLAGS="),                    # same family
     re.compile(r"\brustup\s+component\s+add\s+miri"), # same family
@@ -102,6 +108,45 @@ def is_bench_only(cmd: str) -> bool:
     return any(p.search(cmd) for p in BENCH_PATTERNS)
 
 
+# `cargo kani ... -p <crate>` — the form the matrix cross-check can attribute.
+KANI_P_STEP = re.compile(r"\bcargo\s+kani\b.*\s-p\s+([A-Za-z0-9_-]+)")
+
+# Explicit, TRACKED waivers for crates whose cited proofs CI cannot run yet.
+# A waiver is a debt: it must carry the issue that retires it, and it is
+# REPORTED in every gate run (never silently skipped). New orphans still FAIL.
+KANI_MATRIX_WAIVERS = {
+    # verify_peak_jerk_sound hangs CBMC (>1200s, f32 intractability) — needs
+    # unwind/concretisation bounding before the crate can be gated. #260.
+    "relay-traj": "https://github.com/pulseengine/relay/issues/260",
+}
+
+_KANI_MATRIX_CACHE: set[str] | None = None
+
+
+def kani_matrix_crates(workflow_path: str = ".github/workflows/kani.yml") -> set[str]:
+    """Crate names in the kani.yml CI matrix (the required `Kani gate` check).
+
+    Parsed as the bare `- crate-name` items of the matrix list (entries with a
+    colon are YAML mappings — steps/uses — not crates). An unreadable workflow
+    returns the empty set, which FAILS every kani step loudly rather than
+    silently passing (fail-closed).
+    """
+    global _KANI_MATRIX_CACHE
+    if _KANI_MATRIX_CACHE is not None:
+        return _KANI_MATRIX_CACHE
+    crates: set[str] = set()
+    try:
+        with open(workflow_path, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"^\s+-\s+([a-z0-9][a-z0-9_-]*)\s*(#.*)?$", line)
+                if m and ":" not in m.group(1):
+                    crates.add(m.group(1))
+    except OSError:
+        pass
+    _KANI_MATRIX_CACHE = crates
+    return crates
+
+
 def rivet_list(filter_expr: str, artifact_type: str) -> list[str]:
     out = subprocess.check_output([
         "rivet", "list",
@@ -158,6 +203,33 @@ def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]
     artifact_pass = True
     for i, step in enumerate(steps):
         cmd = step["run"]
+        # Kani matrix CROSS-CHECK (v1.116): a `cargo kani -p <crate>` step is
+        # not executed here (CBMC is heavy), but it must be ENFORCED somewhere —
+        # the required `Kani gate` CI check runs the kani.yml matrix on every
+        # PR. In-matrix ⇒ counted as enforced; out-of-matrix ⇒ FAIL: the cited
+        # proof is orphaned (CI never runs it), which is exactly how MIX-P05..08
+        # went unenforced for ~40 releases before v1.102.
+        km = KANI_P_STEP.search(cmd)
+        if km:
+            crate = km.group(1)
+            if crate in kani_matrix_crates():
+                print(f"  [enforced-by-kani-gate] {aid}: {cmd}")
+                results.append({"cmd": cmd, "pass": True, "skipped": True, "rc": 0, "duration": 0.0})
+            elif crate in KANI_MATRIX_WAIVERS:
+                # Tracked debt, kept LOUD: reported every run with its issue.
+                print(
+                    f"  [ WAIVED-kani-gate] {aid}: {cmd}"
+                    f" — deferred, see {KANI_MATRIX_WAIVERS[crate]}"
+                )
+                results.append({"cmd": cmd, "pass": True, "skipped": True, "rc": 0, "duration": 0.0})
+            else:
+                artifact_pass = False
+                print(
+                    f"  [          FAIL] (  0.00s) {aid}: {cmd}"
+                    f" — ORPHANED PROOF: crate '{crate}' is not in the kani.yml matrix"
+                )
+                results.append({"cmd": cmd, "pass": False, "skipped": False, "rc": 1, "duration": 0.0})
+            continue
         # bench-only convention: see module docstring. Skip without
         # counting as a failure; still record in the report so an
         # assessor sees what would run on a real bench.

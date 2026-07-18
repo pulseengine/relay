@@ -38,14 +38,17 @@ jobs:
   gate:
     name: Verification gate (rivet-driven)
     runs-on: [self-hosted, linux, x64, rust-cpu]
-    # 45 (was 30): the gate executes every artifact's non-bench-only cargo step
-    # serially. When a PR touches a CENTRAL crate (e.g. falcon-core), the shared
-    # build cache is invalidated and many artifact steps rebuild cold, so the
-    # ~370-artifact sweep can exceed 30 min on a disk-constrained runner — it
-    # timed out at 373/… all-PASS. The extra headroom lets the sweep finish; the
-    # verification itself was never failing. (Root cause to watch: self-hosted
-    # runner disk pressure — see the 94% post-job-hook cleanups.)
-    timeout-minutes: 45
+    # 60 (was 45, was 30): the gate executes every artifact's non-bench-only
+    # cargo step serially. When a PR touches a CENTRAL crate (e.g. falcon-core),
+    # the shared build cache is invalidated and many artifact steps rebuild
+    # cold, so the ~370-step sweep can exceed the budget on a disk-constrained
+    # runner — it timed out at 373/… all-PASS at 30, and again at 45 on
+    # 2026-07-11 (45m21s, all-PASS: cold rivet install ~6 min + the
+    # fetch-depth:0 clone the two-commit rule needs + sweep growth). A timeout
+    # surfaces as "cancelled", which reads like a failure — the verification
+    # itself has never been failing when this trips. Real fix on file: #262
+    # (named-test steps shrink the sweep) + runner disk pressure.
+    timeout-minutes: 60
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
@@ -60,6 +63,22 @@ jobs:
       # the wider workspace. Falcon crates compile clean.
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The two-commit-rule check diffs against the PR base; a shallow
+          # single-commit checkout has no base to diff.
+          fetch-depth: 0
+
+      # ── Two-commit rule (v1.116, rivet hygiene) ──────────────────────
+      # A PR that changes implementation code must not ALSO promote any
+      # artifact to verified/accepted — verification sign-off arrives in a
+      # separate PR whose evidence this gate then executes. Runs FIRST so
+      # the violation is reported in seconds, not after the 30-min sweep.
+      - name: Two-commit rule (verification independence)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: scripts/check-verification-independence.sh "$BASE_SHA"
 
       - uses: dtolnay/rust-toolchain@stable
         with:

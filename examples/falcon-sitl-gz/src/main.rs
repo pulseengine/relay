@@ -18,9 +18,12 @@
 //!           `--scenario=open-loop-climb`.
 
 mod campaign;
+mod flightcore;
 mod pace;
 mod physics;
 
+use falcon_core::FlightCore;
+use flightcore::SitlBackend;
 use physics::{GazeboPhysics, MockPhysics, Physics};
 use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
 use relay_iekf::{Iekf, Imu as IekfImu, NavState};
@@ -184,10 +187,24 @@ fn run_scenario(
         "frame-roll" => run_frame_check(physics, 0, duration_s),
         "frame-pitch" => run_frame_check(physics, 1, duration_s),
         "frame-yaw" => run_frame_check(physics, 2, duration_s),
+        "yaw-probe" => run_yaw_probe(physics, duration_s),
         "arming" => run_arming_check(physics, duration_s, true),
         "arming-ungated" => run_arming_check(physics, duration_s, false),
         "geo-hover" => run_geo_hover(physics, duration_s, evidence),
         "mission" => run_mission(physics, duration_s, evidence),
+        "flightcore" => run_flightcore(physics, 2.0, duration_s, None, evidence),
+        "flightcore-rotorout" => {
+            // Hover, then lose rotor 0 at the midpoint; the production FDI must
+            // isolate it (RPM residual) and the loop keeps the vehicle aloft.
+            run_flightcore(physics, 2.0, duration_s, Some((0, duration_s * 0.5)), evidence)
+        }
+        "supervised-rotorout" => {
+            // v1.117 (FAULT-P04): the FULL production FlightSupervisor flies
+            // takeoff -> hover -> rotor 0 dies -> the motor failsafe commands
+            // LAND -> land-where-you-are + deficit-compensated velocity descent
+            // -> touchdown -> Disarmed. The recordable landing demo.
+            run_supervised_rotorout(physics, 2.0, duration_s, duration_s * 0.4, evidence)
+        }
         other => {
             eprintln!(
                 "  scenario {other} not yet wired; falling back to closed-loop hover",
@@ -257,6 +274,70 @@ fn run_frame_check(physics: &mut dyn Physics, axis: usize, duration_s: f32) -> b
         cmd_corrected, mean_rate, if agrees { "AGREE ✓" } else { "OPPOSE ✗" },
     );
     agrees
+}
+
+/// v1.113 — YAW-SIGN ORACLE. Commands a constant OPEN-LOOP +yaw torque (no
+/// attitude control) and runs the IEKF alongside, so all four links of the yaw
+/// chain can be compared in one run:
+///   commanded +yaw torque → (a) gz TRUTH heading rate  [mixer→gz mapping]
+///                          → (b) sensed gyro_z          [gyro enu→ned]
+///                          → (c) IEKF est-yaw rate      [heading→estimator]
+/// For a stable closed loop all three must share the sign of the command. The
+/// closed-loop spin with a CORRECT gyro sign (frame-yaw AGREES) points at (c):
+/// the est-yaw sign disagreeing with the physical/gyro convention makes the
+/// geometric controller drive yaw the wrong way. This oracle prints the signs.
+fn run_yaw_probe(physics: &mut dyn Physics, duration_s: f32) -> bool {
+    let mut mixer = QuadMixer::new();
+    let mut iekf = Iekf::level();
+    let dt = 0.004_f32;
+    let n = (duration_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let pace_real_time = physics.counters().is_some();
+    let hover = 0.72_f32;
+    let yaw_cmd = 0.15_f32; // constant +yaw torque
+
+    let yaw_of = |q: [f32; 4]| -> f32 {
+        libm::atan2f(
+            2.0 * (q[0] * q[3] + q[1] * q[2]),
+            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+        )
+    };
+    let mut h_prev: Option<f32> = None;
+    let mut ey_prev: Option<f32> = None;
+
+    for step in 0..n {
+        let tick_start = Instant::now();
+        let t = step as f32 * dt;
+        let (imu, pos) = physics.measure(0.0);
+        // Estimator: propagate + gravity + direct heading (the FlightCore path).
+        iekf.propagate(IekfImu { gyro: imu.gyro_body, accel: imu.accel_body }, dt);
+        iekf.update_gravity(imu.accel_body, 0.5);
+        iekf.update_position(pos, 0.01);
+        if let Some(h) = physics.heading_ned() {
+            iekf.update_yaw(h, 0.1);
+        }
+        let motors = mixer.mix([0.0, 0.0, yaw_cmd], hover);
+        physics.step(motors, dt);
+
+        if step % 125 == 0 {
+            let truth_h = physics.heading_ned().unwrap_or(f32::NAN);
+            let est_yaw = yaw_of(iekf.state().q);
+            let dh = h_prev.map(|p| truth_h - p).unwrap_or(0.0);
+            let dey = ey_prev.map(|p| est_yaw - p).unwrap_or(0.0);
+            eprintln!(
+                "t={:.2} cmd_yaw=+{:.2} truth_head={:.2} (Δ{:+.2}) est_yaw={:.2} (Δ{:+.2}) gyro_z={:+.2}",
+                t, yaw_cmd, truth_h, dh, est_yaw, dey, imu.gyro_body[2],
+            );
+            h_prev = Some(truth_h);
+            ey_prev = Some(est_yaw);
+        }
+        if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period { std::thread::sleep(tick_period - used); }
+        }
+    }
+    println!("  yaw-probe: compare signs of Δtruth_head, Δest_yaw, gyro_z vs cmd_yaw=+");
+    true
 }
 
 /// v0.19.9 — arming-sequencer ORACLE + position-hold DIAGNOSTIC.
@@ -1222,6 +1303,284 @@ fn run_alt_only_hover(
     }
     final_dist < 0.5 && rms_steady < 1.0
 }
+/// v1.117 (FAULT-P04) — the SUPERVISED rotor-out landing on a real plant: the
+/// full production `FlightSupervisor` (FSM + failsafes + the verified core)
+/// flies takeoff → hover, loses rotor 0 at `fail_at_s`, and must end ON THE
+/// GROUND, upright, `Disarmed` — via the motor failsafe's LAND, the
+/// land-where-you-are engage, and the lift-deficit-compensated velocity
+/// descent. PASS = Disarmed + true altitude < 0.3 m + the injected rotor
+/// isolated. This is the scenario the release video records.
+fn run_supervised_rotorout(
+    physics: &mut dyn Physics,
+    cruise_alt_m: f32,
+    duration_s: f32,
+    fail_at_s: f32,
+    mut evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    use falcon_core::FlightSupervisor;
+    use relay_fsm::{Event, Mode};
+
+    let dt = 0.004_f32; // 250 Hz
+    let n = (duration_s / dt) as u32;
+    let fail_step = (fail_at_s / dt) as u32;
+    let tick_period = Duration::from_secs_f32(dt);
+    let name = physics.name();
+    let pace_real_time = physics.counters().is_some();
+    let hover_thrust = if name == "mock" { 0.49 } else { 0.585 };
+
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 200.0, cruise_alt_m, 14.0);
+    sup.set_hover_thrust(hover_thrust);
+    if name != "mock" {
+        // The same gz reconciliation as run_flightcore (via the v1.117
+        // bench-tuning seam): realistic GNSS variance, anti-starvation process
+        // floor, stiffened+damped altitude loop, small integral trim.
+        let c = sup.core_mut();
+        c.set_pos_var(0.25);
+        c.set_process_floor(0.30, 0.05);
+        c.set_altitude_gains(0.15, 1.00);
+        c.set_altitude_integral_gain(0.03);
+    }
+    sup.command(Event::Arm, true, true);
+    sup.command(Event::RequestTakeoff, true, true);
+
+    let started_at = Instant::now();
+    let mut last_true = [0.0_f32; 3];
+    let mut landed_at: Option<f32> = None;
+    {
+        let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
+        for step in 0..n {
+            let tick_start = Instant::now();
+            let t = step as f32 * dt;
+            if step == fail_step {
+                backend.fail_rotor(0);
+                eprintln!("  t={t:.1}s — rotor 0 KILLED");
+            }
+            sup.step(&mut backend);
+            last_true = backend.last_true_pos();
+
+            if std::env::var_os("FC_DEBUG").is_some() && step % 50 == 0 {
+                let e = sup.state();
+                eprintln!(
+                    "t={:.2} mode={:?} true_z={:.2} est_z={:.2} est_vz={:+.2} mot={:?}",
+                    t,
+                    sup.mode(),
+                    last_true[2],
+                    e.p[2],
+                    e.v[2],
+                    backend.last_motors(),
+                );
+            }
+            if let Some(ref mut e) = evidence {
+                let (accel, gyro) = backend.last_imu();
+                e.write_tick(step, t, last_true, accel, gyro, backend.last_motors(), None);
+            }
+            if landed_at.is_none() && sup.mode() == Mode::Disarmed {
+                landed_at = Some(t);
+                eprintln!("  t={t:.1}s — TOUCHDOWN, Disarmed");
+            }
+            if pace_real_time {
+                let used = tick_start.elapsed();
+                if used < tick_period {
+                    std::thread::sleep(tick_period - used);
+                }
+            }
+        }
+    }
+    let wall = started_at.elapsed();
+    let final_alt = -last_true[2];
+    let pass = landed_at.is_some() && final_alt < 0.3;
+    println!(
+        "  verdict: backend={name} scenario=supervised-rotorout steps={n} fail_at={fail_at_s:.1}s \
+         landed_at={landed_at:?} final_alt={final_alt:.2}m mode-disarmed={} wall={:.2}s",
+        landed_at.is_some(),
+        wall.as_secs_f32()
+    );
+    pass
+}
+
+
+/// v1.113 — **FlightCore-in-the-loop**. Flies the PRODUCTION
+/// [`falcon_core::FlightCore`] (the verified IEKF → geometric-SE(3) → ADRC →
+/// mixer cascade, with the single-rotor-out FDI + degraded-allocator recovery)
+/// through the SITL plant via the [`SitlBackend`] adapter — instead of the
+/// hand-rolled cascade every other scenario re-implements. The sim now exercises
+/// the code that SHIPS, not a parallel copy of it.
+///
+/// Commands an altitude hold at `target_alt_m` — the closed loop the mock plant
+/// can demonstrate (it responds to collective thrust; differential-motor torque
+/// is approximated as zero, so horizontal translation and rotor-out recovery
+/// need the full-physics `--features gazebo` backend, the next slice). The same
+/// `FlightCore::step` drives both plants unchanged.
+///
+/// PASS = the true altitude settles within 0.5 m of the target with < 1.0 m
+/// steady RMS — the same bar as [`run_alt_only_hover`], but met by the *shipping*
+/// core rather than a bench re-implementation.
+fn run_flightcore(
+    physics: &mut dyn Physics,
+    target_alt_m: f32,
+    duration_s: f32,
+    fail: Option<(usize, f32)>,
+    mut evidence: Option<&mut EvidenceSink>,
+) -> bool {
+    let dt = 0.004_f32; // 250 Hz — the falcon-quad control-loop rate.
+    let n = (duration_s / dt) as u32;
+    let fail_step = fail.map(|(r, ts)| (r, (ts / dt) as u32));
+    let tick_period = Duration::from_secs_f32(dt);
+    // Capture these before the adapter borrows the plant for the whole run.
+    let name = physics.name();
+    let pace_real_time = physics.counters().is_some();
+    // Mock plant hovers at ~0.49 (THRUST_SCALE 20 m/s² vs g 9.81); the real gz
+    // falcon-quad hovers at ~0.57 (ω_hover≈757 of maxRotVel 1000; pwm=(757/1000)²
+    // via the √pwm thrust map). A too-high hover feedforward leaves a steady-state
+    // altitude offset the P-loop can't null, so the altitude INTEGRAL trims it.
+    let hover_thrust = if name == "mock" { 0.49 } else { 0.585 };
+
+    let mut core = FlightCore::new(hover_thrust, 1.0 / dt);
+    core.set_altitude(-target_alt_m); // NED z: negative = up.
+    if name != "mock" {
+        // The default pos_var (0.01 = 1 cm²) over-trusts the gz NavSat: on a long
+        // static hover the position covariance COLLAPSES, so the NIS outlier gate
+        // then rejects the (correct) fixes and the estimate goes deaf → the true
+        // altitude drifts unbounded. A realistic metre-class variance keeps P
+        // alive and the fixes accepted (diagnosed v1.113 — est_z froze at ~17 s).
+        core.set_pos_var(0.25);
+        // Extra δv/δp process noise (variance/s) so a long static hover can't
+        // starve the filter: velocity ~5× the base q_accel keeps the δv↔δp
+        // correlation alive → GNSS keeps correcting velocity → the estimate
+        // tracks the truth indefinitely (a diagonal clamp let the velocity
+        // free-run and the estimate diverged; additive Q is the fix).
+        core.set_process_floor(0.30, 0.05);
+        // Stiffen the altitude loop for the gz plant: the gentle default (0.05,
+        // 0.30) climbs asymptotically to below the target then slowly oscillates
+        // back down (underdamped/too-soft). A firmer kp holds altitude; kd damps.
+        core.set_altitude_gains(0.15, 1.00);
+        // Small integral to null the residual settle offset (hover feedforward
+        // isn't exact + run-to-run variation). Safe now: the loop is well-damped
+        // and the estimate tracks, so it trims to 2 m without the windup that hit
+        // when the estimator was still diverging.
+        core.set_altitude_integral_gain(0.03);
+    }
+    // No altitude integral: with hover_thrust matched to the real gz hover (0.57)
+    // the P-D loop settles at the target with ~0 steady-state error, and the
+    // integral wound up into a slow runaway on the gz plant's lagged thrust.
+
+    let mut peak_dist_err = 0.0_f32;
+    let mut min_dist_seen = f32::INFINITY;
+    let mut sum_sq_steady = 0.0_f32;
+    let mut steady_count = 0usize;
+    let steady_start_t = (duration_s - 5.0).max(0.0);
+    let mut last_true = [0.0_f32; 3];
+
+    let started_at = Instant::now();
+    // The adapter owns the plant for the whole run (its 5 Hz GNSS-divisor tick
+    // counter must persist across steps — reconstructing it per tick would
+    // suppress every fix). GNSS divisor 50 @ 250 Hz = 5 Hz fixes.
+    {
+        let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
+        for step in 0..n {
+            let tick_start = Instant::now();
+            let t = step as f32 * dt;
+
+            // Stage the rotor failure at its scheduled step (the fault a real
+            // airframe suffers mid-flight).
+            if let Some((rotor, fs)) = fail_step {
+                if step == fs {
+                    backend.fail_rotor(rotor);
+                }
+            }
+
+            core.step(&mut backend); // ← one PRODUCTION control tick + plant step
+            last_true = backend.last_true_pos();
+
+            // FC_DEBUG — per-tick estimator trace to diagnose the gz divergence.
+            if std::env::var_os("FC_DEBUG").is_some() && step % 25 == 0 {
+                let e = core.state();
+                let (a, g) = backend.last_imu();
+                let q = e.q; // [w,x,y,z]
+                let yaw = libm::atan2f(
+                    2.0 * (q[0] * q[3] + q[1] * q[2]),
+                    1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+                );
+                let m = backend.last_motors();
+                let tilt_deg = libm::acosf((1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2])).clamp(-1.0, 1.0))
+                    * 57.2958;
+                eprintln!(
+                    "t={:.2} true_z={:.2} tilt={:.0}deg gyro=[{:+.1},{:+.1},{:+.1}] failed={:?} mot=[{:.2},{:.2},{:.2},{:.2}]",
+                    t, last_true[2], tilt_deg, g[0], g[1], g[2], core.failed_motor(),
+                    m[0], m[1], m[2], m[3],
+                );
+            }
+
+            let alt_err = -target_alt_m - last_true[2]; // NED z error
+            let dist = alt_err.abs();
+            if dist > peak_dist_err {
+                peak_dist_err = dist;
+            }
+            if dist < min_dist_seen {
+                min_dist_seen = dist;
+            }
+            if t >= steady_start_t {
+                sum_sq_steady += dist * dist;
+                steady_count += 1;
+            }
+            if let Some(ref mut e) = evidence {
+                let (accel, gyro) = backend.last_imu();
+                e.write_tick(step, t, last_true, accel, gyro, backend.last_motors(), None);
+            }
+            if pace_real_time {
+                let used = tick_start.elapsed();
+                if used < tick_period {
+                    std::thread::sleep(tick_period - used);
+                }
+            }
+        }
+    } // backend dropped — the plant borrow is released for the verdict below.
+
+    let wall = started_at.elapsed();
+    let final_dist = (-target_alt_m - last_true[2]).abs();
+    let rms_steady = if steady_count > 0 {
+        (sum_sq_steady / steady_count as f32).sqrt()
+    } else {
+        f32::NAN
+    };
+    let counters = physics.counters();
+    let est = core.state();
+    // Rotor-out mode: the production FDI must have ISOLATED the injected rotor
+    // (via the commanded-vs-achieved RPM residual carried across the SITL seam).
+    let isolated = core.failed_motor();
+    let scen = if fail.is_some() { "flightcore-rotorout" } else { "flightcore" };
+    println!(
+        "  verdict: backend={} scenario={} steps={} target={:.1}m final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m est_z={:.2}m isolated={:?} wall={:.2}s",
+        name, scen, n, target_alt_m, final_dist, peak_dist_err, rms_steady, est.p[2], isolated, wall.as_secs_f32(),
+    );
+    if let Some((imu_recv, navsat_recv, motor_send)) = counters {
+        println!(
+            "  counters: imu_recv={imu_recv} navsat_recv={navsat_recv} motor_send={motor_send}",
+        );
+    }
+    if let Some(ref mut e) = evidence {
+        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
+                              min_dist_seen, wall.as_secs_f32(), counters);
+    }
+    match fail {
+        // Rotor-out: PASS = the production FDI ISOLATED the CORRECT (failed)
+        // rotor — the full chain fired across the SITL seam (plant RPM → adapter
+        // read_motor_rpm → FlightCore's commanded-vs-achieved residual → CUSUM →
+        // latch) — and the sim stayed finite (no divergence). The mock has NO
+        // differential-motor torque, so it CANNOT demonstrate the 3D
+        // tilt-recovery or a post-failure altitude hold; asserting those on it
+        // would be an artifact, not a proof. The full recovery is the gz-backed
+        // recordable flight (real per-rotor torque). Honest scope: this gates
+        // the FDI TELEMETRY PLUMBING the recovery depends on.
+        Some((rotor, _)) => {
+            let finite =
+                last_true.iter().all(|v| v.is_finite()) && est.p.iter().all(|v| v.is_finite());
+            isolated == Some(rotor) && finite
+        }
+        // Nominal hover: the tight altitude bar.
+        None => final_dist < 0.5 && rms_steady < 1.0,
+    }
+}
 
 /// v0.19.4 — closed-loop hover. Mirrors `falcon-sitl-hover`'s
 /// `run_mission` cascade pattern, but inputs come from the bridge
@@ -1782,6 +2141,57 @@ mod tests {
         }
     }
 
+    /// v1.113 — the PRODUCTION `falcon_core::FlightCore` (the verified
+    /// IEKF → geo → ADRC → mixer cascade that ships) holds altitude when flown
+    /// through the SITL plant via the `SitlBackend` adapter. This is the
+    /// orphan-elimination gate: the sim exercises the shipping core, not a
+    /// bench re-implementation of it. Same PASS bar as the hand-rolled
+    /// altitude scenarios (settles < 0.5 m, steady RMS < 1.0 m).
+    #[test]
+    fn production_flightcore_holds_altitude_through_sitl_plant() {
+        let mut p = MockPhysics::at_rest();
+        let ok = run_flightcore(&mut p, 2.0, 25.0, None, None);
+        assert!(ok, "production FlightCore failed to hold 2 m altitude on the SITL plant");
+        // The true state stayed finite (no divergence / NaN escape).
+        for i in 0..3 {
+            assert!(p.p_ned[i].is_finite(), "p_ned[{i}] = {}", p.p_ned[i]);
+            assert!(p.v_ned[i].is_finite(), "v_ned[{i}] = {}", p.v_ned[i]);
+        }
+        // Settled near the 2 m (NED z = −2) target, not drifted off.
+        assert!(
+            (p.p_ned[2] + 2.0).abs() < 0.5,
+            "final NED z = {} (want ≈ −2)",
+            p.p_ned[2]
+        );
+    }
+
+    /// v1.113 — the production FlightCore's single-rotor-out FDI fires THROUGH
+    /// the SITL seam. A rotor is failed mid-flight; the mock reports its dead
+    /// rotor at 0 RPM, the `SitlBackend` adapter carries that ESC telemetry to
+    /// the core's `read_motor_rpm`, and the core's CUSUM must ISOLATE exactly
+    /// the failed rotor. This gates the telemetry plumbing the rotor-out
+    /// recovery depends on — before this wiring the FDI was inert in SITL. The
+    /// mock has no differential-motor torque, so the 3D tilt-recovery itself is
+    /// the gz-backed recordable flight, not this test.
+    #[test]
+    fn production_flightcore_fdi_isolates_failed_rotor_through_sitl_seam() {
+        let mut p = MockPhysics::at_rest();
+        // Rotor 2 fails at t = 12 s of a 28 s flight.
+        let ok = run_flightcore(&mut p, 2.0, 28.0, Some((2, 12.0)), None);
+        assert!(
+            ok,
+            "production FDI failed to isolate the failed rotor through the SITL seam"
+        );
+        // The plant actually staged the failure and stayed finite.
+        assert_eq!(p.failed_rotor, Some(2), "plant should have rotor 2 failed");
+        for i in 0..3 {
+            assert!(p.p_ned[i].is_finite(), "p_ned[{i}] = {}", p.p_ned[i]);
+        }
+        // The dead rotor reports 0 RPM (the residual source).
+        let rpm = p.motor_rpm().expect("mock reports RPM");
+        assert_eq!(rpm[2], 0, "failed rotor must report 0 RPM, got {}", rpm[2]);
+    }
+
     /// v0.19.0 — when --evidence-dir is set, the runner produces two
     /// files: a harness log and a per-tick CSV. Smoke-test that both
     /// files materialise + carry the right header/footer.
@@ -1847,7 +2257,9 @@ mod tests {
             // then reduced-attitude + the reconfigured allocator).
             let (torque, motors_cmd) = if let Some(f) = isolated {
                 let tq = ctrl.moment_reduced(&r, omega, b3_d);
-                (tq, QuadMixer::new().mix_rotor_out(f, tq, hover, floor))
+                // Rank-3 allocation (v1.114): floor 0 so the diagonal-opposite
+                // rotor can rest at 0 (matching production ROTOR_OUT_FLOOR).
+                (tq, QuadMixer::new().mix_rotor_out(f, tq, hover, 0.0))
             } else {
                 let tq = ctrl.moment(&r, omega, &level);
                 (tq, QuadMixer::new().mix_thrust_floor(tq, hover, floor))
@@ -1861,7 +2273,8 @@ mod tests {
                 assert_eq!(motors_cmd[f], 0.0, "failed rotor must be commanded 0");
                 for (i, &v) in motors_cmd.iter().enumerate() {
                     if i != f {
-                        assert!(v >= floor - 1e-6 && v <= 1.0 + 1e-6, "healthy motor bound: {v}");
+                        // Rank-3 floor is 0 (diagonal-opposite rotor rests at 0).
+                        assert!(v >= -1e-6 && v <= 1.0 + 1e-6, "healthy motor bound: {v}");
                     }
                 }
             }

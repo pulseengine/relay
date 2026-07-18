@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-RELAY-VGATE-P01
+    type: sw-req
+    title: "VGATE-P01 — verification-gate integrity: no orphaned proofs, no self-verified changes"
+    status: verified
+    release: falcon-v1.116.0
+    description: >
+      The CI verification gate shall enforce two integrity properties the
+      2026-07 traceability audit found missing. (1) ORPHANED-PROOF DETECTION:
+      a verification artifact step citing `cargo kani -p <crate>` shall FAIL
+      the gate when <crate> is not in the kani.yml CI matrix (the required
+      `Kani gate` check) — a cited proof CI never runs is evidence drift, the
+      mechanism by which MIX-P05..08 went unenforced for ~40 releases.
+      Explicitly waived crates (KANI_MATRIX_WAIVERS) shall be reported loudly
+      in every run with the tracking issue that retires the waiver (#260 for
+      relay-traj). (2) TWO-COMMIT RULE: a pull request that modifies
+      implementation code (crates/ or examples/ *.rs) shall not, in the same
+      PR, promote any rivet artifact to `verified` or `accepted` — the
+      verification sign-off must arrive in a separate PR whose cited evidence
+      the gate executes. Break-glass override (ALLOW_SAME_PR_VERIFIED=1) is
+      permitted but shall be visible in the CI log.
+    tags: [relay, verification-gate, traceability, hygiene, process-integrity, v1.116]
+    fields:
+      req-type: constraint
+      priority: must
+      verification-criteria: >
+        (1) A dry-run of run-falcon-verification.py against an artifact citing
+        an out-of-matrix kani crate exits non-zero with an ORPHANED PROOF
+        failure; against in-matrix crates reports enforced-by-kani-gate; the
+        relay-traj waiver is reported with issue #260. (2)
+        check-verification-independence.sh exits non-zero for a diff range
+        containing both crates/*.rs changes and added `status: verified` lines
+        (the v1.115 range 23fc92f..82db51f reproduces this), and exits zero for
+        a compliant range.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

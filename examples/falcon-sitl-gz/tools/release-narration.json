@@ -4,104 +4,109 @@
     {
       "version": "v1.16",
       "narration": "Falcon one point sixteen adds wind rejection. We found the position loop could not reject a steady force, so we added an integral term, cutting the wind-induced offset from over one and a half metres down to under sixty centimetres.",
-      "title": "Falcon v1.16 — Wind Rejection | a formally-verified drone flight stack",
+      "title": "Falcon v1.16 \u2014 Wind Rejection | a formally-verified drone flight stack",
       "description": "The verified falcon flight core now rejects a steady wind. A falsification-driven fix: the P-D position loop left a >1.5 m offset under wind, so we added an anti-windup integral that cuts it to <0.6 m. Verified in Gazebo SITL with the Lean Lyapunov proof and the Kani-verified FSM and mixer still holding. IEKF to geometric SE(3) to ADRC to mixer, all no_std / no_alloc.\n\n#drone #autopilot #formalverification #rust #robotics"
     },
     {
       "version": "v1.17",
       "narration": "Falcon one point seventeen adds quadratic aerodynamic drag. The vehicle still tracks a far setpoint to within sixty centimetres through the drag, and the drag itself adds damping that stabilises the flight.",
-      "title": "Falcon v1.17 — Aerodynamic Drag | verified drone flight stack",
+      "title": "Falcon v1.17 \u2014 Aerodynamic Drag | verified drone flight stack",
       "description": "Quadratic v-squared aerodynamic drag, the force that matters during fast flight. The verified cascade tracks a far [4,0,-2] m setpoint to within 0.6 m through the drag, and the drag damps the vehicle. Verified in SITL.\n\n#drone #autopilot #formalverification #rust #robotics"
     },
     {
       "version": "v1.18",
       "narration": "Falcon one point eighteen hardens the estimator against a realistic, wandering gyro bias. The Invariant E K F continuously re-tracks the random-walk bias, holding the body level through a long hover.",
-      "title": "Falcon v1.18 — IMU Bias-Instability | verified drone flight stack",
+      "title": "Falcon v1.18 \u2014 IMU Bias-Instability | verified drone flight stack",
       "description": "A realistic IMU bias-instability: a stochastic random-walk gyro bias, a moving target. The verified Invariant-EKF re-tracks it continuously, holding tilt under 0.15 rad as the bias wanders to about 0.06 rad/s. Verified in SITL.\n\n#drone #autopilot #estimation #formalverification #rust"
     },
     {
       "version": "v1.19",
       "narration": "Falcon one point nineteen survives noisy and intermittent G N S S. We found that an over-trusting filter actually diverged by two and a half kilometres, so we matched the measurement variance to the real sensor, and now it holds.",
-      "title": "Falcon v1.19 — Noisy + Intermittent GNSS | verified drone flight stack",
+      "title": "Falcon v1.19 \u2014 Noisy + Intermittent GNSS | verified drone flight stack",
       "description": "Realistic GNSS: metre-class noise plus recurring outages. A falsification: an over-trusting measurement variance made the filter diverge ~2400 m. The fix is honest filter tuning, matching the variance to the sensor, and it holds. Verified in SITL.\n\n#drone #autopilot #gps #formalverification #rust"
     },
     {
       "version": "v1.20",
       "narration": "Falcon one point twenty adds barometer fusion. With G P S vertical lost for forty seconds, the barometer, fed into the verified estimator, anchors the altitude and holds it within about one and a third metres.",
-      "title": "Falcon v1.20 — Barometer Fusion | verified drone flight stack",
+      "title": "Falcon v1.20 \u2014 Barometer Fusion | verified drone flight stack",
       "description": "An independent vertical source so altitude survives a GPS-vertical outage. The barometer is fed into the verified IEKF as a vertical anchor; through a 40 s GPS loss it holds altitude to ~1.3 m, beating dead-reckoning. Verified in SITL.\n\n#drone #autopilot #sensorfusion #formalverification #rust"
     },
     {
       "version": "v1.21",
       "narration": "Falcon one point twenty one makes the low-battery failsafe fire on a real draining pack. As the battery depletes and the voltage sags under load, the supervisor actuates a return to launch.",
-      "title": "Falcon v1.21 — Battery Drain Failsafe | verified drone flight stack",
+      "title": "Falcon v1.21 \u2014 Battery Drain Failsafe | verified drone flight stack",
       "description": "The low-battery failsafe now fires on a real depleting pack, not a set value: the charge drains with motor load and the terminal voltage sags, and the supervisor actuates RTL/Land on a genuine endurance limit. Verified in SITL.\n\n#drone #autopilot #safety #formalverification #rust"
     },
     {
       "version": "v1.22",
       "narration": "Falcon one point twenty two models air-density thrust lapse. We added an altitude integral so the vehicle holds high altitude despite the falling thrust, and the model honestly shows a service ceiling.",
-      "title": "Falcon v1.22 — Air-Density Thrust Lapse | verified drone flight stack",
+      "title": "Falcon v1.22 \u2014 Air-Density Thrust Lapse | verified drone flight stack",
       "description": "Thrust falls with altitude. The vertical twin of the wind finding: the P-D altitude loop sags, so an opt-in altitude integral holds it, and beyond the margin there is an honest service ceiling. Verified in SITL.\n\n#drone #autopilot #control #formalverification #rust"
     },
     {
       "version": "v1.23",
       "narration": "Falcon one point twenty three confirms the inner loop absorbs realistic motor lag. With a forty millisecond motor time constant, the A D R C extended state observer cancels the lag and recovers a tilted body to level.",
-      "title": "Falcon v1.23 — Motor Dynamics | verified drone flight stack",
+      "title": "Falcon v1.23 \u2014 Motor Dynamics | verified drone flight stack",
       "description": "First-order motor spin-up lag, the actuator lag the ADRC extended-state observer was built to absorb. With a 40 ms motor time constant the inner loop still recovers a tilted body to level. A robustness confirmation. Verified in SITL.\n\n#drone #autopilot #control #formalverification #rust"
     },
     {
       "version": "v1.24",
       "narration": "Falcon one point twenty four adds ground effect. The thrust cushion near the surface aids takeoff, and we honestly document that it floats the landing, which a future velocity-based touchdown controller will solve.",
-      "title": "Falcon v1.24 — Ground Effect | verified drone flight stack",
+      "title": "Falcon v1.24 \u2014 Ground Effect | verified drone flight stack",
       "description": "Rotor downwash off the surface augments thrust near the ground. It aids takeoff; on landing it cushions the vehicle into a documented float that a velocity-based touchdown controller will solve, an honest limitation, not a faked touchdown. Verified in SITL.\n\n#drone #autopilot #aerodynamics #formalverification #rust"
     },
     {
       "version": "v1.25",
       "narration": "Falcon one point twenty five flies through turbulence. Under a Dryden-like two metre per second gust spectrum, the vehicle stays bounded within a few metres and does not diverge, the worst-case environment of the realism arc.",
-      "title": "Falcon v1.25 — Turbulence | verified drone flight stack",
+      "title": "Falcon v1.25 \u2014 Turbulence | verified drone flight stack",
       "description": "A Dryden-like colored gust spectrum, harder than white noise because the gusts persist. Under 2 m/s RMS turbulence the vehicle stays bounded within a few metres and does not diverge. Honest scope: bounded, not crisp. Verified in SITL.\n\n#drone #autopilot #turbulence #formalverification #rust"
     },
     {
       "version": "v1.26",
       "narration": "Falcon one point twenty six is the keystone. The verified flight core now runs as a Web Assembly component in wasmtime, the portable hand-off that our toolchain carries onto real hardware.",
-      "title": "Falcon v1.26 — WASM Component Model, runs in wasmtime | verified drone flight stack",
+      "title": "Falcon v1.26 \u2014 WASM Component Model, runs in wasmtime | verified drone flight stack",
       "description": "The keystone of the toolchain-to-hardware path. The verified IEKF to geometric to ADRC to mixer cascade builds as a WebAssembly Component Model component and runs in wasmtime, recovering a tilted body and flying to a setpoint. This is the portable hand-off artifact for the meld to loom to synth to gale integration onto silicon.\n\n#webassembly #wasm #drone #autopilot #formalverification #rust"
     },
     {
       "version": "v1.27",
       "narration": "Falcon version one point twenty seven adds a velocity-based touchdown controller. Near the ground, reflected rotor downwash boosts thrust into a cushion that the position loop used to float on, about a metre up, instead of landing. The new landing mode commands a constant descent rate that pushes straight through the cushion and settles cleanly on the surface, then cuts to idle on touchdown. Verified in simulation, and it still builds bare-metal for the flight controller.",
-      "title": "Falcon v1.27 — Velocity-Based Touchdown Controller | verified drone flight stack",
+      "title": "Falcon v1.27 \u2014 Velocity-Based Touchdown Controller | verified drone flight stack",
       "description": "A velocity-based touchdown controller that lands cleanly through ground effect. v1.24 documented an honest limitation: near the surface, reflected rotor downwash boosts thrust into a cushion that the position-based altitude loop floats on (~1.3 m) instead of landing. v1.27 adds a landing mode that commands a constant descent rate, sized below the maximum ground-effect boost, so it descends through the cushion and settles on the surface (< 0.15 m, |vz| < 0.3 m/s). Verified in SITL; still builds bare-metal for Cortex-M.\n\n#drone #autopilot #landing #formalverification #rust #robotics"
     },
     {
       "version": "v1.28",
       "narration": "Falcon version one point twenty eight opens the vehicle to the outside world. A new bridge speaks MAVLink, the language of QGroundControl and MAVSDK, so any standard ground station can arm the drone, command takeoff, landing, and return to launch, then watch its position stream back live. The bridge only translates. The verified wire codec and the flight state machine underneath it stay exactly as proven, and it still builds bare-metal for the flight controller.",
-      "title": "Falcon v1.28 — MAVLink Bridge: arm / launch / land from QGroundControl | verified drone flight stack",
-      "description": "Falcon now speaks MAVLink. A new no_std / no_alloc falcon-mavlink bridge translates between the MAVLink v2 wire (QGroundControl / MAVSDK) and the verified flight supervisor: inbound COMMAND_LONG (arm/disarm, takeoff, land, RTL, terminate) drives the Kani-verified flight FSM; outbound HEARTBEAT and GLOBAL_POSITION_INT report mode and live position. The bridge is a thin translation seam — the relay-mavlink codec and relay-fsm state machine underneath stay exactly as verified. 11 unit tests, clippy clean, builds bare-metal for Cortex-M.\n\n#mavlink #qgroundcontrol #drone #autopilot #formalverification #rust"
+      "title": "Falcon v1.28 \u2014 MAVLink Bridge: arm / launch / land from QGroundControl | verified drone flight stack",
+      "description": "Falcon now speaks MAVLink. A new no_std / no_alloc falcon-mavlink bridge translates between the MAVLink v2 wire (QGroundControl / MAVSDK) and the verified flight supervisor: inbound COMMAND_LONG (arm/disarm, takeoff, land, RTL, terminate) drives the Kani-verified flight FSM; outbound HEARTBEAT and GLOBAL_POSITION_INT report mode and live position. The bridge is a thin translation seam \u2014 the relay-mavlink codec and relay-fsm state machine underneath stay exactly as verified. 11 unit tests, clippy clean, builds bare-metal for Cortex-M.\n\n#mavlink #qgroundcontrol #drone #autopilot #formalverification #rust"
     },
     {
       "version": "v1.29",
       "narration": "Falcon one point twenty nine fixes the landing. Version twenty seven built a velocity-based touchdown controller, but the flight supervisor never used it, so the real stack still crept down and floated on the ground-effect cushion. Now the land command engages it: the drone settles over home, descends at a constant rate, and disarms cleanly on touchdown.",
-      "title": "Falcon v1.29 — Velocity Landing wired into the supervisor (clean touchdown) | verified drone flight stack",
-      "description": "v1.27 shipped a velocity-based touchdown controller — but the FlightSupervisor still ran the old position-based descent in Land mode, so the integrated stack crept down and floated on the ground-effect cushion (~1.3 m, the v1.24 limitation). v1.29 wires set_landing into the supervisor: on the land / RTL command the vehicle settles over home, then descends at a constant rate straight through the cushion and disarms on touchdown (~5 s, vs the ~20 s position creep). A settle-then-descend gate (near home AND slow) keeps the fast descent from drifting off-target on arrival. Integration-tested through the FlightSupervisor; clippy clean; builds bare-metal for Cortex-M.\n\n#drone #autopilot #landing #formalverification #rust #robotics"
+      "title": "Falcon v1.29 \u2014 Velocity Landing wired into the supervisor (clean touchdown) | verified drone flight stack",
+      "description": "v1.27 shipped a velocity-based touchdown controller \u2014 but the FlightSupervisor still ran the old position-based descent in Land mode, so the integrated stack crept down and floated on the ground-effect cushion (~1.3 m, the v1.24 limitation). v1.29 wires set_landing into the supervisor: on the land / RTL command the vehicle settles over home, then descends at a constant rate straight through the cushion and disarms on touchdown (~5 s, vs the ~20 s position creep). A settle-then-descend gate (near home AND slow) keeps the fast descent from drifting off-target on arrival. Integration-tested through the FlightSupervisor; clippy clean; builds bare-metal for Cortex-M.\n\n#drone #autopilot #landing #formalverification #rust #robotics"
     },
     {
       "version": "v1.30",
       "narration": "Falcon version one point thirty flies an autonomous mission. The ground station sends one mission-start command, and the supervisor takes over: it flies a stored sequence of waypoints in order, advancing to each next leg as it arrives. After the final waypoint it returns home on its own and lands. One command, a full sortie, verified and bare-metal ready.",
-      "title": "Falcon v1.30 — Autonomous Multi-Waypoint Mission (one command, full sortie) | verified drone flight stack",
-      "description": "v1.30 adds a multi-waypoint mission sequencer to the FlightSupervisor. A single MAVLink MISSION_START command (mapped to the Mission FSM event) flies a stored sequence of NED waypoints in order — advancing to the next leg within a 1.2 m acceptance radius — then autonomously returns home and lands (reusing the v1.29 settle-then-descend touchdown). The whole sortie — arm, takeoff, three-leg mission, return, land, disarm — runs with no per-waypoint commanding. Integration-tested through the FlightSupervisor (visits each leg in order, monotonic leg index, completes + disarms); no_std / no_alloc fixed-capacity waypoint store; clippy clean; builds bare-metal for Cortex-M. Flight shown at 2x speed.\n\n#drone #autopilot #mission #autonomy #formalverification #rust"
+      "title": "Falcon v1.30 \u2014 Autonomous Multi-Waypoint Mission (one command, full sortie) | verified drone flight stack",
+      "description": "v1.30 adds a multi-waypoint mission sequencer to the FlightSupervisor. A single MAVLink MISSION_START command (mapped to the Mission FSM event) flies a stored sequence of NED waypoints in order \u2014 advancing to the next leg within a 1.2 m acceptance radius \u2014 then autonomously returns home and lands (reusing the v1.29 settle-then-descend touchdown). The whole sortie \u2014 arm, takeoff, three-leg mission, return, land, disarm \u2014 runs with no per-waypoint commanding. Integration-tested through the FlightSupervisor (visits each leg in order, monotonic leg index, completes + disarms); no_std / no_alloc fixed-capacity waypoint store; clippy clean; builds bare-metal for Cortex-M. Flight shown at 2x speed.\n\n#drone #autopilot #mission #autonomy #formalverification #rust"
     },
     {
       "version": "v1.31",
       "narration": "Falcon version one point thirty one adds obstacle avoidance. A no-fly zone sits squarely on the mission path. The supervisor deflects the flight setpoint around it, so the vehicle arcs clear of the zone, reaches its waypoint, and on the way home arcs around the zone again before landing. The mission completes, and the keep-out is never entered.",
-      "title": "Falcon v1.31 — Keep-Out Zone Avoidance (the vehicle arcs around a no-fly zone) | verified drone flight stack",
-      "description": "v1.31 adds reactive keep-out (no-fly) zone avoidance to the FlightSupervisor. When a mission or return-to-launch path runs through a no-fly zone, the position setpoint is deflected around it — radial stand-off plus a tangential look-ahead, so the vehicle steers AROUND the zone (not into a stall in front of it). The deflection is path-aware: it engages only when a zone actually obstructs the route to the goal, so a zone beside home doesn't disturb the final approach. Integration-tested through the FlightSupervisor: a mission straight across a zone reaches its far waypoint, but its closest approach to the zone centre stays outside the radius the whole flight (out and back), and the sortie still completes + disarms. no_std fixed-capacity zone store; clippy clean; builds bare-metal for Cortex-M. Flight shown at 2.5x speed.\n\n#drone #autopilot #avoidance #autonomy #formalverification #rust"
+      "title": "Falcon v1.31 \u2014 Keep-Out Zone Avoidance (the vehicle arcs around a no-fly zone) | verified drone flight stack",
+      "description": "v1.31 adds reactive keep-out (no-fly) zone avoidance to the FlightSupervisor. When a mission or return-to-launch path runs through a no-fly zone, the position setpoint is deflected around it \u2014 radial stand-off plus a tangential look-ahead, so the vehicle steers AROUND the zone (not into a stall in front of it). The deflection is path-aware: it engages only when a zone actually obstructs the route to the goal, so a zone beside home doesn't disturb the final approach. Integration-tested through the FlightSupervisor: a mission straight across a zone reaches its far waypoint, but its closest approach to the zone centre stays outside the radius the whole flight (out and back), and the sortie still completes + disarms. no_std fixed-capacity zone store; clippy clean; builds bare-metal for Cortex-M. Flight shown at 2.5x speed.\n\n#drone #autopilot #avoidance #autonomy #formalverification #rust"
     },
     {
       "version": "v1.33",
       "narration": "Falcon version one point thirty three completes the autonomy loop. A ground station uploads the mission over MAVLink: the waypoint count, then each item, acknowledged by the vehicle. A single start command then flies the uploaded mission, leg by leg, and brings it home. A real ground-station-defined sortie, end to end.",
-      "title": "Falcon v1.33 — MAVLink Mission Upload (a GCS defines the mission, end to end) | verified drone flight stack",
-      "description": "v1.33 completes the autonomy loop: a ground station (QGroundControl / MAVSDK) UPLOADS the mission over MAVLink, then v1.30's MISSION_START flies it. The relay-mavlink codec gains the four mission-protocol messages — MISSION_COUNT, MISSION_REQUEST_INT, MISSION_ITEM_INT, MISSION_ACK — and the falcon-mavlink bridge runs the upload handshake (COUNT → request item 0 → ITEM → … → ACK ACCEPTED), converting each uploaded lat/lon/alt into an NED waypoint for the FlightSupervisor sequencer. End-to-end tested: an uploaded 3-leg mission is flown in order by the real supervisor, then returns and disarms — no per-waypoint commanding, no hard-coded mission. 14 falcon-mavlink + 61 relay-mavlink tests; no_std/no_alloc; clippy clean; builds bare-metal for Cortex-M. Handshake shown in the HUD; flight at 2.5x speed.\n\n#mavlink #qgroundcontrol #mission #autonomy #drone #formalverification #rust"
+      "title": "Falcon v1.33 \u2014 MAVLink Mission Upload (a GCS defines the mission, end to end) | verified drone flight stack",
+      "description": "v1.33 completes the autonomy loop: a ground station (QGroundControl / MAVSDK) UPLOADS the mission over MAVLink, then v1.30's MISSION_START flies it. The relay-mavlink codec gains the four mission-protocol messages \u2014 MISSION_COUNT, MISSION_REQUEST_INT, MISSION_ITEM_INT, MISSION_ACK \u2014 and the falcon-mavlink bridge runs the upload handshake (COUNT \u2192 request item 0 \u2192 ITEM \u2192 \u2026 \u2192 ACK ACCEPTED), converting each uploaded lat/lon/alt into an NED waypoint for the FlightSupervisor sequencer. End-to-end tested: an uploaded 3-leg mission is flown in order by the real supervisor, then returns and disarms \u2014 no per-waypoint commanding, no hard-coded mission. 14 falcon-mavlink + 61 relay-mavlink tests; no_std/no_alloc; clippy clean; builds bare-metal for Cortex-M. Handshake shown in the HUD; flight at 2.5x speed.\n\n#mavlink #qgroundcontrol #mission #autonomy #drone #formalverification #rust"
+    },
+    {
+      "version": "v1.117",
+      "title": "Falcon v1.117 \u2014 Rotor-Out Landing | a formally-verified drone flight stack",
+      "narration": "A motor dies mid-flight. The verified flight core detects the failure in milliseconds, hands the landing to the supervisor, and brings the quad down on three rotors, spinning by design, landing upright with the motors provably off. One hundred fifty randomized failure trials in simulation: zero crashes."
     }
   ]
 }

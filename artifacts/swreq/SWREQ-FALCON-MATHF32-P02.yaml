@@ -1,0 +1,38 @@
+artifacts:
+  - id: SWREQ-FALCON-MATHF32-P02
+    type: sw-req
+    title: "MATHF32-P02 — exhaustive worst-case accuracy bound for the f32 sin/cos kernels"
+    status: verified
+    release: falcon-v1.126.0
+    description: >
+      The f32 sin/cos kernels (MATHF32-P01) shall carry an EXHAUSTIVELY
+      established worst-case accuracy bound — not a sampled one. Over EVERY
+      f32 value in the qualified envelope |x| <= 128 (~2.2e9 inputs),
+      checked against a high-precision (f64) reference, the worst ABSOLUTE
+      error shall be <= 1.2e-7 (one ulp at unit magnitude) and the worst
+      relative error <= 2 ulp wherever |value| >= 1e-3. Rationale: a sampled
+      sweep cannot bound worst-case error over a continuum — it can step
+      over a bad binade (the v1.125 4M-point test asserted <=2 ulp and was
+      in fact hiding the near-zero behaviour that only exhaustive
+      enumeration surfaced). Absolute error is the flight-relevant metric:
+      so3_exp, the mixer geometry and the notch coefficients consume the
+      VALUES, so a near-zero ulp inflation (harmless, |err| still <= 1.2e-7)
+      is not an accuracy loss. This is the qualified-single-precision
+      standard (CORE-MATH / crlibm methodology) and the empirical foundation
+      a later machine-checked error-bound proof (Gappa / Rocq) would certify.
+    tags: [falcon, relay-math, f32, accuracy, qualification, exhaustive, v1.126]
+    fields:
+      req-type: non-functional
+      priority: should
+      verification-criteria: >
+        The exhaustive test enumerates all ~2.2e9 envelope f32 against the
+        f64 reference and asserts worst |abs err| <= 1.2e-7 AND worst
+        off-zeros ulp <= 2 (relay-math tests::
+        f32_kernels_exhaustive_worst_case_bound; parallel, run on
+        demand/nightly). The fast 4M sampled test uses the same honest
+        off-zeros metric as the per-PR gate.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-MATHF32-P01

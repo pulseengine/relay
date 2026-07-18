@@ -77,6 +77,8 @@ pub fn flow_to_velocity(
     }
 }
 
+pub mod tf02;
+
 #[cfg(kani)]
 mod kani_proofs;
 
@@ -135,12 +137,9 @@ mod proptests {
         /// the altitude never exceeds the range magnitude (|cos| ≤ 1).
         #[test]
         fn altitude_gated_and_bounded(r in -100.0f32..100.0, tilt in -3.0f32..3.0) {
-            match range_to_altitude(r, tilt, 0.2, 30.0) {
-                Some(a) => {
-                    proptest::prop_assert!((0.2..=30.0).contains(&r));
-                    proptest::prop_assert!(a.abs() <= r.abs() + 1e-3);
-                }
-                None => {}
+            if let Some(a) = range_to_altitude(r, tilt, 0.2, 30.0) {
+                proptest::prop_assert!((0.2..=30.0).contains(&r));
+                proptest::prop_assert!(a.abs() <= r.abs() + 1e-3);
             }
         }
     }

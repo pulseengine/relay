@@ -13,6 +13,9 @@ crate-type = ["rlib"]
 
 [dev-dependencies]
 proptest.workspace = true
+# CALIB-P02 (v1.117): the calibrate->persist->reboot round-trip integration
+# test rides the PARAM-P03 persistence seam.
+relay-param = { path = "../relay-param" }
 
 [lints]
 workspace = true

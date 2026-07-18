@@ -1,0 +1,108 @@
+artifacts:
+  - id: FV-FALCON-FAULT-003
+    type: sw-verification
+    title: "Single-rotor-out FULL-LOOP recovery — parasitic-free rank-3 allocation + production-core spin-descent oracle (v1.114)"
+    status: implemented
+    release: falcon-v1.114.0
+    description: >
+      Strengthens FV-FALCON-FAULT-002. That artifact verified the
+      rotor-out chain only in an IDEALISED attitude-only harness
+      (falcon-sitl-gz fault_tolerance_chain_recovers_from_rotor_loss:
+      constant hover thrust, TRUE-state feedback, level b3_d) — under
+      which the recovery merely leans and stays < 80°. The FULL
+      production loop (IEKF estimator + altitude loop + the FDI
+      attitude/rate gate) was never exercised, and it did NOT actually
+      recover: it flipped to ~180° (reproduced on the real gz plant and,
+      now, offline). v1.114 finds the cause, fixes it, and adds the
+      first full-loop recovery oracle.
+
+      ROOT CAUSE (mechanically proven, no sim needed).
+      The reconfigured allocator reused the 4-rotor MIXER_X rows with the
+      failed rotor zeroed. Zeroing one rotor breaks the zero-sum property
+      of each torque column, so the collective THRUST leaks into
+      roll/pitch — a parasitic body moment ≈ collective toward the dead
+      corner. At hover (collective 0.585) that is roll +0.585 / pitch
+      −0.585 (58% of full authority) at ZERO commanded torque. The
+      reduced-attitude law can only oppose it from a growing tilt; once
+      the altitude loop raises thrust to replace the lost lift the
+      parasitic grows too → runaway → flip.
+        - Test: relay-mix-quad mix_p08_rotor_out_zero_torque_has_no_parasitic_moment
+          (asserts produced roll/pitch ≈ 0 at zero command, for every
+          failed index — the guard that would have caught this).
+
+      FIX — RANK-3 allocation (MIX-P08, v1.114).
+      mix_rotor_out now SOLVES the 3×3 system for the three healthy rotor
+      commands that produce exactly (collective, roll, pitch), yaw free,
+      via a collective base + a zero-collective moment delta scaled by the
+      existing scale_to_fit desaturation (so moment DIRECTION and
+      collective are preserved and a clamp cannot flip a moment's sign).
+      This kills the diagonal-opposite rotor and drives the through-CoM
+      pair: pure lift, zero parasitic tilt, controlled yaw spin. Floor
+      lowered to 0 (the opposite rotor legitimately rests at 0). A
+      TAU_BOUND input clamp keeps the Cramer solve below f32 overflow.
+        - Kani: verify_mix_rotor_out_bound VERIFICATION SUCCESSFUL
+          (0 of 377 checks failed) — the MIX-P08 bound (failed rotor 0,
+          healthy ∈ [floor,1], all finite, yaw relinquished) still holds
+          for ANY input and ANY failed index < 4 under the new solve.
+        - Tests: relay-mix-quad
+          mix_p08_rotor_out_preserves_moment_direction (produced moment is
+          s·commanded for s∈[0,1] — parallel, no sign flip, no overshoot),
+          mix_p08_rotor_out_small_command_is_exact (feasible small command
+          realised exactly), mix_p08_rotor_out_pins_failed_and_bounds_healthy.
+
+      FULL-LOOP RECOVERY ORACLE (the gap FV-002 left).
+      falcon-core survives_single_rotor_failure_without_flipping flies the
+      PRODUCTION FlightCore (verified IEKF → geometric SE(3) →
+      reduced-attitude + rank-3 allocation, driven by the real FDI on ESC
+      RPM) on the analytic rigid-body plant. After a rotor-0 loss from a
+      settled hover the FDI isolates within a step, and the vehicle holds
+      the thrust axis near-level (peak tilt < 0.5 rad; steady descent
+      < ~6°), keeps the relinquished-yaw spin bounded (< 10 rad/s), and
+      lands near-upright (touchdown tilt < 0.35 rad) — a controlled
+      spin-descent, not a tumble.
+
+      DISPERSED GUARD — closing the campaign blind spot (v1.114).
+      The Monte-Carlo `run_motor_out_campaign` dispersed over the SAME
+      idealised attitude-only sim as FV-002 (its header says so), so
+      thousands of trials could not falsify the flip — dispersion adds
+      breadth, not fidelity. New `run_fullloop_motor_out_campaign` disperses
+      200 trials over the FULL production FlightCore (IEKF + altitude + FDI +
+      rank-3 allocation, rot_drag plant) across failed-rotor, hover altitude,
+      rotational drag, and sensor-noise axes, asserting no-flip + bounded
+      spin + correct FDI + no-NaN. Measured worst case: peak tilt 0.274 rad,
+      yaw 5.7 rad/s, FDI detect 5 steps, 0/200 failures. A parasitic-moment
+      regression drives peak tilt toward π and trips this guard — the guard
+      the idealised campaign could not provide. (Altitude after the loss is
+      the FlightSupervisor's LAND job — reported, not gated, here.)
+
+      PLANT FIDELITY (v1.114).
+      SimBackend gains quadratic ROTATIONAL aero drag (rot_drag, τ =
+      −c·ω·|ω|, opt-in like drag_quad/wind/turbulence, default off).
+      Without it the analytic plant has no torque to oppose the rotor-out
+      yaw reaction (both surviving lift rotors share a spin sense), so the
+      spin runs away and corrupts the estimator; real air bounds it. This
+      is why the idealised FV-002 harness (no estimator, constant thrust)
+      never saw the failure. SimBackend also gains fail_rotor + a
+      read_motor_rpm implementation so the same rigid-body plant now
+      exercises the FDI + recovery end to end.
+
+      FALSIFICATION: this recovery is wrong if a single-rotor-out from a
+      settled hover is observed to exceed ~45° tilt, spin past ~10 rad/s,
+      or fail to reach a near-upright landing — on the analytic plant
+      (this oracle) or the gz plant.
+    tags: [verification, falcon, fault-tolerance, rotor-loss, control-allocation, kani, full-loop, v1.114]
+    fields:
+      method: formal-verification
+      steps:
+        - run: cargo kani -p relay-mix-quad --harness verify_mix_rotor_out_bound
+        - run: cargo test -p relay-mix-quad mix_p08_rotor_out_zero_torque_has_no_parasitic_moment
+        - run: cargo test -p relay-mix-quad mix_p08_rotor_out_preserves_moment_direction
+        - run: cargo test -p relay-mix-quad mix_p08_rotor_out_small_command_is_exact
+        - run: cargo test -p falcon-core survives_single_rotor_failure_without_flipping
+        - run: cargo test -p falcon-sitl-gz fullloop_motor_out_monte_carlo_campaign
+        - run: cargo test -p falcon-sitl-gz fault_tolerance_chain_recovers_from_rotor_loss
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P02
+      - type: refines
+        target: FV-FALCON-FAULT-002

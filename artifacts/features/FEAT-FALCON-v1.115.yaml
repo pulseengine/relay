@@ -1,0 +1,36 @@
+artifacts:
+  - id: FEAT-FALCON-v1.115
+    type: feature
+    title: "v1.115 — single-rotor-out FDI noise-robustness"
+    status: implemented
+    release: falcon-v1.115.0
+    description: >
+      IMPLEMENTED (release falcon-v1.115.0). The first of the follow-ups
+      surfaced by the v1.114 rotor-out work — where a parasitic-moment
+      allocation flipped the vehicle on the real plant despite being "verified"
+      and dispersed over thousands of Monte-Carlo trials, because the campaign
+      ran an IDEALISED attitude-only sim (dispersion is breadth, not fidelity).
+
+      SHIPPED in v1.115:
+        - SWREQ-FALCON-FAULT-P03 (verified, FV-FALCON-FAULT-004) — single-rotor
+          -out FDI noise-robustness. The dispersed full-loop campaign exposed a
+          FALSE-ISOLATION under heavier sensor noise (a one-tick command/achieved
+          skew spiked every rotor's residual on an abrupt collective step);
+          fixed by a command-aligned residual + a roll/pitch-only detection gate.
+          Guarded by fdi_noise_robustness_monte_carlo_campaign (0 false
+          isolations / 0 misses / worst 17-step latency at gps σ ≤ 0.18 m).
+          GitHub #255.
+
+      DEFERRED:
+        - SWREQ-FALCON-FAULT-P04 → v1.116 — supervisor-driven controlled landing
+          + the clean gz confirmation run and recordable video (the video is
+          display-dependent). GitHub #256.
+        - Verification-fidelity audit (GitHub #257) — the broader sweep of other
+          safety-behaviour campaigns for the idealised-harness blind spot.
+
+      Builds on v1.114 (FV-FALCON-FAULT-003): the rank-3 allocation, the
+      full-loop recovery oracle, and the dispersed full-loop campaign.
+    tags: [falcon, fault-tolerance, rotor-loss, fdi, robustness, roadmap, v1.115]
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-005

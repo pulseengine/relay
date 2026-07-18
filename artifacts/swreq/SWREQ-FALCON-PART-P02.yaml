@@ -1,0 +1,40 @@
+artifacts:
+  - id: SWREQ-FALCON-PART-P02
+    type: sw-req
+    title: "PART-P02 — actuator-path constraints on the F100 failsafe partition (relay specifies, gale implements)"
+    status: verified
+    release: falcon-v1.124.0
+    description: >
+      The F100 I/O-failsafe partition (gale/gust-owned per jess#144 — NOT a
+      relay component) shall satisfy two constraints that relay's verified
+      control properties depend on, specified here so the cross-repo trace
+      closes: (a) PASS-THROUGH FIDELITY — in normal operation the F100 shall
+      forward the M7 cascade's per-motor commands unmodified (no re-mixing,
+      no per-motor clamping beyond hardware limits): the rank-3 rotor-out
+      allocation (MIX-P08) deliberately commands asymmetric motor sets
+      including zeros, and an independent allocation authority downstream
+      would reintroduce exactly the parasitic-moment class of failure fixed
+      in v1.114; (b) SILENCE SAFE-STATE — on loss of the M7 actuator-command
+      stream (heartbeat timeout, bound to be agreed with gale, proposed
+      ≤ 100 ms) the F100 shall autonomously drive the safe output state
+      (motors off), the hardware backstop for the software Terminate action
+      (FSM-P01's absorbing state) when the flight core itself is the
+      casualty. Verification of the F100 implementation is gale's; relay
+      contributes the conformance vectors (command sequences incl. rotor-out
+      asymmetric sets + the expected pass-through) and consumes gale's
+      evidence in the joint trace (gale#65).
+    tags: [falcon, partition, failsafe, f100, gale, actuator-path, safety, v1.123]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Relay-side: a conformance vector set (nominal, saturated, rotor-out
+        asymmetric incl. zeroed motors) with expected byte-exact pass-through
+        outputs, published as a fixture gale's tests consume; a SITL test
+        that the Terminate action plus a simulated silent-M7 both reach
+        motors-off within the agreed bound. Gale-side (consumed as evidence):
+        the F100 implementation passes the fixture and the silence-timeout
+        test on Renode + hardware.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-005

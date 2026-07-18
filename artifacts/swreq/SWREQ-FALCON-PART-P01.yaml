@@ -1,0 +1,47 @@
+artifacts:
+  - id: SWREQ-FALCON-PART-P01
+    type: sw-req
+    title: "PART-P01 — separable estimator partition (M4) with transport-delay-robust cascade (M7)"
+    status: verified
+    release: falcon-v1.124.0
+    description: >
+      The flight stack shall decompose into an ESTIMATOR partition and a
+      CASCADE partition matching the agreed RT1176 core mapping (jess#144 /
+      jess DD-023: estimator on the M4, flight cascade on the M7): the
+      estimator partition owns IEKF propagate + all measurement updates
+      (gravity, position, magnetometer, yaw, baro) + calibration application,
+      and publishes NavState (q, v, p, b_g, b_a — 16×f32, 64 bytes) as its
+      sole output; the cascade partition (geometric attitude, ADRC, mixer,
+      rotor-out FDI + degraded allocation, failsafe logic) consumes NavState
+      and owns everything actuator-ward. GROUNDED separability facts: both
+      crates are f32-clean (zero f64 — the M4's FPv4-SP suffices; verified
+      2026-07-11), relay-iekf is already its own no_std crate, and the only
+      cross-boundary data is NavState. DELAY ROBUSTNESS is the requirement's
+      teeth: the cascade currently consumes the SAME-TICK estimate, and the
+      MU/RPMsg inter-core hop adds at least one transport delay plus rate
+      decoupling — the partitioned cascade shall remain stable and meet the
+      existing recovery envelopes with the estimator output delayed by up to
+      2 control ticks and jittered by ±1 tick (measured, not asserted).
+      Component builds: the estimator ships as its OWN meld-fused component;
+      relay's WIT worlds reconcile with jess's spar-generated
+      estimator/falcon/failsafe WIT (their TEST-PIX-023) via the committed-
+      artifact drift-gate discipline. Ownership per jess#144: relay decides
+      the component→partition mapping; jess owns the per-core ISA compile +
+      binding (gated on synth float poles #708/#369).
+    tags: [falcon, partition, estimator, iekf, multi-core, rt1176, m4, wit, v1.123]
+    fields:
+      req-type: interface
+      priority: should
+      verification-criteria: >
+        Partition equivalence: the split estimator+cascade, run with zero
+        added delay, reproduces the fused FlightCore trajectory f32-bit-exactly
+        on the SITL plant (same inputs, same outputs). Delay robustness: the
+        full-loop recovery campaigns (hover, rotor-out) pass with NavState
+        delayed 1 and 2 ticks and jittered ±1 tick — dispersed, with the
+        existing tilt/spin bounds. WIT reconcile: relay's estimator component
+        world and jess's spar-generated estimator.wit agree (drift gate,
+        zero diff). f32 cleanliness enforced: a CI grep gate rejects f64 in
+        relay-iekf and falcon-core.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020

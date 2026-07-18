@@ -1,0 +1,21 @@
+[package]
+name = "relay-notch"
+description = "Relay Notch — RPM-tracked harmonic notch filtering for the rate-loop gyro path (PX4 IMU_GYRO_DNF / ArduPilot INS_HNTCH / Betaflight RPM-filter parity). Per-motor biquad notches at the rotation fundamental + 2nd harmonic, center frequencies tracking achieved eRPM; clean unity bypass when RPM telemetry is absent (no filtering is safer than a mistracked notch); Nyquist-clamped per notch. no_std/no_alloc/forbid(unsafe)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+relay-math = { path = "../relay-math" }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

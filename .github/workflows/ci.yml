@@ -59,12 +59,15 @@ jobs:
       # Scope tight: only the v0.1 falcon crates. Workspace-wide
       # clippy lights up pre-existing warnings in cFS crates that
       # are out of v0.1 scope.
+      - name: Float discipline (f32 flight core; f64 only at annotated boundaries)
+        run: ./scripts/check-float-discipline.sh
       - name: Clippy on v0.1 falcon crates
         run: |
           cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
             -p falcon-param -p relay-fsm -p relay-preflight -p relay-calib \
             -p falcon-core -p relay-mix-quad \
             -p relay-arm -p relay-adrc -p relay-geo -p relay-iekf \
+            -p relay-batt -p relay-flowrange -p falcon-gnss-ubx -p relay-notch \
             --all-targets -- -D warnings
 
   test:

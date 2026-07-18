@@ -1,0 +1,39 @@
+artifacts:
+  - id: SWREQ-FALCON-MATHF32-P01
+    type: sw-req
+    title: "MATHF32-P01 — f32-only sin/cos kernels behind the relay-math seam (no flight-path f64)"
+    status: verified
+    release: falcon-v1.125.0
+    description: >
+      The relay-math flight-math seam shall provide sinf/cosf implemented
+      end-to-end in f32 (no f64 anywhere in the call graph), replacing the
+      libm f32-API defaults whose f64 internals (f64 minimax polynomials +
+      rem_pio2f f64 argument reduction) were the ONLY f64 operations left in
+      the shipped flight component (480 ops in 4 libm functions, measured on
+      falcon-flight-v1.123, jess#144). Motivation: the estimator partition
+      runs on the RT1176 Cortex-M4 (FPv4-SP, no double-precision hardware),
+      where so3_exp -> sinf/cosf soft-floats every propagate — a WCET hazard
+      the f32 kernels remove; and it shrinks the libm qualification surface
+      (readiness item 6) toward a single auditable module. Kernel design:
+      Cody-Waite f32 argument reduction (exact for the qualified envelope
+      |x| <= 128) + Cephes single-precision minimax cores on |r| <= pi/4;
+      totality (non-finite -> 0.0); graceful bounded degradation outside the
+      envelope. Every existing relay-math seam caller inherits it with no
+      flight-code edit.
+    tags: [falcon, relay-math, f32, wcet, qualification, m4, v1.125]
+    fields:
+      req-type: non-functional
+      priority: should
+      verification-criteria: >
+        Conformance MEASURED in ulp vs the libm reference across |x| <= 128
+        (4M-point dense sweep): <= 2 ulp inside |x| <= 4pi (every flight
+        caller), <= 8 ulp across the full envelope. Totality: finite output
+        in [-1, 1] for any f32 bit pattern (fuzz). Flight-path identity:
+        sin^2 + cos^2 ~ 1 across the inner envelope. No source f64 in the
+        flight crates (check-float-discipline.sh, gate green). Downstream
+        regression: relay-iekf/relay-geo/relay-notch/falcon-core suites
+        unchanged (the v1.118 golden replay + v1.124 rotor-out/delay
+        campaigns drive so3_exp through real non-Taylor angles).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002

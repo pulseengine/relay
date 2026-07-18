@@ -1,0 +1,45 @@
+artifacts:
+  - id: FV-FALCON-PARAM-003
+    type: sw-verification
+    title: "Parameter persistence — two-slot FRAM commit, CRC records, loud fallback (v1.117)"
+    status: verified
+    release: falcon-v1.117.0
+    description: >
+      Verifies PARAM-P03. Evidence run 2026-07-15 on the shipping tree
+      (post #266 + #271, main f032cb7 lineage): relay-param 17/17 —
+      save→load reboot roundtrip (bit-exact), double-save slot alternation,
+      TORN-COMMIT safety (half-written inactive slot + no selector flip ⇒
+      previous image intact), EXHAUSTIVE all-positions single-byte corruption
+      sweep (every byte of a committed image flipped: no panic, no
+      out-of-schema value ever stored), schema-version bump ⇒ explicit
+      SchemaMismatch reset (never silent reinterpretation), unknown-id +
+      tightened-bounds records counted in the LoadReport (loud, never
+      silent), capacity-too-small as error; plus proptests: random in-schema
+      value roundtrips and random multi-byte corruption never escaping
+      schema bounds.
+
+      Schema safety is COMPOSITIONAL: `persist::load`'s only store mutation
+      is its single `set()` call site, and PARAM-K01/K02 (Kani, CI-enforced
+      via the relay-param matrix entry) prove `set` never lands an
+      out-of-bounds/non-finite value. Direct Kani over the persist layer is
+      CBMC-intractable (nondet through CRC-32, measured 28+20 CPU-min — the
+      relay-traj pattern); the certificate upgrade path is ordeal (#265),
+      documented in kani_proofs.rs.
+
+      Seam per jess#144: byte-addressable NvmBytes over the FM25V02A FRAM
+      (no erase pages ⇒ no wear layer); ArrayNvm is the mock + Renode-stage
+      stand-in until jess's binding (REQ-PIX-015).
+
+      FALSIFICATION: wrong if any NVM content (torn, corrupt, stale-schema,
+      hostile) ever yields a stored parameter outside its schema bounds, or
+      a power cut during commit loses the previously-committed image.
+    tags: [verification, falcon, parameters, persistence, nvm, rotor-loss-adjacent, v1.117]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-param persist_tests
+        - run: cargo test -p relay-param persist_proptests
+        - run: cargo kani -p relay-param --harness verify_out_of_range_never_lands
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PARAM-P03

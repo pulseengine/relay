@@ -1,0 +1,53 @@
+artifacts:
+  - id: FV-FALCON-PART-001
+    type: sw-verification
+    title: "PART-P01/P02 — estimator/cascade partition equivalence, delay robustness, F100 fixtures (v1.124)"
+    status: verified
+    release: falcon-v1.124.0
+    description: >
+      Verification of the partition slice per SWREQ-FALCON-PART-P01 and
+      SWREQ-FALCON-PART-P02.
+
+      Partition equivalence (P01): the SHIPPED v1.118 golden blackbox log
+      replays f32-BIT-EXACTLY through the partitioned core (the
+      pre-partition fixture pins the refactor:
+      blackbox_replay_tests::golden_log_replay_regression), and the
+      partitioned deployment at zero transport delay reproduces the fused
+      trajectory bit-exactly — estimate AND motor stream, 6000 ticks
+      (tests::partitioned_zero_delay_is_bit_exact_with_fused). The
+      boundary is TYPE-ENFORCED: EstimatorPartition's only output is
+      NavState (16xf32); the cascade holds no estimator reference.
+
+      Delay robustness (P01's teeth, MEASURED): PartitionedCore models the
+      MU/RPMsg hop. Hover holds within envelopes with NavState delayed 1
+      and 2 ticks and jittered +/-1 (deterministic LCG; 6 dispersed
+      configs: tests::partitioned_delay_holds_hover), and the ROTOR-OUT
+      recovery keeps the v1.114 bounds — near-level thrust axis, upright
+      touchdown — at delay 2 + jitter across seeds
+      (tests::partitioned_delay_rotor_out_recovers).
+
+      F100 constraints (P02): bench-evidence/fixtures/f100-passthrough-v1.csv
+      carries byte-exact (f32 bit-pattern) pass-through vectors from the
+      REAL mixer — hover, saturated transient, and rank-3 rotor-out rows
+      with the legitimate 00000000 motors a downstream re-mix would
+      destroy — drift-gated by tests::f100_passthrough_fixture_is_current
+      (CRLF-proofed via .gitattributes eol=lf). The software half of the
+      silence safe-state is measured: FSM Terminate reaches motors-off
+      actuation within 100 ms
+      (tests::terminate_reaches_motors_off_within_bound). The gale-side
+      halves (gust pass-through oracle + MU-heartbeat timeout on
+      Renode/hardware) are gale#65 / TEST-PIX-019 evidence, consumed in
+      the joint trace; the WIT reconcile runs on jess's committed drift
+      gate (TEST-PIX-023) once NavState is typed into REQ-PIX-007
+      (jess#144 coordination, 2026-07-16).
+    tags: [verification, falcon, partition, m4, m7, f100, delay, v1.124]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-core
+        - run: cargo test -p falcon-core --release
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PART-P01
+      - type: verifies
+        target: SWREQ-FALCON-PART-P02

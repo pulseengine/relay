@@ -1,0 +1,32 @@
+artifacts:
+  - id: SWREQ-FALCON-FLOAT-P01
+    type: sw-req
+    title: "FLOAT-P01 — f32 flight core with enforced f64 boundary discipline + covariance numerical health"
+    status: verified
+    release: falcon-v1.123.0
+    description: >
+      (a) Flight-partition code (the M4/M7 crates) shall contain no f64
+      arithmetic outside explicitly annotated geodetic/API boundary
+      modules — the M4's FPv4-SP FPU has no double-precision hardware, so
+      unintended f64 is a WCET hazard, while absolute lat/lon in f32 would
+      quantize at ~0.6 m (the boundary modules exist precisely for that).
+      The rule shall be CI-enforced, not conventional. (b) The estimator's
+      error covariance shall remain numerically healthy under f32
+      arithmetic for ANY input: every diagonal finite and within
+      [1e-9, 1e6] after each measurement update, with corrupt-row
+      correlations cleared and every healing event counted loudly.
+      Raised by external design review (2026-07); design rationale in
+      SWDD-FALCON-FLOAT-001.
+    tags: [falcon, float-discipline, f32, iekf, numerical-health, v1.123]
+    fields:
+      req-type: non-functional
+      priority: must
+      verification-criteria: >
+        Gate green in CI on every PR and negative-tested (a seeded f64
+        fails it). Kani post-condition proof over all covariance contents
+        incl. NaN/±∞. Unit tests for negative/NaN diagonal healing and
+        correlation clearing. A 50k-cycle healthy run with ZERO floor
+        hits (behavior-neutral); pre-existing estimator suites unchanged.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002

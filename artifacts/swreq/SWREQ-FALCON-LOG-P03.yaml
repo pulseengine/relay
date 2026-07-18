@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-LOG-P03
+    type: sw-req
+    title: "LOG-P03 — bit-exact estimator replay from flight logs"
+    status: verified
+    release: falcon-v1.118.0
+    description: >
+      A host-side replay harness shall re-run the PRODUCTION IEKF (same
+      crate, same code) from a LOG-P02 flight log and reproduce the logged
+      estimator outputs BIT-EXACTLY (f32-identical state trajectory). This is
+      ArduPilot's Replay capability — the single best estimator-regression
+      tool in the field, and the one most aligned with this project's
+      oracle-gated methodology: every real flight becomes a regression
+      fixture, and any estimator change can be validated against the entire
+      accumulated flight archive before it ships (a change that alters
+      replayed output on a past flight is a MEASURED behavioral diff, not an
+      opinion). Requires deterministic estimator execution (no wall-clock, no
+      global state) — which the no_std IEKF already satisfies; the work is
+      the log→input adapter and the archival diff harness.
+    tags: [falcon, logging, replay, estimator, regression, verification-fidelity, v1.118]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Round-trip: a SITL flight logged via LOG-P02, replayed, reproduces
+        the logged state trajectory f32-bit-exactly (zero tolerance). CI: the
+        replay harness runs against a checked-in golden log; any estimator PR
+        that changes replayed output fails until the golden is deliberately
+        regenerated (a reviewed, explicit act). Determinism: two replays of
+        the same log are byte-identical.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-021

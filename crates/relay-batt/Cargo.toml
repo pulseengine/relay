@@ -1,0 +1,18 @@
+[package]
+name = "relay-batt"
+description = "Relay Batt — verified battery state estimation: coulomb-counted consumption (mAh, drift-bounded), sag-compensated resting voltage (I·R with online internal-resistance estimate), OCV-based state-of-charge cross-check, and failsafe threshold evaluation with a flagged voltage-only fallback when current sensing is absent. no_std/no_alloc/forbid(unsafe). Closes the PX4 BAT1_R_INTERNAL / ArduPilot sag-compensated-failsafe parity gap (BATTERY-P02, v1.120)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

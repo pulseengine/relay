@@ -1,0 +1,37 @@
+artifacts:
+  - id: FV-FALCON-LOG-002
+    type: sw-verification
+    title: "Flight blackbox — CRC-framed records, truncation-safe scan, counted drops (v1.118)"
+    status: verified
+    release: falcon-v1.118.0
+    description: >
+      Verifies LOG-P02. Evidence run 2026-07-15 on the shipping tree
+      (post #273): relay-log blackbox_tests 4/4 (within the crate's 10/10) —
+      (1) Tick record encode/decode BIT-EXACT across all present-flag
+      combinations (IMU, optional GNSS/mag/heading/baro/RPM exactly as the
+      flight loop saw them, motors, estimator q/v/p + covariance-diagonal
+      summary); (2) a mixed Boot+Tick+Event stream TRUNCATED AT EVERY BYTE
+      OFFSET yields exactly the complete records before the cut, with
+      consumed-bytes landing on the preceding record boundary (the
+      power-loss contract, exhaustively); (3) an every-position corruption
+      sweep stops the scanner cleanly — total decode, never out-of-bounds,
+      never a panic; (4) the rate-budgeted writer COUNTS over-budget and
+      media-rejected appends as drops (never silent). The BlockLog seam
+      (whole-record append or MediaRejected) is the relay half of the
+      jess#144 / REQ-PIX-022 storage split; jess owns media flush ordering +
+      block-level torn-record detectability. Boot carries the schema version
+      + parameter snapshot; Event carries mode/failsafe transitions — the
+      supervised demo (FV-FALCON-LOG-003's steps) shows all three record
+      types surviving a full flight scan.
+
+      FALSIFICATION: wrong if a stream cut or corrupted at any byte yields a
+      record that was not fully written, a panic, or an out-of-bounds read —
+      or if any dropped record is not counted.
+    tags: [verification, falcon, logging, blackbox, forensics, v1.118]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-log blackbox_tests
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LOG-P02

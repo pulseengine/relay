@@ -1,0 +1,21 @@
+artifacts:
+  - id: SYSREQ-FALCON-021
+    type: system-req
+    title: "Field-operable flight infrastructure — configuration persistence, flight logging/replay, and operator telemetry"
+    status: approved
+    description: >
+      The flight system shall be operable as a REAL fielded vehicle, not only
+      as a simulation target: configuration (parameters, calibration) shall
+      survive power cycles; every flight shall produce a persistent, replayable
+      log sufficient to re-run the state estimator bit-exactly and to diagnose
+      a crash post-hoc; and the operator shall receive continuous telemetry
+      (state, health, energy) with the ability to adjust tuning parameters in
+      flight. Derived from the 2026-07 gap analysis against PX4 v1.16 /
+      ArduPilot 4.6: these "boring" infrastructure capabilities are the
+      load-bearing ring around the verified control core — their absence, not
+      control quality, is what blocks field operations. First hardware target:
+      Pixhawk 6X-RT + Holybro X500 V2 (see FEAT-FALCON-first-flight-hw).
+    tags: [falcon, infrastructure, field-operations, parameters, logging, telemetry, v1.116]
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001

@@ -197,3 +197,33 @@ v1.60 lands the relay-side of the inter-core comms carrier (for jess / Pixhawk 6
 _video: falcon-v1.60.mp4_
 
 ---
+
+---
+
+## v1.117
+**Title:** Falcon v1.117 — A Motor Dies Mid-Flight | a formally-verified drone flight stack
+
+A quadcopter loses one of its four motors mid-hover — no warning, zero thrust. The verified falcon flight core detects the failure in milliseconds from ESC RPM feedback (a CUSUM detector on commanded-vs-achieved rotor speed), hands the vehicle to the flight supervisor, and lands it where it stands: yaw is deliberately given up (a 3-rotor quad spins — that's physics, so the controller embraces it), a rank-3 control allocation keeps the thrust axis level through the spin, and a lift-deficit-compensated velocity law flies it down to an upright touchdown. Then the motors are provably off — the state machine's disarmed state now commands zero actuation, not just claims it.
+
+Every layer of the cascade is proof-carrying: the Invariant-EKF estimator, geometric SE(3) attitude control, ADRC inner loop, and the Kani-verified mixer with the rotor-out allocator. The recovery isn't a demo one-off: 150 randomized rotor-failure trials in simulation — random rotor, altitude, aerodynamics, sensor noise — landed 150 times with zero crashes, worst approach sink 0.94 m/s.
+
+Falsifiable, as always: this release is wrong if a rotor-out from settled hover exceeds 45° of tilt, spins past 10 rad/s, or fails to land upright. Footage: Gazebo SITL flying the production flight code, unmodified.
+
+#drone #autopilot #faulttolerance #formalverification #rust #robotics
+
+_video: falcon-v1.117-narrated.mp4 (af_sky) / falcon-v1.117.mp4 (captions only)_
+
+---
+
+## v1.118–v1.122 (combined arc)
+**Title:** Falcon v1.118→v1.122 — The Vehicle Grew Instruments | five verified releases in one arc
+
+Five releases that turned a proven flight stack into a field-ready instrument — and every claim on screen is machine-checked. v1.118: a crash-safe flight blackbox whose estimator replay is f32 bit-EXACT (a checked-in golden log gates CI — every flight becomes a permanent regression test). v1.119: GCS telemetry, six MAVLink messages byte-exact against pymavlink reference vectors, with a link scheduler whose heartbeat provably never starves, plus bounded in-flight tuning. v1.120: a sag-compensated, coulomb-counted battery estimator — a 300 A punch that sags the pack through the old voltage threshold no longer false-triggers, and a rebounding empty pack can no longer hide. v1.121: dual-GPS blending with one-interval failover and a latched divergence flag, plus a TF02 rangefinder that lands the vehicle within 15 cm of TRUE ground while barometer and GPS both lie by two meters. v1.122: an RPM-tracked harmonic notch filter (bit-exact bypass proven, <10° phase cost measured) and a 19-row pre-arm check table whose monotonicity is a theorem — adding a failing check can NEVER allow arming.
+
+Every data animation in the video is rendered from the actual test traces in the repo — nothing is illustrative. The proofs caught bugs the tests missed: an ∞−∞ NaN in the GPS blend weights and a float rounding escape in the rangefinder decode. All five releases are tagged on green CI and cosign-signed.
+
+Falsifiable, as always: this arc is wrong if a replayed log diverges from its recording by one bit, if HEARTBEAT misses its rate on a half-budget link, if a sag punch trips the failsafe on a half-full pack, if a dual-GPS failover steps the estimate beyond the healthy receiver's accuracy, or if the notch bank fails to bypass bit-exactly without RPM telemetry.
+
+#drone #autopilot #formalverification #kani #rust #robotics #embedded #gps #battery #filtering
+
+_video: falcon-v1.118-122-narrated.mp4 (af_sky, data segments rendered from real test traces)_

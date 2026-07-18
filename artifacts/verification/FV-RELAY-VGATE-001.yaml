@@ -1,0 +1,59 @@
+artifacts:
+  - id: FV-RELAY-VGATE-001
+    type: sw-verification
+    title: "Verification-gate integrity — orphaned-proof cross-check + two-commit rule (v1.116)"
+    status: verified
+    release: falcon-v1.116.0
+    description: >
+      Verifies VGATE-P01. Evidence, run 2026-07-11 on main ac57b2c (this
+      artifact lands in a SEPARATE, code-free PR — the first exercise of the
+      very two-commit rule it verifies):
+
+      (1) ORPHANED-PROOF CROSS-CHECK. A dry-run of the gate script over the
+      rotor-loss scope reports `enforced-by-kani-gate` for every in-matrix
+      `cargo kani -p` step (FV-FALCON-FAULT-002/003 observed) and exits 0.
+      Negative case established during development: before the relay-traj
+      waiver existed, the same cross-check FAILED the sweep with "ORPHANED
+      PROOF: crate 'relay-traj' is not in the kani.yml matrix" — the detector
+      finds real orphans (that finding created issue #260). Fail-closed: an
+      unreadable kani.yml yields an empty matrix, which fails every kani
+      step loudly rather than passing silently.
+
+      (2) WAIVER LOUDNESS. The falcon-scope dry-run reports exactly 2
+      `WAIVED-kani-gate` lines (relay-traj's two harnesses), each carrying
+      the retirement issue #260 — the debt is visible in every run, never a
+      silent skip.
+
+      (3) TWO-COMMIT RULE, DETECTION. `check-verification-independence.sh
+      23fc92f` (the v1.115 range, which changed falcon-core/campaign code
+      AND added `status: verified` lines in the same PR) exits non-zero
+      with both halves of the violation listed — the detector catches the
+      exact historical pattern the audit flagged.
+
+      (4) TWO-COMMIT RULE, COMPLIANCE. The same check against an empty
+      range exits 0 ("two-commit rule: OK"), and passed live in CI on
+      PR #263 itself (code-changed=no, terminal-status-added=no) as the
+      gate's first step.
+
+      LIVE CI EXERCISE: PR #263's Verification-gate run executed both
+      mechanisms on the real runner (two-commit rule OK in <1 s;
+      enforced-by-kani-gate lines throughout the sweep) before the sweep's
+      pre-existing duration growth hit the job timeout — the mechanisms
+      themselves ran green; the scoped rerun passed 55/55 (#262 tracks the
+      sweep-duration fix).
+
+      FALSIFICATION: this gate integrity is wrong if a PR citing an
+      out-of-matrix, un-waived kani proof passes the gate, or if a PR that
+      changes crates/examples code and promotes an artifact to
+      verified/accepted in the same change merges without the override
+      being visible in its CI log.
+    tags: [verification, relay, verification-gate, hygiene, process-integrity, v1.116]
+    fields:
+      method: automated-test
+      steps:
+        - run: python3 scripts/run-falcon-verification.py --filter '(has-tag "rotor-loss")' --dry-run
+        - run: scripts/check-verification-independence.sh 23fc92f && exit 1 || true
+        - run: scripts/check-verification-independence.sh HEAD
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-VGATE-P01

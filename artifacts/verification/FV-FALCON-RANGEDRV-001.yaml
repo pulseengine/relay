@@ -1,0 +1,51 @@
+artifacts:
+  - id: FV-FALCON-RANGEDRV-001
+    type: sw-verification
+    title: "RANGEDRV-P01 — TF02-Pro wire decode + terrain-relative landing assist (v1.121)"
+    status: verified
+    release: falcon-v1.121.0
+    description: >
+      Verification of the rangefinder slice per SWREQ-FALCON-RANGEDRV-P01.
+
+      Decode conformance: the 9-byte Benewake frame layout (0x59 0x59
+      header, distance cm LE at bytes 2-3, strength LE at 4-5, checksum =
+      low 8 bits of sum(bytes 0..7)) is cross-validated against TWO
+      independent open-source parsers — ArduPilot AP_RangeFinder_Benewake
+      and PX4 tfmini_parser — whose quoted semantics are pinned in the
+      module doc, plus a hand-worked concrete vector
+      (relay-flowrange tf02::tests::decodes_documented_frame_arithmetic;
+      external-reference rule: self-round-trip proves robustness, not
+      conformance). Quality gating IN the decoder: low-strength (< 60 or
+      65535), sentinel (0xFFFF) and out-of-envelope (outside 10..=4000 cm)
+      returns never reach the caller (tests::quality_gate_rejects);
+      streaming resync through garbage and false headers
+      (tests::scanner_resyncs_through_garbage, scanner_skips_false_header).
+
+      Kani FLOWRANGE-K03/K04: decode totality + gate soundness over ALL
+      9-byte patterns; scanner totality with bounded consumption. K03
+      CAUGHT a float defect during development: 10 x 0.01f32 =
+      0.099999994 escaped the 0.1 m envelope bound; fixed by switching to
+      division (correctly-rounded quotient makes the bounds exact).
+
+      Landing assist (terrain-relative AGL, the PX4 terrain-estimator
+      role — deliberately NOT z-state fusion, where three absolute
+      references would fight): with baro AND GNSS vertical both lying 2 m
+      high, touchdown fires within 15 cm of TRUE ground with the range
+      assist and provably does NOT without it (negative control kept:
+      falcon-core tests::biased_baro_range_assisted_touchdown). An
+      obstacle overflight's sudden short return is REJECTED by the ±3 m
+      innovation gate and the altitude estimate does not fold
+      (tests::obstacle_overflight_does_not_fold_altitude). The previously-
+      orphaned relay_flowrange::range_to_altitude (tilt compensation +
+      band gating, Kani FLOWRANGE-K01) is now the consuming path.
+    tags: [verification, falcon, rangefinder, tf02-pro, landing, kani, v1.121]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p relay-flowrange
+        - run: cargo test -p relay-flowrange --release
+        - run: cargo test -p falcon-core
+        - run: cargo kani -p relay-flowrange
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-RANGEDRV-P01

@@ -140,6 +140,22 @@ pub fn replay<F: FnMut(LogEntry)>(bytes: &[u8], mut sink: F) -> usize {
     n
 }
 
+pub mod blackbox;
+
+/// CRC-32 (IEEE, bitwise, table-free) — shared by the blackbox record framing.
+pub(crate) fn crc32(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &b in data {
+        crc ^= b as u32;
+        let mut i = 0;
+        while i < 8 {
+            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            i += 1;
+        }
+    }
+    !crc
+}
+
 #[cfg(kani)]
 mod kani_proofs;
 
@@ -200,6 +216,129 @@ mod tests {
         });
         assert_eq!(n, 2);
         assert_eq!(seen, [10, 20]);
+    }
+}
+
+#[cfg(test)]
+mod blackbox_tests {
+    extern crate std;
+    use super::blackbox::*;
+    use std::vec::Vec;
+
+    struct VecLog(Vec<u8>, Option<usize>); // bytes, fail-after budget
+    impl BlockLog for VecLog {
+        fn append(&mut self, r: &[u8]) -> Result<(), MediaRejected> {
+            if let Some(cap) = self.1 {
+                if self.0.len() + r.len() > cap {
+                    return Err(MediaRejected);
+                }
+            }
+            self.0.extend_from_slice(r);
+            Ok(())
+        }
+    }
+
+    fn tick(i: u32) -> TickRecord {
+        let f = i as f32;
+        TickRecord {
+            gyro: [0.01 * f, -0.02, 0.005],
+            accel: [0.1, 0.0, -9.81 + 0.01 * f],
+            pos: (i % 5 == 0).then(|| [1.0 + f, 2.0, -2.0]),
+            mag: None,
+            heading: (i % 3 == 0).then_some(0.9),
+            baro: Some(-2.0 - 0.001 * f),
+            rpm: (i % 2 == 0).then(|| [4000 + i as i32, 4001, 4002, 4003]),
+            motors: [0.5, 0.51, 0.49, 0.5],
+            est_q: [1.0, 0.0, 0.001 * f, 0.0],
+            est_v: [0.0, 0.1, -0.05],
+            est_p: [f, 2.0, -2.0],
+            cov: [0.01, 0.02 + 0.001 * f, 0.03],
+        }
+    }
+
+    #[test]
+    fn tick_roundtrip_bit_exact_all_flag_combos() {
+        for i in 0..30u32 {
+            let t = tick(i);
+            let mut buf = [0u8; TICK_MAX];
+            let n = t.encode(&mut buf);
+            let mut got = None;
+            let (cnt, used) = scan(&buf[..n], |r| {
+                assert_eq!(r.rec_type, REC_TICK);
+                got = TickRecord::decode(r.payload);
+            });
+            assert_eq!((cnt, used), (1, n));
+            assert_eq!(got.unwrap(), t, "tick {i}");
+        }
+    }
+
+    #[test]
+    fn stream_truncated_at_every_byte_yields_only_complete_records() {
+        // Build a stream: boot + 20 ticks + an event.
+        let mut stream = Vec::new();
+        let mut buf = [0u8; 1024];
+        let n = encode_boot(&mut buf, 7, &[(*b"MC_ROLL_P\0\0\0\0\0\0\0", 6.5)]).unwrap();
+        stream.extend_from_slice(&buf[..n]);
+        let mut boundaries = std::vec![stream.len()];
+        for i in 0..20 {
+            let mut tb = [0u8; TICK_MAX];
+            let n = tick(i).encode(&mut tb);
+            stream.extend_from_slice(&tb[..n]);
+            boundaries.push(stream.len());
+        }
+        let mut eb = [0u8; 16];
+        let n = encode_event(&mut eb, 3, 1.5);
+        stream.extend_from_slice(&eb[..n]);
+        boundaries.push(stream.len());
+
+        // Cut at EVERY byte offset: decoded count == records fully before the
+        // cut; consumed bytes == that record boundary; never a panic.
+        for cut in 0..=stream.len() {
+            let expect = boundaries.iter().filter(|&&b| b <= cut).count();
+            let (cnt, used) = scan(&stream[..cut], |_| {});
+            assert_eq!(cnt, expect, "cut at {cut}");
+            let expect_used = boundaries.iter().filter(|&&b| b <= cut).max().copied().unwrap_or(0);
+            assert_eq!(used, expect_used, "cut at {cut}");
+        }
+    }
+
+    #[test]
+    fn corrupt_byte_stops_cleanly_never_out_of_bounds() {
+        let mut stream = Vec::new();
+        for i in 0..5 {
+            let mut tb = [0u8; TICK_MAX];
+            let n = tick(i).encode(&mut tb);
+            stream.extend_from_slice(&tb[..n]);
+        }
+        for pos in 0..stream.len() {
+            let mut evil = stream.clone();
+            evil[pos] ^= 0xFF;
+            let (cnt, used) = scan(&evil, |r| {
+                // Whatever still decodes must decode TOTALLY (no panic).
+                if r.rec_type == REC_TICK {
+                    let _ = TickRecord::decode(r.payload);
+                }
+            });
+            assert!(cnt <= 5 && used <= evil.len());
+        }
+    }
+
+    #[test]
+    fn writer_budget_drops_are_counted_never_silent() {
+        // Budget fits exactly one tick record per tick.
+        let mut w = BlackboxWriter::new(VecLog(Vec::new(), None), TICK_MAX);
+        let t = tick(0);
+        let mut buf = [0u8; TICK_MAX];
+        let n = t.encode(&mut buf);
+        w.begin_tick();
+        w.append(&buf[..n]); // fits
+        w.append(&buf[..n]); // over budget -> dropped
+        assert_eq!((w.written, w.dropped), (1, 1));
+        // Media failure also counts as a drop.
+        let mut w2 = BlackboxWriter::new(VecLog(Vec::new(), Some(10)), TICK_MAX);
+        w2.begin_tick();
+        w2.append(&buf[..n]);
+        assert_eq!((w2.written, w2.dropped), (0, 1));
     }
 }
 

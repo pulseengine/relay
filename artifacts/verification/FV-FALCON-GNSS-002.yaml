@@ -1,0 +1,42 @@
+artifacts:
+  - id: FV-FALCON-GNSS-002
+    type: sw-verification
+    title: "GNSS-P02 — dual-M9N selection/blending/failover + divergence integrity (v1.121)"
+    status: verified
+    release: falcon-v1.121.0
+    description: >
+      Verification of the dual-receiver GNSS slice per SWREQ-FALCON-GNSS-P02.
+
+      Dispersion campaign (CI-sized, 40 LCG-dispersed trials over fault
+      type and onset — dropout, accuracy collapse, divergence walk,
+      nominal): the divergence flag fires in 100% of walk trials with ZERO
+      false flags in the others, and no trial steps the position estimate
+      discontinuously (max inter-cycle step < 1.5 m at 5000 steps/trial)
+      (falcon-core tests::dual_gnss_dispersion_campaign). Failover within
+      one fix interval with the estimate held (< 1 m step, no estimator
+      reset: tests::dual_gnss_failover_holds_estimate). Divergence latches,
+      blocks pre-arm, and the selector keeps the estimator-consistent
+      receiver (tests::gnss_divergence_latches_and_blocks_arming; selector
+      unit tests in falcon-gnss-ubx dual::tests cover blend weighting,
+      accuracy-collapse and innovation-jump disqualification, transient
+      non-latch, dual-loss no-fix).
+
+      Kani GNSS-K05 (falcon-gnss-ubx kani_proofs.rs): selector totality —
+      every NedFix field nondet including NaN/∞ positions and accuracies —
+      never panics, never emits a non-finite selection. The harness CAUGHT
+      a real defect during development: a denormal reported accuracy
+      overflowed the 1/acc² blend weight into ∞−∞ = NaN; fixed with the
+      MIN_ACC_M floor + MAX_POS_M sanity bound now in the health gate.
+      The previously-orphaned relay-iekf SpoofMonitor is wired (position
+      innovation per GNSS update) and nav_compromised (spoof ∨ divergence)
+      blocks arming.
+    tags: [verification, falcon, gnss, dual-receiver, m9n, kani, v1.121]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-gnss-ubx
+        - run: cargo test -p falcon-core
+        - run: cargo kani -p falcon-gnss-ubx
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-GNSS-P02

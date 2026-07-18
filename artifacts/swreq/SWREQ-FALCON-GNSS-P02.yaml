@@ -1,0 +1,34 @@
+artifacts:
+  - id: SWREQ-FALCON-GNSS-P02
+    type: sw-req
+    title: "GNSS-P02 — dual-receiver blending and failover (2× u-blox M9N)"
+    status: verified
+    release: falcon-v1.121.0
+    description: >
+      The estimator input shall support TWO GNSS receivers (the first
+      vehicle carries 2× Holybro M9N): (a) health scoring per receiver
+      (fix type, satellite count, reported accuracy, innovation consistency
+      against the IEKF); (b) selection or inverse-variance blending of the
+      healthy fix(es); (c) FAILOVER within one fix interval when the active
+      receiver degrades (loss, accuracy collapse, or a jump the innovation
+      gate rejects), without a position-estimate step discontinuity larger
+      than the healthy receiver's accuracy; (d) divergence between the two
+      receivers beyond a bound shall raise a flag consumed by the spoof
+      monitor (SpoofMonitor) and pre-arm checks. This is the AP-style
+      GPS_AUTO_SWITCH / blending capability the single-lane input lacks.
+    tags: [falcon, gnss, dual-receiver, m9n, redundancy, failover, v1.121]
+    fields:
+      req-type: safety
+      priority: should
+      verification-criteria: >
+        Dispersed SITL campaign with two simulated receivers: injected
+        single-receiver dropout, accuracy collapse, and jump faults ⇒ the
+        blended output tracks truth within the healthy receiver's accuracy,
+        failover < 1 fix interval, zero estimator resets. Divergence between
+        receivers beyond the bound raises the flag in 100% of injected spoof
+        trials, zero false flags in nominal trials. Kani: selector totality
+        (any pair of inputs incl. non-finite yields a valid selection or a
+        no-fix decision, never NaN).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-018
