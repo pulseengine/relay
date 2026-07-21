@@ -1,0 +1,20 @@
+# Machine-checked floating-point error-bound proofs for relay-math's flight
+# kernels (rules_rocq_rust#37/#41). Each `.gappa` states a rounding bound;
+# `gappa -Bcoq` emits a Flocq/Rocq certificate that gappa_proof kernel-checks
+# with coqc (Gappa's own success is never trusted — rivet CC-002).
+
+load("@rules_rocq_rust//rocq:defs.bzl", "gappa_proof", "rocq_proof_test")
+
+# MATHF32-P03 — the sin-polynomial evaluation is faithful to its exact
+# mathematics over the reduced range (rounding-error layer).
+gappa_proof(
+    name = "sin_poly_rounding",
+    src = "sin_poly_rounding.gappa",
+    visibility = ["//visibility:public"],
+)
+
+rocq_proof_test(
+    name = "sin_poly_rounding_test",
+    srcs = [],
+    deps = [":sin_poly_rounding"],
+)
