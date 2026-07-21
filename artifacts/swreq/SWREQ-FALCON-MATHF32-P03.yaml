@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MATHF32-P03
     type: sw-req
     title: "MATHF32-P03 — machine-checked rounding-error bound for the f32 sin-polynomial evaluation"
-    status: implemented
+    status: verified
     release: falcon-v1.127.0
     description: >
       The f32 sin-polynomial evaluation in relay-math (the Horner core of
