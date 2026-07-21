@@ -48,7 +48,10 @@ jobs:
     # surfaces as "cancelled", which reads like a failure — the verification
     # itself has never been failing when this trips. Real fix on file: #262
     # (named-test steps shrink the sweep) + runner disk pressure.
-    timeout-minutes: 60
+    # 90 (was 60): a legit full sweep measured 45m21s (2026-07-11) but a
+    # loaded self-hosted runner tipped it to 61m and FALSE-CANCELLED green
+    # Dependabot PRs (2026-07-21). Headroom, not a slower gate.
+    timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
@@ -80,6 +83,44 @@ jobs:
         shell: bash
         run: scripts/check-verification-independence.sh "$BASE_SHA"
 
+      # ── Scope fast-path (2026-07-21) ─────────────────────────────────
+      # The falcon verification sweep (~370 steps, ~45m) only reflects
+      # changes to code, deps, rivet artifacts, arch/interfaces, or the
+      # gate itself. A PR touching NONE of those (docs, other workflow
+      # files, bench-evidence, a Dependabot GitHub-Action pin) has nothing
+      # for this gate to verify — running the full sweep on it only burns
+      # runner time and, on a loaded runner, false-cancels a green PR.
+      # Compute run_full from the PR diff; FAIL-SAFE to true (verify) when
+      # the base cannot be determined (e.g. workflow_dispatch).
+      - name: Scope check (does this PR need the full sweep?)
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -z "${BASE_SHA:-}" ]; then
+            echo "no base sha (manual run) — running full sweep"
+            echo "run_full=true" >>"$GITHUB_OUTPUT"; exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BASE_SHA"...HEAD || echo "__diff_failed__")
+          if [ "$CHANGED" = "__diff_failed__" ]; then
+            echo "diff failed — fail-safe to full sweep"
+            echo "run_full=true" >>"$GITHUB_OUTPUT"; exit 0
+          fi
+          # Verification-relevant paths: code, workspace deps, rivet
+          # artifacts, architecture/interfaces, the gate script + this
+          # workflow file. Anything else is out of this gate's scope.
+          if printf '%s\n' "$CHANGED" | grep -qE \
+            '^(crates/|artifacts/|spar/|wit/|Cargo\.toml|Cargo\.lock|scripts/run-falcon-verification\.py|scripts/check-verification-independence\.sh|\.github/workflows/verification-gate\.yml)'; then
+            echo "verification-relevant files changed — full sweep"
+            printf '%s\n' "$CHANGED" | grep -E '^(crates/|artifacts/|spar/|wit/|Cargo\.|scripts/|\.github/workflows/verification-gate)' | head
+            echo "run_full=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "no verification-relevant files changed — FAST-PASS (nothing to verify)"
+            printf 'changed:\n%s\n' "$CHANGED"
+            echo "run_full=false" >>"$GITHUB_OUTPUT"
+          fi
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -92,11 +133,13 @@ jobs:
       # inputs into run: blocks (PR body is bound via env: + sanitised
       # before reaching the script).
       - name: Install cargo-llvm-cov
+        if: steps.scope.outputs.run_full == 'true'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 
       - name: Install rivet v0.19.0 (pinned; skip if cached)
+        if: steps.scope.outputs.run_full == 'true'
         shell: bash
         # PINNED (was unpinned --git main): every push to rivet master forced a
         # cold recompile here — the OOM-prone step. Pinning to a tag means the
@@ -121,6 +164,7 @@ jobs:
       # via GITHUB_OUTPUT (which is sanitized).
       - name: Pick verification filter (per-PR override via body)
         id: pick
+        if: steps.scope.outputs.run_full == 'true'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         shell: bash
@@ -137,6 +181,7 @@ jobs:
 
       - name: Run falcon verification gate
         id: verify
+        if: steps.scope.outputs.run_full == 'true'
         continue-on-error: true
         env:
           FILTER: ${{ steps.pick.outputs.filter }}
@@ -155,7 +200,7 @@ jobs:
             --markdown | tee verification-output.md
 
       - name: Upload verification output
-        if: always()
+        if: always() && steps.scope.outputs.run_full == 'true' 
         uses: actions/upload-artifact@v7
         with:
           name: verification-output
@@ -168,7 +213,7 @@ jobs:
         # hiccup (e.g. `gh` absent on a self-hosted runner) must NEVER fail the
         # gate. Surfaced by the v1.55 smithy migration (gh is GitHub-hosted-only).
         continue-on-error: true
-        if: github.event_name == 'pull_request' && always()
+        if: github.event_name == 'pull_request' && always() && steps.scope.outputs.run_full == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -185,7 +230,9 @@ jobs:
             --body-file verification-summary.md
 
       - name: Fail job if any verification artifact failed
-        if: steps.verify.outcome != 'success'
+        # Fast-pass path (run_full=false): nothing was verified and nothing
+        # can have failed — the job succeeds, satisfying the required check.
+        if: steps.scope.outputs.run_full == 'true' && steps.verify.outcome != 'success'
         shell: bash
         run: |
           echo "::error::One or more falcon verification artifacts failed; see the sticky PR comment"
