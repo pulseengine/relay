@@ -429,7 +429,7 @@ jobs:
       # nix-build) + setup-bazel — same as the cascade CI job. Without these the
       # bazel build aborts with "nix-build not found in PATH".
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@a7ad9c4f0c65208097f4d34f3cfa1913b80cce5c # pinned (was @main) — supply-chain
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # pinned (was @main) — supply-chain
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@5483a91b6e3ffac6092848f1dd7eafcfad203d80 # v0.14.0 pinned
