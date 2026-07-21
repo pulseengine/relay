@@ -1,0 +1,87 @@
+name: Rocq
+
+# Kernel-checks the Rocq/Coq proofs under proofs/rocq/ AND the machine-checked
+# floating-point error-bound proofs under proofs/gappa/ (Gappa -> Flocq/Rocq,
+# coqc-verified) via rules_rocq_rust (Bazel). Both sets were authored +
+# locally kernel-verified but NEVER gated in CI — the same orphaned-proof gap
+# that left the Kani harnesses unenforced until v1.104 and the Lean proofs
+# until lean.yml. This makes `bazel test //proofs/rocq:all //proofs/gappa:all`
+# a required check so a rules_rocq_rust / Coq / Gappa toolchain bump or an
+# edit that breaks a proof (or loosens a proven bound) cannot land silently.
+#
+# Separate workflow (not the cascade Bazel job): the first run fetches the
+# Rocq + Flocq + Gappa + Coq-Interval toolchain via nix — heavier than the
+# component-model cascade build, and it should gate on its own verdict.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: rocq-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  rocq:
+    name: Rocq + Gappa proofs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@v7
+        with:
+          path: relay
+
+      - name: Checkout rules_rocq_rust
+        uses: actions/checkout@v7
+        with:
+          repository: pulseengine/rules_rocq_rust
+          path: rules_rocq_rust
+
+      # MODULE.bazel local_path_overrides the sibling PulseEngine rules repos;
+      # the wider MODULE graph (crate_universe et al.) may reference them, so
+      # check out the ones it resolves to keep the bazel test from failing on
+      # a missing sibling (same pattern as lean.yml).
+      - name: Checkout rules_wasm_component
+        uses: actions/checkout@v7
+        with:
+          repository: pulseengine/rules_wasm_component
+          path: rules_wasm_component
+
+      - name: Checkout rules_verus
+        uses: actions/checkout@v7
+        with:
+          repository: pulseengine/rules_verus
+          path: rules_verus
+
+      - name: Checkout rules_lean
+        uses: actions/checkout@v7
+        with:
+          repository: pulseengine/rules_lean
+          path: rules_lean
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/lib/jvm "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@a7ad9c4f0c65208097f4d34f3cfa1913b80cce5c # pinned — supply-chain
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.14.0
+        with:
+          bazelisk-cache: true
+          disk-cache: bazel
+          repository-cache: true
+
+      - name: Kernel-check every Rocq + Gappa proof
+        working-directory: relay
+        # :all is bazel's implicit all-rules target — every rocq_library /
+        # rocq_proof_test / gappa_proof in the package, so a newly added proof
+        # is gated the moment its BUILD target lands.
+        run: bazel test //proofs/rocq:all //proofs/gappa:all --test_output=errors
