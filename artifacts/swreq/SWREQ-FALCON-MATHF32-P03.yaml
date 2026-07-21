@@ -1,0 +1,42 @@
+artifacts:
+  - id: SWREQ-FALCON-MATHF32-P03
+    type: sw-req
+    title: "MATHF32-P03 — machine-checked rounding-error bound for the f32 sin-polynomial evaluation"
+    status: implemented
+    release: falcon-v1.127.0
+    description: >
+      The f32 sin-polynomial evaluation in relay-math (the Horner core of
+      sin_poly) shall carry a MACHINE-CHECKED floating-point rounding-error
+      bound, not only the exhaustive empirical bound (MATHF32-P02). Over the
+      reduced range r in [-0.8, 0.8] (the interval the Cody-Waite reduction
+      clamps to, containing [-pi/4, pi/4]), the f32 Horner evaluation shall
+      differ from the exact real value of the SAME polynomial (identical f32
+      coefficients, no rounding) by at most 2^-24 — one ulp at unit
+      magnitude. The bound is established by Gappa (gappa -Bcoq) and
+      KERNEL-CHECKED by coqc on the emitted Flocq/Rocq proof term; Gappa's
+      own certificate-generation success is never trusted (rules_rocq_rust
+      gappa_proof, rivet CC-002). This is the ROUNDING-error layer — that
+      the floating-point computation is faithful to the mathematics it
+      implements — and is one of the two ingredients behind the exhaustive
+      1.19e-7 (~2^-23) absolute-error bound. The OTHER ingredient, that the
+      polynomial approximates the true sine (the minimax remainder
+      |P(r) - sin r|), is the Coq-Interval approximation layer, tracked as a
+      follow-on; likewise the Cody-Waite argument-reduction cancellation
+      bound. Enabled by the rules_rocq_rust Flocq/Gappa/Coq-Interval
+      toolchain (rules_rocq_rust#37/#41).
+    tags: [falcon, relay-math, f32, gappa, flocq, machine-checked, qualification, v1.127]
+    fields:
+      req-type: non-functional
+      priority: should
+      verification-criteria: >
+        bazel test //proofs/gappa:sin_poly_rounding_test is a required CI
+        check (rocq.yml): Gappa emits the bound, coqc kernel-checks the
+        Flocq/Rocq term. The bound has teeth — coqc REJECTS 2^-25 (the proof
+        fails to build), so the 2^-24 pass is non-vacuous; verified by
+        negative test. The gate also enforces the pre-existing (previously
+        orphaned) proofs/rocq proofs.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-MATHF32-P02

@@ -76,6 +76,15 @@ use_repo(
     "rocq_hammer",
     "rocq_hammer_tactics",
     "rocq_smpl",
+    # Floating-point proof track (rules_rocq_rust#37/#41): the Gappa binary
+    # (referenced by the gappa_proof rule) + the FP support libraries so the
+    # kernel-checked rounding bounds — and the Coq-Interval approximation
+    # bounds that follow — resolve. proofs/gappa/ consumes these.
+    "rocq_gappa_bin",
+    "rocq_flocq",
+    "rocq_gappalib",
+    "rocq_interval",
+    "rocq_coquelicot",
 )
 register_toolchains("@rocq_toolchains//:all")
 
