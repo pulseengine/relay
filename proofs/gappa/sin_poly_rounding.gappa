@@ -1,0 +1,52 @@
+# Machine-checked rounding-error bound for relay-math's f32 sin polynomial
+# (MATHF32-P03, the proof track for MATHF32-P01/P02 — rules_rocq_rust#37/#41).
+#
+# CLAIM (rounding-error LAYER only): over the reduced range r in [-0.8, 0.8]
+# — the interval the Cody-Waite reduction clamps to, containing [-pi/4,pi/4]
+# — the f32 Horner evaluation of sin_poly differs from the EXACT real value
+# of the SAME polynomial (same f32 coefficients, no rounding) by at most
+# 2^-24 (one ULP at unit magnitude — the tight machine-checked bound:
+# coqc accepts 2^-24, rejects 2^-25). I.e. the floating-point evaluation is faithful to the mathematics
+# it implements. This is one of the two ingredients behind the exhaustive
+# 1.19e-7 absolute-error bound (MATHF32-P02); the OTHER — that this
+# polynomial approximates the true sine (the minimax remainder |P(r)-sin r|)
+# — is the Coq-Interval layer, tracked separately, NOT proven here.
+#
+# `gappa -Bcoq` emits a Flocq/Rocq proof term; gappa_proof (rules_rocq_rust)
+# kernel-checks it with coqc — Gappa's own success is never trusted (CC-002).
+#
+# Kernel source: crates/relay-math/src/lib.rs, sin_poly():
+#   z = r*r;  r + r*z*(S1 + z*(S2 + z*S3))
+# evaluated left-to-right in f32 (each op rounds to nearest-even).
+
+@rnd = float<ieee_32,ne>;
+
+# Exact f32 coefficients (bit-identical to the compiled constants).
+S1 = -0x1.5555460p-3;
+S2 =  0x1.11073c0p-7;
+S3 = -0x1.9943f20p-13;
+
+# r is a float in the reduced range.
+r = rnd(rin);
+
+# --- f32 evaluation, operation-for-operation with the kernel ---
+z  rnd= r * r;
+t0 rnd= z * S3;
+t1 rnd= S2 + t0;
+t2 rnd= z * t1;
+t3 rnd= S1 + t2;      # inner = S1 + z*(S2 + z*S3)
+rz rnd= r * z;
+pr rnd= rz * t3;      # r*z*inner
+Msin rnd= r + pr;
+
+# --- exact real value of the SAME polynomial (same coefficients) ---
+Ez  = r * r;
+Et0 = Ez * S3;
+Et1 = S2 + Et0;
+Et2 = Ez * Et1;
+Et3 = S1 + Et2;
+Erz = r * Ez;
+Epr = Erz * Et3;
+Esin = r + Epr;
+
+{ rin in [-0.8, 0.8] -> |Msin - Esin| <= 1b-24 }
