@@ -393,6 +393,7 @@ jobs:
     permissions:
       contents: write
       id-token: write          # keyless cosign over the bundle SHA256SUMS (v1.77)
+      packages: write          # OCI push of the flight component to ghcr.io (v1.128)
     steps:
       # relay's MODULE.bazel local_path_override's the four pulseengine rules to
       # ../<repo>, so bazel needs relay in a subdir + the rules as siblings
@@ -514,4 +515,59 @@ jobs:
           else
             echo "::error::Release $TAG has NO falcon-flight-*.wasm asset — the #100/#140 regression. Failing."
             exit 1
+          fi
+
+
+      # ── Publish the flight component to ghcr.io as an OCI artifact (v1.128) ──
+      # An ADDITIVE distribution channel: the same verified `falcon:flight`
+      # component, pushed as an OCI 1.1 artifact with the Component-Model media
+      # type via `wkg`, so it is `wkg oci pull`-able and indexable by
+      # wasm.directory (a meta-registry over OCI registries). Cosign-signed by
+      # immutable DIGEST, like the release bundle. NON-BLOCKING
+      # (continue-on-error): the primary artifact is the cosign-signed GitHub
+      # Release above; a registry hiccup must never fail a release. Tighten to
+      # hard-fail once proven over a few tags. Ref: ghcr.io/<owner>/falcon-flight.
+      - name: Publish flight component to ghcr.io (OCI, cosign-signed)
+        continue-on-error: true
+        working-directory: relay
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Bind the tag via env — never expand ${{ ... }} inside run: (the
+          # command-injection convention this file follows throughout).
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          # Validate the shape before it reaches any shell command: a release
+          # tag is falcon-vX.Y.Z (+ optional prerelease). Reject anything else.
+          if ! printf '%s' "$TAG" | grep -qE '^falcon-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$'; then
+            echo "::error::refusing to publish OCI for a malformed tag: $TAG"; exit 1
+          fi
+          MM=$(printf '%s' "$TAG" | sed -E 's/^falcon-v([0-9]+\.[0-9]+).*/\1/')
+          FULL=$(printf '%s' "$TAG" | sed -E 's/^falcon-v//')
+          WASM="falcon-flight-v${MM}.wasm"
+          REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon-flight"
+
+          # Pull the exact wasm the release just attached (single source of truth).
+          gh release download "$TAG" -p "$WASM" --clobber
+
+          # wkg = the wasm-pkg-tools CLI. PINNED (supply-chain), bumped in
+          # lockstep. Pushes the wasm-component OCI media type wasm.directory
+          # expects — a plain `oras push` would tag it as a generic blob.
+          cargo install wkg --locked --version 0.15.1
+
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          wkg oci push "${REPO}:${FULL}" "$WASM" | tee push.log
+          # :latest is a moving convenience pointer — pushed for discovery,
+          # but NEVER signed (only immutable refs get a signature).
+          wkg oci push "${REPO}:latest" "$WASM"
+
+          # Sign the IMMUTABLE digest, not a mutable tag. Only if we resolved one.
+          DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' push.log | head -1 || true)
+          if [ -n "$DIGEST" ]; then
+            cosign sign --yes "${REPO}@${DIGEST}"
+            echo "::notice::Published + signed ${REPO}@${DIGEST} (tags ${FULL}, latest). Pull: wkg oci pull ${REPO}:${FULL}"
+          else
+            echo "::warning::pushed ${REPO}:${FULL} but could not resolve a digest to sign — left unsigned this run"
           fi
