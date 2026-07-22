@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-FALCON-MATHF32-P05
+    type: sw-req
+    title: "MATHF32-P05 — machine-checked reduced-range bound for the COSINE kernel (rounding + approximation)"
+    status: proposed
+    release: falcon-v1.129.0
+    description: >
+      Extend the sine-kernel proof method (MATHF32-P03 rounding + MATHF32-P04
+      approximation, composed) to the f32 COSINE polynomial (cos_poly): a
+      Gappa rounding bound on the Horner evaluation plus a Coq-Interval bound
+      on |Q(r) - cos r|, composed to a kernel-checked reduced-range accuracy
+      bound for cosf. A small extension once the sine machinery exists — the
+      same two tools, the same composition, different coefficients and
+      reference function.
+    tags: [falcon, relay-math, f32, gappa, coq-interval, machine-checked, v1.129]
+    fields:
+      req-type: non-functional
+      priority: should
+      verification-criteria: >
+        Gappa rounding proof + Coq-Interval approximation proof for cos_poly,
+        both coqc-kernel-checked and teeth-tested, composed to a reduced-range
+        |computed - cos r| bound; enforced under the rocq.yml gate.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-MATHF32-P04
