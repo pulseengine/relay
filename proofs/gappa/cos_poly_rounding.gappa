@@ -1,0 +1,60 @@
+# Machine-checked rounding-error bound for relay-math's f32 cos polynomial
+# (the cosine analogue of sin_poly_rounding.gappa — MATHF32-P03 track,
+# rules_rocq_rust#37/#41).
+#
+# CLAIM (rounding-error LAYER only): over the reduced range r in [-0.8, 0.8]
+# — the interval the Cody-Waite reduction clamps to, containing [-pi/4,pi/4]
+# — the f32 Horner evaluation of cos_poly differs from the EXACT real value
+# of the SAME polynomial (same f32 coefficients, no rounding) by at most
+# 2^-23 (one ULP at unit magnitude for cos, whose result sits in [0.69, 1]
+# — the tight machine-checked bound: coqc accepts 2^-23, rejects 2^-24;
+# Gappa's best provable bound is ~8.95e-8 = 1.5*2^-24, because the
+# `1 - 0.5*z` subtraction AND the final add each contribute a half-ulp at
+# magnitude ~1, unlike sin whose result passes through 0 with r).
+# I.e. the floating-point evaluation is faithful to the
+# mathematics it implements. The OTHER ingredient — that this polynomial
+# approximates the true cosine (the minimax remainder |P(r)-cos r|) — is
+# the Coq-Interval layer, tracked separately, NOT proven here.
+#
+# `gappa -Bcoq` emits a Flocq/Rocq proof term; gappa_proof (rules_rocq_rust)
+# kernel-checks it with coqc — Gappa's own success is never trusted (CC-002).
+#
+# Kernel source: crates/relay-math/src/lib.rs, cos_poly():
+#   z = r*r;  1.0 - 0.5*z + z*z*(C1 + z*(C2 + z*C3))
+# evaluated left-to-right in f32 (each op rounds to nearest-even).
+
+@rnd = float<ieee_32,ne>;
+
+# Exact f32 coefficients (bit-identical to the compiled constants).
+C1 =  0x1.55554a0p-5;
+C2 = -0x1.6c0c340p-10;
+C3 =  0x1.99eb9c0p-16;
+
+# r is a float in the reduced range.
+r = rnd(rin);
+
+# --- f32 evaluation, operation-for-operation with the kernel ---
+z  rnd= r * r;
+h  rnd= 0.5 * z;
+a  rnd= 1 - h;        # 1.0 - 0.5*z
+zz rnd= z * z;
+t0 rnd= z * C3;
+t1 rnd= C2 + t0;
+t2 rnd= z * t1;
+t3 rnd= C1 + t2;      # inner = C1 + z*(C2 + z*C3)
+p  rnd= zz * t3;      # z*z*inner
+Mcos rnd= a + p;
+
+# --- exact real value of the SAME polynomial (same coefficients) ---
+Ez  = r * r;
+Eh  = 0.5 * Ez;
+Ea  = 1 - Eh;
+Ezz = Ez * Ez;
+Et0 = Ez * C3;
+Et1 = C2 + Et0;
+Et2 = Ez * Et1;
+Et3 = C1 + Et2;
+Ep  = Ezz * Et3;
+Ecos = Ea + Ep;
+
+{ rin in [-0.8, 0.8] -> |Mcos - Ecos| <= 1b-23 }
