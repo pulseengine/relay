@@ -1,0 +1,34 @@
+artifacts:
+  - id: SWREQ-FALCON-MATHF32-P06
+    type: sw-req
+    title: "MATHF32-P06 — machine-checked Cody-Waite argument-reduction bound → FULL-range sin/cos accuracy"
+    status: proposed
+    release: falcon-v1.130.0
+    description: >
+      The remaining and HARDEST ingredient: a machine-checked bound on the
+      Cody-Waite argument reduction r = ((x - n*PIO2_HI) - n*PIO2_MID) -
+      n*PIO2_LO — that the reduced r is accurate (the three-part-subtraction
+      cancellation error stays bounded) for all quadrant counts |n| in the
+      qualified envelope |x| <= 128. A Gappa proof (rounding + the exactness
+      of n*PIO2_HI for bounded n). Composing this with the reduced-range
+      kernel bounds (P04 sine, P05 cosine) yields a kernel-checked accuracy
+      bound over the FULL input range, not just the reduced range — the
+      complete crlibm/CORE-MATH-style argument. Explicitly scoped as a LARGE
+      slice (the reduction cancellation is the part those references spend
+      most of their pages on — weeks, not days) and deliberately sequenced
+      AFTER P04/P05 so the reduced-range proof lands first.
+    tags: [falcon, relay-math, f32, gappa, argument-reduction, machine-checked, qualification, v1.130]
+    fields:
+      req-type: non-functional
+      priority: could
+      verification-criteria: >
+        A Gappa proof of the reduction error bound over |x| <= 128 (all |n|),
+        coqc-kernel-checked and teeth-tested; a composed Rocq lemma giving a
+        full-range |computed - sin/cos x| bound from P06 + P04/P05; enforced
+        under the rocq.yml gate. The exhaustive empirical bound (MATHF32-P02)
+        remains the cross-check the full-range proof must be consistent with.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-MATHF32-P04
