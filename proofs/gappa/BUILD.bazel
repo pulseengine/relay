@@ -18,3 +18,19 @@ rocq_proof_test(
     srcs = [],
     deps = [":sin_poly_rounding"],
 )
+
+# MATHF32-P05 (rounding half) — the cos-polynomial evaluation is faithful to
+# its exact mathematics over the reduced range. The APPROXIMATION half
+# (|Q(r)-cos r|, Coq-Interval) is blocked on the mathcomp toolchain gap
+# (rules_rocq_rust#43) and lands separately.
+gappa_proof(
+    name = "cos_poly_rounding",
+    src = "cos_poly_rounding.gappa",
+    visibility = ["//visibility:public"],
+)
+
+rocq_proof_test(
+    name = "cos_poly_rounding_test",
+    srcs = [],
+    deps = [":cos_poly_rounding"],
+)
