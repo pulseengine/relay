@@ -85,6 +85,13 @@ use_repo(
     "rocq_gappalib",
     "rocq_interval",
     "rocq_coquelicot",
+    # Coq-Interval approximation-bound env (rules_rocq_rust#43, DD-003): a
+    # coq_9_0.withPackages(...) composition resolving Interval's full closure
+    # (mathcomp-boot/fingroup, hierarchy-builder, coq-elpi). The
+    # rocq_interval_proof rule defaults to @rocq_interval_env//:coqc — without
+    # this use_repo, proofs/rocq/sin_approx.v (MATHF32-P04) can't resolve
+    # `Require Import Interval.Tactic`.
+    "rocq_interval_env",
 )
 register_toolchains("@rocq_toolchains//:all")
 

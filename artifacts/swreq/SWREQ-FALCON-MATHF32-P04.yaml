@@ -1,34 +1,51 @@
 artifacts:
   - id: SWREQ-FALCON-MATHF32-P04
     type: sw-req
-    title: "MATHF32-P04 — machine-checked APPROXIMATION bound for the sin polynomial (Coq-Interval) + reduced-range composition"
-    status: proposed
+    title: "MATHF32-P04 — machine-checked APPROXIMATION bound for the f32 sin polynomial (Coq-Interval)"
+    status: implemented
     release: falcon-v1.128.0
     description: >
-      Establish the second (approximation) half of the sine-kernel proof and
-      COMPOSE it with the rounding half (MATHF32-P03) to give a machine-checked
-      bound on the reduced-range accuracy of the f32 sine kernel. Two parts:
-      (a) using Coq-Interval (now wired via rules_rocq_rust #41), prove the
-      minimax remainder |P(r) - sin r| <= eps over the reduced range r in
-      [-0.8, 0.8] (containing [-pi/4, pi/4]), where P is the exact real value
-      of the kernel's f32-coefficient polynomial; (b) compose it with the
-      P03 Gappa rounding bound |computed - P(r)| <= 2^-24 via the triangle
-      inequality to obtain a kernel-checked |computed - sin r| <= (eps +
-      2^-24) for the REDUCED range. This turns "rounding proven" into
-      "reduced-range sine kernel proven." It does NOT cover the full input
-      range — the Cody-Waite argument-reduction cancellation (MATHF32-P06) is
-      the remaining ingredient for that.
+      Establish the second (approximation) half of the sine-kernel proof: the
+      minimax remainder between the kernel polynomial and true sine. Using
+      Coq-Interval (wired via rules_rocq_rust #41/#43 — the withPackages env
+      that resolves Interval's full closure, DD-003), prove
+      |P(r) - sin r| <= 1e-8 over the reduced range r in [-0.8, 0.8] (the
+      interval the Cody-Waite reduction clamps to, containing [-pi/4, pi/4]),
+      where P is the EXACT real value of the kernel's f32-coefficient
+      polynomial. The coefficients are byte-identical to those in the P03
+      Gappa proof (S1 = -0x1.5555460p-3, S2 = 0x1.11073c0p-7,
+      S3 = -0x1.9943f20p-13), so P equals Gappa's exact-arithmetic polynomial
+      Esin — the two layers reference the SAME real function. This is the
+      OTHER ingredient (with the P03 rounding bound) behind the exhaustive
+      1.19e-7 (~2^-23) absolute-error bound (MATHF32-P02), now proven by
+      construction rather than by enumeration.
+
+      SCOPE (deliberately narrowed from the original P04 draft): this
+      requirement delivers the approximation INGREDIENT only. The reduced-range
+      COMPOSITION — chaining this bound with the P03 rounding bound via the
+      triangle inequality to a single kernel-checked
+      |computed - sin r| <= 1e-8 + 2^-24 (~6.9e-8) — is valid precisely
+      because the coefficients are identical, but assembling it as one
+      coqc-checked Rocq lemma (integrating the Gappa-emitted term with the
+      Interval term) is deferred to the P06 composition step, where the
+      reduced-range pieces are combined with the argument-reduction bound for
+      FULL-range accuracy. This artifact does not claim the composition is done.
     tags: [falcon, relay-math, f32, coq-interval, flocq, machine-checked, qualification, v1.128]
     fields:
       req-type: non-functional
       priority: should
       verification-criteria: >
-        A Coq-Interval proof of |P(r) - sin r| <= eps over [-0.8, 0.8],
-        kernel-checked by coqc, with a NON-VACUOUS (teeth-tested) eps — coqc
-        rejects a bound tighter than achievable. A composed Rocq lemma
-        deriving |computed - sin r| <= eps + 2^-24 from P04 and P03. Both run
-        under the required rocq.yml gate (bazel test //proofs/rocq:all
-        //proofs/gappa:all, extended to the interval proof).
+        proofs/rocq/sin_approx.v proves |P(r) - sin r| <= 1e-8 over
+        [-0.8, 0.8] via the Coq-Interval `interval` tactic (i_bisect, i_taylor,
+        i_degree 15), kernel-checked by the withPackages coqc
+        (rocq_interval_proof); the tactic's own success is never trusted
+        (CC-002). The bound has teeth — it is NON-VACUOUS: `interval` proves
+        1e-8 but FAILS to prove 8e-9 even at i_degree 18 (and 5e-9 at
+        i_degree 22), so the 1e-8 pass is not achievable at an arbitrary
+        bound. Runs as `bazel test //proofs/rocq:sin_approx_test`, included in
+        the required rocq.yml gate (//proofs/rocq:all). The composed
+        reduced-range lemma is NOT part of this requirement's evidence (see
+        scope note; tracked under P06).
     links:
       - type: derives-from
         target: SYSREQ-FALCON-002
