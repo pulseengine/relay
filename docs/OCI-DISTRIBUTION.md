@@ -39,13 +39,35 @@ cosign verify ghcr.io/pulseengine/falcon-flight:1.127.0 \
    tagged release populates it, in the org's package settings set
    `pulseengine/falcon-flight` visibility to **public** and link it to the
    `relay` repo. (One-time; subsequent pushes inherit the setting.)
-2. **Register the namespace with wasm.directory.** Per its publishing guide,
-   add the `pulseengine` namespace → `ghcr.io` mapping to the wasm.directory
-   registry config (or your account's namespace list), then it indexes the
-   package. wasm.directory is **alpha** ("indexed data may be incomplete or
-   reset without notice; don't depend on it in production") — treat the listing
-   as a visibility channel, not a dependency. The durable, signed artifacts
-   remain the GitHub Release and the ghcr OCI ref.
+2. **Register the namespace with wasm.directory.** Registration is a GitHub
+   issue on the index repo (`yoshuawuyts/wasm`), *not* a config file you push.
+   Open its **`registry-entry`** issue template with:
+
+   - **kind**: `component`
+   - **namespace**: `pulseengine`
+   - **package name**: `falcon-flight`
+   - **repository**: `falcon-flight`
+
+   Submitting it auto-opens a PR adding `registry/pulseengine.toml`:
+
+   ```toml
+   [namespace]
+   name = "pulseengine"
+   registry = "ghcr.io/pulseengine"
+
+   [[component]]
+   name = "falcon-flight"
+   repository = "falcon-flight"
+   ```
+
+   A **new namespace** is flagged for maintainer review, so the ghcr package must
+   already exist and be **public** (step 1) before submitting — an unpullable
+   entry is rejected. Do this only after a real release has populated the package.
+
+   wasm.directory is **alpha** ("indexed data may be incomplete or reset without
+   notice; don't depend on it in production") — treat the listing as a visibility
+   channel, not a dependency. The durable, signed artifacts remain the GitHub
+   Release and the ghcr OCI ref.
 
 ## Scope note
 
