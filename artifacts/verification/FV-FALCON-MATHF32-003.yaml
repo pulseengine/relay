@@ -1,0 +1,40 @@
+artifacts:
+  - id: FV-FALCON-MATHF32-003
+    type: sw-verification
+    title: "MATHF32-P03 — machine-checked (Gappa→Flocq→coqc) rounding bound for the f32 sin polynomial (v1.127)"
+    status: verified
+    release: falcon-v1.127.0
+    description: >
+      Verification of SWREQ-FALCON-MATHF32-P03. The rounding-error bound on
+      the f32 sin-polynomial Horner evaluation — within 2^-24 (one ulp at
+      unit magnitude) of the exact real value of the same polynomial over
+      r in [-0.8, 0.8] — is MACHINE-CHECKED: Gappa (gappa -Bcoq) emits a
+      Flocq/Rocq proof term and coqc kernel-checks it, never trusting
+      Gappa's own certificate-generation success (rules_rocq_rust
+      gappa_proof, rivet CC-002). proofs/gappa/sin_poly_rounding.gappa.
+
+      Non-vacuous (has teeth): coqc ACCEPTS 2^-24 and REJECTS 2^-25 (the
+      proof then fails to build) — negative-tested; the bound is the tight
+      proven value, not a loose one. Enforced in CI: the new required
+      .github/workflows/rocq.yml runs `bazel test //proofs/rocq:all
+      //proofs/gappa:all`, so the proof cannot rot silently, and it closes
+      the pre-existing orphan (the proofs/rocq proofs were never gated
+      either). The Rocq gate ran and PASSED on merge (0 failures), so the
+      kernel-check is confirmed on CI infrastructure, not only locally.
+
+      SCOPE (honest): this is the ROUNDING layer — the fp computation is
+      faithful to the polynomial it implements — one of the two ingredients
+      behind the exhaustive 1.19e-7 (~2^-23) absolute-error bound
+      (MATHF32-P02). The APPROXIMATION layer (|P(r) - sin r|, the minimax
+      remainder, via Coq-Interval — now available) and the Cody-Waite
+      argument-reduction cancellation are scoped follow-ons, NOT verified
+      here.
+    tags: [verification, falcon, relay-math, gappa, flocq, machine-checked, v1.127]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //proofs/gappa:sin_poly_rounding_test
+        - run: bazel test //proofs/rocq:all //proofs/gappa:all
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MATHF32-P03
