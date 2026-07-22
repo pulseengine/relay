@@ -393,6 +393,7 @@ jobs:
     permissions:
       contents: write
       id-token: write          # keyless cosign over the bundle SHA256SUMS (v1.77)
+      packages: write          # OCI push of the flight component to ghcr.io (v1.128)
     steps:
       # relay's MODULE.bazel local_path_override's the four pulseengine rules to
       # ../<repo>, so bazel needs relay in a subdir + the rules as siblings
@@ -515,3 +516,45 @@ jobs:
             echo "::error::Release $TAG has NO falcon-flight-*.wasm asset — the #100/#140 regression. Failing."
             exit 1
           fi
+
+      # ── Publish the flight component to ghcr.io as an OCI artifact (v1.128) ──
+      # An ADDITIVE distribution channel: the same verified `falcon:flight`
+      # component, pushed as an OCI 1.1 artifact with the Component-Model media
+      # type via `wkg`, so it is `wkg oci pull`-able and indexable by
+      # wasm.directory (a meta-registry over OCI registries). Cosign-signed
+      # keyless, like the release bundle. NON-BLOCKING: the primary artifact is
+      # the cosign-signed GitHub Release above; a registry hiccup must never
+      # fail a release, so this best-effort step is continue-on-error until it
+      # has proven itself across a few tags. Ref: ghcr.io/pulseengine/falcon-flight.
+      - name: Publish flight component to ghcr.io (OCI, cosign-signed)
+        continue-on-error: true
+        working-directory: relay
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          MM=$(printf '%s' "$TAG" | sed -E 's/^falcon-v([0-9]+\.[0-9]+).*/\1/')
+          FULL=$(printf '%s' "$TAG" | sed -E 's/^falcon-v//')
+          WASM="falcon-flight-v${MM}.wasm"
+          REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon-flight"
+
+          # Pull the exact wasm the release just attached (single source of truth).
+          gh release download "$TAG" -p "$WASM" --clobber
+
+          # wkg = wasm-pkg-tools: pushes with the wasm-component OCI media type
+          # that OCI-1.1 registries and wasm.directory expect (a plain `oras
+          # push` would tag it as a generic blob). Reads docker credentials.
+          cargo install wasm-pkg-tools --locked
+
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          wkg oci push "${REPO}:${FULL}" "$WASM"
+          wkg oci push "${REPO}:latest" "$WASM"
+
+          # Cosign-sign the pushed ref by digest (keyless OIDC). Resolve the
+          # digest via `docker buildx imagetools` / crane-free: cosign can sign
+          # the tag ref directly, which signs the underlying digest.
+          cosign sign --yes "${REPO}:${FULL}"
+
+          echo "::notice::Published + signed ${REPO}:${FULL} (and :latest). Pull: wkg oci pull ${REPO}:${FULL}"
