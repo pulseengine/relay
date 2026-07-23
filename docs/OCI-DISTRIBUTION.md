@@ -39,13 +39,50 @@ cosign verify ghcr.io/pulseengine/falcon-flight:1.127.0 \
    tagged release populates it, in the org's package settings set
    `pulseengine/falcon-flight` visibility to **public** and link it to the
    `relay` repo. (One-time; subsequent pushes inherit the setting.)
-2. **Register the namespace with wasm.directory.** Per its publishing guide,
-   add the `pulseengine` namespace → `ghcr.io` mapping to the wasm.directory
-   registry config (or your account's namespace list), then it indexes the
-   package. wasm.directory is **alpha** ("indexed data may be incomplete or
-   reset without notice; don't depend on it in production") — treat the listing
-   as a visibility channel, not a dependency. The durable, signed artifacts
-   remain the GitHub Release and the ghcr OCI ref.
+2. **Register the namespace with wasm.directory.** Publishing the bytes (the
+   `wkg oci push` above) and *indexing* in the meta-registry are two separate
+   steps — the push does not list the package in the searchable index. Indexing
+   is a GitHub issue on the index repo (`yoshuawuyts/wasm.directory`), *not* a
+   config file you push. Two ways to file it, same endpoint:
+
+   - **Tool path** (`component-cli`): from a project with a `[package]` section
+     in a `wasm.toml`, run `component registry publish` — it reads
+     `name`/`kind`/`registry`, checks whether the package is already indexed,
+     and opens the **Registry entry** issue prefilled (`--no-open` prints the
+     URL instead).
+   - **By hand**: open the repo's **`registry-entry`** issue template with:
+
+     - **kind**: `component`
+     - **namespace**: `pulseengine`
+     - **package name**: `falcon-flight`
+     - **repository**: `falcon-flight`
+     - **OCI registry** (new namespaces only): `ghcr.io/pulseengine`
+
+   Submitting it auto-opens a PR adding `registry/pulseengine.toml`:
+
+   ```toml
+   [namespace]
+   name = "pulseengine"
+   registry = "ghcr.io/pulseengine"
+
+   [[component]]
+   name = "falcon-flight"
+   repository = "falcon-flight"
+   ```
+
+   A **new namespace** is flagged for maintainer review, so the ghcr package must
+   already exist and be **public** (step 1) before submitting — an unpullable
+   entry is rejected. Do this only after a real release has populated the package.
+
+   > Status: filed for `pulseengine` off falcon-v1.127.0 —
+   > [wasm.directory#466](https://github.com/yoshuawuyts/wasm.directory/issues/466)
+   > → auto-opened [PR #467](https://github.com/yoshuawuyts/wasm.directory/pull/467)
+   > (`registry/pulseengine.toml`), awaiting new-namespace maintainer review.
+
+   wasm.directory is **alpha** ("indexed data may be incomplete or reset without
+   notice; don't depend on it in production") — treat the listing as a visibility
+   channel, not a dependency. The durable, signed artifacts remain the GitHub
+   Release and the ghcr OCI ref.
 
 ## Scope note
 
