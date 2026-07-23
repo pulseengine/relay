@@ -1,0 +1,46 @@
+artifacts:
+  - id: FV-FALCON-MATHF32-004
+    type: sw-verification
+    title: "MATHF32-P04 — machine-checked (Coq-Interval) approximation bound for the f32 sin polynomial (v1.128)"
+    status: verified
+    release: falcon-v1.128.0
+    description: >
+      Verification of SWREQ-FALCON-MATHF32-P04. The APPROXIMATION-error bound
+      on the f32 sin kernel — the minimax remainder |P(r) - sin r| <= 1e-8 over
+      the reduced range r in [-0.8, 0.8] — is MACHINE-CHECKED: Coq-Interval's
+      `interval` tactic (i_bisect, i_taylor, i_degree 15) proves it and the
+      withPackages coqc (rules_rocq_rust#43 rocq_interval_proof) kernel-checks
+      the emitted Flocq/Coq-Interval term, never trusting the tactic's own
+      success (rivet CC-002). proofs/rocq/sin_approx.v.
+
+      Non-vacuous (has teeth): `interval` proves 1e-8 but FAILS to prove 8e-9
+      even at i_degree 18 (and 5e-9 at i_degree 22) — negative-tested; the
+      bound is the tight achievable value, not a loose one. Enforced in CI: the
+      required .github/workflows/rocq.yml runs `bazel test //proofs/rocq:all
+      //proofs/gappa:all`, which includes //proofs/rocq:sin_approx_test, so the
+      proof cannot rot silently. The Rocq + Gappa gate ran and PASSED on the
+      merge of #307 (0 failures), confirming the kernel-check on CI
+      infrastructure, not only locally.
+
+      Composability: the coefficients are byte-identical to the P03 Gappa proof
+      (S1 = -0x1.5555460p-3, S2 = 0x1.11073c0p-7, S3 = -0x1.9943f20p-13), so
+      P equals Gappa's exact-arithmetic Esin — the rounding (P03) and
+      approximation (P04) layers reference the SAME real function and therefore
+      compose by triangle inequality. Sanity: 1e-8 is far below the exhaustive
+      total 1.19e-7 (MATHF32-P02), which is dominated by f32 rounding — as
+      expected for a good minimax polynomial.
+
+      SCOPE (honest): this verifies the APPROXIMATION ingredient only. The
+      reduced-range COMPOSITION (chaining P03 + P04 into one kernel-checked
+      |computed - sin r| <= 1e-8 + 2^-24 lemma) and the Cody-Waite
+      argument-reduction cancellation are scoped follow-ons (P06), NOT verified
+      here.
+    tags: [verification, falcon, relay-math, coq-interval, flocq, machine-checked, v1.128]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //proofs/rocq:sin_approx_test
+        - run: bazel test //proofs/rocq:all //proofs/gappa:all
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MATHF32-P04

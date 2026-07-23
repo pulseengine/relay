@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MATHF32-P04
     type: sw-req
     title: "MATHF32-P04 — machine-checked APPROXIMATION bound for the f32 sin polynomial (Coq-Interval)"
-    status: implemented
+    status: verified
     release: falcon-v1.128.0
     description: >
       Establish the second (approximation) half of the sine-kernel proof: the
