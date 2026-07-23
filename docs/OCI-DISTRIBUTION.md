@@ -74,15 +74,39 @@ cosign verify ghcr.io/pulseengine/falcon-flight:1.127.0 \
    already exist and be **public** (step 1) before submitting — an unpullable
    entry is rejected. Do this only after a real release has populated the package.
 
-   > Status: filed for `pulseengine` off falcon-v1.127.0 —
-   > [wasm.directory#466](https://github.com/yoshuawuyts/wasm.directory/issues/466)
-   > → auto-opened [PR #467](https://github.com/yoshuawuyts/wasm.directory/pull/467)
-   > (`registry/pulseengine.toml`), awaiting new-namespace maintainer review.
+   > Status: **LIVE** — the `pulseengine` namespace was accepted
+   > ([wasm.directory#466](https://github.com/yoshuawuyts/wasm.directory/issues/466)
+   > → [PR #467](https://github.com/yoshuawuyts/wasm.directory/pull/467) merged);
+   > indexed at <https://wasm.directory/pulseengine/falcon-flight/1.128.0>.
 
    wasm.directory is **alpha** ("indexed data may be incomplete or reset without
    notice; don't depend on it in production") — treat the listing as a visibility
    channel, not a dependency. The durable, signed artifacts remain the GitHub
    Release and the ghcr OCI ref.
+
+## Component metadata contract (what wasm.directory renders)
+
+wasm.directory shows a component's **WIT interface** (with its `///` doc comments)
+plus the **embedded package metadata** — `description`, `licenses`, `source`,
+`authors`, `version` — which `cargo-component` bakes into the wasm
+`package-metadata` section from the crate's `Cargo.toml`. Empty metadata → a bare
+listing. So **every published relay component MUST carry**, in its (standalone)
+`Cargo.toml` — it can't inherit the workspace root:
+
+```toml
+description = "<one sentence a stranger understands — lead with what it IS>"
+license = "Apache-2.0"
+repository = "https://github.com/pulseengine/relay"
+documentation = "<link to the docs for this component>"
+authors = ["PulseEngine"]
+keywords = ["flight-control", "verified", "drone", "embedded", "wasm"]
+categories = ["aerospace", "science::robotics"]
+```
+
+…and a WIT world/interface with real `///` doc comments (the interface docs come
+straight from the WIT). This is the metadata pattern the per-component publishing
+(the `falcon-rate`/estimator/mixer components, jess#167) inherits — a listing is
+only as informative as the metadata the component carries.
 
 ## Scope note
 
