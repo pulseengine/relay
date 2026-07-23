@@ -17,8 +17,14 @@ name: Lean
 on:
   push:
     branches: [main]
+  # PR runs are path-filtered (CI diet): the Lean proofs (Lyapunov/WCET) are
+  # self-contained under proofs/lean. NON-REQUIRED check; skip never blocks a
+  # merge. push:main stays UNFILTERED (backstop).
   pull_request:
     branches: [main]
+    paths:
+      - 'proofs/lean/**'
+      - '.github/workflows/lean.yml'
 
 concurrency:
   # PRs and non-main branch pushes: cancel superseded runs.
