@@ -9,7 +9,7 @@
 # these are PURE ABSTRACT proofs — they use only Stdlib.ZArith and
 # do not depend on any translation infrastructure.
 
-load("@rules_rocq_rust//rocq:defs.bzl", "rocq_library", "rocq_proof_test")
+load("@rules_rocq_rust//rocq:defs.bzl", "rocq_interval_proof", "rocq_library", "rocq_proof_test")
 
 # ── Limit Checker proofs ────────────────────────────────────────────────
 
@@ -79,4 +79,22 @@ rocq_proof_test(
     name = "cfdp_proofs_test",
     srcs = ["cfdp_proofs.v"],
     deps = [":cfdp_proofs"],
+)
+
+# ── f32 sin approximation-error bound (MATHF32-P04, Coq-Interval) ─────────
+# The minimax-remainder half of the sin error: |P(r) - sin r| <= 1e-8 over
+# the reduced range, complementing the Gappa rounding bound in
+# proofs/gappa/sin_poly_rounding.gappa. Uses the withPackages Interval env
+# (rules_rocq_rust#43); the kernel-check is the point, the tactic is not
+# trusted (CC-002).
+
+rocq_interval_proof(
+    name = "sin_approx",
+    srcs = ["sin_approx.v"],
+)
+
+rocq_proof_test(
+    name = "sin_approx_test",
+    srcs = [],
+    deps = [":sin_approx"],
 )
