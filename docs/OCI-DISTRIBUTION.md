@@ -92,3 +92,5 @@ verified component, not yet a reusable library exposing a typed control
 interface. Publishing it is a provenance/visibility play (a formally-verified
 flight component, signed, in the public component ecosystem). A richer typed
 `falcon:flight` interface others could import is a separate follow-on.
+
+<!-- ci-diet skip-probe: docs-only change to validate that Kani + the non-required gates skip while Kani gate stays green. Safe to delete. -->
