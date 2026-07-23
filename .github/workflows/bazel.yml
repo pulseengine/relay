@@ -14,8 +14,25 @@ name: Bazel
 on:
   push:
     branches: [main]
+  # PR runs are path-filtered (CI diet): the Bazel build + Component Model
+  # cascade compose the flight component (wasm/cm/flight) and build the
+  # crates/proofs via Bazel. Generous globs — a too-narrow filter would let a
+  # breaking PR skip this and redden main. NON-REQUIRED check; skip never blocks
+  # a merge. push:main stays UNFILTERED (backstop).
   pull_request:
     branches: [main]
+    paths:
+      - 'crates/**'
+      - 'wasm/**'
+      - 'embedded/**'
+      - 'proofs/**'
+      - 'wit/**'
+      - '**/BUILD.bazel'
+      - '**/*.bzl'
+      - 'MODULE.bazel'
+      - 'MODULE.bazel.lock'
+      - '.bazelrc'
+      - '.github/workflows/bazel.yml'
 
 # Group key: head_ref (PR branch name) for pull_request events; ref
 # (e.g. refs/heads/main) for push events — unique per branch/PR.

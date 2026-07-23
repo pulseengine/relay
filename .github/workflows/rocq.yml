@@ -16,8 +16,18 @@ name: Rocq
 on:
   push:
     branches: [main]
+  # PR runs are path-filtered (CI diet): the Rocq/Gappa proofs cover the
+  # relay-math FP kernels, so re-run on proof changes AND on relay-math changes
+  # (drift catch — the proofs hardcode the kernel coefficients). NON-REQUIRED
+  # check; skip never blocks a merge. push:main stays UNFILTERED (backstop).
   pull_request:
     branches: [main]
+    paths:
+      - 'proofs/rocq/**'
+      - 'proofs/gappa/**'
+      - 'crates/relay-math/**'
+      - 'MODULE.bazel'
+      - '.github/workflows/rocq.yml'
 
 concurrency:
   group: rocq-${{ github.head_ref || github.ref }}

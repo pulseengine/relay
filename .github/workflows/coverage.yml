@@ -15,7 +15,19 @@ name: Coverage
 on:
   push:
     branches: [main]
+  # PR runs are path-filtered (CI diet): coverage is a Rust-source concern, so
+  # skip it on PRs that touch no code (docs, artifacts, wit). NON-REQUIRED
+  # check, so a skip never blocks a merge. The push:main trigger above stays
+  # UNFILTERED — every main commit still produces the DO-178C/EN-50128 coverage
+  # evidence record (the backstop).
   pull_request:
+    paths:
+      - 'crates/**'
+      - 'wasm/**'
+      - 'embedded/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/coverage.yml'
 
 # PRs and non-main branch pushes: cancel superseded runs.
 # Main pushes: never cancel — coverage artifact is the DO-178C/EN-50128

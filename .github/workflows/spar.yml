@@ -10,8 +10,15 @@ name: Spar
 on:
   push:
     branches: [main]
+  # PR runs are path-filtered (CI diet): the Spar AADL->WIT drift gate concerns
+  # the architecture models and the generated WIT. NON-REQUIRED check; skip
+  # never blocks a merge. push:main stays UNFILTERED (backstop).
   pull_request:
     branches: [main]
+    paths:
+      - 'spar/**'
+      - 'wit/**'
+      - '.github/workflows/spar.yml'
 
 concurrency:
   # PRs / non-main pushes: cancel superseded runs. Main: never cancel — every
