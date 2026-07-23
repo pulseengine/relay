@@ -1,0 +1,11 @@
+[package]
+name = "rate-loop-proof"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+wasmtime = { version = "41", features = ["component-model"] }
+anyhow = "1"
+
+[workspace]
