@@ -24,8 +24,52 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # CI diet (tier B): decide whether the 24-engine matrix needs to run at all.
+  # Kani model-checks Rust harnesses under crates/**, so a PR touching only docs,
+  # rivet artifacts, wit, or proofs cannot change any harness — skip the matrix
+  # and let kani-gate (below) report the required check as pass. On push:main (no
+  # PR base) and on any diff failure this FAILS SAFE to run=true — the required
+  # gate never silently no-ops on a real code change. Native git-diff (no
+  # third-party action), mirroring verification-gate.yml's #298 scope check.
+  changes:
+    name: Detect engine changes
+    runs-on: [self-hosted, linux, x64, light]
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Scope check (do any Kani-relevant files change?)
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if [ -z "${BASE_SHA:-}" ]; then
+            echo "no base sha (push/manual) — run the full matrix (backstop)"
+            echo "run=true" >>"$GITHUB_OUTPUT"; exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BASE_SHA"...HEAD || echo "__diff_failed__")
+          if [ "$CHANGED" = "__diff_failed__" ]; then
+            echo "diff failed — fail-safe to run"
+            echo "run=true" >>"$GITHUB_OUTPUT"; exit 0
+          fi
+          # Kani-relevant: any crate source (all 38 harnesses live under
+          # crates/<engine>/plain/), workspace deps, or this workflow.
+          if printf '%s\n' "$CHANGED" | grep -qE '^(crates/|Cargo\.toml|Cargo\.lock|\.github/workflows/kani\.yml)'; then
+            echo "Kani-relevant files changed — run the matrix"
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "no Kani-relevant files changed — SKIP the matrix (kani-gate reports pass)"
+            printf 'changed:\n%s\n' "$CHANGED"
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
+
   kani:
     name: Kani (${{ matrix.engine }})
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
     strategy:
       fail-fast: false
@@ -109,9 +153,23 @@ jobs:
   kani-gate:
     name: Kani gate
     runs-on: [self-hosted, linux, x64, light]
-    needs: kani
+    needs: [changes, kani]
     if: always()
     steps:
-      - name: All Kani engines green?
+      - name: All Kani engines green (or correctly skipped)?
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          KANI_RESULT: ${{ needs.kani.result }}
         run: |
-          [ "${{ needs.kani.result }}" = "success" ] || { echo "Kani matrix result: ${{ needs.kani.result }}"; exit 1; }
+          # The scope job must have succeeded — otherwise we can't trust the
+          # skip decision, so fail closed.
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "scope (changes) job did not succeed: $CHANGES_RESULT"; exit 1
+          fi
+          # matrix skipped == no Kani-relevant files changed == pass (CI diet,
+          # tier B); the push:main backstop always runs the full matrix.
+          case "$KANI_RESULT" in
+            success) echo "Kani matrix: all engines verified" ;;
+            skipped) echo "Kani matrix: skipped (no Kani-relevant files changed) — OK" ;;
+            *) echo "Kani matrix result: $KANI_RESULT"; exit 1 ;;
+          esac
