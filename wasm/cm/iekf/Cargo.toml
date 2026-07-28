@@ -2,7 +2,12 @@
 # workspace (generated bindings module won't build under plain cargo).
 [package]
 name = "falcon-iekf-cm"
-description = "Falcon v1.4 — IEKF (SE₂(3)) as a Component Model component, exporting the falcon:cascade/ekf interface"
+description = "Formally-verified invariant-EKF (SE₂(3)) navigation estimator as a WebAssembly Component — fuses IMU/GNSS/mag/baro into a 16-state attitude/velocity/position/bias estimate."
+homepage = "https://pulseengine.eu"
+documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
+authors = ["PulseEngine"]
+keywords = ["flight-control", "verified", "drone", "embedded", "wasm"]
+categories = ["aerospace", "science::robotics"]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
