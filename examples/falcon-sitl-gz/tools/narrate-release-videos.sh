@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Add an af_nicole / Kokoro voiceover (a short success description) to each
+# Add an af_nova / Kokoro voiceover (a short success description) to each
 # per-release falcon video via a self-hosted Speaches server (OpenAI-compatible
 # TTS), and emit the channel metadata (title + description per release) for
 # upload. Reads release-narration.json.
 #
 # Usage:   narrate-release-videos.sh
 #   env:   SPEACHES_URL (default http://192.168.178.28:8000)
-#          VOICE (af_nicole)   TTS_MODEL (speaches-ai/Kokoro-82M-v1.0-ONNX)
+#          VOICE (af_nova)     TTS_MODEL (speaches-ai/Kokoro-82M-v1.0-ONNX)
 #          VIDDIR (bench-evidence/gz-sim/recordings/relvids)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
 URL="${SPEACHES_URL:-http://192.168.178.28:8000}"
-VOICE="${VOICE:-af_nicole}"
+VOICE="${VOICE:-af_nova}"
 MODEL="${TTS_MODEL:-speaches-ai/Kokoro-82M-v1.0-ONNX}"
 VIDDIR="${VIDDIR:-$REPO/bench-evidence/gz-sim/recordings/relvids}"
 # python is only used here for stdlib (json + urllib) — the stable venv works,
