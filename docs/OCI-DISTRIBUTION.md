@@ -83,6 +83,24 @@ cosign verify ghcr.io/pulseengine/falcon-flight:1.127.0 \
    already exist and be **public** (step 1) before submitting — an unpullable
    entry is rejected. Do this only after a real release has populated the package.
 
+   Adding a component to an **existing** namespace auto-merges (no maintainer
+   review) — only a brand-new namespace is held for review. Registered so far:
+
+   | component | wasm.directory | note |
+   |---|---|---|
+   | `falcon-flight` | ✅ indexed (#466 → #467) | |
+   | `falcon-iekf` | filed #474 → PR #478 | |
+   | `falcon-position` | filed #475 → PR #479 | |
+   | `falcon-attitude` | filed #476 → PR #480 | |
+   | `falcon-mixer` | filed #477 → PR #481 | |
+   | `falcon-rate` | **HELD — do not register yet** | published 1.129.0 is a CORE MODULE, not a component; register after v1.130 republishes it |
+
+   **Verify the payload before registering.** The OCI `config.mediaType` reads
+   `application/vnd.wasm.config.v0+json` whether or not the bytes are actually a
+   component, so metadata cannot be trusted here — pull the blob and check the
+   8-byte header (`0061736d0d000100` = component, `0061736d01000000` = core
+   module). This is how `falcon-rate:1.129.0` was caught.
+
    > Status: **LIVE** — the `pulseengine` namespace was accepted
    > ([wasm.directory#466](https://github.com/yoshuawuyts/wasm.directory/issues/466)
    > → [PR #467](https://github.com/yoshuawuyts/wasm.directory/pull/467) merged);

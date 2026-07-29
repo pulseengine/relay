@@ -39,5 +39,12 @@ codegen-units = 1
 [workspace]
 
 [features]
-default = ["bazel-bindings"]
+# Two INDEPENDENT concerns — do not conflate them again (see lib.rs):
+#   bazel-bindings : where the WIT bindings come from (bazel-generated crate
+#                    vs cargo-component's local `mod bindings`)
+#   std            : link std, or build no_std (WASI-free, lowerable)
+# Bazel sets crate_features explicitly and rules_rust does NOT apply Cargo's
+# default-features, so a Bazel build gets bazel-bindings WITHOUT std -> no_std.
+default = ["bazel-bindings", "std"]
 bazel-bindings = []
+std = []
