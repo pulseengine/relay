@@ -53,9 +53,16 @@ artifacts:
     fields:
       method: test
       steps:
-        - run: cargo component build --release --no-default-features   # wasm/cm/rate
-        - run: wasm-tools component wit falcon_rate_cm.wasm            # expect 1 import, no wasi:*
-        - run: cargo run --release -p rate-loop-proof -- falcon_rate_cm.wasm
+        # bench-only: cargo-component + wasm-tools + wasmtime are not installed
+        # in the verification-gate runner, and rate-loop-proof is a STANDALONE
+        # crate (its own [workspace], so wasmtime does not join the root
+        # workspace) — it cannot be addressed as `-p rate-loop-proof` from the
+        # repo root. Each step is the exact command that produced the recorded
+        # evidence; the CI-enforced half of this requirement is the release
+        # workflow's own publish + guard steps.
+        - run: "cd wasm/cm/rate && cargo component build --release --no-default-features  # bench-only"
+        - run: "wasm-tools component wit falcon_rate_cm.wasm  # bench-only: expect 1 import (falcon:cascade/types), no wasi:*"
+        - run: "cd tests/rate-loop-proof && cargo run --release -- <path-to>/falcon_rate_cm.wasm  # bench-only: closed loop through the wasm seam"
     links:
       - type: verifies
         target: SWREQ-FALCON-OCI-P01
