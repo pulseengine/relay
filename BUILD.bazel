@@ -754,7 +754,18 @@ rust_wasm_component_bindgen(
 
 rust_wasm_component_bindgen(
     name = "falcon-rate",
-    crate_features = ["bazel-bindings"],
+    # `std` is EXPLICIT here (v1.130). The features are now independent:
+    # bazel-bindings = bindings source, std = std-vs-no_std. Bazel opts into std
+    # because this target cannot build no_std yet — it would need `lol_alloc` in
+    # the crate_universe deps and a genuine no_std rules_rust config (without
+    # them: "cannot find crate `lol_alloc`" + "duplicate lang item `panic_impl`",
+    # since rules_rust still links std). Until that lands, the WASI-free
+    # component comes from the cargo-component path and Bazel builds the std
+    # variant. Making these converge is the follow-up (see docs/OCI-DISTRIBUTION).
+    crate_features = [
+        "bazel-bindings",
+        "std",
+    ],
     srcs = ["wasm/cm/rate/src/lib.rs"],
     wit = ":falcon_rate_wit",
     deps = [":relay-rate"],
