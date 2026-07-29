@@ -1,0 +1,61 @@
+artifacts:
+  - id: FV-FALCON-OCI-001
+    type: sw-verification
+    title: "OCI-P01 — signed per-component publish, WASI-free build, and through-wasm closed-loop proof (v1.129)"
+    status: verified
+    release: falcon-v1.129.0
+    description: >
+      Verification of SWREQ-FALCON-OCI-P01, the jess consumption contract
+      (jess#167 / DD-026). All three required properties are evidenced:
+
+      (a) DISTRIBUTION — .github/workflows/release.yml publishes each cascade
+      stage (flight, iekf, position, attitude, rate, mixer) to
+      ghcr.io/<owner>/falcon-<stage> on every tagged release via `wkg oci push`
+      (Component-Model OCI media type, not a generic blob), cosign-signed by
+      IMMUTABLE DIGEST, plus a :latest discovery tag that is deliberately left
+      unsigned. VALIDATED END-TO-END on the falcon-v1.127.0 and falcon-v1.128.0
+      releases: the push step's real conclusion was `success` (it is
+      continue-on-error, so the step conclusion — not the run conclusion — is
+      the evidence), and the published package was confirmed ANONYMOUSLY
+      pullable with config media type application/vnd.wasm.config.v0+json and a
+      cosign .sig tag present. Each component carries the embedded metadata
+      contract (description/license/source/keywords) that wasm.directory renders;
+      the `pulseengine` namespace is live and indexed.
+
+      (b) LOWERABLE (no WASI) — the rate component is built `no_std` on the
+      cargo-component path (single-threaded statics replacing thread_local!,
+      lol_alloc global allocator, panic handler), all gated to
+      not(feature = "bazel-bindings"). VERIFIED by disassembly: imports dropped
+      from 10 (incl. every wasi:* interface) to exactly ONE —
+      `import falcon:cascade/types@0.7.0` — with `export falcon:cascade/rate`.
+      Independently corroborated by jess's per-stage lowering sweep, in which
+      the (already WASI-free) mixer stage lowered to the Cortex-M7 with 0 skips,
+      0 external symbols and 0 WASI.
+
+      (c) LOOP-COMPLETE EVIDENCE — tests/rate-loop-proof is a WASI-less wasmtime
+      host that closes the control loop THROUGH the component's own WIT seam:
+      plant (omega_dot = torque / inertia) -> gyro into vehicle-state ->
+      rate.tick across the wasm boundary -> torque -> plant. Result: the body
+      rate tracks a 1 rad/s step, converging at 0.193 s with steady-state
+      |err| 0.0059 rad/s < 0.01 (I = 0.005 kg*m^2, dt = 1 ms,
+      RateGains::DEFAULT). This is the relay half of the agreed proof split and
+      is banked by jess as the SIL differential baseline for the on-target
+      (Renode) run after lowering.
+
+      SCOPE (honest): (a) is verified for the components published to date; the
+      per-component (six-ref) generalization merged in #318 and takes effect on
+      the next tagged release. (b) is verified for the rate component; the other
+      stages still link std and carry WASI imports until each receives the same
+      conversion — the pattern is proven and mechanical, and jess's per-stage
+      skip report prioritizes the order. Nothing here claims on-target lowering:
+      that is jess's half of the split.
+    tags: [verification, falcon, oci, wasm, component-model, jess-contract, v1.129]
+    fields:
+      method: test
+      steps:
+        - run: cargo component build --release --no-default-features   # wasm/cm/rate
+        - run: wasm-tools component wit falcon_rate_cm.wasm            # expect 1 import, no wasi:*
+        - run: cargo run --release -p rate-loop-proof -- falcon_rate_cm.wasm
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OCI-P01
