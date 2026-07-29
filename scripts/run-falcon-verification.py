@@ -99,6 +99,9 @@ BENCH_PATTERNS = [
     # v1.56 — the component-bundle build scripts wrap `cargo component` (absent
     # on the gate runner); same bench-tool rationale as the cargo-component line.
     re.compile(r"\bbuild-(flight-)?components?\.sh\b"),
+    re.compile(r"\bwasm-tools\b"),                   # wasm-tools not on the gate runner
+    re.compile(r"\bcargo\s+component\b"),             # cargo-component (wasm32-wasip2) not provisioned
+    re.compile(r"\brate-loop-proof\b"),               # standalone crate; needs a pre-built .wasm argument
     re.compile(r"\bwasmtime\b"),
     re.compile(r"\bwasmtime-flight-test\b"),
 ]

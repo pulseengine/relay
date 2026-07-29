@@ -62,7 +62,7 @@ artifacts:
         # workflow's own publish + guard steps.
         - run: "cd wasm/cm/rate && cargo component build --release --no-default-features  # bench-only"
         - run: "wasm-tools component wit falcon_rate_cm.wasm  # bench-only: expect 1 import (falcon:cascade/types), no wasi:*"
-        - run: "cd tests/rate-loop-proof && cargo run --release -- <path-to>/falcon_rate_cm.wasm  # bench-only: closed loop through the wasm seam"
+        - run: "cd tests/rate-loop-proof && cargo run --release -- \"$(find ../../wasm/cm/rate/target /Volumes/*/cargo-target -name falcon_rate_cm.wasm 2>/dev/null | head -1)\"  # bench-only: closed loop through the wasm seam"
     links:
       - type: verifies
         target: SWREQ-FALCON-OCI-P01
