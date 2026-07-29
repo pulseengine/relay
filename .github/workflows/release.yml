@@ -527,7 +527,7 @@ jobs:
       # (continue-on-error): the primary artifact is the cosign-signed GitHub
       # Release above; a registry hiccup must never fail a release. Tighten to
       # hard-fail once proven over a few tags. Ref: ghcr.io/<owner>/falcon-flight.
-      - name: Publish flight component to ghcr.io (OCI, cosign-signed)
+      - name: Publish cascade components to ghcr.io (OCI, cosign-signed)
         continue-on-error: true
         working-directory: relay
         env:
@@ -546,28 +546,41 @@ jobs:
           fi
           MM=$(printf '%s' "$TAG" | sed -E 's/^falcon-v([0-9]+\.[0-9]+).*/\1/')
           FULL=$(printf '%s' "$TAG" | sed -E 's/^falcon-v//')
-          WASM="falcon-flight-v${MM}.wasm"
-          REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon-flight"
 
-          # Pull the exact wasm the release just attached (single source of truth).
-          gh release download "$TAG" -p "$WASM" --clobber
+          # Per-component OCI publish (jess#167 decision 5): each fine-grained
+          # verified cascade stage is its own cosign-signed OCI entity, so jess
+          # can `wkg oci pull` and fuse/lower/place per core. The bundle dir was
+          # produced WASI-free (--no-default-features) by the build step above;
+          # push straight from it (no re-download). `flight` is the runnable
+          # demo; the rest are the composable stages.
+          SLUGS="flight iekf position attitude rate mixer"
+          BUNDLE="dist/falcon-components-v${MM}"
 
           # wkg = the wasm-pkg-tools CLI. PINNED (supply-chain), bumped in
           # lockstep. Pushes the wasm-component OCI media type wasm.directory
           # expects — a plain `oras push` would tag it as a generic blob.
           cargo install wkg --locked --version 0.15.1
-
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          wkg oci push "${REPO}:${FULL}" "$WASM" | tee push.log
-          # :latest is a moving convenience pointer — pushed for discovery,
-          # but NEVER signed (only immutable refs get a signature).
-          wkg oci push "${REPO}:latest" "$WASM"
 
-          # Sign the IMMUTABLE digest, not a mutable tag. Only if we resolved one.
-          DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' push.log | head -1 || true)
-          if [ -n "$DIGEST" ]; then
-            cosign sign --yes "${REPO}@${DIGEST}"
-            echo "::notice::Published + signed ${REPO}@${DIGEST} (tags ${FULL}, latest). Pull: wkg oci pull ${REPO}:${FULL}"
-          else
-            echo "::warning::pushed ${REPO}:${FULL} but could not resolve a digest to sign — left unsigned this run"
-          fi
+          published=0
+          for slug in $SLUGS; do
+            WASM="${BUNDLE}/falcon-${slug}-v${MM}.wasm"
+            REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon-${slug}"
+            if [ ! -f "$WASM" ]; then
+              echo "::warning::missing ${WASM} — skipping falcon-${slug}"; continue
+            fi
+            wkg oci push "${REPO}:${FULL}" "$WASM" | tee "push-${slug}.log"
+            # :latest is a moving convenience pointer — pushed for discovery,
+            # but NEVER signed (only immutable refs get a signature).
+            wkg oci push "${REPO}:latest" "$WASM"
+            # Sign the IMMUTABLE digest, not a mutable tag. Only if we resolved one.
+            DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' "push-${slug}.log" | head -1 || true)
+            if [ -n "$DIGEST" ]; then
+              cosign sign --yes "${REPO}@${DIGEST}"
+              echo "::notice::Published + signed ${REPO}@${DIGEST} (tags ${FULL}, latest). Pull: wkg oci pull ${REPO}:${FULL}"
+              published=$((published + 1))
+            else
+              echo "::warning::pushed ${REPO}:${FULL} but could not resolve a digest to sign — left unsigned this run"
+            fi
+          done
+          echo "::notice::per-component OCI publish: ${published} components signed + pushed"

@@ -8,19 +8,28 @@ a meta-registry that indexes OCI registries rather than hosting packages itself.
 
 ## What the release does automatically
 
-`.github/workflows/release.yml` (flight-component job) pushes the exact wasm the
-release attached:
+`.github/workflows/release.yml` (flight-component job) publishes **each verified
+cascade stage as its own cosign-signed OCI entity** (jess#167 decision 5) — the
+fine-grained components jess `wkg oci pull`s and fuses/lowers/places per core:
 
 ```
-ghcr.io/pulseengine/falcon-flight:<full-version>   # e.g. 1.127.0
-ghcr.io/pulseengine/falcon-flight:latest
+ghcr.io/pulseengine/falcon-flight:<full-version>     # runnable demo (sealed loop)
+ghcr.io/pulseengine/falcon-iekf:<full-version>       # invariant-EKF estimator
+ghcr.io/pulseengine/falcon-position:<full-version>   # position/velocity controller
+ghcr.io/pulseengine/falcon-attitude:<full-version>   # geometric SO(3) attitude
+ghcr.io/pulseengine/falcon-rate:<full-version>       # body-rate PID
+ghcr.io/pulseengine/falcon-mixer:<full-version>      # control allocator
+#   ...each also tagged :latest
 ```
 
-pushed with `wkg` (wasm-pkg-tools) so it carries the Component-Model OCI media
-type wasm.directory expects — not a generic blob — and cosign-signed keyless,
-like the release bundle. The step is **non-blocking** (`continue-on-error`): a
-registry hiccup must never fail the primary signed GitHub Release. It will be
-tightened to a hard failure once it has proven itself across a few tags.
+Each is built **WASI-free** (`--no-default-features`, so it lowers to bare metal
+— see `wasm/cm/*`) and pushed with `wkg` (wasm-pkg-tools) so it carries the
+Component-Model OCI media type wasm.directory expects — not a generic blob — and
+cosign-signed keyless by immutable digest, like the release bundle. The step is
+**non-blocking** (`continue-on-error`): a registry hiccup must never fail the
+primary signed GitHub Release. It will be tightened to a hard failure once it has
+proven itself across a few tags. Every published component carries the full
+embedded metadata contract (below) so its wasm.directory listing is real.
 
 Pull + verify:
 
