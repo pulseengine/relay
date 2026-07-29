@@ -49,8 +49,21 @@ build_component() {
   local dir="$1"
   local wasm_dir="$HERE/wasm/cm/$dir"
   printf "  building %-16s..." "$dir" >&2
-  ( cd "$wasm_dir" && cargo component build --release --target wasm32-wasip2 --no-default-features 2>&1 ) \
-    | grep -E "^error" | sed 's/^/    /' >&2 || true
+  # FAIL LOUD (v1.130): this used to end in `|| true`, so a build error was
+  # printed and then IGNORED — the script fell through to a stale artifact from
+  # a previous build and shipped it. That is exactly how falcon-rate:1.129.0 was
+  # published as a raw CORE MODULE: the no_std wasip2 build failed
+  # ("module does not export a function named `cabi_realloc`"), the failure was
+  # swallowed, and the fallback picked up a pre-componentization module.
+  # A build failure must stop the bundle, not degrade it silently.
+  if ! ( cd "$wasm_dir" && cargo component build --release --target wasm32-wasip2 --no-default-features 2>&1 ) \
+       | tee /tmp/falcon-build-$dir.log | grep -E "^error" | sed 's/^/    /' >&2; then
+    : # grep found no "^error" lines — that is the success path
+  fi
+  if grep -qE "^error" /tmp/falcon-build-$dir.log 2>/dev/null; then
+    echo " ERROR: cargo component build failed for $dir (see above)" >&2
+    exit 1
+  fi
   # Prefer the wasip2 path; cargo-component <0.20 emits wasip1.
   local src
   src=$(ls "$wasm_dir"/target/wasm32-wasip2/release/*.wasm 2>/dev/null | head -1 || true)
@@ -66,6 +79,18 @@ build_component() {
   local slug="${dir#falcon-}"
   local dest="$BUNDLE_DIR/falcon-$slug-v$MM.wasm"
   cp "$src" "$dest"
+  # ASSERT the payload really is a Component, not a core module (v1.130).
+  # jess found falcon-rate:1.129.0 shipped as a core module — `meld fuse`
+  # rejected it outright. The OCI config mediaType says "component" regardless
+  # of the bytes, so metadata cannot catch this; check the 8-byte header.
+  #   core module : 00 61 73 6d 01 00 00 00
+  #   component   : 00 61 73 6d 0d 00 01 00
+  magic=$(od -An -tx1 -N8 "$dest" | tr -d ' \n')
+  if [ "$magic" != "0061736d0d000100" ]; then
+    echo " ERROR: $dest is NOT a wasm component (header $magic)" >&2
+    echo "        expected 0061736d0d000100; a core module is 0061736d01000000" >&2
+    exit 1
+  fi
   local bytes
   bytes=$(wc -c < "$dest" | tr -d ' ')
   printf " %s bytes\n" "$bytes" >&2
