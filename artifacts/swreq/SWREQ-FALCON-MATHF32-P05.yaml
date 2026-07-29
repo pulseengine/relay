@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MATHF32-P05
     type: sw-req
     title: "MATHF32-P05 — machine-checked reduced-range bound for the COSINE kernel (rounding + approximation)"
-    status: implemented
+    status: verified
     release: falcon-v1.129.0
     description: >
       The cosine analogue of the sine-kernel proof pair, both halves now built:

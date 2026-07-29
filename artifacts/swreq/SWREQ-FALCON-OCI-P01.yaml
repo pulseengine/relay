@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-OCI-P01
     type: sw-req
     title: "OCI-P01 — publish each verified cascade stage as a signed, lowerable OCI component"
-    status: implemented
+    status: verified
     release: falcon-v1.129.0
     description: >
       The verified flight components shall be consumable by the system
