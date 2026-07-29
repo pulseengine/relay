@@ -61,6 +61,69 @@ impl Timestamp {
     pub fn as_secs_f32(self) -> f32 {
         self.seconds as f32 + (self.fraction as f32) / (1u64 << 32) as f32
     }
+
+    /// Seconds (f32) elapsed from `earlier` to `self`, computed in the INTEGER
+    /// domain and converted once — the lowerable form.
+    ///
+    /// Two reasons this exists rather than `self.as_secs_f32() - earlier.as_secs_f32()`:
+    ///
+    /// 1. **Lowering (synth GI-FPU-001 / synth#369).** `as_secs_f32` converts a
+    ///    `u64` seconds field, emitting `f32.convert_i64_u`, which synth cannot
+    ///    yet lower to ARM VFP — it skipped the whole public entry point of the
+    ///    rate/position/ekf stages. Differencing first keeps the elapsed value
+    ///    small, so only `u32`/`i32` conversions (`f32.convert_i32_u`, which
+    ///    lowers fine) are needed. Reported by jess on the per-stage lowering
+    ///    sweep (jess#167).
+    /// 2. **Precision.** Subtracting two large absolute f32 epoch times
+    ///    catastrophically cancels — at t≈1e6 s an f32 ULP is ~0.06 s, which
+    ///    swamps a 1 ms control period. Differencing in integers and converting
+    ///    the small result is strictly more accurate.
+    ///
+    /// Saturates at zero for out-of-order (non-monotonic) input rather than
+    /// wrapping or panicking; callers clamp the result to their dt band anyway.
+    pub fn secs_since_f32(self, earlier: Self) -> f32 {
+        if self.seconds < earlier.seconds
+            || (self.seconds == earlier.seconds && self.fraction < earlier.fraction)
+        {
+            return 0.0;
+        }
+        let mut whole = self.seconds - earlier.seconds;
+        let frac_diff = if self.fraction >= earlier.fraction {
+            self.fraction - earlier.fraction
+        } else {
+            // Borrow one second (whole >= 1 here: equal-seconds-with-smaller-
+            // fraction was handled by the early return above).
+            whole -= 1;
+            (self.fraction as u64 + (1u64 << 32) - earlier.fraction as u64) as u32
+        };
+        // Elapsed time between control ticks is small. Saturate to a SMALL u32
+        // bound (not u32::MAX) and narrow BEFORE any float math, so the only
+        // integer->float conversion the backend can emit is the 32-bit form.
+        // (A u32::MAX bound let LLVM keep the value in i64 and re-emit
+        // f32.convert_i64_u — verified by disassembling the built component.)
+        // Callers clamp dt to <= 0.1 s anyway, so any gap beyond the cap is
+        // already out of band and saturating there loses nothing.
+        // NOTE (verified by disassembly, not assumed): an `if/else` cap here gets
+        // compiled to a branchless select that converts the full u64 and caps in
+        // FLOAT domain — i.e. `f32.convert_i64_u` survives. `u64::min` narrows
+        // unconditionally BEFORE the cast, so the backend can only emit the
+        // 32-bit convert. Cap is ~12 days, far above any control dt; callers
+        // clamp dt to <= 0.1 s, so a longer gap is already out of band.
+        // Verified by disassembly (not assumed): both an `if/else` cap and
+        // `u64::min(..) as u32` leave LLVM converting the u64 directly
+        // (`f32.convert_i64_u`) — it clamps in integer domain but never narrows.
+        // Truncating the LOW 32 BITS after an explicit in-range check makes the
+        // narrowing unconditional and the u64 dead before the float op, so the
+        // backend can only emit `f32.convert_i32_u`. Cap ~12 days; callers clamp
+        // dt to <= 0.1 s, so a longer gap is already out of band.
+        const MAX_GAP_SECS: u64 = 1 << 20;
+        let whole_u32: u32 = if whole >= MAX_GAP_SECS {
+            MAX_GAP_SECS as u32
+        } else {
+            (whole & 0xFFFF_FFFF) as u32
+        };
+        whole_u32 as f32 + (frac_diff as f32) * (1.0 / 4_294_967_296.0)
+    }
 }
 
 /// Tuning gains for the rate controller. All values per-axis
@@ -171,7 +234,7 @@ impl RatePid {
         let dt = if self.last_time.seconds == 0 && self.last_time.fraction == 0 {
             1.0 / 1000.0
         } else {
-            let delta = time.as_secs_f32() - self.last_time.as_secs_f32();
+            let delta = time.secs_since_f32(self.last_time);
             clamp_f32(delta, 0.0001, 0.1)
         };
         self.last_time = time;
