@@ -65,11 +65,25 @@ build_component() {
     exit 1
   fi
   # Prefer the wasip2 path; cargo-component <0.20 emits wasip1.
-  local src
-  src=$(ls "$wasm_dir"/target/wasm32-wasip2/release/*.wasm 2>/dev/null | head -1 || true)
-  if [ -z "$src" ]; then
-    src=$(ls "$wasm_dir"/target/wasm32-wasip1/release/*.wasm 2>/dev/null | head -1 || true)
-  fi
+  # Select the artifact BY NAME, never `ls *.wasm | head -1` (v1.130). The old
+  # glob picked whatever sorted first in the target dir — with a shared
+  # CARGO_TARGET_DIR (a common CI disk-saving setting) that is a DIFFERENT
+  # crate's component: building `rate` picked up falcon_flight_component.wasm
+  # because "flight" < "rate". It would then be published under the wrong name.
+  # cargo turns - into _ for the artifact filename.
+  local crate_name artifact src
+  crate_name=$(grep -m1 '^name *= *"' "$wasm_dir/Cargo.toml" | sed -E 's/.*"(.*)".*/\1/')
+  artifact="${crate_name//-/_}.wasm"
+  src=""
+  for tgt in wasm32-wasip2 wasm32-wasip1; do
+    if [ -f "$wasm_dir/target/$tgt/release/$artifact" ]; then
+      src="$wasm_dir/target/$tgt/release/$artifact"; break
+    fi
+    # honour a shared CARGO_TARGET_DIR if one is set
+    if [ -n "${CARGO_TARGET_DIR:-}" ] && [ -f "$CARGO_TARGET_DIR/$tgt/release/$artifact" ]; then
+      src="$CARGO_TARGET_DIR/$tgt/release/$artifact"; break
+    fi
+  done
   if [ -z "$src" ]; then
     echo " ERROR: no .wasm found" >&2
     exit 1

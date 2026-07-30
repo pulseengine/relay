@@ -6,19 +6,27 @@
 //! comes from `vehicle-state.{wx,wy,wz}` (the gyro reading the EKF component
 //! passes through).
 //!
-//! `no_std` on the cargo-component path so the component imports NO WASI — a
+//! `no_std` unless the `std` feature is on, so the component imports NO WASI — a
 //! pure `falcon:cascade/types` -> `rate` transformer, which is what lowers to
 //! bare metal (synth -> gale on M4/M7/F100) and what a WASI-less wasmtime host
 //! can drive directly. (The single-threaded statics replace `thread_local!`,
 //! whose `std` dependency was the sole reason WASI was linked.) The Bazel
 //! bindings path keeps its existing environment.
+//!
+//! FEATURE SPLIT (v1.130): `bazel-bindings` selects the BINDINGS SOURCE only;
+//! `std` selects std-vs-no_std. These were briefly conflated on one flag, which
+//! made the Bazel build (which sets bazel-bindings) silently produce a
+//! std/WASI-carrying artifact while the cargo-component build produced the
+//! WASI-free one — two build systems, same source, materially different output.
+//! rules_rust does not apply Cargo's default-features, so a Bazel build enables
+//! ONLY the features it lists: `bazel-bindings` without `std` => no_std.
 
-#![cfg_attr(not(feature = "bazel-bindings"), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 // no_std (cargo-component path) global allocator — the component ABI's
 // cabi_realloc needs one. Single-threaded is sound: a component instance is
 // never re-entered concurrently by the runtime.
-#[cfg(not(feature = "bazel-bindings"))]
+#[cfg(not(feature = "std"))]
 #[global_allocator]
 static ALLOC: lol_alloc::AssumeSingleThreaded<lol_alloc::FreeListAllocator> =
     unsafe { lol_alloc::AssumeSingleThreaded::new(lol_alloc::FreeListAllocator::new()) };
@@ -31,7 +39,7 @@ static ALLOC: lol_alloc::AssumeSingleThreaded<lol_alloc::FreeListAllocator> =
 // `wasm-component-ld` failed with "module does not export a function named
 // `cabi_realloc`" — leaving a raw CORE MODULE where a component was expected.
 // Export it here, backed by the same single-threaded allocator.
-#[cfg(not(feature = "bazel-bindings"))]
+#[cfg(not(feature = "std"))]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn cabi_realloc(
     old_ptr: *mut u8,
@@ -114,7 +122,7 @@ bindings::export!(Component with_types_in bindings);
 
 // no_std (cargo-component path) needs a panic handler; the Bazel path (std)
 // provides its own.
-#[cfg(not(feature = "bazel-bindings"))]
+#[cfg(not(feature = "std"))]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}

@@ -83,6 +83,24 @@ cosign verify ghcr.io/pulseengine/falcon-flight:1.127.0 \
    already exist and be **public** (step 1) before submitting — an unpullable
    entry is rejected. Do this only after a real release has populated the package.
 
+   Adding a component to an **existing** namespace auto-merges (no maintainer
+   review) — only a brand-new namespace is held for review. Registered so far:
+
+   | component | wasm.directory | note |
+   |---|---|---|
+   | `falcon-flight` | ✅ indexed (#466 → #467) | |
+   | `falcon-iekf` | filed #474 → PR #478 | |
+   | `falcon-position` | filed #475 → PR #479 | |
+   | `falcon-attitude` | filed #476 → PR #480 | |
+   | `falcon-mixer` | filed #477 → PR #481 | |
+   | `falcon-rate` | **HELD — do not register yet** | published 1.129.0 is a CORE MODULE, not a component; register after v1.130 republishes it |
+
+   **Verify the payload before registering.** The OCI `config.mediaType` reads
+   `application/vnd.wasm.config.v0+json` whether or not the bytes are actually a
+   component, so metadata cannot be trusted here — pull the blob and check the
+   8-byte header (`0061736d0d000100` = component, `0061736d01000000` = core
+   module). This is how `falcon-rate:1.129.0` was caught.
+
    > Status: **LIVE** — the `pulseengine` namespace was accepted
    > ([wasm.directory#466](https://github.com/yoshuawuyts/wasm.directory/issues/466)
    > → [PR #467](https://github.com/yoshuawuyts/wasm.directory/pull/467) merged);
@@ -92,6 +110,31 @@ cosign verify ghcr.io/pulseengine/falcon-flight:1.127.0 \
    notice; don't depend on it in production") — treat the listing as a visibility
    channel, not a dependency. The durable, signed artifacts remain the GitHub
    Release and the ghcr OCI ref.
+
+## Two build paths — and why they still differ
+
+The components are built **twice**, and the paths do not yet agree:
+
+| | Bazel (`rust_wasm_component_bindgen`) | `scripts/build-components.sh` |
+|---|---|---|
+| used by | the cascade / `wac_plug` / `meld_fuse` / `synth_compile` graph | the **release** (what we publish) |
+| variant | **std** (carries WASI imports) | **no_std, WASI-free** |
+| on build error | fails the build | fails the build (since v1.130; it used to `|| true`) |
+
+The published artifact is the WASI-free one, and only the script produces it today.
+The feature flags are now properly independent — `bazel-bindings` selects the
+bindings source, `std` selects std-vs-no_std — but the Bazel target must still
+opt into `std`, because building it `no_std` needs two things it does not have:
+
+1. `lol_alloc` in the Bazel `deps` (Bazel does not read `Cargo.toml` deps), and
+2. a genuine no_std rules_rust configuration — otherwise std is still linked and
+   the crate's own `#[panic_handler]` collides ("duplicate lang item `panic_impl`").
+
+**Converging them is the open follow-up**: once Bazel can build the no_std
+variant, the release should consume Bazel outputs and this script becomes a thin
+bundler. That removes the whole class of bug that shipped `falcon-rate:1.129.0`
+as a core module (silent build failure + untyped artifact selection), because a
+Bazel action failure cannot be swallowed and its outputs are declared.
 
 ## Component metadata contract (what wasm.directory renders)
 
