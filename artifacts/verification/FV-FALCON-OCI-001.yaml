@@ -22,6 +22,27 @@ artifacts:
       contract (description/license/source/keywords) that wasm.directory renders;
       the `pulseengine` namespace is live and indexed.
 
+      EVIDENCE GAP FOUND IN THE FIELD (v1.130) — the check above was NOT
+      sufficient. jess pulled falcon-rate:1.129.0 and found a raw CORE MODULE
+      (header 0061736d01000000), not a component (0061736d0d000100); `meld fuse`
+      rejects it, so the consumption path stopped at step one. The OCI config
+      mediaType reads "component" regardless of the payload, so metadata can
+      never catch this — the original evidence checked the WRAPPER, not the BYTES.
+      Root cause: the no_std conversion dropped the `cabi_realloc` export that
+      wit-bindgen-rt supplies only when std is linked
+      (#[cfg(not(target_env = "p2"))]), so wasm-component-ld could not encode a
+      component; build-components.sh then SWALLOWED that failure (`|| true`) and
+      fell back to a pre-componentization artifact.
+
+      STRENGTHENED EVIDENCE (#323, #324): (i) `cabi_realloc` is exported from the
+      no_std path; (ii) a build failure now aborts the bundle instead of silently
+      degrading it; (iii) every component's 8-byte HEADER is asserted before it
+      enters the bundle — verified that the assert REJECTS the published 1.129.0
+      artifact and ACCEPTS known-good components; (iv) artifacts are selected by
+      derived crate name, not `ls *.wasm | head -1`, which could otherwise
+      publish a different crate's component under the wrong name when
+      CARGO_TARGET_DIR is shared. Republished correctly in v1.130.
+
       (b) LOWERABLE (no WASI) — the rate component is built `no_std` on the
       cargo-component path (single-threaded statics replacing thread_local!,
       lol_alloc global allocator, panic handler), all gated to
