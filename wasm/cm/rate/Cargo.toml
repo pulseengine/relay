@@ -20,8 +20,6 @@ crate-type = ["cdylib"]
 [dependencies]
 relay-rate = { path = "../../../crates/relay-rate" }
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
-# no_std (cargo-component path) global allocator — single-threaded wasm.
-lol_alloc = "0.4"
 
 [package.metadata.component]
 package = "falcon:cascade"
