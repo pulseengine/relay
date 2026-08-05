@@ -43,6 +43,31 @@ artifacts:
       publish a different crate's component under the wrong name when
       CARGO_TARGET_DIR is shared. Republished correctly in v1.130.
 
+      FURTHER STRENGTHENING (v1.131) — three follow-on defects, each measured on
+      the artifact rather than argued:
+      (v) NO-GROW. The v1.130 cabi_realloc fix satisfied the ABI with a GROWING
+      allocator (lol_alloc), so the shipped component carried `memory.grow` —
+      which is exactly what makes `meld fuse --memory shared --address-rebase`
+      reject a component (gale#89, meld#299), i.e. the fix partly re-blocked the
+      MCU lowering it exists to serve. Replaced with a bounded static
+      work-memory arena (fixed size, traps on exhaustion, never grows):
+      memory.grow 1 -> 0 (#327).
+      (vi) ROOT CAUSE — TARGET. `target_env = "p2"` is the wasip2 RUST TARGET,
+      which links wasi-libc, whose cabi_realloc goes through malloc. A component
+      does NOT need that target to be a valid P2 component. no_std components
+      now build wasm32-unknown-unknown (#329). Measured on falcon-rate, same
+      source, only the target differing: wasip2 -> component, 0 wasi, grow=1,
+      4674 B; unknown-unknown -> component, 0 wasi, grow=0, 3953 B; the
+      through-wasm closed-loop proof identical on both (0.193 s, |err| 0.0059).
+      (vii) LISTING METADATA. wasm.directory renders STANDARD OCI MANIFEST
+      ANNOTATIONS, not the wasm's embedded package-metadata — our manifests
+      carried none, so `falcon-mixer:1.130.0` listed as "No description
+      available" with no license or source despite complete crate metadata.
+      The release now sets org.opencontainers.image.* on both refs, sourcing
+      each description from its crate Cargo.toml (#328). This corrected an
+      explicit claim in docs/OCI-DISTRIBUTION.md, which had asserted the
+      embedded metadata drove the listing.
+
       (b) LOWERABLE (no WASI) — the rate component is built `no_std` on the
       cargo-component path (single-threaded statics replacing thread_local!,
       lol_alloc global allocator, panic handler), all gated to
