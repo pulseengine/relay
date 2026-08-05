@@ -562,6 +562,9 @@ jobs:
           cargo install wkg --locked --version 0.15.1
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
 
+          # RFC-3339 build timestamp for org.opencontainers.image.created.
+          CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
           published=0
           for slug in $SLUGS; do
             WASM="${BUNDLE}/falcon-${slug}-v${MM}.wasm"
@@ -569,10 +572,31 @@ jobs:
             if [ ! -f "$WASM" ]; then
               echo "::warning::missing ${WASM} — skipping falcon-${slug}"; continue
             fi
-            wkg oci push "${REPO}:${FULL}" "$WASM" | tee "push-${slug}.log"
+            # STANDARD OCI ANNOTATIONS — this is what wasm.directory renders.
+            # Without them the listing reads "No description available" with no
+            # license or source link, however complete the crate metadata is:
+            # the web listing reads the MANIFEST ANNOTATIONS, not the wasm's
+            # embedded package-metadata section. Descriptions are sourced from
+            # each component crate's Cargo.toml so there is one source of truth.
+            CRATE_DIR="wasm/cm/${slug}"
+            [ -d "$CRATE_DIR" ] || CRATE_DIR="wasm/cm/falcon-${slug}"
+            DESC=$(sed -n 's/^description *= *"\(.*\)"$/\1/p' "${CRATE_DIR}/Cargo.toml" 2>/dev/null | head -1)
+            [ -n "$DESC" ] || DESC="Formally-verified falcon flight-control component (${slug})."
+            ANN=(
+              --annotation "org.opencontainers.image.title=pulseengine:falcon-${slug}"
+              --annotation "org.opencontainers.image.description=${DESC}"
+              --annotation "org.opencontainers.image.version=${FULL}"
+              --annotation "org.opencontainers.image.licenses=Apache-2.0"
+              --annotation "org.opencontainers.image.source=https://github.com/pulseengine/relay"
+              --annotation "org.opencontainers.image.documentation=https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
+              --annotation "org.opencontainers.image.vendor=PulseEngine"
+              --annotation "org.opencontainers.image.revision=${GITHUB_SHA}"
+              --annotation "org.opencontainers.image.created=${CREATED}"
+            )
+            wkg oci push "${ANN[@]}" "${REPO}:${FULL}" "$WASM" | tee "push-${slug}.log"
             # :latest is a moving convenience pointer — pushed for discovery,
             # but NEVER signed (only immutable refs get a signature).
-            wkg oci push "${REPO}:latest" "$WASM"
+            wkg oci push "${ANN[@]}" "${REPO}:latest" "$WASM"
             # Sign the IMMUTABLE digest, not a mutable tag. Only if we resolved one.
             DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' "push-${slug}.log" | head -1 || true)
             if [ -n "$DIGEST" ]; then
