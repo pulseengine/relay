@@ -138,12 +138,35 @@ Bazel action failure cannot be swallowed and its outputs are declared.
 
 ## Component metadata contract (what wasm.directory renders)
 
-wasm.directory shows a component's **WIT interface** (with its `///` doc comments)
-plus the **embedded package metadata** — `description`, `licenses`, `source`,
-`authors`, `version` — which `cargo-component` bakes into the wasm
-`package-metadata` section from the crate's `Cargo.toml`. Empty metadata → a bare
-listing. So **every published relay component MUST carry**, in its (standalone)
-`Cargo.toml` — it can't inherit the workspace root:
+wasm.directory's listing page renders **standard OCI manifest annotations** —
+NOT the wasm's embedded `package-metadata` section. (Corrected: an earlier
+version of this doc claimed the opposite. Evidence: `falcon-mixer:1.130.0`
+listed as *"No description available"*, with no license and no source link,
+even though its crate carried all of them — while `autostamp/amadeus` shows a
+full listing and its manifest carries
+`org.opencontainers.image.{description,licenses,source,title,version,created}`.)
+
+So the release pushes those annotations explicitly (`wkg oci push --annotation
+KEY=value`), sourcing each component's description from its crate `Cargo.toml`
+so there is one source of truth:
+
+| annotation | value |
+|---|---|
+| `…image.title` | `pulseengine:falcon-<stage>` |
+| `…image.description` | the crate's `description` |
+| `…image.version` | the release version |
+| `…image.licenses` | `Apache-2.0` |
+| `…image.source` | the relay repo |
+| `…image.documentation` | this file |
+| `…image.vendor` | `PulseEngine` |
+| `…image.revision` | the release commit SHA |
+| `…image.created` | build timestamp (RFC 3339) |
+
+The crate metadata below is still worth carrying — `component registry inspect`
+reads the embedded fields, and it is where the annotation descriptions come
+from — but it is the annotations that make the web listing non-bare. So **every
+published relay component MUST carry**, in its (standalone) `Cargo.toml` — it
+can't inherit the workspace root:
 
 ```toml
 description = "<one sentence a stranger understands — lead with what it IS>"
