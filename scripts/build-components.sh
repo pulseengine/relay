@@ -45,10 +45,35 @@ TOOLCHAIN_STR="rustc=$RUSTC_VER cargo-component=$CC_VER"
 # Builds the component in wasm/cm/<dir>, finds the output .wasm, copies it
 # to the bundle dir as falcon-<dir>-vMM.wasm, and prints the destination path.
 # ---------------------------------------------------------------------------
+# Components that are `no_std` build for wasm32-unknown-unknown, NOT
+# wasm32-wasip2 (v1.131). `target_env = "p2"` is the wasip2 RUST TARGET, which
+# links wasi-libc — and wasi-libc's cabi_realloc goes through malloc, which
+# emits `memory.grow`. `memory.grow` is what makes
+# `meld fuse --memory shared --address-rebase` reject a component (gale#89,
+# meld#299), so it blocks the single-address-space MCU lowering these
+# components exist for. A component does NOT need the wasip2 target to be a
+# valid Component-Model P2 component: falcon-rate built for
+# wasm32-unknown-unknown is a component (0061736d0d000100) with ZERO wasi
+# imports. gale provides gust:os/gust:hal, not WASI, so nothing on this path
+# should be linking wasi-libc at all.
+#
+# Add a component here as it is converted to no_std (jess's per-stage lowering
+# report is the priority order). A std component still needs wasip2.
+NOSTD_COMPONENTS=" rate "
+
+component_target() {
+  case "$NOSTD_COMPONENTS" in
+    *" $1 "*) echo "wasm32-unknown-unknown" ;;
+    *)        echo "wasm32-wasip2" ;;
+  esac
+}
+
 build_component() {
   local dir="$1"
   local wasm_dir="$HERE/wasm/cm/$dir"
-  printf "  building %-16s..." "$dir" >&2
+  local target
+  target=$(component_target "$dir")
+  printf "  building %-16s (%s)..." "$dir" "$target" >&2
   # FAIL LOUD (v1.130): this used to end in `|| true`, so a build error was
   # printed and then IGNORED — the script fell through to a stale artifact from
   # a previous build and shipped it. That is exactly how falcon-rate:1.129.0 was
@@ -56,7 +81,7 @@ build_component() {
   # ("module does not export a function named `cabi_realloc`"), the failure was
   # swallowed, and the fallback picked up a pre-componentization module.
   # A build failure must stop the bundle, not degrade it silently.
-  if ! ( cd "$wasm_dir" && cargo component build --release --target wasm32-wasip2 --no-default-features 2>&1 ) \
+  if ! ( cd "$wasm_dir" && cargo component build --release --target "$target" --no-default-features 2>&1 ) \
        | tee /tmp/falcon-build-$dir.log | grep -E "^error" | sed 's/^/    /' >&2; then
     : # grep found no "^error" lines — that is the success path
   fi
@@ -75,7 +100,7 @@ build_component() {
   crate_name=$(grep -m1 '^name *= *"' "$wasm_dir/Cargo.toml" | sed -E 's/.*"(.*)".*/\1/')
   artifact="${crate_name//-/_}.wasm"
   src=""
-  for tgt in wasm32-wasip2 wasm32-wasip1; do
+  for tgt in "$target" wasm32-wasip2 wasm32-wasip1; do
     if [ -f "$wasm_dir/target/$tgt/release/$artifact" ]; then
       src="$wasm_dir/target/$tgt/release/$artifact"; break
     fi
