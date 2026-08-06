@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-OCI-P04
     type: sw-req
     title: "OCI-P04 — publish the WIT interface package and claim the `falcon` namespace"
-    status: proposed
+    status: implemented
     release: falcon-v1.133.0
     description: >
       The interfaces our components export shall be published and owned, not
