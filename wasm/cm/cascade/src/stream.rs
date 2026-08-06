@@ -12,7 +12,7 @@
 
 use cascade_orch::{Cascade, TickIn};
 
-use falcon_cascade_stream_composed_bindings::exports::falcon::cascade_stream::cascade_stream::{
+use falcon_cascade_stream_composed_bindings::exports::pulseengine::falcon_cascade_stream::cascade_stream::{
     CascadeInput as WitInput, Guest, MotorPwm as WitPwm,
 };
 

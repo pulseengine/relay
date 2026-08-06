@@ -1,4 +1,4 @@
-package falcon:control@0.6.0;
+package pulseengine:falcon-control@0.6.0;
 
 /// Falcon control-cascade component interfaces — v0.6 pipeline shape.
 ///

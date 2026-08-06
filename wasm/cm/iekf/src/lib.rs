@@ -1,5 +1,5 @@
 //! falcon-iekf — the VERIFIED Invariant-EKF (SE₂(3)) as a Component Model
-//! component, exporting the same `falcon:cascade/ekf` interface as the v0.6
+//! component, exporting the same `pulseengine:falcon-cascade/ekf` interface as the v0.6
 //! Mahony `falcon-ekf` component. This is the v1.4 step of replacing the old
 //! cascade with the verified stack: the IEKF is now a real WIT component, so
 //! it can be composed (wac) and fused (meld) like any other.
@@ -17,8 +17,8 @@ mod bindings;
 
 use core::cell::RefCell;
 
-use bindings::exports::falcon::cascade::ekf::Guest;
-use bindings::falcon::cascade::types::{ImuSample, VehicleState};
+use bindings::exports::pulseengine::falcon_cascade::ekf::Guest;
+use bindings::pulseengine::falcon_cascade::types::{ImuSample, VehicleState};
 
 use relay_iekf::{Iekf, Imu as RImu};
 

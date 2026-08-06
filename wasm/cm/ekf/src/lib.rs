@@ -14,8 +14,8 @@ mod bindings;
 
 use core::cell::RefCell;
 
-use bindings::exports::falcon::cascade::ekf::Guest;
-use bindings::falcon::cascade::types::{ImuSample, VehicleState};
+use bindings::exports::pulseengine::falcon_cascade::ekf::Guest;
+use bindings::pulseengine::falcon_cascade::types::{ImuSample, VehicleState};
 
 use relay_ekf::{Ekf, ImuSample as RImu, Timestamp};
 

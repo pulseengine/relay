@@ -14,8 +14,8 @@ mod bindings;
 
 use core::cell::RefCell;
 
-use bindings::exports::falcon::cascade::attitude::Guest;
-use bindings::falcon::cascade::types::{AttitudeSetpoint, RateSetpoint, VehicleState};
+use bindings::exports::pulseengine::falcon_cascade::attitude::Guest;
+use bindings::pulseengine::falcon_cascade::types::{AttitudeSetpoint, RateSetpoint, VehicleState};
 
 use relay_att::{AttController, Timestamp};
 

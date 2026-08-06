@@ -1,7 +1,7 @@
 //! falcon-mixer — the X-config quad mixer as a Component Model
 //! component. Wraps `relay-mix-quad::QuadMixer`.
 //!
-//! v0.7: exports the `falcon:cascade/mixer` interface. `wac` wires
+//! v0.7: exports the `pulseengine:falcon-cascade/mixer` interface. `wac` wires
 //! this component's export into the `cascade` orchestrator's import
 //! (see falcon-cascade.wac). The mixer is stateless per call, so the
 //! `Guest` impl just constructs a `QuadMixer` and runs one `mix`.
@@ -13,8 +13,8 @@ use falcon_mixer_bindings as bindings;
 #[cfg(not(feature = "bazel-bindings"))]
 mod bindings;
 
-use bindings::exports::falcon::cascade::mixer::Guest;
-use bindings::falcon::cascade::types::{MotorPwm, TorqueSetpoint};
+use bindings::exports::pulseengine::falcon_cascade::mixer::Guest;
+use bindings::pulseengine::falcon_cascade::types::{MotorPwm, TorqueSetpoint};
 
 use relay_mix_quad::QuadMixer;
 

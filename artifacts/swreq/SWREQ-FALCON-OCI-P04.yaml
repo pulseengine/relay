@@ -1,0 +1,55 @@
+artifacts:
+  - id: SWREQ-FALCON-OCI-P04
+    type: sw-req
+    title: "OCI-P04 — publish the WIT interface package and claim the `falcon` namespace"
+    status: proposed
+    release: falcon-v1.133.0
+    description: >
+      The interfaces our components export shall be published and owned, not
+      merely implied by the components that happen to implement them.
+
+      wasm.directory indexes COMPONENTS under the registry namespace but
+      INTERFACES under the WIT package namespace, and ours disagree: the
+      components are registered under `pulseengine` (registry/pulseengine.toml),
+      while the WIT packages are `falcon:cascade@0.7.0` and
+      `falcon:flight@1.26.0`. So a component page at
+      /pulseengine/falcon-iekf/1.131.1 links its exports to
+      /falcon/cascade/0.7.0/interface/ekf — a namespace that is ORPHANED:
+      /falcon reports "0 packages", no owner, no registry. The interfaces are
+      reachable by direct URL but not discoverable from our namespace, and the
+      namespace they live in belongs to nobody. Contrast /wasi/io/0.2.9, which
+      is coherent because the `wasi` package namespace is owned and registered.
+
+      Fix by publishing the WIT package itself (`wkg wit build` produces an
+      encoded WIT package; `wkg oci push` publishes it) and registering the
+      `falcon` namespace with `[[interface]]` entries — the shape wasi uses:
+      namespace `wasi` at registry ghcr.io/webassembly with
+      `[[interface]] name = "io", repository = "wasi/io"`. Ours becomes namespace
+      `falcon` at ghcr.io/pulseengine with repository `falcon/cascade`.
+
+      The alternative — renaming `falcon:*` to `pulseengine:*` — was rejected:
+      it changes every import/export string, the wac composition, the meld
+      fusion and jess's integration, which is far too much breakage for a
+      listing. `falcon` as a product namespace alongside `pulseengine` as the
+      org is legitimate; the defect is that it is unclaimed.
+
+      Publishing the interface separately also makes it independently
+      consumable (`component install falcon:cascade`) rather than only
+      obtainable by pulling a component that implements it — which is the point
+      of publishing to a meta-registry at all.
+    tags: [falcon, oci, wasm, wit, wasm-directory, discoverability, v1.133]
+    fields:
+      req-type: interface
+      priority: should
+      verification-criteria: >
+        (a) The WIT package is published to ghcr.io/<owner>/falcon/cascade on a
+        tagged release and is anonymously pullable. (b) The `falcon` namespace is
+        registered on wasm.directory with `[[interface]]` entries, and
+        https://wasm.directory/falcon no longer reports "0 packages". (c) A
+        component page's export links resolve into an OWNED namespace. Verified
+        by fetching the live pages, not by inspecting the workflow.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-OCI-P01

@@ -7,7 +7,7 @@
 //! passes through).
 //!
 //! `no_std` unless the `std` feature is on, so the component imports NO WASI — a
-//! pure `falcon:cascade/types` -> `rate` transformer, which is what lowers to
+//! pure `pulseengine:falcon-cascade/types` -> `rate` transformer, which is what lowers to
 //! bare metal (synth -> gale on M4/M7/F100) and what a WASI-less wasmtime host
 //! can drive directly. (The single-threaded statics replace `thread_local!`,
 //! whose `std` dependency was the sole reason WASI was linked.) The Bazel
@@ -151,8 +151,8 @@ mod bindings;
 
 use core::cell::RefCell;
 
-use bindings::exports::falcon::cascade::rate::Guest;
-use bindings::falcon::cascade::types::{RateSetpoint, TorqueSetpoint, VehicleState};
+use bindings::exports::pulseengine::falcon_cascade::rate::Guest;
+use bindings::pulseengine::falcon_cascade::types::{RateSetpoint, TorqueSetpoint, VehicleState};
 
 use relay_rate::{RatePid, Timestamp};
 

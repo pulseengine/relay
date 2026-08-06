@@ -3,7 +3,7 @@
 //! Loads the component, then closes the control loop across the real WIT seam:
 //! plant (omega_dot = torque / inertia) -> gyro into vehicle-state -> the
 //! component's `rate.tick` -> torque -> plant. Asserts the body rate tracks a
-//! 1 rad/s step. No WASI: the component imports only falcon:cascade/types.
+//! 1 rad/s step. No WASI: the component imports only pulseengine:falcon-cascade/types.
 
 use anyhow::{bail, Result};
 use wasmtime::component::{Component, Linker};
@@ -14,7 +14,7 @@ wasmtime::component::bindgen!({
     path: "../../wit/falcon-cascade/cascade.wit",
 });
 
-use falcon::cascade::types::{RateSetpoint, VehicleState};
+use pulseengine::falcon_cascade::types::{RateSetpoint, VehicleState};
 
 fn main() -> Result<()> {
     let wasm = std::env::args().nth(1).unwrap_or_else(|| {
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
     let linker: Linker<()> = Linker::new(&engine);
     let mut store = Store::new(&engine, ());
     let bindings = RateComponent::instantiate(&mut store, &component, &linker)?;
-    let rate = bindings.falcon_cascade_rate();
+    let rate = bindings.pulseengine_falcon_cascade_rate();
 
     // Plant: 5 g·m² roll inertia (500 g, 10-inch quad), no friction.
     let inertia = 0.005_f32;
