@@ -1,0 +1,56 @@
+artifacts:
+  - id: SWREQ-FALCON-OCI-P03
+    type: sw-req
+    title: "OCI-P03 — bounded messaging payloads: adopt the wit-bindgen fork (fixed-length lists + arena/elision)"
+    status: proposed
+    release: falcon-v1.134.0
+    description: >
+      Message-carrying seams shall declare BOUNDED payloads, so the work memory
+      they require can be sized and defended rather than being unbounded.
+
+      Standing rule for this platform: bounded static WORK MEMORY (an arena) is
+      acceptable; a heap or anything that grows is not. The control path
+      (falcon:cascade) needs no allocation at all — it crosses only flat f32
+      records, and once an export's flattened parameters fit within the
+      canonical MAX_FLAT_PARAMS (16) nothing spills. The messaging path is
+      different: payloads must land somewhere, and an arena is the correct
+      answer there.
+
+      The problem is that our seams declare UNBOUNDED payloads —
+      `type commandmessage = list<u8>`, `type secureframe = list<u8>`
+      (relay-transport), plus `envelope.data`, `scheduled-action.payload` and
+      `table-update.table-name` in relay-common-types. An unbounded `list<u8>`
+      has no worst case, so no arena bound can be justified for it.
+
+      WIT's fixed-length lists (`list<T, N>`) are the answer, and we cannot
+      express them: measured, `wasm-tools` parses `list<u8, 8>` but our
+      wit-bindgen 0.41 rejects it ("expected '>', found ','"). The fork
+      (pulseengine/wit-bindgen, 0.58) supports them with runtime and codegen
+      tests, and additionally carries `disable_cabi_realloc` (#6, elide the
+      forced export on the flat control path) and `cabi-realloc-extern` (#4,
+      delegate to gale's single embedder-owned `__cabi_arena_realloc` rather
+      than a per-component arena).
+
+      Cost: wit-bindgen 0.41 → 0.58 plus a crate restructure (wit-bindgen-rt is
+      folded into wit-bindgen), on the flight path.
+    tags: [falcon, oci, wasm, wit-bindgen, messaging, embedded, v1.134]
+    fields:
+      req-type: interface
+      priority: should
+      verification-criteria: >
+        PREREQUISITE, to be settled BEFORE migrating: determine whether
+        `cabi-realloc-extern` leaves `__cabi_arena_realloc` as an unresolved
+        import — if it does, the published component no longer runs standalone
+        in wasmtime, which tests/rate-loop-proof and host composition tests
+        depend on; the likely resolution is two build modes (host = default
+        allocator, gale = extern arena), which decides what we publish.
+        Then: message-carrying seams declare bounded payloads; the flat control
+        path builds with no `cabi_realloc` export at all; falcon-rate carries NO
+        relay-side allocator, remains a component with 0 wasi imports and 0
+        memory.grow; and the closed-loop proof still converges at the 0.193 s /
+        |err| 0.0059 rad/s baseline.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-OCI-P01
