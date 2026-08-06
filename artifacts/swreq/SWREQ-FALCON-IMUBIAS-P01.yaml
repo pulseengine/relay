@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "IMUBIAS-P01 — IEKF holds under random-walk gyro bias-instability"
     status: implemented
+    release: falcon-v1.18.0
     description: >
       The estimator shall remain stable and the attitude bounded under a
       realistic IMU bias-instability model — a STOCHASTIC random-walk gyro bias

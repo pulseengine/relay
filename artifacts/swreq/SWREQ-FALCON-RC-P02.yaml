@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "RC-P02: SBUS wire decode — byte-frame to bounded RcInput, panic-free"
     status: implemented
+    release: falcon-v1.88.0
     description: >
       Falcon shall decode the Futaba/FrSky S.BUS receiver protocol — the
       dominant Pixhawk RC link — into the normalised RcInput consumed by the

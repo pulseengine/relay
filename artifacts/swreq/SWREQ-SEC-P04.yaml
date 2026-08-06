@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SEC-P04: Authenticated frame wrap/verify (authenticate before parse)"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       The frame layer shall protect a CCSDS payload as
       header(11) || payload || Ascon-tag(16) on a per-channel security

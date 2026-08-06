@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "FSM-P01 — flight-mode state machine with proven disarm-safety + failsafe-recovery"
     status: implemented
+    release: falcon-v1.7.0
     description: >
       The flight stack shall have a flight-mode state machine — Disarmed →
       Armed → Takeoff → Loiter ↔ Mission → Land → Disarmed, with Rtl reachable

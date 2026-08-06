@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SUPV-P01 — autonomy supervisor: FSM-driven loop + geofence→RTL ACTUATION + battery failsafe"
     status: implemented
+    release: falcon-v1.8.0
     description: >
       A flight supervisor shall wrap the verified flight core with the
       relay-fsm flight-mode state machine and ACTUATE the failsafes the

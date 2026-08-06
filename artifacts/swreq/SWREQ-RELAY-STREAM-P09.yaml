@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P09 — falcon quad mixer exposes a Component-Model Preview 3 async stream interface (completes the control cascade)"
     status: implemented
+    release: falcon-v1.71.0
     description: >
       The fifth and FINAL control-cascade engine to follow the streamification
       template (after rate P05, position P06, attitude P07, iekf P08): the falcon

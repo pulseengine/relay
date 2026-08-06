@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P04 — relay-sc exposes a Component-Model Preview 3 async stream interface (completes the cFS set)"
     status: implemented
+    release: falcon-v1.65.0
     description: >
       The fourth and final cFS engine to follow the streamification TEMPLATE
       (after LC P01, SCH P02, HK P03): relay-sc shall expose a WASM

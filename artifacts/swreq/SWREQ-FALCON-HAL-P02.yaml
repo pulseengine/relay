@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "HAL-P02 — altitude hold + disturbance rejection through the backend seam"
     status: implemented
+    release: falcon-v1.2.0
     description: >
       The backend-agnostic flight core shall hold a commanded altitude and
       reject a sustained body-torque disturbance, both driven only through the

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "GZGE-P01 — custom gz ground-effect plugin matches the SimBackend model"
     status: implemented
+    release: falcon-v1.32.0
     description: >
       A custom Gazebo Harmonic (gz-sim8) System plugin shall apply a near-surface
       thrust-augmentation cushion force to a configured link, matching the Rust

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "GNSSDRV-P01: u-blox UBX GNSS driver decodes NAV-PVT with checksum validation, total on any stream"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       Falcon shall provide a real GNSS driver body that parses the u-blox UBX
       protocol from a byte stream and decodes UBX-NAV-PVT (position, velocity,

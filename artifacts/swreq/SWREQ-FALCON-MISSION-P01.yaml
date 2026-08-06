@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MISSION-P01 — multi-waypoint mission sequencer + autonomous return"
     status: implemented
+    release: falcon-v1.30.0
     description: >
       The FlightSupervisor shall fly a stored sequence of NED waypoints (a
       multi-leg mission) autonomously: while in Mission mode it flies to the

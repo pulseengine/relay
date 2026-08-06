@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "PREFLIGHT-P01: arming is blocked unless every required pre-flight check passes"
     status: implemented
+    release: falcon-v1.54.0
     description: >
       Falcon shall gate arming behind a built-in-test (BIT) / pre-flight check
       set (PX4 Commander pre-flight checks): sensor health, estimator

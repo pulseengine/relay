@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "TRAJ-P02 — reference governor: a verified virtual-time gate (FALSIFIED as a flight default; primitive only)"
     status: implemented
+    release: falcon-v0.36.0
     description: >
       A setpoint-side reference governor shall be available that samples a
       trajectory at a governed virtual time s whose advance ṡ = g·dt is

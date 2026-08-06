@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "FAULT-P02 — single-rotor-loss tolerance: detect, isolate, reconfigure to reduced-attitude"
     status: implemented
+    release: falcon-v0.34.0
     description: >
       On loss of a single rotor the flight stack shall detect and
       isolate the failed rotor, reconfigure the control allocation

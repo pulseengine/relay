@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "TARGET-P01 — the verified flight core runs bare-metal on an ARM Cortex-M with the sim backend"
     status: implemented
+    release: falcon-v1.6.0
     description: >
       The verified flight core shall build into a bare-metal ARM Cortex-M
       (STM32H743) ELF that runs the FlightCore + SimBackend loop ON the MCU —

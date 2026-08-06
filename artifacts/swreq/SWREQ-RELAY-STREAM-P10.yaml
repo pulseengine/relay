@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P10 (v1.72) — shared cascade stream-types WIT (the composition substrate)"
     status: implemented
+    release: falcon-v1.72.0
     description: >
       PLANNED v1.72. The five control-cascade stream components (iekf/pos/att/
       rate/mixer, STREAM-P05..P09) were authored with SELF-CONTAINED WITs to

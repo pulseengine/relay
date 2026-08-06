@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MISSIONUP-P01 — MAVLink mission UPLOAD (a GCS defines the mission)"
     status: implemented
+    release: falcon-v1.33.0
     description: >
       Falcon shall accept a mission uploaded over MAVLink, completing the
       autonomy loop: a ground station DEFINES the mission (vs v1.30's

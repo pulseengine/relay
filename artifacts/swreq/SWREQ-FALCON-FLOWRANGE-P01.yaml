@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "FLOWRANGE-P01: rangefinder + optical-flow preprocessing gates bad readings before they aid the estimator"
     status: implemented
+    release: falcon-v1.54.0
     description: >
       Falcon shall fuse a downward rangefinder (terrain altitude) and optical
       flow (horizontal velocity) for low-altitude / GPS-denied flight (PX4 EKF2

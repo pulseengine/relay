@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "GNSS-P01 — hold under noisy + intermittent GNSS via variance-matched filter"
     status: implemented
+    release: falcon-v1.19.0
     description: >
       The vehicle shall hold position under realistic GNSS — continuous
       metre-class fix noise plus recurring (intermittent) outages — and the IEKF

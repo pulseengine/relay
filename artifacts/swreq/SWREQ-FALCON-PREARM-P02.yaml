@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "PREARM-P02: the pre-arm gate is fed by real vehicle state, not all-pass defaults"
     status: implemented
+    release: falcon-v1.99.0
     description: >
       The FlightSupervisor shall derive, each control cycle, the pre-arm checks it
       can know from its own state and backend inputs, so the Kani-proven arm gate

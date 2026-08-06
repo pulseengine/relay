@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "RC-P01: manual flight modes (Stabilized / Acro) map sticks to BOUNDED setpoints"
     status: implemented
+    release: falcon-v1.54.0
     description: >
       Falcon shall provide the manual pilot flight modes (PX4 Manual/Stabilized/
       Acro), missing until now (offboard/MAVLink only). Stabilized maps the

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "HAL-P01 — relay-hal peripheral-abstraction seam: per-instance + enumerable + fallible, with a Presence/health device set for the voter"
     status: implemented
+    release: falcon-v1.81.0
     description: >
       relay owns the hardware ABSTRACTION (jess#62 / relay#214 contract; jess
       DD-014/015/018). The relay-hal crate is the no_std peripheral seam:

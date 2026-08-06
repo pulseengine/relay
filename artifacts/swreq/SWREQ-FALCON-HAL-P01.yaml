@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "HAL-P01 — backend-agnostic flight core: the verified cascade runs against a swappable FlightBackend seam"
     status: implemented
+    release: falcon-v1.1.0
     description: >
       The verified flight cascade (IEKF estimator → geometric SE(3) attitude
       → ADRC inner loop → mixer) shall be factored out of the Gazebo bench

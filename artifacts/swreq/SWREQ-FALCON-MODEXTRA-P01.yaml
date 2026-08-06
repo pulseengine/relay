@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MODEXTRA-P01: extended flight modes (guided yaw, follow-me, land-in-place, RTL override) emit safe finite setpoints"
     status: implemented
+    release: falcon-v1.54.0
     description: >
       Falcon shall round out the autonomy modes to PX4 breadth: guided
       point-of-interest yaw (face a POI), follow-me (offset from a moving target),

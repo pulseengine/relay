@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SEC-P05: AEAD-upgrade confidentiality mode (per-SA, no downgrade)"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       relay-sec shall provide a per-channel confidentiality mode — MAC-only
       (authenticated plaintext) or AEAD (Ascon-AEAD128 encrypting the payload).

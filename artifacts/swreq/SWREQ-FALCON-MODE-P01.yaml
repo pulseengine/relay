@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MODE-P01: position + altitude hold flight modes hold station against wind (PX4 ALTCTL/POSCTL parity)"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       Falcon shall provide the everyday GPS flight modes — Position hold and
       Altitude hold — equivalent to PX4 POSCTL/ALTCTL: in the Loiter mode the

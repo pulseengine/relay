@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "ESCDRV-P01: DShot ESC frames from the verified mixer (saturating, CRC4) + battery threshold monitor"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       Falcon shall provide the output-side driver bodies (F7): a DShot ESC
       throttle encoder and a battery monitor. The DShot encoder shall map the

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MM-P01: Valid only when address in range, size > 0, alignment ok"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       The validate function shall return Valid only when the address is
       within the configured RAM range, size is greater than zero, size

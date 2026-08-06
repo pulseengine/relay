@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "PARAM-P02: MAVLink PARAM protocol binding drives the bounded store (conformant + bound-preserving)"
     status: implemented
+    release: falcon-v1.96.0
     description: >
       Falcon shall bind the MAVLink parameter protocol (PARAM_REQUEST_LIST,
       PARAM_REQUEST_READ, PARAM_SET, PARAM_VALUE) to the bounded parameter store

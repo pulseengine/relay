@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "HAL-P03 — baromag anchors on embedded-hal-async I2c (shared decode); the relay-bus carrier transports a decoded sensor sample across the inter-core seam"
     status: implemented
+    release: falcon-v1.83.0
     description: >
       Extends the embedded-hal-async re-target (relay#214 / jess#62 DD-016) to
       the I2C sensors and connects the HAL output to the inter-core carrier
