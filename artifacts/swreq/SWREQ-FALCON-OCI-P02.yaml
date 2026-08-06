@@ -1,0 +1,45 @@
+artifacts:
+  - id: SWREQ-FALCON-OCI-P02
+    type: sw-req
+    title: "OCI-P02 — the whole cascade lowers: convert the remaining stages to no_std/no-grow"
+    status: proposed
+    release: falcon-v1.133.0
+    description: >
+      Every published cascade component shall be free of `memory.grow`, so the
+      fused cascade can be lowered to a single-address-space MCU image.
+
+      `meld fuse --memory shared --address-rebase` rejects any component
+      containing `memory.grow` ("memory.grow not supported with address
+      rebasing" — gale#89, meld#299). As of falcon-v1.131.1 only `rate` is
+      converted (no_std + wasm32-unknown-unknown + a bounded static work-memory
+      arena): it carries memory.grow=0 at 3,908 bytes. The other five —
+      flight, iekf, position, attitude, mixer — are still std/wasip2 and each
+      carries memory.grow=1.
+
+      The conversion pattern is proven and mechanical: `no_std` gated on a `std`
+      feature, single-threaded statics in place of `thread_local!`, a bounded
+      arena rather than a growing allocator, `cabi_realloc` exported explicitly
+      (wit-bindgen-rt provides it only when std is linked), and the
+      wasm32-unknown-unknown target rather than wasip2 (which links wasi-libc
+      and drags malloc in).
+
+      Priority order is jess's per-stage lowering report, which measured the
+      conversion's effect directly: on `rate` it took the stage from 3 synth
+      skips to 1, clearing both register-allocation tail helpers.
+    tags: [falcon, oci, wasm, no_std, embedded, jess-contract, v1.133]
+    fields:
+      req-type: constraint
+      priority: should
+      verification-criteria: >
+        Each published falcon-<stage> component, pulled from ghcr and
+        disassembled, has header 0061736d0d000100, ZERO `wasi:*` imports and
+        ZERO `memory.grow`. The bundle's header assert (added v1.130) continues
+        to gate this at build time. KILL-CRITERION, owned by gale/meld: with all
+        stages converted, `meld fuse --memory shared --address-rebase` accepts
+        the fused cascade — if it still rejects, that is a real finding and this
+        requirement is not met.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-OCI-P01

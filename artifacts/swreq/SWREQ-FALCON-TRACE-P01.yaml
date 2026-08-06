@@ -1,0 +1,43 @@
+artifacts:
+  - id: SWREQ-FALCON-TRACE-P01
+    type: sw-req
+    title: "TRACE-P01 — make the release plan queryable: backfill release: fields and promote implemented→verified"
+    status: proposed
+    release: falcon-v1.132.0
+    description: >
+      The rivet trace shall reflect what actually shipped, so that release
+      readiness is a QUERY rather than an opinion.
+
+      Measured state (hygiene sweep, 2026-08-06): of 163 sw-req artifacts, only
+      23 carry a `release:` field — and those are 22 `verified` + 1 `proposed`.
+      The other 140 carry NO release field and sit at `implemented` (139) or
+      `approved` (1). The correlation is near-perfect: `release:` tracks
+      `verified`, so 139 requirements are frozen at `implemented` forever.
+
+      This is PAPERWORK DEBT, NOT AN EVIDENCE GAP — sampling shows every one of
+      those `implemented` requirements already has 1–3 verification artifacts
+      pointing at it (231 sw-verification artifacts exist for 139 implemented
+      requirements). The V is closed in substance; only the status field and the
+      release assignment were never updated. The second half of the two-commit
+      rule (promotion to `verified` in a code-free PR) was simply never run for
+      this population.
+
+      The consequence is that the core planning query — "is release X ready?" —
+      is computed from a field that does not reflect reality, and the roadmap
+      cannot be driven from rivet, which is the reason the plan lives there.
+    tags: [falcon, rivet, traceability, release-planning, hygiene, v1.132]
+    fields:
+      req-type: constraint
+      priority: should
+      verification-criteria: >
+        (a) Every sw-req whose implementation has shipped carries a `release:`
+        field naming the release that shipped it. (b) Every sw-req at
+        `implemented` that has at least one sw-verification artifact linked by
+        `verifies` is promoted to `verified` — or, where the evidence does NOT
+        hold up on inspection, is left at `implemented` with the gap NAMED
+        rather than promoted to make the query tidy. (c) `rivet validate` PASS
+        and a readiness query for any release returns a meaningful answer.
+        Promotion is done in code-free PRs, per the two-commit rule.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
