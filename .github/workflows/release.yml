@@ -441,7 +441,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip2
+          # BOTH targets (v1.131): std components build wasm32-wasip2; no_std
+          # components build wasm32-unknown-unknown (see NOSTD_COMPONENTS in
+          # scripts/build-components.sh — the wasip2 target links wasi-libc,
+          # whose cabi_realloc pulls in memory.grow, which blocks the MCU
+          # lowering). Omitting the second target fails the release at
+          # "building rate (wasm32-unknown-unknown)... ERROR: no .wasm found".
+          targets: wasm32-wasip2, wasm32-unknown-unknown
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
