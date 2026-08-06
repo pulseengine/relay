@@ -59,7 +59,7 @@ TOOLCHAIN_STR="rustc=$RUSTC_VER cargo-component=$CC_VER"
 #
 # Add a component here as it is converted to no_std (jess's per-stage lowering
 # report is the priority order). A std component still needs wasip2.
-NOSTD_COMPONENTS=" rate "
+NOSTD_COMPONENTS=" flight iekf ekf attitude rate position falcon-mixer cascade "
 
 component_target() {
   case "$NOSTD_COMPONENTS" in

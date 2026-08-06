@@ -23,124 +23,12 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-// no_std (cargo-component path) allocator — a BOUNDED BUMP ARENA, deliberately
-// not a growing allocator.
-//
-// WHY NOT lol_alloc (what this used to be): a growing allocator emits
-// `memory.grow`, and `memory.grow` blocks the single-address-space / no-grow
-// MCU lowering that meld (`--memory shared`) and gale need — confirmed by
-// disassembling the shipped falcon-rate:1.130.0, where the only `memory.grow`
-// in the module sat inside lol_alloc. So the fix that made the component
-// encode correctly also made it harder to lower. This is the same conclusion
-// pulseengine/wit-bindgen reached in `cabi-realloc-extern` (back cabi_realloc
-// with a bounded embedder arena instead of the global growing allocator —
-// gale#89, meld#299); this is that idea applied locally, because that runtime
-// feature is scoped to non-p2 targets and the release builds wasm32-wasip2.
-//
-// Sizing: the canonical ABI only allocates here for the SPILLED PARAMETER AREA
-// of `rate.tick` — vehicle-state (14 f32) + rate-setpoint (4 f32) = 18 flat
-// params exceeds the canonical MAX_FLAT_PARAMS (16), so the host writes the
-// arguments into our memory and we return a pointer for the result. That is a
-// few hundred bytes per call at most; 8 KiB is ample. Exhaustion TRAPS rather
-// than growing — a bounded, analyzable failure mode, which is what the
-// embedded target wants.
-//
-// A component instance is never re-entered concurrently by the runtime, so
-// single-threaded access is sound.
+// Bounded work-memory arena + the canonical-ABI `cabi_realloc` export + a panic
+// handler, from the shared crate so the `unsafe` lives in one audited place
+// rather than once per component. See crates/falcon-cm-rt.
 #[cfg(not(feature = "std"))]
-mod arena {
-    use core::alloc::{GlobalAlloc, Layout};
-    use core::cell::UnsafeCell;
+falcon_cm_rt::export_cm_rt!();
 
-    /// Bounded backing store. Sized for the spilled-parameter area (see above).
-    const ARENA_BYTES: usize = 8 * 1024;
-
-    #[repr(align(16))]
-    struct Store(UnsafeCell<[u8; ARENA_BYTES]>);
-    // SAFETY: the component model guarantees single-threaded, non-reentrant access.
-    unsafe impl Sync for Store {}
-
-    static STORE: Store = Store(UnsafeCell::new([0; ARENA_BYTES]));
-    static NEXT: BumpCursor = BumpCursor(UnsafeCell::new(0));
-
-    struct BumpCursor(UnsafeCell<usize>);
-    // SAFETY: as above — single-threaded, non-reentrant.
-    unsafe impl Sync for BumpCursor {}
-
-    pub struct BumpArena;
-
-    impl BumpArena {
-        /// Reset the cursor. The canonical ABI hands us a fresh parameter area
-        /// per call and never asks us to free, so reclaiming at the top of each
-        /// export keeps a long-running component from exhausting the arena.
-        #[inline]
-        pub fn reset() {
-            unsafe { *NEXT.0.get() = 0 };
-        }
-    }
-
-    unsafe impl GlobalAlloc for BumpArena {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            unsafe {
-                let cur = *NEXT.0.get();
-                let base = STORE.0.get() as *mut u8;
-                let aligned = (cur + layout.align() - 1) & !(layout.align() - 1);
-                let end = match aligned.checked_add(layout.size()) {
-                    Some(e) => e,
-                    None => return core::ptr::null_mut(),
-                };
-                if end > ARENA_BYTES {
-                    // Bounded failure: null propagates to a trap in the ABI
-                    // shim rather than silently growing linear memory.
-                    return core::ptr::null_mut();
-                }
-                *NEXT.0.get() = end;
-                base.add(aligned)
-            }
-        }
-
-        /// Bump arena: individual frees are no-ops; `reset()` reclaims in bulk.
-        unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
-    }
-}
-
-#[cfg(not(feature = "std"))]
-#[global_allocator]
-static ALLOC: arena::BumpArena = arena::BumpArena;
-
-// The Component-Model canonical ABI requires the guest to export
-// `cabi_realloc`. wit-bindgen-rt provides it ONLY when it can lean on std —
-// its implementation is `#[cfg(not(target_env = "p2"))]`, because on
-// wasm32-wasip2 it expects the std toolchain to supply the symbol. This crate
-// is `no_std` on the cargo-component path, so nothing exported it and
-// `wasm-component-ld` failed with "module does not export a function named
-// `cabi_realloc`" — leaving a raw CORE MODULE where a component was expected.
-// Export it here, backed by the same single-threaded allocator.
-#[cfg(not(feature = "std"))]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn cabi_realloc(
-    old_ptr: *mut u8,
-    old_len: usize,
-    align: usize,
-    new_len: usize,
-) -> *mut u8 {
-    use core::alloc::{GlobalAlloc, Layout};
-    unsafe {
-        if old_len == 0 {
-            // Canonical ABI: a zero-size allocation returns the alignment as a
-            // non-null, suitably-aligned dangling pointer.
-            if new_len == 0 {
-                return align as *mut u8;
-            }
-            return ALLOC.alloc(Layout::from_size_align_unchecked(new_len, align));
-        }
-        ALLOC.realloc(
-            old_ptr,
-            Layout::from_size_align_unchecked(old_len, align),
-            new_len,
-        )
-    }
-}
 
 // Bindings generated by cargo-component as src/bindings.rs.
 #[allow(warnings)]
@@ -186,7 +74,7 @@ impl Guest for Component {
         // Sound here because the arena only ever holds the CURRENT call's
         // argument/result area — nothing allocated by a previous tick outlives it.
         #[cfg(not(feature = "std"))]
-        arena::BumpArena::reset();
+        falcon_cm_rt::BumpArena::reset();
 
         let torque = PID.0.borrow_mut().tick(
             next_timestamp(),
@@ -205,10 +93,3 @@ impl Guest for Component {
 
 bindings::export!(Component with_types_in bindings);
 
-// no_std (cargo-component path) needs a panic handler; the Bazel path (std)
-// provides its own.
-#[cfg(not(feature = "std"))]
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    loop {}
-}

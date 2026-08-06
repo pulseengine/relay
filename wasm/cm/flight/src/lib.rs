@@ -8,6 +8,15 @@
 //! project (meld → loom → synth → gale) consumes; this crate only has to make
 //! the verified core a portable, runnable component.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+// Bounded work-memory arena + the canonical-ABI `cabi_realloc` export + a panic
+// handler, from the shared crate so the `unsafe` lives in one audited place.
+// no_std keeps the component free of WASI and of `memory.grow`, which is what
+// blocks `meld fuse --memory shared --address-rebase` (gale#89, meld#299).
+#[cfg(not(feature = "std"))]
+falcon_cm_rt::export_cm_rt!();
+
 #[allow(warnings)]
 mod bindings;
 
