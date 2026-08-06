@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "TURB-P01 — bounded position hold under a Dryden-like turbulence spectrum"
     status: implemented
+    release: falcon-v1.25.0
     description: >
       The flight stack shall remain BOUNDED (not diverge) under a realistic
       turbulence spectrum — a Dryden-like COLORED gust (an Ornstein-Uhlenbeck

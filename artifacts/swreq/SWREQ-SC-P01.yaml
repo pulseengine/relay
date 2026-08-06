@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SC-P01: Invariant holds after init"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       After initialization, the stored command tables shall be empty
       with all counts at zero.

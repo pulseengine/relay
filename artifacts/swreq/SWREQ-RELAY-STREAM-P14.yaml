@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P14 (v1.76) — sigil attestation of the composed/lowered stream artifacts + streamification closure"
     status: implemented
+    release: falcon-v1.72.0
     description: >
       PLANNED v1.76. The other recurring feature-loop N/A across the campaign was
       sigil (step 6): the composed P3 component (STREAM-P11) and the Meld-lowered

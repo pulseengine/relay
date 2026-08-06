@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "PATH-P01 — robustness under injected sensor pathologies through the HAL"
     status: implemented
+    release: falcon-v1.9.0
     description: >
       The simulation backend shall be able to inject the four sensor
       pathologies the clean-room audit found untested (the sim previously fed

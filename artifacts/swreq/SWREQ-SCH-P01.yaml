@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SCH-P01: Invariant holds after init"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       After initialization, the ScheduleTable invariant shall hold:
       the table is empty and slot_count is 0.

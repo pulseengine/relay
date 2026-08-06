@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SEC-P03: Total pre-auth Security-Header parser + nonce derivation"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       The Security-Header parser is the minimal PRE-authentication attack
       surface (you must parse SPI || channel_id || counter to look up the

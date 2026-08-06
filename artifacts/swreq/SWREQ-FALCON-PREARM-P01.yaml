@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "PREARM-P01: the FSM arm transition is gated on the pre-arm commander verdict (proven entry gate)"
     status: implemented
+    release: falcon-v1.97.0
     description: >
       Falcon shall gate the flight-mode FSM's transition into Armed on the pre-arm
       / commander verdict: the vehicle enters Armed ONLY from Disarmed, ONLY on an

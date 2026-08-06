@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "OFFB-P01: offboard setpoint stream — stale/dropped stream must not keep flying (timeout failsafe)"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       Falcon shall accept companion-computer setpoints (position/velocity/yaw)
       over the AUTHENTICATED relay-sec channel (per-frame MAC + anti-replay +

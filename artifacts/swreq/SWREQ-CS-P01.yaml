@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "CS-P01: Invariant holds after init"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       After initialization, the region table shall be empty with
       region_count at zero.

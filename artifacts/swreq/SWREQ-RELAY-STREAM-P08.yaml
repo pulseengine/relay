@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P08 — falcon IEKF estimator exposes a Component-Model Preview 3 async stream interface (fourth control-cascade engine)"
     status: implemented
+    release: falcon-v1.70.0
     description: >
       Continues the control-cascade streamification (after rate P05, position
       P06, attitude P07): the falcon IEKF estimator shall expose a WASM

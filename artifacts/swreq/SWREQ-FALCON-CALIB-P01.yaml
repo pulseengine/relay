@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "CALIB-P01: verified sensor-calibration math the estimator applies before the IEKF"
     status: implemented
+    release: falcon-v1.98.0
     description: >
       Falcon shall provide verified sensor-calibration math (relay-calib) that
       solves per-sensor offsets and applies them to raw IMU/magnetometer samples

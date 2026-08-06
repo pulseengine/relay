@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P03 — relay-hk exposes a Component-Model Preview 3 async stream interface"
     status: implemented
+    release: falcon-v1.64.0
     description: >
       The third cFS engine to follow the streamification TEMPLATE (after the
       Limit Checker P01 and the Scheduler P02): relay-hk shall expose a WASM

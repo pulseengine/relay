@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "CFDP-P01: State transitions are valid (no skipping states)"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       CFDP transaction state transitions shall follow the valid state
       machine graph. No state may be skipped. Transitions follow:

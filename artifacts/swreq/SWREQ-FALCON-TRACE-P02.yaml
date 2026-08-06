@@ -1,0 +1,46 @@
+artifacts:
+  - id: SWREQ-FALCON-TRACE-P02
+    type: sw-req
+    title: "TRACE-P02 — promote the V: drive implemented→verified from the verification gate's own per-artifact result"
+    status: proposed
+    release: falcon-v1.133.0
+    description: >
+      Artifact status shall reflect executed evidence, so that "verified" means
+      a gate ran the artifact's steps and they passed.
+
+      Measured state after TRACE-P01: all 163 sw-reqs carry a release
+      assignment, but of the 140 that were unassigned, only 3 have a `verifies`
+      link from a verification artifact that is ITSELF `verified`. The other 137
+      link only to verifiers sitting at `implemented`/`approved`. So the whole
+      right side of the V is unpromoted — not missing, unpromoted.
+
+      The promotion must not be a bulk status edit. There is already a real
+      oracle: `scripts/run-falcon-verification.py` executes each falcon-tagged
+      verification artifact's `steps` and returns a per-artifact pass/fail
+      (`artifact_pass`), which the required `Verification gate (rivet-driven)`
+      check runs on every PR — a recent full sweep reported 263 PASS / 0 FAIL.
+      That output, not judgement, is what may promote an artifact.
+
+      Steps marked bench-only (hardware, sim, tools absent from the runner) are
+      SKIPPED by that runner, so an artifact whose evidence is entirely
+      bench-only has NOT been executed and must NOT be promoted on the gate's
+      say-so; it needs either a real CI-runnable step or an explicit, named
+      waiver. Distinguishing those two populations is most of the work.
+    tags: [falcon, rivet, traceability, verification, hygiene, v1.133]
+    fields:
+      req-type: constraint
+      priority: should
+      verification-criteria: >
+        (a) Every artifact promoted to `verified` has a recorded gate run in
+        which its steps EXECUTED and passed — not merely a `verifies` link.
+        (b) Artifacts whose evidence is entirely bench-only/skipped remain
+        unpromoted and are listed explicitly with the reason, rather than being
+        promoted to make the query tidy. (c) The count of `implemented` sw-reqs
+        with executed-and-passing evidence goes to zero, and the residual
+        population is named. (d) Promotions land in code-free PRs per the
+        two-commit rule.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-TRACE-P01

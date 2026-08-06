@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P01 — relay engines expose Component-Model Preview 3 async stream interfaces"
     status: implemented
+    release: falcon-v1.57.0
     description: >
       Relay is stream-native by design (CLAUDE.md: "Components declare typed
       stream<T> inputs/outputs; composition is stream wiring (P3 async)"). This

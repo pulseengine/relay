@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "EKF-P05 — adaptive process noise: the IEKF stays NEES-consistent under motion/load instead of over-confident"
     status: implemented
+    release: falcon-v0.35.0
     description: >
       The Invariant-EKF shall inflate its process noise by the vehicle motion
       magnitude so the filter does not grow over-confident when the fixed

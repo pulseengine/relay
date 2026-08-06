@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MIX-P01: Mixer matrix derived from Drake MultibodyPlant"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       Each airframe variant's mixer matrix shall be derived
       symbolically from a Drake MultibodyPlant model of the

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MATHSEAM-P01 — single qualification boundary for flight-path transcendental math"
     status: implemented
+    release: falcon-v1.12.0
     description: >
       All transcendental math evaluated in the verified flight path
       (sqrt, sin, cos, atan2, acos, fabs, remainder) shall route through a

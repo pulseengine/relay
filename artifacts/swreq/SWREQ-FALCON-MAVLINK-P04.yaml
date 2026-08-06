@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MAVLINK-P04: GLOBAL_POSITION_INT codec — round-trip + offset stability"
     status: implemented
+    release: falcon-v0.12.0
     description: >
       The MAVLink codec shall encode and decode the
       GLOBAL_POSITION_INT message (id 33, 28-byte payload, CRC_EXTRA

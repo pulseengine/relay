@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P02 — relay-sch exposes a Component-Model Preview 3 async stream interface"
     status: implemented
+    release: falcon-v1.63.0
     description: >
       The second cFS engine to follow the streamification TEMPLATE established by
       the Limit Checker (SWREQ-RELAY-STREAM-P01): relay-sch shall expose a WASM

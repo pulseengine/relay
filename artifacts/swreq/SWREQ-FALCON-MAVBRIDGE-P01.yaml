@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MAVBRIDGE-P01 — MAVLink ↔ flight-supervisor bridge (commands + telemetry)"
     status: implemented
+    release: falcon-v1.28.0
     description: >
       A no_std/no_alloc bridge shall translate between the MAVLink v2 wire
       (QGroundControl / MAVSDK / PX4-ecosystem ground stations) and falcon's

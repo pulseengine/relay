@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MIXMULTI-P01: hexacopter + coaxial-octo mixers allocate within [0,1] for any wrench"
     status: implemented
+    release: falcon-v1.54.0
     description: >
       Falcon shall support multi-rotor airframes beyond the quad (WORLD-P02): a
       hexacopter (6-rotor) and a coaxial-octo / X8 (8-rotor) control allocator

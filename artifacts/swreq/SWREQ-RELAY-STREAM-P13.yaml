@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P13 (v1.75) — witness MC/DC on a composed stream component (verification depth)"
     status: implemented
+    release: falcon-v1.72.0
     description: >
       PLANNED v1.75. Across the entire streamification campaign (9 engines + the
       composition) the feature-loop's witness step (MC/DC truth table on the Wasm

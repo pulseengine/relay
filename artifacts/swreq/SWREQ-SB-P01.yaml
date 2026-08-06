@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SB-P01: Software Bus no_std pluggable backend seam (stream<T> -> Gale ring_buf / ipc_service)"
     status: implemented
+    release: falcon-v1.60.0
     description: >
       The relay Software Bus shall expose a no_std/no_alloc BACKEND SEAM under
       the `bus` WIT (wit/interfaces/relay-software-bus/bus.wit): the typed

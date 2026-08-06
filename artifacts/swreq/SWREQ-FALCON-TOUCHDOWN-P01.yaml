@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "TOUCHDOWN-P01 — velocity-based touchdown lands through ground effect"
     status: implemented
+    release: falcon-v1.27.0
     description: >
       A velocity-based touchdown controller shall land the vehicle cleanly
       through the ground-effect cushion the v1.24 position-based altitude loop

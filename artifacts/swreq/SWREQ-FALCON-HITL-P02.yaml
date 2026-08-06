@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "HITL — MavlinkBench live-telemetry backend"
     status: implemented
+    release: falcon-v0.12.0
     description: >
       The HITL harness shall provide a `MavlinkBench` backend that
       reads GLOBAL_POSITION_INT frames from a real flight

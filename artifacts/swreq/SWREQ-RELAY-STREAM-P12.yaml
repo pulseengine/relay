@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P12 (v1.74) — Meld-lower the composed stream pipeline to a runnable core module"
     status: implemented
+    release: falcon-v1.72.0
     description: >
       PLANNED v1.74. Per RFC #46, Meld lowers Component-Model async (P3 streams)
       to a core wasm module at BUILD time, so relay has no runtime async

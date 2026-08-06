@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "CCSDS-P01: Encode then decode equals identity (roundtrip)"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       Encoding a CCSDS header and then decoding the result shall produce
       the original header fields. The codec is lossless for all valid inputs.

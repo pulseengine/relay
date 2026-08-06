@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "GNDEFFECT-P01 — ground-effect thrust cushion: aids takeoff, documented landing float"
     status: implemented
+    release: falcon-v1.24.0
     description: >
       The flight stack shall model ground effect — near the surface, rotor
       downwash reflects and augments thrust (thrust ×= 1 + gain/(1 + (alt/0.25)²),

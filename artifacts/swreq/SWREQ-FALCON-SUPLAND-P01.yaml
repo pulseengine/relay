@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SUPLAND-P01 — FlightSupervisor engages the velocity-landing in Land mode"
     status: implemented
+    release: falcon-v1.29.0
     description: >
       The FlightSupervisor shall land the vehicle with the v1.27 velocity-based
       touchdown controller, not the position-based altitude descent. v1.27 added

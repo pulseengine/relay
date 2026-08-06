@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "WASMCM-P02 — all 8 falcon CM components build and are emitted as a versioned bundle"
     status: implemented
+    release: falcon-v1.56.0
     description: >
       The full falcon Component Model family (8 components) shall build with
       cargo-component to wasm32-wasip2 and be emitted by

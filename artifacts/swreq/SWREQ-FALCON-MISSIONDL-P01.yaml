@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MISSIONDL-P01 — MAVLink mission DOWNLOAD (a GCS reads the mission back)"
     status: implemented
+    release: falcon-v1.34.0
     description: >
       Falcon shall serve its current mission back to a ground station over
       MAVLink — the mirror of the v1.33 upload, completing the mission protocol
