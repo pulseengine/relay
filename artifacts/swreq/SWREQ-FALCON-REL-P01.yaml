@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-REL-P01
     type: sw-req
     title: "REL-P01 — a failed release shall leave NO published release, not a partial one"
-    status: proposed
+    status: implemented
     release: falcon-v1.133.0
     description: >
       The release workflow shall not publish a GitHub Release until its
