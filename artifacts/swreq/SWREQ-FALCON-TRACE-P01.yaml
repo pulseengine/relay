@@ -1,7 +1,7 @@
 artifacts:
   - id: SWREQ-FALCON-TRACE-P01
     type: sw-req
-    title: "TRACE-P01 — make the release plan queryable: backfill release: fields and promote implemented→verified"
+    title: "TRACE-P01 — make the release plan queryable: backfill the per-artifact release assignment and promote implemented→verified"
     status: proposed
     release: falcon-v1.132.0
     description: >
