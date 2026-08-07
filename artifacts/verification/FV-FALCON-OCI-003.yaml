@@ -1,0 +1,46 @@
+artifacts:
+  - id: FV-FALCON-OCI-003
+    type: sw-verification
+    title: "OCI-P04 — the WIT package namespace is pulseengine:falcon-*, with no falcon:* remnants (v1.133)"
+    status: implemented
+    release: falcon-v1.133.0
+    description: >
+      Verification of SWREQ-FALCON-OCI-P04. The requirement is that the WIT
+      package namespace matches the registry namespace we actually publish
+      under, so that a consumer browsing the ecosystem finds our components and
+      the interfaces they export in the SAME place.
+
+      WHY IT EXISTS: wasm.directory indexes COMPONENTS by their registry
+      namespace but INTERFACES by their WIT package namespace. Publishing
+      components under `pulseengine` while their interfaces declared
+      `falcon:cascade` split our own surface across two namespaces — the
+      exports and imports were not discoverable from the component's own page.
+
+      EVIDENCE: the rename is only correct if it is COMPLETE. A partial rename
+      is worse than none — it leaves a package that resolves in one tool and
+      not another. So the evidence is two-sided:
+
+      (a) POSITIVE — the cascade package declares the new namespace.
+      (b) NEGATIVE — there is not a single remaining `falcon:cascade` reference
+      anywhere under wit/. This is the step that actually carries the weight:
+      it is the one that fails if the rename is partial, and it is cheap enough
+      to run on every PR, so the property cannot silently regress.
+
+      Measured at the time this landed: 0 remaining references across the whole
+      wit/ tree.
+
+      SCOPE (honest): this verifies the WIT SOURCE. That the published OCI
+      manifests and the wasm.directory listing agree with it is covered by the
+      OCI distribution evidence (FV-FALCON-OCI-001) and re-checked per release;
+      this artifact does not claim it.
+    tags: [verification, falcon, oci, wit, namespace, wasm-directory, v1.133]
+    fields:
+      method: test
+      steps:
+        # (a) the package declares the unified namespace
+        - run: "grep -q 'package pulseengine:falcon-cascade' wit/falcon-cascade/cascade.wit"
+        # (b) THE LOAD-BEARING STEP — a partial rename must fail this
+        - run: "test \"$(grep -rl 'falcon:cascade' wit/ | wc -l)\" -eq 0"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OCI-P04
