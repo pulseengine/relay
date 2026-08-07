@@ -2,7 +2,7 @@
 # workspace (generated bindings module won't build under plain cargo).
 [package]
 name = "falcon-rate-cm"
-description = "Formally-verified body-rate PID controller as a WebAssembly Component — body-rate setpoint + gyro → body torque. Airframe-agnostic; part of the falcon:cascade control loop."
+description = "Formally-verified body-rate PID controller as a WebAssembly Component — body-rate setpoint + gyro → body torque. Airframe-agnostic; part of the pulseengine:falcon-cascade control loop."
 homepage = "https://pulseengine.eu"
 documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
 authors = ["PulseEngine"]
@@ -22,7 +22,7 @@ relay-rate = { path = "../../../crates/relay-rate" }
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
 
 [package.metadata.component]
-package = "falcon:cascade"
+package = "pulseengine:falcon-cascade"
 
 [package.metadata.component.target]
 path = "../../../wit/falcon-cascade"

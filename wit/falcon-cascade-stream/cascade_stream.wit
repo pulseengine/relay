@@ -1,4 +1,4 @@
-package falcon:cascade-stream@0.1.0;
+package pulseengine:falcon-cascade-stream@0.1.0;
 
 /// Control cascade — stream transformer edition, SHARED types.
 ///

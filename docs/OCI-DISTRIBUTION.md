@@ -1,6 +1,6 @@
 # OCI distribution + wasm.directory
 
-The verified flight component (`falcon:flight`, the `falcon-flight-vX.wasm`
+The verified flight component (`pulseengine:falcon-flight`, the `falcon-flight-vX.wasm`
 artifact) is published to **ghcr.io as an OCI 1.1 artifact** on every tagged
 release, in addition to the cosign-signed GitHub Release. This makes it
 `wkg oci pull`-able and indexable by [wasm.directory](https://wasm.directory) —
@@ -206,9 +206,9 @@ only as informative as the metadata the component carries.
 
 ## Scope note
 
-`falcon:flight`'s current world (`flight-demo`) exports two runnable smoke-test
+`pulseengine:falcon-flight`'s current world (`flight-demo`) exports two runnable smoke-test
 functions (`run-stabilization`, `run-position-hold`) — it is a *runnable*
 verified component, not yet a reusable library exposing a typed control
 interface. Publishing it is a provenance/visibility play (a formally-verified
 flight component, signed, in the public component ecosystem). A richer typed
-`falcon:flight` interface others could import is a separate follow-on.
+`pulseengine:falcon-flight` interface others could import is a separate follow-on.

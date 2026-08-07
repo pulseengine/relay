@@ -14,8 +14,8 @@ mod bindings;
 
 use core::cell::RefCell;
 
-use bindings::exports::falcon::cascade::position::Guest;
-use bindings::falcon::cascade::types::{AttitudeSetpoint, VehicleState, Waypoint};
+use bindings::exports::pulseengine::falcon_cascade::position::Guest;
+use bindings::pulseengine::falcon_cascade::types::{AttitudeSetpoint, VehicleState, Waypoint};
 
 use relay_pos::{PosController, PositionSetpoint, Timestamp};
 
