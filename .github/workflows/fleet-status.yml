@@ -1,0 +1,189 @@
+name: Fleet status
+
+# CI-fleet health: detect STARVATION (jobs queued against a label with no live
+# runner) and publish a status summary.
+#
+# WHY THIS EXISTS — the failure mode is SILENCE. On 2026-08-06/07 the self-hosted
+# fleet degraded three times (one wedged runner; then 4 of 7 offline; then 6 of
+# 7). Each time CI simply stopped progressing and looked identical to a slow
+# build: no error, no alert, no failed check. One incident burned ~3 hours with
+# a PR sitting at 5/57 checks. Every diagnosis was a human hand-querying the
+# runners API. That is the gap this closes.
+#
+# TWO SIGNALS, DELIBERATELY IN THIS ORDER:
+#
+#   1. STARVATION (always available). A run that has been `queued` far longer
+#      than jobs take to start. This needs only repo scope, and it detects the
+#      SYMPTOM — so it fires for causes we have not thought of, not just the
+#      ones we have. This is the load-bearing check.
+#
+#   2. FLEET INVENTORY (optional). Per-runner online/offline/busy. Needs
+#      `/orgs/{org}/actions/runners`, which requires **admin:org** — the default
+#      GITHUB_TOKEN CANNOT read it. Set the `ORG_RUNNER_READ_TOKEN` secret to a
+#      PAT with that scope to enable it; without the secret this job still runs
+#      and simply reports starvation only. It degrades, it does not fail.
+#
+# CRITICAL PLACEMENT RULE: this workflow must NOT run on `rust-cpu`. A monitor
+# scheduled on the fleet it monitors goes down with it — that is precisely how
+# the outage stayed invisible. It runs on `light`, with a hosted fallback.
+#
+# Security: no `${{ }}` is expanded inside any `run:` block; every input is
+# bound through `env:` and dereferenced as a quoted shell variable.
+
+on:
+  schedule:
+    # Every 15 minutes. Cheap (a few API calls) and short enough that a
+    # degradation is caught inside one CI cycle rather than after it.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: fleet-status
+  cancel-in-progress: true
+
+jobs:
+  status:
+    # NOT rust-cpu — see the placement rule above.
+    runs-on: [self-hosted, linux, x64, light]
+    timeout-minutes: 10
+    steps:
+      - name: Detect starvation (queued far longer than jobs take to start)
+        id: starve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # A job normally starts within a couple of minutes. 30 min queued
+          # means nothing is picking it up.
+          THRESHOLD_MIN: '30'
+        shell: bash
+        run: |
+          set -uo pipefail
+          now=$(date -u +%s)
+          stuck=0
+          details=""
+          # `queued` runs only — an in_progress run is being served.
+          runs=$(gh api "/repos/${REPO}/actions/runs?status=queued&per_page=50" \
+                   --jq '.workflow_runs[] | "\(.created_at)\t\(.name)\t\(.head_branch)\t\(.html_url)"' 2>/dev/null || true)
+          while IFS=$'\t' read -r created name branch url; do
+            [ -z "${created:-}" ] && continue
+            # BSD/GNU date differ; try GNU form first, then BSD.
+            ts=$(date -u -d "$created" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$created" +%s 2>/dev/null || echo 0)
+            [ "$ts" = "0" ] && continue
+            age=$(( (now - ts) / 60 ))
+            if [ "$age" -ge "$THRESHOLD_MIN" ]; then
+              stuck=$((stuck+1))
+              details="${details}- \`${name}\` on \`${branch}\` — queued **${age} min** ([run](${url}))"$'\n'
+            fi
+          done <<< "$runs"
+          {
+            echo "stuck=$stuck"
+            echo "details<<STARVE_EOF"
+            echo "$details"
+            echo "STARVE_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "queued-too-long: $stuck"
+
+      - name: Fleet inventory (optional — needs admin:org PAT)
+        id: fleet
+        env:
+          ORG_TOKEN: ${{ secrets.ORG_RUNNER_READ_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ -z "${ORG_TOKEN:-}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "ORG_RUNNER_READ_TOKEN not set — skipping fleet inventory (starvation check still ran)"
+            exit 0
+          fi
+          json=$(GH_TOKEN="$ORG_TOKEN" gh api --paginate "/orgs/${ORG}/actions/runners" --jq '.runners[]' 2>/dev/null || true)
+          if [ -z "$json" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::could not read org runners (token scope?) — starvation check still ran"
+            exit 0
+          fi
+          total=$(printf '%s\n' "$json"  | jq -s '[.[]|select(.labels|map(.name)|index("rust-cpu"))]|length')
+          online=$(printf '%s\n' "$json" | jq -s '[.[]|select(.labels|map(.name)|index("rust-cpu"))|select(.status=="online")]|length')
+          # WEDGED: offline AND busy. A runner that dropped while HOLDING a job
+          # keeps that job assigned forever and no one else can take it. A plain
+          # online-count misses this entirely — it is why a required check once
+          # "ran" for 55 minutes and then cancelled.
+          wedged=$(printf '%s\n' "$json" | jq -s -r '[.[]|select(.status!="online" and .busy)]|map(.name)|join(", ")')
+          table=$(printf '%s\n' "$json" | jq -s -r 'sort_by(.name)[] | "| \(.name) | \(.status) | \(.busy) | \(.labels|map(.name)|join(" "))|"')
+          {
+            echo "available=true"
+            echo "total=$total"
+            echo "online=$online"
+            echo "wedged=$wedged"
+            echo "table<<FLEET_EOF"
+            echo "$table"
+            echo "FLEET_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "rust-cpu $online/$total online; wedged: ${wedged:-none}"
+
+      - name: Publish status summary
+        env:
+          STUCK: ${{ steps.starve.outputs.stuck }}
+          DETAILS: ${{ steps.starve.outputs.details }}
+          HAVE_FLEET: ${{ steps.fleet.outputs.available }}
+          TOTAL: ${{ steps.fleet.outputs.total }}
+          ONLINE: ${{ steps.fleet.outputs.online }}
+          WEDGED: ${{ steps.fleet.outputs.wedged }}
+          TABLE: ${{ steps.fleet.outputs.table }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          {
+            echo "## CI fleet status"
+            echo
+            if [ "${STUCK:-0}" -gt 0 ]; then
+              echo "### 🔴 Starvation: ${STUCK} run(s) queued 30+ min"
+              echo
+              printf '%s\n' "${DETAILS:-}"
+            else
+              echo "### 🟢 No starvation — nothing queued past the threshold"
+            fi
+            echo
+            if [ "${HAVE_FLEET:-false}" = "true" ]; then
+              echo "### rust-cpu: ${ONLINE}/${TOTAL} online"
+              if [ -n "${WEDGED:-}" ]; then
+                echo
+                echo "**⚠️ Wedged (offline while holding a job): ${WEDGED}** — the job stays"
+                echo "assigned and no other runner can take it. Restart these."
+              fi
+              echo
+              echo "| runner | status | busy | labels |"
+              echo "|---|---|---|---|"
+              printf '%s\n' "${TABLE:-}"
+            else
+              echo "_Fleet inventory unavailable — set the \`ORG_RUNNER_READ_TOKEN\` secret"
+              echo "(PAT with \`admin:org\`) to include per-runner state._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Raise the alarm if starved
+        if: steps.starve.outputs.stuck != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DETAILS: ${{ steps.starve.outputs.details }}
+          WEDGED: ${{ steps.fleet.outputs.wedged }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          TITLE="CI fleet: runs are starving (queued 30+ min)"
+          # One rolling issue, not one per tick — reopen/comment rather than spam.
+          existing=$(gh issue list --repo "$REPO" --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number' 2>/dev/null || true)
+          body=$(printf 'Runs have been queued past the 30-minute threshold — jobs are not being picked up.\n\n%s\n\nWedged runners (offline while holding a job): %s\n\nThis is usually the self-hosted fleet being down, NOT a code fault: jobs queue forever against a label with no live runner, which looks identical to a slow build.\n\nDetected by: %s\n' "${DETAILS:-}" "${WEDGED:-none detected / inventory unavailable}" "$RUN_URL")
+          if [ -n "${existing:-}" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --label ci --body "$body" || \
+              gh issue create --repo "$REPO" --title "$TITLE" --body "$body"
+          fi
