@@ -8,7 +8,7 @@
 //! makes this one harness-drivable.
 
 use cascade_orch::{Cascade, TickIn};
-use falcon_cascade_step_bindings::exports::falcon::cascade_step::step_api::Guest;
+use falcon_cascade_step_bindings::exports::pulseengine::falcon_cascade_step::step_api::Guest;
 
 struct Component;
 

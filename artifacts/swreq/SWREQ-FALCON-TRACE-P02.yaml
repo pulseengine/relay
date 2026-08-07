@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "TRACE-P02 — promote the V: drive implemented→verified from the verification gate's own per-artifact result"
     status: proposed
-    release: falcon-v1.133.0
+    release: falcon-v1.134.0
     description: >
       Artifact status shall reflect executed evidence, so that "verified" means
       a gate ran the artifact's steps and they passed.
@@ -26,7 +26,13 @@ artifacts:
       bench-only has NOT been executed and must NOT be promoted on the gate's
       say-so; it needs either a real CI-runnable step or an explicit, named
       waiver. Distinguishing those two populations is most of the work.
-    tags: [falcon, rivet, traceability, verification, hygiene, v1.133]
+
+      DEFERRED v1.133 -> v1.134 (2026-08-06, deliberate scope move). v1.133's
+      scope is the OCI/release arc (OCI-P02, OCI-P04, REL-P01), which is
+      implementation-complete and waiting only on CI. This promotion sweep is
+      independent of that arc and large enough to warrant its own release
+      rather than holding the OCI arc behind it.
+    tags: [falcon, rivet, traceability, verification, hygiene, v1.134]
     fields:
       req-type: constraint
       priority: should
