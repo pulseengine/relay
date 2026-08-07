@@ -5,7 +5,7 @@
 
 use relay_mix_quad::QuadMixer;
 
-use falcon_mixer_stream_bindings::exports::falcon::cascade_stream::mixer_stream::{
+use falcon_mixer_stream_bindings::exports::pulseengine::falcon_cascade_stream::mixer_stream::{
     Guest, MotorPwm as WitPwm, TorqueSetpoint as WitTorque,
 };
 

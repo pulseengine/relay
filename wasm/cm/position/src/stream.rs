@@ -6,7 +6,7 @@
 
 use relay_pos::{PosController, PositionSetpoint, Timestamp};
 
-use falcon_position_stream_bindings::exports::falcon::cascade_stream::position_stream::{
+use falcon_position_stream_bindings::exports::pulseengine::falcon_cascade_stream::position_stream::{
     AttitudeSetpoint as WitAtt, Guest, PosInput as WitInput,
 };
 
