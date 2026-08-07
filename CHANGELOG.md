@@ -414,7 +414,7 @@ Component Model component** and **runs in wasmtime**.
 ### Added
 
 - **`wit/falcon-flight/flight.wit`** + **`wasm/cm/flight`** — `falcon-core`
-  wrapped as a `falcon:flight` CM component (cargo-component, wasm32-wasip2,
+  wrapped as a `pulseengine:falcon-flight` CM component (cargo-component, wasm32-wasip2,
   ~101 KB), exporting `run-stabilization` and `run-position-hold`.
 - **`scripts/wasmtime-flight-test.sh`** — the mechanical gate: builds the
   component and **runs it in wasmtime**.
@@ -431,7 +431,7 @@ Component Model component** and **runs in wasmtime**.
 
 This is the **clean hand-off artifact**: a typed, portable, verified component.
 The **meld → loom → synth → gale → hardware** integration is a **separate
-project** that consumes `falcon:flight@1.26` — this repo proves the component
+project** that consumes `pulseengine:falcon-flight@1.26` — this repo proves the component
 *runs and is correct*; the integration project owns getting it onto silicon.
 Roadmap: `docs/research/toolchain-to-hardware-roadmap.md`.
 
@@ -1108,7 +1108,7 @@ outside the graph. v1.4 closes that gap for the estimator.
 
 - **`relay-iekf` as a bazel `rust_library`** + **`falcon-iekf`** — the
   verified Invariant-EKF wrapped as a Component Model component
-  (`wasm/cm/iekf`) exporting the same `falcon:cascade/ekf` interface as the
+  (`wasm/cm/iekf`) exporting the same `pulseengine:falcon-cascade/ekf` interface as the
   v0.6 Mahony `falcon-ekf`.
 
 ### Changed

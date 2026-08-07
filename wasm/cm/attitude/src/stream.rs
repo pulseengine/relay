@@ -6,7 +6,7 @@
 
 use relay_att::{AttController, Timestamp};
 
-use falcon_attitude_stream_bindings::exports::falcon::cascade_stream::attitude_stream::{
+use falcon_attitude_stream_bindings::exports::pulseengine::falcon_cascade_stream::attitude_stream::{
     AttInput as WitInput, Guest, RateSetpoint as WitRate,
 };
 

@@ -1,4 +1,4 @@
-package falcon:control-rate@0.6.0;
+package pulseengine:falcon-control-rate@0.6.0;
 
 /// Rate-controller component interface — v0.6 pipeline shape.
 /// Wraps `relay-rate::RatePid`. Spar-codegen `wit_gen` target shape;

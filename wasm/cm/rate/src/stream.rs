@@ -6,7 +6,7 @@
 
 use relay_rate::{RatePid, Timestamp};
 
-use falcon_rate_stream_bindings::exports::falcon::cascade_stream::rate_stream::{
+use falcon_rate_stream_bindings::exports::pulseengine::falcon_cascade_stream::rate_stream::{
     Guest, RateInput as WitInput, TorqueSetpoint as WitTorque,
 };
 

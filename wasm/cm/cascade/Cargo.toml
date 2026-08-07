@@ -15,7 +15,7 @@ crate-type = ["cdylib"]
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
 
 [package.metadata.component]
-package = "falcon:cascade"
+package = "pulseengine:falcon-cascade"
 
 [package.metadata.component.target]
 path = "../../../wit/falcon-cascade"

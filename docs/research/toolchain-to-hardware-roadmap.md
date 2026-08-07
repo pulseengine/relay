@@ -14,8 +14,8 @@ oracle, and any decision it needs. To start one, point at its ID (e.g. "do F1").
 
 ```
    ┌─ relay (this repo) ─────────────────┐   ┌─ falcon-integration (separate) ─┐
-   │  falcon-core (verified cascade)      │   │  consumes falcon:flight@1.26    │
-   │  → falcon:flight CM component  ──────┼──▶│  meld → loom → synth → gale     │
+   │  falcon-core (verified cascade)      │   │  consumes pulseengine:falcon-flight@1.26    │
+   │  → pulseengine:falcon-flight CM component  ──────┼──▶│  meld → loom → synth → gale     │
    │  (wasmtime-runnable, the hand-off)   │   │  → Cortex-M / RISC-V board       │
    │  + hardware-practical + autonomy     │   │  + guides integrators           │
    └──────────────────────────────────────┘   └─────────────────────────────────┘

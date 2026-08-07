@@ -28,9 +28,9 @@ mod bindings;
 // The `cascade` world exports the `controller` interface; its Guest
 // trait lives under `exports::`. The five imported controller
 // interfaces live at the bindings root.
-use bindings::exports::falcon::cascade::controller::Guest;
-use bindings::falcon::cascade::{attitude, ekf, mixer, position, rate};
-use bindings::falcon::cascade::types::{ImuSample, MotorPwm, Waypoint};
+use bindings::exports::pulseengine::falcon_cascade::controller::Guest;
+use bindings::pulseengine::falcon_cascade::{attitude, ekf, mixer, position, rate};
+use bindings::pulseengine::falcon_cascade::types::{ImuSample, MotorPwm, Waypoint};
 
 struct Component;
 

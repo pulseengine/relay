@@ -547,42 +547,42 @@ test_suite(
 wit_library(
     name = "falcon_ekf_wit",
     srcs = ["wit/falcon-cascade/cascade.wit"],
-    package_name = "falcon:cascade",
+    package_name = "pulseengine:falcon-cascade",
     world = "ekf-component",
 )
 
 wit_library(
     name = "falcon_position_wit",
     srcs = ["wit/falcon-cascade/cascade.wit"],
-    package_name = "falcon:cascade",
+    package_name = "pulseengine:falcon-cascade",
     world = "position-component",
 )
 
 wit_library(
     name = "falcon_attitude_wit",
     srcs = ["wit/falcon-cascade/cascade.wit"],
-    package_name = "falcon:cascade",
+    package_name = "pulseengine:falcon-cascade",
     world = "attitude-component",
 )
 
 wit_library(
     name = "falcon_rate_wit",
     srcs = ["wit/falcon-cascade/cascade.wit"],
-    package_name = "falcon:cascade",
+    package_name = "pulseengine:falcon-cascade",
     world = "rate-component",
 )
 
 wit_library(
     name = "falcon_mixer_wit",
     srcs = ["wit/falcon-cascade/cascade.wit"],
-    package_name = "falcon:cascade",
+    package_name = "pulseengine:falcon-cascade",
     world = "mixer-component",
 )
 
 wit_library(
     name = "falcon_cascade_wit",
     srcs = ["wit/falcon-cascade/cascade.wit"],
-    package_name = "falcon:cascade",
+    package_name = "pulseengine:falcon-cascade",
     world = "cascade",
 )
 
@@ -666,7 +666,7 @@ rust_wasm_component_bindgen(
     profiles = ["release"],
 )
 
-# v1.4 — the verified IEKF exports the SAME falcon:cascade/ekf interface, so
+# v1.4 — the verified IEKF exports the SAME pulseengine:falcon-cascade/ekf interface, so
 # it is a drop-in Component Model replacement for the Mahony falcon-ekf.
 rust_wasm_component_bindgen(
     name = "falcon-iekf",
@@ -683,7 +683,7 @@ rust_wasm_component_bindgen(
 wit_library(
     name = "falcon_iekf_stream_wit",
     srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
-    package_name = "falcon:cascade-stream",
+    package_name = "pulseengine:falcon-cascade-stream",
     world = "iekf-stream-component",
 )
 
@@ -711,7 +711,7 @@ rust_wasm_component_bindgen(
 wit_library(
     name = "falcon_position_stream_wit",
     srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
-    package_name = "falcon:cascade-stream",
+    package_name = "pulseengine:falcon-cascade-stream",
     world = "position-stream-component",
 )
 
@@ -739,7 +739,7 @@ rust_wasm_component_bindgen(
 wit_library(
     name = "falcon_attitude_stream_wit",
     srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
-    package_name = "falcon:cascade-stream",
+    package_name = "pulseengine:falcon-cascade-stream",
     world = "attitude-stream-component",
 )
 
@@ -779,7 +779,7 @@ rust_wasm_component_bindgen(
 wit_library(
     name = "falcon_rate_stream_wit",
     srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
-    package_name = "falcon:cascade-stream",
+    package_name = "pulseengine:falcon-cascade-stream",
     world = "rate-stream-component",
 )
 
@@ -807,7 +807,7 @@ rust_wasm_component_bindgen(
 wit_library(
     name = "falcon_mixer_stream_wit",
     srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
-    package_name = "falcon:cascade-stream",
+    package_name = "pulseengine:falcon-cascade-stream",
     world = "mixer-stream-component",
 )
 
@@ -826,7 +826,7 @@ rust_wasm_component_bindgen(
 wit_library(
     name = "falcon_cascade_stream_composed_wit",
     srcs = ["wit/falcon-cascade-stream/cascade_stream.wit"],
-    package_name = "falcon:cascade-stream",
+    package_name = "pulseengine:falcon-cascade-stream",
     world = "cascade-stream-component",
 )
 
@@ -870,7 +870,7 @@ rust_wasm_component_bindgen(
 wit_library(
     name = "falcon_cascade_step_wit",
     srcs = ["wit/falcon-cascade-step/cascade_step.wit"],
-    package_name = "falcon:cascade-step",
+    package_name = "pulseengine:falcon-cascade-step",
     world = "cascade-step-component",
 )
 
@@ -903,11 +903,11 @@ wasm_module_coverage_wasi(
     # error, a yaw command, and a perturbed attitude+rate state. Args are the 10
     # flat f32 (ax,ay,az,gx,gy,gz, north,east,down,yaw); az≈9.81 is specific
     # force at rest so the IEKF gravity update is well-conditioned.
-    invokes = ("falcon:cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,0,0,0,0;" +
-               "falcon:cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,5,0,0,0;" +
-               "falcon:cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,0,5,-2,0.5;" +
-               "falcon:cascade-step/step-api@0.1.0#step=0.5,0.3,9.6,0.1,-0.1,0.05,2,-3,1,-0.3;" +
-               "falcon:cascade-step/step-api@0.1.0#step=-0.4,0.2,9.7,-0.2,0.15,-0.1,-4,2,0.5,0.8"),
+    invokes = ("pulseengine:falcon-cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,0,0,0,0;" +
+               "pulseengine:falcon-cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,5,0,0,0;" +
+               "pulseengine:falcon-cascade-step/step-api@0.1.0#step=0,0,9.81,0,0,0,0,5,-2,0.5;" +
+               "pulseengine:falcon-cascade-step/step-api@0.1.0#step=0.5,0.3,9.6,0.1,-0.1,0.05,2,-3,1,-0.3;" +
+               "pulseengine:falcon-cascade-step/step-api@0.1.0#step=-0.4,0.2,9.7,-0.2,0.15,-0.1,-4,2,0.5,0.8"),
     tags = ["manual"],
 )
 
