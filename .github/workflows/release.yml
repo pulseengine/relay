@@ -574,7 +574,17 @@ jobs:
           published=0
           for slug in $SLUGS; do
             WASM="${BUNDLE}/falcon-${slug}-v${MM}.wasm"
-            REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon-${slug}"
+            # NESTED PATH (v1.133): ghcr.io/<owner>/falcon/<stage>, not
+            # ghcr.io/<owner>/falcon-<stage>. Mirrors how wasi publishes
+            # (ghcr.io/webassembly/wasi/io under namespace `wasi`), and groups
+            # everything falcon under one path instead of a flat hyphenated
+            # list. The wasm.directory entry keeps the display name
+            # `falcon-<stage>` and points `repository` at the nested path —
+            # exactly wasi's shape (`name = "io"`, `repository = "wasi/io"`).
+            # Bundled with the falcon:* -> pulseengine:falcon-* WIT rename so
+            # consumers absorb ONE break, not two. Paths published up to
+            # falcon-v1.131.1 keep serving their old versions.
+            REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon/${slug}"
             if [ ! -f "$WASM" ]; then
               echo "::warning::missing ${WASM} — skipping falcon-${slug}"; continue
             fi
