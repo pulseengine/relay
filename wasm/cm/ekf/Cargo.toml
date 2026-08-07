@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 [dependencies]
 relay-ekf = { path = "../../../crates/relay-ekf" }
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+falcon-cm-rt = { path = "../../../crates/falcon-cm-rt" }
 
 [package.metadata.component]
 package = "pulseengine:falcon-cascade"
@@ -32,5 +33,6 @@ codegen-units = 1
 [workspace]
 
 [features]
-default = ["bazel-bindings"]
+std = []
+default = ["bazel-bindings", "std"]
 bazel-bindings = []

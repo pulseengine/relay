@@ -19,6 +19,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 relay-rate = { path = "../../../crates/relay-rate" }
+falcon-cm-rt = { path = "../../../crates/falcon-cm-rt" }
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
 
 [package.metadata.component]
