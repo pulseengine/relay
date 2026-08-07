@@ -13,12 +13,12 @@ cascade stage as its own cosign-signed OCI entity** (jess#167 decision 5) — th
 fine-grained components jess `wkg oci pull`s and fuses/lowers/places per core:
 
 ```
-ghcr.io/pulseengine/falcon-flight:<full-version>     # runnable demo (sealed loop)
-ghcr.io/pulseengine/falcon-iekf:<full-version>       # invariant-EKF estimator
-ghcr.io/pulseengine/falcon-position:<full-version>   # position/velocity controller
-ghcr.io/pulseengine/falcon-attitude:<full-version>   # geometric SO(3) attitude
-ghcr.io/pulseengine/falcon-rate:<full-version>       # body-rate PID
-ghcr.io/pulseengine/falcon-mixer:<full-version>      # control allocator
+ghcr.io/pulseengine/falcon/flight:<full-version>     # runnable demo (sealed loop)
+ghcr.io/pulseengine/falcon/iekf:<full-version>       # invariant-EKF estimator
+ghcr.io/pulseengine/falcon/position:<full-version>   # position/velocity controller
+ghcr.io/pulseengine/falcon/attitude:<full-version>   # geometric SO(3) attitude
+ghcr.io/pulseengine/falcon/rate:<full-version>       # body-rate PID
+ghcr.io/pulseengine/falcon/mixer:<full-version>      # control allocator
 #   ...each also tagged :latest
 ```
 
@@ -34,8 +34,8 @@ embedded metadata contract (below) so its wasm.directory listing is real.
 Pull + verify:
 
 ```sh
-wkg oci pull ghcr.io/pulseengine/falcon-flight:1.127.0 -o falcon-flight.wasm
-cosign verify ghcr.io/pulseengine/falcon-flight:1.127.0 \
+wkg oci pull ghcr.io/pulseengine/falcon/flight:1.127.0 -o falcon-flight.wasm
+cosign verify ghcr.io/pulseengine/falcon/flight:1.127.0 \
   --certificate-identity-regexp \
     'https://github.com/pulseengine/relay/.github/workflows/release.yml@.*' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
@@ -82,6 +82,27 @@ cosign verify ghcr.io/pulseengine/falcon-flight:1.127.0 \
    A **new namespace** is flagged for maintainer review, so the ghcr package must
    already exist and be **public** (step 1) before submitting — an unpullable
    entry is rejected. Do this only after a real release has populated the package.
+
+   > **Entries need UPDATING for the nested paths (v1.133).** The registered
+   > entries point at the flat repositories (`repository = "falcon-rate"`), but
+   > releases now publish to the nested path (`ghcr.io/pulseengine/falcon/rate`).
+   > Until the entries are updated the listings keep resolving to the OLD
+   > repositories, which stop receiving new versions. The target shape mirrors
+   > wasi's (display name flat, repository nested):
+   >
+   > ```toml
+   > [[component]]
+   > name = "falcon-rate"
+   > repository = "falcon/rate"
+   >
+   > [[interface]]
+   > name = "falcon-cascade"
+   > repository = "falcon/cascade"
+   > ```
+   >
+   > A `registry-entry` issue ADDS an entry; changing an existing one needs a PR
+   > against `registry/pulseengine.toml`. Do it after the first release that
+   > publishes to the nested paths, so the entries never point at nothing.
 
    Adding a component to an **existing** namespace auto-merges (no maintainer
    review) — only a brand-new namespace is held for review. Registered so far:
