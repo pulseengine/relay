@@ -22,12 +22,13 @@ categories = ["aerospace", "science::robotics"]
 falcon-core = { path = "../../../crates/falcon-core" }
 relay-math = { path = "../../../crates/relay-math" }
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+falcon-cm-rt = { path = "../../../crates/falcon-cm-rt" }
 
 [lib]
 crate-type = ["cdylib"]
 
 [package.metadata.component]
-package = "falcon:flight"
+package = "pulseengine:falcon-flight"
 
 [package.metadata.component.target]
 path = "../../../wit/falcon-flight/flight.wit"
@@ -40,3 +41,8 @@ lto = true
 # standalone (not in the host cargo workspace) — built only by cargo-component
 # for wasm32-wasip2, like embedded/falcon-cortex-m.
 [workspace]
+
+[features]
+default = ["bazel-bindings", "std"]
+bazel-bindings = []
+std = []

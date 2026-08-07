@@ -5,7 +5,7 @@
 
 use relay_iekf::{Iekf, Imu as RImu};
 
-use falcon_iekf_stream_bindings::exports::falcon::cascade_stream::iekf_stream::{
+use falcon_iekf_stream_bindings::exports::pulseengine::falcon_cascade_stream::iekf_stream::{
     Guest, ImuSample as WitImu, VehicleState as WitState,
 };
 

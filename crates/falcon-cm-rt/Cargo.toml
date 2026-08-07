@@ -1,0 +1,8 @@
+[package]
+name = "falcon-cm-rt"
+description = "no_std Component-Model runtime support for the falcon cascade components: a bounded work-memory arena, the canonical-ABI cabi_realloc export, and a panic handler."
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/pulseengine/relay"
+publish = false

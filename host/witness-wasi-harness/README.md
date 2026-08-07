@@ -76,7 +76,7 @@ witness-wasi-harness: collected 2 counters
 ## Cascade run (v0.15.1)
 
 ```text
-witness-wasi-harness: invoke falcon:cascade/controller@0.7.0#step
+witness-wasi-harness: invoke pulseengine:falcon-cascade/controller@0.7.0#step
    failed: memory fault at wasm address 0x100000 in linear memory
    of size 0x100000: wasm trap: out of bounds memory access
 witness-wasi-harness: invoked 14 exports

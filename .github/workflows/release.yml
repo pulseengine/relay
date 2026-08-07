@@ -367,15 +367,26 @@ jobs:
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "::notice::Release $VERSION exists; uploading assets"
             gh release upload "$VERSION" --clobber release-assets/*
+          # CREATED AS A DRAFT (v1.133, REL-P01). The flight-component job runs
+          # AFTER this one; when it failed on falcon-v1.131.0 the release was
+          # already public with binaries and permanently no wasm components —
+          # incomplete, and unrepairable without moving a tag or cutting a new
+          # version. The #140 guard could not help: it lives inside that later
+          # job, i.e. downstream of the publish. A draft is invisible to
+          # consumers, so the failure mode becomes "no release" instead of
+          # "half a release". flight-component publishes it as its final step,
+          # only after the guard passes.
           elif [ -n "${NOTES_PATH}" ]; then
-            echo "::notice::Creating Release $VERSION with notes from ${NOTES_PATH}"
+            echo "::notice::Creating DRAFT Release $VERSION with notes from ${NOTES_PATH}"
             gh release create "$VERSION" \
+              --draft \
               --title "$VERSION" \
               --notes-file "${NOTES_PATH}" \
               release-assets/*
           else
-            echo "::notice::Creating Release $VERSION with autogen notes"
+            echo "::notice::Creating DRAFT Release $VERSION with autogen notes"
             gh release create "$VERSION" \
+              --draft \
               --title "$VERSION" \
               --generate-notes \
               release-assets/*
@@ -574,7 +585,17 @@ jobs:
           published=0
           for slug in $SLUGS; do
             WASM="${BUNDLE}/falcon-${slug}-v${MM}.wasm"
-            REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon-${slug}"
+            # NESTED PATH (v1.133): ghcr.io/<owner>/falcon/<stage>, not
+            # ghcr.io/<owner>/falcon-<stage>. Mirrors how wasi publishes
+            # (ghcr.io/webassembly/wasi/io under namespace `wasi`), and groups
+            # everything falcon under one path instead of a flat hyphenated
+            # list. The wasm.directory entry keeps the display name
+            # `falcon-<stage>` and points `repository` at the nested path —
+            # exactly wasi's shape (`name = "io"`, `repository = "wasi/io"`).
+            # Bundled with the falcon:* -> pulseengine:falcon-* WIT rename so
+            # consumers absorb ONE break, not two. Paths published up to
+            # falcon-v1.131.1 keep serving their old versions.
+            REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon/${slug}"
             if [ ! -f "$WASM" ]; then
               echo "::warning::missing ${WASM} — skipping falcon-${slug}"; continue
             fi
@@ -614,3 +635,35 @@ jobs:
             fi
           done
           echo "::notice::per-component OCI publish: ${published} components signed + pushed"
+
+      # ── PUBLISH the draft — the last thing the release does (REL-P01) ─────
+      # The release has been a DRAFT until now (see create-release). Everything
+      # that can fail has already run: the component bundle built, was signed
+      # and attached, the #140 wasm-asset guard passed, and the OCI push ran.
+      # Only now does it become visible.
+      #
+      # NOT `if: always()` and NOT continue-on-error: if any earlier step in
+      # this job failed, the job stops before here and the release stays a
+      # draft — which is the entire point. The OCI push above IS
+      # continue-on-error (a registry hiccup must not fail a release), so a
+      # registry outage still publishes; a missing component does not.
+      - name: Publish the release (flip the draft)
+        working-directory: relay
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          if ! printf '%s' "$TAG" | grep -qE '^falcon-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$'; then
+            echo "::error::refusing to publish a malformed tag: $TAG"; exit 1
+          fi
+          # Re-assert the guard's property against the LIVE release rather than
+          # trusting that an earlier step in this job checked it.
+          if ! gh release view "$TAG" --json assets -q '.assets[].name' \
+               | grep -qE 'falcon-flight-v[0-9.]+\.wasm$'; then
+            echo "::error::refusing to publish $TAG — no falcon-flight-*.wasm asset"; exit 1
+          fi
+          gh release edit "$TAG" --draft=false --latest
+          echo "::notice::Published $TAG (was a draft until every component was attached and guarded)"

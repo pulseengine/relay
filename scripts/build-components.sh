@@ -2,14 +2,14 @@
 # Build ALL falcon Component-Model components and emit a versioned bundle into
 # dist/falcon-components-vMM/:
 #
-#   falcon-flight-vMM.wasm        — falcon:flight (standalone, wasmtime-runnable)
-#   falcon-iekf-vMM.wasm          — falcon:cascade ekf-component (IEKF SE₂(3))
-#   falcon-ekf-vMM.wasm           — falcon:cascade ekf-component (Mahony legacy)
-#   falcon-attitude-vMM.wasm      — falcon:cascade attitude-component
-#   falcon-rate-vMM.wasm          — falcon:cascade rate-component
-#   falcon-position-vMM.wasm      — falcon:cascade position-component
-#   falcon-mixer-vMM.wasm         — falcon:cascade mixer-component
-#   falcon-cascade-vMM.wasm       — falcon:cascade orchestrator
+#   falcon-flight-vMM.wasm        — pulseengine:falcon-flight (standalone, wasmtime-runnable)
+#   falcon-iekf-vMM.wasm          — pulseengine:falcon-cascade ekf-component (IEKF SE₂(3))
+#   falcon-ekf-vMM.wasm           — pulseengine:falcon-cascade ekf-component (Mahony legacy)
+#   falcon-attitude-vMM.wasm      — pulseengine:falcon-cascade attitude-component
+#   falcon-rate-vMM.wasm          — pulseengine:falcon-cascade rate-component
+#   falcon-position-vMM.wasm      — pulseengine:falcon-cascade position-component
+#   falcon-mixer-vMM.wasm         — pulseengine:falcon-cascade mixer-component
+#   falcon-cascade-vMM.wasm       — pulseengine:falcon-cascade orchestrator
 #   manifest.json                 — name + file + sha256 + bytes + toolchain
 #   SHA256SUMS                    — canonical checksums for all .wasm artifacts
 #
@@ -59,7 +59,7 @@ TOOLCHAIN_STR="rustc=$RUSTC_VER cargo-component=$CC_VER"
 #
 # Add a component here as it is converted to no_std (jess's per-stage lowering
 # report is the priority order). A std component still needs wasip2.
-NOSTD_COMPONENTS=" rate "
+NOSTD_COMPONENTS=" flight iekf ekf attitude rate position falcon-mixer cascade "
 
 component_target() {
   case "$NOSTD_COMPONENTS" in
