@@ -230,9 +230,11 @@ jobs:
           # plausible and matches 0 of the 195 sw-verification artifacts
           # (the tag lives on sw-reqs, not verifications) — exit code 0.
           if grep -qE '^# 0 artifact\(s\) matched' verification-output.md; then
-            echo "::error::Verify-Filter matched 0 verification artifacts — \
-refusing to pass a gate that verified nothing. Fix the filter or drop the \
-override to use the default."
+            # NB: keep this on ONE line. A backslash-continued string whose
+            # continuation starts at column 0 terminates the `run: |` block
+            # scalar and makes the whole workflow file INVALID YAML — which is
+            # how the first version of this guard broke its own gate.
+            echo "::error::Verify-Filter matched 0 verification artifacts — refusing to pass a gate that verified nothing. Fix the filter, or drop the override to use the default."
             exit 1
           fi
 
