@@ -199,6 +199,35 @@ def cargo_tests_passed(output: str) -> int:
     return sum(int(m) for m in re.findall(r"test result: ok\. (\d+) passed", output))
 
 
+# Whole-crate steps seen this run: (artifact-id, cmd). Reported, not failed —
+# see cargo_test_is_whole_crate.
+WHOLE_CRATE_STEPS: list[tuple[str, str]] = []
+
+
+def cargo_test_is_whole_crate(cmd: str) -> bool:
+    """True if `cmd` is a `cargo test` step that runs an ENTIRE crate/workspace
+    instead of naming the test(s) that verify the requirement.
+
+    Whole-crate steps are weak evidence: they assert "something in this crate
+    passes", not "THIS test verifies THIS requirement". They are also the one
+    step shape that CANNOT detect evidence drift — the named-test guard in
+    run_steps (`cargo_tests_passed(...) == 0`) has no name to check, so a test
+    that is renamed, deleted, or `#[ignore]`d leaves the step green.
+
+    Counted and reported (#262), not failed: the backlog was 70 steps when this
+    landed, so failing immediately would block unrelated work. The point is to
+    stop the count drifting back up — it had already grown ~54 -> 70 since the
+    2026-07 audit. Convert to a hard failure once the backlog is worked down."""
+    import shlex
+    try:
+        toks = shlex.split(cmd)
+    except ValueError:
+        return False
+    if toks[:2] != ["cargo", "test"]:
+        return False
+    return not cargo_test_names_a_filter(cmd)
+
+
 def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]]:
     aid = artifact["id"]
     steps = artifact.get("fields", {}).get("steps") or []
@@ -257,6 +286,11 @@ def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]
         if passed and cargo_test_names_a_filter(cmd) and cargo_tests_passed(proc.stdout) == 0:
             passed = False
             note = " — named test ran 0 (renamed/removed? evidence drift)"
+        # Weak-evidence census (#262). Does NOT affect pass/fail — see
+        # cargo_test_is_whole_crate for why this warns rather than fails.
+        if cargo_test_is_whole_crate(cmd):
+            WHOLE_CRATE_STEPS.append((aid, cmd))
+            note += " — WHOLE-CRATE step: names no test (#262)"
         artifact_pass = artifact_pass and passed
         status = "PASS" if passed else (f"FAIL (rc={rc})" if rc != 0 else "FAIL (0 tests)")
         print(f"  [{status:>14}] ({duration:6.2f}s) {aid}: {cmd}{note}")
@@ -351,6 +385,15 @@ def main() -> int:
             "pass": ok,
             "steps": step_results,
         })
+
+    # Weak-evidence census (#262). Printed even on a green run — a gate that
+    # only speaks when it fails cannot show a backlog shrinking.
+    if WHOLE_CRATE_STEPS:
+        print()
+        print(f"# {len(WHOLE_CRATE_STEPS)} whole-crate step(s) — weak evidence, "
+              f"name the verifying test(s) (#262):")
+        for aid, cmd in WHOLE_CRATE_STEPS:
+            print(f"#   {aid}: {cmd}")
 
     if args.markdown:
         print()
