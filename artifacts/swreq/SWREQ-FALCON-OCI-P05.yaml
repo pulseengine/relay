@@ -1,0 +1,65 @@
+artifacts:
+  - id: SWREQ-FALCON-OCI-P05
+    type: sw-req
+    title: "OCI-P05 — published components carry relocation metadata so meld can rebase them into a shared address space"
+    status: implemented
+    release: falcon-v1.134.0
+    description: >
+      Every published cascade component shall carry `linking` and `reloc.*`
+      sections, so a fusing consumer can place it at a non-zero base in a
+      shared address space and rebase its absolute addresses safely.
+
+      WHY IT EXISTS — this is the SECOND blocker, found only because the first
+      one was tested rather than assumed. OCI-P02 removed `memory.grow` from all
+      eight components (v1.133), and its kill-criterion asked jess to run the
+      thing that removal was FOR:
+
+        meld fuse --memory shared --address-rebase iekf position attitude rate mixer
+
+      It REJECTED (jess#167, 2026-08-11):
+
+        component 'mixer.wasm' module 0 is placed at a non-zero shared-memory
+        base but carries no relocation metadata (linking/reloc.*); its absolute
+        addresses cannot be rebased safely. Rebuild it with relocations retained
+        on the FINAL link (`-C link-arg=--emit-relocs`) — an unresolved
+        relocatable object (`wasm-ld -r`) is NOT sufficient, its stored values
+        are addends, not final addresses — or fuse without shared memory.
+
+      Measured: all six published v1.133 components had `reloc-sections=0`. So
+      zero `memory.grow` was NECESSARY but NOT SUFFICIENT, exactly as OCI-P02's
+      evidence record predicted when it declined to promote itself to `verified`
+      on byte-level evidence alone.
+
+      It is not mixer-specific — mixer is merely the first component meld places
+      at a non-zero base. All six need the same flag.
+
+      THE FLAG MUST BE ON THE FINAL LINK. `wasm-ld -r` produces an unresolved
+      relocatable object whose stored values are ADDENDS rather than final
+      addresses; a consumer cannot rebase from those. `-C link-arg=--emit-relocs`
+      retains the relocations through the real link.
+
+      COST, MEASURED AND ACCEPTED: falcon-mixer grows 2,918 -> 12,296 bytes
+      (4.2x). The reloc + linking sections themselves are only ~1,054 bytes, so
+      most of the growth is `--emit-relocs` inhibiting dead-code elimination.
+      This is metadata on the DISTRIBUTED component; whether it survives into
+      the flashed image depends on what meld/synth emit after rebasing, which is
+      jess's half. If the fused image carries it, that is a finding worth its own
+      requirement.
+    tags: [falcon, oci, wasm, meld, relocation, embedded, lowering, v1.134]
+    fields:
+      req-type: interface
+      priority: shall
+      verification-criteria: >
+        (a) Every published component, disassembled, contains `linking`,
+        `reloc.CODE` and `reloc.DATA` custom sections. (b) The OCI-P02
+        invariants are UNBROKEN by the change: still a component
+        (0061736d0d000100), still ZERO `memory.grow`, still ZERO `wasi:*`.
+        (c) KILL-CRITERION, owned by gale/meld and NOT dischargeable here:
+        `meld fuse --memory shared --address-rebase` ACCEPTS the fused
+        five-stage cascade. A rejection for any reason — including a third,
+        different one — means this requirement is not met.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-OCI-P02

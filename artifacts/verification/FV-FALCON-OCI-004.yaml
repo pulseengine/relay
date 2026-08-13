@@ -1,0 +1,61 @@
+artifacts:
+  - id: FV-FALCON-OCI-004
+    type: sw-verification
+    title: "OCI-P05 — components are built with --emit-relocs and carry linking/reloc.* sections (v1.134)"
+    status: implemented
+    release: falcon-v1.134.0
+    description: >
+      Verification of SWREQ-FALCON-OCI-P05.
+
+      (a) CONFIGURATION (CI-runnable, the step below). scripts/build-components.sh
+      passes `-C link-arg=--emit-relocs` via RUSTFLAGS to every component build.
+      This is a weak-but-real assertion of the same kind as FV-FALCON-REL-001's
+      tier (a): the property lives in the build definition, and the step fails if
+      the flag is dropped — which is the regression worth catching, since nothing
+      else in CI would notice its absence until a consumer tried to fuse.
+
+      (b) ARTIFACT-LEVEL (bench-only — needs cargo-component + wasm-tools, which
+      the gate runner does not have). MEASURED on falcon-mixer, built locally
+      with the flag, wasm32-unknown-unknown:
+
+        custom "linking"       938 bytes
+        custom "reloc.CODE"    105 bytes
+        custom "reloc.DATA"     11 bytes
+
+      against the SAME component as published at 1.133.0, which had
+      reloc+linking sections = 0. So the flag demonstrably produces what meld
+      asked for, rather than merely being present in the build line.
+
+      (c) NON-REGRESSION — the point of the check, since adding metadata could
+      plausibly have disturbed the OCI-P02 invariants. Measured on the same
+      artifact:
+
+        header       0061736d0d000100   (still a component)
+        memory.grow  0                  (unchanged)
+        wasi:*       0                  (unchanged)
+        WIT ns       pulseengine:falcon-cascade
+
+      Also checked: nothing in scripts/build-components.sh or release.yml strips
+      custom sections on the component path (the only `strip` is for the
+      falcon-hello native binary), so the reloc sections survive to publication.
+      That was worth verifying — a strip step would have silently undone this.
+
+      SCOPE (honest): (a) and (b) show the components now CARRY relocation
+      metadata. They do NOT show that meld accepts the fused cascade. That is
+      OCI-P05's kill-criterion, it is owned by gale/meld, and it is the reason
+      this artifact stays `implemented`. The v1.133 cycle is the cautionary
+      precedent: byte-level evidence looked complete and the fuse still rejected
+      for an entirely different reason. A third blocker is possible and would be
+      a finding, not a surprise.
+    tags: [verification, falcon, oci, wasm, meld, relocation, embedded, v1.134]
+    fields:
+      method: test
+      steps:
+        # (a) the build actually passes the flag — fails if it is ever dropped
+        - run: "grep -q 'link-arg=--emit-relocs' scripts/build-components.sh"
+        # (b) artifact-level evidence, bench-only (needs cargo-component + wasm-tools)
+        - run: "wasm-tools objdump falcon_mixer_cm.wasm | grep -c 'reloc.CODE'  # bench-only: expect >=1"
+        - run: "wasm-tools print falcon_mixer_cm.wasm | grep -c 'memory.grow'  # bench-only: expect 0 (non-regression)"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OCI-P05
