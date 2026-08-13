@@ -51,7 +51,14 @@ artifacts:
       priority: shall
       verification-criteria: >
         (a) Every published component, disassembled, contains `linking`,
-        `reloc.CODE` and `reloc.DATA` custom sections. (b) The OCI-P02
+        `reloc.CODE` and `reloc.DATA` custom sections, AND exposes its true
+        static end — `__heap_base`/`__data_end` in the linking symbol table,
+        with `.bss` materialised as an explicit data segment so the extent is
+        also readable from the data-segment end. Both readings must agree.
+        (The extent half is not cosmetic: meld packs by static end, and the
+        8 KiB arena lives in `.bss`. Published 1.133.0 exposed NEITHER reading
+        — a consumer packing by data-segment-end would reserve 76 bytes for a
+        component whose static memory ends 8,229 bytes later, and collide.) (b) The OCI-P02
         invariants are UNBROKEN by the change: still a component
         (0061736d0d000100), still ZERO `memory.grow`, still ZERO `wasi:*`.
         (c) KILL-CRITERION, owned by gale/meld and NOT dischargeable here:
