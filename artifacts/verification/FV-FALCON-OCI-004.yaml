@@ -26,6 +26,34 @@ artifacts:
       reloc+linking sections = 0. So the flag demonstrably produces what meld
       asked for, rather than merely being present in the build line.
 
+      (b2) EXTENT READABILITY — the half meld actually packs against, and the
+      half that was invisible before. Measured, falcon-mixer, published 1.133.0
+      vs the same component rebuilt with the flag:
+
+                            published 1.133.0      with --emit-relocs
+        data segments       1 (.rodata only)       2
+        .rodata             76 B, end 1048652      same
+        .bss                ABSENT (implicit)      base 1048656, len 8225,
+                                                   end 1056881
+        linking section     absent                 present, 938 B
+        __heap_base         absent                 present
+        __data_end          absent                 present
+
+      The arena is 8 KiB in `.bss`. Published 1.133.0 exposed the extent by
+      NEITHER route, so a consumer packing by data-segment-end would reserve
+      76 bytes for a component whose static memory ends 8,229 bytes later
+      (meld#370).
+
+      Two corollaries, recorded because they contradict a reasonable
+      assumption: `wasm-tools component new` does NOT unconditionally strip the
+      linking section — it survives when it exists; and `--emit-relocs`
+      materialises `.bss` as an explicit zero-filled segment, so the static end
+      becomes readable two independent ways that should agree.
+
+      Confirmed on a SECOND component (falcon-rate, which also carries a
+      `.data` segment, so the three-segment case is covered): 3 linking+reloc
+      sections, `__heap_base` and `__data_end` present, memory.grow 0, wasi 0.
+
       (c) NON-REGRESSION — the point of the check, since adding metadata could
       plausibly have disturbed the OCI-P02 invariants. Measured on the same
       artifact:
