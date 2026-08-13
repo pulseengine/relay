@@ -35,11 +35,30 @@ artifacts:
       happy path is proven before the failure path is provoked on the real
       release train.
 
-      SCOPE (honest): (a) is verified mechanically on every PR. (b) is NOT
-      verified at the time this artifact lands — it cannot be, since it requires
-      a tagged release. This artifact stays `implemented` until falcon-v1.133.0
-      has run and its draft->published transition is recorded; only then does it
-      become `verified`. This is the same two-tier split as FV-FALCON-OCI-001.
+      (b) IS NOW DISCHARGED — observed live on falcon-v1.133.0, run
+      31205220348. The transition was watched, not inferred:
+
+        18:03:40Z  release created                isDraft=true
+        18:38:21Z  5 platform builds + Create     isDraft=true, 12 assets
+                   GitHub Release all `success`,
+                   flight-component still running
+        18:53:00Z  guard passed, draft flipped    isDraft=false, 20 assets
+
+      The 18:38 sample is the load-bearing one. The release had TWELVE ASSETS
+      ALREADY ATTACHED and was still invisible to consumers. That window is
+      exactly the falcon-v1.131.0 failure: under the previous ordering this
+      release would have been PUBLISHED and public at that moment, carrying its
+      platform binaries and missing every wasm component. A consumer pulling it
+      then would have received half a release. With draft-then-finalize that
+      state is unreachable rather than merely unlikely.
+
+      SCOPE (honest): what is discharged is the HAPPY PATH — the guard permits
+      publication once everything is present. The FAILURE path (force an upload
+      to fail, confirm the release STAYS a draft) is NOT verified here and is
+      deliberately deferred to a scratch tag, so the happy path is proven on the
+      real release train before the failure path is provoked on it. Until that
+      runs, this artifact evidences "publishes only after the guard", not
+      "provably never publishes when the guard fails".
     tags: [verification, falcon, release, oci, ordering, v1.133]
     fields:
       method: test
