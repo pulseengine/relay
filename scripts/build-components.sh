@@ -81,7 +81,25 @@ build_component() {
   # ("module does not export a function named `cabi_realloc`"), the failure was
   # swallowed, and the fallback picked up a pre-componentization module.
   # A build failure must stop the bundle, not degrade it silently.
-  if ! ( cd "$wasm_dir" && cargo component build --release --target "$target" --no-default-features 2>&1 ) \
+  # RELOCATION METADATA (v1.134, OCI-P05). meld's shared-memory fusion places
+  # each module at a non-zero base and REBASES its absolute addresses. It can
+  # only do that if the module carries `linking` / `reloc.*` sections. Without
+  # them it refuses — correctly, since silently mis-rebasing would produce a
+  # component that links and then misbehaves at runtime:
+  #
+  #   component 'mixer.wasm' module 0 is placed at a non-zero shared-memory base
+  #   but carries no relocation metadata (linking/reloc.*); its absolute
+  #   addresses cannot be rebased safely.
+  #
+  # Measured by jess on the v1.133 components (jess#167): ALL SIX had
+  # reloc-sections=0, so `meld fuse --memory shared --address-rebase` rejected
+  # the cascade. Zero `memory.grow` (OCI-P02) was NECESSARY but NOT SUFFICIENT;
+  # this is the second, independent blocker.
+  #
+  # It must be on the FINAL link. `wasm-ld -r` (an unresolved relocatable
+  # object) is NOT sufficient: its stored values are addends, not final
+  # addresses, so a consumer cannot rebase from them.
+  if ! ( cd "$wasm_dir" && RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs" cargo component build --release --target "$target" --no-default-features 2>&1 ) \
        | tee /tmp/falcon-build-$dir.log | grep -E "^error" | sed 's/^/    /' >&2; then
     : # grep found no "^error" lines — that is the success path
   fi
