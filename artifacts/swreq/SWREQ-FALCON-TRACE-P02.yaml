@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "TRACE-P02 — promote the V: drive implemented→verified from the verification gate's own per-artifact result"
     status: proposed
-    release: falcon-v1.134.0
+    release: falcon-v1.135.0
     description: >
       Artifact status shall reflect executed evidence, so that "verified" means
       a gate ran the artifact's steps and they passed.
@@ -32,7 +32,11 @@ artifacts:
       implementation-complete and waiting only on CI. This promotion sweep is
       independent of that arc and large enough to warrant its own release
       rather than holding the OCI arc behind it.
-    tags: [falcon, rivet, traceability, verification, hygiene, v1.134]
+      Deferred v1.134 -> v1.135. v1.134 is cut minimal — OCI-P05 alone — because
+      a downstream consumer (jess) is BLOCKED on the relocation fix and the
+      published artifact is the only way to hand it to them. Accumulating
+      unrelated scope would make them wait on work they do not need.
+    tags: [falcon, rivet, traceability, verification, hygiene, v1.135]
     fields:
       req-type: constraint
       priority: should
