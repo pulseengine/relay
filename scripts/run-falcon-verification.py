@@ -228,6 +228,73 @@ def cargo_test_is_whole_crate(cmd: str) -> bool:
     return not cargo_test_names_a_filter(cmd)
 
 
+
+# ── PER-CRATE BATCHING (v1.134, #350) ────────────────────────────────────────
+# MEASURED on a real gate run (32154246436, verification-output.md): the sweep
+# executed 311 steps totalling 43.2 min, and `cargo test -p falcon-core` alone
+# accounted for **67 invocations / 1455 s / 56%** of it. falcon-sitl-gz added
+# 21 more for 24%. Two crates were 80% of the sweep, and 96% of step time went
+# to crates invoked MORE THAN ONCE.
+#
+# Each invocation pays cargo's fixed cost — resolve, freshness check, link,
+# harness start — even when the named test itself is milliseconds. So the lever
+# is not converting whole-crate steps to named ones (#262/#343; measured
+# separately, does not close the gap) but invoking cargo ONCE per crate.
+#
+# Strategy: for any crate appearing in 2+ steps of the plain shape
+# `cargo test -p <crate> [filter]`, run it once, record every test's outcome,
+# and resolve those steps from the recorded results.
+#
+# DELIBERATELY NARROW. A step is batchable only if it is exactly
+# `cargo test -p CRATE` or `cargo test -p CRATE FILTER`. Anything carrying
+# --release, --all-targets, `--`, env prefixes or extra flags runs unchanged on
+# the original path, because those observe different code or different
+# profiles and must not be answered from a debug whole-crate run.
+#
+# Semantics are preserved, including the guard that matters: a step naming a
+# filter that matches ZERO executed tests still FAILS (renamed/removed/#[ignore]
+# — pulseengine.eu#89). An `#[ignore]`d test does not appear as a pass in the
+# batch, so `cargo test -p falcon-core notch` still fails exactly as it does
+# today.
+BATCHABLE = re.compile(r"^cargo test -p ([A-Za-z0-9_-]+)(?: ([A-Za-z0-9_:]+))?$")
+
+# crate -> {test_name: "ok"|"FAILED"|"ignored"}, plus crate -> overall rc
+BATCH_RESULTS: dict[str, dict[str, str]] = {}
+BATCH_RC: dict[str, int] = {}
+
+
+def batchable(cmd: str):
+    """(crate, filter|None) if `cmd` is a plain `cargo test -p X [filter]`, else None."""
+    m = BATCHABLE.match(cmd.strip())
+    return (m.group(1), m.group(2)) if m else None
+
+
+def run_crate_batch(crate: str) -> None:
+    """Run a crate's suite ONCE and record every test outcome."""
+    proc = subprocess.run(
+        f"cargo test -p {crate}", shell=True, capture_output=True, text=True
+    )
+    BATCH_RC[crate] = proc.returncode
+    tests: dict[str, str] = {}
+    # libtest per-test lines: `test some::name ... ok` / `... FAILED` / `... ignored`
+    for m in re.finditer(r"^test ([^\s]+) \.\.\. (ok|FAILED|ignored)", proc.stdout, re.M):
+        tests[m.group(1)] = m.group(2)
+    BATCH_RESULTS[crate] = tests
+
+
+def resolve_from_batch(crate: str, filt: str | None):
+    """(passed, note, n_ran) for a batched step, mirroring the unbatched semantics."""
+    tests = BATCH_RESULTS[crate]
+    if filt is None:                                   # whole-crate step
+        ran = [v for v in tests.values() if v != "ignored"]
+        return (BATCH_RC[crate] == 0, "", len(ran))
+    matched = {k: v for k, v in tests.items() if filt in k}
+    ran = {k: v for k, v in matched.items() if v != "ignored"}
+    if not ran:
+        return (False, " — named test ran 0 (renamed/removed? evidence drift)", 0)
+    return (all(v == "ok" for v in ran.values()), "", len(ran))
+
+
 def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]]:
     aid = artifact["id"]
     steps = artifact.get("fields", {}).get("steps") or []
@@ -272,6 +339,19 @@ def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]
         if dry_run:
             print(f"  [dry-run] {aid} step {i+1}: {cmd}")
             results.append({"cmd": cmd, "pass": True, "skipped": False, "rc": 0, "duration": 0.0})
+            continue
+        # Resolve from the per-crate batch when this step was pre-run (#350).
+        b = batchable(cmd)
+        if b and b[0] in BATCH_RESULTS:
+            crate, filt = b
+            passed, note, n = resolve_from_batch(crate, filt)
+            if cargo_test_is_whole_crate(cmd):
+                WHOLE_CRATE_STEPS.append((aid, cmd))
+                note += " — WHOLE-CRATE step: names no test (#262)"
+            artifact_pass = artifact_pass and passed
+            status = "PASS" if passed else "FAIL (batched)"
+            print(f"  [{status:>14}] ( batched) {aid}: {cmd}{note}")
+            results.append({"cmd": cmd, "pass": passed, "skipped": False, "rc": 0 if passed else 1, "duration": 0.0})
             continue
         start = time.monotonic()
         proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -373,10 +453,53 @@ def main() -> int:
     print(f"# {len(ids)} artifact(s) matched: {', '.join(ids)}")
     print()
 
+    # Fetch once — the pre-pass and the run both need every artifact, and
+    # rivet_get is a subprocess call per id.
+    arts = {aid: rivet_get(aid) for aid in ids}
+
+    # ── PER-CRATE BATCH PRE-PASS (#350) ──────────────────────────────────
+    # Count how often each crate appears in a plain `cargo test -p X [filter]`
+    # step. Any crate seen 2+ times is run ONCE here; its steps are then
+    # resolved from the recorded per-test outcomes instead of re-invoking
+    # cargo. See the BATCHABLE block for why this is deliberately narrow.
+    if not args.dry_run:
+        counts: dict[str, int] = {}
+        for a in arts.values():
+            for st in (a.get("fields", {}).get("steps") or []):
+                cmd = st["run"]
+                if is_bench_only(cmd) or KANI_P_STEP.search(cmd):
+                    continue
+                b = batchable(cmd)
+                if b:
+                    counts[b[0]] = counts.get(b[0], 0) + 1
+        # THRESHOLD 5, chosen from measurement rather than taste. Batching
+        # replaces N filtered runs with ONE whole-crate run, so it only pays
+        # when N x per_invocation > whole_crate. Measured locally (warm cache):
+        #   4 falcon-core steps -> batched 61s vs 53s unbatched  (LOSS)
+        #   7 falcon-core steps -> batched 53s vs 55s unbatched  (+2s)
+        # Break-even is ~6-7 here. In CI it is far lower: the gate log shows
+        # 21.7s per falcon-core invocation (CARGO_BUILD_JOBS=2, disk pressure)
+        # against ~52s for the whole crate, i.e. break-even near 3 — which is
+        # why 67 invocations cost 1455s there and ~0 here. 5 is set to avoid
+        # regressing small cases locally while still engaging the two crates
+        # that are 80% of the CI sweep (falcon-core 67, falcon-sitl-gz 21).
+        batch = sorted([c for c, n in counts.items() if n >= 5],
+                       key=lambda c: -counts[c])
+        if batch:
+            print(f"# batching {len(batch)} crate(s) invoked 2+ times "
+                  f"({sum(counts[c] for c in batch)} steps -> {len(batch)} cargo runs):")
+            for c in batch:
+                t0 = time.monotonic()
+                run_crate_batch(c)
+                ran = len([v for v in BATCH_RESULTS[c].values() if v != "ignored"])
+                print(f"#   {c}: {counts[c]} steps -> 1 run, {ran} tests, "
+                      f"{time.monotonic() - t0:.1f}s")
+            print()
+
     report = []
     overall_pass = True
     for aid in ids:
-        a = rivet_get(aid)
+        a = arts[aid]
         ok, step_results = run_steps(a, args.dry_run)
         overall_pass = overall_pass and ok
         report.append({
