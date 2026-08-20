@@ -1,0 +1,74 @@
+artifacts:
+  - id: SWREQ-FALCON-OCI-P06
+    type: sw-req
+    title: "OCI-P06 — published components carry a TUNED shadow stack, not the 1 MB wasm-ld default"
+    status: implemented
+    release: falcon-v1.134.0
+    description: >
+      Every published cascade component shall reserve a shadow stack sized to
+      its measured need, so a fused image's stack region fits the target's RAM.
+
+      WHY IT EXISTS — the THIRD blocker in this chain, and again found only by
+      a consumer running the thing the previous fix enabled. `__stack_pointer`
+      init IS the stack size: the stack is [0, SP) growing down and static data
+      begins exactly at SP. All six published components carried
+      SP = 1 048 576 — the wasm-ld default, never set.
+
+      meld's `--share-stack` (v0.48.0) places ONE region sized max_i(stack_i)
+      across the fused set, so a single untuned participant sizes the region
+      for everyone (jess, meld#370):
+
+        1 MB  vs F100 8 KB SRAM        -> exceeds by 128x
+        1 MB  vs M7 DTCM 256 KB        -> exceeds by 4x
+
+      So the flag is sound and correct as designed and bought NOTHING for the
+      falcon set. Removing `memory.grow` (OCI-P02) and adding relocations
+      (OCI-P05) were both necessary and neither was sufficient. This is the
+      third.
+
+      PER-STAGE, not uniform. The two sizings differ by 8x where
+      `--share-stack` is NOT used (total = sum) and are a wash where it is —
+      and its precondition holds only for the five LEAVES, because the
+      `cascade` orchestrator's frame is live across all of them. Per-stage is
+      the only choice that is good in both worlds.
+
+        rate attitude position mixer   512 B    (scry bounds 16-112 B, 5-32x headroom)
+        iekf                         8 192 B    (scry bound 4 192 B, 2x)
+        ekf cascade                  8 192 B    (no bound published; conservative)
+        flight                      16 384 B    (measured floor 12 288 B)
+
+      EVIDENCE GRADES, stated because they differ. MEASURED HERE by build-and-
+      execute: `rate` passes its through-wasm closed-loop proof at 512 B with
+      convergence identical to the 1 MB build (0.193 s); `flight` traps at
+      10 240 and passes at 12 288 with output bit-identical to the 1 MB control.
+      TAKEN FROM jess (scry static bounds): the per-stage numbers for iekf,
+      position, attitude, mixer — NOT reproduced here, as those four have no
+      execution oracle in this repo.
+
+      The two grades corroborate rather than merely coexist: scry bounds
+      `flight` at 10 688, which sits INSIDE the independently measured bracket
+      (10 240 traps < 10 688 < 12 288 passes). That is evidence scry's
+      `stack_max_bytes` tracks what `-zstack-size` sets, which is the
+      assumption the borrowed numbers rest on.
+
+      `flight` is the standalone demo — every stage nested in ONE component
+      plus the harness — and is NOT in the fuse set. It must not be used to
+      size the leaves.
+    tags: [falcon, oci, wasm, meld, stack, embedded, lowering, v1.134]
+    fields:
+      req-type: interface
+      priority: shall
+      verification-criteria: >
+        (a) Every published component's `__stack_pointer` init equals its
+        assigned size, and none is the 1 MB default. (b) Each component still
+        passes its execution oracle where one exists, with output unchanged
+        from the untuned build. (c) KILL-CRITERION, owned by gale/meld and NOT
+        dischargeable here: the fused five-stage cascade's shared stack region
+        fits the target budget AND the image executes. A trap under load
+        means a stage is under-reserved and this requirement is not met —
+        note the four borrowed bounds are the likeliest place for that.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-OCI-P05

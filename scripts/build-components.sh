@@ -61,6 +61,44 @@ TOOLCHAIN_STR="rustc=$RUSTC_VER cargo-component=$CC_VER"
 # report is the priority order). A std component still needs wasip2.
 NOSTD_COMPONENTS=" flight iekf ekf attitude rate position falcon-mixer cascade "
 
+# STACK SIZE (v1.134, OCI-P06). Components shipped an UNTUNED 1 MB shadow stack
+# — the wasm-ld default, never set. `__stack_pointer` init IS the stack size:
+# the stack is [0, SP) growing down and static data begins exactly at SP, so an
+# untuned component reserves 1 MB before its first byte of data.
+#
+# That is fatal for the MCU lowering these components exist for. meld's
+# `--share-stack` (v0.48.0) places ONE region sized max_i(stack_i) across the
+# fused set, so a single untuned participant sizes the region for everyone:
+# 1 MB vs the F100's 8 KB SRAM, or 4x the M7's 256 KB DTCM (jess, meld#370).
+#
+# PER-STAGE rather than uniform, because the two sizings differ by 8x in the
+# world where --share-stack is NOT used (total = sum, not max) and are a wash
+# in the world where it is — and --share-stack's precondition holds only for
+# the five LEAVES (the `cascade` orchestrator's frame is live across all of
+# them, so fusing it in breaks the one-live-at-a-time envelope).
+#
+# Values: scry static bounds (jess) rounded generously — 5-32x headroom on the
+# small stages, 2x on iekf. The method was corroborated independently here:
+# scry bounds `flight` at 10688, and a build-and-execute bisection put the real
+# floor between 10240 (traps) and 12288 (passes, output bit-identical to the
+# 1 MB control). So the bound sits inside the measured bracket.
+#
+# MEASURED HERE, not inherited: rate passes its through-wasm closed-loop proof
+# at 512 B with convergence identical to the 1 MB build (0.193 s). flight needs
+# 12288 and gets 16384 — it is the standalone demo with every stage nested in
+# ONE component, is NOT in the fuse set, and must not be used to size the leaves.
+#
+# ekf and cascade have no published bound; both get 8192 (iekf's tier) as the
+# conservative choice. Tighten when they get an execution oracle.
+component_stack() {
+  case "$1" in
+    rate|attitude|position|falcon-mixer) echo 512   ;;
+    iekf|ekf|cascade)                    echo 8192  ;;
+    flight)                              echo 16384 ;;
+    *)                                   echo 16384 ;;
+  esac
+}
+
 component_target() {
   case "$NOSTD_COMPONENTS" in
     *" $1 "*) echo "wasm32-unknown-unknown" ;;
@@ -99,7 +137,7 @@ build_component() {
   # It must be on the FINAL link. `wasm-ld -r` (an unresolved relocatable
   # object) is NOT sufficient: its stored values are addends, not final
   # addresses, so a consumer cannot rebase from them.
-  if ! ( cd "$wasm_dir" && RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs" cargo component build --release --target "$target" --no-default-features 2>&1 ) \
+  if ! ( cd "$wasm_dir" && RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs -C link-arg=-zstack-size=$(component_stack "$dir")" cargo component build --release --target "$target" --no-default-features 2>&1 ) \
        | tee /tmp/falcon-build-$dir.log | grep -E "^error" | sed 's/^/    /' >&2; then
     : # grep found no "^error" lines — that is the success path
   fi
