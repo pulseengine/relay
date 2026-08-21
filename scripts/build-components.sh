@@ -137,7 +137,22 @@ build_component() {
   # It must be on the FINAL link. `wasm-ld -r` (an unresolved relocatable
   # object) is NOT sufficient: its stored values are addends, not final
   # addresses, so a consumer cannot rebase from them.
-  if ! ( cd "$wasm_dir" && RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs -C link-arg=-zstack-size=$(component_stack "$dir")" cargo component build --release --target "$target" --no-default-features 2>&1 ) \
+  #
+  # EXPORT THE EXTENT MARKERS EXPLICITLY (v1.134.1). meld reads `__heap_base`
+  # to learn a component's true static end — data AND .bss — so it can pack the
+  # shared region without under-reserving. Do NOT rely on the toolchain
+  # exporting it as a side effect of --emit-relocs.
+  #
+  # MEASURED, and it cost us a release: on rustc 1.96.1 the markers ARE exported
+  # with --emit-relocs alone, which is what I verified locally and then told meld
+  # (meld#370) made their second flag unnecessary. The release runner builds with
+  # rustc 1.98.0, where they are NOT — so falcon-v1.134.0 shipped with relocation
+  # metadata and NO `__heap_base`/`__data_end`, falsifying its own criterion (1).
+  # meld's original two-flag ask was right; my one-flag conclusion was an artifact
+  # of a local toolchain that happened to be two minors behind CI.
+  #
+  # Explicit is cheap and version-proof: redundant on 1.96, load-bearing on 1.98.
+  if ! ( cd "$wasm_dir" && RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs -C link-arg=-zstack-size=$(component_stack "$dir") -C link-arg=--export=__heap_base -C link-arg=--export=__data_end" cargo component build --release --target "$target" --no-default-features 2>&1 ) \
        | tee /tmp/falcon-build-$dir.log | grep -E "^error" | sed 's/^/    /' >&2; then
     : # grep found no "^error" lines — that is the success path
   fi
