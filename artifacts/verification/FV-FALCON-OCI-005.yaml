@@ -1,0 +1,72 @@
+artifacts:
+  - id: FV-FALCON-OCI-005
+    type: sw-verification
+    title: "OCI-P06 — per-stage tuned shadow stacks; rate at 512 B and flight at 16 KB measured by execution (v1.134)"
+    status: implemented
+    release: falcon-v1.134.0
+    description: >
+      Verification of SWREQ-FALCON-OCI-P06.
+
+      (a) CONFIGURATION (CI-runnable, below). scripts/build-components.sh
+      assigns a per-component `-zstack-size` and no component takes the 1 MB
+      default. The step asserts the flag is present AND that the literal
+      1048576 does not appear as an assigned size — the regression worth
+      catching, since an untuned component is invisible until a consumer fuses
+      it.
+
+      (b) EXECUTION, MEASURED HERE. Method: build at a candidate N, run the
+      component's real oracle, and require not merely "does not trap" but
+      output BIT-IDENTICAL to the untuned 1 MB control. Stack overflow in this
+      layout underflows past 0 and traps, so the oracle discriminates.
+
+        rate  (through-wasm closed-loop proof: plant -> gyro -> rate.tick
+               across the seam -> torque)
+          2048 / 1024 / 512  -> PASS, converged 0.193 s at every size,
+                                identical to the v1.133 recorded figure
+
+        flight (wasmtime: run-stabilization / run-position-hold)
+           8192 -> trap        10240 -> trap
+          12288 -> PASS        16384 -> PASS        65536 -> PASS
+          1048576 (control) -> PASS
+          every passing build: stab 0.023241377, pos 0.13178352 — identical
+
+        floor is between 10 240 and 12 288; ships 16 384.
+
+      A control was ESSENTIAL and nearly missed: the first sweep trapped at
+      every size INCLUDING 8192, which looked like the flag was broken.
+      Building `--emit-relocs` alone reproduced the published output exactly,
+      which is what established the traps as real signal rather than a broken
+      build.
+
+      (c) BORROWED, NOT REPRODUCED — stated as a different grade of evidence.
+      The per-stage numbers for iekf (4 192 B), position (112 B), attitude
+      (16 B) and mixer (16 B) are jess's scry static bounds. Those four have no
+      execution oracle in this repo, so they were not verified here.
+
+      The grades corroborate: scry bounds `flight` at 10 688, which sits INSIDE
+      the bracket measured independently above (10 240 traps < 10 688 < 12 288
+      passes). That is evidence scry's `stack_max_bytes` tracks what
+      `-zstack-size` sets — the assumption the borrowed numbers rest on — and
+      it is why 5-32x headroom was applied on top rather than shipping the
+      bounds directly.
+
+      SCOPE (honest): (a) and (b) show the stacks are tuned and that the two
+      components with oracles are unharmed. They do NOT show the fused image
+      executes. That is OCI-P06's kill-criterion, owned by gale/meld, and the
+      four borrowed bounds are the likeliest place for it to fail.
+    tags: [verification, falcon, oci, wasm, meld, stack, embedded, v1.134]
+    fields:
+      method: test
+      steps:
+        # (a) per-stage sizing is wired, and nothing takes the 1 MB default
+        # NB: no `$(` in these patterns — a step runs through a shell, so an
+        # unescaped command substitution in the grep pattern would EXECUTE.
+        # (Caught by running the step rather than reading it.)
+        - run: "grep -q 'component_stack()' scripts/build-components.sh"
+        - run: "grep -q 'zstack-size' scripts/build-components.sh"
+        - run: "test \"$(grep -c 'echo 1048576' scripts/build-components.sh)\" -eq 0"
+        # (b) execution evidence, bench-only (needs cargo-component + wasmtime)
+        - run: "wasmtime run --invoke 'run-stabilization()' falcon_flight_component.wasm  # bench-only: expect < 0.1 rad at 16384"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OCI-P06
