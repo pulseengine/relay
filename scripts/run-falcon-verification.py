@@ -492,7 +492,7 @@ def main() -> int:
         batch = sorted([c for c, n in counts.items() if n >= 5],
                        key=lambda c: -counts[c])
         if batch:
-            print(f"# batching {len(batch)} crate(s) invoked 2+ times "
+            print(f"# batching {len(batch)} crate(s) invoked 5+ times "
                   f"({sum(counts[c] for c in batch)} steps -> {len(batch)} cargo runs):")
             for c in batch:
                 t0 = time.monotonic()
