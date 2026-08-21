@@ -42,3 +42,7 @@ embedded/falcon-cortex-m/target/
 target/falcon-pipeline/
 /dist/
 crates/*/src/bindings.rs
+
+# Python bytecode from running scripts/ locally (recurring status noise).
+__pycache__/
+*.pyc
