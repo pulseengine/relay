@@ -98,7 +98,13 @@ BENCH_PATTERNS = [
     re.compile(r"\bcargo\s+component\b"),
     # v1.56 — the component-bundle build scripts wrap `cargo component` (absent
     # on the gate runner); same bench-tool rationale as the cargo-component line.
-    re.compile(r"\bbuild-(flight-)?components?\.sh\b"),
+    # ANCHORED to INVOCATION, not mention. The unanchored form matched any step
+    # that merely NAMED the script — so `grep -q 'zstack-size'
+    # scripts/build-components.sh`, a cheap config assertion, was classified
+    # bench-only and silently skipped. FV-FALCON-OCI-004 shipped with all three
+    # of its steps skipped and verified NOTHING in CI as a result. A verifier
+    # that cannot run is indistinguishable from one that passes.
+    re.compile(r"^\s*(?:bash\s+|sh\s+|\./)?(?:scripts/)?build-(?:flight-)?components?\.sh\b"),
     re.compile(r"\bwasm-tools\b"),                   # wasm-tools not on the gate runner
     re.compile(r"\bcargo\s+component\b"),             # cargo-component (wasm32-wasip2) not provisioned
     re.compile(r"\brate-loop-proof\b"),               # standalone crate; needs a pre-built .wasm argument
@@ -486,7 +492,7 @@ def main() -> int:
         batch = sorted([c for c, n in counts.items() if n >= 5],
                        key=lambda c: -counts[c])
         if batch:
-            print(f"# batching {len(batch)} crate(s) invoked 2+ times "
+            print(f"# batching {len(batch)} crate(s) invoked 5+ times "
                   f"({sum(counts[c] for c in batch)} steps -> {len(batch)} cargo runs):")
             for c in batch:
                 t0 = time.monotonic()
