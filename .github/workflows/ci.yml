@@ -101,7 +101,27 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run falcon-hello UDP-loopback demo
-        run: bash scripts/falcon-hello-demo.sh
+        # The demo binds a FIXED UDP port pair (default 14700/14701). Several of
+        # these jobs can land on the SAME self-hosted runner concurrently — which
+        # happens routinely whenever more than one PR is updated at once — and the
+        # second one dies with:
+        #
+        #   error: bind 127.0.0.1:14700: Address already in use (os error 98)
+        #
+        # Observed 2026-08-08 after four PRs were refreshed together. It presents
+        # as a red REQUIRED check on an unrelated PR (#342 changed only a workflow
+        # file), so it reads as a real regression and costs a diagnosis cycle —
+        # and worse, it trains people to re-run a red gate.
+        #
+        # The script already honours FALCON_HELLO_PORT_BASE; CI just never set it.
+        # Derive a per-run base so two concurrent jobs cannot contend. Stepping by
+        # 2 matters: the demo uses base AND base+1, so consecutive bases would
+        # still overlap. GITHUB_RUN_ID is injected by Actions as a plain env var,
+        # so nothing is interpolated into this run: block.
+        run: |
+          export FALCON_HELLO_PORT_BASE=$(( 20000 + (GITHUB_RUN_ID % 10000) * 2 ))
+          echo "using port pair ${FALCON_HELLO_PORT_BASE}/$((FALCON_HELLO_PORT_BASE + 1))"
+          bash scripts/falcon-hello-demo.sh
 
   # The closed-loop SAFETY suite as a first-class, named gate. These are the
   # top-of-the-V integration tests — the whole verified cascade actually

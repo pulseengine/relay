@@ -2,24 +2,45 @@ artifacts:
   - id: SWREQ-FALCON-MATHF32-P05
     type: sw-req
     title: "MATHF32-P05 — machine-checked reduced-range bound for the COSINE kernel (rounding + approximation)"
-    status: proposed
+    status: verified
     release: falcon-v1.129.0
     description: >
-      Extend the sine-kernel proof method (MATHF32-P03 rounding + MATHF32-P04
-      approximation, composed) to the f32 COSINE polynomial (cos_poly): a
-      Gappa rounding bound on the Horner evaluation plus a Coq-Interval bound
-      on |Q(r) - cos r|, composed to a kernel-checked reduced-range accuracy
-      bound for cosf. A small extension once the sine machinery exists — the
-      same two tools, the same composition, different coefficients and
-      reference function.
+      The cosine analogue of the sine-kernel proof pair, both halves now built:
+      (a) ROUNDING — a Gappa bound proving the f32 Horner evaluation of cos_poly
+      is within 2^-23 of the exact real value of the SAME polynomial over
+      r in [-0.8, 0.8] (proofs/gappa/cos_poly_rounding.gappa; the extra ulp vs
+      the sine's 2^-24 is the additional `1 - 0.5*z` subtraction); and
+      (b) APPROXIMATION — a Coq-Interval bound proving the exact polynomial is
+      within 1e-9 of true cosine over the same range
+      (proofs/rocq/cos_approx.v). Both are kernel-checked by coqc; neither
+      tool's own success is trusted (CC-002). The coefficients are byte-identical
+      between the two proofs (C1 = 0x1.55554a0p-5, C2 = -0x1.6c0c340p-10,
+      C3 = 0x1.99eb9c0p-16), so Ecos = Q as real functions and the two layers
+      compose by triangle inequality.
+
+      The cosine core is ~an order of magnitude more accurate than the sine core
+      (1e-9 vs 1e-8, MATHF32-P04) because cos_poly carries the exact leading
+      terms `1 - 0.5*z` and only fits the residual.
+
+      SCOPE (deliberately narrowed, mirroring P04): this delivers the two
+      INGREDIENTS. The reduced-range COMPOSITION — assembling them into one
+      coqc-checked |computed - cos r| <= 2^-23 + 1e-9 lemma — is deferred to the
+      P06 composition step, where the reduced-range pieces are combined with the
+      argument-reduction bound for FULL-range accuracy. This artifact does not
+      claim the composition is done.
     tags: [falcon, relay-math, f32, gappa, coq-interval, machine-checked, v1.129]
     fields:
       req-type: non-functional
       priority: should
       verification-criteria: >
-        Gappa rounding proof + Coq-Interval approximation proof for cos_poly,
-        both coqc-kernel-checked and teeth-tested, composed to a reduced-range
-        |computed - cos r| bound; enforced under the rocq.yml gate.
+        Two kernel-checked proofs under the required rocq.yml gate
+        (bazel test //proofs/rocq:all //proofs/gappa:all):
+        bazel test //proofs/gappa:cos_poly_rounding_test (rounding, <= 2^-23)
+        and bazel test //proofs/rocq:cos_approx_test (approximation, <= 1e-9).
+        Both NON-VACUOUS (teeth-tested): the rounding proof passes 1b-23 and
+        FAILS 1b-28; the approximation proof passes 1e-9 at i_degree 18 and
+        FAILS 1e-10 even at i_degree 20. The composed reduced-range lemma is
+        NOT part of this requirement's evidence (see scope note; tracked as P06).
     links:
       - type: derives-from
         target: SYSREQ-FALCON-002

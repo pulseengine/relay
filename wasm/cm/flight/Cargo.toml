@@ -1,20 +1,34 @@
 [package]
 name = "falcon-flight-component"
-description = "The verified falcon flight core (IEKF → geometric SE(3) → ADRC → mixer) as a WebAssembly Component Model component — the portable, wasmtime-runnable artifact the toolchain-to-hardware integration (meld → loom → synth → gale) consumes. (v1.26.0)"
+description = "Formally-verified drone flight core (invariant-EKF estimator → geometric SE(3) attitude control → ADRC → mixer) as a portable WebAssembly Component. Runs the same cascade that is Kani/Verus/Rocq/Lean-verified natively and bare-metal on Cortex-M."
 version = "0.1.0"
 edition = "2021"
 publish = false
+# Embedded component metadata — cargo-component bakes these into the wasm
+# `package-metadata` section, and wasm.directory renders them (description,
+# licenses, source) alongside the WIT. Standalone crate (own [workspace]),
+# so it can't inherit the repo root's fields — set them explicitly. This is
+# the metadata contract for EVERY published relay component (see
+# docs/OCI-DISTRIBUTION.md).
+license = "Apache-2.0"
+repository = "https://github.com/pulseengine/relay"
+homepage = "https://pulseengine.eu"
+documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
+authors = ["PulseEngine"]
+keywords = ["flight-control", "verified", "drone", "embedded", "wasm"]
+categories = ["aerospace", "science::robotics"]
 
 [dependencies]
 falcon-core = { path = "../../../crates/falcon-core" }
 relay-math = { path = "../../../crates/relay-math" }
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+falcon-cm-rt = { path = "../../../crates/falcon-cm-rt" }
 
 [lib]
 crate-type = ["cdylib"]
 
 [package.metadata.component]
-package = "falcon:flight"
+package = "pulseengine:falcon-flight"
 
 [package.metadata.component.target]
 path = "../../../wit/falcon-flight/flight.wit"
@@ -27,3 +41,8 @@ lto = true
 # standalone (not in the host cargo workspace) — built only by cargo-component
 # for wasm32-wasip2, like embedded/falcon-cortex-m.
 [workspace]
+
+[features]
+default = ["bazel-bindings", "std"]
+bazel-bindings = []
+std = []

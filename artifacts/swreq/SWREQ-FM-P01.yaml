@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "FM-P01: validate_path rejects empty paths"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       The validate_path function shall reject paths with length zero.
     tags: [file-manager, validation, safety, verus]

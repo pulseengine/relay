@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "PACE-P01 — gyro-synchronized loop scheduling: the control loop paces to the IMU stream, robust to sim/host slowdown"
     status: implemented
+    release: falcon-v0.34.0
     description: >
       The SITL control loop shall be scheduled off the IMU sample stream
       (the gyro data-ready model real flight controllers use), not a free-

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "AVOID-P01 — reactive keep-out (no-fly) zone avoidance"
     status: implemented
+    release: falcon-v1.31.0
     description: >
       The FlightSupervisor shall avoid circular keep-out (no-fly) zones: when a
       mission or return-to-launch path would pass through a zone, the horizontal

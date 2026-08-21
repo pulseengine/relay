@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SENSVOTE-P01: redundant-sensor median voting (a faulted sensor never propagates) + GPS-loss fallback"
     status: implemented
+    release: falcon-v1.54.0
     description: >
       Falcon shall vote redundant sensors and degrade gracefully on a fault
       (PX4 sensor redundancy). A triple-redundant median vote shall reject ONE

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "BATTERY-P01 — low-battery failsafe fires on a real draining pack"
     status: implemented
+    release: falcon-v1.21.0
     description: >
       The v1.8 low-battery failsafe shall be exercised against a realistic energy
       model rather than a set voltage: the battery charge shall drain with motor

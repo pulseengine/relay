@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "TRAJ-P01 — flat-space trajectory generation + differential-flatness feedforward"
     status: implemented
+    release: falcon-v0.34.0
     description: >
       The flight stack shall generate smooth, dynamically-feasible
       trajectories between waypoints and provide the geometric

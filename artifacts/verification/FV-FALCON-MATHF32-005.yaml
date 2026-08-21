@@ -1,0 +1,52 @@
+artifacts:
+  - id: FV-FALCON-MATHF32-005
+    type: sw-verification
+    title: "MATHF32-P05 — machine-checked rounding + approximation bounds for the f32 cosine kernel (v1.129)"
+    status: verified
+    release: falcon-v1.129.0
+    description: >
+      Verification of SWREQ-FALCON-MATHF32-P05, the cosine analogue of the sine
+      proof pair. Both halves are MACHINE-CHECKED and CI-enforced:
+
+      ROUNDING (Gappa -> Flocq/Rocq -> coqc): the f32 Horner evaluation of
+      cos_poly is within 2^-23 of the exact real value of the SAME polynomial
+      over r in [-0.8, 0.8]. proofs/gappa/cos_poly_rounding.gappa. The extra ulp
+      versus the sine's 2^-24 is the additional `1 - 0.5*z` subtraction.
+      Non-vacuous: coqc ACCEPTS 1b-23 and REJECTS 1b-28.
+
+      APPROXIMATION (Coq-Interval -> coqc): the exact polynomial is within 1e-9
+      of true cosine over the same range. proofs/rocq/cos_approx.v, via the
+      `interval` tactic (i_bisect, i_taylor, i_degree 18) kernel-checked by the
+      withPackages coqc (rules_rocq_rust#43). Non-vacuous: proves 1e-9, FAILS
+      1e-10 even at i_degree 20 (and 1e-11 at i_degree 22).
+
+      Neither tool's own success is trusted — the coqc kernel-check is the
+      evidence (rivet CC-002). Both proofs run under the required
+      .github/workflows/rocq.yml gate (bazel test //proofs/rocq:all
+      //proofs/gappa:all), which includes cos_approx_test and
+      cos_poly_rounding_test, so they cannot rot silently. The Rocq + Gappa
+      gate ran and PASSED on the merge of #320, confirming the kernel-check on
+      CI infrastructure, not only locally.
+
+      COMPOSABILITY: the coefficients are byte-identical between the two proofs
+      (C1 = 0x1.55554a0p-5, C2 = -0x1.6c0c340p-10, C3 = 0x1.99eb9c0p-16), so
+      Ecos = Q as real functions and the layers compose by triangle inequality.
+      Observation worth recording: the cosine core is ~an order of magnitude
+      more accurate than the sine core (1e-9 vs 1e-8, MATHF32-P04) because
+      cos_poly carries the exact leading terms `1 - 0.5*z` and only fits the
+      residual.
+
+      SCOPE (honest): this verifies the two INGREDIENTS. The reduced-range
+      COMPOSITION (one kernel-checked |computed - cos r| <= 2^-23 + 1e-9 lemma)
+      and the Cody-Waite argument-reduction cancellation are scoped follow-ons
+      (P06), NOT verified here.
+    tags: [verification, falcon, relay-math, gappa, coq-interval, machine-checked, v1.129]
+    fields:
+      method: formal-verification
+      steps:
+        - run: bazel test //proofs/gappa:cos_poly_rounding_test
+        - run: bazel test //proofs/rocq:cos_approx_test
+        - run: bazel test //proofs/rocq:all //proofs/gappa:all
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MATHF32-P05

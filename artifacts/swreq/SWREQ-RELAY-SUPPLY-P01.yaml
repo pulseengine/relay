@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SUPPLY-P01 — third-party GitHub Actions on mutable branch refs SHA-pinned + dependabot-tracked"
     status: implemented
+    release: falcon-v1.78.0
     description: >
       Supply-chain hardening (from two release-pipeline security reviews):
       third-party GitHub Actions referenced by a MUTABLE branch ref (e.g. @main)

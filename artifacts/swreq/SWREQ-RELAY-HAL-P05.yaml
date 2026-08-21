@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "HAL-P05 — battery monitor anchors on relay-hal AdcIn (completes the ADC transport shape); BatteryState rides the carrier"
     status: implemented
+    release: falcon-v1.85.0
     description: >
       Completes the driver-retarget arc (relay#214 / jess#62): the battery
       monitor is the last driver, and AdcIn the last relay-hal custom trait, not

@@ -1,0 +1,53 @@
+artifacts:
+  - id: SWREQ-FALCON-OCI-P01
+    type: sw-req
+    title: "OCI-P01 — publish each verified cascade stage as a signed, lowerable OCI component"
+    status: verified
+    release: falcon-v1.129.0
+    description: >
+      The verified flight components shall be consumable by the system
+      integrator (jess) as individually addressable, signed artifacts — the
+      Level-1 fine-grained components of the consumption contract agreed in
+      pulseengine/jess#167 (jess DD-026): relay ships portable, minimal,
+      loop-complete components; jess owns the cross-core seam, fuses per core
+      (meld), lowers per ISA (loom -> synth -> gale-link) and signs the
+      flashable set.
+
+      Three properties are required of a published component:
+
+      (a) DISTRIBUTION — each cascade stage (flight, iekf, position, attitude,
+      rate, mixer) is pushed on every tagged release to
+      ghcr.io/<owner>/falcon-<stage> with the Component-Model OCI media type
+      (via wkg, not a generic blob), cosign-signed by IMMUTABLE DIGEST (never a
+      mutable tag), and carries the embedded package metadata
+      (description/license/source/keywords) that makes its wasm.directory
+      listing meaningful. The push is non-blocking: a registry fault must never
+      fail the primary signed GitHub Release.
+
+      (b) LOWERABLE — a published component should import NO WASI, so it can be
+      lowered to bare metal (synth -> gale) for the M4/M7/F100 partitions. The
+      cargo-component build links `std` by default (via thread_local!), which
+      drags in ~10 WASI imports; components are therefore built `no_std` on the
+      cargo-component path.
+
+      (c) LOOP-COMPLETE EVIDENCE — a published component ships with a proof that
+      the control loop CLOSES THROUGH the component's own WIT seam (host drives
+      the real exported function, plant feeds back), not an open-loop smoke
+      test. This is the relay half of the agreed proof split: relay proves the
+      loop closes in source (SIL); jess proves it still closes after the
+      wasm->ARM lowering (Renode, on-target differential).
+    tags: [falcon, oci, wasm, component-model, distribution, jess-contract, v1.129]
+    fields:
+      req-type: interface
+      priority: should
+      verification-criteria: >
+        (a) release.yml publishes the six falcon-<stage> OCI refs, cosign-signed
+        by digest, each anonymously pullable with config media type
+        application/vnd.wasm.config.v0+json; (b) the rate component's built wasm
+        imports only falcon:cascade/types (zero wasi:* imports), checked with
+        wasm-tools; (c) tests/rate-loop-proof drives rate.tick across the wasm
+        boundary in a WASI-less wasmtime host and the body rate converges to a
+        1 rad/s step within the documented budget.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "WCET-P01 — compositional WCET + schedulability for the flight cascade"
     status: implemented
+    release: falcon-v1.10.0
     description: >
       The worst-case execution time of the Falcon flight cascade
       (FlightCore::step: IEKF propagate + measurement updates → geometric

@@ -1,4 +1,4 @@
-package falcon:flight@1.26.0;
+package pulseengine:falcon-flight@1.26.0;
 
 /// The verified flight core (falcon-core) as a Component-Model component — the
 /// keystone of the toolchain-to-hardware pipeline (meld → loom → synth → gale).

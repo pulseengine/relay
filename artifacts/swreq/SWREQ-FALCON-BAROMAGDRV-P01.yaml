@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "BAROMAGDRV-P01: magnetometer (IST8310) + barometer (BMP388) driver bodies decode their register protocol, total on any contents"
     status: implemented
+    release: falcon-v1.45.0
     description: >
       Falcon shall provide real magnetometer and barometer driver bodies over a
       register bus, completing the F6 sensor-input trio (GNSS landed v1.42). The

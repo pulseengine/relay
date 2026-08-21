@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "TRANSPORT-P01 — shared CCSDS-over-relay-sec secure channel AADL model + generated transport WIT"
     status: implemented
+    release: falcon-v1.61.0
     description: >
       The CCSDS-over-relay-sec secure channel — the safety-protected transport
       shared by falcon (drone C2 link) and wohl (home-automation command/sensor

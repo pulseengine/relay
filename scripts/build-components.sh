@@ -2,14 +2,14 @@
 # Build ALL falcon Component-Model components and emit a versioned bundle into
 # dist/falcon-components-vMM/:
 #
-#   falcon-flight-vMM.wasm        — falcon:flight (standalone, wasmtime-runnable)
-#   falcon-iekf-vMM.wasm          — falcon:cascade ekf-component (IEKF SE₂(3))
-#   falcon-ekf-vMM.wasm           — falcon:cascade ekf-component (Mahony legacy)
-#   falcon-attitude-vMM.wasm      — falcon:cascade attitude-component
-#   falcon-rate-vMM.wasm          — falcon:cascade rate-component
-#   falcon-position-vMM.wasm      — falcon:cascade position-component
-#   falcon-mixer-vMM.wasm         — falcon:cascade mixer-component
-#   falcon-cascade-vMM.wasm       — falcon:cascade orchestrator
+#   falcon-flight-vMM.wasm        — pulseengine:falcon-flight (standalone, wasmtime-runnable)
+#   falcon-iekf-vMM.wasm          — pulseengine:falcon-cascade ekf-component (IEKF SE₂(3))
+#   falcon-ekf-vMM.wasm           — pulseengine:falcon-cascade ekf-component (Mahony legacy)
+#   falcon-attitude-vMM.wasm      — pulseengine:falcon-cascade attitude-component
+#   falcon-rate-vMM.wasm          — pulseengine:falcon-cascade rate-component
+#   falcon-position-vMM.wasm      — pulseengine:falcon-cascade position-component
+#   falcon-mixer-vMM.wasm         — pulseengine:falcon-cascade mixer-component
+#   falcon-cascade-vMM.wasm       — pulseengine:falcon-cascade orchestrator
 #   manifest.json                 — name + file + sha256 + bytes + toolchain
 #   SHA256SUMS                    — canonical checksums for all .wasm artifacts
 #
@@ -45,18 +45,126 @@ TOOLCHAIN_STR="rustc=$RUSTC_VER cargo-component=$CC_VER"
 # Builds the component in wasm/cm/<dir>, finds the output .wasm, copies it
 # to the bundle dir as falcon-<dir>-vMM.wasm, and prints the destination path.
 # ---------------------------------------------------------------------------
+# Components that are `no_std` build for wasm32-unknown-unknown, NOT
+# wasm32-wasip2 (v1.131). `target_env = "p2"` is the wasip2 RUST TARGET, which
+# links wasi-libc — and wasi-libc's cabi_realloc goes through malloc, which
+# emits `memory.grow`. `memory.grow` is what makes
+# `meld fuse --memory shared --address-rebase` reject a component (gale#89,
+# meld#299), so it blocks the single-address-space MCU lowering these
+# components exist for. A component does NOT need the wasip2 target to be a
+# valid Component-Model P2 component: falcon-rate built for
+# wasm32-unknown-unknown is a component (0061736d0d000100) with ZERO wasi
+# imports. gale provides gust:os/gust:hal, not WASI, so nothing on this path
+# should be linking wasi-libc at all.
+#
+# Add a component here as it is converted to no_std (jess's per-stage lowering
+# report is the priority order). A std component still needs wasip2.
+NOSTD_COMPONENTS=" flight iekf ekf attitude rate position falcon-mixer cascade "
+
+# STACK SIZE (v1.134, OCI-P06). Components shipped an UNTUNED 1 MB shadow stack
+# — the wasm-ld default, never set. `__stack_pointer` init IS the stack size:
+# the stack is [0, SP) growing down and static data begins exactly at SP, so an
+# untuned component reserves 1 MB before its first byte of data.
+#
+# That is fatal for the MCU lowering these components exist for. meld's
+# `--share-stack` (v0.48.0) places ONE region sized max_i(stack_i) across the
+# fused set, so a single untuned participant sizes the region for everyone:
+# 1 MB vs the F100's 8 KB SRAM, or 4x the M7's 256 KB DTCM (jess, meld#370).
+#
+# PER-STAGE rather than uniform, because the two sizings differ by 8x in the
+# world where --share-stack is NOT used (total = sum, not max) and are a wash
+# in the world where it is — and --share-stack's precondition holds only for
+# the five LEAVES (the `cascade` orchestrator's frame is live across all of
+# them, so fusing it in breaks the one-live-at-a-time envelope).
+#
+# Values: scry static bounds (jess) rounded generously — 5-32x headroom on the
+# small stages, 2x on iekf. The method was corroborated independently here:
+# scry bounds `flight` at 10688, and a build-and-execute bisection put the real
+# floor between 10240 (traps) and 12288 (passes, output bit-identical to the
+# 1 MB control). So the bound sits inside the measured bracket.
+#
+# MEASURED HERE, not inherited: rate passes its through-wasm closed-loop proof
+# at 512 B with convergence identical to the 1 MB build (0.193 s). flight needs
+# 12288 and gets 16384 — it is the standalone demo with every stage nested in
+# ONE component, is NOT in the fuse set, and must not be used to size the leaves.
+#
+# ekf and cascade have no published bound; both get 8192 (iekf's tier) as the
+# conservative choice. Tighten when they get an execution oracle.
+component_stack() {
+  case "$1" in
+    rate|attitude|position|falcon-mixer) echo 512   ;;
+    iekf|ekf|cascade)                    echo 8192  ;;
+    flight)                              echo 16384 ;;
+    *)                                   echo 16384 ;;
+  esac
+}
+
+component_target() {
+  case "$NOSTD_COMPONENTS" in
+    *" $1 "*) echo "wasm32-unknown-unknown" ;;
+    *)        echo "wasm32-wasip2" ;;
+  esac
+}
+
 build_component() {
   local dir="$1"
   local wasm_dir="$HERE/wasm/cm/$dir"
-  printf "  building %-16s..." "$dir" >&2
-  ( cd "$wasm_dir" && cargo component build --release --target wasm32-wasip2 --no-default-features 2>&1 ) \
-    | grep -E "^error" | sed 's/^/    /' >&2 || true
-  # Prefer the wasip2 path; cargo-component <0.20 emits wasip1.
-  local src
-  src=$(ls "$wasm_dir"/target/wasm32-wasip2/release/*.wasm 2>/dev/null | head -1 || true)
-  if [ -z "$src" ]; then
-    src=$(ls "$wasm_dir"/target/wasm32-wasip1/release/*.wasm 2>/dev/null | head -1 || true)
+  local target
+  target=$(component_target "$dir")
+  printf "  building %-16s (%s)..." "$dir" "$target" >&2
+  # FAIL LOUD (v1.130): this used to end in `|| true`, so a build error was
+  # printed and then IGNORED — the script fell through to a stale artifact from
+  # a previous build and shipped it. That is exactly how falcon-rate:1.129.0 was
+  # published as a raw CORE MODULE: the no_std wasip2 build failed
+  # ("module does not export a function named `cabi_realloc`"), the failure was
+  # swallowed, and the fallback picked up a pre-componentization module.
+  # A build failure must stop the bundle, not degrade it silently.
+  # RELOCATION METADATA (v1.134, OCI-P05). meld's shared-memory fusion places
+  # each module at a non-zero base and REBASES its absolute addresses. It can
+  # only do that if the module carries `linking` / `reloc.*` sections. Without
+  # them it refuses — correctly, since silently mis-rebasing would produce a
+  # component that links and then misbehaves at runtime:
+  #
+  #   component 'mixer.wasm' module 0 is placed at a non-zero shared-memory base
+  #   but carries no relocation metadata (linking/reloc.*); its absolute
+  #   addresses cannot be rebased safely.
+  #
+  # Measured by jess on the v1.133 components (jess#167): ALL SIX had
+  # reloc-sections=0, so `meld fuse --memory shared --address-rebase` rejected
+  # the cascade. Zero `memory.grow` (OCI-P02) was NECESSARY but NOT SUFFICIENT;
+  # this is the second, independent blocker.
+  #
+  # It must be on the FINAL link. `wasm-ld -r` (an unresolved relocatable
+  # object) is NOT sufficient: its stored values are addends, not final
+  # addresses, so a consumer cannot rebase from them.
+  if ! ( cd "$wasm_dir" && RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs -C link-arg=-zstack-size=$(component_stack "$dir")" cargo component build --release --target "$target" --no-default-features 2>&1 ) \
+       | tee /tmp/falcon-build-$dir.log | grep -E "^error" | sed 's/^/    /' >&2; then
+    : # grep found no "^error" lines — that is the success path
   fi
+  if grep -qE "^error" /tmp/falcon-build-$dir.log 2>/dev/null; then
+    echo " ERROR: cargo component build failed for $dir (see above)" >&2
+    exit 1
+  fi
+  # Prefer the wasip2 path; cargo-component <0.20 emits wasip1.
+  # Select the artifact BY NAME, never `ls *.wasm | head -1` (v1.130). The old
+  # glob picked whatever sorted first in the target dir — with a shared
+  # CARGO_TARGET_DIR (a common CI disk-saving setting) that is a DIFFERENT
+  # crate's component: building `rate` picked up falcon_flight_component.wasm
+  # because "flight" < "rate". It would then be published under the wrong name.
+  # cargo turns - into _ for the artifact filename.
+  local crate_name artifact src
+  crate_name=$(grep -m1 '^name *= *"' "$wasm_dir/Cargo.toml" | sed -E 's/.*"(.*)".*/\1/')
+  artifact="${crate_name//-/_}.wasm"
+  src=""
+  for tgt in "$target" wasm32-wasip2 wasm32-wasip1; do
+    if [ -f "$wasm_dir/target/$tgt/release/$artifact" ]; then
+      src="$wasm_dir/target/$tgt/release/$artifact"; break
+    fi
+    # honour a shared CARGO_TARGET_DIR if one is set
+    if [ -n "${CARGO_TARGET_DIR:-}" ] && [ -f "$CARGO_TARGET_DIR/$tgt/release/$artifact" ]; then
+      src="$CARGO_TARGET_DIR/$tgt/release/$artifact"; break
+    fi
+  done
   if [ -z "$src" ]; then
     echo " ERROR: no .wasm found" >&2
     exit 1
@@ -66,6 +174,18 @@ build_component() {
   local slug="${dir#falcon-}"
   local dest="$BUNDLE_DIR/falcon-$slug-v$MM.wasm"
   cp "$src" "$dest"
+  # ASSERT the payload really is a Component, not a core module (v1.130).
+  # jess found falcon-rate:1.129.0 shipped as a core module — `meld fuse`
+  # rejected it outright. The OCI config mediaType says "component" regardless
+  # of the bytes, so metadata cannot catch this; check the 8-byte header.
+  #   core module : 00 61 73 6d 01 00 00 00
+  #   component   : 00 61 73 6d 0d 00 01 00
+  magic=$(od -An -tx1 -N8 "$dest" | tr -d ' \n')
+  if [ "$magic" != "0061736d0d000100" ]; then
+    echo " ERROR: $dest is NOT a wasm component (header $magic)" >&2
+    echo "        expected 0061736d0d000100; a core module is 0061736d01000000" >&2
+    exit 1
+  fi
   local bytes
   bytes=$(wc -c < "$dest" | tr -d ' ')
   printf " %s bytes\n" "$bytes" >&2

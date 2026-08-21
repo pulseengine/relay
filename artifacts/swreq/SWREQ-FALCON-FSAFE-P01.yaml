@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "FSAFE-P01: unified failsafe arbiter resolves all triggers to a prioritized, latched action"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       Falcon shall provide a single failsafe arbiter that takes every failsafe
       trigger (RC loss, datalink loss, geofence breach, position loss, low /

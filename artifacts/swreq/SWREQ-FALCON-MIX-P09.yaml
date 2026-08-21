@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "MIX-P09 — airframe-agnostic control allocation: the same stack flies any rotor geometry, with bounded commands"
     status: implemented
+    release: falcon-v0.34.0
     description: >
       Control allocation shall not be hardwired to one airframe. A generic
       allocator (MixerN) shall hold an N×4 effectiveness matrix — per rotor,

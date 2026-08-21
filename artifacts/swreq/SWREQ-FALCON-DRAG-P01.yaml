@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "DRAG-P01 — track setpoints through quadratic aerodynamic drag"
     status: implemented
+    release: falcon-v1.17.0
     description: >
       The flight stack shall remain accurate and stable under realistic
       quadratic aerodynamic drag — a force F = -Cd·|v_air|·v_air on the

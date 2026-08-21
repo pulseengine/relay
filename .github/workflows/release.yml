@@ -367,15 +367,26 @@ jobs:
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "::notice::Release $VERSION exists; uploading assets"
             gh release upload "$VERSION" --clobber release-assets/*
+          # CREATED AS A DRAFT (v1.133, REL-P01). The flight-component job runs
+          # AFTER this one; when it failed on falcon-v1.131.0 the release was
+          # already public with binaries and permanently no wasm components —
+          # incomplete, and unrepairable without moving a tag or cutting a new
+          # version. The #140 guard could not help: it lives inside that later
+          # job, i.e. downstream of the publish. A draft is invisible to
+          # consumers, so the failure mode becomes "no release" instead of
+          # "half a release". flight-component publishes it as its final step,
+          # only after the guard passes.
           elif [ -n "${NOTES_PATH}" ]; then
-            echo "::notice::Creating Release $VERSION with notes from ${NOTES_PATH}"
+            echo "::notice::Creating DRAFT Release $VERSION with notes from ${NOTES_PATH}"
             gh release create "$VERSION" \
+              --draft \
               --title "$VERSION" \
               --notes-file "${NOTES_PATH}" \
               release-assets/*
           else
-            echo "::notice::Creating Release $VERSION with autogen notes"
+            echo "::notice::Creating DRAFT Release $VERSION with autogen notes"
             gh release create "$VERSION" \
+              --draft \
               --title "$VERSION" \
               --generate-notes \
               release-assets/*
@@ -441,13 +452,19 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip2
+          # BOTH targets (v1.131): std components build wasm32-wasip2; no_std
+          # components build wasm32-unknown-unknown (see NOSTD_COMPONENTS in
+          # scripts/build-components.sh — the wasip2 target links wasi-libc,
+          # whose cabi_realloc pulls in memory.grow, which blocks the MCU
+          # lowering). Omitting the second target fails the release at
+          # "building rate (wasm32-unknown-unknown)... ERROR: no .wasm found".
+          targets: wasm32-wasip2, wasm32-unknown-unknown
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
       - name: Install cargo-component
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.86.1
         with:
           tool: cargo-component
 
@@ -456,7 +473,7 @@ jobs:
       # run-position-hold < 0.6) before it ships, not just built. (Per review:
       # install, don't skip — the skip in build-components.sh is only a fallback.)
       - name: Install wasmtime
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.86.1
         with:
           tool: wasmtime
 
@@ -527,7 +544,7 @@ jobs:
       # (continue-on-error): the primary artifact is the cosign-signed GitHub
       # Release above; a registry hiccup must never fail a release. Tighten to
       # hard-fail once proven over a few tags. Ref: ghcr.io/<owner>/falcon-flight.
-      - name: Publish flight component to ghcr.io (OCI, cosign-signed)
+      - name: Publish cascade components to ghcr.io (OCI, cosign-signed)
         continue-on-error: true
         working-directory: relay
         env:
@@ -546,28 +563,107 @@ jobs:
           fi
           MM=$(printf '%s' "$TAG" | sed -E 's/^falcon-v([0-9]+\.[0-9]+).*/\1/')
           FULL=$(printf '%s' "$TAG" | sed -E 's/^falcon-v//')
-          WASM="falcon-flight-v${MM}.wasm"
-          REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon-flight"
 
-          # Pull the exact wasm the release just attached (single source of truth).
-          gh release download "$TAG" -p "$WASM" --clobber
+          # Per-component OCI publish (jess#167 decision 5): each fine-grained
+          # verified cascade stage is its own cosign-signed OCI entity, so jess
+          # can `wkg oci pull` and fuse/lower/place per core. The bundle dir was
+          # produced WASI-free (--no-default-features) by the build step above;
+          # push straight from it (no re-download). `flight` is the runnable
+          # demo; the rest are the composable stages.
+          SLUGS="flight iekf position attitude rate mixer"
+          BUNDLE="dist/falcon-components-v${MM}"
 
           # wkg = the wasm-pkg-tools CLI. PINNED (supply-chain), bumped in
           # lockstep. Pushes the wasm-component OCI media type wasm.directory
           # expects — a plain `oras push` would tag it as a generic blob.
           cargo install wkg --locked --version 0.15.1
-
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          wkg oci push "${REPO}:${FULL}" "$WASM" | tee push.log
-          # :latest is a moving convenience pointer — pushed for discovery,
-          # but NEVER signed (only immutable refs get a signature).
-          wkg oci push "${REPO}:latest" "$WASM"
 
-          # Sign the IMMUTABLE digest, not a mutable tag. Only if we resolved one.
-          DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' push.log | head -1 || true)
-          if [ -n "$DIGEST" ]; then
-            cosign sign --yes "${REPO}@${DIGEST}"
-            echo "::notice::Published + signed ${REPO}@${DIGEST} (tags ${FULL}, latest). Pull: wkg oci pull ${REPO}:${FULL}"
-          else
-            echo "::warning::pushed ${REPO}:${FULL} but could not resolve a digest to sign — left unsigned this run"
+          # RFC-3339 build timestamp for org.opencontainers.image.created.
+          CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          published=0
+          for slug in $SLUGS; do
+            WASM="${BUNDLE}/falcon-${slug}-v${MM}.wasm"
+            # NESTED PATH (v1.133): ghcr.io/<owner>/falcon/<stage>, not
+            # ghcr.io/<owner>/falcon-<stage>. Mirrors how wasi publishes
+            # (ghcr.io/webassembly/wasi/io under namespace `wasi`), and groups
+            # everything falcon under one path instead of a flat hyphenated
+            # list. The wasm.directory entry keeps the display name
+            # `falcon-<stage>` and points `repository` at the nested path —
+            # exactly wasi's shape (`name = "io"`, `repository = "wasi/io"`).
+            # Bundled with the falcon:* -> pulseengine:falcon-* WIT rename so
+            # consumers absorb ONE break, not two. Paths published up to
+            # falcon-v1.131.1 keep serving their old versions.
+            REPO="ghcr.io/${GITHUB_REPOSITORY_OWNER}/falcon/${slug}"
+            if [ ! -f "$WASM" ]; then
+              echo "::warning::missing ${WASM} — skipping falcon-${slug}"; continue
+            fi
+            # STANDARD OCI ANNOTATIONS — this is what wasm.directory renders.
+            # Without them the listing reads "No description available" with no
+            # license or source link, however complete the crate metadata is:
+            # the web listing reads the MANIFEST ANNOTATIONS, not the wasm's
+            # embedded package-metadata section. Descriptions are sourced from
+            # each component crate's Cargo.toml so there is one source of truth.
+            CRATE_DIR="wasm/cm/${slug}"
+            [ -d "$CRATE_DIR" ] || CRATE_DIR="wasm/cm/falcon-${slug}"
+            DESC=$(sed -n 's/^description *= *"\(.*\)"$/\1/p' "${CRATE_DIR}/Cargo.toml" 2>/dev/null | head -1)
+            [ -n "$DESC" ] || DESC="Formally-verified falcon flight-control component (${slug})."
+            ANN=(
+              --annotation "org.opencontainers.image.title=pulseengine:falcon-${slug}"
+              --annotation "org.opencontainers.image.description=${DESC}"
+              --annotation "org.opencontainers.image.version=${FULL}"
+              --annotation "org.opencontainers.image.licenses=Apache-2.0"
+              --annotation "org.opencontainers.image.source=https://github.com/pulseengine/relay"
+              --annotation "org.opencontainers.image.documentation=https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
+              --annotation "org.opencontainers.image.vendor=PulseEngine"
+              --annotation "org.opencontainers.image.revision=${GITHUB_SHA}"
+              --annotation "org.opencontainers.image.created=${CREATED}"
+            )
+            wkg oci push "${ANN[@]}" "${REPO}:${FULL}" "$WASM" | tee "push-${slug}.log"
+            # :latest is a moving convenience pointer — pushed for discovery,
+            # but NEVER signed (only immutable refs get a signature).
+            wkg oci push "${ANN[@]}" "${REPO}:latest" "$WASM"
+            # Sign the IMMUTABLE digest, not a mutable tag. Only if we resolved one.
+            DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' "push-${slug}.log" | head -1 || true)
+            if [ -n "$DIGEST" ]; then
+              cosign sign --yes "${REPO}@${DIGEST}"
+              echo "::notice::Published + signed ${REPO}@${DIGEST} (tags ${FULL}, latest). Pull: wkg oci pull ${REPO}:${FULL}"
+              published=$((published + 1))
+            else
+              echo "::warning::pushed ${REPO}:${FULL} but could not resolve a digest to sign — left unsigned this run"
+            fi
+          done
+          echo "::notice::per-component OCI publish: ${published} components signed + pushed"
+
+      # ── PUBLISH the draft — the last thing the release does (REL-P01) ─────
+      # The release has been a DRAFT until now (see create-release). Everything
+      # that can fail has already run: the component bundle built, was signed
+      # and attached, the #140 wasm-asset guard passed, and the OCI push ran.
+      # Only now does it become visible.
+      #
+      # NOT `if: always()` and NOT continue-on-error: if any earlier step in
+      # this job failed, the job stops before here and the release stays a
+      # draft — which is the entire point. The OCI push above IS
+      # continue-on-error (a registry hiccup must not fail a release), so a
+      # registry outage still publishes; a missing component does not.
+      - name: Publish the release (flip the draft)
+        working-directory: relay
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          if ! printf '%s' "$TAG" | grep -qE '^falcon-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$'; then
+            echo "::error::refusing to publish a malformed tag: $TAG"; exit 1
           fi
+          # Re-assert the guard's property against the LIVE release rather than
+          # trusting that an earlier step in this job checked it.
+          if ! gh release view "$TAG" --json assets -q '.assets[].name' \
+               | grep -qE 'falcon-flight-v[0-9.]+\.wasm$'; then
+            echo "::error::refusing to publish $TAG — no falcon-flight-*.wasm asset"; exit 1
+          fi
+          gh release edit "$TAG" --draft=false --latest
+          echo "::notice::Published $TAG (was a draft until every component was attached and guarded)"

@@ -1,0 +1,114 @@
+artifacts:
+  - id: FV-FALCON-OCI-001
+    type: sw-verification
+    title: "OCI-P01 — signed per-component publish, WASI-free build, and through-wasm closed-loop proof (v1.129)"
+    status: verified
+    release: falcon-v1.129.0
+    description: >
+      Verification of SWREQ-FALCON-OCI-P01, the jess consumption contract
+      (jess#167 / DD-026). All three required properties are evidenced:
+
+      (a) DISTRIBUTION — .github/workflows/release.yml publishes each cascade
+      stage (flight, iekf, position, attitude, rate, mixer) to
+      ghcr.io/<owner>/falcon-<stage> on every tagged release via `wkg oci push`
+      (Component-Model OCI media type, not a generic blob), cosign-signed by
+      IMMUTABLE DIGEST, plus a :latest discovery tag that is deliberately left
+      unsigned. VALIDATED END-TO-END on the falcon-v1.127.0 and falcon-v1.128.0
+      releases: the push step's real conclusion was `success` (it is
+      continue-on-error, so the step conclusion — not the run conclusion — is
+      the evidence), and the published package was confirmed ANONYMOUSLY
+      pullable with config media type application/vnd.wasm.config.v0+json and a
+      cosign .sig tag present. Each component carries the embedded metadata
+      contract (description/license/source/keywords) that wasm.directory renders;
+      the `pulseengine` namespace is live and indexed.
+
+      EVIDENCE GAP FOUND IN THE FIELD (v1.130) — the check above was NOT
+      sufficient. jess pulled falcon-rate:1.129.0 and found a raw CORE MODULE
+      (header 0061736d01000000), not a component (0061736d0d000100); `meld fuse`
+      rejects it, so the consumption path stopped at step one. The OCI config
+      mediaType reads "component" regardless of the payload, so metadata can
+      never catch this — the original evidence checked the WRAPPER, not the BYTES.
+      Root cause: the no_std conversion dropped the `cabi_realloc` export that
+      wit-bindgen-rt supplies only when std is linked
+      (#[cfg(not(target_env = "p2"))]), so wasm-component-ld could not encode a
+      component; build-components.sh then SWALLOWED that failure (`|| true`) and
+      fell back to a pre-componentization artifact.
+
+      STRENGTHENED EVIDENCE (#323, #324): (i) `cabi_realloc` is exported from the
+      no_std path; (ii) a build failure now aborts the bundle instead of silently
+      degrading it; (iii) every component's 8-byte HEADER is asserted before it
+      enters the bundle — verified that the assert REJECTS the published 1.129.0
+      artifact and ACCEPTS known-good components; (iv) artifacts are selected by
+      derived crate name, not `ls *.wasm | head -1`, which could otherwise
+      publish a different crate's component under the wrong name when
+      CARGO_TARGET_DIR is shared. Republished correctly in v1.130.
+
+      FURTHER STRENGTHENING (v1.131) — three follow-on defects, each measured on
+      the artifact rather than argued:
+      (v) NO-GROW. The v1.130 cabi_realloc fix satisfied the ABI with a GROWING
+      allocator (lol_alloc), so the shipped component carried `memory.grow` —
+      which is exactly what makes `meld fuse --memory shared --address-rebase`
+      reject a component (gale#89, meld#299), i.e. the fix partly re-blocked the
+      MCU lowering it exists to serve. Replaced with a bounded static
+      work-memory arena (fixed size, traps on exhaustion, never grows):
+      memory.grow 1 -> 0 (#327).
+      (vi) ROOT CAUSE — TARGET. `target_env = "p2"` is the wasip2 RUST TARGET,
+      which links wasi-libc, whose cabi_realloc goes through malloc. A component
+      does NOT need that target to be a valid P2 component. no_std components
+      now build wasm32-unknown-unknown (#329). Measured on falcon-rate, same
+      source, only the target differing: wasip2 -> component, 0 wasi, grow=1,
+      4674 B; unknown-unknown -> component, 0 wasi, grow=0, 3953 B; the
+      through-wasm closed-loop proof identical on both (0.193 s, |err| 0.0059).
+      (vii) LISTING METADATA. wasm.directory renders STANDARD OCI MANIFEST
+      ANNOTATIONS, not the wasm's embedded package-metadata — our manifests
+      carried none, so `falcon-mixer:1.130.0` listed as "No description
+      available" with no license or source despite complete crate metadata.
+      The release now sets org.opencontainers.image.* on both refs, sourcing
+      each description from its crate Cargo.toml (#328). This corrected an
+      explicit claim in docs/OCI-DISTRIBUTION.md, which had asserted the
+      embedded metadata drove the listing.
+
+      (b) LOWERABLE (no WASI) — the rate component is built `no_std` on the
+      cargo-component path (single-threaded statics replacing thread_local!,
+      lol_alloc global allocator, panic handler), all gated to
+      not(feature = "bazel-bindings"). VERIFIED by disassembly: imports dropped
+      from 10 (incl. every wasi:* interface) to exactly ONE —
+      `import falcon:cascade/types@0.7.0` — with `export falcon:cascade/rate`.
+      Independently corroborated by jess's per-stage lowering sweep, in which
+      the (already WASI-free) mixer stage lowered to the Cortex-M7 with 0 skips,
+      0 external symbols and 0 WASI.
+
+      (c) LOOP-COMPLETE EVIDENCE — tests/rate-loop-proof is a WASI-less wasmtime
+      host that closes the control loop THROUGH the component's own WIT seam:
+      plant (omega_dot = torque / inertia) -> gyro into vehicle-state ->
+      rate.tick across the wasm boundary -> torque -> plant. Result: the body
+      rate tracks a 1 rad/s step, converging at 0.193 s with steady-state
+      |err| 0.0059 rad/s < 0.01 (I = 0.005 kg*m^2, dt = 1 ms,
+      RateGains::DEFAULT). This is the relay half of the agreed proof split and
+      is banked by jess as the SIL differential baseline for the on-target
+      (Renode) run after lowering.
+
+      SCOPE (honest): (a) is verified for the components published to date; the
+      per-component (six-ref) generalization merged in #318 and takes effect on
+      the next tagged release. (b) is verified for the rate component; the other
+      stages still link std and carry WASI imports until each receives the same
+      conversion — the pattern is proven and mechanical, and jess's per-stage
+      skip report prioritizes the order. Nothing here claims on-target lowering:
+      that is jess's half of the split.
+    tags: [verification, falcon, oci, wasm, component-model, jess-contract, v1.129]
+    fields:
+      method: test
+      steps:
+        # bench-only: cargo-component + wasm-tools + wasmtime are not installed
+        # in the verification-gate runner, and rate-loop-proof is a STANDALONE
+        # crate (its own [workspace], so wasmtime does not join the root
+        # workspace) — it cannot be addressed as `-p rate-loop-proof` from the
+        # repo root. Each step is the exact command that produced the recorded
+        # evidence; the CI-enforced half of this requirement is the release
+        # workflow's own publish + guard steps.
+        - run: "cd wasm/cm/rate && cargo component build --release --no-default-features  # bench-only"
+        - run: "wasm-tools component wit falcon_rate_cm.wasm  # bench-only: expect 1 import (falcon:cascade/types), no wasi:*"
+        - run: "cd tests/rate-loop-proof && cargo run --release -- \"$(find ../../wasm/cm/rate/target /Volumes/*/cargo-target -name falcon_rate_cm.wasm 2>/dev/null | head -1)\"  # bench-only: closed loop through the wasm seam"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OCI-P01

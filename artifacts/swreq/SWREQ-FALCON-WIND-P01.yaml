@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "WIND-P01 — reject a steady wind force via a position-loop integral"
     status: implemented
+    release: falcon-v1.16.0
     description: >
       The horizontal position loop shall reject a sustained wind — a
       translational FORCE disturbance the ADRC ESO (a torque observer) does not

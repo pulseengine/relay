@@ -1,0 +1,42 @@
+artifacts:
+  - id: SWREQ-FALCON-REL-P01
+    type: sw-req
+    title: "REL-P01 — a failed release shall leave NO published release, not a partial one"
+    status: implemented
+    release: falcon-v1.133.0
+    description: >
+      The release workflow shall not publish a GitHub Release until its
+      components have been built and guarded, so that a failure leaves nothing
+      public rather than something incomplete.
+
+      Observed on falcon-v1.131.0: `create-release` publishes first and
+      `flight-component` (build → guard → attach → OCI push) runs after it. When
+      the component build failed on a missing rustc target, the release was
+      ALREADY public with 12 assets (binaries, SBOM, checksums) and permanently
+      no wasm components. Nothing incorrect was published — the fail-loud from
+      v1.130 aborted the build and the OCI push was skipped — but the release
+      could not be repaired without either moving a published tag or cutting a
+      new version (v1.131.1 was cut).
+
+      The existing #100/#140 guard asserts the flight wasm asset is present, but
+      it lives INSIDE the component job, i.e. downstream of the publish: if the
+      job fails before the upload, the guard never runs and the release is
+      already out. The gate is downstream of the damage.
+
+      Preferred shape: create the release as a DRAFT, attach and guard, then
+      flip it to published as the final step — a draft is invisible to
+      consumers, so the failure mode becomes "no release" rather than "half a
+      release".
+    tags: [falcon, release, ci, hardening, v1.133]
+    fields:
+      req-type: constraint
+      priority: should
+      verification-criteria: >
+        Verified by DELIBERATE FAILURE INJECTION, not by reasoning: break the
+        component build on a scratch tag and confirm that (a) no published
+        release exists afterwards, (b) the #140 wasm-asset guard still runs and
+        still blocks, and (c) an unbroken run publishes exactly what it does
+        today.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002

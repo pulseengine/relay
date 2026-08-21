@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SHIELD-P01 — verified simplex shield: an unverified agile policy never leaves the certified safe set"
     status: implemented
+    release: falcon-v0.34.0
     description: >
       An unverified high-performance (learned/NMPC) attitude policy may
       command the vehicle ONLY while the geometric error state is safely

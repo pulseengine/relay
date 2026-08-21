@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "DC-P04: DroneCanNode async pump + NodeStatus heartbeat — the runtime over the CanBus seam"
     status: implemented
+    release: falcon-v1.95.0
     description: >
       Falcon shall provide the DroneCAN node runtime that ties the verified
       transfer layer (DC-P01) to the relay-hal CanBus seam: an async pump that

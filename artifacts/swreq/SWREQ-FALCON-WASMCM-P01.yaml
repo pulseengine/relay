@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "WASMCM-P01 — falcon-core as a wasmtime-runnable Component-Model component"
     status: implemented
+    release: falcon-v1.26.0
     description: >
       The falcon-core flight cascade shall be wrapped as a WebAssembly Component
       Model component (wit/falcon-flight/flight.wit, wasm/cm/flight) exporting

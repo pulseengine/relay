@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P05 — falcon rate controller exposes a Component-Model Preview 3 async stream interface (first control-cascade engine)"
     status: implemented
+    release: falcon-v1.66.0
     description: >
       Extends the streamification template from the cFS engines (LC/SCH/HK/SC,
       P01-P04) to the CONTROL CASCADE: the falcon rate controller shall expose a

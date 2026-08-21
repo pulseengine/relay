@@ -4,7 +4,12 @@
 # via `cargo component build`.
 [package]
 name = "falcon-mixer-cm"
-description = "Falcon v0.7 — mixer as a Component Model component (wac cascade)"
+description = "Formally-verified control allocator (mixer) as a WebAssembly Component — body torque + thrust → per-motor commands (airframe-parameterizable)."
+homepage = "https://pulseengine.eu"
+documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
+authors = ["PulseEngine"]
+keywords = ["flight-control", "verified", "drone", "embedded", "wasm"]
+categories = ["aerospace", "science::robotics"]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
@@ -17,9 +22,10 @@ crate-type = ["cdylib"]
 [dependencies]
 relay-mix-quad = { path = "../../../crates/relay-mix-quad" }
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+falcon-cm-rt = { path = "../../../crates/falcon-cm-rt" }
 
 [package.metadata.component]
-package = "falcon:cascade"
+package = "pulseengine:falcon-cascade"
 
 [package.metadata.component.target]
 path = "../../../wit/falcon-cascade"
@@ -34,5 +40,6 @@ codegen-units = 1
 [workspace]
 
 [features]
-default = ["bazel-bindings"]
+std = []
+default = ["bazel-bindings", "std"]
 bazel-bindings = []

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "PARAM-P01: parameter writes outside the schema bounds are rejected (value unchanged)"
     status: implemented
+    release: falcon-v1.54.0
     description: >
       Falcon shall provide a typed parameter store — the safety core of a
       PX4-style MAVLink parameter system (PARAM_REQUEST_LIST / READ / SET /

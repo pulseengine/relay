@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P15 (v1.77) — bundle + cosign-attest the composed/fused stream artifacts in the release"
     status: implemented
+    release: falcon-v1.77.0
     description: >
       Closes the FV-RELAY-STREAM-014 honest gap: the composed flight-control
       stream pipeline (//:falcon-cascade-stream-composed) and its Meld-lowered

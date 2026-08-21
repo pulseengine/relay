@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "MATHF32-P06 — machine-checked Cody-Waite argument-reduction bound → FULL-range sin/cos accuracy"
     status: proposed
-    release: falcon-v1.130.0
+    release: falcon-v1.135.0
     description: >
       The remaining and HARDEST ingredient: a machine-checked bound on the
       Cody-Waite argument reduction r = ((x - n*PIO2_HI) - n*PIO2_MID) -

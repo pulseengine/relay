@@ -98,3 +98,19 @@ rocq_proof_test(
     srcs = [],
     deps = [":sin_approx"],
 )
+
+# ── f32 cos approximation-error bound (MATHF32-P05, Coq-Interval) ────────
+# The minimax-remainder half of the cos error: |Q(r) - cos r| <= 1e-9 over
+# the reduced range, complementing the Gappa rounding bound in
+# proofs/gappa/cos_poly_rounding.gappa. Cosine analogue of sin_approx.
+
+rocq_interval_proof(
+    name = "cos_approx",
+    srcs = ["cos_approx.v"],
+)
+
+rocq_proof_test(
+    name = "cos_approx_test",
+    srcs = [],
+    deps = [":cos_approx"],
+)

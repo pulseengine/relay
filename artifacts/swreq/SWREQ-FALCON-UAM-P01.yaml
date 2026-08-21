@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "UAM-P01 — multi-waypoint mission dispatched via relay-sc RTS"
     status: implemented
+    release: falcon-v0.9.0
     description: >
       The SITL untethered mission shall load a 4-waypoint RTS
       sequence (N → E → S → home) into the verified relay-sc

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "IMUDRV-P01 — reference ICM-42688 IMU driver against the hardware seam"
     status: implemented
+    release: falcon-v1.13.0
     description: >
       A reference IMU driver shall implement the v1.11 ImuDriver seam for a real
       sensor (TDK InvenSense ICM-42688-P) over a minimal, dependency-free

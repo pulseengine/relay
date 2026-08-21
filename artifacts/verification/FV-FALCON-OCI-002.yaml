@@ -1,0 +1,91 @@
+artifacts:
+  - id: FV-FALCON-OCI-002
+    type: sw-verification
+    title: "OCI-P02 — the whole cascade is no_std and no-grow: 8/8 components, WASI-free (v1.133)"
+    status: implemented
+    release: falcon-v1.133.0
+    description: >
+      Verification of SWREQ-FALCON-OCI-P02. The requirement is that EVERY
+      published cascade stage lowers to bare metal, not just the one that was
+      converted first.
+
+      WHY IT EXISTS: v1.129 shipped `falcon-rate` converted to no_std while the
+      other stages still linked std and carried WASI imports. A partially
+      converted cascade is not lowerable — jess fuses the stages together, so
+      one std stage re-introduces WASI and `memory.grow` into the fused image
+      and blocks `meld fuse --memory shared --address-rebase` (gale#89,
+      meld#299). "Most of the cascade lowers" is not a useful property.
+
+      EVIDENCE, IN TWO TIERS.
+
+      (a) SOURCE-LEVEL, ALL STAGES (CI-runnable, the steps below). All 8
+      components under wasm/cm/ declare `#![cfg_attr(not(feature = "std"),
+      no_std)]` and export the shared Component-Model runtime via
+      `falcon_cm_rt::export_cm_rt!()`. The count is asserted as EIGHT rather
+      than "at least one", so adding a 9th stage that forgets the conversion
+      fails this step instead of passing unnoticed — that is the regression
+      this artifact exists to catch, given the v1.129 history above.
+
+      The shared runtime matters on its own: it supplies `cabi_realloc` backed
+      by a BOUNDED arena. wit-bindgen-rt supplies that symbol only when std is
+      linked (`#[cfg(not(target_env = "p2"))]`), which is precisely why the
+      first no_std conversion silently produced a raw core module instead of a
+      component. Centralising it means the fix cannot be forgotten per-stage.
+
+      (b) ARTIFACT-LEVEL (bench-only — needs cargo-component + wasm-tools,
+      which the gate runner does not provide). The binding evidence is the
+      built wasm: zero `wasi:*` imports and zero `memory.grow` in every
+      published component. That is checked per release against the actual
+      published blobs, and is recorded in FV-FALCON-OCI-001.
+
+      (b) IS NOW DISCHARGED for falcon-v1.133.0. All six published components
+      were pulled from the registry and inspected as BYTES — not as manifest
+      metadata, which cannot be trusted here (the OCI config.mediaType reads
+      "component" regardless of the payload; that is how falcon-rate:1.129.0
+      shipped as a core module past a green check).
+
+        stage      first 8 bytes      verdict     memory.grow   wasi:*
+        flight     0061736d0d000100   component   0             0
+        iekf       0061736d0d000100   component   0             0
+        position   0061736d0d000100   component   0             0
+        attitude   0061736d0d000100   component   0             0
+        rate       0061736d0d000100   component   0             0
+        mixer      0061736d0d000100   component   0             0
+
+      Pulled from the NESTED paths (ghcr.io/pulseengine/falcon/<stage>:1.133.0),
+      so that migration is evidenced by the same check. Header 0061736d0d000100
+      is a component; 0061736d01000000 would be a raw core module.
+
+      This is the first release where the WHOLE cascade satisfies it: v1.129 had
+      one converted stage and five that still linked std.
+
+      SCOPE (honest): verified for the six components published at 1.133.0. It
+      is not a standing guarantee — a future dependency could reintroduce std
+      transitively, which (a) would not catch. The per-release blob inspection
+      is what keeps it true, and must be repeated per release.
+
+      REMAINING, AND WHY THIS ARTIFACT IS NOT `verified`: SWREQ-FALCON-OCI-P02
+      carries a KILL-CRITERION this evidence does not touch — "with all stages
+      converted, `meld fuse --memory shared --address-rebase` accepts the fused
+      cascade; if it still rejects, that is a real finding and this requirement
+      is not met". That check is owned by gale/meld and has NOT been run against
+      the v1.133.0 components.
+
+      Zero `memory.grow` is necessary for that fuse to succeed but is not
+      sufficient — it was the known blocker (gale#89, meld#299), not a proof.
+      Promoting on the byte-level evidence alone would assert the outcome the
+      kill-criterion exists to test. Stays `implemented` until the fuse is run.
+    tags: [verification, falcon, oci, wasm, no-std, embedded, component-model, v1.133]
+    fields:
+      method: test
+      steps:
+        # (a) ALL EIGHT stages are no_std — not "at least one"
+        - run: "test \"$(grep -l 'no_std)' wasm/cm/*/src/lib.rs | wc -l)\" -eq 8"
+        # ...and all eight export the shared bounded-arena CM runtime
+        - run: "test \"$(grep -l 'export_cm_rt' wasm/cm/*/src/lib.rs | wc -l)\" -eq 8"
+        # (b) the binding evidence, per published blob
+        - run: "wasm-tools component wit falcon_rate_cm.wasm  # bench-only: expect 0 wasi:* imports"
+        - run: "wasm-tools print falcon_rate_cm.wasm | grep -c 'memory.grow'  # bench-only: expect 0"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OCI-P02

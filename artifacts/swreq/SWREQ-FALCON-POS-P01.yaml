@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "POS-P01: Setpoint magnitude bounds"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       The position controller shall accept setpoints within
       configured bounds: position [-1e6, +1e6] m, velocity

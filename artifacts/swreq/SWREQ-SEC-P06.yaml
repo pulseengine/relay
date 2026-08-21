@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SEC-P06: Session establishment — ephemeral X25519 key agreement (PFS) + rekey-on-reboot"
     status: implemented
+    release: falcon-v1.44.0
     description: >
       relay-sec shall establish per-session keys by an authenticated ephemeral
       X25519 (RFC 7748) Diffie-Hellman handshake, replacing static per-channel

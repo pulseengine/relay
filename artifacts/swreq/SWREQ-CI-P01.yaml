@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "CI-P01: validate_header returns Valid only when all checks pass"
     status: implemented
+    release: falcon-v0.1.0
     description: >
       The validate_header function shall return Valid only when all
       validation checks pass: valid stream_id, correct checksum, valid

@@ -1,0 +1,80 @@
+artifacts:
+  - id: FV-FALCON-OCI-003
+    type: sw-verification
+    title: "OCI-P04 — the WIT package namespace is pulseengine:falcon-*, with no falcon:* remnants (v1.133)"
+    status: implemented
+    release: falcon-v1.133.0
+    description: >
+      Verification of SWREQ-FALCON-OCI-P04. The requirement is that the WIT
+      package namespace matches the registry namespace we actually publish
+      under, so that a consumer browsing the ecosystem finds our components and
+      the interfaces they export in the SAME place.
+
+      WHY IT EXISTS: wasm.directory indexes COMPONENTS by their registry
+      namespace but INTERFACES by their WIT package namespace. Publishing
+      components under `pulseengine` while their interfaces declared
+      `falcon:cascade` split our own surface across two namespaces — the
+      exports and imports were not discoverable from the component's own page.
+
+      EVIDENCE: the rename is only correct if it is COMPLETE. A partial rename
+      is worse than none — it leaves a package that resolves in one tool and
+      not another. So the evidence is two-sided:
+
+      (a) POSITIVE — the cascade package declares the new namespace.
+      (b) NEGATIVE — there is not a single remaining `falcon:cascade` reference
+      anywhere under wit/. This is the step that actually carries the weight:
+      it is the one that fails if the rename is partial, and it is cheap enough
+      to run on every PR, so the property cannot silently regress.
+
+      Measured at the time this landed: 0 remaining references across the whole
+      wit/ tree.
+
+      ARTIFACT-LEVEL CONFIRMATION (falcon-v1.133.0). The steps above check the
+      SOURCE. The published binaries were also inspected, which is the stronger
+      claim — the rename is only real if it survives into what consumers pull:
+
+        $ wasm-tools component wit <stage>.wasm   # pulled from ghcr.io
+        rate      -> pulseengine:falcon-cascade
+        mixer     -> pulseengine:falcon-cascade
+        iekf      -> pulseengine:falcon-cascade
+        legacy `falcon:cascade` across ALL SIX published components -> 0
+
+      So the embedded interface namespace agrees with the registry namespace,
+      which is the whole point of the requirement: wasm.directory indexes
+      components by registry namespace but interfaces by WIT package namespace,
+      and a mismatch splits our surface across two namespaces.
+
+      SCOPE (honest): the WIT source and the published component bytes agree.
+
+      REMAINING, AND WHY THIS ARTIFACT IS NOT `verified`: SWREQ-FALCON-OCI-P04's
+      criteria are broader than the source and the bytes. Of the three:
+
+        (a) published to ghcr.io/<owner>/falcon/<name> on a tagged release and
+            anonymously pullable                                    -> MET
+            (all six pulled anonymously from the nested paths at 1.133.0)
+        (b) the namespace registered on wasm.directory with `[[interface]]`
+            entries, and the namespace page no longer reporting "0 packages"
+                                                                    -> NOT MET
+        (c) a component page's export links resolve into an OWNED namespace,
+            "verified by fetching the live pages, not by inspecting the
+            workflow"                                               -> NOT MET
+
+      (b) and (c) need the follow-up PR to registry/pulseengine.toml moving the
+      entries to the nested repository paths, and then a fetch of the live
+      pages. Until then the requirement's own stated method — checking the
+      rendered pages — has not been carried out, so this stays `implemented`.
+
+      Note the criteria name the `falcon` namespace; OCI-P04 is precisely the
+      change that unified it to `pulseengine`, so the criteria wording should be
+      updated to match when (b) is done.
+    tags: [verification, falcon, oci, wit, namespace, wasm-directory, v1.133]
+    fields:
+      method: test
+      steps:
+        # (a) the package declares the unified namespace
+        - run: "grep -q 'package pulseengine:falcon-cascade' wit/falcon-cascade/cascade.wit"
+        # (b) THE LOAD-BEARING STEP — a partial rename must fail this
+        - run: "test \"$(grep -rl 'falcon:cascade' wit/ | wc -l)\" -eq 0"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OCI-P04

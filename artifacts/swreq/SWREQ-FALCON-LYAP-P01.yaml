@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "LYAP-P01 — full-state Lyapunov: the combined position+attitude closed loop is non-increasing (closes the shield's attitude-only gap)"
     status: implemented
+    release: falcon-v0.38.0
     description: >
       The geometric cascade shall have a machine-checked full-state Lyapunov
       certificate, extending the v0.23 attitude-only result to translation.

@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "DC-P03: DroneCAN sensor ingest — esc.Status/mag/baro/battery decoders + float16 primitive"
     status: implemented
+    release: falcon-v1.94.0
     description: >
       Falcon shall decode the DroneCAN v0 sensor-ingest messages (the SPI/I2C
       drivers' CAN-bus counterparts) on the v1.92 transfer layer, plus the shared

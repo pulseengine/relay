@@ -1,0 +1,56 @@
+artifacts:
+  - id: SWREQ-FALCON-TRACE-P01
+    type: sw-req
+    title: "TRACE-P01 — make the release plan queryable: backfill the per-artifact release assignment"
+    status: proposed
+    release: falcon-v1.132.0
+    description: >
+      The rivet trace shall reflect what actually shipped, so that release
+      readiness is a QUERY rather than an opinion.
+
+      Measured state (hygiene sweep, 2026-08-06): of 163 sw-req artifacts, only
+      23 carry a `release:` field — and those are 22 `verified` + 1 `proposed`.
+      The other 140 carry NO release field and sit at `implemented` (139) or
+      `approved` (1). The correlation is near-perfect: `release:` tracks
+      `verified`, so 139 requirements are frozen at `implemented` forever.
+
+      This is PAPERWORK DEBT, NOT AN EVIDENCE GAP — sampling shows every one of
+      those `implemented` requirements already has 1–3 verification artifacts
+      pointing at it (231 sw-verification artifacts exist for 139 implemented
+      requirements). The V is closed in substance; only the status field and the
+      release assignment were never updated. The second half of the two-commit
+      rule (promotion to `verified` in a code-free PR) was simply never run for
+      this population.
+
+      The consequence is that the core planning query — "is release X ready?" —
+      is computed from a field that does not reflect reality, and the roadmap
+      cannot be driven from rivet, which is the reason the plan lives there.
+
+      SCOPE NARROWED ON EXECUTION — the premise above was partly wrong, and
+      recording that matters more than the tidy version. The initial read
+      ("paperwork, not an evidence gap") came from sampling for the EXISTENCE of
+      verification artifacts. Checking their STATUS tells a different story: of
+      the 140, only 3 have a `verifies` link from an artifact that is itself
+      `verified`; the other 137 link only to verifiers that are themselves
+      `implemented`/`approved`. The right side of the V is unpromoted too, so
+      promoting the requirements on that basis would be exactly the "make the
+      query tidy" failure this requirement's own criteria forbid.
+
+      This requirement therefore delivers the FACTUAL half only — the
+      per-artifact release assignment, derived mechanically from the first
+      release tag containing each artifact's creating commit. Status promotion
+      moves to SWREQ-FALCON-TRACE-P02, which has a real oracle (the verification
+      gate's own per-artifact result) rather than an assumption.
+    tags: [falcon, rivet, traceability, release-planning, hygiene, v1.132]
+    fields:
+      req-type: constraint
+      priority: should
+      verification-criteria: >
+        Every sw-req carries a `release:` field naming the release that shipped
+        it, derived MECHANICALLY (the first `falcon-v*` tag containing the
+        artifact's creating commit) rather than assigned by judgement; zero
+        artifacts remain unassigned; `rivet validate` PASS. Status promotion is
+        explicitly NOT in scope — see SWREQ-FALCON-TRACE-P02.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
