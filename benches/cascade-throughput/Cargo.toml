@@ -1,0 +1,20 @@
+[package]
+name = "cascade-throughput-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Per-cycle throughput benchmarks for the falcon FLIGHT CASCADE (iekf/position/attitude/rate/mixer). The engine-throughput bench guards the cFS engines; this one guards the control path that actually flies."
+
+[dependencies]
+relay-iekf = { path = "../../crates/relay-iekf" }
+relay-pos = { path = "../../crates/relay-pos" }
+relay-att = { path = "../../crates/relay-att" }
+relay-rate = { path = "../../crates/relay-rate" }
+relay-mix-quad = { path = "../../crates/relay-mix-quad" }
+
+[dev-dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "cascade_throughput"
+harness = false

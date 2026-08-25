@@ -1,0 +1,70 @@
+artifacts:
+  - id: FV-FALCON-PERF-002
+    type: sw-verification
+    title: "PERF-P01 — flight cascade per-cycle baseline: 1.2413 us/tick, estimator 91% (v1.135)"
+    status: implemented
+    release: falcon-v1.135.0
+    description: >
+      Verification of SWREQ-FALCON-PERF-P01.
+
+      (a) CONFIGURATION (CI-runnable, below). The benchmark crate exists, covers
+      all five stages plus the full tick, and a baseline with per-bench
+      regression ceilings is recorded. These steps fail if the bench is deleted,
+      if a stage stops being covered, or if the baseline file goes missing —
+      which is the regression worth catching, since nothing else in CI would
+      notice the flight path losing its only timing evidence.
+
+      (b) MEASURED, by execution — `cargo bench -p cascade-throughput-bench`,
+      Apple-silicon dev host, release profile, 2026-08-25:
+
+        iekf_propagate      [1.1249  1.1256  1.1263] us
+        position_tick       [73.359  73.403  73.451] ns
+        attitude_tick       [15.456  15.465  15.476] ns
+        rate_tick           [10.245  10.252  10.261] ns
+        mixer_mix           [ 9.4437  9.4491  9.4549] ns
+        full_cascade_tick   [1.2406  1.2413  1.2421] us
+
+      Confidence intervals are tight (<0.1 % spread), so these are stable
+      measurements rather than noise.
+
+      CROSS-CHECK, and it is the useful part: the timing split identifies iekf
+      as 91 % of the cascade, and jess's scry STATIC STACK bounds independently
+      put iekf at 4 192 B against 16-112 B for the other four. Two unrelated
+      methods — dynamic timing here, static analysis there — agree on which
+      stage carries the mass. Neither was derived from the other.
+
+      SCOPE (honest, and the limits are the point):
+
+      - NOT an on-silicon number. aarch64 dev host with a warm cache and a
+        branch predictor a Cortex-M7 does not have. The Lean compositional WCET
+        proof bounds cycle counts; this does not measure them.
+      - NOT a comparison. The PX4 head-to-head on the same board is criterion
+        (d) of the requirement and has not been run. We can currently say what
+        our cascade costs, not that it costs less.
+      - NOT a tight SLA. No persisted baseline history, so the ceilings are
+        coarse catastrophic-regression guards (~10x) chosen to survive hardware
+        variance — the same limitation FV-FALCON-PERF-001 records for the
+        engine benches.
+
+      This artifact therefore stays `implemented`. Criterion (d) is what would
+      make it `verified`, and it is a measurement nobody has taken yet.
+    tags: [verification, falcon, performance, wcet, cascade, benchmark, v1.135]
+    fields:
+      method: test
+      steps:
+        # (a) the bench exists and covers every stage plus the full tick
+        - run: "test -f benches/cascade-throughput/benches/cascade_throughput.rs"
+        - run: "grep -q 'full_cascade_tick' benches/cascade-throughput/benches/cascade_throughput.rs"
+        - run: "test \"$(grep -c 'c.bench_function' benches/cascade-throughput/benches/cascade_throughput.rs)\" -eq 6"
+        # (b) a baseline with regression ceilings is recorded
+        - run: "grep -q 'full_cascade_tick' benches/cascade-throughput/BASELINE.md"
+        - run: "grep -q 'Catastrophic-regression ceiling' benches/cascade-throughput/BASELINE.md"
+        # (c) execution evidence — this one genuinely RUNS in the gate (~62s).
+        # NOT marked bench-only: `cargo bench` is not in BENCH_PATTERNS, so a
+        # "# bench-only" comment here would claim something untrue. It executes,
+        # which is better evidence than a skip, and FV-FALCON-PERF-001 already
+        # pays the same cost for the engine benches.
+        - run: "cargo bench -p cascade-throughput-bench"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PERF-P01
