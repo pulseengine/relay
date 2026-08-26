@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, housekeeping]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-hk"
     links:
       - type: verifies
         target: SWDD-HK-001

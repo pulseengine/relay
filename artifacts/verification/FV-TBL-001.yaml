@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-tbl engine properties
       TBL-P01 through TBL-P05. All 5 properties proven. Run via:
-      bazel test //:verus_relay_tbl
+      bazel test //:relay_tbl_verus_test
     tags: [verification, formal, verus, table-services]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_tbl never existed (#364).
+        - run: "bazel test //:relay_tbl_verus_test"
     links:
       - type: verifies
         target: SWDD-TBL-001

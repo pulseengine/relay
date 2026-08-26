@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, scheduler]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-sch"
     links:
       - type: verifies
         target: SWDD-SCH-001

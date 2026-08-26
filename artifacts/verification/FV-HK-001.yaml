@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-hk engine properties
       HK-P01 through HK-P04. All 4 properties proven. Run via:
-      bazel test //:verus_relay_hk
+      bazel test //:relay_hk_verus_test
     tags: [verification, formal, verus, housekeeping]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_hk never existed (#364).
+        - run: "bazel test //:relay_hk_verus_test"
     links:
       - type: verifies
         target: SWDD-HK-001

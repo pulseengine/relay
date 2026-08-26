@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, file-manager]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-fm"
     links:
       - type: verifies
         target: SWDD-FM-001
