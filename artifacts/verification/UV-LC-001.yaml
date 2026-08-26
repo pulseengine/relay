@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, limit-checker]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-lc"
     links:
       - type: verifies
         target: SWDD-LC-001

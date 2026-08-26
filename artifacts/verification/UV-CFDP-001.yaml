@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, cfdp]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-cfdp"
     links:
       - type: verifies
         target: SWDD-CFDP-001

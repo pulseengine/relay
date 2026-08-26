@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, data-storage]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-ds"
     links:
       - type: verifies
         target: SWDD-DS-001
