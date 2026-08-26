@@ -81,6 +81,11 @@ artifacts:
       steps:
         # (a) the build actually passes the flag — fails if it is ever dropped
         - run: "grep -q 'link-arg=--emit-relocs' scripts/build-components.sh"
+        # The extent markers must be exported EXPLICITLY, not inherited from
+        # toolchain default behaviour. falcon-v1.134.0 shipped without them
+        # because rustc 1.98 (CI) stopped exporting what 1.96 (local) did.
+        - run: "grep -q 'export=__heap_base' scripts/build-components.sh"
+        - run: "grep -q 'export=__data_end' scripts/build-components.sh"
         # (b) artifact-level evidence, bench-only (needs cargo-component + wasm-tools)
         - run: "wasm-tools objdump falcon_mixer_cm.wasm | grep -c 'reloc.CODE'  # bench-only: expect >=1"
         - run: "wasm-tools print falcon_mixer_cm.wasm | grep -c 'memory.grow'  # bench-only: expect 0 (non-regression)"
