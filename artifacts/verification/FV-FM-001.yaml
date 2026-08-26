@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-fm engine properties
       FM-P01 through FM-P04. All 4 properties proven. Run via:
-      bazel test //:verus_relay_fm
+      bazel test //:relay_fm_verus_test
     tags: [verification, formal, verus, file-manager]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_fm never existed (#364).
+        - run: "bazel test //:relay_fm_verus_test"
     links:
       - type: verifies
         target: SWDD-FM-001

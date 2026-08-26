@@ -1,0 +1,114 @@
+name: Verus
+
+# Kernel-checks the Lean 4 proofs under proofs/lean/ against Mathlib via
+# rules_lean (Bazel). These proofs (WCET bounds, backpressure safety,
+# compositional WCET, and the geometric/position/strict Lyapunov stability
+# certificates) were authored + locally kernel-verified but never gated in
+# CI — the same orphaned-proof gap that left the Kani control/estimator
+# harnesses unenforced until v1.104. This workflow makes `bazel test
+# //proofs/lean:all` a required check so a Mathlib/toolchain bump or an
+# edit that breaks a proof cannot land silently.
+#
+# Separate workflow (not the cascade Bazel job): the first run fetches the
+# Lean 4.29.1 toolchain + builds/fetches Mathlib v4.29.1 oleans (several GB,
+# minutes) — heavier than the component-model cascade build, and it should
+# gate on its own verdict.
+
+on:
+  push:
+    branches: [main]
+  # PR runs are path-filtered (CI diet): the Lean proofs (Lyapunov/WCET) are
+  # self-contained under proofs/lean. NON-REQUIRED check; skip never blocks a
+  # merge. push:main stays UNFILTERED (backstop).
+  pull_request:
+    branches: [main]
+    paths:
+      - 'proofs/lean/**'
+      - '.github/workflows/lean.yml'
+
+concurrency:
+  # PRs and non-main branch pushes: cancel superseded runs.
+  # Main pushes: never cancel — required check, evidence preservation.
+  group: verus-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  verus:
+    name: Verus proofs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@v7
+        with:
+          path: relay
+
+      - name: Checkout rules_lean
+        uses: actions/checkout@v7
+        with:
+          repository: pulseengine/rules_lean
+          path: rules_lean
+
+      # MODULE.bazel local_path_overrides the four rules_* PulseEngine repos
+      # as siblings; the Lean proofs only need rules_lean, but crate_universe
+      # / the wider graph may reference the others. Check out the ones the
+      # MODULE graph resolves to keep `bazel test //proofs/lean:all` from
+      # failing on a missing sibling.
+      - name: Checkout rules_wasm_component
+        uses: actions/checkout@v7
+        with:
+          repository: pulseengine/rules_wasm_component
+          path: rules_wasm_component
+
+      - name: Checkout rules_verus
+        uses: actions/checkout@v7
+        with:
+          repository: pulseengine/rules_verus
+          path: rules_verus
+
+      - name: Checkout rules_rocq_rust
+        uses: actions/checkout@v7
+        with:
+          repository: pulseengine/rules_rocq_rust
+          path: rules_rocq_rust
+
+      # ubuntu-latest ships ~14 GB free, but the Lean 4.29.1 toolchain +
+      # Mathlib v4.29.1 oleans + the transitive rules_* toolchain graph
+      # (wac/wkg/meld/loom/spar/witness/synth/rocq, pulled in by the sibling
+      # checkouts above) overran it ("No space left on device" extracting the
+      # Lean toolchain). Reclaim the ~25 GB of preinstalled SDKs this job does
+      # not use. Plain rm (no third-party action) to keep the CI dependency
+      # surface minimal.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/lib/jvm "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # pinned — supply-chain
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.14.0
+        with:
+          bazelisk-cache: true
+          disk-cache: bazel
+          repository-cache: true
+
+      - name: Kernel-check every Lean proof
+        working-directory: relay
+        # //proofs/lean:all is bazel's implicit all-rules target — every
+        # lean_library + lean_proof_test in the package, so a newly added
+        # proof file is gated the moment its BUILD target lands.
+        run: |
+          # QUERY, do not enumerate. This workflow exists because 19 verus_test
+          # targets were defined and none was ever executed (#364) — a hand-written
+          # target list is exactly the drift that produced that. Discover them.
+          TARGETS=$(bazel query 'kind("verus_test rule", //...)' 2>/dev/null | tr '\n' ' ')
+          if [ -z "${TARGETS// /}" ]; then
+            echo "::error::no verus_test targets found — the Verus track would silently verify NOTHING"
+            exit 1
+          fi
+          echo "verus targets discovered:"; printf '  %s\n' $TARGETS
+          bazel test $TARGETS --test_output=errors

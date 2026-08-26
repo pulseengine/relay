@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-to engine properties
       TO-P01 through TO-P04. All 4 properties proven. Run via:
-      bazel test //:verus_relay_to
+      bazel test //:relay_to_verus_test
     tags: [verification, formal, verus, telemetry-output]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_to never existed (#364).
+        - run: "bazel test //:relay_to_verus_test"
     links:
       - type: verifies
         target: SWDD-TO-001

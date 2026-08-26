@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-ds engine properties
       DS-P01 through DS-P04. All 4 properties proven. Run via:
-      bazel test //:verus_relay_ds
+      bazel test //:relay_ds_verus_test
     tags: [verification, formal, verus, data-storage]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_ds never existed (#364).
+        - run: "bazel test //:relay_ds_verus_test"
     links:
       - type: verifies
         target: SWDD-DS-001

@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-ci engine properties
       CI-P01 through CI-P04. All 4 properties proven. Run via:
-      bazel test //:verus_relay_ci
+      bazel test //:relay_ci_verus_test
     tags: [verification, formal, verus, command-ingest]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_ci never existed (#364).
+        - run: "bazel test //:relay_ci_verus_test"
     links:
       - type: verifies
         target: SWDD-CI-001

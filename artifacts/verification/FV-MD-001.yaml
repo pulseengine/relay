@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-md engine properties
       MD-P01 through MD-P04. All 4 properties proven. Run via:
-      bazel test //:verus_relay_md
+      bazel test //:relay_md_verus_test
     tags: [verification, formal, verus, memory-dwell]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_md never existed (#364).
+        - run: "bazel test //:relay_md_verus_test"
     links:
       - type: verifies
         target: SWDD-MD-001
