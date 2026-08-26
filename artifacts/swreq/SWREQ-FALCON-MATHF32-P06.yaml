@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "MATHF32-P06 — machine-checked Cody-Waite argument-reduction bound → FULL-range sin/cos accuracy"
     status: proposed
-    release: falcon-v1.135.0
+    release: falcon-v1.139.0
     description: >
       The remaining and HARDEST ingredient: a machine-checked bound on the
       Cody-Waite argument reduction r = ((x - n*PIO2_HI) - n*PIO2_MID) -
@@ -17,7 +17,13 @@ artifacts:
       slice (the reduction cancellation is the part those references spend
       most of their pages on — weeks, not days) and deliberately sequenced
       AFTER P04/P05 so the reduced-range proof lands first.
-    tags: [falcon, relay-math, f32, gappa, argument-reduction, machine-checked, qualification, v1.130]
+      Deferred to v1.139 (2026-08-26). Not blocked and not obsolete — simply
+      lower value than the four releases ahead of it (PERF-P01 measurement,
+      TRACE-P02 promotion, the trusted-base publication, and the oracle
+      repairs), each of which moves a claim the project currently cannot
+      make or cannot defend.
+
+    tags: [falcon, relay-math, f32, gappa, argument-reduction, machine-checked, qualification, v1.139]
     fields:
       req-type: non-functional
       priority: could
