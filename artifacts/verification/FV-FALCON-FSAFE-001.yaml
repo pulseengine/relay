@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FSAFE-001
     type: sw-verification
     title: "Failsafe arbiter — relay-fsafe tests + exhaustive Kani (falcon v1.41)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-FSAFE-P01. The relay-fsafe crate (no_std/no_alloc,
       forbid-unsafe) implements the FailsafeArbiter — the single prioritized

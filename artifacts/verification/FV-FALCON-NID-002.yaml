@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-NID-002
     type: sw-verification
     title: "relay-nid — Verus dual-tree refactor + Option-totality contracts (v0.11)"
-    status: approved
+    status: verified
     description: >
       v0.11 brings relay-nid in line with the verified-engine
       pattern the rest of the workspace uses. Adds:

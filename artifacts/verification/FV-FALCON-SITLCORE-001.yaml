@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SITLCORE-001
     type: sw-verification
     title: "FlightCore-in-the-loop — the production core flies the SITL plant through the FlightBackend seam (v1.113)"
-    status: implemented
+    status: verified
     release: falcon-v1.113.0
     description: >
       Closes the orphaned-core gap in the Gazebo SITL bench: every prior

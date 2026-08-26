@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MODE-001
     type: sw-verification
     title: "Flight-mode sequence + position/altitude-hold bench (falcon v1.39)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-MODE-P01. falcon-hold-bench exercises the existing
       verified relay-fsm (flight-mode state machine) and relay-pos (position

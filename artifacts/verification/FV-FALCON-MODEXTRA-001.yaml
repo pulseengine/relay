@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MODEXTRA-001
     type: sw-verification
     title: "Extended flight modes — relay-modextra tests + Kani (falcon v1.52)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-MODEXTRA-P01. The relay-modextra crate (no_std/
       no_alloc/forbid-unsafe): poi_yaw / follow_setpoint / land_in_place /

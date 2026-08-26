@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-KANICI-002
     type: sw-verification
     title: "Flight-critical control + estimator Kani harnesses enforced in CI (orphaned-proof closure)"
-    status: implemented
+    status: verified
     release: falcon-v1.104.0
     description: >
       Closes the highest-value subset of a systemic orphaned-proof gap. A

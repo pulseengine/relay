@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-GEO-001
     type: sw-verification
     title: "Geofence safety path — Verus proofs + SITL EW-spoof scenario (v0.10)"
-    status: approved
+    status: verified
     description: >
       v0.10 verification of the geofence safety path: the
       relay-lc Verus-verified Geofence engine + the falcon-sitl-hover

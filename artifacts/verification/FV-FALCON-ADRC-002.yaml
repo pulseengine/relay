@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-ADRC-002
     type: sw-verification
     title: "Inner-loop cadence-robustness certification + command-filter primitive — Kani + proptest + flight falsification (v0.33)"
-    status: approved
+    status: verified
     description: >
       Verification of the v0.33 inner-loop robustness work in relay-adrc:
 

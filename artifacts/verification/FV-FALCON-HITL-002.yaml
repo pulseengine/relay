@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-HITL-002
     type: sw-verification
     title: "HITL MavlinkBench — GLOBAL_POSITION_INT-driven backend (v0.12)"
-    status: approved
+    status: verified
     description: >
       v0.12 verification of the MavlinkBench backend that closes
       the live-FC telemetry gap recorded in FV-FALCON-HITL-001.

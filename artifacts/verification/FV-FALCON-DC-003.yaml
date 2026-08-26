@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-DC-003
     type: sw-verification
     title: "DroneCAN sensor ingest — float16 + esc.Status/mag/baro/battery decoders, Kani read_bits bound (DC-P03, v1.94)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-DC-P03. relay-dronecan gains the float16 primitive
       (float16.rs) and the sensor-ingest decoders (sensors.rs). Test-level

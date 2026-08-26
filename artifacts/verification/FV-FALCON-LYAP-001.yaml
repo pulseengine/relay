@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-LYAP-001
     type: sw-verification
     title: "Full-state Lyapunov — kernel-checked Lean position+combined proof + runnable certificate (v0.38)"
-    status: approved
+    status: verified
     description: >
       Verification of the v0.38 full-state Lyapunov certificate:
 

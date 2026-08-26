@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TQ-001
     type: sw-verification
     title: "Tool-qualification records for Verus / Kani / miri / witness / spar (v0.14.3)"
-    status: approved
+    status: verified
     description: >
       v0.14.3 lands the cross-cutting tool-qualification dossier
       under `docs/dossier/tool-qualification/`. Five TQ records,

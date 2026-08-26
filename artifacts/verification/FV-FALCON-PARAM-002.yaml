@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-PARAM-002
     type: sw-verification
     title: "MAVLink PARAM binding — pymavlink wire conformance + bounded-store seam (falcon v1.96)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-PARAM-P02. Two layers, each independently checked:
 

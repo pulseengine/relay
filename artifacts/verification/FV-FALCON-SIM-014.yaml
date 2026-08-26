@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIM-014
     type: sw-verification
     title: "SIM-P02 review — simulator landscape analysis + Gazebo-bridge path (docs/SIMULATOR.md)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-SIM-P02, a documentation requirement (req-type:
       documentation, doc: docs/SIMULATOR.md). Verification method is review:

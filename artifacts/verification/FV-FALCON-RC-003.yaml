@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-RC-003
     type: sw-verification
     title: "CRSF wire decode — relay-rc tests + Kani unpack/CRC-bounded proof (RC-P03, v1.89)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-RC-P03. relay-rc gains the CRSF (TBS Crossfire /
       ExpressLRS) verified-decode lane: a 26-byte RC_CHANNELS_PACKED frame

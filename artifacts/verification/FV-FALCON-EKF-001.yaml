@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-EKF-001
     type: sw-verification
     title: "Unit + property tests + accuracy bench for relay-ekf (v0.2)"
-    status: approved
+    status: verified
     description: >
       v0.2 verification of the real Mahony complementary-filter
       attitude estimator (`relay-ekf`). Replaces the v0.1 stub

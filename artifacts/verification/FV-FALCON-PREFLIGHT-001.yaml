@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-PREFLIGHT-001
     type: sw-verification
     title: "Pre-flight BIT + arming gate — relay-preflight tests + exhaustive Kani (falcon v1.53)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-PREFLIGHT-P01. The relay-preflight crate (no_std/
       no_alloc/forbid-unsafe): PreflightChecks + arm_check. 4 unit tests

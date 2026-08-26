@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIMMC-005
     type: sw-verification
     title: "Motor-out recovery under DISPERSION — actuator noise + wind (v1.112 slice 3)"
-    status: implemented
+    status: verified
     release: falcon-v1.112.0
     description: >
       Upgrades the clean-plant motor-out campaign (FV-FALCON-FAULT-002 /

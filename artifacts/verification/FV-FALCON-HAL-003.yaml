@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-HAL-003
     type: sw-verification
     title: "Full 6-DoF position hold through the HAL — complete hover stack (v1.3.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.3.0 horizontal position loop in falcon-core
       (5 tests pass, clippy clean):

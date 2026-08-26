@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-BARO-001
     type: sw-verification
     title: "Barometer fusion holds altitude through GPS-vertical loss (v1.20.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.20.0 barometer-fusion layer (21 falcon-core tests
       pass, clippy clean), realism arc release 5:

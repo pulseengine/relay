@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-PREARM-001
     type: sw-verification
     title: "Pre-arm entry gate — FSM-K03 + falcon-core seam (falcon v1.97)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-PREARM-P01: the FSM arm transition is gated on the
       pre-arm commander verdict, proven and wired end-to-end.
