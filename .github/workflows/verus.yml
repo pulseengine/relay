@@ -96,7 +96,7 @@ jobs:
           disk-cache: bazel
           repository-cache: true
 
-      - name: Kernel-check every Lean proof
+      - name: Run every Verus proof
         working-directory: relay
         # //proofs/lean:all is bazel's implicit all-rules target — every
         # lean_library + lean_proof_test in the package, so a newly added
@@ -105,7 +105,12 @@ jobs:
           # QUERY, do not enumerate. This workflow exists because 19 verus_test
           # targets were defined and none was ever executed (#364) — a hand-written
           # target list is exactly the drift that produced that. Discover them.
-          TARGETS=$(bazel query 'kind("verus_test rule", //...)' 2>/dev/null | tr '\n' ' ')
+          # Scope to the ROOT package: that is where every verus_test is
+          # declared. `//...` additionally walks agent worktrees under .claude
+          # (now covered by .bazelignore too) and dies loading a sibling repo's
+          # BUILD file — which is exactly how this workflow failed its first
+          # run. Measured locally: this returns 19.
+          TARGETS=$(bazel query 'kind("verus_test rule", //:*)' 2>/dev/null | tr '\n' ' ')
           if [ -z "${TARGETS// /}" ]; then
             echo "::error::no verus_test targets found — the Verus track would silently verify NOTHING"
             exit 1
