@@ -1,0 +1,12 @@
+# Agent worktrees and scratch checkouts. These contain sibling repos
+# (rules_verus, rules_lean, ...) whose BUILD files are NOT part of this
+# module, so `bazel query //...` tries to load them and fails:
+#
+#   ERROR: error loading package '.claude/worktrees/rules_verus':
+#          Label '//verus:defs.bzl' ...
+#
+# That broke verus.yml on its very first run. ANY workflow using `//...`
+# hits the same wall, so ignore it at the source rather than scoping every
+# query around it. Verified: with this file, `bazel query
+# 'kind("verus_test rule", //...)'` returns 19 instead of erroring.
+.claude
