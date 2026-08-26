@@ -20,6 +20,7 @@ members = [
     "crates/relay-ccsds",
     "crates/relay-cfdp",
     "benches/engine-throughput",
+    "benches/cascade-throughput",
     "crates/relay-sec",
     "crates/relay-offboard",
     "crates/relay-fsafe",

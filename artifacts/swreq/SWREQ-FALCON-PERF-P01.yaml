@@ -1,0 +1,69 @@
+artifacts:
+  - id: SWREQ-FALCON-PERF-P01
+    type: sw-req
+    title: "PERF-P01 — the flight cascade has a measured per-cycle baseline, and a regression guard on it"
+    status: implemented
+    release: falcon-v1.135.0
+    description: >
+      The falcon control cascade shall have a recorded per-cycle timing
+      baseline, per stage and for the full tick, guarded against regression.
+
+      WHY IT EXISTS — performance was the one axis on which this project could
+      make NO claim at all. `engine-throughput` has guarded the cFS-lineage
+      engines (LC/SCH/SC/HS/CFDP) since v1.56, but the control path that
+      actually flies — iekf, position, attitude, rate, mixer — had no timing
+      baseline of any kind. The `examples/*-bench` binaries measure estimator
+      ACCURACY, not time. A compositional WCET proof exists in Lean; no
+      measurement had ever been taken against it.
+
+      That gap mattered strategically, not just tidily. The architecture has
+      real structural reasons to be fast — no RTOS on the control path, no
+      dynamic allocation, a bounded arena, fused single address space — and
+      none of it was evidenced. "Proven correct AND measurably faster on the
+      same silicon" is a claim no open-source, verified-systems or commercial
+      alternative can answer; it was also entirely unsubstantiated here.
+
+      MEASURED (2026-08-25, Apple-silicon dev host, release profile):
+
+        iekf_propagate      1.1256 us    91.0 % of the cascade
+        position_tick      73.40   ns     5.9 %
+        attitude_tick      15.47   ns     1.2 %
+        rate_tick          10.25   ns     0.8 %
+        mixer_mix           9.45   ns     0.8 %
+        full_cascade_tick   1.2413 us    <- the per-tick control-loop cost
+
+      TWO FINDINGS FALL OUT.
+
+      (i) THE ESTIMATOR IS THE CASCADE. IEKF is 91 % of per-tick cost; the other
+      four stages together are ~108 ns. Any cascade performance work that is not
+      estimator work is rounding error. This agrees with an independent
+      measurement — jess's scry static stack bounds put iekf at 4 192 B against
+      16-112 B for the others — so two unrelated methods identify the same stage
+      as carrying the mass.
+
+      (ii) THE 1 kHz BUDGET IS NOT CLOSE. 1.2413 us against a 1 ms period is
+      0.12 % of budget, ~806x margin on this host. Even allowing an order of
+      magnitude for a Cortex-M7 at a fraction of the clock, the control math is
+      not what will bound the loop — the HAL, scheduler and sensor I/O will.
+
+      `full_cascade_tick` is the honest per-tick figure rather than a synthetic
+      sum, because the cascade is SINGLE-RATE: `cascade.step()` executes every
+      stage once per tick with no divider (verified in
+      wasm/cm/cascade/src/lib.rs).
+    tags: [falcon, performance, wcet, cascade, benchmark, v1.135]
+    fields:
+      req-type: performance
+      priority: shall
+      verification-criteria: >
+        (a) A criterion benchmark exists covering all five cascade stages AND
+        the full tick, with a recorded baseline in
+        benches/cascade-throughput/BASELINE.md. (b) The baseline states its
+        host and explicitly disclaims being a cross-machine SLA or an
+        on-silicon figure. (c) A catastrophic-regression ceiling is recorded
+        per bench. (d) NOT DISCHARGEABLE BY (a)-(c): a head-to-head against
+        PX4's equivalent loop on the SAME board. Until that runs, this
+        requirement establishes what our cascade costs, NOT that it costs less
+        than the alternative — and the second half is the claim worth having.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-001

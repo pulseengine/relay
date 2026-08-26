@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "TRACE-P02 — promote the V: drive implemented→verified from the verification gate's own per-artifact result"
     status: proposed
-    release: falcon-v1.135.0
+    release: falcon-v1.136.0
     description: >
       Artifact status shall reflect executed evidence, so that "verified" means
       a gate ran the artifact's steps and they passed.
@@ -36,7 +36,26 @@ artifacts:
       a downstream consumer (jess) is BLOCKED on the relocation fix and the
       published artifact is the only way to hand it to them. Accumulating
       unrelated scope would make them wait on work they do not need.
-    tags: [falcon, rivet, traceability, verification, hygiene, v1.135]
+      Re-scoped to v1.136 (2026-08-26). v1.135 is cut around PERF-P01 alone —
+      the cascade timing baseline — because performance was the one axis on
+      which the project could make no claim at all, and that gap was the
+      highest-value item in the standing assessment. TRACE-P02 follows
+      immediately and is now precisely sized (see below).
+
+      MEASURED SIZING (2026-08-25), which decomposes this into three
+      populations with very different costs rather than one sweep:
+        155 of 236 verification artifacts carry >=1 CI-runnable step
+            -> promotable MECHANICALLY from the gate's per-artifact result
+         36 are bench-only
+            -> need a named waiver or a real step; judgement, not bookkeeping
+         45 have NO steps at all
+            -> cannot be evidence as they stand; write steps or demote
+      Also measured: ZERO `implemented` requirements lack a verifier. The
+      22/247 verified figure is entirely UNPROMOTED verifiers, not missing
+      evidence — which makes this far cheaper than it looks, except for the
+      45.
+
+    tags: [falcon, rivet, traceability, verification, hygiene, v1.136]
     fields:
       req-type: constraint
       priority: should

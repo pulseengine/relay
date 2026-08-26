@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OCI-P03 — bounded messaging payloads: adopt the wit-bindgen fork (fixed-length lists + arena/elision)"
     status: proposed
-    release: falcon-v1.135.0
+    release: falcon-v1.139.0
     description: >
       Message-carrying seams shall declare BOUNDED payloads, so the work memory
       they require can be sized and defended rather than being unbounded.
@@ -42,7 +42,22 @@ artifacts:
       justification for adopting the FORK is obsolete; the allocator work
       (gale-owned arena via cabi-realloc-extern, relay#330) is what remains.
       Rewrite the requirement around that before implementing it.
-    tags: [falcon, oci, wasm, wit-bindgen, messaging, embedded, v1.135]
+      Still parked at v1.139 pending the REWRITE noted above — do not
+      implement against the current text. Restated because it is easy to
+      pick up by release order: upstream wit-bindgen 0.60 already generates
+      `[u8; 8]` for `list<u8, 8>`, so the fixed-length-list justification for
+      adopting the fork is gone. What remains is the gale-owned arena
+      (relay#330), and measured 2026-08-25 the fork is three minors stale
+      (synced at upstream 0.58, upstream now 0.61.1) with NOTHING in relay
+      depending on it.
+
+      The drift that actually matters is different and is in the flight
+      path: our components pin `wit-bindgen-rt` 0.41.0 while the workspace
+      is on 0.60.0 — a 19-minor spread in one repo, and 0.41 generates the
+      bindings baked into every published artifact. Rewrite this requirement
+      around THAT migration, which needs no fork at all.
+
+    tags: [falcon, oci, wasm, wit-bindgen, messaging, embedded, v1.139]
     fields:
       req-type: interface
       priority: should
