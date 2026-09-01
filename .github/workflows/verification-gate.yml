@@ -134,7 +134,7 @@ jobs:
       # before reaching the script).
       - name: Install cargo-llvm-cov
         if: steps.scope.outputs.run_full == 'true'
-        uses: taiki-e/install-action@v2.86.5
+        uses: taiki-e/install-action@v2.87.1
         with:
           tool: cargo-llvm-cov
 
