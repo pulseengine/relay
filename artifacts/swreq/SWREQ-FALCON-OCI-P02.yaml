@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-OCI-P02
     type: sw-req
     title: "OCI-P02 — the whole cascade lowers: convert the remaining stages to no_std/no-grow"
-    status: implemented
+    status: verified
     release: falcon-v1.133.0
     description: >
       Every published cascade component shall be free of `memory.grow`, so the
