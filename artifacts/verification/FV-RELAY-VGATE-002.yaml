@@ -1,0 +1,120 @@
+artifacts:
+  - id: FV-RELAY-VGATE-002
+    type: sw-verification
+    title: "VGATE-P02 — untraced-proof cross-check: 10 engines, 22 harnesses, cited by nothing (v1.136)"
+    status: implemented
+    release: falcon-v1.136.0
+    description: >
+      Verification of SWREQ-RELAY-VGATE-P02.
+
+      (1) THE DEFECT, MEASURED BEFORE THE FIX. kani.yml's matrix runs 45
+      engines. Cross-referencing every `cargo kani -p <crate>` step across all
+      213 sw-verification artifacts against that matrix:
+
+        matrix engines                        45
+        cited by at least one artifact step   35
+        cited by NOTHING                      10
+
+      The ten: relay-{ccsds,ci,cs,ds,fm,hk,md,mm,tbl,to}. Harness counts read
+      from source, not assumed:
+
+        relay-hk      2   verify_collect_bounded, verify_no_panic
+        relay-cs      3   verify_crc_deterministic, verify_check_bounded, verify_no_panic
+        relay-ds      3   verify_decision_bounded, verify_disabled_no_decision, verify_no_panic
+        relay-fm      2   verify_empty_path_rejected, verify_no_panic
+        relay-ci      2   verify_valid_header_accepted, verify_no_panic
+        relay-to      2   verify_subscribe_unsubscribe, verify_no_panic
+        relay-md      2   verify_sample_bounded, verify_no_panic
+        relay-mm      2   verify_out_of_range_rejected, verify_no_panic
+        relay-tbl     2   verify_register_bounded, verify_no_panic
+        relay-ccsds   2   verify_encode_decode_roundtrip, verify_no_panic
+        TOTAL        22
+
+      (2) THE CORRESPONDING TRACE HOLE, found by an INDEPENDENT query. For
+      every requirement at implemented/verified/accepted, collect its
+      `verifies` edges; flag those whose verifiers ALL have zero steps. That
+      query returns exactly SWREQ-{HK,CS,DS,FM,CI,TO,MD,MM,TBL,CCSDS}-P01 —
+      the same ten engines, reached without reference to kani.yml at all.
+      Two queries over different data converging on the same set is what
+      makes this a finding rather than a coincidence of one script.
+
+      (3) THE DETECTOR FIRES. `untraced_kani_engines()` reports all ten and
+      returns a non-empty failure list, and `main()` folds it into
+      `overall_pass` so the gate exits non-zero.
+
+      (4) IT CANNOT BE NARROWED — the property that makes it worth having.
+      Run under `--filter '(has-tag "oci")'`, which matches 6 artifacts of
+      213, the check still reports all ten. `kani_cited_crates()` scans the
+      artifact tree from disk rather than the filtered set, so a
+      `Verify-Filter` can shrink what is EXECUTED but not what is CHECKED FOR
+      COVERAGE. Had it been computed from the filtered set, the narrow filter
+      would instead have reported 39 engines untraced — a spurious failure
+      that would have got the check deleted within a week.
+
+      (4b) NEGATIVE CASE — the detector is observed FAILING, not just passing.
+      A detector only ever seen to pass is indistinguishable from one that
+      cannot fail. Injecting a matrix entry no artifact cites:
+
+        + '          - relay-fake-untraced'  into kani.yml's engine list
+        $ python3 scripts/run-falcon-verification.py --filter '(has-tag "oci")' --dry-run
+        # 1 UNTRACED PROOF(S) — ... NO rivet artifact cites them ...
+        #   relay-fake-untraced
+        exit 1
+
+      and after reverting the injection, exit 0. (First attempt at this
+      injection silently changed nothing — the matrix is a YAML block list,
+      not the inline-quoted form assumed — and the run then "passed". The
+      substitution count is checked before believing the result; a negative
+      test that did not actually inject is a passing test that proves the
+      opposite of what it claims.)
+
+      (5) FAIL-CLOSED ON AN EMPTY MATRIX. An unreadable or empty kani.yml
+      yields an empty matrix, which would make the coverage check vacuously
+      pass ("0 engines uncovered"). It returns an explicit failure instead,
+      mirroring the verus.yml empty-set guard added in v1.135.
+
+      (6) THE GAP IS THEN CLOSED, not merely detected. FV-RELAY-KANICI-001 —
+      whose stated scope is "cFS engines' Kani harnesses model-checked in CI"
+      — is extended from 6 engines to 16, and gains `verifies` edges to the
+      ten SWREQ-*-P01 whose evidence was previously stepless-only. After that,
+      the check reports 0 untraced and the gate exits 0.
+
+      HONEST SCOPE. This proves the ten engines' proofs are now CITED and
+      that CI runs them. It does not re-derive that each harness is adequate
+      evidence for the requirement text it now links to; several are
+      `verify_no_panic`, which is a totality property, not a functional one.
+      What changed is that the evidence is visible in the trace instead of
+      only in a CI log — the requirements remain at `implemented`, not
+      `verified`, for exactly that reason.
+
+      ONE CASE DELIBERATELY LEFT OPEN. After this change the requirement-side
+      query returns exactly one remaining entry: SWREQ-FALCON-SIM-P04
+      (`implemented`), whose eight verifiers FV-FALCON-SIM-006..013 are all
+      stepless. That is a DIFFERENT class and is not closed here.
+
+      Those eight are gz-sim bench artifacts. Their evidence is a Gazebo
+      Harmonic run, which the gate runner does not have; the recorded runs
+      live in bench-evidence/gz-sim/ as per-tick CSVs, harness logs and dated
+      findings. A step asserting those files exist and their verdict line
+      reads PASS would be trivial to add, would zero this query, and would
+      verify almost nothing — it would check that a record from May 2026 is
+      still on disk, not that the software still produces it. Adding it would
+      be optimising the metric rather than the property, which is the failure
+      this whole gate exists to prevent. It is named here and tracked instead.
+
+      FALSIFICATION: wrong if an engine can be added to kani.yml's matrix and
+      merged with no artifact citing it and no waiver.
+    tags: [verification, relay, verification-gate, hygiene, process-integrity, kani, v1.136]
+    fields:
+      method: automated-test
+      steps:
+        # The detector is wired in and the tree is clean: exits 0 only when
+        # every matrix engine is cited (or waived).
+        - run: python3 scripts/run-falcon-verification.py --filter '(has-tag "verification-gate")' --dry-run
+        # Coverage is filter-independent: a 6-of-213 filter must not change it.
+        - run: "test \"$(python3 scripts/run-falcon-verification.py --filter '(has-tag \"oci\")' --dry-run | grep -c 'UNTRACED PROOF')\" -eq 0"
+        # The forward direction (VGATE-P01) still holds.
+        - run: scripts/check-verification-independence.sh HEAD
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-VGATE-P02
