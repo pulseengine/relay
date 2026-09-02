@@ -50,6 +50,22 @@ BENCH_PATTERNS = [
     # the traceability-audit finding). Only a kani step WITHOUT `-p` (run from
     # inside a crate dir) still falls through to bench-only.
     re.compile(r"\bcargo\s+kani\b(?!.*\s-p\s)"),      # kani without -p: bench-only
+    # RELEASE-VERIFICATION steps need tools the gate runner does not carry and a
+    # PUBLISHED release to point at: `gh` and `cosign` are absent (rc=127), and
+    # even installed they would query the network for a tag that may not exist
+    # yet. FV-FALCON-RELEASE-001 has carried three such steps since v0.17.0 and
+    # they had NEVER been executed — it is tagged [release, supply-chain, cosign,
+    # sbom, slsa] with no `falcon` tag, so the default `(has-tag "falcon")` sweep
+    # never matched it. A broader Verify-Filter on PR #375 finally selected it and
+    # all three failed rc=127 at once.
+    #
+    # This is the same trap FV-FALCON-REL-001 documented and deliberately avoided:
+    # a `gh release view <tag>` step fails for everyone until the release exists,
+    # then passes forever after — a result that depends on WHEN it runs, which is
+    # not evidence. Classifying by shape is what makes that judgement automatic
+    # instead of per-author.
+    re.compile(r"^\s*gh\s+(?:release|attestation)\s"),   # needs gh + a published release
+    re.compile(r"^\s*cosign\s+(?:verify|verify-blob)\b"),  # needs cosign + published sigs
     re.compile(r"\bcargo\s+\+nightly\s+miri\b"),      # miri nightly component
     re.compile(r"^\s*MIRIFLAGS="),                    # same family
     re.compile(r"\brustup\s+component\s+add\s+miri"), # same family
