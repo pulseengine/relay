@@ -301,6 +301,39 @@ def resolve_from_batch(crate: str, filt: str | None):
     return (all(v == "ok" for v in ran.values()), "", len(ran))
 
 
+
+# VERUS CROSS-CHECK (#364), mirroring the Kani one above. A step citing a
+# `verus_test` bazel target is not executed here (bazel is not provisioned on
+# the gate runner), but it MUST be enforced somewhere — verus.yml runs
+# `bazel test` over every verus_test target it can discover.
+#
+# WHY THIS EXISTS: 19 verus_test targets were defined in BUILD.bazel and NONE
+# was ever executed in CI — bazel.yml runs `bazel build` only, and Bazel is not
+# a required check. Worse, 16 verification artifacts cited
+# `//:verus_relay_<engine>` while the real targets are `//:relay_<engine>_verus_test`.
+# The citations did not resolve, and nothing noticed, because nothing ran them.
+# That is the same orphaned-proof pattern the Kani cross-check was built to
+# catch after MIX-P05..08 went unenforced for ~40 releases.
+#
+# In-BUILD.bazel  => enforced-by-verus-gate.
+# Absent          => FAIL: the cited proof does not exist under that name.
+VERUS_STEP = re.compile(r"\bbazel\s+test\b.*?//:([A-Za-z0-9_-]*verus[A-Za-z0-9_-]*)")
+
+
+def verus_targets(build_path: str = "BUILD.bazel") -> set[str]:
+    """Every `name = "..."` declared by a verus_test/verus_strip_test rule."""
+    try:
+        src = open(build_path).read()
+    except OSError:
+        return set()
+    out: set[str] = set()
+    for m in re.finditer(r"^(verus_test|verus_strip_test)\(([^)]*)\)", src, re.M | re.S):
+        n = re.search(r'name\s*=\s*"([^"]+)"', m.group(2))
+        if n:
+            out.add(n.group(1))
+    return out
+
+
 def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]]:
     aid = artifact["id"]
     steps = artifact.get("fields", {}).get("steps") or []
@@ -332,6 +365,21 @@ def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]
                 print(
                     f"  [          FAIL] (  0.00s) {aid}: {cmd}"
                     f" — ORPHANED PROOF: crate '{crate}' is not in the kani.yml matrix"
+                )
+                results.append({"cmd": cmd, "pass": False, "skipped": False, "rc": 1, "duration": 0.0})
+            continue
+        vm = VERUS_STEP.search(cmd)
+        if vm:
+            tgt = vm.group(1)
+            if tgt in verus_targets():
+                print(f"  [enforced-by-verus-gate] {aid}: {cmd}")
+                results.append({"cmd": cmd, "pass": True, "skipped": True, "rc": 0, "duration": 0.0})
+            else:
+                artifact_pass = False
+                avail = ", ".join(sorted(verus_targets())[:3]) or "none"
+                print(
+                    f"  [          FAIL] (  0.00s) {aid}: {cmd}"
+                    f" — ORPHANED PROOF: no verus target '{tgt}' in BUILD.bazel (have e.g. {avail})"
                 )
                 results.append({"cmd": cmd, "pass": False, "skipped": False, "rc": 1, "duration": 0.0})
             continue

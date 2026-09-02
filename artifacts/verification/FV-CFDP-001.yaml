@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-cfdp engine properties
       CFDP-P01 through CFDP-P04. All 4 properties proven. Run via:
-      bazel test //:verus_relay_cfdp
+      bazel test //:relay_cfdp_verus_test
     tags: [verification, formal, verus, cfdp]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_cfdp never existed (#364).
+        - run: "bazel test //:relay_cfdp_verus_test"
     links:
       - type: verifies
         target: SWDD-CFDP-001

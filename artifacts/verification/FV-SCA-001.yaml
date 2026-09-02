@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-sca engine properties
       SCA-P01 through SCA-P04. All 4 properties proven. Run via:
-      bazel test //:verus_relay_sca
+      bazel test //:relay_sca_verus_test
     tags: [verification, formal, verus, stored-command-absolute]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_sca never existed (#364).
+        - run: "bazel test //:relay_sca_verus_test"
     links:
       - type: verifies
         target: SWDD-SCA-001

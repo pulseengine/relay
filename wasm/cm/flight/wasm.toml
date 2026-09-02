@@ -1,0 +1,28 @@
+# component-cli (wasm.directory) manifest for the verified falcon flight
+# component — the declarative source of truth for its meta-registry identity.
+#
+# The RELEASE pipeline itself publishes the bytes via `wkg oci push` in
+# .github/workflows/release.yml (cosign-signed by digest); this file is NOT
+# wired into that path. Its purpose is to let the component-cli tool operate
+# from a committed manifest — `component registry publish` reads it to (re)open
+# the wasm.directory registry-entry issue, and `component publish` would push
+# to `<registry>:<version>`.
+#
+# Registration status: filed for namespace `pulseengine` off falcon-v1.127.0 —
+# yoshuawuyts/wasm.directory#466 -> registry/pulseengine.toml (PR #467),
+# awaiting new-namespace maintainer review. See docs/OCI-DISTRIBUTION.md.
+
+[package]
+# namespace:package — matches the registry entry (namespace `pulseengine`,
+# component `falcon-flight`).
+name = "pulseengine:falcon-flight"
+kind = "component"
+# Tracks the falcon release line (the OCI tag release.yml pushes, e.g.
+# ghcr.io/pulseengine/falcon-flight:1.128.0). Bump with each release; the WIT
+# interface itself is versioned separately in wit/falcon-flight/flight.wit
+# (falcon:flight@1.26.0).
+version = "1.128.0"
+# Full OCI location (host + path, no tag). component derives the namespace base
+# `ghcr.io/pulseengine` and catalog path `falcon-flight` from this to match the
+# registry entry's `registry` + `repository` fields.
+registry = "ghcr.io/pulseengine/falcon-flight"

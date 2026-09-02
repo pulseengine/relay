@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, checksum]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-cs"
     links:
       - type: verifies
         target: SWDD-CS-001
