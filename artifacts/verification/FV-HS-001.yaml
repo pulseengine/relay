@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-hs engine properties
       HS-P01 through HS-P05. All 5 properties proven. Run via:
-      bazel test //:verus_relay_hs
+      bazel test //:relay_hs_verus_test
     tags: [verification, formal, verus, health-safety]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_hs never existed (#364).
+        - run: "bazel test //:relay_hs_verus_test"
     links:
       - type: verifies
         target: SWDD-HS-001

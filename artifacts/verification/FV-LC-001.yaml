@@ -6,10 +6,15 @@ artifacts:
     description: >
       Verus SMT/Z3 formal verification of relay-lc engine properties
       LC-P01 through LC-P08. All 8 properties proven. Run via:
-      bazel test //:verus_relay_lc
+      bazel test //:relay_lc_verus_test
     tags: [verification, formal, verus, limit-checker]
     fields:
       method: formal-verification
+      steps:
+        # Cross-checked against BUILD.bazel by the gate
+        # (enforced-by-verus-gate); EXECUTED by verus.yml.
+        # The old citation //:verus_relay_lc never existed (#364).
+        - run: "bazel test //:relay_lc_verus_test"
     links:
       - type: verifies
         target: SWDD-LC-001

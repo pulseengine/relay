@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, stored-command-absolute]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-sca"
     links:
       - type: verifies
         target: SWDD-SCA-001

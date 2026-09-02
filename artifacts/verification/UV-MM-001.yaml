@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, memory-manager]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-mm"
     links:
       - type: verifies
         target: SWDD-MM-001

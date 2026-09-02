@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, telemetry-output]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-to"
     links:
       - type: verifies
         target: SWDD-TO-001

@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, memory-dwell]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-md"
     links:
       - type: verifies
         target: SWDD-MD-001
