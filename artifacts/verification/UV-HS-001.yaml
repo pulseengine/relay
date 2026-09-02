@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, health-safety]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-hs"
     links:
       - type: verifies
         target: SWDD-HS-001

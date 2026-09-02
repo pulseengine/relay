@@ -9,6 +9,8 @@ artifacts:
     tags: [testing, unit, ccsds]
     fields:
       method: automated-test
+      steps:
+        - run: "cargo test -p relay-ccsds"
     links:
       - type: verifies
         target: SWDD-CCSDS-001
