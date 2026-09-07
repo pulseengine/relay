@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MAVBRIDGE-001
     type: sw-verification
     title: "MAVLink ↔ flight-supervisor bridge — commands + telemetry (v1.28.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.28.0 falcon-mavlink bridge (11 unit tests pass,
       clippy clean, builds bare-metal for thumbv7em-none-eabihf). The bridge is

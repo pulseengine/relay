@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIM-002
     type: sw-verification
     title: "PX4-SITL round-trip: falcon RTL drives PX4 home via COMMAND_LONG (v0.14.2)"
-    status: approved
+    status: verified
     description: >
       v0.14.2 closes the round-trip the v0.14.0 PX4-SITL loop
       stopped one step short of: when the verified relay-lc

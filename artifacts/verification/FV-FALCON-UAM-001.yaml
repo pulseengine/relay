@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-UAM-001
     type: sw-verification
     title: "Untethered multi-waypoint mission — relay-sc RTS dispatch in SITL (v0.9)"
-    status: approved
+    status: verified
     description: >
       v0.9 verification of the untethered autonomous-mission path:
       the falcon-sitl-hover `untethered` scenario.

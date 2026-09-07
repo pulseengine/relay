@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-GEO-002
     type: sw-verification
     title: "Geofence::check — Kani bounded model checking (v0.11)"
-    status: approved
+    status: verified
     description: >
       v0.11 Kani harness pack on `relay_lc::engine::Geofence::check`.
       Mirrors the v0.9.1 pattern that pinned EkfHealthMonitor with

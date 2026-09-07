@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-RATE-001
     type: sw-verification
     title: "Unit + property + closed-loop SITL for relay-rate (v0.3)"
-    status: approved
+    status: verified
     description: >
       v0.3 verification of the body-rate PID controller (`relay-rate`)
       and the closed-loop pure-Rust SITL bench

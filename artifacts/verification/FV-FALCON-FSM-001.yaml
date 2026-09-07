@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FSM-001
     type: sw-verification
     title: "Flight-mode FSM — Kani disarm-safety + failsafe-recovery + lifecycle tests (v1.7.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.7.0 flight-mode state machine (relay-fsm):
 

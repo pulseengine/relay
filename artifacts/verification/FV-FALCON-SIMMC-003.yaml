@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIMMC-003
     type: sw-verification
     title: "Estimator-robustness campaign — IEKF under dispersed sensor noise + GNSS dropout (v1.111)"
-    status: implemented
+    status: verified
     release: falcon-v1.111.0
     description: >
       The first genuinely STOCHASTIC dispersion campaign (the attitude/failsafe

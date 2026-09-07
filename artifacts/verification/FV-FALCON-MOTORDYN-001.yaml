@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MOTORDYN-001
     type: sw-verification
     title: "ADRC ESO absorbs first-order motor lag (v1.23.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.23.0 motor-dynamics layer (27 falcon-core tests
       pass, clippy clean, embedded builds), realism arc release 8 (a robustness

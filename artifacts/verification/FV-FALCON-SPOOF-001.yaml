@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SPOOF-001
     type: sw-verification
     title: "Position-fix spoof/fault FDI — Kani gate+CUSUM contracts + deterministic spoof tests + real-gz hold demo (v0.37)"
-    status: approved
+    status: verified
     description: >
       Verification of the v0.37 position-fix fault/spoof robustness:
 

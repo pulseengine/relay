@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-IMUBIAS-001
     type: sw-verification
     title: "IEKF under random-walk gyro bias-instability (v1.18.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.18.0 IMU bias-instability layer (18 falcon-core
       tests pass, clippy clean), realism arc release 3 (first sensor-fidelity

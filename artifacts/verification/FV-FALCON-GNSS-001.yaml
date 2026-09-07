@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-GNSS-001
     type: sw-verification
     title: "Noisy + intermittent GNSS: variance-matched hold vs over-trust divergence (v1.19.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.19.0 GNSS-realism layer (20 falcon-core tests pass,
       clippy clean), realism arc release 4:

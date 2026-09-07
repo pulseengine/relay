@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-PARAM-001
     type: sw-verification
     title: "Parameter store schema-bounded writes — relay-param tests + Kani (falcon v1.47)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-PARAM-P01. The relay-param crate (no_std/no_alloc/
       forbid-unsafe) is the typed parameter store: register/get/set with

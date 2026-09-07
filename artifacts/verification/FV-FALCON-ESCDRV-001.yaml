@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-ESCDRV-001
     type: sw-verification
     title: "ESC DShot + battery driver — protocol tests + Kani (falcon v1.43)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-ESCDRV-P01. The falcon-esc-dshot crate (no_std/
       no_alloc/forbid-unsafe) provides the DShot throttle encoder

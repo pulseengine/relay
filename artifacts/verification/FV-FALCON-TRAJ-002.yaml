@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TRAJ-002
     type: sw-verification
     title: "Reference governor — Kani gate bound + monotone-advance tests + flight falsification (v0.36)"
-    status: approved
+    status: verified
     description: >
       Verification of the v0.36 reference governor (relay-traj RefGovernor):
 

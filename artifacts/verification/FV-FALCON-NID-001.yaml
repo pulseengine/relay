@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-NID-001
     type: sw-verification
     title: "Network ID codec — round-trip + fuzz + Kani + ASTM bit-packing for relay-nid (v0.9 + v0.9.1)"
-    status: approved
+    status: verified
     description: >
       v0.9 verification of the EASA U-space Network Identification
       codec (`crates/relay-nid`):

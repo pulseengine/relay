@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-GZGE-001
     type: sw-verification
     title: "Custom gz ground-effect plugin — cushion holds the vehicle aloft (v1.32.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.32.0 falcon GroundEffect gz-sim8 plugin. BENCH-ONLY:
       Gazebo is not in CI (the CI gate skips gz/meld/bazel steps), so this runs

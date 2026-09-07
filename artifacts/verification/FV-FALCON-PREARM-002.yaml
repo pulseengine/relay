@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-PREARM-002
     type: sw-verification
     title: "Pre-arm gate fed by real state — update_preflight + live-signal arming (falcon v1.99)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-PREARM-P02: the FlightSupervisor derives the pre-arm
       checks from real vehicle state each cycle, so the Kani-proven arm gate

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-ATMOS-001
     type: sw-verification
     title: "Air-density thrust lapse: altitude integral + service ceiling (v1.22.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.22.0 atmosphere / thrust-lapse layer (25 falcon-core
       tests pass, clippy clean, embedded builds), realism arc release 7:

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MATHSEAM-002
     type: sw-verification
     title: "Flight-math seam extended to the remaining flight crates — seam now complete across the no_std flight path"
-    status: implemented
+    status: verified
     description: >
       FV-FALCON-MATHSEAM-001 migrated the v1.12 verified cascade
       (relay-iekf/geo/adrc/mix-quad/falcon-core) to the relay-math seam, but four

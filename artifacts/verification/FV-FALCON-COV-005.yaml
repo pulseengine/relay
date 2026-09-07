@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-COV-005
     type: sw-verification
     title: "witness harness improvements + bazel macro (v0.16.0)"
-    status: approved
+    status: verified
     description: >
       v0.16.0 lands two harness improvements that close v0.15.1's
       deferred items 1 + 3, plus an upstream-bug report for item 2.

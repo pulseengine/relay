@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIMMC-001
     type: sw-verification
     title: "Monte-Carlo simulation campaigns — dispersed closed-loop safety verification + named CI gate (v1.109)"
-    status: implemented
+    status: verified
     release: falcon-v1.109.0
     description: >
       Turns the single-condition closed-loop point-tests into large randomised

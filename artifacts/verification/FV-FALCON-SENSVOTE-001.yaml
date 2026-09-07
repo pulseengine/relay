@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SENSVOTE-001
     type: sw-verification
     title: "Sensor voting + GPS-loss fallback — relay-sensvote tests + Kani (falcon v1.50)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-SENSVOTE-P01. The relay-sensvote crate (no_std/
       no_alloc/forbid-unsafe): median3 / vote3 / median3_vec (NaN-safe,

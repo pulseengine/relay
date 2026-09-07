@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-RUNAWAY-001
     type: sw-verification
     title: "Attitude-runaway flight termination — FSM Kani + in-flight detector (falcon v1.99 expanded failsafe)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-RUNAWAY-P01: a sustained unrecoverable tilt cuts the
       motors via a new FSM termination state.

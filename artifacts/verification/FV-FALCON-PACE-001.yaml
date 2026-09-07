@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-PACE-001
     type: sw-verification
     title: "Gyro-synchronized loop pacing — pure-logic unit tests + A/B/C/D real-Gazebo load matrix (v0.32)"
-    status: approved
+    status: verified
     description: >
       Verification of the v0.32 two-stage gyro-synchronized loop scheduler:
 

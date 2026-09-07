@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-IEKF-001
     type: sw-verification
     title: "IEKF SITL accuracy bench — full-state position/velocity tracking (falcon v1.38)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-IEKF-P01. The falcon-iekf-bench example exercises the
       verified relay-iekf full-state Invariant EKF over a deterministic 30 s

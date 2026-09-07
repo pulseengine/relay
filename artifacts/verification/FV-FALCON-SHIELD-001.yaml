@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SHIELD-001
     type: sw-verification
     title: "Verified simplex shield — Kani safety contract + recoverable-set predicate + containment demo (v0.28)"
-    status: implemented
+    status: verified
     description: >
       Verification of the v0.28 runtime-assurance shield:
 
