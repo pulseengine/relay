@@ -1,0 +1,47 @@
+artifacts:
+  - id: SWREQ-FALCON-REL-P02
+    type: sw-req
+    title: "REL-P02 — the signed bundle shall describe every artifact it attests"
+    status: implemented
+    release: falcon-v1.136.0
+    description: >
+      Every file covered by the cosign-signed bundle SHA256SUMS shall appear in
+      the bundle manifest.json with a `kind` naming what it is. A build that
+      attests a file the manifest does not describe shall fail.
+
+      WHY IT EXISTS. From v1.77 to v1.135 the bundle carried TEN .wasm files and
+      the manifest described EIGHT. The two undescribed ones were
+      falcon-cascade-stream-{composed,fused} — the P3 stream artifacts added by
+      SWREQ-RELAY-STREAM-P15 so the cosign signature would cover them. The
+      signature did cover them. Nothing described them.
+
+      That is a real ambiguity, not a tidiness complaint, and jess hit it on
+      #202. In one directory sit `falcon-cascade-v1.135.wasm` — the
+      cargo-component cascade that gets fused and lowered — and
+      `falcon-cascade-stream-composed-v1.135.wasm` /
+      `falcon-cascade-stream-fused-v1.135.wasm`, which are P3 async stream
+      variants: a different artefact class with a near-identical name. A
+      consumer asking "which of these did you verify, and which do I fuse?" had
+      only the filename to go on, because the machine-readable manifest listed
+      neither.
+
+      The attestation itself was never broken — `shasum -c SHA256SUMS` inside
+      the published falcon-components-v1.135.tar.gz passes 10/10. What drifted
+      is the bundle's SELF-DESCRIPTION, and it drifted silently for 58 releases
+      because nothing compared the two files.
+
+      RESOLUTION SHAPE. Describe, do not remove. Dropping the stream artifacts
+      from the bundle was considered and rejected: it would contradict
+      SWREQ-RELAY-STREAM-P15 (which requires exactly that they be bundled and
+      attested), would falsify FV-RELAY-STREAM-015, and would not answer the
+      question that was actually asked — which is "what IS this file", not
+      "why is this file here".
+
+      FALSIFICATION: this requirement is wrong if a release can ship a bundle
+      whose signed SHA256SUMS covers a file that manifest.json does not list.
+    tags: [requirement, falcon, release, bundle, attestation, manifest, v1.136]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
+      - type: refines
+        target: SWREQ-FALCON-REL-P01
