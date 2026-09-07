@@ -1,0 +1,54 @@
+artifacts:
+  - id: SWREQ-RELAY-VGATE-P02
+    type: sw-req
+    title: "VGATE-P02 — verification-gate integrity, the other direction: no UNTRACED proofs"
+    status: implemented
+    release: falcon-v1.136.0
+    description: >
+      Every crate the Kani CI matrix model-checks shall be cited by at least
+      one rivet artifact step, or carry an explicit waiver naming a tracking
+      issue. A proof that runs on every push while no artifact records it is
+      an UNTRACED PROOF, and the gate shall fail on one.
+
+      WHY IT EXISTS. VGATE-P01 gave the gate a cross-check in ONE direction:
+      an artifact citing `cargo kani -p <crate>` for a crate outside the
+      kani.yml matrix is an ORPHANED PROOF, because CI never runs it. That
+      catches evidence claimed but not executed — the MIX-P05..P08 pattern,
+      unenforced for ~40 releases.
+
+      It does not catch the reverse, and the reverse had happened. Ten cFS
+      engines — relay-{hk,cs,ds,fm,ci,to,md,mm,tbl,ccsds} — carried 22 Kani
+      harnesses that the required `Kani gate` check verified on every push,
+      for months, while SWREQ-{HK,CS,DS,FM,CI,TO,MD,MM,TBL,CCSDS}-P01 sat at
+      `implemented` whose only `verifies` edge came from a stepless roll-up
+      (SV-RELAY-*). The proof existed, ran, and passed. The traceability graph
+      said the requirement had no executable evidence.
+
+      That asymmetry matters more than it looks. A one-directional cross-check
+      is satisfied by citing NOTHING: the fewer proofs an artifact claims, the
+      less can be orphaned. The incentive runs the wrong way, and the failure
+      is invisible — nothing goes red, an assessor simply reads a hole in the
+      trace that the CI log has been filling all along.
+
+      This is the exact mirror of the v1.135 Verus finding, where 19 proofs
+      were DEFINED and none ever RAN. Together the two directions close the
+      loop: proofs that are claimed must run, and proofs that run must be
+      claimed.
+
+      SCOPE. Coverage is a property of the traceability GRAPH, not of one
+      run's scope, so the check shall be computed over every artifact on disk
+      and shall not be narrowable by `--filter` / `Verify-Filter`. A check
+      that a filter can shrink is the same empty-scope-equals-pass defect this
+      gate exists to prevent.
+
+      FALSIFICATION: this requirement is wrong if an engine can be added to
+      the kani.yml matrix, model-checked on every push, and merged to main
+      with no rivet artifact citing it and no waiver naming an issue.
+    tags: [requirement, relay, verification-gate, hygiene, process-integrity, kani, v1.136]
+    links:
+      # Same system requirement VGATE-P01 derives from: this is the other
+      # half of the same gate-integrity property, not a new one.
+      - type: derives-from
+        target: SYSREQ-FALCON-010
+      - type: refines
+        target: SWREQ-RELAY-VGATE-P01
