@@ -295,19 +295,54 @@ MANIFEST="$BUNDLE_DIR/manifest.json"
   printf '  "toolchain": "%s",\n' "$TOOLCHAIN_STR"
   printf '  "components": [\n'
   first=1
-  for dir in flight iekf ekf attitude rate position falcon-mixer cascade; do
-    slug="${dir#falcon-}"
-    fname="falcon-$slug-v$MM.wasm"
-    dest="$BUNDLE_DIR/$fname"
+  emit_entry() {  # $1=name $2=file $3=kind
+    local dest="$BUNDLE_DIR/$2" sha bytes
     sha=$(shasum -a 256 "$dest" | awk '{print $1}')
     bytes=$(wc -c < "$dest" | tr -d ' ')
     if [ "$first" = "1" ]; then first=0; else printf ',\n'; fi
-    printf '    { "name": "falcon-%s", "file": "%s", "sha256": "%s", "bytes": %s, "toolchain": "%s" }' \
-      "$slug" "$fname" "$sha" "$bytes" "$TOOLCHAIN_STR"
+    printf '    { "name": "%s", "file": "%s", "kind": "%s", "sha256": "%s", "bytes": %s, "toolchain": "%s" }' \
+      "$1" "$2" "$3" "$sha" "$bytes" "$TOOLCHAIN_STR"
+  }
+  for dir in flight iekf ekf attitude rate position falcon-mixer cascade; do
+    slug="${dir#falcon-}"
+    emit_entry "falcon-$slug" "falcon-$slug-v$MM.wasm" "flight-component"
+  done
+  # The P3 stream artifacts are IN the bundle and therefore covered by the
+  # cosign-signed SHA256SUMS — but until v1.136 they were absent from this
+  # manifest. A consumer read 8 components, unpacked 10 .wasm, and had no
+  # machine-readable way to tell which was which: `falcon-cascade-v*.wasm`
+  # (the cargo-component cascade jess fuses) sits beside
+  # `falcon-cascade-stream-{composed,fused}-v*.wasm` (the P3 stream variants,
+  # a different thing with a near-identical name). Two SIGNED artifacts the
+  # manifest did not describe is exactly the "which artifact did you actually
+  # verify?" ambiguity jess raised on #202. `kind` answers it mechanically
+  # rather than by reading filenames.
+  for tgt in falcon-cascade-stream-composed falcon-cascade-stream-fused; do
+    [ -f "$BUNDLE_DIR/$tgt-v$MM.wasm" ] || continue   # bazel-absent path
+    emit_entry "$tgt" "$tgt-v$MM.wasm" "p3-stream-artifact"
   done
   printf '\n  ]\n}\n'
 } > "$MANIFEST"
 echo "  manifest.json written"
+
+# GUARD (v1.136): the signed SHA256SUMS and the manifest must describe the SAME
+# set. They drifted silently from v1.77 to v1.135 — the two P3 stream artifacts
+# were signed but undescribed — because nothing compared them. Asserting it here
+# means the next artifact added to the bundle cannot be attested-but-anonymous.
+missing=$(
+  python3 - "$BUNDLE_DIR" <<'PY'
+import json, sys, os
+b = sys.argv[1]
+declared = {c["file"] for c in json.load(open(os.path.join(b, "manifest.json")))["components"]}
+summed = {l.split()[1].lstrip("./") for l in open(os.path.join(b, "SHA256SUMS")) if l.strip()}
+print(" ".join(sorted(summed - declared)))
+PY
+)
+if [ -n "$missing" ]; then
+  echo " ERROR: signed by SHA256SUMS but undescribed in manifest.json: $missing" >&2
+  exit 1
+fi
+echo "  manifest/SHA256SUMS agree on every bundled artifact"
 
 echo ""
 echo "== bundle: $BUNDLE_DIR =="
