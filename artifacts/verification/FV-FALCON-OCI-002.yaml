@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-OCI-002
     type: sw-verification
     title: "OCI-P02 — the whole cascade is no_std and no-grow: 8/8 components, WASI-free (v1.133)"
-    status: implemented
+    status: verified
     release: falcon-v1.133.0
     description: >
       Verification of SWREQ-FALCON-OCI-P02. The requirement is that EVERY
@@ -64,17 +64,41 @@ artifacts:
       transitively, which (a) would not catch. The per-release blob inspection
       is what keeps it true, and must be repeated per release.
 
-      REMAINING, AND WHY THIS ARTIFACT IS NOT `verified`: SWREQ-FALCON-OCI-P02
-      carries a KILL-CRITERION this evidence does not touch — "with all stages
-      converted, `meld fuse --memory shared --address-rebase` accepts the fused
-      cascade; if it still rejects, that is a real finding and this requirement
-      is not met". That check is owned by gale/meld and has NOT been run against
-      the v1.133.0 components.
+      KILL-CRITERION DISCHARGED (jess, 2026-09-02, issue #202). The fused
+      five-stage cascade was fused, validated and lowered:
 
-      Zero `memory.grow` is necessary for that fuse to succeed but is not
-      sufficient — it was the known blocker (gale#89, meld#299), not a proof.
-      Promoting on the byte-level evidence alone would assert the outcome the
-      kill-criterion exists to test. Stays `implemented` until the fuse is run.
+        strategy                          meld  validate  m7dp lowering
+        --memory shared --address-rebase  OK    OK        exit 0, 5/5 stages
+        --memory shared --pack-rebase     OK    OK        exit 0, 5/5 stages
+        --pack-rebase --share-stack       OK    OK        exit 0, 5/5 stages
+        --memory multi                    OK    OK        exit 1, 0/5
+
+      Confirmed on relay v1.134.1 AND v1.135.0 (10/10 published digests verified
+      before use). Fused image 65,410 B; after loom 61,762 B, sha256
+      ab135ac1a010770b. Tools: meld 0.52.0, loom 1.4.0, synth 0.60.0, varve-pinned
+      and drift-checked before quoting.
+
+      The FIVE are five DISTINCT stages, checked explicitly rather than by a
+      count that would pass either way: falcon-cascade/{attitude,ekf,mixer,
+      position,rate}.
+
+      A CORRECTION IN THE EVIDENCE ITSELF, worth recording. jess first reported
+      "lowers 5/5 through meld -> loom -> synth", which reads as this criterion
+      being met. Asked which rebase flag, the answer was `--pack-rebase` — NOT
+      the `--address-rebase` this criterion names. jess then ran the named flag,
+      and it passed. So the discharge rests on the flag the requirement actually
+      specifies, not on a compatible-sounding neighbour.
+
+      QUALIFICATION: m4f reaches 5/5 only via the embedder-contract path
+      (`--relocatable --embedder-data-init --embedder-global-init`); the
+      self-contained build skips 3 of 21 functions on m4f while m7dp is clean at
+      0 skips. The three externals are `__aeabi_f2lz`/`__aeabi_l2f`/`__aeabi_ul2f`,
+      resolved from stock arm-none-eabi libgcc with 0 undefined.
+
+      (The paragraph that stood here said this artifact stays `implemented`
+      until the fuse was run. The fuse has now been run and accepted — see
+      KILL-CRITERION DISCHARGED above — so that text has been removed rather
+      than left contradicting the status.)
     tags: [verification, falcon, oci, wasm, no-std, embedded, component-model, v1.133]
     fields:
       method: test
