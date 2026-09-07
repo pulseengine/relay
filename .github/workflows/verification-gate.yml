@@ -51,7 +51,24 @@ jobs:
     # 90 (was 60): a legit full sweep measured 45m21s (2026-07-11) but a
     # loaded self-hosted runner tipped it to 61m and FALSE-CANCELLED green
     # Dependabot PRs (2026-07-21). Headroom, not a slower gate.
-    timeout-minutes: 90
+    #
+    # 150 (was 90, 2026-08-08): the sweep has grown into the ceiling AGAIN.
+    # Measured across one day: ~63m (#340, passed) up to >=90m (#344, KILLED at
+    # 1h30m21s), with #342 failing twice the same way. Variance now exceeds
+    # headroom, so a REQUIRED check was being decided by runner load rather
+    # than by whether anything is wrong. It also blocked the two PRs meant to
+    # improve this very gate.
+    #
+    # THIS IS A STOPGAP, and the third reactive bump in a row (60 -> 90 -> 150).
+    # The TREND is the problem: 45m in July, >=90m now. Raising the ceiling buys
+    # time; it does not address why the sweep grew, and shipping it alone just
+    # moves the cliff. Tracked in #350, where the next step is measuring the
+    # COMPILE-vs-TEST split on the runner: the sweep spans 64 crates with 29
+    # `--release` steps (two profile-wide compile sets), so compilation is the
+    # likely dominant cost. Note that converting whole-crate steps to named ones
+    # (#343 / #262) demonstrably will NOT close a 30-minute gap on its own —
+    # measured, the non-falcon-core offenders run in 0-5s.
+    timeout-minutes: 150
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
@@ -134,7 +151,7 @@ jobs:
       # before reaching the script).
       - name: Install cargo-llvm-cov
         if: steps.scope.outputs.run_full == 'true'
-        uses: taiki-e/install-action@v2.86.5
+        uses: taiki-e/install-action@v2.87.1
         with:
           tool: cargo-llvm-cov
 
@@ -198,6 +215,28 @@ jobs:
           python3 scripts/run-falcon-verification.py \
             --filter "$FILTER" \
             --markdown | tee verification-output.md
+
+          # A filter that matches NOTHING must not pass this gate.
+          #
+          # The script exits 0 on an empty match set — nothing ran, so nothing
+          # failed — which means a typo'd (or hostile) `Verify-Filter:` in the
+          # PR body silently green-lights a REQUIRED check while verifying
+          # zero artifacts. The body is attacker-controllable, so this is a
+          # gate-silencing vector, not just an ergonomic foot-gun: the
+          # injection risk was already handled above (env-bound, quoted), but
+          # the SEMANTIC trust of the filter was not.
+          #
+          # Caught empirically: `(has-tag "traceability")` reads perfectly
+          # plausible and matches 0 of the 195 sw-verification artifacts
+          # (the tag lives on sw-reqs, not verifications) — exit code 0.
+          if grep -qE '^# 0 artifact\(s\) matched' verification-output.md; then
+            # NB: keep this on ONE line. A backslash-continued string whose
+            # continuation starts at column 0 terminates the `run: |` block
+            # scalar and makes the whole workflow file INVALID YAML — which is
+            # how the first version of this guard broke its own gate.
+            echo "::error::Verify-Filter matched 0 verification artifacts — refusing to pass a gate that verified nothing. Fix the filter, or drop the override to use the default."
+            exit 1
+          fi
 
       - name: Upload verification output
         if: always() && steps.scope.outputs.run_full == 'true' 

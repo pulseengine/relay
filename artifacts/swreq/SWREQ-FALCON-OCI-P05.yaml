@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-OCI-P05
     type: sw-req
     title: "OCI-P05 — published components carry relocation metadata so meld can rebase them into a shared address space"
-    status: implemented
+    status: verified
     release: falcon-v1.134.0
     description: >
       Every published cascade component shall carry `linking` and `reloc.*`

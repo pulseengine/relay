@@ -1,0 +1,93 @@
+artifacts:
+  - id: FV-FALCON-REL-002
+    type: sw-verification
+    title: "REL-P02 — 2 of 10 bundled artifacts were signed but undescribed for 58 releases (v1.136)"
+    status: implemented
+    release: falcon-v1.136.0
+    description: >
+      Verification of SWREQ-FALCON-REL-P02.
+
+      (1) THE DEFECT, MEASURED ON THE PUBLISHED ARTIFACT — not on the script
+      that produces it. falcon-components-v1.135.tar.gz was downloaded from the
+      falcon-v1.135.0 release and unpacked:
+
+        files in the bundle                    13 (10 .wasm + .sha256 + 2 json)
+        entries in the signed SHA256SUMS       10
+        components declared in manifest.json    8
+        signed but UNDESCRIBED                  2
+
+          falcon-cascade-stream-composed-v1.135.wasm
+          falcon-cascade-stream-fused-v1.135.wasm
+
+      (2) THE ATTESTATION ITSELF IS SOUND — stated because the opposite was
+      briefly suspected and it matters which failure this is. Inside the
+      unpacked bundle:
+
+        $ shasum -a 256 -c SHA256SUMS
+        ./falcon-attitude-v1.135.wasm: OK
+        ... all 10 ...
+        exit 0
+
+      So SWREQ-RELAY-STREAM-P15 is genuinely satisfied: the stream artifacts
+      ARE bundled and ARE covered by the cosign signature. Nothing about the
+      signing path is broken. What drifted is the bundle's self-description.
+
+      A NOTE ON HOW THIS WAS NEARLY MIS-DIAGNOSED, kept because the correction
+      is the useful part. Listing the release assets through a name filter of
+      "wasm|SHA256|manifest" excludes falcon-components-v*.tar.gz, whose name
+      contains none of those. Checking "is each SHA256SUMS entry a release
+      asset?" against that already-filtered list then reported 9 of 10 MISSING
+      and looked like a serious release defect — a signed manifest of files
+      nobody could resolve. The tarball was there the whole time. The filter was
+      applied twice and the second use inherited the first one's blind spot. The
+      real defect is smaller and different in kind, and was only visible after
+      unpacking the actual published artifact.
+
+      (3) THE FIX. manifest.json now describes all bundled .wasm with an explicit
+      `kind` — `flight-component` for the eight cargo-component stages,
+      `p3-stream-artifact` for the two bazel-built stream variants — so
+      distinguishing `falcon-cascade-v*.wasm` from
+      `falcon-cascade-stream-fused-v*.wasm` is a field lookup rather than a
+      guess from the filename.
+
+      (4) THE DRIFT GUARD, tested in BOTH directions. build-components.sh now
+      fails the build if any SHA256SUMS entry is undeclared:
+
+        negative — manifest omitting a signed file (i.e. the exact v1.135 state):
+          ERROR: signed by SHA256SUMS but undescribed in manifest.json:
+                 falcon-cascade-stream-fused-v1.136.wasm     exit 1
+        positive — both described:
+          manifest/SHA256SUMS agree on every bundled artifact  exit 0
+
+      The negative case is the published v1.135 shape reproduced deliberately,
+      so the guard is known to catch the bug that motivated it rather than only
+      known to pass on a clean tree.
+
+      WHY NOT REMOVE THE STREAM ARTIFACTS, which was the originally agreed fix.
+      Removal would contradict SWREQ-RELAY-STREAM-P15, whose text requires them
+      to be bundled and cosign-attested, and would falsify FV-RELAY-STREAM-015.
+      It also would not answer the question actually being asked on #202 — which
+      is "what IS this file", not "why is it here". Describing costs nothing and
+      drops no attestation.
+
+      HONEST SCOPE: verified against the falcon-v1.135.0 published bundle and
+      against the guard's own negative case. The v1.136 release run is what
+      exercises the new manifest end to end; this artifact stays `implemented`
+      until that bundle is pulled and re-inspected.
+
+      FALSIFICATION: wrong if a release ships a bundle whose signed SHA256SUMS
+      covers a file manifest.json does not list.
+    tags: [verification, falcon, release, bundle, attestation, manifest, v1.136]
+    fields:
+      method: automated-test
+      steps:
+        # The manifest emits `kind` for both classes.
+        - run: "grep -q 'p3-stream-artifact' scripts/build-components.sh"
+        - run: "grep -q 'flight-component' scripts/build-components.sh"
+        # The drift guard exists and is not commented out.
+        - run: "grep -q 'undescribed in manifest.json' scripts/build-components.sh"
+        # The script still parses.
+        - run: "bash -n scripts/build-components.sh"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-REL-P02

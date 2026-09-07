@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-OCI-004
     type: sw-verification
     title: "OCI-P05 — components are built with --emit-relocs and carry linking/reloc.* sections (v1.134)"
-    status: implemented
+    status: verified
     release: falcon-v1.134.0
     description: >
       Verification of SWREQ-FALCON-OCI-P05.
@@ -68,13 +68,42 @@ artifacts:
       falcon-hello native binary), so the reloc sections survive to publication.
       That was worth verifying — a strip step would have silently undone this.
 
-      SCOPE (honest): (a) and (b) show the components now CARRY relocation
-      metadata. They do NOT show that meld accepts the fused cascade. That is
-      OCI-P05's kill-criterion, it is owned by gale/meld, and it is the reason
-      this artifact stays `implemented`. The v1.133 cycle is the cautionary
-      precedent: byte-level evidence looked complete and the fuse still rejected
-      for an entirely different reason. A third blocker is possible and would be
-      a finding, not a surprise.
+      KILL-CRITERION DISCHARGED (jess, 2026-09-02, issue #202). The fused
+      five-stage cascade was fused, validated and lowered:
+
+        strategy                          meld  validate  m7dp lowering
+        --memory shared --address-rebase  OK    OK        exit 0, 5/5 stages
+        --memory shared --pack-rebase     OK    OK        exit 0, 5/5 stages
+        --pack-rebase --share-stack       OK    OK        exit 0, 5/5 stages
+        --memory multi                    OK    OK        exit 1, 0/5
+
+      Confirmed on relay v1.134.1 AND v1.135.0 (10/10 published digests verified
+      before use). Fused image 65,410 B; after loom 61,762 B, sha256
+      ab135ac1a010770b. Tools: meld 0.52.0, loom 1.4.0, synth 0.60.0, varve-pinned
+      and drift-checked before quoting.
+
+      The FIVE are five DISTINCT stages, checked explicitly rather than by a
+      count that would pass either way: falcon-cascade/{attitude,ekf,mixer,
+      position,rate}.
+
+      A CORRECTION IN THE EVIDENCE ITSELF, worth recording. jess first reported
+      "lowers 5/5 through meld -> loom -> synth", which reads as this criterion
+      being met. Asked which rebase flag, the answer was `--pack-rebase` — NOT
+      the `--address-rebase` this criterion names. jess then ran the named flag,
+      and it passed. So the discharge rests on the flag the requirement actually
+      specifies, not on a compatible-sounding neighbour.
+
+      QUALIFICATION: m4f reaches 5/5 only via the embedder-contract path
+      (`--relocatable --embedder-data-init --embedder-global-init`); the
+      self-contained build skips 3 of 21 functions on m4f while m7dp is clean at
+      0 skips. The three externals are `__aeabi_f2lz`/`__aeabi_l2f`/`__aeabi_ul2f`,
+      resolved from stock arm-none-eabi libgcc with 0 undefined.
+
+      SCOPE (honest): (a) and (b) show the components CARRY relocation
+      metadata; the kill-criterion above is what shows a consumer can USE it.
+      Both halves are now evidenced. What is still NOT evidenced is execution
+      of the lowered image under load — see FV-FALCON-OCI-005, which stays
+      `implemented` for exactly that reason.
     tags: [verification, falcon, oci, wasm, meld, relocation, embedded, v1.134]
     fields:
       method: test
