@@ -156,9 +156,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # bazel is absent here, so build-components.sh skips the P3 stream
-          # artifacts with a warning — the eight cargo-component ones, which are
-          # what compose into the cascade, all build.
+          # build-components.sh skips the P3 stream artifacts here: ubuntu-latest
+          # DOES ship bazelisk, but MODULE.bazel local_path_override's four
+          # sibling rules_* repos which are not checked out on a runner, so the
+          # script's precondition (bazel AND the siblings) is false. The eight
+          # cargo-component artifacts — the ones that compose into the cascade —
+          # all build.
           bash scripts/build-components.sh 1.137
           scripts/compose-cascade.sh dist/falcon-components-v1.137 /tmp/composed.wasm
           cd tests/cascade-sitl-wasm
