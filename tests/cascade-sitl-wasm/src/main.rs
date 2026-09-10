@@ -79,6 +79,7 @@ fn main() -> Result<()> {
     // Hold 2 m above the launch point. NED: down is negative up.
     let down: f32 = std::env::var("TARGET_DOWN").ok().and_then(|v| v.parse().ok()).unwrap_or(-2.0);
     let target = Waypoint { north: 0.0, east: 0.0, down, yaw: 0.0 };
+    let noise: f32 = std::env::var("IMU_NOISE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let mut plant = MockPhysics::at_rest();
 
     println!("=== wasm cascade in the SITL loop ===");
@@ -90,7 +91,7 @@ fn main() -> Result<()> {
 
     let mut peak_tilt = 0.0f32;
     for _ in 0..ticks {
-        let (s, _true_pos) = plant.measure(0.0);
+        let (s, _true_pos) = plant.measure(noise);
         let imu = WitImu {
             ax: s.accel_body[0], ay: s.accel_body[1], az: s.accel_body[2],
             gx: s.gyro_body[0],  gy: s.gyro_body[1],  gz: s.gyro_body[2],
@@ -124,22 +125,37 @@ fn main() -> Result<()> {
     }
     println!("LOOP CLOSES: {ticks} ticks executed through the Component Model seam.");
 
-    // (2) Does it HOLD the commanded altitude? It does not, and the reason is
-    //     structural rather than a tuning problem, so this is reported as a
-    //     finding instead of being quietly tolerated by a loose threshold.
+    // (2) Does it HOLD the commanded altitude? The answer depends on the tick
+    //     rate, and that dependency is itself the first defect.
     //
-    //     The shipped WIT seam is `ekf.estimate: func(imu: imu-sample) ->
-    //     vehicle-state`. IMU ONLY. There is no interface on the published
-    //     cascade that accepts a position fix, a barometer, a magnetometer or a
-    //     heading — while the native `FlightBackend` this bench normally flies
-    //     supplies read_position, read_mag, read_heading and read_motor_rpm.
+    //     DEFECT 1 — the estimator hardcodes its integration step:
+    //         wasm/cm/iekf/src/lib.rs:  f.propagate(RImu { gyro, accel }, 0.001);
+    //     1 kHz, always. No interface lets a host declare its rate and the
+    //     component cannot detect one, so a host that is not exactly 1 kHz gets
+    //     a confidently wrong answer with no error:
+    //         1000 Hz -> 2.00 m   |err| 0.00     (what it assumes)
+    //          400 Hz -> 12.43 m  |err| 10.43
+    //          250 Hz -> 29.17 m  |err| 27.17
+    //     Pass dt=0.001 to see the component behave as designed; pass anything
+    //     else to see the bug.
     //
-    //     So altitude is unobservable across this seam: the estimator can only
-    //     dead-reckon the accelerometer, and the altitude loop chases an
-    //     estimate that drifts. Commanding a deeper target climbs FURTHER
-    //     (-2 m -> 12.4 m, -5 m -> 29.9 m), which is the signature of a loop
-    //     responding to its setpoint while its feedback diverges — not of a
-    //     controller ignoring the command.
+    //     DEFECT 2 — IMU-only. `ekf.estimate: func(imu) -> vehicle-state` takes
+    //     no position fix, baro, mag or heading, while the native FlightBackend
+    //     supplies all four. At 1 kHz this survives a quiet plant and fails
+    //     hard once the accelerometer is realistically noisy (IMU_NOISE, m/s^2):
+    //         0.00 -> 2.00 m      0.01 -> 2.01 m
+    //         0.05 -> 2.01 m      0.20 -> -121.46 m   (dead reckoning gone)
+    //     So the seam gap costs nothing in a noiseless bench and everything on
+    //     a real MEMS IMU. That is why a quiet PASS here is not evidence of
+    //     flightworthiness.
+    //
+    //     A NOTE ON HOW THIS WAS FIRST MIS-DIAGNOSED, kept because the mistake
+    //     is instructive: the 29 m divergence was originally attributed to
+    //     DEFECT 2 on the strength of reading the WIT. The structural argument
+    //     was correct and the attribution was wrong — it was DEFECT 1 all
+    //     along, eleven lines into the component being tested. An explanation
+    //     that fits the symptom is not the same as the one that caused it;
+    //     vary the parameter and watch the number move.
     let want = -down;
     let err = (alt - want).abs();
     println!("HOLD ERROR : commanded {want:.2} m, reached {alt:.2} m  (|err| = {err:.2} m)");
