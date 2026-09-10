@@ -1,0 +1,185 @@
+name: Gazebo
+
+# Gazebo has NEVER run in CI. Every gz result this repo carries — hover, the
+# Monte-Carlo campaigns, rotor-out recovery, touchdown — was produced on a
+# developer machine and committed as bench-evidence. Nothing re-derived any of
+# it, so a change that broke the gz bridge would surface whenever someone next
+# ran it by hand, which for the flight-critical paths could be a long time.
+#
+# It also unblocks the wasm x Gazebo pairing (#384): gz-transport cross-process
+# discovery does not work on the macOS dev box (`gz topic -l` returns nothing
+# while the server runs), and chasing that is a worse use of time than running
+# it where it demonstrably works.
+#
+# Ubuntu-hosted rather than the self-hosted fleet: this needs apt + the OSRF
+# repo, and the fleet's rust-cpu boxes are for the heavy Rust gates.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'examples/falcon-sitl-gz/**'
+      - 'tests/cascade-sitl-wasm/**'
+      - 'crates/falcon-core/**'
+      - 'crates/relay-iekf/**'
+      - 'wasm/cm/**'
+      - 'wit/falcon-cascade/**'
+      - '.github/workflows/gazebo.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: gazebo-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # NOT a required status check yet, deliberately, and this is a decision with a
+  # deadline rather than an omission. Nobody has ever flown the published wasm
+  # components through a physics engine, so whether the last step passes is
+  # genuinely unknown — making it required before the first run would be
+  # asserting an outcome instead of measuring one.
+  #
+  # But a non-required check that fails is invisible (SWREQ-RELAY-VGATE-P03 was
+  # written after `Verus` sat red for twelve days unnoticed for exactly that
+  # reason). So: read the FIRST run on main, then either promote this to a
+  # required context or record why not. Tracked in #384.
+  gazebo:
+    name: Gazebo SITL (real gz bridge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      # Gazebo Harmonic from the OSRF apt repo. Pinned to the keyring rather
+      # than apt-key (deprecated) and to ubuntu-stable for the runner's codename.
+      - name: Install Gazebo Harmonic
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lsb-release gnupg curl
+          sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
+            -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/gazebo-stable.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y gz-harmonic
+          gz sim --versions || true
+          pkg-config --modversion gz-transport13
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      # build-components.sh drives cargo-component; compose-cascade.sh drives
+      # wac. Neither is on a hosted runner. install-action serves prebuilt
+      # binaries, so this is seconds rather than a source build of both.
+      - name: Install cargo-component + wac
+        uses: taiki-e/install-action@v2.87.6
+        with:
+          tool: cargo-component,wac-cli
+
+      - name: Build the SITL bench with the real bridge
+        shell: bash
+        run: cargo build --release -p falcon-sitl-gz --features gazebo
+
+      # ── The world must actually come up ──────────────────────────────────
+      # A gz gate that "passes" because nothing connected is worse than no
+      # gate: it reports green having simulated nothing. So the server is
+      # started, and the topics the bridge SUBSCRIBES TO are asserted present
+      # before any scenario runs. This is the same empty-scope-must-not-pass
+      # rule the verification gate learned in #342.
+      - name: Start gz server and assert the world is publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gz sim -s -r -v2 examples/falcon-sitl-gz/worlds/falcon-quad.sdf \
+            > /tmp/gz-server.log 2>&1 &
+          echo $! > /tmp/gz.pid
+
+          # Wait for the IMU topic specifically — the one the estimator needs.
+          IMU=/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+          for i in $(seq 1 60); do
+            if gz topic -l 2>/dev/null | grep -qx "$IMU"; then break; fi
+            sleep 2
+          done
+
+          echo "== topics =="
+          gz topic -l 2>/dev/null | sort | tee /tmp/gz-topics.txt
+
+          MISSING=0
+          for t in \
+            "$IMU" \
+            "/world/falcon/model/quad/link/base_link/sensor/navsat_sensor/navsat" \
+            "/model/quad/odometry" \
+            "/quad/command/motor_speed"; do
+            if grep -qx "$t" /tmp/gz-topics.txt; then
+              echo "  present: $t"
+            else
+              echo "::error::gz topic MISSING: $t"; MISSING=1
+            fi
+          done
+          if [ "$MISSING" != "0" ]; then
+            echo "::error::the world is not publishing what the bridge subscribes to — refusing to report a green gz run"
+            sed -n '1,60p' /tmp/gz-server.log
+            exit 1
+          fi
+
+          # A live IMU sample, not merely an advertised name: a topic can exist
+          # with nothing ever published on it.
+          timeout 20 gz topic -e -t "$IMU" -n 1 > /tmp/gz-imu-sample.txt || true
+          if [ ! -s /tmp/gz-imu-sample.txt ]; then
+            echo "::error::IMU topic advertised but produced no sample in 20s"
+            exit 1
+          fi
+          echo "== one IMU sample =="; head -20 /tmp/gz-imu-sample.txt
+
+      - name: Native cascade through the real bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./target/release/falcon-sitl-gz \
+            --backend=gazebo --scenario=flightcore --duration=10 \
+            | tee /tmp/native-gz.txt
+          grep -q 'PASS' /tmp/native-gz.txt || { echo "::error::native flightcore did not PASS on gz"; exit 1; }
+
+      # ── The point of the exercise (#380, #384) ───────────────────────────
+      # Fly the SHIPPED wasm components through the SAME world the native
+      # cascade just flew. Until this runs, "the wasm cascade flies" rests on
+      # MockPhysics — an analytic plant, not a physics engine.
+      - name: Compose the published cascade and fly it through gz
+        shell: bash
+        run: |
+          set -euo pipefail
+          # bazel is absent here, so build-components.sh skips the P3 stream
+          # artifacts with a warning — the eight cargo-component ones, which are
+          # what compose into the cascade, all build.
+          bash scripts/build-components.sh 1.137
+          scripts/compose-cascade.sh dist/falcon-components-v1.137 /tmp/composed.wasm
+          cd tests/cascade-sitl-wasm
+          cargo build --release --features gazebo
+          BACKEND=gazebo ./target/release/cascade-sitl-wasm /tmp/composed.wasm 2500 0.004 \
+            | tee /tmp/wasm-gz.txt
+
+      - name: Stop gz
+        if: always()
+        shell: bash
+        run: kill "$(cat /tmp/gz.pid)" 2>/dev/null || true; pkill -f 'gz sim' || true
+
+      - name: Upload gz evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gazebo-evidence
+          path: |
+            /tmp/gz-server.log
+            /tmp/gz-topics.txt
+            /tmp/gz-imu-sample.txt
+            /tmp/native-gz.txt
+            /tmp/wasm-gz.txt
+          if-no-files-found: warn
