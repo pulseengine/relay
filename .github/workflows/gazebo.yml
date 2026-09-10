@@ -156,6 +156,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The wasm leg needs two things that arrive with PR #381 (the harness
+          # + scripts/compose-cascade.sh). Until that lands this step announces
+          # its own absence rather than silently doing nothing — a skipped leg
+          # that looks like a passed leg is exactly the failure mode this
+          # workflow's topic guard exists to prevent, one level up.
+          if [ ! -x scripts/compose-cascade.sh ] || [ ! -d tests/cascade-sitl-wasm ]; then
+            echo "::warning::wasm leg SKIPPED — scripts/compose-cascade.sh and/or tests/cascade-sitl-wasm not on this branch (they land with PR #381). The native leg above still gated; the wasm x Gazebo pairing (#380/#384) is NOT covered by this run."
+            echo "wasm leg skipped: harness not present on this branch" > /tmp/wasm-gz.txt
+            exit 0
+          fi
+
           # build-components.sh skips the P3 stream artifacts here: ubuntu-latest
           # DOES ship bazelisk, but MODULE.bazel local_path_override's four
           # sibling rules_* repos which are not checked out on a runner, so the
