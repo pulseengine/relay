@@ -259,15 +259,34 @@ def untraced_kani_engines() -> tuple[list[str], list[tuple[str, str]]]:
     return (fails, waived)
 
 
-def rivet_list(filter_expr: str, artifact_type: str) -> list[str]:
-    out = subprocess.check_output([
-        "rivet", "list",
-        "--type", artifact_type,
-        "--filter", filter_expr,
-        "--format", "json",
-    ])
-    data = json.loads(out)
-    return [a["id"] for a in data["artifacts"]]
+def rivet_list(filter_expr: str, artifact_types: str) -> list[str]:
+    """Artifact ids matching the filter, across EVERY requested type.
+
+    `artifact_types` is comma-separated because the default used to be the bare
+    string "sw-verification" — and that single word was a scope hole nobody had
+    looked at. Measured before this changed: 36 `sys-verification` and 38
+    `unit-verification` artifacts carrying 97 steps, 15% of all recorded
+    verification steps, were invisible to EVERY gate run. Among them were 32 of
+    the 36 artifacts citing a Verus proof.
+
+    That is the same shape as the tag-filter holes (#342's zero-match, #375's
+    never-run `gh`/`cosign` steps, #377's never-run crosswalk) on a different
+    axis: the gate was sweeping a subset and reporting as though it had swept
+    the whole tree. Ordering is preserved and duplicates dropped so a type
+    listed twice cannot double-run a step.
+    """
+    seen: list[str] = []
+    for t in [x.strip() for x in artifact_types.split(",") if x.strip()]:
+        out = subprocess.check_output([
+            "rivet", "list",
+            "--type", t,
+            "--filter", filter_expr,
+            "--format", "json",
+        ])
+        for a in json.loads(out)["artifacts"]:
+            if a["id"] not in seen:
+                seen.append(a["id"])
+    return seen
 
 
 def rivet_get(artifact_id: str) -> dict[str, Any]:
@@ -596,9 +615,10 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--filter", default='(has-tag "falcon")',
                    help='rivet S-expression filter (default: falcon-tagged)')
-    p.add_argument("--type", default="sw-verification",
-                   help='rivet artifact type (default: sw-verification — '
-                        'matches every FV-FALCON-*.yaml)')
+    p.add_argument("--type", default="sw-verification,sys-verification,unit-verification",
+                   help='comma-separated rivet artifact types. Default sweeps ALL '
+                        'THREE verification types; the previous sw-verification-only '
+                        'default left 97 steps (15%%) unexecuted in every run.')
     p.add_argument("--dry-run", action="store_true",
                    help="print commands without executing")
     p.add_argument("--markdown", action="store_true",
