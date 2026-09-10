@@ -1,0 +1,21 @@
+[package]
+name = "cascade-sitl-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone workspace, exactly like tests/rate-loop-proof: this pulls
+# wasmtime, which must not enter the main workspace's dependency graph.
+[workspace]
+
+[features]
+# Declared only so the `#[cfg(feature = "gazebo")]` blocks inside the included
+# physics.rs are a known-false cfg rather than an unexpected one. Never enabled
+# here: this harness flies MockPhysics, not the gz bridge.
+gazebo = []
+
+[dependencies]
+wasmtime = { version = "41", features = ["component-model"] }
+anyhow = "1"
+libm = "0.2"
+relay-ekf = { path = "../../crates/relay-ekf" }
