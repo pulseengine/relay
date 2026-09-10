@@ -222,11 +222,23 @@ jobs:
           set -euo pipefail
           pkill -f 'gz sim' 2>/dev/null || true
           sleep 2
+          # `flightcore` — the scenario that actually holds station, and the
+          # same one the native leg above gates on. The first attempt recorded
+          # `hover`, which diverged to 17.38 m with framed=0: honest footage of
+          # a scenario that does not pass, which is not what anyone wants to
+          # watch to see whether the flight works.
           xvfb-run -a examples/falcon-sitl-gz/scripts/record_headless.sh \
-            markers hover 20 2>&1 | tee /tmp/record.log
-          MP4=$(find /tmp examples/falcon-sitl-gz -maxdepth 3 -name '*.mp4' -newermt '-30 minutes' 2>/dev/null | head -1)
+            markers flightcore 20 2>&1 | tee /tmp/record.log
+
+          # Take the path the script ITSELF reports rather than guessing with
+          # find. The first attempt searched /tmp and examples/ by mtime while
+          # the script writes to bench-evidence/gz-sim/recordings/ — so a
+          # perfectly good 527-frame recording was produced and then declared
+          # missing.
+          MP4=$(sed -n 's/^== done -> \(.*\) ==$/\1/p' /tmp/record.log | tail -1)
           if [ -z "$MP4" ] || [ ! -s "$MP4" ]; then
             echo "::error::no video produced — see /tmp/record.log"
+            tail -30 /tmp/record.log
             exit 1
           fi
           mkdir -p /tmp/gz-video
