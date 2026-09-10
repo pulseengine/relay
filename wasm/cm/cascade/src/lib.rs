@@ -37,14 +37,14 @@ mod bindings;
 // interfaces live at the bindings root.
 use bindings::exports::pulseengine::falcon_cascade::controller::Guest;
 use bindings::pulseengine::falcon_cascade::{attitude, ekf, mixer, position, rate};
-use bindings::pulseengine::falcon_cascade::types::{ImuSample, MotorPwm, Waypoint};
+use bindings::pulseengine::falcon_cascade::types::{SensorFrame, MotorPwm, Waypoint};
 
 struct Component;
 
 impl Guest for Component {
-    fn step(imu: ImuSample, target: Waypoint) -> MotorPwm {
+    fn step(sensors: SensorFrame, target: Waypoint) -> MotorPwm {
         // 1. State estimation.
-        let state = ekf::estimate(imu);
+        let state = ekf::estimate(sensors);
         // 2. Outer position loop → attitude setpoint.
         let att_sp = position::tick(state, target);
         // 3. Attitude loop → rate setpoint.

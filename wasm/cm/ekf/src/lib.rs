@@ -26,29 +26,40 @@ struct SingleThreaded<T>(RefCell<T>);
 unsafe impl<T> Sync for SingleThreaded<T> {}
 
 use bindings::exports::pulseengine::falcon_cascade::ekf::Guest;
-use bindings::pulseengine::falcon_cascade::types::{ImuSample, VehicleState};
+use bindings::pulseengine::falcon_cascade::types::{SensorFrame, VehicleState};
 
 use relay_ekf::{Ekf, ImuSample as RImu, Timestamp};
 
 static EKF: SingleThreaded<Ekf> = SingleThreaded(RefCell::new(Ekf::new()));
-/// Monotonic millisecond counter — the cascade runs at 1 kHz.
-static TICK_MS: SingleThreaded<u64> = SingleThreaded(RefCell::new(0));
+/// Monotonic nanosecond counter, advanced by the HOST's period.
+///
+/// v0.7 advanced this by exactly 1 ms per call — "the cascade runs at 1 kHz" —
+/// which is the same defect the iekf component carried: a host ticking at any
+/// other rate got a timeline that ran fast or slow, silently. Nanoseconds
+/// rather than milliseconds because a 250 Hz host is 4 ms and a 400 Hz host is
+/// 2.5 ms; integer-millisecond accumulation truncates the latter to 2 ms and
+/// drifts 20% per tick.
+static TICK_NS: SingleThreaded<u64> = SingleThreaded(RefCell::new(0));
 
-fn next_timestamp() -> Timestamp {
-    let ms = *TICK_MS.0.borrow();
-    *TICK_MS.0.borrow_mut() = ms + 1;
+fn advance_timestamp(dt_s: f32) -> Timestamp {
+    // Same clamp as the iekf component: [0.1 ms, 100 ms], non-finite falls back
+    // to the v0.7 constant.
+    let dt = if dt_s.is_finite() { dt_s.clamp(0.0001, 0.1) } else { 0.001 };
+    let ns = *TICK_NS.0.borrow();
+    *TICK_NS.0.borrow_mut() = ns + (dt as f64 * 1e9) as u64;
     Timestamp {
-        seconds: ms / 1000,
-        fraction: ((ms % 1000) * (1u64 << 32) / 1000) as u32,
+        seconds: ns / 1_000_000_000,
+        fraction: (((ns % 1_000_000_000) as u128 * (1u128 << 32)) / 1_000_000_000) as u32,
     }
 }
 
 struct Component;
 
 impl Guest for Component {
-    fn estimate(imu: ImuSample) -> VehicleState {
+    fn estimate(sensors: SensorFrame) -> VehicleState {
+        let imu = sensors.imu;
         let sample = RImu {
-            time: next_timestamp(),
+            time: advance_timestamp(sensors.dt_s),
             accel_body: [imu.ax, imu.ay, imu.az],
             gyro_body: [imu.gx, imu.gy, imu.gz],
         };

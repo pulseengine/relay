@@ -43,13 +43,13 @@ wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.7.0;
+            export pulseengine:falcon-cascade/controller@0.8.0;
         }
     "#,
     path: "../../wit/falcon-cascade",
 });
 
-use pulseengine::falcon_cascade::types::{ImuSample as WitImu, Waypoint};
+use pulseengine::falcon_cascade::types::{ImuSample as WitImu, SensorFrame, Vec3, Waypoint};
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -87,18 +87,44 @@ fn main() -> Result<()> {
     println!("plant     : MockPhysics (the same module falcon-sitl-gz flies)");
     println!("target    : hold N=0 E=0 D={down} m, yaw 0");
     println!("schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)", ticks as f32 * dt, 1.0 / dt);
+    println!("imu noise : {noise} m/s^2");
     println!();
 
+    // GNSS divisor: a fix every `gnss_div` ticks. 5 Hz at any rate, matching
+    // the native bench's `SitlBackend::new(physics, dt, noise, 50)` at 250 Hz.
+    // Set GNSS_DIV=0 to withhold position entirely and reproduce the v0.7
+    // IMU-only behaviour through the v0.8 interface.
+    let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| ((1.0 / dt) / 5.0).round().max(1.0) as u32);
+
     let mut peak_tilt = 0.0f32;
-    for _ in 0..ticks {
-        let (s, _true_pos) = plant.measure(noise);
+    let mut fixes = 0u32;
+    for tick in 0..ticks {
+        let (s, true_pos) = plant.measure(noise);
         let imu = WitImu {
             ax: s.accel_body[0], ay: s.accel_body[1], az: s.accel_body[2],
             gx: s.gyro_body[0],  gy: s.gyro_body[1],  gz: s.gyro_body[2],
         };
+        // v0.8: the host now states its own period and offers what it has.
+        // MockPhysics has no magnetometer and no heading reference (the gz
+        // bridge supplies both), so those stay `none` here — which is the
+        // honest frame for this plant rather than a synthesised one.
+        let position_ned = if gnss_div > 0 && tick % gnss_div == 0 {
+            fixes += 1;
+            Some(Vec3 { x: true_pos[0], y: true_pos[1], z: true_pos[2] })
+        } else {
+            None
+        };
+        let frame = SensorFrame {
+            imu,
+            dt_s: dt,
+            position_ned,
+            mag_body: None,
+            heading_rad: None,
+        };
         // The tick that matters: one full estimate -> position -> attitude ->
         // rate -> mixer pass, executed inside the wasm component.
-        let m = controller.call_step(&mut store, imu, target)?;
+        let m = controller.call_step(&mut store, frame, target)?;
         let tilt = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
         peak_tilt = peak_tilt.max(tilt);
         plant.step([m.m1, m.m2, m.m3, m.m4], dt);
@@ -110,6 +136,7 @@ fn main() -> Result<()> {
     println!("final NED  : n={:.3} e={:.3} d={:.3}  (altitude {:.3} m)", p[0], p[1], p[2], alt);
     println!("horizontal : {horiz:.3} m from launch");
     println!("peak |a_xy|: {peak_tilt:.3} m/s^2");
+    println!("gnss fixes : {fixes} (every {gnss_div} ticks = {:.1} Hz)", if gnss_div > 0 { 1.0 / (dt * gnss_div as f32) } else { 0.0 });
     println!();
 
     // TWO SEPARATE VERDICTS, because they have different answers and merging

@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.7.0;
+package pulseengine:falcon-cascade@0.8.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -58,12 +58,56 @@ interface types {
     record waypoint {
         north: f32, east: f32, down: f32, yaw: f32,
     }
+
+    /// A 3-vector; the frame is named by the field that uses it.
+    record vec3 {
+        x: f32, y: f32, z: f32,
+    }
+
+    /// Everything the estimator needs for ONE tick.
+    ///
+    /// v0.8 replaces the bare `imu-sample` argument, because v0.7 could not
+    /// express either of two things a host must be able to say. Both were
+    /// found by actually driving the published components from a host
+    /// (tests/cascade-sitl-wasm) rather than by reading the interface.
+    ///
+    /// `dt-s` — the host's ACTUAL control period. v0.7 had no way to state it,
+    /// so the estimator hardcoded 1 kHz; an off-rate host got a confidently
+    /// wrong answer and no error at all. Measured against the SITL plant:
+    ///     1000 Hz -> 0.00 m altitude error   (what it assumed)
+    ///      400 Hz -> 10.43 m
+    ///      250 Hz -> 27.17 m
+    ///
+    /// The optional aiding measurements — v0.7 took the IMU alone, so position
+    /// was observable only by dead reckoning. Same plant, same IMU noise of
+    /// 0.2 m/s^2: the native cascade (GNSS @5 Hz + mag + heading) held 0.39 m
+    /// while the IMU-only wasm cascade inverted to -121 m.
+    ///
+    /// Every aiding field is `option<>`, and `none` reproduces v0.7 behaviour
+    /// exactly — an IMU-only host stays valid, it just inherits the drift.
+    ///
+    /// Measurement variances are deliberately NOT in this record: they are
+    /// tuned per-vehicle and live with the estimator, not with the host that
+    /// happens to own the sensor driver.
+    record sensor-frame {
+        imu: imu-sample,
+        dt-s: f32,
+        /// NED position fix (m) — GNSS or equivalent. Fused when present.
+        position-ned: option<vec3>,
+        /// Body-frame magnetometer. Any consistent unit; normalised internally.
+        mag-body: option<vec3>,
+        /// Absolute heading (rad, NED). An alternative to `mag-body` for hosts
+        /// that already resolve yaw; both correct the same unobservable state.
+        heading-rad: option<f32>,
+    }
 }
 
 /// State estimator — wraps relay-ekf (Mahony complementary filter).
 interface ekf {
-    use types.{imu-sample, vehicle-state};
-    estimate: func(imu: imu-sample) -> vehicle-state;
+    use types.{sensor-frame, vehicle-state};
+    /// One estimator step: propagate over `dt-s`, then fuse whichever aiding
+    /// measurements the frame carries.
+    estimate: func(sensors: sensor-frame) -> vehicle-state;
 }
 
 /// Position controller — wraps relay-pos.
@@ -104,10 +148,11 @@ world mixer-component    { export mixer; }
 /// wit-bindgen export macro is generated the same, interface-shaped
 /// way the leaf components rely on.
 interface controller {
-    use types.{imu-sample, waypoint, motor-pwm};
+    use types.{sensor-frame, waypoint, motor-pwm};
     /// One full cascade pass: estimate → position → attitude → rate
-    /// → mixer.
-    step: func(imu: imu-sample, target: waypoint) -> motor-pwm;
+    /// → mixer. The frame carries the host's tick period and any aiding
+    /// measurements it has this tick.
+    step: func(sensors: sensor-frame, target: waypoint) -> motor-pwm;
 }
 
 /// Imports the five controller interfaces, exports `controller`.
