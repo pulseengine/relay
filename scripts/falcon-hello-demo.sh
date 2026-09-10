@@ -25,7 +25,39 @@ set -euo pipefail
 DURATION=${FALCON_HELLO_DURATION:-4}
 RATE=${FALCON_HELLO_RATE_HZ:-4}
 EXPECTED=${FALCON_HELLO_EXPECTED:-8}
-PORT_BASE=${FALCON_HELLO_PORT_BASE:-14700}
+# PORT BASE — probed, not fixed. A hardcoded 14700/14701 pair collides when two
+# jobs share a runner, and the gate runners are shared: PR #365's verification
+# gate failed with
+#     error: bind 127.0.0.1:14701: Address already in use (os error 98)
+#     FAIL: expected at least 8 heartbeats, got 0
+# on a run where nothing was wrong with the code. A REQUIRED check that fails on
+# a port race is a flake that reads exactly like a real regression, and this one
+# cost a full re-run to diagnose.
+#
+# An explicit FALCON_HELLO_PORT_BASE still wins, so a bench operator can pin it.
+pick_free_port_base() {
+  python3 - <<'PY'
+import random, socket
+def free(p):
+    for fam, addr in ((socket.AF_INET, ("127.0.0.1", p)),):
+        with socket.socket(fam, socket.SOCK_DGRAM) as s:
+            try:
+                s.bind(addr)
+            except OSError:
+                return False
+    return True
+# Ephemeral-adjacent but below the usual dynamic range, so we do not fight the
+# kernel's own allocator for the same numbers.
+for _ in range(64):
+    base = random.randrange(20000, 39000, 2)   # even base => base+1 is the pair
+    if free(base) and free(base + 1):
+        print(base)
+        break
+else:
+    print(14700)   # give up and use the historical default rather than fail
+PY
+}
+PORT_BASE=${FALCON_HELLO_PORT_BASE:-$(pick_free_port_base)}
 
 GCS_PORT=${PORT_BASE}
 VEH_PORT=$((PORT_BASE + 1))
