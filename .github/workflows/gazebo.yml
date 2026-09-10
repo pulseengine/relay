@@ -161,8 +161,8 @@ jobs:
           # its own absence rather than silently doing nothing — a skipped leg
           # that looks like a passed leg is exactly the failure mode this
           # workflow's topic guard exists to prevent, one level up.
-          if [ ! -x scripts/compose-cascade.sh ] || [ ! -d tests/cascade-sitl-wasm ]; then
-            echo "::warning::wasm leg SKIPPED — scripts/compose-cascade.sh and/or tests/cascade-sitl-wasm not on this branch (they land with PR #381). The native leg above still gated; the wasm x Gazebo pairing (#380/#384) is NOT covered by this run."
+          if [ ! -d tools/compose-cascade ] || [ ! -d tests/cascade-sitl-wasm ]; then
+            echo "::warning::wasm leg SKIPPED — tools/compose-cascade and/or tests/cascade-sitl-wasm not on this branch (they land with PR #381). The native leg above still gated; the wasm x Gazebo pairing (#380/#384) is NOT covered by this run."
             echo "wasm leg skipped: harness not present on this branch" > /tmp/wasm-gz.txt
             exit 0
           fi
@@ -174,7 +174,8 @@ jobs:
           # cargo-component artifacts — the ones that compose into the cascade —
           # all build.
           bash scripts/build-components.sh 1.137
-          scripts/compose-cascade.sh dist/falcon-components-v1.137 /tmp/composed.wasm
+          cargo run --release --manifest-path tools/compose-cascade/Cargo.toml -- \
+            dist/falcon-components-v1.137 /tmp/composed.wasm
           cd tests/cascade-sitl-wasm
           cargo build --release --features gazebo
           BACKEND=gazebo ./target/release/cascade-sitl-wasm /tmp/composed.wasm 2500 0.004 \
