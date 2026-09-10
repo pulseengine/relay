@@ -48,6 +48,23 @@ artifacts:
 
       This artifact therefore stays `implemented`. Criterion (d) is what would
       make it `verified`, and it is a measurement nobody has taken yet.
+
+      CORRECTION (2026-09-10, #388) — THIS BENCHMARK MEASURES THE WRONG CASCADE.
+      benches/cascade-throughput imports PosController, AttController and RatePid.
+      falcon-core does not depend on any of them: its controller deps are
+      relay-iekf, relay-adrc and relay-mix-quad, and it flies "IEKF -> geometric
+      SE(3) attitude -> ADRC torque -> mix". relay-adrc entered falcon-core on
+      2026-06-03 and this bench was written afterwards against the crates it had
+      already dropped.
+
+      So 1.2413 us/tick is a real, reproducible measurement of the LEGACY PID
+      cascade, not of the flight cascade this artifact's title claims. The
+      regression guard still guards something real; it guards the wrong thing.
+
+      Not silently rewritten: the number and the method were honestly obtained
+      and the error is in what they were said to be about. Re-pointing the bench
+      at falcon-core's actual controllers is tracked in #388, and the artifact
+      stays `implemented` — the claim it was promoted on does not hold.
     tags: [verification, falcon, performance, wcet, cascade, benchmark, v1.135]
     fields:
       method: test
