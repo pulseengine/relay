@@ -66,6 +66,21 @@ BENCH_PATTERNS = [
     # instead of per-author.
     re.compile(r"^\s*gh\s+(?:release|attestation)\s"),   # needs gh + a published release
     re.compile(r"^\s*cosign\s+(?:verify|verify-blob)\b"),  # needs cosign + published sigs
+    # The FOUR-TRACK CROSSWALK needs all four provers on one machine. The gate
+    # runner has none of them: its own output reads "cargo-kani not installed",
+    # "Verus : RUN ❌", "Rocq : RUN ❌" — 3 of 4 tracks cannot even start, and
+    # the Verus one additionally cannot work on linux at all until
+    # pulseengine/rules_verus#25 (the bundled sysroot lacks the target std).
+    #
+    # Each track has a DEDICATED workflow that is its real enforcer — the same
+    # arrangement as `cargo kani -p` (enforced-by-kani-gate) and `bazel test
+    # //:*_verus_test` (enforced-by-verus-gate). Running the crosswalk here only
+    # re-reports those workflows' failures through a second, worse channel.
+    #
+    # Surfaced by PR #377: this step had not been executed in recent memory
+    # because no PR's Verify-Filter selected FV-RELAY-VCHAIN-001, so a narrow
+    # filter revealed it exactly as #375's filter revealed FV-FALCON-RELEASE-001.
+    re.compile(r"^\s*(?:bash\s+|sh\s+|\./)?(?:scripts/)?verify-chain\.sh\b"),
     re.compile(r"\bcargo\s+\+nightly\s+miri\b"),      # miri nightly component
     re.compile(r"^\s*MIRIFLAGS="),                    # same family
     re.compile(r"\brustup\s+component\s+add\s+miri"), # same family
