@@ -60,6 +60,14 @@ fn main() -> Result<()> {
     let ticks: u32 = args.next().unwrap_or_else(|| "4000".into()).parse()?;
     let dt: f32 = args.next().unwrap_or_else(|| "0.0025".into()).parse()?;
 
+    // The dt the host DECLARES, which may differ from the dt it actually
+    // steps at. Defaults to the truth. Setting DECLARED_DT=0.001 while running
+    // at another rate reproduces the v0.7 defect exactly — v0.7's bug WAS
+    // "assume 0.001 regardless" — so a before/after can be produced from one
+    // binary and one component instead of comparing across builds.
+    let declared_dt: f32 = std::env::var("DECLARED_DT").ok()
+        .and_then(|v| v.parse().ok()).unwrap_or(dt);
+
     let mut cfg = Config::new();
     cfg.wasm_component_model(true);
     let engine = Engine::new(&cfg)?;
@@ -88,6 +96,9 @@ fn main() -> Result<()> {
     println!("target    : hold N=0 E=0 D={down} m, yaw 0");
     println!("schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)", ticks as f32 * dt, 1.0 / dt);
     println!("imu noise : {noise} m/s^2");
+    if (declared_dt - dt).abs() > f32::EPSILON {
+        println!("DECLARED  : {declared_dt}s  <-- deliberately WRONG (reproducing v0.7)");
+    }
     println!();
 
     // GNSS divisor: a fix every `gnss_div` ticks. 5 Hz at any rate, matching
@@ -96,6 +107,13 @@ fn main() -> Result<()> {
     // IMU-only behaviour through the v0.8 interface.
     let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|v| v.parse().ok())
         .unwrap_or_else(|| ((1.0 / dt) / 5.0).round().max(1.0) as u32);
+
+    // Optional per-tick trace for plotting: t_s,altitude_m,commanded_m
+    let mut trace = std::env::var("TRACE_CSV").ok().map(|f| {
+        let mut w = String::from("t_s,altitude_m,commanded_m\n");
+        w.reserve(ticks as usize * 24);
+        (f, w)
+    });
 
     let mut peak_tilt = 0.0f32;
     let mut fixes = 0u32;
@@ -117,7 +135,7 @@ fn main() -> Result<()> {
         };
         let frame = SensorFrame {
             imu,
-            dt_s: dt,
+            dt_s: declared_dt,
             position_ned,
             mag_body: None,
             heading_rad: None,
@@ -128,8 +146,16 @@ fn main() -> Result<()> {
         let tilt = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
         peak_tilt = peak_tilt.max(tilt);
         plant.step([m.m1, m.m2, m.m3, m.m4], dt);
+        if let Some((_, w)) = trace.as_mut() {
+            let (_s2, p) = plant.measure(0.0);
+            w.push_str(&format!("{:.4},{:.4},{:.4}\n", tick as f32 * dt, -p[2], -down));
+        }
     }
 
+    if let Some((f, w)) = trace.as_ref() {
+        std::fs::write(f, w).with_context(|| format!("writing trace {f}"))?;
+        println!("trace      : {f}");
+    }
     let (_s, p) = plant.measure(0.0);
     let alt = -p[2];
     let horiz = (p[0] * p[0] + p[1] * p[1]).sqrt();
