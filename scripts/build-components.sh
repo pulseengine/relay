@@ -247,7 +247,22 @@ build_component "cascade"      > /dev/null
 # to the bundle so the bundle SHA256SUMS (cosign-signed in release.yml) attests
 # them — closing the FV-RELAY-STREAM-014 gap (v1.77). The cascade CI job already
 # builds these targets, so a build failure here is loud, not silent.
-if command -v bazel >/dev/null 2>&1; then
+# PRECONDITION is not "bazel exists" — it is "bazel can RESOLVE this workspace".
+# MODULE.bazel local_path_override's four sibling rules_* repos, so on any
+# machine without them checked out beside relay, bazel is present and the build
+# fails at fetch:
+#     ERROR: An error occurred during the fetch of repository 'rules_verus+'
+# GitHub's ubuntu-latest ships bazelisk, so `command -v bazel` alone was true on
+# a runner that cannot possibly resolve the graph — the gazebo workflow (#386)
+# failed on exactly this after its comment asserted bazel would be absent.
+_stream_prereqs_ok() {
+  command -v bazel >/dev/null 2>&1 || return 1
+  for r in rules_verus rules_wasm_component rules_rocq_rust rules_lean; do
+    [ -d "$HERE/../$r" ] || return 1
+  done
+  return 0
+}
+if _stream_prereqs_ok; then
   echo "== building P3 stream artifacts (bazel) =="
   bazel build //:falcon-cascade-stream-composed //:falcon-cascade-stream-fused
   for tgt in falcon-cascade-stream-composed falcon-cascade-stream-fused; do
@@ -257,7 +272,7 @@ if command -v bazel >/dev/null 2>&1; then
     echo "  $tgt-v$MM.wasm  <-  $src"
   done
 else
-  echo "== WARNING: bazel not on PATH — P3 stream artifacts NOT bundled =="
+  echo "== WARNING: bazel or the sibling rules_* repos unavailable — P3 stream artifacts NOT bundled =="
 fi
 
 # Helper: artifact filename from dir name (strips leading "falcon-")
