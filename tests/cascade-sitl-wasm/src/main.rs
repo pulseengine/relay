@@ -31,6 +31,8 @@ mod physics;
 
 use anyhow::{bail, Context, Result};
 use physics::{MockPhysics, Physics};
+#[cfg(feature = "gazebo")]
+use physics::GazeboPhysics;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store};
 
@@ -88,11 +90,34 @@ fn main() -> Result<()> {
     let down: f32 = std::env::var("TARGET_DOWN").ok().and_then(|v| v.parse().ok()).unwrap_or(-2.0);
     let target = Waypoint { north: 0.0, east: 0.0, down, yaw: 0.0 };
     let noise: f32 = std::env::var("IMU_NOISE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
-    let mut plant = MockPhysics::at_rest();
+    // BACKEND. `mock` is the analytic plant every number in #380 came from;
+    // `gazebo` is the same real bridge the native bench flies, so a wasm result
+    // and a native result are comparable rather than merely adjacent.
+    let backend = std::env::var("BACKEND").unwrap_or_else(|_| "mock".into());
+    let mut boxed: Box<dyn Physics> = match backend.as_str() {
+        "mock" => Box::new(MockPhysics::at_rest()),
+        #[cfg(feature = "gazebo")]
+        "gazebo" => {
+            let world = std::env::var("GZ_WORLD").unwrap_or_else(|_| "falcon".into());
+            let model = std::env::var("GZ_MODEL").unwrap_or_else(|_| "quad".into());
+            match GazeboPhysics::connect(&world, &model) {
+                Some(p) => Box::new(p),
+                None => bail!(
+                    "could not connect to gz world '{world}' model '{model}'. Is `gz sim` \
+                     running with worlds/falcon-quad.sdf, and gz-transport13 on the \
+                     library path?"
+                ),
+            }
+        }
+        #[cfg(not(feature = "gazebo"))]
+        "gazebo" => bail!("rebuild with --features gazebo to use the real gz bridge"),
+        other => bail!("unknown BACKEND '{other}' (expected: mock | gazebo)"),
+    };
+    let plant = &mut *boxed;
 
     println!("=== wasm cascade in the SITL loop ===");
     println!("component : {wasm}");
-    println!("plant     : MockPhysics (the same module falcon-sitl-gz flies)");
+    println!("plant     : {} (BACKEND={backend})", plant.name());
     println!("target    : hold N=0 E=0 D={down} m, yaw 0");
     println!("schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)", ticks as f32 * dt, 1.0 / dt);
     println!("imu noise : {noise} m/s^2");
