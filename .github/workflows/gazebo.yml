@@ -76,13 +76,18 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
 
-      # build-components.sh drives cargo-component; tools/compose-cascade drives
+      # build-components.sh drives cargo-component; scripts/compose-cascade.rs drives
       # wac. Neither is on a hosted runner. install-action serves prebuilt
       # binaries, so this is seconds rather than a source build of both.
       - name: Install cargo-component + wac
         uses: taiki-e/install-action@v2.87.6
         with:
           tool: cargo-component,wac-cli
+
+      # scripts/*.rs are rust-script single-file tools (inline [dependencies]).
+      - name: Install rust-script
+        shell: bash
+        run: cargo install rust-script --locked
 
       - name: Build the SITL bench with the real bridge
         shell: bash
@@ -157,12 +162,12 @@ jobs:
         run: |
           set -euo pipefail
           # The wasm leg needs two things that arrive with PR #381 (the harness
-          # + tools/compose-cascade). Until that lands this step announces
+          # + scripts/compose-cascade.rs). Until that lands this step announces
           # its own absence rather than silently doing nothing — a skipped leg
           # that looks like a passed leg is exactly the failure mode this
           # workflow's topic guard exists to prevent, one level up.
-          if [ ! -d tools/compose-cascade ] || [ ! -d tests/cascade-sitl-wasm ]; then
-            echo "::warning::wasm leg SKIPPED — tools/compose-cascade and/or tests/cascade-sitl-wasm not on this branch (they land with PR #381). The native leg above still gated; the wasm x Gazebo pairing (#380/#384) is NOT covered by this run."
+          if [ ! -x scripts/compose-cascade.rs ] || [ ! -d tests/cascade-sitl-wasm ]; then
+            echo "::warning::wasm leg SKIPPED — scripts/compose-cascade.rs and/or tests/cascade-sitl-wasm not on this branch (they land with PR #381). The native leg above still gated; the wasm x Gazebo pairing (#380/#384) is NOT covered by this run."
             echo "wasm leg skipped: harness not present on this branch" > /tmp/wasm-gz.txt
             exit 0
           fi
@@ -174,8 +179,7 @@ jobs:
           # cargo-component artifacts — the ones that compose into the cascade —
           # all build.
           bash scripts/build-components.sh 1.137
-          cargo run --release --manifest-path tools/compose-cascade/Cargo.toml -- \
-            dist/falcon-components-v1.137 /tmp/composed.wasm
+          ./scripts/compose-cascade.rs dist/falcon-components-v1.137 /tmp/composed.wasm
           cd tests/cascade-sitl-wasm
           cargo build --release --features gazebo
           BACKEND=gazebo ./target/release/cascade-sitl-wasm /tmp/composed.wasm 2500 0.004 \
