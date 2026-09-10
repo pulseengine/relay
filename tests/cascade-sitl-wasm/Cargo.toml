@@ -19,3 +19,12 @@ wasmtime = { version = "41", features = ["component-model"] }
 anyhow = "1"
 libm = "0.2"
 relay-ekf = { path = "../../crates/relay-ekf" }
+
+# The NATIVE half of the differential test. These are the exact crates the wasm
+# stage components wrap, so running them in-process and through the Component
+# Model is the same code by two routes — which is the claim the demo makes.
+relay-iekf = { path = "../../crates/relay-iekf" }
+relay-pos = { path = "../../crates/relay-pos" }
+relay-att = { path = "../../crates/relay-att" }
+relay-rate = { path = "../../crates/relay-rate" }
+relay-mix-quad = { path = "../../crates/relay-mix-quad" }
