@@ -43,22 +43,27 @@ use physics::GazeboPhysics;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store};
 
-// The composed component's world is `import types; export controller` — it does
-// NOT import the five stage interfaces, because wac already satisfied them. The
-// repo's `cascade` world still declares those imports, so it cannot describe
-// this artifact. Declaring the host's own view inline keeps the generated WIT
-// untouched (it is spar-derived; hand-editing it would trip the drift gate).
+// Declaring the host's own view inline keeps this harness pinned to exactly the
+// surface it drives, independent of the other worlds in the package.
+//
+// (The comment that stood here said the WIT is spar-derived and hand-editing it
+// would trip the drift gate. That is false and was worth correcting rather than
+// deleting: spar.yml enumerates three roots — relay-transport, dronecan and
+// param — and falcon-cascade is not one of them. The claim would have deterred
+// exactly the seam change v0.9 needed.)
 wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.8.0;
+            export pulseengine:falcon-cascade/controller@0.9.0;
         }
     "#,
     path: "../../wit/falcon-cascade",
 });
 
-use pulseengine::falcon_cascade::types::{ImuSample as WitImu, SensorFrame, Vec3, Waypoint};
+use pulseengine::falcon_cascade::types::{
+    ImuSample as WitImu, SensorFrame, Vec3, VehicleConfig, Waypoint,
+};
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -121,6 +126,44 @@ fn main() -> Result<()> {
     println!("schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)", ticks as f32 * dt, 1.0 / dt);
     println!();
 
+    // ── VEHICLE CALIBRATION (v0.9 seam) ──────────────────────────────────
+    // These are the SAME numbers examples/falcon-sitl-gz installs on its own
+    // FlightCore, so "the wasm matches the native reference" is a statement
+    // about the control law rather than about two different tunings.
+    //
+    // Before this seam existed the component could fly nothing but its
+    // defaults, and on gz those defaults do not leave the ground: measured
+    // 1.91 m hold error with est_z -0.09 m, against 0.16 m for the tuned
+    // native run. hover-thrust is the dominant term — at 0.5 the airframe
+    // cannot lift and the altitude estimate diverges to -58.8 m.
+    //
+    // The mock plant deliberately gets ONLY its hover thrust: the native
+    // scenario applies its tuning under `if name != "mock"`, so mirroring it
+    // means leaving every other knob at the falcon-core default.
+    let gz = plant.name() != "mock";
+    let calib = VehicleConfig {
+        // mock hovers at ~0.49 (THRUST_SCALE 20 m/s² vs g); the gz falcon-quad
+        // at ~0.585 (ω_hover≈757 of maxRotVel 1000 through the √pwm map).
+        hover_thrust: if gz { 0.585 } else { 0.49 },
+        loop_rate_hz: 1.0 / dt,
+        pos_var: if gz { 0.25 } else { 0.01 },
+        process_floor_vel: if gz { 0.30 } else { 0.0 },
+        process_floor_pos: if gz { 0.05 } else { 0.0 },
+        altitude_kp: if gz { 0.15 } else { 0.05 },
+        altitude_kd: if gz { 1.00 } else { 0.30 },
+        altitude_ki: if gz { 0.03 } else { 0.0 },
+        // Not touched by the native scenario in either mode — so it must carry
+        // falcon-core's default (0.02), not 0.
+        position_ki: 0.02,
+    };
+    println!(
+        "calibration: hover={:.3} rate={:.0}Hz pos_var={:.2} alt=({:.2},{:.2},{:.2})",
+        calib.hover_thrust, calib.loop_rate_hz, calib.pos_var,
+        calib.altitude_kp, calib.altitude_kd, calib.altitude_ki
+    );
+    controller.call_configure(&mut store, calib)?;
+    println!();
+
     let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|v| v.parse().ok())
         .unwrap_or_else(|| ((1.0 / dt) / 5.0).round().max(1.0) as u32);
     let mut fixes = 0u32;
@@ -131,7 +174,23 @@ fn main() -> Result<()> {
     // agree, and if it does not, the Component Model is not transparent.
     let mut differential = std::env::var("DIFFERENTIAL")
         .ok().filter(|v| v != "0")
-        .map(|_| (native_mirror::NativeCascade::new(), 0.0f32, 0u32));
+        .map(|_| {
+            let mut n = native_mirror::NativeCascade::new();
+            // Derived from the SAME `calib` the component was given, so the two
+            // sides cannot drift apart by someone editing one literal.
+            n.configure(native_mirror::Calib {
+                hover_thrust: calib.hover_thrust,
+                loop_rate_hz: calib.loop_rate_hz,
+                pos_var: calib.pos_var,
+                process_floor_vel: calib.process_floor_vel,
+                process_floor_pos: calib.process_floor_pos,
+                altitude_kp: calib.altitude_kp,
+                altitude_kd: calib.altitude_kd,
+                altitude_ki: calib.altitude_ki,
+                position_ki: calib.position_ki,
+            });
+            (n, 0.0f32, 0u32)
+        });
 
     // ── PACING (found by cpetig) ──────────────────────────────────────────
     // The loop had NONE. measure() -> call_step() -> step() ran flat out, and
@@ -172,12 +231,22 @@ fn main() -> Result<()> {
         } else {
             None
         };
+        // Aiding measurements, offered exactly as the native SitlBackend offers
+        // them. Passing `None` here was a harness defect, not a seam limit: the
+        // v0.8 seam already carries both fields and the gz plant already exposes
+        // both. Without `heading` yaw is UNOBSERVABLE — the estimate drifts, the
+        // geometric SE(3) attitude error is computed against a wrong yaw, the
+        // thrust axis tilts off vertical and the vehicle climbs and then falls.
+        // Measured with them absent: reached 1.08 m at 1.2 s, then -0.54 m by
+        // 8 s, on a calibration that holds 2.00 m with them present.
+        let mag_body = plant.mag_body_ned().map(|m| Vec3 { x: m[0], y: m[1], z: m[2] });
+        let heading_rad = plant.heading_ned();
         let frame = SensorFrame {
             imu,
             dt_s: dt,
             position_ned,
-            mag_body: None,
-            heading_rad: None,
+            mag_body,
+            heading_rad,
         };
         let m = controller.call_step(&mut store, frame, target)?;
 
@@ -191,6 +260,8 @@ fn main() -> Result<()> {
                 s.gyro_body,
                 [target.north, target.east, target.down],
                 position_ned.map(|p| [p.x, p.y, p.z]),
+                mag_body.map(|m| [m.x, m.y, m.z]),
+                heading_rad,
                 dt,
             );
             let dmax = [
@@ -313,10 +384,21 @@ fn main() -> Result<()> {
     println!("HOLD ERROR : commanded {want:.2} m, reached {alt:.2} m  (|err| = {err:.2} m)");
     if err > 0.5 {
         bail!(
-            "FAIL (expected, and the point of this harness): the published wasm cascade \
-             cannot hold altitude. |err| = {err:.2} m > 0.5 m. The seam accepts no position \
-             measurement — see the note above. This is an interface gap, not a gain-tuning \
-             problem, and no amount of retuning fixes it from outside the component."
+            "FAIL: the wasm cascade did not hold altitude. |err| = {err:.2} m > 0.5 m.\n\
+             \n\
+             This is now a REAL failure. It used to be the expected outcome, and the \
+             message here used to say so — the seam could accept no position measurement \
+             and no calibration, so the component provably could not hold and the harness \
+             existed to demonstrate that. Both gaps are closed (v0.9 `configure` + the \
+             aiding fields), and the same component now holds 2.00 m on gz to within \
+             0.14 m, bit-identical to native. So if you are reading this, something \
+             regressed.\n\
+             \n\
+             Check, in order: (1) is `configure` being called at all — an unconfigured \
+             component keeps mock-plant defaults and will not lift a gz airframe; \
+             (2) are `mag-body`/`heading-rad` being offered — without them yaw is \
+             unobservable and the vehicle climbs and then falls; (3) has the plant or \
+             its hover point changed under the calibration."
         );
     }
     println!("PASS: closed the loop AND held the commanded altitude.");

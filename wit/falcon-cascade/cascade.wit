@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.8.0;
+package pulseengine:falcon-cascade@0.9.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -93,6 +93,58 @@ interface types {
         /// that already resolve yaw; both correct the same unobservable state.
         heading-rad: option<f32>,
     }
+
+    /// Airframe calibration — the numbers the control law needs and CANNOT
+    /// derive from the sensor stream.
+    ///
+    /// v0.9 exists because the v0.8 component could fly NOTHING but its own
+    /// defaults: every value below was frozen at construction, so no host could
+    /// correct them from outside and no amount of retuning could make the
+    /// published component hold altitude on a real plant.
+    ///
+    /// MEASURED on the gz falcon-quad, 2 m hold, 2000 ticks @ 250 Hz, one
+    /// knob at a time against the tuned native reference (0.16 m hold error):
+    ///
+    ///   hover-thrust 0.585 -> 0.5, tuning kept  : 2.65 m, est_z -58.8 m
+    ///   tuning dropped, hover-thrust kept       : 0.66 m, est_z  -1.3 m
+    ///   both (i.e. exactly the v0.8 defaults)   : 1.91 m, never left the ground
+    ///
+    /// Both groups are load-bearing and `hover-thrust` dominates: at 0.5 the
+    /// airframe cannot lift, the estimator is then driven by a specific force
+    /// that never matches the commanded one, and the altitude estimate diverges
+    /// by an order of magnitude. That is the failure mode a host MUST be able
+    /// to correct, and before v0.9 it could not.
+    record vehicle-config {
+        /// Normalised collective throttle that holds THIS airframe in a steady
+        /// hover. The dominant term — see the measurements above. gz
+        /// falcon-quad 0.585; the SITL mock plant 0.49.
+        hover-thrust: f32,
+        /// Control-loop rate (Hz). AUTHORITATIVE: the estimator and the ADRC
+        /// observer are discretised on it. `sensor-frame.dt-s` remains the
+        /// per-tick integration step (it varies); this is the design rate. A
+        /// host that supplies neither inherits a guess, which is how the v0.7
+        /// stages ended up 20x apart.
+        loop-rate-hz: f32,
+        /// Position-measurement variance (m²). The default over-trusts a real
+        /// GNSS: on a long static hover the covariance collapses, the outlier
+        /// gate then rejects correct fixes, and the estimate goes deaf. 0.25
+        /// for the gz NavSat.
+        pos-var: f32,
+        /// Additive process-noise floor (variance/s) on velocity. Keeps the
+        /// δv↔δp correlation alive so a long hover cannot starve the filter.
+        process-floor-vel: f32,
+        /// Additive process-noise floor (variance/s) on position.
+        process-floor-pos: f32,
+        /// Altitude-loop proportional gain.
+        altitude-kp: f32,
+        /// Altitude-loop derivative gain.
+        altitude-kd: f32,
+        /// Altitude-loop integral gain, trimming the residual hover-feedforward
+        /// error. Safe only once the loop is damped and the estimate tracks.
+        altitude-ki: f32,
+        /// Horizontal position-loop integral gain. 0 disables it.
+        position-ki: f32,
+    }
 }
 
 /// State estimator — wraps relay-ekf (Mahony complementary filter).
@@ -139,11 +191,21 @@ world mixer-component    { export mixer; }
 /// wit-bindgen export macro is generated the same, interface-shaped
 /// way the leaf components rely on.
 interface controller {
-    use types.{sensor-frame, waypoint, motor-pwm};
+    use types.{sensor-frame, waypoint, motor-pwm, vehicle-config};
     /// One full flight-core tick: estimate, fuse whatever aiding the frame
     /// carries, then geometric SE(3) attitude → ADRC rate → mixer, with the
     /// rotor-out FDI and the altitude/position loops the vehicle actually flies.
     step: func(sensors: sensor-frame, target: waypoint) -> motor-pwm;
+
+    /// Install this vehicle's calibration.
+    ///
+    /// Call ONCE before the first `step`. Calling it later is legal and
+    /// RE-INITIALISES the control core — estimator state included — because
+    /// `loop-rate-hz` is fixed at construction and a partially-applied
+    /// configuration is worse than an explicit reset. A host that never calls
+    /// this keeps the built-in defaults, which fly the SITL mock plant and
+    /// nothing else.
+    configure: func(cfg: vehicle-config);
 }
 
 /// Imports the five controller interfaces, exports `controller`.

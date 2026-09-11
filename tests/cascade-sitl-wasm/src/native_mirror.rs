@@ -29,6 +29,8 @@ type Vec3 = [f32; 3];
 struct FrameBackend {
     imu: CoreImu,
     position: Option<Vec3>,
+    mag: Option<Vec3>,
+    heading: Option<f32>,
     dt: f32,
     motors: [f32; 4],
 }
@@ -37,14 +39,14 @@ impl FlightBackend for FrameBackend {
     fn read_imu(&mut self) -> CoreImu {
         self.imu
     }
-    fn read_position(&mut self) -> Option<Vec3> {
-        self.position
-    }
     fn read_mag(&mut self) -> Option<Vec3> {
-        None
+        self.mag
     }
     fn read_heading(&mut self) -> Option<f32> {
-        None
+        self.heading
+    }
+    fn read_position(&mut self) -> Option<Vec3> {
+        self.position
     }
     fn write_motors(&mut self, motors: &[f32]) {
         for (i, m) in self.motors.iter_mut().enumerate() {
@@ -56,8 +58,25 @@ impl FlightBackend for FrameBackend {
     }
 }
 
+/// The mirror of the WIT `vehicle-config` record. Deliberately a separate type
+/// rather than the generated one: the mirror must not be able to compile against
+/// a seam the component does not actually export.
+#[derive(Clone, Copy)]
+pub struct Calib {
+    pub hover_thrust: f32,
+    pub loop_rate_hz: f32,
+    pub pos_var: f32,
+    pub process_floor_vel: f32,
+    pub process_floor_pos: f32,
+    pub altitude_kp: f32,
+    pub altitude_kd: f32,
+    pub altitude_ki: f32,
+    pub position_ki: f32,
+}
+
 pub struct NativeCascade {
     core: Option<FlightCore>,
+    cfg: Option<Calib>,
 }
 
 impl Default for NativeCascade {
@@ -66,9 +85,27 @@ impl Default for NativeCascade {
     }
 }
 
+/// Mirrors the component's `sane()`. Same fallbacks, same positivity rules —
+/// a mirror that sanitised differently would report a difference that is about
+/// the mirror, not about the Component Model.
+fn sane(v: f32, default: f32, positive: bool) -> f32 {
+    if v.is_finite() && (!positive || v > 0.0) {
+        v
+    } else {
+        default
+    }
+}
+
 impl NativeCascade {
     pub fn new() -> Self {
-        Self { core: None }
+        Self { core: None, cfg: None }
+    }
+
+    /// Mirrors `Component::configure`, INCLUDING dropping the core so the next
+    /// step rebuilds from the new calibration.
+    pub fn configure(&mut self, cfg: Calib) {
+        self.cfg = Some(cfg);
+        self.core = None;
     }
 
     /// Mirrors `wasm/cm/cascade::step` call for call, including the dt clamp and
@@ -82,6 +119,8 @@ impl NativeCascade {
         gyro: [f32; 3],
         target: [f32; 3],
         position: Option<Vec3>,
+        mag: Option<Vec3>,
+        heading: Option<f32>,
         dt_s: f32,
     ) -> [f32; 4] {
         let dt = if dt_s.is_finite() {
@@ -92,11 +131,33 @@ impl NativeCascade {
         let mut b = FrameBackend {
             imu: CoreImu { accel, gyro },
             position,
+            mag,
+            heading,
             dt,
             motors: [0.0; 4],
         };
-        // hover_thrust 0.5, loop rate from the frame — identical to the component.
-        let core = self.core.get_or_insert_with(|| FlightCore::new(0.5, 1.0 / dt));
+        // Built from the calibration when the host supplied one, and from the
+        // v0.8 defaults otherwise — identical to the component's `build_core`.
+        let cfg = self.cfg;
+        let core = self.core.get_or_insert_with(|| match cfg {
+            None => FlightCore::new(0.5, 1.0 / dt),
+            Some(c) => {
+                let hz = sane(c.loop_rate_hz, 1.0 / dt, true);
+                let mut core = FlightCore::new(sane(c.hover_thrust, 0.5, true), hz);
+                core.set_pos_var(sane(c.pos_var, 0.01, true));
+                core.set_process_floor(
+                    sane(c.process_floor_vel, 0.0, false),
+                    sane(c.process_floor_pos, 0.0, false),
+                );
+                core.set_altitude_gains(
+                    sane(c.altitude_kp, 0.05, false),
+                    sane(c.altitude_kd, 0.30, false),
+                );
+                core.set_altitude_integral_gain(sane(c.altitude_ki, 0.0, false));
+                core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
+                core
+            }
+        });
         core.set_position(target);
         core.step(&mut b);
         b.motors

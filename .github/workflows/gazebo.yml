@@ -200,12 +200,20 @@ jobs:
           # instantiate the component) => FAIL. That is this gate's job and a
           # regression in it must stop a merge.
           #
-          # The FLIGHT OUTCOME => recorded, not fatal. The published cascade
-          # does not currently take off in gz: it wraps the legacy PID stages
-          # and has no arming or hover-thrust bias, which CascadePartition
-          # supplies (#388). That is a known, tracked gap, not something this
-          # or any unrelated PR introduces, and blocking every merge on it
-          # would only get the leg deleted.
+          # The FLIGHT OUTCOME => also FAIL, as of v0.9.
+          #
+          # It was recorded-not-fatal for as long as the published cascade
+          # provably could not take off in gz — it wrapped the legacy PID
+          # stages (#393) and had no way to receive a hover-thrust bias or any
+          # other calibration (#388). Gating on an outcome that was known-bad
+          # by construction would only have got the leg deleted.
+          #
+          # Both causes are fixed: the component wraps falcon-core's FlightCore
+          # and the v0.9 seam takes a `vehicle-config`. The same component now
+          # holds 2.00 m on the gz falcon-quad to within 0.14 m, against 0.16 m
+          # for the tuned native binary. A tolerated notice here would now stay
+          # green through exactly the regression this leg exists to catch —
+          # the same shape as an empty scope passing a gate.
           #
           # "LOOP CLOSES" is the discriminator: the harness prints it only
           # after the component has actually executed its ticks. Absent =>
@@ -234,7 +242,14 @@ jobs:
             exit 1
           fi
           HOLD=$(sed -n 's/^HOLD ERROR *: .*|err| = \([0-9.]*\) m.*/\1/p' /tmp/wasm-gz.txt | tail -1)
-          echo "::notice::wasm cascade ran ${HOLD:-?} m hold error in gz — tracked in #388 until the components wrap the flown stack"
+          # The threshold lives in the harness, not here, so there is exactly
+          # one definition of "held it" and this file cannot drift from it.
+          if ! grep -q 'PASS: closed the loop AND held the commanded altitude' /tmp/wasm-gz.txt; then
+            echo "::error::the wasm cascade flew but did NOT hold altitude in gz (|err| = ${HOLD:-?} m). Reference: 0.14 m."
+            tail -20 /tmp/wasm-gz.txt
+            exit 1
+          fi
+          echo "::notice::wasm cascade held ${HOLD:-?} m in gz, bit-identical to native"
 
       # ── Record the flight ────────────────────────────────────────────────
       # Every gz run leaves footage. The bench has recorded video for releases
