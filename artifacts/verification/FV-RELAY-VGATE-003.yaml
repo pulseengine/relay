@@ -1,0 +1,103 @@
+artifacts:
+  - id: FV-RELAY-VGATE-003
+    type: sw-verification
+    title: "VGATE-P03 — the Verus gate never passed once; running it found 2 broken proofs (v1.136)"
+    status: implemented
+    release: falcon-v1.136.0
+    description: >
+      Verification of SWREQ-RELAY-VGATE-P03.
+
+      (1) THE ENFORCING GATE HAS NEVER SUCCEEDED. Every `Verus` workflow run on
+      main since the workflow was introduced:
+
+        2026-08-26 10:42  b777ba98  failure   <- the commit that ADDED it
+        2026-08-26 21:53  32528a5e  failure
+        2026-09-01 16:01  53ef471a  failure
+        2026-09-02 06:52  cf19c79f  failure
+        2026-09-02 11:45  dacd91c2  failure
+        2026-09-02 20:58  34cc0fd6  failure
+        2026-09-07 05:05  9a5a912f  failure
+
+      Seven runs, seven failures, zero successes. Not a required context, so
+      nothing blocked. Run 34085464421: 19 tests FAILED, each in 0.0-0.1s, with
+      `error[E0463]: can't find crate for std` for x86_64-unknown-linux-gnu —
+      an abort before verification starts, not a proof failing.
+
+      (2) THE FAILURE IS PLATFORM-SPECIFIC, established by contrast rather than
+      inference:
+
+        aarch64-apple-darwin (local)   17/19 PASSED, 2 real failures
+        x86_64-unknown-linux-gnu (CI)  0/19, all abort in <=0.1s
+
+      The linux half is upstream — the bundled Verus rust sysroot lacks the
+      target std. Filed as pulseengine/rules_verus#25 with the evidence,
+      including that rules_verus's own fetch-time check verifies only
+      `libcore-*.rlib` and not `libstd-*.rlib`, so a partial sysroot passes the
+      check and then fails at first use.
+
+      (3) WHAT THE UNRUN GATE WAS HIDING — the point of this artifact. The two
+      darwin failures are genuine relay defects, unrelated to the toolchain:
+
+        relay_nid       bitpack.rs:22 — 3x error[E0507]: cannot move out of
+                        `msg.id_type` / `msg.ua_type` / `msg.status` behind a
+                        shared reference. NOTE the proofs were sound:
+                        "verification results:: 7 verified, 0 errors". The
+                        crate did not COMPILE under Verus.
+                        CAUSE: the verus tree declared `#[derive(PartialEq,
+                        Eq)]` where the plain tree has `#[derive(Clone, Copy,
+                        PartialEq, Eq, Debug)]`. The dual trees had drifted, and
+                        `enum as u8` behind `&BasicId` needs Copy.
+                        FIX: Clone, Copy on IdType, UaType, OperationalStatus,
+                        MessageType — restoring parity with the plain tree.
+
+        relay_mavlink   heartbeat.rs:41 — error: expression has mode spec,
+                        expected mode exec, on
+                        `pub const FALCON_AUTOPILOT_ID: u8 =
+                         MavAutopilot::Invalid as u8;`
+                        CAUSE: Verus rejects an enum-to-integer cast in exec
+                        mode. Adding Copy did NOT fix it (tried, and reported
+                        here because the obvious fix failing is worth knowing).
+                        FIX: move the const OUTSIDE the `verus!` block. It
+                        carries no proof obligation, items outside the block are
+                        external to Verus, and Rust item order is irrelevant so
+                        the exec code inside still resolves it.
+
+      (4) RESULT, measured after the fix:
+
+        $ bazel test $(bazel query 'kind("verus_test rule", //:*)')
+        19 tests, 19 PASSED, exit 0        (aarch64-apple-darwin)
+
+        $ cargo test -p relay-nid -p relay-mavlink
+        99 passed; 0 failed                (plain trees unaffected)
+
+      HONEST SCOPE, and it is a real limitation. These fixes are verified ONLY
+      on darwin-arm64, locally. CI cannot confirm them until rules_verus#25 is
+      resolved, because the linux runner cannot execute any Verus target at all.
+      This artifact therefore stays `implemented` and does NOT claim CI
+      enforcement. Saying "19/19 pass" without saying "on one platform, off CI"
+      would repeat the exact error this requirement exists to catch.
+
+      (5) STILL OUTSTANDING. The rivet gate reports `[enforced-by-verus-gate]`
+      for every `bazel test //:*_verus_test` step across 16+ artifacts. That
+      message asserts the Verus CI check runs the step. It will be true again
+      when rules_verus#25 lands and the workflow is added to main's required
+      contexts; until then it overstates. Not patched here because the honest
+      fix is a working gate, not softer wording — and a softer message would
+      make the discrepancy easier to live with.
+    tags: [verification, relay, verification-gate, verus, formal-verification, v1.136]
+    fields:
+      method: formal-verification
+      steps:
+        # The two enums the drift removed Copy from are restored.
+        - run: "grep -q 'derive(Clone, Copy, PartialEq, Eq)' crates/relay-nid/src/lib.rs"
+        - run: "grep -q 'derive(Clone, Copy, PartialEq, Eq)' crates/relay-mavlink/src/heartbeat.rs"
+        # The const is outside the verus! block (it precedes it in the file).
+        - run: "test \"$(grep -n 'FALCON_AUTOPILOT_ID: u8 =' crates/relay-mavlink/src/heartbeat.rs | cut -d: -f1)\" -lt \"$(grep -n '^verus! {' crates/relay-mavlink/src/heartbeat.rs | cut -d: -f1)\""
+        # The plain trees still build and pass.
+        - run: "cargo test -p relay-nid -p relay-mavlink"
+        # The proofs themselves — bench-only: the gate runner has no bazel+nix,
+        # and on linux they cannot run at all until rules_verus#25.
+        - run: "bazel test //:relay_nid_verus_test //:relay_mavlink_verus_test  # bench-only (needs bazel+nix; blocked on rules_verus#25 for linux)"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-VGATE-P03
