@@ -1,0 +1,59 @@
+artifacts:
+  - id: SWREQ-RELAY-VGATE-P03
+    type: sw-req
+    title: "VGATE-P03 — a gate cited as the enforcer must itself be observed to PASS"
+    status: implemented
+    release: falcon-v1.136.0
+    description: >
+      Where the verification gate defers a step to another CI gate — reporting
+      `enforced-by-kani-gate` or `enforced-by-verus-gate` instead of executing
+      it — that other gate shall be observed to have SUCCEEDED, not merely to
+      exist. A deferral to a gate that has never passed is not enforcement.
+
+      WHY IT EXISTS, and it is the third instance of the same shape.
+
+      v1.135 added .github/workflows/verus.yml to enforce the Verus track,
+      after finding 19 proofs defined and never run. The workflow was verified
+      to FIRE — its empty-set guard was exercised, and #367 fixed a bazel query
+      that walked an agent worktree. It was never verified to PASS.
+
+      It has failed on EVERY run on main since 2026-08-26: 19/19 targets abort
+      in 0.0-0.1s with `error[E0463]: can't find crate for std` on
+      x86_64-unknown-linux-gnu. Twelve days, unnoticed, because `Verus` is not
+      among main's seven required contexts, so its failure blocks nothing.
+
+      Meanwhile the rivet gate reports `[enforced-by-verus-gate]` for every
+      `bazel test //:*_verus_test` step it finds — 16+ artifacts. That message
+      asserts "the Verus CI check runs this". For twelve days it was false.
+
+      WHAT THE UNRUN GATE WAS HIDING. Running the 19 targets locally on
+      darwin-arm64 found 17 passing and TWO REAL FAILURES that had nothing to
+      do with the linux toolchain:
+
+        relay_nid       3x error[E0507]: cannot move out of `msg.id_type` /
+                        `msg.ua_type` / `msg.status` behind a shared reference.
+                        The proofs themselves were fine — "7 verified, 0 errors"
+                        — the crate did not COMPILE under Verus.
+        relay_mavlink   error: expression has mode spec, expected mode exec, on
+                        an enum-to-integer cast in a const initialiser.
+
+      So the gate nobody could run was concealing two genuinely broken proofs.
+      That is the cost of accepting "the gate exists" as evidence that "the
+      gate enforces".
+
+      THE PATTERN, stated because it keeps recurring at successively higher
+      levels: VGATE-P01 checks a cited proof is in the matrix (claimed ->
+      exists). VGATE-P02 checks a matrix proof is cited (runs -> recorded).
+      This checks the enforcing gate actually succeeds (exists -> passes).
+      Each layer was built after the previous one turned out to be satisfiable
+      while the property underneath was false.
+
+      FALSIFICATION: this requirement is wrong if the gate can report
+      `enforced-by-<x>-gate` for a step whose named workflow has never
+      completed successfully on main.
+    tags: [requirement, relay, verification-gate, hygiene, process-integrity, verus, v1.136]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
+      - type: refines
+        target: SWREQ-RELAY-VGATE-P02
