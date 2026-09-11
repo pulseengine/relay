@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.7.0;
+package pulseengine:falcon-cascade@0.8.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -58,6 +58,41 @@ interface types {
     record waypoint {
         north: f32, east: f32, down: f32, yaw: f32,
     }
+
+    /// A 3-vector; the frame is named by the field that uses it.
+    record vec3 {
+        x: f32, y: f32, z: f32,
+    }
+
+    /// Everything the flight core needs for ONE tick.
+    ///
+    /// v0.8 replaces the bare `imu-sample`, because v0.7 could not express two
+    /// things a host must be able to say — both found by actually driving the
+    /// published components rather than by reading the interface.
+    ///
+    /// `dt-s` — the host's ACTUAL control period. v0.7 had no way to state it,
+    /// so every stage hardcoded its own and they disagreed with each other by up
+    /// to 20x (estimator 1 ms, position 20 ms, attitude 4 ms, rate 1 ms) while
+    /// the cascade called all five once per tick. Measured on the SITL plant,
+    /// holding 2.0 m: 1000 Hz -> 0.00 m error, 400 Hz -> 10.43 m, 250 Hz -> 27.17 m,
+    /// with no error signal of any kind.
+    ///
+    /// The aiding measurements — v0.7 took the IMU alone, so position was
+    /// observable only by dead reckoning. The flight core fuses GNSS, the
+    /// magnetometer and an absolute heading; a seam that cannot carry them
+    /// cannot carry the flight core. Every field is `option<>`, and all-`none`
+    /// is a valid IMU-only host that simply inherits the drift.
+    record sensor-frame {
+        imu: imu-sample,
+        dt-s: f32,
+        /// NED position fix (m) — GNSS or equivalent.
+        position-ned: option<vec3>,
+        /// Body-frame magnetometer. Any consistent unit; normalised internally.
+        mag-body: option<vec3>,
+        /// Absolute heading (rad, NED). An alternative to `mag-body` for hosts
+        /// that already resolve yaw; both correct the same unobservable state.
+        heading-rad: option<f32>,
+    }
 }
 
 /// State estimator — wraps relay-ekf (Mahony complementary filter).
@@ -104,21 +139,24 @@ world mixer-component    { export mixer; }
 /// wit-bindgen export macro is generated the same, interface-shaped
 /// way the leaf components rely on.
 interface controller {
-    use types.{imu-sample, waypoint, motor-pwm};
-    /// One full cascade pass: estimate → position → attitude → rate
-    /// → mixer.
-    step: func(imu: imu-sample, target: waypoint) -> motor-pwm;
+    use types.{sensor-frame, waypoint, motor-pwm};
+    /// One full flight-core tick: estimate, fuse whatever aiding the frame
+    /// carries, then geometric SE(3) attitude → ADRC rate → mixer, with the
+    /// rotor-out FDI and the altitude/position loops the vehicle actually flies.
+    step: func(sensors: sensor-frame, target: waypoint) -> motor-pwm;
 }
 
 /// Imports the five controller interfaces, exports `controller`.
 /// The implementation calls estimate → position → attitude → rate
 /// → mixer in order. wac satisfies the imports from the leaf
 /// components (BUILD.bazel `wac_plug`).
+/// v0.8: the cascade component wraps falcon-core's FlightCore directly, so it
+/// imports NOTHING. The five-stage decomposition it used to compose was a
+/// wasm-side invention that never corresponded to the flight architecture —
+/// which is exactly how it drifted onto the legacy PID controllers while
+/// falcon-core moved to geometric SE(3) + ADRC, unnoticed for three months
+/// (#388). One component, one tick, one clock, and the same control law the
+/// vehicle flies.
 world cascade {
-    import ekf;
-    import position;
-    import attitude;
-    import rate;
-    import mixer;
     export controller;
 }
