@@ -45,13 +45,13 @@ wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.7.0;
+            export pulseengine:falcon-cascade/controller@0.8.0;
         }
     "#,
     path: "../../wit/falcon-cascade",
 });
 
-use pulseengine::falcon_cascade::types::{ImuSample as WitImu, Waypoint};
+use pulseengine::falcon_cascade::types::{ImuSample as WitImu, SensorFrame, Vec3, Waypoint};
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -114,16 +114,35 @@ fn main() -> Result<()> {
     println!("schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)", ticks as f32 * dt, 1.0 / dt);
     println!();
 
+    let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| ((1.0 / dt) / 5.0).round().max(1.0) as u32);
+    let mut fixes = 0u32;
+
     let mut peak_tilt = 0.0f32;
-    for _ in 0..ticks {
-        let (s, _true_pos) = plant.measure(noise);
+    for tick in 0..ticks {
+        let (s, true_pos) = plant.measure(noise);
         let imu = WitImu {
             ax: s.accel_body[0], ay: s.accel_body[1], az: s.accel_body[2],
             gx: s.gyro_body[0],  gy: s.gyro_body[1],  gz: s.gyro_body[2],
         };
         // The tick that matters: one full estimate -> position -> attitude ->
         // rate -> mixer pass, executed inside the wasm component.
-        let m = controller.call_step(&mut store, imu, target)?;
+        // v0.8: the host states its own period and offers what it has. A 5 Hz
+        // position fix matches the native bench's gnss_div=50 @250 Hz.
+        let position_ned = if gnss_div > 0 && tick % gnss_div == 0 {
+            fixes += 1;
+            Some(Vec3 { x: true_pos[0], y: true_pos[1], z: true_pos[2] })
+        } else {
+            None
+        };
+        let frame = SensorFrame {
+            imu,
+            dt_s: dt,
+            position_ned,
+            mag_body: None,
+            heading_rad: None,
+        };
+        let m = controller.call_step(&mut store, frame, target)?;
         let tilt = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
         peak_tilt = peak_tilt.max(tilt);
         plant.step([m.m1, m.m2, m.m3, m.m4], dt);
