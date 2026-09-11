@@ -40,7 +40,9 @@ mod bindings;
 // trait lives under `exports::`. The five imported controller
 // interfaces live at the bindings root.
 use bindings::exports::pulseengine::falcon_cascade::controller::Guest;
-use bindings::pulseengine::falcon_cascade::types::{MotorPwm, SensorFrame, VehicleConfig, Waypoint};
+use bindings::pulseengine::falcon_cascade::types::{
+    MotorPwm, SensorFrame, VehicleConfig, Waypoint,
+};
 
 use core::cell::RefCell;
 use falcon_core::{FlightBackend, FlightCore, ImuSample as CoreImu};
@@ -131,6 +133,9 @@ struct FrameBackend {
     position: Option<Vec3>,
     mag: Option<Vec3>,
     heading: Option<f32>,
+    /// v0.10: per-rotor ESC telemetry. `None` leaves the rotor-out FDI on its
+    /// RPM-free path, which is what every published component did until now.
+    motor_rpm: Option<[i32; 4]>,
     dt: f32,
     motors: [f32; 4],
 }
@@ -147,6 +152,9 @@ impl FlightBackend for FrameBackend {
     }
     fn read_heading(&mut self) -> Option<f32> {
         self.heading
+    }
+    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+        self.motor_rpm
     }
     fn write_motors(&mut self, motors: &[f32]) {
         for (i, m) in self.motors.iter_mut().enumerate() {
@@ -183,6 +191,7 @@ impl Guest for Component {
             position: sensors.position_ned.map(|p| [p.x, p.y, p.z]),
             mag: sensors.mag_body.map(|m| [m.x, m.y, m.z]),
             heading: sensors.heading_rad,
+            motor_rpm: sensors.motor_rpm.map(|r| [r.m1, r.m2, r.m3, r.m4]),
             dt,
             motors: [0.0; 4],
         };
