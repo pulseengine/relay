@@ -9,13 +9,23 @@ publish = false
 [workspace]
 
 [features]
-# Declared only so the `#[cfg(feature = "gazebo")]` blocks inside the included
-# physics.rs are a known-false cfg rather than an unexpected one. Never enabled
-# here: this harness flies MockPhysics, not the gz bridge.
-gazebo = []
+# Real gz bridge, same shape as examples/falcon-sitl-gz: the included physics.rs
+# gates its `gz_real` module on this, so enabling it brings in the same
+# GazeboPhysics the native bench flies. Needs the gz-transport13 dev libs on
+# PKG_CONFIG_PATH and a running `gz sim`. Off by default so the mock path stays
+# dependency-free.
+gazebo = ["dep:gz-transport", "dep:gz-msgs", "dep:crossbeam-channel"]
 
 [dependencies]
 wasmtime = { version = "41", features = ["component-model"] }
 anyhow = "1"
 libm = "0.2"
 relay-ekf = { path = "../../crates/relay-ekf" }
+
+# Optional — only with feature `gazebo`. Versions match examples/falcon-sitl-gz
+# EXACTLY; a different gz-transport here would be a different bridge than the
+# one every native SITL result was produced with, and the comparison would stop
+# meaning anything.
+gz-transport = { version = "0.10", features = ["harmonic"], optional = true }
+gz-msgs = { version = "0.10", features = ["harmonic"], optional = true }
+crossbeam-channel = { version = "0.5", optional = true }
