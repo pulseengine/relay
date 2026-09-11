@@ -155,6 +155,15 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
+      # scripts/*.rs are rust-script single-file tools (shebang + inline
+      # [dependencies]). Without this, a step invoking one fails rc=127 —
+      # "command not found" — which reads like a broken script rather than a
+      # missing interpreter. FV-FALCON-WASMEQ-002 hit exactly that.
+      - name: Install rust-script (skip if cached)
+        if: steps.scope.outputs.run_full == 'true'
+        shell: bash
+        run: command -v rust-script >/dev/null 2>&1 || cargo install rust-script --locked
+
       - name: Install rivet v0.19.0 (pinned; skip if cached)
         if: steps.scope.outputs.run_full == 'true'
         shell: bash

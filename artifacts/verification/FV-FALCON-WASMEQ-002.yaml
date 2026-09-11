@@ -1,0 +1,57 @@
+artifacts:
+  - id: FV-FALCON-WASMEQ-002
+    type: sw-verification
+    title: "WASMEQ-P02 — component/flight-core dependency audit, 4 violations found and waived (v1.137)"
+    status: implemented
+    release: falcon-v1.137.0
+    description: >
+      Verification of SWREQ-FALCON-WASMEQ-P02 via scripts/audit-component-deps.rs.
+
+      WHAT IT FOUND ON FIRST RUN — the #388 defect, in full:
+
+        SHIPPED BUT NOT FLOWN — 4 violation(s):
+          wasm/cm/attitude  wraps relay-att   — falcon-core does NOT depend on it
+          wasm/cm/ekf       wraps relay-ekf   — falcon-core does NOT depend on it
+          wasm/cm/position  wraps relay-pos   — falcon-core does NOT depend on it
+          wasm/cm/rate      wraps relay-rate  — falcon-core does NOT depend on it
+
+      And, informationally, the other half of the same picture: relay-adrc and
+      relay-geo — the control law falcon-core actually flies — are wrapped by NO
+      component at all. The flown cascade has never had a wasm packaging.
+
+      WAIVED, NOT SILENCED. Those four are waived so the audit can be wired in
+      NOW rather than after #388 is fixed, which is a deliberate trade: a waiver
+      prints its crate and its issue on every run, whereas what let the defect
+      survive three months was that nothing compared the sets at all. Landing it
+      waived is what makes it catch the NEXT one. Each entry comes out as #388
+      brings that component up, and the audit then fails if it regresses.
+
+      DETECTOR OBSERVED FAILING, not merely passing. Injecting a dependency on
+      relay-sensvote (which falcon-core does not use) into wasm/cm/falcon-mixer:
+
+        SHIPPED BUT NOT FLOWN — 1 violation(s)     exit 1
+
+      and restoring the manifest returns exit 0. A detector only ever seen to
+      pass is indistinguishable from one that cannot fail.
+
+      FAIL-CLOSED ON AN EMPTY SCOPE: if no components are found under wasm/cm,
+      the audit refuses to report a clean result rather than passing vacuously —
+      the same rule as the verification gate's zero-match guard (#342).
+
+      It also recurses into `[target.'cfg(...)'.dependencies]`, so moving a crate
+      behind a cfg cannot hide it from the audit.
+
+      HONEST SCOPE: this is a dependency-set comparison, not a semantic one. It
+      cannot tell whether a SHARED crate is used equivalently — wasm/cm/iekf and
+      falcon-core both depend on relay-iekf while configuring it differently
+      (the component omitted set_process_floor for months, #380). It catches the
+      coarse failure, which is the one that went unnoticed.
+    tags: [verification, falcon, wasm, component-model, supply-chain, hygiene, v1.137]
+    fields:
+      method: automated-test
+      steps:
+        - run: "./scripts/audit-component-deps.rs"
+        - run: "grep -q 'refusing to report a clean audit' scripts/audit-component-deps.rs"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WASMEQ-P02
