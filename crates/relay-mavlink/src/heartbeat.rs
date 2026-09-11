@@ -2,6 +2,13 @@
 
 use vstd::prelude::*;
 
+// OUTSIDE `verus!` deliberately. Verus rejects an enum-to-integer cast in exec
+// mode ("expression has mode spec, expected mode exec"), and this const carries
+// no proof obligation — it names the discriminant, nothing more. Items declared
+// outside the block are external to Verus but still module-scoped, so the exec
+// code inside `verus!` uses it unchanged. Mirrors ../plain/src/heartbeat.rs.
+pub const FALCON_AUTOPILOT_ID: u8 = MavAutopilot::Invalid as u8;
+
 verus! {
 
 pub const HEARTBEAT_MSG_ID: u32 = 0;
@@ -22,7 +29,7 @@ pub enum MavType {
     OnboardController = 18,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MavAutopilot {
     Generic = 0,
@@ -38,9 +45,8 @@ pub enum MavAutopilot {
     Smartap = 13,
 }
 
-pub const FALCON_AUTOPILOT_ID: u8 = MavAutopilot::Invalid as u8;
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MavState {
     Uninit = 0,
