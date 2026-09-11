@@ -1,0 +1,68 @@
+artifacts:
+  - id: SWREQ-FALCON-WASMEQ-P03
+    type: sw-req
+    title: "WASMEQ-P03 — a host shall be able to calibrate the published cascade for its airframe, and the calibrated component shall fly the reference plant"
+    status: implemented
+    release: falcon-v1.138.0
+    description: >
+      The published cascade component shall accept its airframe calibration
+      from the host, and the calibrated component shall hold a commanded
+      altitude on the reference Gazebo plant to within 0.5 m.
+
+      WHY IT EXISTS. WASMEQ-P01 constrains the PACKAGING: wasm output equals
+      native output, bit-exact. It is satisfiable by a component that computes
+      the same wrong answer on both sides, and that is precisely what shipped.
+      Until v1.138 every vehicle-specific number was frozen inside the component
+      at `FlightCore::new(0.5, ..)`, so no host could correct it from outside,
+      and the published cascade could not take off on the gz falcon-quad at all
+      — it stayed on the ground while reporting a perfect equivalence result.
+
+      An equivalence oracle proves two things are the same. It cannot tell you
+      they are both wrong. This requirement is the second half: the thing they
+      agree on must also FLY.
+
+      MEASURED, one knob varied at a time against the tuned native reference
+      (0.16 m), 2000 ticks at 250 Hz on the gz falcon-quad:
+
+        hover-thrust 0.585 -> 0.5, tuning kept : 2.65 m, est_z -58.8 m
+        tuning dropped, hover-thrust kept      : 0.66 m, est_z  -1.3 m
+        both (i.e. the pre-v1.138 defaults)    : 1.91 m, never left the ground
+        calibrated component, v0.9 seam        : 0.16 m, PASS
+
+      Both groups are load-bearing and hover-thrust dominates: at 0.5 the
+      airframe cannot lift, the estimator is then driven by a specific force
+      that never matches the commanded one, and the altitude estimate diverges
+      by an order of magnitude.
+
+      THE SEAM. `configure(vehicle-config)` at `pulseengine:falcon-cascade@0.9.0`
+      carries nine values: hover thrust, loop rate, position-measurement
+      variance, two process-noise floors, three altitude-loop gains and the
+      horizontal position integral gain. A host that never calls it keeps the
+      previous defaults byte for byte, so this is additive.
+
+      `configure` re-initialises the core rather than patching it in place.
+      `loop-rate-hz` is fixed at construction while the other eight are
+      live-settable, so an in-place late `configure` would honour eight fields
+      and silently ignore the ninth — a host flying a rate it did not ask for,
+      with no error. That is the same defect shape as the hardcoded tick period
+      this seam family exists to remove.
+
+      SCOPE, and what this does NOT claim. The hold is verified over 8 s. It is
+      NOT a claim of indefinite hold: the altitude creeps upward on a longer
+      hold (0.43 m at 10 s, 0.62 m at 16 s) and the native binary creeps
+      identically (0.61 m at 16 s), which is what bit-identical control
+      predicts. That is a falcon-core defect tracked in #396 and must not be
+      read as covered here.
+
+      Also NOT covered: `read_motor_rpm` has no field in the seam at all, so the
+      rotor-out FDI is inert in wasm while the native backend feeds it. Raised
+      on #388.
+
+      FALSIFICATION: wrong if a host supplying a correct airframe calibration
+      through `configure` cannot make the published component hold the commanded
+      altitude on the reference plant, or if an unconfigured host observes any
+      behavioural change from the pre-v1.138 component.
+    tags: [requirement, falcon, wasm, component-model, calibration, gazebo, v1.138]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

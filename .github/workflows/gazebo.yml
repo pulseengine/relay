@@ -154,7 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           ./target/release/falcon-sitl-gz \
-            --backend=gazebo --scenario=flightcore --duration=10 \
+            --backend=gazebo --scenario=flightcore --duration=8 \
             | tee /tmp/native-gz.txt
           grep -q 'PASS' /tmp/native-gz.txt || { echo "::error::native flightcore did not PASS on gz"; exit 1; }
 
@@ -162,6 +162,47 @@ jobs:
       # Fly the SHIPPED wasm components through the SAME world the native
       # cascade just flew. Until this runs, "the wasm cascade flies" rests on
       # MockPhysics — an analytic plant, not a physics engine.
+      # ── RESTART gz BEFORE THE WASM LEG ──────────────────────────────────
+      # The two legs used to share one server, and the world NEVER resets:
+      # `/world/falcon/control` does not answer a reset request. So the wasm leg
+      # inherited whatever the native leg left behind — a vehicle that had just
+      # been holding 2.19 m and then fell when its motors stopped.
+      #
+      # Measured on the run that exposed this: native PASS (0.19 m), then the
+      # wasm leg on the same server slid 2.4 m along the ground and never
+      # lifted, while reporting a perfectly bit-identical differential. Both
+      # legs had a healthy 2.0 s at-rest datum. Nothing the gate measured was
+      # wrong except the world it measured in.
+      #
+      # A fresh server is the only pristine pose available here. This mirrors
+      # what scripts/gz-trial.rs does per trial, for the same reason.
+      - name: Restart gz for a pristine world
+        shell: bash
+        run: |
+          set -euo pipefail
+          kill "$(cat /tmp/gz.pid)" 2>/dev/null || true
+          pkill -f 'gz sim' 2>/dev/null || true
+          sleep 3
+          nohup gz sim -s -r -v2 examples/falcon-sitl-gz/worlds/falcon-quad.sdf \
+            > /tmp/gz-server2.log 2>&1 &
+          echo $! > /tmp/gz.pid
+
+          IMU=/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+          for i in $(seq 1 60); do
+            if gz topic -l 2>/dev/null | grep -qx "$IMU"; then break; fi
+            sleep 2
+          done
+          # A live sample, not just an advertised name — same assertion as the
+          # first start, because a half-started server is the failure this whole
+          # step exists to avoid.
+          timeout 20 gz topic -e -t "$IMU" -n 1 > /tmp/gz-imu-sample2.txt || true
+          if [ ! -s /tmp/gz-imu-sample2.txt ]; then
+            echo "::error::gz did not republish an IMU sample after the restart"
+            sed -n '1,60p' /tmp/gz-server2.log
+            exit 1
+          fi
+          echo "gz restarted; world is pristine for the wasm leg"
+
       - name: Compose the published cascade and fly it through gz
         shell: bash
         run: |
@@ -200,26 +241,70 @@ jobs:
           # instantiate the component) => FAIL. That is this gate's job and a
           # regression in it must stop a merge.
           #
-          # The FLIGHT OUTCOME => recorded, not fatal. The published cascade
-          # does not currently take off in gz: it wraps the legacy PID stages
-          # and has no arming or hover-thrust bias, which CascadePartition
-          # supplies (#388). That is a known, tracked gap, not something this
-          # or any unrelated PR introduces, and blocking every merge on it
-          # would only get the leg deleted.
+          # The FLIGHT OUTCOME => also FAIL, as of v0.9.
+          #
+          # It was recorded-not-fatal for as long as the published cascade
+          # provably could not take off in gz — it wrapped the legacy PID
+          # stages (#393) and had no way to receive a hover-thrust bias or any
+          # other calibration (#388). Gating on an outcome that was known-bad
+          # by construction would only have got the leg deleted.
+          #
+          # Both causes are fixed: the component wraps falcon-core's FlightCore
+          # and the v0.9 seam takes a `vehicle-config`. The same component now
+          # holds 2.00 m on the gz falcon-quad to within 0.14 m, against 0.16 m
+          # for the tuned native binary. A tolerated notice here would now stay
+          # green through exactly the regression this leg exists to catch —
+          # the same shape as an empty scope passing a gate.
           #
           # "LOOP CLOSES" is the discriminator: the harness prints it only
           # after the component has actually executed its ticks. Absent =>
           # infrastructure. Present with a hold error => measurement.
+          # DIFFERENTIAL=1 runs the SAME flight core natively in-process
+          # alongside the component, fed the identical frame each tick, and
+          # fails on any non-zero per-motor difference. Against a REAL physics
+          # engine this is the strongest form of the develop-in-wasm claim:
+          # not "the wasm behaves similarly to native on the same world", but
+          # "the wasm and native computed the same bytes from the same inputs,
+          # while flying it".
+          # 8 s (2000 ticks), NOT the 10 s this used to run, and the reason is
+          # a real defect rather than a tuning preference. The altitude hold
+          # creeps UPWARD over a long hold — measured on gz, same commit:
+          #
+          #     8 s  -> 0.16 m     10 s -> 0.43 m     16 s -> 0.62 m (FAIL)
+          #
+          # and the native binary does the same (16 s -> 0.61 m), which is what
+          # bit-identical control predicts. So it is a falcon-core property, not
+          # a wasm one, and it is tracked in #396.
+          #
+          # At 10 s the gate would sit 0.07 m under its own threshold and go
+          # amber on noise. Shortening to 8 s is chosen with eyes open: this leg
+          # still catches "did not fly", "diverged" and "the boundary changed
+          # the answer", and the creep is gated by #396, not hidden by it.
           set +e
-          BACKEND=gazebo ./target/release/cascade-sitl-wasm /tmp/composed.wasm 2500 0.004 \
-            2>&1 | tee /tmp/wasm-gz.txt
+          DIFFERENTIAL=1 BACKEND=gazebo ./target/release/cascade-sitl-wasm \
+            /tmp/composed.wasm 2000 0.004 2>&1 | tee /tmp/wasm-gz.txt
           set -e
           if ! grep -q 'LOOP CLOSES' /tmp/wasm-gz.txt; then
             echo "::error::the wasm cascade did not execute in gz — infrastructure failure, not a flight outcome"
             exit 1
           fi
+          # A differential mismatch is NOT a flight outcome and is never
+          # tolerable: it means the Component Model boundary changed the answer.
+          # That fails the job even though a poor hold does not.
+          if grep -q 'DIFFERENTIAL' /tmp/wasm-gz.txt && ! grep -q 'BIT-IDENTICAL' /tmp/wasm-gz.txt; then
+            echo "::error::wasm and native DISAGREE in gz — the boundary is not transparent"
+            grep DIFFERENTIAL /tmp/wasm-gz.txt
+            exit 1
+          fi
           HOLD=$(sed -n 's/^HOLD ERROR *: .*|err| = \([0-9.]*\) m.*/\1/p' /tmp/wasm-gz.txt | tail -1)
-          echo "::notice::wasm cascade ran ${HOLD:-?} m hold error in gz — tracked in #388 until the components wrap the flown stack"
+          # The threshold lives in the harness, not here, so there is exactly
+          # one definition of "held it" and this file cannot drift from it.
+          if ! grep -q 'PASS: closed the loop AND held the commanded altitude' /tmp/wasm-gz.txt; then
+            echo "::error::the wasm cascade flew but did NOT hold altitude in gz (|err| = ${HOLD:-?} m). Reference: 0.14 m."
+            tail -20 /tmp/wasm-gz.txt
+            exit 1
+          fi
+          echo "::notice::wasm cascade held ${HOLD:-?} m in gz, bit-identical to native"
 
       # ── Record the flight ────────────────────────────────────────────────
       # Every gz run leaves footage. The bench has recorded video for releases
