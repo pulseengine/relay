@@ -210,12 +210,27 @@ jobs:
           # "LOOP CLOSES" is the discriminator: the harness prints it only
           # after the component has actually executed its ticks. Absent =>
           # infrastructure. Present with a hold error => measurement.
+          # DIFFERENTIAL=1 runs the SAME flight core natively in-process
+          # alongside the component, fed the identical frame each tick, and
+          # fails on any non-zero per-motor difference. Against a REAL physics
+          # engine this is the strongest form of the develop-in-wasm claim:
+          # not "the wasm behaves similarly to native on the same world", but
+          # "the wasm and native computed the same bytes from the same inputs,
+          # while flying it".
           set +e
-          BACKEND=gazebo ./target/release/cascade-sitl-wasm /tmp/composed.wasm 2500 0.004 \
-            2>&1 | tee /tmp/wasm-gz.txt
+          DIFFERENTIAL=1 BACKEND=gazebo ./target/release/cascade-sitl-wasm \
+            /tmp/composed.wasm 2500 0.004 2>&1 | tee /tmp/wasm-gz.txt
           set -e
           if ! grep -q 'LOOP CLOSES' /tmp/wasm-gz.txt; then
             echo "::error::the wasm cascade did not execute in gz — infrastructure failure, not a flight outcome"
+            exit 1
+          fi
+          # A differential mismatch is NOT a flight outcome and is never
+          # tolerable: it means the Component Model boundary changed the answer.
+          # That fails the job even though a poor hold does not.
+          if grep -q 'DIFFERENTIAL' /tmp/wasm-gz.txt && ! grep -q 'BIT-IDENTICAL' /tmp/wasm-gz.txt; then
+            echo "::error::wasm and native DISAGREE in gz — the boundary is not transparent"
+            grep DIFFERENTIAL /tmp/wasm-gz.txt
             exit 1
           fi
           HOLD=$(sed -n 's/^HOLD ERROR *: .*|err| = \([0-9.]*\) m.*/\1/p' /tmp/wasm-gz.txt | tail -1)
