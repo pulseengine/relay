@@ -15,9 +15,15 @@ public
   -- Controller threads
   -- ══════════════════════════════════════════════════════════════
 
+  -- v0.8: takes a SensorFrame, not a bare ImuSample. The frame carries the
+  -- host's control period plus any aiding measurements available this tick.
+  -- Driving the published wasm components from a host showed the v0.7 port
+  -- set could express neither: the estimator hardcoded 1 kHz (27 m error at
+  -- 250 Hz) and, IMU-only, inverted to -121 m at 0.2 m/s^2 accelerometer
+  -- noise where the native cascade held 0.39 m on the same plant.
   thread EkfThread
     features
-      imu_in: in data port Falcon_Types::ImuSample;
+      sensors_in: in data port Falcon_Types::SensorFrame;
       state_out: out data port Falcon_Types::VehicleState;
     properties
       Dispatch_Protocol => Periodic;
@@ -89,7 +95,7 @@ public
 
   process AutopilotProcess
     features
-      imu_in: in data port Falcon_Types::ImuSample;
+      sensors_in: in data port Falcon_Types::SensorFrame;
       waypoint_in: in data port Falcon_Types::Waypoint;
       pwm_out: out data port Falcon_Types::MotorPwm;
   end AutopilotProcess;
@@ -102,7 +108,7 @@ public
       rate: thread RateThread;
       mix: thread MixerThread;
     connections
-      c0: port imu_in -> ekf.imu_in;
+      c0: port sensors_in -> ekf.sensors_in;
       c1: port ekf.state_out -> pos.state_in;
       c2: port waypoint_in -> pos.waypoint_in;
       c3: port pos.attitude_sp_out -> att.attitude_sp_in;
