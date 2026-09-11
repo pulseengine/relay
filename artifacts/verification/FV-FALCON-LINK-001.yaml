@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-LINK-001
     type: sw-verification
     title: "HITL link backend: closed loop over the framed wire protocol (v1.14.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.14.0 falcon-hitl LinkBackend (2 tests pass, clippy
       clean), the third backend behind the HAL seam:

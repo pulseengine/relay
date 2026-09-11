@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-DC-001
     type: sw-verification
     title: "DroneCAN v0 transfer layer — relay-dronecan tests + Kani buffer-bound/totality proofs (DC-P01, v1.92)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-DC-P01. The relay-dronecan crate (no_std/no_alloc/
       forbid-unsafe) implements the DroneCAN v0 transfer layer. Test-level

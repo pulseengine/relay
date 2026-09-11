@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MAVLINK-001
     type: sw-verification
     title: "Unit + property tests for relay-mavlink (v0.1)"
-    status: approved
+    status: verified
     description: >
       Cargo unit + proptest verification of the relay-mavlink v2
       codec. Covers the CRC-16/MCRF4XX algorithm, HEARTBEAT encode

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MIX-003
     type: sw-verification
     title: "Airframe-agnostic allocator — Kani unit-interval bound + quad-X bit-equivalence + hexa symmetry (v0.34)"
-    status: approved
+    status: verified
     description: >
       Verification of the v0.34 MixerN airframe-agnostic control allocator
       (relay-mix-quad):

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-DC-CONFORMANCE
     type: sw-verification
     title: "DroneCAN wire conformance — pydronecan reference-vector validation (fixes the DSDL bit-order bug)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-DC-P02 + SWREQ-FALCON-DC-P03 along the CONFORMANCE
       axis (does the decode match the real DSDL?), which the prior FV-FALCON-DC-002

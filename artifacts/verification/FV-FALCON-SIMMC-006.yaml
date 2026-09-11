@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIMMC-006
     type: sw-verification
     title: "Mission / waypoint corridor-tracking campaign — real PosController under dispersion (v1.112 slice 2)"
-    status: implemented
+    status: verified
     release: falcon-v1.112.0
     description: >
       A NEW behaviour in the dispersion deck: waypoint mission tracking. Drives

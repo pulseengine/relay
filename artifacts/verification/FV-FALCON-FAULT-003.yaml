@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FAULT-003
     type: sw-verification
     title: "Single-rotor-out FULL-LOOP recovery — parasitic-free rank-3 allocation + production-core spin-descent oracle (v1.114)"
-    status: implemented
+    status: verified
     release: falcon-v1.114.0
     description: >
       Strengthens FV-FALCON-FAULT-002. That artifact verified the

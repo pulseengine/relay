@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-WORLD-001
     type: sw-verification
     title: "v0.1 end-to-end UDP heartbeat exchange test"
-    status: approved
+    status: verified
     description: >
       Integration test in examples/falcon-hello demonstrating the
       v0.1 acceptance criterion: vehicle and GCS exchange MAVLink

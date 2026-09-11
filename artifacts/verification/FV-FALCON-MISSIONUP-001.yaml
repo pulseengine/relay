@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MISSIONUP-001
     type: sw-verification
     title: "MAVLink mission upload — a GCS-defined mission flown end to end (v1.33.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.33.0 MAVLink mission-upload protocol (relay-mavlink
       61 tests + falcon-mavlink 14, clippy clean, embedded builds):
