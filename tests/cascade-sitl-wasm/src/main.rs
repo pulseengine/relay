@@ -29,6 +29,12 @@
 #[path = "../../../examples/falcon-sitl-gz/src/physics.rs"]
 mod physics;
 mod native_mirror;
+// The SAME pacing logic the native bench uses, included by path rather than
+// copied — for the same reason physics.rs is: a copy would let the two drift,
+// and the entire point is that the wasm harness and the native bench pace the
+// plant identically.
+#[path = "../../../examples/falcon-sitl-gz/src/pace.rs"]
+mod pace;
 
 use anyhow::{bail, Context, Result};
 use physics::{MockPhysics, Physics};
@@ -127,8 +133,30 @@ fn main() -> Result<()> {
         .ok().filter(|v| v != "0")
         .map(|_| (native_mirror::NativeCascade::new(), 0.0f32, 0u32));
 
+    // ── PACING (found by cpetig) ──────────────────────────────────────────
+    // The loop had NONE. measure() -> call_step() -> step() ran flat out, and
+    // the gz bridge is fully non-blocking: `step` is a fire-and-forget publish
+    // and `measure` drains a channel and returns the cached latest sample. So
+    // 2000 ticks burned ~0.5 s of wall clock, gz advanced ~0.5 s of sim, the
+    // controller re-consumed the SAME stale IMU sample roughly 4x per fresh
+    // one, and motor commands flooded out faster than physics stepped.
+    //
+    // The dt this harness passed to the component was therefore FICTION — which
+    // also means every gz number it produced was measuring a desynchronised
+    // loop rather than the controller.
+    //
+    // The native bench never had this: it paces on `counters().is_some()`. The
+    // wasm harness simply never got the same treatment.
+    let tick_period = std::time::Duration::from_secs_f32(dt);
+    let pace_real_time = plant.counters().is_some();
+    let sim_lock = pace_real_time && std::env::var("NO_SIM_LOCK").is_err();
+    let pace_deadline_us = (tick_period.as_micros() as u64).saturating_mul(8).max(2000);
+    let mut last_imu = plant.counters().map(|c| c.0).unwrap_or(0);
+    let run_start = std::time::Instant::now();
+
     let mut peak_tilt = 0.0f32;
     for tick in 0..ticks {
+        let tick_start = std::time::Instant::now();
         let (s, true_pos) = plant.measure(noise);
         let imu = WitImu {
             ax: s.accel_body[0], ay: s.accel_body[1], az: s.accel_body[2],
@@ -174,6 +202,36 @@ fn main() -> Result<()> {
         let tilt = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
         peak_tilt = peak_tilt.max(tilt);
         plant.step([m.m1, m.m2, m.m3, m.m4], dt);
+
+        // Mirrors examples/falcon-sitl-gz two-stage pacing exactly.
+        if sim_lock {
+            // Stage 1 (anti-burst): hold a uniform real-time control period so
+            // the inner loop never bursts through buffered IMU samples.
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+            // Stage 2 (anti-stale): if the sim has fallen behind (RTF < 1) the
+            // IMU can still be stale after a full period — wait for a fresh
+            // sample so we pace to PHYSICS rather than over-driving it.
+            // Bounded, so a stalled publisher cannot hang the run.
+            loop {
+                let now_imu = plant.counters().map(|c| c.0).unwrap_or(last_imu + 1);
+                let waited_us = tick_start.elapsed().as_micros() as u64;
+                match pace::pace_decision(last_imu, now_imu, waited_us, pace_deadline_us) {
+                    pace::Pace::Fresh(w) | pace::Pace::Deadline(w) => {
+                        last_imu = w;
+                        break;
+                    }
+                    pace::Pace::Wait => std::thread::sleep(std::time::Duration::from_micros(150)),
+                }
+            }
+        } else if pace_real_time {
+            let used = tick_start.elapsed();
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
+        }
     }
 
     let (_s, p) = plant.measure(0.0);
@@ -195,6 +253,16 @@ fn main() -> Result<()> {
     if !alt.is_finite() || !horiz.is_finite() {
         bail!("FAIL: diverged to non-finite state — the loop does not close");
     }
+    // Wall-vs-sim, printed always: the failure this fixes was INVISIBLE — the
+    // run completed, reported a plausible-looking altitude, and nothing said the
+    // clock had come apart. A desync should never again be silent.
+    let wall = run_start.elapsed().as_secs_f32();
+    let scheduled = ticks as f32 * dt;
+    println!(
+        "wall/sim   : {wall:.2}s wall vs {scheduled:.2}s scheduled (RTF {:.2}, pacing: {})",
+        if wall > 0.0 { scheduled / wall } else { 0.0 },
+        if sim_lock { "gyro-sync" } else if pace_real_time { "wall-clock" } else { "free-running" }
+    );
     println!("LOOP CLOSES: {ticks} ticks executed through the Component Model seam.");
 
     if let Some((_, worst, worst_tick)) = differential.as_ref() {
