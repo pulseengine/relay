@@ -1,0 +1,303 @@
+name: Gazebo
+
+# Gazebo has NEVER run in CI. Every gz result this repo carries — hover, the
+# Monte-Carlo campaigns, rotor-out recovery, touchdown — was produced on a
+# developer machine and committed as bench-evidence. Nothing re-derived any of
+# it, so a change that broke the gz bridge would surface whenever someone next
+# ran it by hand, which for the flight-critical paths could be a long time.
+#
+# It also unblocks the wasm x Gazebo pairing (#384): gz-transport cross-process
+# discovery does not work on the macOS dev box (`gz topic -l` returns nothing
+# while the server runs), and chasing that is a worse use of time than running
+# it where it demonstrably works.
+#
+# Ubuntu-hosted rather than the self-hosted fleet: this needs apt + the OSRF
+# repo, and the fleet's rust-cpu boxes are for the heavy Rust gates.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'examples/falcon-sitl-gz/**'
+      - 'tests/cascade-sitl-wasm/**'
+      - 'crates/falcon-core/**'
+      - 'crates/relay-iekf/**'
+      - 'wasm/cm/**'
+      - 'wit/falcon-cascade/**'
+      - '.github/workflows/gazebo.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: gazebo-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # NOT a required status check yet, deliberately, and this is a decision with a
+  # deadline rather than an omission. Nobody has ever flown the published wasm
+  # components through a physics engine, so whether the last step passes is
+  # genuinely unknown — making it required before the first run would be
+  # asserting an outcome instead of measuring one.
+  #
+  # But a non-required check that fails is invisible (SWREQ-RELAY-VGATE-P03 was
+  # written after `Verus` sat red for twelve days unnoticed for exactly that
+  # reason). So: read the FIRST run on main, then either promote this to a
+  # required context or record why not. Tracked in #384.
+  gazebo:
+    name: Gazebo SITL (real gz bridge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      # Gazebo Harmonic from the OSRF apt repo. Pinned to the keyring rather
+      # than apt-key (deprecated) and to ubuntu-stable for the runner's codename.
+      - name: Install Gazebo Harmonic
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lsb-release gnupg curl
+          sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
+            -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/gazebo-stable.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y gz-harmonic
+          # Recording needs ffmpeg and a render context. ogre2 gets an offscreen
+          # context from mesa's software rasteriser on a headless runner; without
+          # these the camera renders 0 frames and record_headless.sh fails with
+          # "render context failed" (which is the behaviour we want — see below).
+          sudo apt-get install -y ffmpeg libgl1-mesa-dri libegl1 libglx-mesa0 xvfb
+          gz sim --versions || true
+          pkg-config --modversion gz-transport13
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      # build-components.sh drives cargo-component; scripts/compose-cascade.rs drives
+      # wac. Neither is on a hosted runner. install-action serves prebuilt
+      # binaries, so this is seconds rather than a source build of both.
+      - name: Install cargo-component + wac
+        uses: taiki-e/install-action@v2.87.6
+        with:
+          tool: cargo-component,wac-cli
+
+      # scripts/*.rs are rust-script single-file tools (inline [dependencies]).
+      - name: Install rust-script
+        shell: bash
+        run: cargo install rust-script --locked
+
+      - name: Build the SITL bench with the real bridge
+        shell: bash
+        run: cargo build --release -p falcon-sitl-gz --features gazebo
+
+      # ── The world must actually come up ──────────────────────────────────
+      # A gz gate that "passes" because nothing connected is worse than no
+      # gate: it reports green having simulated nothing. So the server is
+      # started, and the topics the bridge SUBSCRIBES TO are asserted present
+      # before any scenario runs. This is the same empty-scope-must-not-pass
+      # rule the verification gate learned in #342.
+      - name: Start gz server and assert the world is publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gz sim -s -r -v2 examples/falcon-sitl-gz/worlds/falcon-quad.sdf \
+            > /tmp/gz-server.log 2>&1 &
+          echo $! > /tmp/gz.pid
+
+          # Wait for the IMU topic specifically — the one the estimator needs.
+          IMU=/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+          for i in $(seq 1 60); do
+            if gz topic -l 2>/dev/null | grep -qx "$IMU"; then break; fi
+            sleep 2
+          done
+
+          echo "== topics =="
+          gz topic -l 2>/dev/null | sort | tee /tmp/gz-topics.txt
+
+          MISSING=0
+          for t in \
+            "$IMU" \
+            "/world/falcon/model/quad/link/base_link/sensor/navsat_sensor/navsat" \
+            "/model/quad/odometry" \
+            "/quad/command/motor_speed"; do
+            if grep -qx "$t" /tmp/gz-topics.txt; then
+              echo "  present: $t"
+            else
+              echo "::error::gz topic MISSING: $t"; MISSING=1
+            fi
+          done
+          if [ "$MISSING" != "0" ]; then
+            echo "::error::the world is not publishing what the bridge subscribes to — refusing to report a green gz run"
+            sed -n '1,60p' /tmp/gz-server.log
+            exit 1
+          fi
+
+          # A live IMU sample, not merely an advertised name: a topic can exist
+          # with nothing ever published on it.
+          timeout 20 gz topic -e -t "$IMU" -n 1 > /tmp/gz-imu-sample.txt || true
+          if [ ! -s /tmp/gz-imu-sample.txt ]; then
+            echo "::error::IMU topic advertised but produced no sample in 20s"
+            exit 1
+          fi
+          echo "== one IMU sample =="; head -20 /tmp/gz-imu-sample.txt
+
+      - name: Native cascade through the real bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./target/release/falcon-sitl-gz \
+            --backend=gazebo --scenario=flightcore --duration=10 \
+            | tee /tmp/native-gz.txt
+          grep -q 'PASS' /tmp/native-gz.txt || { echo "::error::native flightcore did not PASS on gz"; exit 1; }
+
+      # ── The point of the exercise (#380, #384) ───────────────────────────
+      # Fly the SHIPPED wasm components through the SAME world the native
+      # cascade just flew. Until this runs, "the wasm cascade flies" rests on
+      # MockPhysics — an analytic plant, not a physics engine.
+      - name: Compose the published cascade and fly it through gz
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The wasm leg needs two things that arrive with PR #381 (the harness
+          # + scripts/compose-cascade.rs). Until that lands this step announces
+          # its own absence rather than silently doing nothing — a skipped leg
+          # that looks like a passed leg is exactly the failure mode this
+          # workflow's topic guard exists to prevent, one level up.
+          if [ ! -x scripts/compose-cascade.rs ] || [ ! -d tests/cascade-sitl-wasm ]; then
+            echo "::warning::wasm leg SKIPPED — scripts/compose-cascade.rs and/or tests/cascade-sitl-wasm not on this branch (they land with PR #381). The native leg above still gated; the wasm x Gazebo pairing (#380/#384) is NOT covered by this run."
+            echo "wasm leg skipped: harness not present on this branch" > /tmp/wasm-gz.txt
+            exit 0
+          fi
+
+          # build-components.sh skips the P3 stream artifacts here: ubuntu-latest
+          # DOES ship bazelisk, but MODULE.bazel local_path_override's four
+          # sibling rules_* repos which are not checked out on a runner, so the
+          # script's precondition (bazel AND the siblings) is false. The eight
+          # cargo-component artifacts — the ones that compose into the cascade —
+          # all build.
+          bash scripts/build-components.sh 1.137
+          ./scripts/compose-cascade.rs dist/falcon-components-v1.137 /tmp/composed.wasm
+          cd tests/cascade-sitl-wasm
+          cargo build --release --features gazebo
+          # TWO DIFFERENT FAILURES, treated differently on purpose.
+          #
+          # INFRASTRUCTURE broken (cannot build, cannot connect to gz, cannot
+          # instantiate the component) => FAIL. That is this gate's job and a
+          # regression in it must stop a merge.
+          #
+          # The FLIGHT OUTCOME => recorded, not fatal. The published cascade
+          # does not currently take off in gz: it wraps the legacy PID stages
+          # and has no arming or hover-thrust bias, which CascadePartition
+          # supplies (#388). That is a known, tracked gap, not something this
+          # or any unrelated PR introduces, and blocking every merge on it
+          # would only get the leg deleted.
+          #
+          # "LOOP CLOSES" is the discriminator: the harness prints it only
+          # after the component has actually executed its ticks. Absent =>
+          # infrastructure. Present with a hold error => measurement.
+          set +e
+          BACKEND=gazebo ./target/release/cascade-sitl-wasm /tmp/composed.wasm 2500 0.004 \
+            2>&1 | tee /tmp/wasm-gz.txt
+          set -e
+          if ! grep -q 'LOOP CLOSES' /tmp/wasm-gz.txt; then
+            echo "::error::the wasm cascade did not execute in gz — infrastructure failure, not a flight outcome"
+            exit 1
+          fi
+          HOLD=$(sed -n 's/^HOLD ERROR *: .*|err| = \([0-9.]*\) m.*/\1/p' /tmp/wasm-gz.txt | tail -1)
+          echo "::notice::wasm cascade ran ${HOLD:-?} m hold error in gz — tracked in #388 until the components wrap the flown stack"
+
+      # ── Record the flight ────────────────────────────────────────────────
+      # Every gz run leaves footage. The bench has recorded video for releases
+      # for a long time, but only when a person remembered to run the script;
+      # nothing produced a recording as a by-product of the flight itself, so
+      # the visual evidence for any given commit either exists by luck or not
+      # at all.
+      #
+      # record_headless.sh renders through a camera SENSOR (Sensors/ogre2
+      # offscreen), not a GUI or a screen capture, so it needs no display and no
+      # permissions. It already gets the three non-obvious parts right: a gz
+      # camera renders only while something subscribes to its image topic; gz
+      # writes frames unpadded so a lexical sort interleaves 1,10,100,2; and the
+      # encode framerate must be the MEASURED capture rate or the video comes
+      # out in slow motion.
+      #
+      # It FAILS on zero frames rather than emitting an empty file, and this step
+      # deliberately does NOT continue-on-error. A recording step that silently
+      # produces nothing is the same failure as a gate that passes having checked
+      # nothing — and this repo has just spent several releases removing those.
+      - name: Record the flight
+        shell: bash
+        env:
+          # Software rasteriser: no GPU on a hosted runner.
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+          # One run, not the local best-of-4: CI wants the footage of THIS
+          # commit's flight, not the prettiest of several.
+          RUNS: "1"
+        run: |
+          set -euo pipefail
+          pkill -f 'gz sim' 2>/dev/null || true
+          sleep 2
+          # `flightcore` — the scenario that actually holds station, and the
+          # same one the native leg above gates on. The first attempt recorded
+          # `hover`, which diverged to 17.38 m with framed=0: honest footage of
+          # a scenario that does not pass, which is not what anyone wants to
+          # watch to see whether the flight works.
+          xvfb-run -a examples/falcon-sitl-gz/scripts/record_headless.sh \
+            markers flightcore 20 2>&1 | tee /tmp/record.log
+
+          # Take the path the script ITSELF reports rather than guessing with
+          # find. The first attempt searched /tmp and examples/ by mtime while
+          # the script writes to bench-evidence/gz-sim/recordings/ — so a
+          # perfectly good 527-frame recording was produced and then declared
+          # missing.
+          MP4=$(sed -n 's/^== done -> \(.*\) ==$/\1/p' /tmp/record.log | tail -1)
+          if [ -z "$MP4" ] || [ ! -s "$MP4" ]; then
+            echo "::error::no video produced — see /tmp/record.log"
+            tail -30 /tmp/record.log
+            exit 1
+          fi
+          mkdir -p /tmp/gz-video
+          cp "$MP4" "/tmp/gz-video/falcon-gz-${GITHUB_SHA:0:8}.mp4"
+          ls -la /tmp/gz-video/ 
+          ffprobe -v error -show_entries format=duration,size -of default=nw=1 \
+            "/tmp/gz-video/falcon-gz-${GITHUB_SHA:0:8}.mp4"
+
+      - name: Stop gz
+        if: always()
+        shell: bash
+        run: kill "$(cat /tmp/gz.pid)" 2>/dev/null || true; pkill -f 'gz sim' || true
+
+      # Stored as a build artifact keyed by commit sha. 90 days is the maximum
+      # retention; a release-worthy clip gets promoted into the relvids set and
+      # its channel-metadata.md entry, which is the durable path.
+      - name: Store the flight video
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gazebo-flight-video
+          path: /tmp/gz-video/
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload gz evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gazebo-evidence
+          path: |
+            /tmp/gz-server.log
+            /tmp/gz-topics.txt
+            /tmp/gz-imu-sample.txt
+            /tmp/native-gz.txt
+            /tmp/wasm-gz.txt
+            /tmp/record.log
+          if-no-files-found: warn

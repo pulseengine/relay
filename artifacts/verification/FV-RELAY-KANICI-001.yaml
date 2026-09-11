@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-KANICI-001
     type: sw-verification
     title: "cFS engines' Kani harnesses model-checked in CI (closes #6's CI gap)"
-    status: approved
+    status: implemented
     description: >
       Verification that the cFS engines' Kani harnesses are model-checked in CI.
       The harnesses (the Rust companion to the Lean BackpressureSafety /
@@ -27,6 +27,41 @@ artifacts:
       #2): lc geofence-latch, hs RTL-latch, cfdp transaction-state, sc RTS
       sequence, sch add-slot + set-enabled. Remaining for full #6 closure: an
       explicit rivet link from each harness to the matching Lean theorem.
+
+      EXTENDED IN v1.136 — from 6 engines to 16, because the other ten were
+      being model-checked and not recorded. The untraced-proof cross-check
+      (SWREQ-RELAY-VGATE-P02) found that kani.yml's matrix runs 45 engines
+      while only 35 were cited by any artifact. The ten uncited ones were all
+      cFS engines squarely inside THIS artifact's stated scope:
+
+        relay-hk      2   verify_collect_bounded, verify_no_panic
+        relay-cs      3   verify_crc_deterministic, verify_check_bounded, verify_no_panic
+        relay-ds      3   verify_decision_bounded, verify_disabled_no_decision, verify_no_panic
+        relay-fm      2   verify_empty_path_rejected, verify_no_panic
+        relay-ci      2   verify_valid_header_accepted, verify_no_panic
+        relay-to      2   verify_subscribe_unsubscribe, verify_no_panic
+        relay-md      2   verify_sample_bounded, verify_no_panic
+        relay-mm      2   verify_out_of_range_rejected, verify_no_panic
+        relay-tbl     2   verify_register_bounded, verify_no_panic
+        relay-ccsds   2   verify_encode_decode_roundtrip, verify_no_panic
+        TOTAL        22   (bringing this artifact to 52 harnesses / 16 engines)
+
+      These 22 have been verified on every push by the required `Kani gate`
+      check for months. Nothing about the proofs changed here; what changed is
+      that the traceability graph now records them. Before this, SWREQ-{HK,CS,
+      DS,FM,CI,TO,MD,MM,TBL,CCSDS}-P01 sat at `implemented` with their only
+      `verifies` edge coming from a stepless roll-up (SV-RELAY-*), so the trace
+      reported no executable evidence for a requirement whose proof was green
+      in CI that same minute.
+
+      WHAT THIS DOES NOT CLAIM. Adding the citation makes the evidence visible;
+      it does not argue the evidence is sufficient. Ten of these 22 are
+      `verify_no_panic` — a totality property, not a functional one — and the
+      requirements stay at `implemented` rather than being promoted on the
+      strength of a link that did not exist yesterday. The -P02..-P0n
+      requirements of these engines remain at `approved` with roll-up-only
+      evidence; that is honest (approved = planned, not executed) and is
+      tracked separately, not quietly folded in here.
     tags: [verification, relay, cfs, kani, ci]
     fields:
       method: model-checking
@@ -37,6 +72,16 @@ artifacts:
         - run: "cargo kani -p relay-sch  # bench-only"
         - run: "cargo kani -p relay-cfdp  # bench-only"
         - run: "cargo kani -p relay-sca  # bench-only"
+        - run: "cargo kani -p relay-hk  # bench-only"
+        - run: "cargo kani -p relay-cs  # bench-only"
+        - run: "cargo kani -p relay-ds  # bench-only"
+        - run: "cargo kani -p relay-fm  # bench-only"
+        - run: "cargo kani -p relay-ci  # bench-only"
+        - run: "cargo kani -p relay-to  # bench-only"
+        - run: "cargo kani -p relay-md  # bench-only"
+        - run: "cargo kani -p relay-mm  # bench-only"
+        - run: "cargo kani -p relay-tbl  # bench-only"
+        - run: "cargo kani -p relay-ccsds  # bench-only"
     links:
       - type: verifies
         target: SWREQ-LC-P01
@@ -50,3 +95,23 @@ artifacts:
         target: SWREQ-CFDP-P01
       - type: verifies
         target: SWREQ-SCA-P01
+      - type: verifies
+        target: SWREQ-HK-P01
+      - type: verifies
+        target: SWREQ-CS-P01
+      - type: verifies
+        target: SWREQ-DS-P01
+      - type: verifies
+        target: SWREQ-FM-P01
+      - type: verifies
+        target: SWREQ-CI-P01
+      - type: verifies
+        target: SWREQ-TO-P01
+      - type: verifies
+        target: SWREQ-MD-P01
+      - type: verifies
+        target: SWREQ-MM-P01
+      - type: verifies
+        target: SWREQ-TBL-P01
+      - type: verifies
+        target: SWREQ-CCSDS-P01

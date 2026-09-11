@@ -28,6 +28,7 @@ Usage:
 """
 
 import argparse
+import glob
 import json
 import re
 import subprocess
@@ -49,6 +50,37 @@ BENCH_PATTERNS = [
     # the traceability-audit finding). Only a kani step WITHOUT `-p` (run from
     # inside a crate dir) still falls through to bench-only.
     re.compile(r"\bcargo\s+kani\b(?!.*\s-p\s)"),      # kani without -p: bench-only
+    # RELEASE-VERIFICATION steps need tools the gate runner does not carry and a
+    # PUBLISHED release to point at: `gh` and `cosign` are absent (rc=127), and
+    # even installed they would query the network for a tag that may not exist
+    # yet. FV-FALCON-RELEASE-001 has carried three such steps since v0.17.0 and
+    # they had NEVER been executed — it is tagged [release, supply-chain, cosign,
+    # sbom, slsa] with no `falcon` tag, so the default `(has-tag "falcon")` sweep
+    # never matched it. A broader Verify-Filter on PR #375 finally selected it and
+    # all three failed rc=127 at once.
+    #
+    # This is the same trap FV-FALCON-REL-001 documented and deliberately avoided:
+    # a `gh release view <tag>` step fails for everyone until the release exists,
+    # then passes forever after — a result that depends on WHEN it runs, which is
+    # not evidence. Classifying by shape is what makes that judgement automatic
+    # instead of per-author.
+    re.compile(r"^\s*gh\s+(?:release|attestation)\s"),   # needs gh + a published release
+    re.compile(r"^\s*cosign\s+(?:verify|verify-blob)\b"),  # needs cosign + published sigs
+    # The FOUR-TRACK CROSSWALK needs all four provers on one machine. The gate
+    # runner has none of them: its own output reads "cargo-kani not installed",
+    # "Verus : RUN ❌", "Rocq : RUN ❌" — 3 of 4 tracks cannot even start, and
+    # the Verus one additionally cannot work on linux at all until
+    # pulseengine/rules_verus#25 (the bundled sysroot lacks the target std).
+    #
+    # Each track has a DEDICATED workflow that is its real enforcer — the same
+    # arrangement as `cargo kani -p` (enforced-by-kani-gate) and `bazel test
+    # //:*_verus_test` (enforced-by-verus-gate). Running the crosswalk here only
+    # re-reports those workflows' failures through a second, worse channel.
+    #
+    # Surfaced by PR #377: this step had not been executed in recent memory
+    # because no PR's Verify-Filter selected FV-RELAY-VCHAIN-001, so a narrow
+    # filter revealed it exactly as #375's filter revealed FV-FALCON-RELEASE-001.
+    re.compile(r"^\s*(?:bash\s+|sh\s+|\./)?(?:scripts/)?verify-chain\.sh\b"),
     re.compile(r"\bcargo\s+\+nightly\s+miri\b"),      # miri nightly component
     re.compile(r"^\s*MIRIFLAGS="),                    # same family
     re.compile(r"\brustup\s+component\s+add\s+miri"), # same family
@@ -156,15 +188,105 @@ def kani_matrix_crates(workflow_path: str = ".github/workflows/kani.yml") -> set
     return crates
 
 
-def rivet_list(filter_expr: str, artifact_type: str) -> list[str]:
-    out = subprocess.check_output([
-        "rivet", "list",
-        "--type", artifact_type,
-        "--filter", filter_expr,
-        "--format", "json",
-    ])
-    data = json.loads(out)
-    return [a["id"] for a in data["artifacts"]]
+# Engines the matrix model-checks that no artifact cites YET. Same shape as
+# KANI_MATRIX_WAIVERS: tracked debt stays LOUD (reported every run with its
+# issue) rather than silently tolerated.
+KANI_TRACE_WAIVERS: dict[str, str] = {}
+
+_KANI_CITED_CACHE: set[str] | None = None
+
+
+def kani_cited_crates(artifact_root: str = "artifacts") -> set[str]:
+    """Crates cited by a `cargo kani -p <crate>` step in ANY rivet artifact.
+
+    Deliberately scans the WHOLE artifact tree from disk rather than the
+    filtered set this run happens to be executing. Coverage is a property of
+    the traceability graph, not of one run's scope: computing it from the
+    filtered subset would report an engine as untraced merely because a
+    `Verify-Filter` excluded the artifact that cites it. That is the same
+    empty-scope-equals-pass shape this gate exists to prevent, inverted into
+    a spurious failure — so the scope is fixed at "every artifact", always.
+
+    Raw-text regex rather than a YAML parse: the step text appears verbatim,
+    the pattern is the SAME KANI_P_STEP used for the forward check, and it
+    keeps this dependency-free (mirrors how kani_matrix_crates reads the
+    workflow and verus_targets reads BUILD.bazel).
+    """
+    global _KANI_CITED_CACHE
+    if _KANI_CITED_CACHE is None:
+        cited: set[str] = set()
+        for f in glob.glob(f"{artifact_root}/**/*.yaml", recursive=True):
+            try:
+                text = open(f, encoding="utf-8", errors="ignore").read()
+            except OSError:
+                continue
+            for m in KANI_P_STEP.finditer(text):
+                cited.add(m.group(1))
+        _KANI_CITED_CACHE = cited
+    return _KANI_CITED_CACHE
+
+
+def untraced_kani_engines() -> tuple[list[str], list[tuple[str, str]]]:
+    """Matrix engines that no rivet artifact cites: (failures, waived).
+
+    The cross-check in run_steps() runs ARTIFACT -> MATRIX: a step citing a
+    crate outside kani.yml is an ORPHANED PROOF, because CI never runs it.
+    This is the other direction, MATRIX -> ARTIFACT: a crate kani.yml DOES
+    model-check on every push that no artifact cites is an UNTRACED PROOF.
+
+    Why that is a real defect and not bookkeeping. relay-{hk,cs,ds,fm,ci,to,
+    md,mm,tbl,ccsds} carried 22 Kani harnesses that the required `Kani gate`
+    check verified on every push for months. Meanwhile SWREQ-{HK,CS,DS,FM,CI,
+    TO,MD,MM,TBL,CCSDS}-P01 sat at `implemented` whose only `verifies` edge
+    came from a stepless roll-up (SV-RELAY-*). So the proof existed, ran, and
+    passed — and the traceability graph said the requirement had no
+    executable evidence. An assessor reading the trace would have found a
+    hole that the CI log had been filling the whole time.
+
+    This is the exact mirror of the v1.135 Verus finding (19 proofs defined,
+    none ever ran). Both directions now fail loudly, which is the point: a
+    one-directional cross-check is satisfied by citing nothing.
+    """
+    matrix = kani_matrix_crates()
+    if not matrix:
+        # Mirrors the verus.yml empty-set guard. An empty matrix would make
+        # this check vacuously pass — "0 engines uncovered" — which is
+        # exactly the failure mode it exists to catch.
+        return (["<kani.yml matrix is EMPTY — coverage cannot be computed>"], [])
+    missing = sorted(matrix - kani_cited_crates())
+    fails = [c for c in missing if c not in KANI_TRACE_WAIVERS]
+    waived = [(c, KANI_TRACE_WAIVERS[c]) for c in missing if c in KANI_TRACE_WAIVERS]
+    return (fails, waived)
+
+
+def rivet_list(filter_expr: str, artifact_types: str) -> list[str]:
+    """Artifact ids matching the filter, across EVERY requested type.
+
+    `artifact_types` is comma-separated because the default used to be the bare
+    string "sw-verification" — and that single word was a scope hole nobody had
+    looked at. Measured before this changed: 36 `sys-verification` and 38
+    `unit-verification` artifacts carrying 97 steps, 15% of all recorded
+    verification steps, were invisible to EVERY gate run. Among them were 32 of
+    the 36 artifacts citing a Verus proof.
+
+    That is the same shape as the tag-filter holes (#342's zero-match, #375's
+    never-run `gh`/`cosign` steps, #377's never-run crosswalk) on a different
+    axis: the gate was sweeping a subset and reporting as though it had swept
+    the whole tree. Ordering is preserved and duplicates dropped so a type
+    listed twice cannot double-run a step.
+    """
+    seen: list[str] = []
+    for t in [x.strip() for x in artifact_types.split(",") if x.strip()]:
+        out = subprocess.check_output([
+            "rivet", "list",
+            "--type", t,
+            "--filter", filter_expr,
+            "--format", "json",
+        ])
+        for a in json.loads(out)["artifacts"]:
+            if a["id"] not in seen:
+                seen.append(a["id"])
+    return seen
 
 
 def rivet_get(artifact_id: str) -> dict[str, Any]:
@@ -493,9 +615,10 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--filter", default='(has-tag "falcon")',
                    help='rivet S-expression filter (default: falcon-tagged)')
-    p.add_argument("--type", default="sw-verification",
-                   help='rivet artifact type (default: sw-verification — '
-                        'matches every FV-FALCON-*.yaml)')
+    p.add_argument("--type", default="sw-verification,sys-verification,unit-verification",
+                   help='comma-separated rivet artifact types. Default sweeps ALL '
+                        'THREE verification types; the previous sw-verification-only '
+                        'default left 97 steps (15%%) unexecuted in every run.')
     p.add_argument("--dry-run", action="store_true",
                    help="print commands without executing")
     p.add_argument("--markdown", action="store_true",
@@ -550,8 +673,26 @@ def main() -> int:
                       f"{time.monotonic() - t0:.1f}s")
             print()
 
+    # ── KANI TRACE COVERAGE (matrix -> artifact) ─────────────────────────
+    # Filter-independent by construction (see kani_cited_crates), so it is
+    # computed once here rather than per-artifact, and a narrow Verify-Filter
+    # can neither weaken it nor spuriously trip it.
+    kani_fails, kani_waived = untraced_kani_engines()
+    for crate, issue in kani_waived:
+        print(f"# [ WAIVED-kani-trace] {crate}: model-checked but uncited — see {issue}")
+    coverage_pass = not kani_fails
+    if kani_fails:
+        print(f"# {len(kani_fails)} UNTRACED PROOF(S) — kani.yml model-checks these "
+              f"on every push and NO rivet artifact cites them, so the "
+              f"requirements they discharge read as having no executable evidence:")
+        for crate in kani_fails:
+            print(f"#   {crate}")
+        print("# Fix: add a `cargo kani -p <crate>` step (and a `verifies` link) to "
+              "the artifact that owns it, or add a KANI_TRACE_WAIVERS entry with an issue.")
+        print()
+
     report = []
-    overall_pass = True
+    overall_pass = coverage_pass
     for aid in ids:
         a = arts[aid]
         ok, step_results = run_steps(a, args.dry_run)

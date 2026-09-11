@@ -47,7 +47,7 @@ pub const UAS_ID_BYTES: usize = 20;
 pub const PROTOCOL_VERSION: u8 = 2;
 
 /// Network ID message family.
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MessageType {
     BasicId = 0,
@@ -68,7 +68,7 @@ impl MessageType {
 }
 
 /// What kind of identifier the UAS ID field carries.
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum IdType {
     None = 0,
@@ -95,7 +95,7 @@ impl IdType {
 }
 
 /// UA category from the EASA / FAA enumerations (simplified).
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum UaType {
     None = 0,
@@ -132,7 +132,7 @@ impl UaType {
 }
 
 /// Operational status of the vehicle.
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum OperationalStatus {
     Undeclared = 0,
