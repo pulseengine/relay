@@ -41,7 +41,8 @@ artifacts:
       steps:
         - run: cargo test -p relay-batt
         - run: cargo test -p relay-batt --release
-        - run: cargo test -p falcon-core
+        - run: cargo test -p falcon-core battery
+        - run: cargo test -p falcon-core sag_punch
         - run: cargo kani -p relay-batt
     links:
       - type: verifies

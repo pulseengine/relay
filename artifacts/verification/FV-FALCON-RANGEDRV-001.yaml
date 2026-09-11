@@ -44,7 +44,7 @@ artifacts:
       steps:
         - run: cargo test -p relay-flowrange
         - run: cargo test -p relay-flowrange --release
-        - run: cargo test -p falcon-core
+        - run: cargo test -p falcon-core range
         - run: cargo kani -p relay-flowrange
     links:
       - type: verifies

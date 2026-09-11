@@ -44,8 +44,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo test -p falcon-core
-        - run: cargo test -p falcon-core --release
+        - run: cargo test -p falcon-core partitioned
+        - run: cargo test -p falcon-core --release partitioned
     links:
       - type: verifies
         target: SWREQ-FALCON-PART-P01
