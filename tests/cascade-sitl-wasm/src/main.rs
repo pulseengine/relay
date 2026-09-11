@@ -28,6 +28,7 @@
 // so without that feature this pulls exactly `Physics` + `MockPhysics`.
 #[path = "../../../examples/falcon-sitl-gz/src/physics.rs"]
 mod physics;
+mod native_mirror;
 
 use anyhow::{bail, Context, Result};
 use physics::{MockPhysics, Physics};
@@ -114,8 +115,18 @@ fn main() -> Result<()> {
     println!("schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)", ticks as f32 * dt, 1.0 / dt);
     println!();
 
+    // DIFFERENTIAL=1 runs the SAME crates natively alongside and reports the
+    // worst per-motor disagreement. This is "develop in wasm, deploy that wasm
+    // unchanged" made falsifiable: identical Rust reached two ways must agree,
+    // and if it does not, the Component Model is not transparent and the whole
+    // develop-then-deploy story needs qualifying.
+    let mut differential = std::env::var("DIFFERENTIAL")
+        .ok()
+        .filter(|v| v != "0")
+        .map(|_| (native_mirror::NativeCascade::new(), 0.0f32, 0u32));
+
     let mut peak_tilt = 0.0f32;
-    for _ in 0..ticks {
+    for tick in 0..ticks {
         let (s, _true_pos) = plant.measure(noise);
         let imu = WitImu {
             ax: s.accel_body[0], ay: s.accel_body[1], az: s.accel_body[2],
@@ -124,6 +135,24 @@ fn main() -> Result<()> {
         // The tick that matters: one full estimate -> position -> attitude ->
         // rate -> mixer pass, executed inside the wasm component.
         let m = controller.call_step(&mut store, imu, target)?;
+
+        // Fed the IDENTICAL imu sample, not its own — both sides must see one
+        // input sequence or they diverge for reasons that say nothing about the
+        // Component Model. The plant is advanced by the WASM output, so the
+        // trajectory belongs to the artifact under test and the native mirror
+        // is a pure observer.
+        if let Some((nat, worst, worst_tick)) = differential.as_mut() {
+            let n = nat.step(s.accel_body, s.gyro_body, [0.0, 0.0, down, 0.0]);
+            let d = [
+                (n[0] - m.m1).abs(), (n[1] - m.m2).abs(),
+                (n[2] - m.m3).abs(), (n[3] - m.m4).abs(),
+            ];
+            let dmax = d.iter().copied().fold(0.0f32, f32::max);
+            if dmax > *worst {
+                *worst = dmax;
+                *worst_tick = tick;
+            }
+        }
         let tilt = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
         peak_tilt = peak_tilt.max(tilt);
         plant.step([m.m1, m.m2, m.m3, m.m4], dt);
@@ -149,6 +178,24 @@ fn main() -> Result<()> {
         bail!("FAIL: diverged to non-finite state — the loop does not close");
     }
     println!("LOOP CLOSES: {ticks} ticks executed through the Component Model seam.");
+
+    if let Some((_, worst, worst_tick)) = differential.as_ref() {
+        println!("DIFFERENTIAL: worst per-motor |wasm - native| = {worst:.9} at tick {worst_tick}");
+        // BIT-EXACT is the bar, not "close". Both sides run the same f32 code on
+        // the same inputs and wasm32 shares IEEE-754 semantics with the host, so
+        // any difference at all means something OTHER than the arithmetic
+        // changed — a different constant, a different call order, a lost update.
+        // A tolerance would hide exactly the divergence worth finding.
+        if *worst != 0.0 {
+            bail!(
+                "FAIL: wasm and native disagree by {worst:.9} (tick {worst_tick}). The same \
+                 Rust reached two ways must compute the same answer — if it does not, \
+                 'develop in wasm, deploy that wasm unchanged' is not true and the \
+                 difference must be explained before it is tolerated."
+            );
+        }
+        println!("PASS: wasm and native are BIT-IDENTICAL across {ticks} ticks.");
+    }
 
     // (2) Does it HOLD the commanded altitude? The answer depends on the tick
     //     rate, and that dependency is itself the first defect.

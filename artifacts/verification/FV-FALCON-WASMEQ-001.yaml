@@ -1,0 +1,64 @@
+artifacts:
+  - id: FV-FALCON-WASMEQ-001
+    type: sw-verification
+    title: "WASMEQ-P01 — wasm and native are bit-identical across 2000 ticks (v1.137)"
+    status: implemented
+    release: falcon-v1.137.0
+    description: >
+      Verification of SWREQ-FALCON-WASMEQ-P01.
+
+      MEASURED, tests/cascade-sitl-wasm with DIFFERENTIAL=1, 2000 ticks at 1 kHz
+      against the published falcon-v1.135.0 components composed by wac:
+
+        DIFFERENTIAL: worst per-motor |wasm - native| = 0.000000000 at tick 0
+        PASS: wasm and native are BIT-IDENTICAL across 2000 ticks.
+
+      METHOD. `native_mirror.rs` runs the SAME crates the wasm stage components
+      wrap — relay-iekf, relay-pos, relay-att, relay-rate, relay-mix-quad — wired
+      exactly as wasm/cm/cascade wires them, in-process. Both sides receive the
+      IDENTICAL imu sample each tick: the plant is advanced by the WASM output,
+      so the trajectory belongs to the artifact under test and the native side is
+      a pure observer. Letting each side drive its own trajectory would produce
+      divergence that says nothing about the Component Model.
+
+      FIDELITY OVER CORRECTNESS IN THE MIRROR, deliberately. Every constant is
+      COPIED from its component rather than chosen, including the wrong ones:
+      each stage fabricates its own clock at a different hardcoded rate (position
+      20 ms, attitude 4 ms, rate 1 ms) although the cascade calls all five once
+      per step, and the rate loop is fed the raw GYRO rather than the filtered
+      state because that is what the component passes. A mirror that quietly
+      fixed either would compare two different programs and report a difference
+      meaning nothing.
+
+      NO TOLERANCE. The assertion is `worst != 0.0`, not a threshold. Both sides
+      run identical f32 code on identical inputs under shared IEEE-754 semantics,
+      so a non-zero delta is evidence that something structural differs, and the
+      test says so rather than absorbing it.
+
+      HONEST SCOPE — three things this does NOT establish:
+        1. NOT that the wasm cascade equals falcon-core's FlightCore. It does
+           not: native flies geometric SE(3) + ADRC, these components wrap the
+           older PID cascade (#380). This is packaging transparency, not
+           controller parity.
+        2. NOT anything about meld/loom/synth lowering to ARM — that is jess's
+           rung of the ladder, and passing here is its precondition, not its
+           substitute.
+        3. One plant (MockPhysics), one scenario, 2000 ticks, 1 kHz. Bit-exact
+           agreement over a wider envelope is untested.
+
+      This is rung 1 of the develop-in-wasm/deploy-unchanged ladder: same
+      artifact, two execution routes, identical output.
+    tags: [verification, falcon, wasm, component-model, equivalence, differential, v1.137]
+    fields:
+      method: automated-test
+      steps:
+        # The mirror exists and wires the same five stages the component does.
+        - run: "grep -q 'relay_mix_quad::QuadMixer' tests/cascade-sitl-wasm/src/native_mirror.rs"
+        # No tolerance: the assertion is inequality with zero, not a threshold.
+        - run: "grep -q 'worst != 0.0' tests/cascade-sitl-wasm/src/main.rs"
+        # The differential run itself — bench-only: needs a composed component,
+        # which needs cargo-component + wac. The Gazebo CI job runs it.
+        - run: "DIFFERENTIAL=1 cargo run --release --manifest-path tests/cascade-sitl-wasm/Cargo.toml -- composed.wasm 2000 0.001  # bench-only: expect BIT-IDENTICAL"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WASMEQ-P01
