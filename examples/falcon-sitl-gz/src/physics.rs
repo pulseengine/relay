@@ -507,6 +507,23 @@ mod gz_real {
                 // above, and the general rule it teaches is a real pre-arm
                 // condition, not a simulator quirk: never initialise an
                 // altitude reference while the airframe is still moving.
+                // TWO conditions, and the second is not redundant.
+                //
+                // Stability alone is NOT "at rest": three identical fixes are
+                // equally consistent with "the vehicle has landed" and with
+                // "physics has barely started, so nothing has had time to
+                // move". Position samples cannot tell those apart. A first
+                // version of this check tested stability only, accepted a datum
+                // 0.1 s in, and on CI (which starts the flight promptly, where
+                // a local rig had burned seconds in its readiness probe) it
+                // pinned the reference at the SPAWN height — the vehicle then
+                // slid 7.75 m along the ground without ever lifting, at a
+                // reported altitude of exactly 0.000 m.
+                //
+                // So require settling time to have ELAPSED as well. The drop
+                // takes ~0.4 s; 2 s is five times that, and is paid once at
+                // startup.
+                const SETTLE_MIN_S: f32 = 2.0;
                 let start = std::time::Instant::now();
                 let mut last_alt: Option<f64> = None;
                 let mut stable = 0u32;
@@ -515,17 +532,15 @@ mod gz_real {
                     else {
                         continue;
                     };
-                    // Three consecutive fixes within 2 cm. At the 5 Hz NavSat
-                    // rate that is 0.4 s of stillness, comfortably longer than
-                    // the ~0.4 s drop, so a slow phase of the fall cannot be
-                    // mistaken for having landed.
+                    // Three consecutive fixes within 2 cm = 0.4 s of stillness
+                    // at the 5 Hz NavSat rate.
                     if last_alt.is_some_and(|a| (a - fix.altitude).abs() < 0.02) {
                         stable += 1;
                     } else {
                         stable = 0;
                     }
                     last_alt = Some(fix.altitude);
-                    if stable < 3 {
+                    if stable < 3 || start.elapsed().as_secs_f32() < SETTLE_MIN_S {
                         continue;
                     }
                     home = Home {
