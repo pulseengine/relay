@@ -1,0 +1,48 @@
+artifacts:
+  - id: SWREQ-FALCON-WASMEQ-P02
+    type: sw-req
+    title: "WASMEQ-P02 — a published component shall not wrap a crate the flight core does not use"
+    status: implemented
+    release: falcon-v1.137.0
+    description: >
+      Every `relay-*` crate wrapped by a component under wasm/cm shall also be a
+      dependency of crates/falcon-core, or carry an explicit waiver naming its
+      tracking issue. A build shall fail otherwise.
+
+      WHY IT EXISTS. falcon-core adopted relay-adrc on 2026-06-03 and dropped
+      relay-pos, relay-att and relay-rate. The wasm components kept wrapping
+      them. For roughly three months and ~40 releases, relay published,
+      cosign-signed, pushed to ghcr, registered on wasm.directory and handed to
+      jess a control stack the flight core does not fly (#388).
+
+      Nothing noticed because nothing compared the two dependency sets. Not one
+      of the ~370 verification steps, four proof tracks or 289 traceability
+      artifacts asked the question "is the thing we ship built from the thing we
+      fly?" — because each of them verifies a component, or a crate, or a proof,
+      and this property lives in the RELATIONSHIP between two manifests.
+
+      WHY IT MATTERS BEYOND TIDINESS. Verification evidence is about specific
+      code. When the published artifact is built from different code than the
+      verified one, every proof, bench and campaign result still holds — about
+      something nobody ships. The evidence does not become wrong; it becomes
+      unattached, which is harder to notice and worse to rely on.
+
+      SCOPE. The check is a dependency-set comparison, not a semantic one. It
+      cannot tell whether a shared crate is USED equivalently — wasm/cm/iekf and
+      falcon-core both depend on relay-iekf while configuring it differently
+      (the component omitted set_process_floor for months). It catches the
+      coarse failure, which is the one that went unnoticed for three months.
+
+      RELATED: SWREQ-FALCON-WASMEQ-P01 (the Component Model boundary is
+      transparent — wasm output == native output, bit-exact) lands with PR #381
+      and is not yet on main, so it is named here rather than linked. P01 says
+      the PACKAGING does not change the answer; P02 says the packaged code is
+      the code we fly. Both are needed: a transparent boundary around the wrong
+      program still ships the wrong program.
+
+      FALSIFICATION: wrong if a component can be published wrapping a crate
+      crates/falcon-core does not depend on, without a waiver, and CI stays green.
+    tags: [requirement, falcon, wasm, component-model, supply-chain, hygiene, v1.137]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

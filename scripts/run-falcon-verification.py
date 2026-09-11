@@ -64,7 +64,7 @@ BENCH_PATTERNS = [
     # then passes forever after — a result that depends on WHEN it runs, which is
     # not evidence. Classifying by shape is what makes that judgement automatic
     # instead of per-author.
-    re.compile(r"^\s*gh\s+(?:release|attestation)\s"),   # needs gh + a published release
+    re.compile(r"^\s*gh\s+(?:release|attestation|api)\s"),  # needs gh (+ network/a release)
     re.compile(r"^\s*cosign\s+(?:verify|verify-blob)\b"),  # needs cosign + published sigs
     # The FOUR-TRACK CROSSWALK needs all four provers on one machine. The gate
     # runner has none of them: its own output reads "cargo-kani not installed",
