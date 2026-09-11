@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-DC-002
     type: sw-verification
     title: "DroneCAN ESC control path — NodeStatus/RawCommand codecs + single-frame TX, Kani-bounded (DC-P02, v1.93)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-DC-P02. relay-dronecan gains the ESC-path message
       codecs (msg.rs) and the single-frame transfer encoder (transfer.rs).

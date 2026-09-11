@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-POS-001
     type: sw-verification
     title: "Unit + property tests + mission SITL for relay-pos (v0.5)"
-    status: approved
+    status: verified
     description: >
       v0.5 verification of the position controller (`relay-pos`) and
       the full POS → ATT → RATE → MIX → plant cascade in the

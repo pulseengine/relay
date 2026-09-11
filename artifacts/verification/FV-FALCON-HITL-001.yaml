@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-HITL-001
     type: sw-verification
     title: "HITL RF-spoof harness — verdict contract + stub-backend regression (v0.11)"
-    status: approved
+    status: verified
     description: >
       v0.11 verification of the HITL harness that exercises the
       formally verified geofence safety path against an RF GPS

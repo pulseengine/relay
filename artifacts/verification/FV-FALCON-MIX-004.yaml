@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MIX-004
     type: sw-verification
     title: "Airframe-agnostic closed loop — hexa cascade stabilization (SITL) (v0.39)"
-    status: approved
+    status: verified
     description: >
       Verification of the v0.39 closed-loop "any drone" substantiation:
 

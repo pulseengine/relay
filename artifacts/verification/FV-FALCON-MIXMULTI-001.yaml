@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MIXMULTI-001
     type: sw-verification
     title: "Hex + coax mixers — relay-mix-multi tests + Kani (falcon v1.49)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-MIXMULTI-P01. The relay-mix-multi crate (no_std/
       no_alloc/forbid-unsafe) provides hex_x (6) and octo_coax (8) N-rotor

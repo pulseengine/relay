@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIM-003
     type: sw-verification
     title: "Gazebo SITL scaffold — Physics trait + MockPhysics + Gazebo stub (v0.16.1)"
-    status: approved
+    status: verified
     description: >
       v0.16.1 lands the Gazebo SITL backend scaffold called for in
       docs/SIMULATOR.md (v0.15.0) option C. The scaffold is the

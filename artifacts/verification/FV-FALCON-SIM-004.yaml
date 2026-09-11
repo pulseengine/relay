@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIM-004
     type: sw-verification
     title: "Real gz-transport-rs Gazebo bridge — falcon-sitl-gz `gazebo` feature (v0.18.0)"
-    status: approved
+    status: verified
     description: >
       v0.18.0 promotes `examples/falcon-sitl-gz`'s `GazeboPhysics`
       from the v0.16.1 stub (returns zeros, prints warning) to a

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-HAL-001
     type: sw-verification
     title: "Backend-agnostic flight core — HAL seam + verified cascade stabilizes through it (v1.1.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.1.0 hardware-abstraction-layer seam (new crate
       falcon-core):

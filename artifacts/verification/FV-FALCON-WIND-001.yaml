@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-WIND-001
     type: sw-verification
     title: "Wind rejection via position-loop integral (v1.16.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.16.0 wind layer (15 falcon-core tests pass, clippy
       clean, embedded builds), the first SITL-realism release:

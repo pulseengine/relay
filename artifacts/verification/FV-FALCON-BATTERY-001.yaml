@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-BATTERY-001
     type: sw-verification
     title: "Low-battery failsafe on a real draining pack (v1.21.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.21.0 battery-drain layer (22 falcon-core tests pass,
       clippy clean, embedded builds), realism arc release 6 (energy realism):
