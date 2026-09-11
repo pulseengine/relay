@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SUPLAND-001
     type: sw-verification
     title: "FlightSupervisor engages the velocity-landing in Land mode (v1.29.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.29.0 supervisor-landing integration (falcon-core
       tests pass — 32, clippy clean, embedded builds). v1.27 built the

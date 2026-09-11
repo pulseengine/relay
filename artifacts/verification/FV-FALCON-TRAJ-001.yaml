@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TRAJ-001
     type: sw-verification
     title: "Trajectory generation — Mueller quintic + sound jerk bound + flatness feedforward + waypoint mission (v0.27)"
-    status: implemented
+    status: verified
     description: >
       Verification of the v0.27 trajectory stack:
 

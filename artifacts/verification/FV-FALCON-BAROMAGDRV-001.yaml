@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-BAROMAGDRV-001
     type: sw-verification
     title: "Mag (IST8310) + baro (BMP388) driver bodies — mock-bus tests + Kani (falcon v1.45)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-BAROMAGDRV-P01. The falcon-baromag crate (no_std/
       no_alloc/forbid-unsafe) provides the IST8310 magnetometer and BMP388

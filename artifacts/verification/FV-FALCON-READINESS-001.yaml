@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-READINESS-001
     type: sw-verification
     title: "v1.0-practical readiness review + clean-room re-verification of the v1.8–v1.14 arc (v1.15.0)"
-    status: approved
+    status: verified
     description: >
       The capstone readiness review for the v1.8 -> v1.14 hardware-abstraction
       arc, recorded in docs/dossier/v1.0-practical-readiness.md: a

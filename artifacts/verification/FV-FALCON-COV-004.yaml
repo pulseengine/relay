@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-COV-004
     type: sw-verification
     title: "Cascade witness MC/DC via wasmtime+WASI subprocess harness (v0.15.1)"
-    status: approved
+    status: verified
     description: >
       v0.15.1 closes the cascade-target witness coverage WASI gap
       recorded in FV-FALCON-COV-001 (v0.13) and confirmed in
