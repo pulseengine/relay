@@ -52,13 +52,25 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        # The mirror exists and wires the same five stages the component does.
-        - run: "grep -q 'relay_mix_quad::QuadMixer' tests/cascade-sitl-wasm/src/native_mirror.rs"
+        # The mirror runs the SAME flight core the component wraps.
+        #
+        # This step used to grep for `relay_mix_quad::QuadMixer`, because the
+        # mirror wired the five legacy stages. #393 replaced the component with
+        # one wrapping falcon-core's FlightCore and the mirror followed it, so
+        # the old assertion described a program that no longer exists — it went
+        # red on the first PR that touched the mirror, which is the gate working.
+        - run: "grep -q 'falcon_core::{FlightBackend, FlightCore' tests/cascade-sitl-wasm/src/native_mirror.rs"
         # No tolerance: the assertion is inequality with zero, not a threshold.
         - run: "grep -q 'worst != 0.0' tests/cascade-sitl-wasm/src/main.rs"
-        # The differential run itself — bench-only: needs a composed component,
-        # which needs cargo-component + wac. The Gazebo CI job runs it.
-        - run: "DIFFERENTIAL=1 cargo run --release --manifest-path tests/cascade-sitl-wasm/Cargo.toml -- composed.wasm 2000 0.001  # bench-only: expect BIT-IDENTICAL"
+        # The mirror must MIRROR, not merely exist: a mirror that skipped the
+        # calibration would agree with the component only by luck.
+        - run: "grep -q 'fn configure(&mut self, cfg: Calib)' tests/cascade-sitl-wasm/src/native_mirror.rs"
+        # The differential run itself. Bench-only BY SHAPE (`cascade-sitl-wasm`
+        # is in BENCH_PATTERNS): it needs a live gz server. It used to name
+        # `composed.wasm`, an artifact of the wac composition retired in #395,
+        # so it could only ever fail. The `Gazebo SITL (real gz bridge)` job
+        # runs the real thing and BLOCKS on it.
+        - run: "DIFFERENTIAL=1 BACKEND=gazebo cascade-sitl-wasm falcon_cascade_cm.wasm 2000 0.004  # gz-job: expect BIT-IDENTICAL"
     links:
       - type: verifies
         target: SWREQ-FALCON-WASMEQ-P01
