@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-OFFB-001
     type: sw-verification
     title: "Offboard setpoint-timeout failsafe — relay-offboard tests + Kani (falcon v1.40)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-OFFB-P01. The relay-offboard crate (no_std/no_alloc,
       forbid-unsafe) implements OffboardReceiver — the freshness/timeout state

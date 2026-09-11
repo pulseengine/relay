@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MIX-001
     type: sw-verification
     title: "Unit + property tests for relay-mix-quad (v0.4)"
-    status: approved
+    status: verified
     description: >
       v0.4 verification of the X-config quadcopter mixer
       (`relay-mix-quad`). Maps body-frame (torque, thrust) commands

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-PERF-001
     type: sw-verification
     title: "per-engine throughput benchmarks — WCET-budget regression guard (#8)"
-    status: implemented
+    status: verified
     description: >
       Criterion per-cycle throughput benchmarks for the five core flight
       engines (LC / SCH / SC / HS / CFDP), guarding the Lean-proven WCET

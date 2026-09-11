@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SIMMC-004
     type: sw-verification
     title: "Maneuvering-truth estimator + GNSS-spoof-injection campaigns (v1.112 slice 1)"
-    status: implemented
+    status: verified
     release: falcon-v1.112.0
     description: >
       Two stochastic estimator campaigns extending the static-hover one

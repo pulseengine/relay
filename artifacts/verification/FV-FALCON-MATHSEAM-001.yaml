@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MATHSEAM-001
     type: sw-verification
     title: "Flight-math qualification seam: cascade migrated, faithful, builds (v1.12.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.12.0 relay-math qualification seam:
 

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-IMUDRV-001
     type: sw-verification
     title: "Reference ICM-42688 IMU driver: protocol + scaling against a mock bus (v1.13.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.13.0 falcon-imu-icm42688 driver (4 tests pass,
       clippy clean), the first concrete driver against the v1.11 ImuDriver seam:

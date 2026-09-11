@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-WINDFS-001
     type: sw-verification
     title: "High-wind failsafe — saturation+tilt → RTL, distinct from termination (falcon v1.101)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-WINDFS-P01: sustained control saturation while leaning
       hard (but short of a tumble) commands an RTL-class recovery.

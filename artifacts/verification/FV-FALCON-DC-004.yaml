@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-DC-004
     type: sw-verification
     title: "DroneCanNode async pump + NodeStatus heartbeat — sync/async equivalence + round-trip (DC-P04, v1.95)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-DC-P04. relay-dronecan gains the node runtime
       (node.rs) and the heartbeat encoder (msg.rs encode_node_status).

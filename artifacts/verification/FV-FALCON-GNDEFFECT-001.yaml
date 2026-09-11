@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-GNDEFFECT-001
     type: sw-verification
     title: "Ground effect: aids takeoff, documented landing float (v1.24.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.24.0 ground-effect layer (29 falcon-core tests pass,
       clippy clean, embedded builds), realism arc release 9:

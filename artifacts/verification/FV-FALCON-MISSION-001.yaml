@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MISSION-001
     type: sw-verification
     title: "Multi-waypoint mission sequencer + autonomous return (v1.30.0)"
-    status: approved
+    status: verified
     description: >
       Verification of the v1.30.0 mission sequencer (falcon-core 33 tests +
       relay-mavlink 55 + falcon-mavlink 11, clippy clean, embedded builds):
