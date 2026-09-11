@@ -1,52 +1,63 @@
-//! The composed cascade, run NATIVELY — the same crates the wasm stage
-//! components wrap, wired the same way `wasm/cm/cascade` wires them.
+//! The flight core, run NATIVELY — the control side of the equivalence test.
 //!
 //! This exists for one claim: **you develop in wasm and deploy that same wasm,
-//! unchanged**. That is only true if the Component Model is transparent — if
-//! the identical Rust, reached through a wasm component boundary, computes the
-//! identical answer. This module is the control side of that experiment.
+//! unchanged**. That is only true if the Component Model is transparent — if the
+//! identical Rust, reached through a wasm component boundary, computes the
+//! identical answer.
 //!
-//! Fidelity matters more than elegance here. Every constant below is copied
-//! from the corresponding component rather than chosen, INCLUDING the ones that
-//! are wrong: each stage fabricates its own clock at a different hardcoded rate
-//! (position 20 ms, attitude 4 ms, rate 1 ms) even though the cascade calls all
-//! five once per step. Mirroring the bug is the point — a differential test
-//! that silently "fixed" it on one side would compare two different programs
-//! and report a difference that means nothing.
+//! v0.8 rework. The previous mirror wired five stage crates (relay-pos /
+//! relay-att / relay-rate / relay-iekf / relay-mix-quad) because that is what
+//! the cascade component wrapped. #393 replaced that component with one wrapping
+//! `falcon_core::FlightCore`, so this mirror follows it. Keeping the old mirror
+//! would have compared two different programs and reported a difference meaning
+//! nothing — a differential is only evidence while both sides run the same code.
+//!
+//! It is now a much smaller file, which is the point: there is one flight core,
+//! and both sides call it.
 
-use relay_att::AttController;
-use relay_iekf::{Iekf, Imu as IekfImu};
-use relay_mix_quad::QuadMixer;
-use relay_pos::{PosController, PositionSetpoint};
-use relay_rate::RatePid;
+use falcon_core::{FlightBackend, FlightCore, ImuSample as CoreImu};
 
-/// Each crate declares its OWN `Timestamp` — same shape, distinct types, no
-/// shared definition. So the conversion is written once per crate rather than
-/// once, which is worth noticing: five components each re-deriving the same
-/// two fields is how they ended up with five different hardcoded tick rates.
-fn ts_pos(ms: u64) -> relay_pos::Timestamp {
-    relay_pos::Timestamp { seconds: ms / 1000, fraction: frac(ms) }
+type Vec3 = [f32; 3];
+
+/// One tick's sensors in, motors out — the same shim `wasm/cm/cascade` uses.
+///
+/// `FlightCore` pulls from a backend and pushes motors into it, which is the
+/// seam that lets the same code run against SITL, Gazebo or hardware. Mirroring
+/// the component's shim exactly (including returning `None` where the frame
+/// carried nothing, so the core skips that fusion rather than being handed a
+/// fabricated zero) is what keeps the comparison honest.
+struct FrameBackend {
+    imu: CoreImu,
+    position: Option<Vec3>,
+    dt: f32,
+    motors: [f32; 4],
 }
-fn ts_att(ms: u64) -> relay_att::Timestamp {
-    relay_att::Timestamp { seconds: ms / 1000, fraction: frac(ms) }
-}
-fn ts_rate(ms: u64) -> relay_rate::Timestamp {
-    relay_rate::Timestamp { seconds: ms / 1000, fraction: frac(ms) }
-}
-fn frac(ms: u64) -> u32 {
-    ((ms % 1000) * (1u64 << 32) / 1000) as u32
+
+impl FlightBackend for FrameBackend {
+    fn read_imu(&mut self) -> CoreImu {
+        self.imu
+    }
+    fn read_position(&mut self) -> Option<Vec3> {
+        self.position
+    }
+    fn read_mag(&mut self) -> Option<Vec3> {
+        None
+    }
+    fn read_heading(&mut self) -> Option<f32> {
+        None
+    }
+    fn write_motors(&mut self, motors: &[f32]) {
+        for (i, m) in self.motors.iter_mut().enumerate() {
+            *m = motors.get(i).copied().unwrap_or(0.0);
+        }
+    }
+    fn dt(&self) -> f32 {
+        self.dt
+    }
 }
 
 pub struct NativeCascade {
-    iekf: Iekf,
-    pos: PosController,
-    att: AttController,
-    rate: RatePid,
-    /// Per-stage tick counters, kept SEPARATE because the components keep them
-    /// separate and advance them at different rates.
-    n_pos: u64,
-    n_att: u64,
-    n_rate: u64,
+    core: Option<FlightCore>,
 }
 
 impl Default for NativeCascade {
@@ -57,47 +68,37 @@ impl Default for NativeCascade {
 
 impl NativeCascade {
     pub fn new() -> Self {
-        Self {
-            iekf: Iekf::level(),
-            pos: PosController::new(),
-            att: AttController::new(),
-            rate: RatePid::new(),
-            n_pos: 0,
-            n_att: 0,
-            n_rate: 0,
-        }
+        Self { core: None }
     }
 
-    /// One full cascade pass: estimate -> position -> attitude -> rate -> mixer.
-    /// Mirrors `wasm/cm/cascade/src/lib.rs::step` call for call.
-    pub fn step(&mut self, accel: [f32; 3], gyro: [f32; 3], target: [f32; 4]) -> [f32; 4] {
-        // ── ekf (wasm/cm/iekf): 1 kHz hardcoded, gravity update at var 0.5 ──
-        self.iekf.propagate(IekfImu { gyro, accel }, 0.001);
-        self.iekf.update_gravity(accel, 0.5);
-        let st = self.iekf.state();
-
-        // ── position (wasm/cm/position): 50 Hz -> 20 ms per tick ────────────
-        let sp = PositionSetpoint {
-            position_ned: [target[0], target[1], target[2]],
-            velocity_ned: [0.0, 0.0, 0.0],
-            yaw_setpoint: target[3],
+    /// Mirrors `wasm/cm/cascade::step` call for call, including the dt clamp and
+    /// the lazy construction on the FIRST frame's rate — the component cannot
+    /// build its core until a host states its period, and a mirror that built
+    /// eagerly on a guessed rate would diverge for a reason that says nothing
+    /// about the Component Model.
+    pub fn step(
+        &mut self,
+        accel: [f32; 3],
+        gyro: [f32; 3],
+        target: [f32; 3],
+        position: Option<Vec3>,
+        dt_s: f32,
+    ) -> [f32; 4] {
+        let dt = if dt_s.is_finite() {
+            dt_s.clamp(0.0001, 0.1)
+        } else {
+            0.001
         };
-        let att_sp = self.pos.tick(ts_pos(self.n_pos * 20), st.p, st.v, st.q, sp);
-        self.n_pos += 1;
-
-        // ── attitude (wasm/cm/attitude): 250 Hz -> 4 ms per tick ────────────
-        let rate_sp = self.att.tick(ts_att(self.n_att * 4), st.q, att_sp.quaternion);
-        self.n_att += 1;
-
-        // ── rate (wasm/cm/rate): 1 kHz -> 1 ms per tick. Body rates come from
-        //    the GYRO, not the estimator: the components pass state.wx/wy/wz,
-        //    which the iekf component fills from imu.gx/gy/gz rather than from
-        //    the filtered state. Mirroring that exactly.
-        let torque = self.rate.tick(ts_rate(self.n_rate), gyro, rate_sp);
-        self.n_rate += 1;
-
-        // ── mixer (wasm/cm/falcon-mixer): constructed fresh per call ────────
-        let mut mixer = QuadMixer::new();
-        mixer.mix([torque[0], torque[1], torque[2]], att_sp.thrust)
+        let mut b = FrameBackend {
+            imu: CoreImu { accel, gyro },
+            position,
+            dt,
+            motors: [0.0; 4],
+        };
+        // hover_thrust 0.5, loop rate from the frame — identical to the component.
+        let core = self.core.get_or_insert_with(|| FlightCore::new(0.5, 1.0 / dt));
+        core.set_position(target);
+        core.step(&mut b);
+        b.motors
     }
 }

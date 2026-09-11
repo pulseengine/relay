@@ -46,13 +46,13 @@ wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.7.0;
+            export pulseengine:falcon-cascade/controller@0.8.0;
         }
     "#,
     path: "../../wit/falcon-cascade",
 });
 
-use pulseengine::falcon_cascade::types::{ImuSample as WitImu, Waypoint};
+use pulseengine::falcon_cascade::types::{ImuSample as WitImu, SensorFrame, Vec3, Waypoint};
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -115,43 +115,61 @@ fn main() -> Result<()> {
     println!("schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)", ticks as f32 * dt, 1.0 / dt);
     println!();
 
-    // DIFFERENTIAL=1 runs the SAME crates natively alongside and reports the
-    // worst per-motor disagreement. This is "develop in wasm, deploy that wasm
-    // unchanged" made falsifiable: identical Rust reached two ways must agree,
-    // and if it does not, the Component Model is not transparent and the whole
-    // develop-then-deploy story needs qualifying.
+    let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| ((1.0 / dt) / 5.0).round().max(1.0) as u32);
+    let mut fixes = 0u32;
+
+    // DIFFERENTIAL=1 runs the SAME flight core natively alongside and reports
+    // the worst per-motor disagreement. This is "develop in wasm, deploy that
+    // wasm unchanged" made falsifiable: identical Rust reached two ways must
+    // agree, and if it does not, the Component Model is not transparent.
     let mut differential = std::env::var("DIFFERENTIAL")
-        .ok()
-        .filter(|v| v != "0")
+        .ok().filter(|v| v != "0")
         .map(|_| (native_mirror::NativeCascade::new(), 0.0f32, 0u32));
 
     let mut peak_tilt = 0.0f32;
     for tick in 0..ticks {
-        let (s, _true_pos) = plant.measure(noise);
+        let (s, true_pos) = plant.measure(noise);
         let imu = WitImu {
             ax: s.accel_body[0], ay: s.accel_body[1], az: s.accel_body[2],
             gx: s.gyro_body[0],  gy: s.gyro_body[1],  gz: s.gyro_body[2],
         };
         // The tick that matters: one full estimate -> position -> attitude ->
         // rate -> mixer pass, executed inside the wasm component.
-        let m = controller.call_step(&mut store, imu, target)?;
+        // v0.8: the host states its own period and offers what it has. A 5 Hz
+        // position fix matches the native bench's gnss_div=50 @250 Hz.
+        let position_ned = if gnss_div > 0 && tick % gnss_div == 0 {
+            fixes += 1;
+            Some(Vec3 { x: true_pos[0], y: true_pos[1], z: true_pos[2] })
+        } else {
+            None
+        };
+        let frame = SensorFrame {
+            imu,
+            dt_s: dt,
+            position_ned,
+            mag_body: None,
+            heading_rad: None,
+        };
+        let m = controller.call_step(&mut store, frame, target)?;
 
-        // Fed the IDENTICAL imu sample, not its own — both sides must see one
-        // input sequence or they diverge for reasons that say nothing about the
-        // Component Model. The plant is advanced by the WASM output, so the
-        // trajectory belongs to the artifact under test and the native mirror
-        // is a pure observer.
+        // Fed the IDENTICAL frame — both sides must see one input sequence or
+        // they diverge for reasons that say nothing about the boundary. The
+        // plant is advanced by the WASM output, so the native side is a pure
+        // observer of the artifact under test.
         if let Some((nat, worst, worst_tick)) = differential.as_mut() {
-            let n = nat.step(s.accel_body, s.gyro_body, [0.0, 0.0, down, 0.0]);
-            let d = [
+            let n = nat.step(
+                s.accel_body,
+                s.gyro_body,
+                [target.north, target.east, target.down],
+                position_ned.map(|p| [p.x, p.y, p.z]),
+                dt,
+            );
+            let dmax = [
                 (n[0] - m.m1).abs(), (n[1] - m.m2).abs(),
                 (n[2] - m.m3).abs(), (n[3] - m.m4).abs(),
-            ];
-            let dmax = d.iter().copied().fold(0.0f32, f32::max);
-            if dmax > *worst {
-                *worst = dmax;
-                *worst_tick = tick;
-            }
+            ].iter().copied().fold(0.0f32, f32::max);
+            if dmax > *worst { *worst = dmax; *worst_tick = tick; }
         }
         let tilt = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
         peak_tilt = peak_tilt.max(tilt);
@@ -181,18 +199,12 @@ fn main() -> Result<()> {
 
     if let Some((_, worst, worst_tick)) = differential.as_ref() {
         println!("DIFFERENTIAL: worst per-motor |wasm - native| = {worst:.9} at tick {worst_tick}");
-        // BIT-EXACT is the bar, not "close". Both sides run the same f32 code on
-        // the same inputs and wasm32 shares IEEE-754 semantics with the host, so
-        // any difference at all means something OTHER than the arithmetic
-        // changed — a different constant, a different call order, a lost update.
-        // A tolerance would hide exactly the divergence worth finding.
+        // BIT-EXACT, no tolerance: both sides run the same f32 code on the same
+        // inputs under shared IEEE-754 semantics, so any delta means something
+        // structural differs — a different constant, call order, or lost update.
         if *worst != 0.0 {
-            bail!(
-                "FAIL: wasm and native disagree by {worst:.9} (tick {worst_tick}). The same \
-                 Rust reached two ways must compute the same answer — if it does not, \
-                 'develop in wasm, deploy that wasm unchanged' is not true and the \
-                 difference must be explained before it is tolerated."
-            );
+            bail!("FAIL: wasm and native disagree by {worst:.9} (tick {worst_tick}). The same \
+                   Rust reached two ways must compute the same answer.");
         }
         println!("PASS: wasm and native are BIT-IDENTICAL across {ticks} ticks.");
     }

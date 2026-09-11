@@ -1,22 +1,26 @@
-//! falcon-cascade — the control-cascade orchestrator component.
+//! falcon-cascade — THE FLIGHT CORE, as one component.
 //!
-//! Imports the five controller interfaces (`ekf`, `position`,
-//! `attitude`, `rate`, `mixer`) and exports the top-level `step`.
-//! `step` runs the cascade in order:
+//! v0.8 rework. v0.7 imported five stage interfaces (`ekf`, `position`,
+//! `attitude`, `rate`, `mixer`) and composed them with `wac plug`. That
+//! decomposition was a wasm-side invention which never corresponded to the
+//! flight architecture, and it drifted: the stages wrapped relay-pos/att/rate,
+//! which falcon-core DROPPED on 2026-06-03 when it moved to geometric SE(3) +
+//! ADRC. For three months and ~40 releases the published components implemented
+//! a control stack the vehicle does not fly, and nothing noticed because nothing
+//! compared the two dependency sets (#388).
 //!
-//! ```text
-//!   imu ─► ekf.estimate ─► state
-//!   state, waypoint ─► position.tick ─► attitude-setpoint
-//!   state, att-sp   ─► attitude.tick ─► rate-setpoint
-//!   state, rate-sp  ─► rate.tick     ─► torque-setpoint
-//!   torque-sp       ─► mixer.mix     ─► motor-pwm
-//! ```
+//! This component wraps `falcon_core::FlightCore` directly, so what is published
+//! IS what is verified and flown: IEKF estimator, geometric SE(3) attitude, ADRC
+//! inner loop, mixer with rotor-out FDI, and the altitude/position loops.
 //!
-//! The imports are satisfied by the five leaf components at
-//! composition time — `wac plug` (or falcon-cascade.wac) wires the
-//! graph. This component contains no control logic itself: it is
-//! pure orchestration, which is the point of the Component Model
-//! split — the cascade topology lives in one small, auditable place.
+//! It imports nothing. One component, one tick, one clock — which also removes
+//! the other half of the defect: the five stages each advanced their own
+//! hardcoded clock (20 ms, 4 ms, 1 ms) while the cascade called all five once
+//! per tick, so they disagreed with each other by up to 20x.
+//!
+//! `FlightCore` drives a `FlightBackend` rather than returning motors, so the
+//! component supplies a capture backend: the sensor frame goes in as the `read_*`
+//! answers, and `write_motors` is caught on the way out.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -36,23 +40,112 @@ mod bindings;
 // trait lives under `exports::`. The five imported controller
 // interfaces live at the bindings root.
 use bindings::exports::pulseengine::falcon_cascade::controller::Guest;
-use bindings::pulseengine::falcon_cascade::{attitude, ekf, mixer, position, rate};
-use bindings::pulseengine::falcon_cascade::types::{ImuSample, MotorPwm, Waypoint};
+use bindings::pulseengine::falcon_cascade::types::{MotorPwm, SensorFrame, Waypoint};
+
+use core::cell::RefCell;
+use falcon_core::{FlightBackend, FlightCore, ImuSample as CoreImu};
+
+/// falcon-core's `Vec3` alias is private, so it is restated here. Same shape
+/// (`[f32; 3]`, NED); if that ever diverges this stops compiling, which is the
+/// right failure.
+type Vec3 = [f32; 3];
+
+struct SingleThreaded<T>(RefCell<T>);
+// SAFETY: the component model guarantees single-threaded, non-reentrant access.
+unsafe impl<T> Sync for SingleThreaded<T> {}
+
+/// Lazily built: `FlightCore::new` needs the host's loop rate, which only
+/// arrives with the first frame. Constructing it on a guessed rate is exactly
+/// the defect v0.8 exists to remove.
+static CORE: SingleThreaded<Option<FlightCore>> = SingleThreaded(RefCell::new(None));
+
+/// One tick's sensors in, motors out.
+///
+/// `FlightCore` pulls from a backend and pushes motors into it, which is the
+/// seam that lets the SAME code run against SITL, Gazebo or real hardware. A
+/// component has to answer with a value instead, so this stands in for one tick:
+/// every `read_*` returns what the frame carried, and `write_motors` is caught.
+///
+/// Returning `None` where the frame carried nothing is the point — the core
+/// then skips that fusion step rather than being handed a fabricated zero,
+/// which would be silently wrong rather than merely absent.
+struct FrameBackend {
+    imu: CoreImu,
+    position: Option<Vec3>,
+    mag: Option<Vec3>,
+    heading: Option<f32>,
+    dt: f32,
+    motors: [f32; 4],
+}
+
+impl FlightBackend for FrameBackend {
+    fn read_imu(&mut self) -> CoreImu {
+        self.imu
+    }
+    fn read_position(&mut self) -> Option<Vec3> {
+        self.position
+    }
+    fn read_mag(&mut self) -> Option<Vec3> {
+        self.mag
+    }
+    fn read_heading(&mut self) -> Option<f32> {
+        self.heading
+    }
+    fn write_motors(&mut self, motors: &[f32]) {
+        for (i, m) in self.motors.iter_mut().enumerate() {
+            *m = motors.get(i).copied().unwrap_or(0.0);
+        }
+    }
+    fn dt(&self) -> f32 {
+        self.dt
+    }
+}
 
 struct Component;
 
 impl Guest for Component {
-    fn step(imu: ImuSample, target: Waypoint) -> MotorPwm {
-        // 1. State estimation.
-        let state = ekf::estimate(imu);
-        // 2. Outer position loop → attitude setpoint.
-        let att_sp = position::tick(state, target);
-        // 3. Attitude loop → rate setpoint.
-        let rate_sp = attitude::tick(state, att_sp);
-        // 4. Rate loop → torque setpoint.
-        let torque = rate::tick(state, rate_sp);
-        // 5. Control allocation → per-motor PWM.
-        mixer::mix(torque)
+    fn step(sensors: SensorFrame, target: Waypoint) -> MotorPwm {
+        #[cfg(not(feature = "std"))]
+        falcon_cm_rt::BumpArena::reset();
+
+        // The host's ACTUAL period. Clamped to [0.1 ms, 100 ms] so a garbage
+        // frame cannot wind the filters; a non-finite value falls back to the
+        // v0.7 constant, the only rate that was ever safe to assume.
+        let dt = if sensors.dt_s.is_finite() {
+            sensors.dt_s.clamp(0.0001, 0.1)
+        } else {
+            0.001
+        };
+
+        let imu = sensors.imu;
+        let mut backend = FrameBackend {
+            imu: CoreImu {
+                accel: [imu.ax, imu.ay, imu.az],
+                gyro: [imu.gx, imu.gy, imu.gz],
+            },
+            position: sensors.position_ned.map(|p| [p.x, p.y, p.z]),
+            mag: sensors.mag_body.map(|m| [m.x, m.y, m.z]),
+            heading: sensors.heading_rad,
+            dt,
+            motors: [0.0; 4],
+        };
+
+        {
+            let mut guard = CORE.0.borrow_mut();
+            // hover_thrust 0.5 matches falcon-core's own default and the value
+            // both native SITL scenarios construct with. The loop rate comes
+            // from the frame, not from a constant.
+            let core = guard.get_or_insert_with(|| FlightCore::new(0.5, 1.0 / dt));
+            core.set_position([target.north, target.east, target.down]);
+            core.step(&mut backend);
+        }
+
+        MotorPwm {
+            m1: backend.motors[0],
+            m2: backend.motors[1],
+            m3: backend.motors[2],
+            m4: backend.motors[3],
+        }
     }
 }
 
