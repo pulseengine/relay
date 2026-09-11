@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FAULT-001
     type: sw-verification
     title: "EKF-divergence watchdog — Verus + Kani + SITL fault-injection (v0.8 + v0.9.1)"
-    status: approved
+    status: verified
     description: >
       v0.8 verification of the EKF-divergence safety path:
       relay-hs EkfHealthMonitor + the falcon-sitl-hover `fault`

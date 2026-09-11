@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-CPREV-001
     type: sw-verification
     title: "Collision prevention + precision landing — relay-avoid tests + Kani (falcon v1.44)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-CPREV-P01. The relay-avoid crate (no_std/no_alloc/
       forbid-unsafe) provides the collision-prevention velocity limiter

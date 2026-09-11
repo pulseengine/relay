@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-GNSSDRV-001
     type: sw-verification
     title: "GNSS UBX driver — protocol round-trip tests + Kani totality (falcon v1.42)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-GNSSDRV-P01. The falcon-gnss-ubx crate (no_std/
       no_alloc/forbid-unsafe) implements UbxParser, a streaming UBX frame parser

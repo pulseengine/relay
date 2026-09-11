@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-PIPELINE-001
     type: sw-verification
     title: "WASM pipeline — Component Model cascade under Bazel (v0.7)"
-    status: approved
+    status: verified
     description: >
       Verification of the falcon WASM pipeline. v0.6 built the control
       layer as raw `#[export_name]` scalar modules fused by meld; v0.7

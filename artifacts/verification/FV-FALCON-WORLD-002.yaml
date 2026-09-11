@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-WORLD-002
     type: sw-verification
     title: "WORLD-P02: variant worlds share one mixer-agnostic control cascade (v1.87)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-WORLD-P02 (all falcon-* worlds reuse the same
       relay-ekf/rate/att/pos cascade unmodified; only the relay-mix-* mixer and

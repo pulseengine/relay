@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-CALIB-001
     type: sw-verification
     title: "Sensor calibration — synthetic-recovery + Kani totality + estimator consumption (falcon v1.98)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-CALIB-P01. Three layers:
 

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-LOG-001
     type: sw-verification
     title: "Onboard flight logger — relay-log ring + replay tests + Kani (falcon v1.48)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-LOG-P01. The relay-log crate (no_std/no_alloc/
       forbid-unsafe) is the bounded-ring black box: FlightLog<N> + a 16-byte

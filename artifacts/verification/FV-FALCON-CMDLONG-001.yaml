@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-CMDLONG-001
     type: sw-verification
     title: "MAVLink COMMAND_LONG codec + RTL builder — round-trip, CRC_EXTRA, length-rejection (v0.14.2 carrier)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-MAVLINK-P05 (the COMMAND_LONG message + RTL builder,
       added at v0.14.2 after the v0.1 codec that FV-FALCON-MAVLINK-001 covers).

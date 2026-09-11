@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FLOWRANGE-001
     type: sw-verification
     title: "Rangefinder + optical-flow preprocessing — relay-flowrange tests + Kani (falcon v1.51)"
-    status: approved
+    status: verified
     description: >
       Verifies SWREQ-FALCON-FLOWRANGE-P01. The relay-flowrange crate (no_std/
       no_alloc/forbid-unsafe): range_to_altitude (tilt-compensated, band-gated) +
