@@ -233,12 +233,12 @@ jobs:
           #
           # and the native binary does the same (16 s -> 0.61 m), which is what
           # bit-identical control predicts. So it is a falcon-core property, not
-          # a wasm one, and it is tracked separately.
+          # a wasm one, and it is tracked in #396.
           #
           # At 10 s the gate would sit 0.07 m under its own threshold and go
           # amber on noise. Shortening to 8 s is chosen with eyes open: this leg
           # still catches "did not fly", "diverged" and "the boundary changed
-          # the answer", and the creep is gated by the issue, not hidden by it.
+          # the answer", and the creep is gated by #396, not hidden by it.
           set +e
           DIFFERENTIAL=1 BACKEND=gazebo ./target/release/cascade-sitl-wasm \
             /tmp/composed.wasm 2000 0.004 2>&1 | tee /tmp/wasm-gz.txt

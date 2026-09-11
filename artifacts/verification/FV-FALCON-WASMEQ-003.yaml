@@ -1,0 +1,97 @@
+artifacts:
+  - id: FV-FALCON-WASMEQ-003
+    type: sw-verification
+    title: "WASMEQ-P03 — the calibrated wasm cascade holds 2.00 m on real Gazebo to 0.16 m, bit-identical to native (v1.138)"
+    status: implemented
+    release: falcon-v1.138.0
+    description: >
+      Verification of SWREQ-FALCON-WASMEQ-P03.
+
+      (a) SOURCE-LEVEL (CI-runnable, the steps below). The seam declares
+      `configure` and a `vehicle-config` record, and the equivalence harness
+      actually calls it. The second half matters as much as the first: a seam
+      that exists but is never exercised is how the previous generation of this
+      component shipped for three months wrapping a control stack the vehicle
+      does not fly (#388).
+
+      (b) FLIGHT-LEVEL (runs in the `Gazebo SITL (real gz bridge)` job; needs a
+      live gz server, so it is not a bench-only claim — it gates merges).
+      MEASURED on the gz falcon-quad, 2000 ticks at 250 Hz, launch datum
+      captured at rest:
+
+        commanded altitude              2.00 m
+        reached                         2.16 m   (|err| = 0.16 m)
+        horizontal drift                0.04 m
+        native reference, same plant    0.16 m final_dist
+        worst per-motor |wasm-native|   0.000000000 over all 2000 ticks
+        pacing                          500 fresh gyro samples, 0 deadline hits
+        memory.grow / wasi imports      0 / 0
+
+      REPEATABILITY is part of the evidence, not an afterthought. Three
+      consecutive runs returned 0.16 m, 0.16 m, 0.16 m. The first attempt at
+      this measurement returned 0.20 m, 0.19 m and one run that never left the
+      ground at -0.54 m, which is how the mid-drop datum capture was found — a
+      single green run would have published a 33%-flaky result as a clean one.
+
+      (c) ATTRIBUTION. The failure was not diagnosed by inspection; each knob
+      was varied alone against the tuned native reference on a freshly restarted
+      world (the gz `/world/falcon/control` reset service does not answer, so a
+      pristine pose needs a new server per trial):
+
+        hover-thrust 0.585 -> 0.5, tuning kept : 2.65 m, est_z -58.8 m
+        tuning dropped, hover-thrust kept      : 0.66 m, est_z  -1.3 m
+        both (the pre-v1.138 defaults)         : 1.91 m, never left the ground
+
+      A CORRECTION IN THE EVIDENCE ITSELF, recorded because it nearly shipped.
+      Three further trials were run as an honesty test — "does the native PASS
+      depend on pre-seeding the estimator at the target?" — and appeared to
+      confirm it. They were discarded on reading the code: `set_altitude` writes
+      `setpoint[2]`, i.e. it COMMANDS a target altitude. The trials had lowered
+      the setpoint and then measured distance to the original one. There is no
+      estimator pre-seeding anywhere in this stack, and the native PASS does not
+      depend on one. The tell was that `est_z` tracked the seeded value exactly
+      in every trial, which is too precise for filter convergence.
+
+      A SECOND DEFECT, found only by flying the calibrated component: the
+      harness offered no `mag-body`/`heading-rad`, though the v0.8 seam already
+      carried both fields and the gz plant already exposed both. Without heading
+      yaw is unobservable; measured, the vehicle reached 1.08 m at 1.2 s and
+      -0.54 m by 8 s on the very calibration that then held 2.00 m. So the
+      published seam was sufficient and the HOST was incomplete — the opposite
+      of the conclusion the symptom first suggested.
+
+      A THIRD, wasm-specific and invisible to native testing: building the core
+      through a `-> FlightCore` builder overflowed the component's 8 KiB shadow
+      stack and trapped as an out-of-bounds linear-memory access inside
+      `FlightCore::new`. The core is now constructed directly into its slot and
+      tuned through `&mut`. The stack budget was NOT raised: it is a shipped
+      property, and the no-grow invariant is what lets the image lower to bare
+      metal. Re-checked after the change: memory.grow 0, wasi 0.
+
+      SCOPE (honest). The hold is verified over 8 s. The altitude creeps upward
+      on a longer hold — 0.43 m at 10 s, 0.62 m at 16 s — and the native binary
+      creeps identically (0.61 m at 16 s), which is what bit-identical control
+      predicts. That is a falcon-core defect tracked in #396, and the gz gate
+      runs 8 s for that reason, recorded in the workflow rather than left to be
+      rediscovered. This artifact does NOT evidence an indefinite hold.
+    tags: [verification, falcon, wasm, component-model, calibration, gazebo, v1.138]
+    fields:
+      method: test
+      steps:
+        # (a) the seam exists...
+        - run: "grep -q 'configure: func(cfg: vehicle-config);' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'record vehicle-config' wit/falcon-cascade/cascade.wit"
+        # ...and the component implements it
+        - run: "grep -q 'fn configure(cfg: VehicleConfig)' wasm/cm/cascade/src/lib.rs"
+        # ...and the harness actually EXERCISES it — an unexercised seam is how
+        # the previous component shipped wrong for three months (#388)
+        - run: "grep -q 'call_configure' tests/cascade-sitl-wasm/src/main.rs"
+        # ...and the aiding fields are offered, not passed as None
+        - run: "grep -q 'let heading_rad = plant.heading_ned();' tests/cascade-sitl-wasm/src/main.rs"
+        # ...and the gz gate FAILS on a poor hold rather than emitting a notice
+        - run: "grep -q 'the wasm cascade flew but did NOT hold altitude in gz' .github/workflows/gazebo.yml"
+        # (b) the flight itself, in the Gazebo SITL job
+        - run: "DIFFERENTIAL=1 BACKEND=gazebo cascade-sitl-wasm falcon_cascade_cm.wasm 2000 0.004  # gz-job: expect |err| <= 0.5 m and BIT-IDENTICAL"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-WASMEQ-P03
