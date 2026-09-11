@@ -162,6 +162,47 @@ jobs:
       # Fly the SHIPPED wasm components through the SAME world the native
       # cascade just flew. Until this runs, "the wasm cascade flies" rests on
       # MockPhysics — an analytic plant, not a physics engine.
+      # ── RESTART gz BEFORE THE WASM LEG ──────────────────────────────────
+      # The two legs used to share one server, and the world NEVER resets:
+      # `/world/falcon/control` does not answer a reset request. So the wasm leg
+      # inherited whatever the native leg left behind — a vehicle that had just
+      # been holding 2.19 m and then fell when its motors stopped.
+      #
+      # Measured on the run that exposed this: native PASS (0.19 m), then the
+      # wasm leg on the same server slid 2.4 m along the ground and never
+      # lifted, while reporting a perfectly bit-identical differential. Both
+      # legs had a healthy 2.0 s at-rest datum. Nothing the gate measured was
+      # wrong except the world it measured in.
+      #
+      # A fresh server is the only pristine pose available here. This mirrors
+      # what scripts/gz-trial.rs does per trial, for the same reason.
+      - name: Restart gz for a pristine world
+        shell: bash
+        run: |
+          set -euo pipefail
+          kill "$(cat /tmp/gz.pid)" 2>/dev/null || true
+          pkill -f 'gz sim' 2>/dev/null || true
+          sleep 3
+          nohup gz sim -s -r -v2 examples/falcon-sitl-gz/worlds/falcon-quad.sdf \
+            > /tmp/gz-server2.log 2>&1 &
+          echo $! > /tmp/gz.pid
+
+          IMU=/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+          for i in $(seq 1 60); do
+            if gz topic -l 2>/dev/null | grep -qx "$IMU"; then break; fi
+            sleep 2
+          done
+          # A live sample, not just an advertised name — same assertion as the
+          # first start, because a half-started server is the failure this whole
+          # step exists to avoid.
+          timeout 20 gz topic -e -t "$IMU" -n 1 > /tmp/gz-imu-sample2.txt || true
+          if [ ! -s /tmp/gz-imu-sample2.txt ]; then
+            echo "::error::gz did not republish an IMU sample after the restart"
+            sed -n '1,60p' /tmp/gz-server2.log
+            exit 1
+          fi
+          echo "gz restarted; world is pristine for the wasm leg"
+
       - name: Compose the published cascade and fly it through gz
         shell: bash
         run: |
