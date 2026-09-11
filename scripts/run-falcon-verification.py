@@ -66,6 +66,21 @@ BENCH_PATTERNS = [
     # instead of per-author.
     re.compile(r"^\s*gh\s+(?:release|attestation)\s"),   # needs gh + a published release
     re.compile(r"^\s*cosign\s+(?:verify|verify-blob)\b"),  # needs cosign + published sigs
+    # The FOUR-TRACK CROSSWALK needs all four provers on one machine. The gate
+    # runner has none of them: its own output reads "cargo-kani not installed",
+    # "Verus : RUN ❌", "Rocq : RUN ❌" — 3 of 4 tracks cannot even start, and
+    # the Verus one additionally cannot work on linux at all until
+    # pulseengine/rules_verus#25 (the bundled sysroot lacks the target std).
+    #
+    # Each track has a DEDICATED workflow that is its real enforcer — the same
+    # arrangement as `cargo kani -p` (enforced-by-kani-gate) and `bazel test
+    # //:*_verus_test` (enforced-by-verus-gate). Running the crosswalk here only
+    # re-reports those workflows' failures through a second, worse channel.
+    #
+    # Surfaced by PR #377: this step had not been executed in recent memory
+    # because no PR's Verify-Filter selected FV-RELAY-VCHAIN-001, so a narrow
+    # filter revealed it exactly as #375's filter revealed FV-FALCON-RELEASE-001.
+    re.compile(r"^\s*(?:bash\s+|sh\s+|\./)?(?:scripts/)?verify-chain\.sh\b"),
     re.compile(r"\bcargo\s+\+nightly\s+miri\b"),      # miri nightly component
     re.compile(r"^\s*MIRIFLAGS="),                    # same family
     re.compile(r"\brustup\s+component\s+add\s+miri"), # same family
@@ -244,15 +259,34 @@ def untraced_kani_engines() -> tuple[list[str], list[tuple[str, str]]]:
     return (fails, waived)
 
 
-def rivet_list(filter_expr: str, artifact_type: str) -> list[str]:
-    out = subprocess.check_output([
-        "rivet", "list",
-        "--type", artifact_type,
-        "--filter", filter_expr,
-        "--format", "json",
-    ])
-    data = json.loads(out)
-    return [a["id"] for a in data["artifacts"]]
+def rivet_list(filter_expr: str, artifact_types: str) -> list[str]:
+    """Artifact ids matching the filter, across EVERY requested type.
+
+    `artifact_types` is comma-separated because the default used to be the bare
+    string "sw-verification" — and that single word was a scope hole nobody had
+    looked at. Measured before this changed: 36 `sys-verification` and 38
+    `unit-verification` artifacts carrying 97 steps, 15% of all recorded
+    verification steps, were invisible to EVERY gate run. Among them were 32 of
+    the 36 artifacts citing a Verus proof.
+
+    That is the same shape as the tag-filter holes (#342's zero-match, #375's
+    never-run `gh`/`cosign` steps, #377's never-run crosswalk) on a different
+    axis: the gate was sweeping a subset and reporting as though it had swept
+    the whole tree. Ordering is preserved and duplicates dropped so a type
+    listed twice cannot double-run a step.
+    """
+    seen: list[str] = []
+    for t in [x.strip() for x in artifact_types.split(",") if x.strip()]:
+        out = subprocess.check_output([
+            "rivet", "list",
+            "--type", t,
+            "--filter", filter_expr,
+            "--format", "json",
+        ])
+        for a in json.loads(out)["artifacts"]:
+            if a["id"] not in seen:
+                seen.append(a["id"])
+    return seen
 
 
 def rivet_get(artifact_id: str) -> dict[str, Any]:
@@ -581,9 +615,10 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--filter", default='(has-tag "falcon")',
                    help='rivet S-expression filter (default: falcon-tagged)')
-    p.add_argument("--type", default="sw-verification",
-                   help='rivet artifact type (default: sw-verification — '
-                        'matches every FV-FALCON-*.yaml)')
+    p.add_argument("--type", default="sw-verification,sys-verification,unit-verification",
+                   help='comma-separated rivet artifact types. Default sweeps ALL '
+                        'THREE verification types; the previous sw-verification-only '
+                        'default left 97 steps (15%%) unexecuted in every run.')
     p.add_argument("--dry-run", action="store_true",
                    help="print commands without executing")
     p.add_argument("--markdown", action="store_true",
