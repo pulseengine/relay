@@ -492,23 +492,53 @@ mod gz_real {
                 // falcon world's Zürich elevation) in the estimator, which
                 // either "runaway-climbed" or refused to take off depending on
                 // message-arrival luck (2-in-3 runs raced on 2026-07-11).
+                //
+                // AND WAIT FOR THE VEHICLE TO BE AT REST. Taking the FIRST fix
+                // is not enough: the model spawns at z=0.80 m and drops onto
+                // its landing gear (it comes to rest at z=0.019 m). A fix that
+                // arrives mid-drop puts the launch reference ~0.5 m above the
+                // ground, and every altitude the estimator reports is then
+                // offset by that much. Measured before this fix, 2000-tick gz
+                // runs of the same binary on the same world: 0.20 m, 0.19 m,
+                // and one that never left the ground at -0.54 m — 1 in 3.
+                // After it, three runs returned 0.16 m, 0.16 m, 0.16 m.
+                //
+                // This is the same failure CLASS as the 2026-07-11 race noted
+                // above, and the general rule it teaches is a real pre-arm
+                // condition, not a simulator quirk: never initialise an
+                // altitude reference while the airframe is still moving.
                 let start = std::time::Instant::now();
+                let mut last_alt: Option<f64> = None;
+                let mut stable = 0u32;
                 while start.elapsed().as_secs_f32() < 15.0 {
-                    if let Ok(fix) =
-                        navsat_rx.recv_timeout(std::time::Duration::from_millis(100))
-                    {
-                        home = Home {
-                            lat_deg: fix.latitude_deg,
-                            lon_deg: fix.longitude_deg,
-                            alt_m: fix.altitude,
-                        };
-                        eprintln!(
-                            "  gz datum captured after {:.1}s: alt {:.1} m MSL",
-                            start.elapsed().as_secs_f32(),
-                            home.alt_m
-                        );
-                        break;
+                    let Ok(fix) = navsat_rx.recv_timeout(std::time::Duration::from_millis(100))
+                    else {
+                        continue;
+                    };
+                    // Three consecutive fixes within 2 cm. At the 5 Hz NavSat
+                    // rate that is 0.4 s of stillness, comfortably longer than
+                    // the ~0.4 s drop, so a slow phase of the fall cannot be
+                    // mistaken for having landed.
+                    if last_alt.is_some_and(|a| (a - fix.altitude).abs() < 0.02) {
+                        stable += 1;
+                    } else {
+                        stable = 0;
                     }
+                    last_alt = Some(fix.altitude);
+                    if stable < 3 {
+                        continue;
+                    }
+                    home = Home {
+                        lat_deg: fix.latitude_deg,
+                        lon_deg: fix.longitude_deg,
+                        alt_m: fix.altitude,
+                    };
+                    eprintln!(
+                        "  gz datum captured after {:.1}s: alt {:.1} m MSL (at rest)",
+                        start.elapsed().as_secs_f32(),
+                        home.alt_m
+                    );
+                    break;
                 }
                 if home.lat_deg == 0.0 && home.lon_deg == 0.0 && home.alt_m == 0.0 {
                     eprintln!(

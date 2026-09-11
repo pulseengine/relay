@@ -214,6 +214,7 @@ fn main() -> Result<()> {
     let run_start = std::time::Instant::now();
 
     let mut peak_tilt = 0.0f32;
+    let (mut pace_fresh, mut pace_deadline) = (0u32, 0u32);
     for tick in 0..ticks {
         let tick_start = std::time::Instant::now();
         let (s, true_pos) = plant.measure(noise);
@@ -290,7 +291,20 @@ fn main() -> Result<()> {
                 let now_imu = plant.counters().map(|c| c.0).unwrap_or(last_imu + 1);
                 let waited_us = tick_start.elapsed().as_micros() as u64;
                 match pace::pace_decision(last_imu, now_imu, waited_us, pace_deadline_us) {
-                    pace::Pace::Fresh(w) | pace::Pace::Deadline(w) => {
+                    // Counted separately. Collapsing these two into one arm made
+                    // "pacing: gyro-sync" unfalsifiable: a run that hit the
+                    // 8x-period deadline on EVERY tick — i.e. never actually
+                    // synced to a fresh gyro sample — printed exactly the same
+                    // line as a clean one. A deadline hit means the loop gave up
+                    // waiting and ran on a STALE sample, which is the failure
+                    // this stage exists to prevent.
+                    pace::Pace::Fresh(w) => {
+                        pace_fresh += 1;
+                        last_imu = w;
+                        break;
+                    }
+                    pace::Pace::Deadline(w) => {
+                        pace_deadline += 1;
                         last_imu = w;
                         break;
                     }
@@ -334,6 +348,14 @@ fn main() -> Result<()> {
         if wall > 0.0 { scheduled / wall } else { 0.0 },
         if sim_lock { "gyro-sync" } else if pace_real_time { "wall-clock" } else { "free-running" }
     );
+    if sim_lock {
+        // RTF alone cannot distinguish "synced to physics" from "gave up and ran
+        // stale"; both look like a slow run. These two numbers can.
+        println!(
+            "pace       : {pace_fresh} fresh gyro samples, {pace_deadline} deadline hits              ({:.1}% stale)",
+            100.0 * pace_deadline as f32 / (pace_fresh + pace_deadline).max(1) as f32
+        );
+    }
     println!("LOOP CLOSES: {ticks} ticks executed through the Component Model seam.");
 
     if let Some((_, worst, worst_tick)) = differential.as_ref() {

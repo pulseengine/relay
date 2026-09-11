@@ -35,6 +35,9 @@
 #   record_headless.sh [chase|static|markers] [scenario] [duration_s]
 #     scenario : mission (default) | alt-only | hover | geo-hover
 #     duration : flight seconds (default 55)
+#   env: FLIGHT=wasm  film the WASM component (tests/cascade-sitl-wasm) instead
+#        of the native binary, with WASM_PATH pointing at the .wasm. The gz gate
+#        blocks on the wasm run, so that is the run worth filming.
 #   env: RUNS (markers best-of-N, default 4)  FRAME_CAP (peak<this stays framed,
 #        default 8.0 m)  START_TRIM (drop leading idle seconds, default 2)
 #
@@ -50,6 +53,7 @@ FRAME_CAP="${FRAME_CAP:-8.0}"
 START_TRIM="${START_TRIM:-2}"
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 SRCW="$REPO/examples/falcon-sitl-gz/worlds/falcon-quad.sdf"
+WASM_PATH="${WASM_PATH:-$REPO/wasm/cm/cascade/target/wasm32-unknown-unknown/release/falcon_cascade_cm.wasm}"
 CAMW="/tmp/falcon-quad-cam-${VIEW}.sdf"
 FRAMES="/tmp/falcon-cam-frames"
 OUTDIR="$REPO/bench-evidence/gz-sim/recordings"
@@ -109,13 +113,33 @@ fly_once() {
   sleep 14
   gz topic -e -t "$TOPIC" >/dev/null 2>&1 & local SUB=$!
   local T0; T0=$(python3 -c 'import time;print(time.time())')
-  ( cd "$REPO" && cargo run -q -p falcon-sitl-gz --features gazebo -- \
-      --backend=gazebo --world=falcon --model=quad --home=47.3977,8.5456,488 \
-      --scenario="$SCEN" --duration="$DUR" --evidence-dir=/tmp/falcon-flight ) \
-      >/tmp/gz-headless-fly.log 2>&1
+  if [ "${FLIGHT:-native}" = "wasm" ]; then
+    # Film the WASM component flying, not a native stand-in. This is the run
+    # the gz gate now blocks on, and a video of a different binary would be
+    # evidence for something nobody is gating.
+    local TICKS; TICKS=$(python3 -c "print(int($DUR/0.004))")
+    ( cd "$REPO" && DIFFERENTIAL=1 BACKEND=gazebo \
+        ./tests/cascade-sitl-wasm/target/release/cascade-sitl-wasm \
+        "$WASM_PATH" "$TICKS" 0.004 ) >/tmp/gz-headless-fly.log 2>&1
+  else
+    ( cd "$REPO" && cargo run -q -p falcon-sitl-gz --features gazebo -- \
+        --backend=gazebo --world=falcon --model=quad --home=47.3977,8.5456,488 \
+        --scenario="$SCEN" --duration="$DUR" --evidence-dir=/tmp/falcon-flight ) \
+        >/tmp/gz-headless-fly.log 2>&1
+  fi
   local T1; T1=$(python3 -c 'import time;print(time.time())')
   kill $SUB $SRV 2>/dev/null; pkill -f 'gz sim' 2>/dev/null; sleep 1
   local V; V=$(grep -E 'verdict:' /tmp/gz-headless-fly.log | tail -1)
+  if [ "${FLIGHT:-native}" = "wasm" ]; then
+    # The wasm harness reports a different shape: no `verdict:` line. Map its
+    # numbers onto the same three the best-of-N selector uses — `peak` is what
+    # FRAME_CAP tests for "stayed in frame", so horizontal travel is the
+    # honest analogue of peak_dist here.
+    local WERR WHOR
+    WERR=$(sed -nE 's/^HOLD ERROR.*\|err\| = ([0-9.]+) m.*/\1/p' /tmp/gz-headless-fly.log | tail -1)
+    WHOR=$(sed -nE 's/^horizontal *: ([0-9.]+) m.*/\1/p' /tmp/gz-headless-fly.log | tail -1)
+    V="verdict: final_dist=${WERR:-9999}m peak_dist=${WHOR:-9999}m rms_steady=${WERR:-9999}m"
+  fi
   local elapsed; elapsed=$(python3 -c "print(max(1.0,$T1-$T0))")
   local peak final rms
   peak=$(echo "$V" | sed -nE 's/.*peak_dist=([0-9.]+)m.*/\1/p'); peak=${peak:-9999}
