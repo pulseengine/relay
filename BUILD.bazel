@@ -952,20 +952,23 @@ rust_wasm_component_bindgen(
 # ── wac composition — plug the five leaves into the cascade ───────
 # The cascade is the socket (imports five interfaces); each leaf is a
 # plug (exports one). wac matches imports to exports by interface.
-wac_plug(
-    name = "falcon-cascade-composed",
-    # v1.4 — the composed cascade now plugs the VERIFIED IEKF (falcon-iekf)
-    # into the ekf socket instead of the v0.6 Mahony falcon-ekf. The verified
-    # stack is the composed stack.
-    plugs = [
-        ":falcon-iekf",
-        ":falcon-position",
-        ":falcon-attitude",
-        ":falcon-rate",
-        ":falcon-mixer",
-    ],
-    socket = ":falcon-cascade",
-)
+# RETIRED (#393). The cascade component now wraps falcon-core::FlightCore and
+# imports NOTHING but the records-only `types` interface, so there is no socket
+# to plug into: `wac plug` fails with "the socket component had no matching
+# imports for the plugs that were provided". That is correct, and it is how the
+# obsolescence was caught.
+#
+# The five-stage composition existed because the wasm side had invented a
+# decomposition the flight architecture does not have — which is precisely how
+# it drifted onto the legacy PID controllers for three months (#388). There is
+# nothing left to compose; //:falcon-cascade IS the composed cascade.
+#
+# wac_plug(
+#     name = "falcon-cascade-composed",
+#     plugs = [":falcon-iekf", ":falcon-position", ":falcon-attitude",
+#              ":falcon-rate", ":falcon-mixer"],
+#     socket = ":falcon-cascade",
+# )
 
 # ── meld → synth: lower the cascade to an ARM Cortex-M ELF ────────
 # meld_fuse resolves the cascade's five imports against the leaf

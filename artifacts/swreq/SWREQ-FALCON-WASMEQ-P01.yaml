@@ -1,0 +1,53 @@
+artifacts:
+  - id: SWREQ-FALCON-WASMEQ-P01
+    type: sw-req
+    title: "WASMEQ-P01 — the Component Model boundary shall be transparent: wasm output == native output, bit-exact"
+    status: implemented
+    release: falcon-v1.137.0
+    description: >
+      Running the flight crates through a WebAssembly component boundary shall
+      produce output BIT-IDENTICAL to running the same crates natively, given
+      identical inputs. Any non-zero difference shall fail, with no tolerance.
+
+      WHY IT EXISTS. The whole delivery model is "develop in wasm, then deploy
+      that same wasm on the target, no changes needed". That sentence is only
+      true if the boundary is transparent. Until v1.137 it was an architectural
+      belief with nothing measuring it — and this repo has spent several releases
+      discovering that unmeasured beliefs about its own artifacts are wrong more
+      often than not (the components had never been flown at all; the estimator
+      hardcoded its tick rate; the flagship published .wasm embeds a simulator).
+
+      THE LADDER THIS IS THE FIRST RUNG OF. Each rung replaces more simulation
+      with more reality while the wasm components stay BYTE-IDENTICAL:
+
+        1. relay  — the wasm cascade against a SITL plant, and the same crates
+                    natively, compared. THIS REQUIREMENT.
+        2. jess   — the same wasm, relay's SITL layers removed, driven through
+                    gust down to the driver layer, that attached to Gazebo.
+        3. jess   — the same again, down to native on the hardware.
+        4. jess   — real sensors attached, and fly.
+
+      Rungs 2-4 are only meaningful if rung 1 holds: if the boundary itself
+      changed the answer, nothing above it could be attributed to the vehicle
+      rather than to the packaging.
+
+      WHY BIT-EXACT AND NOT A TOLERANCE. Both sides run the same f32 code on the
+      same inputs, and wasm32 shares IEEE-754 semantics with the host. So any
+      difference at all means something other than the arithmetic changed — a
+      different constant, a different call order, a lost update, a stage
+      initialised differently. A tolerance would hide precisely the divergence
+      worth finding, and would turn a sharp property into a negotiable one.
+
+      SCOPE, and what this requirement deliberately does NOT claim. It constrains
+      the PACKAGING, not the packaged controller. The wasm cascade currently
+      wraps relay-pos/att/rate while falcon-core flies geometric SE(3) + ADRC, so
+      satisfying this says nothing about whether the shipped components implement
+      the control law we verify — that is a separate gap tracked in #380 and must
+      not be read as covered here.
+
+      FALSIFICATION: wrong if the same crates, given the same inputs, produce any
+      differing motor output through the component boundary versus natively.
+    tags: [requirement, falcon, wasm, component-model, equivalence, deployment, v1.137]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

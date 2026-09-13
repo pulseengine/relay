@@ -1,7 +1,7 @@
 # Standalone cargo-component crate — the cascade orchestrator.
 [package]
 name = "falcon-cascade-cm"
-description = "Falcon v0.7 — cascade orchestrator (imports 5 controllers, exports step)"
+description = "Falcon v0.8 — the flight core as one component (falcon-core::FlightCore)"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
@@ -14,6 +14,13 @@ crate-type = ["cdylib"]
 [dependencies]
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
 falcon-cm-rt = { path = "../../../crates/falcon-cm-rt" }
+
+# THE FLIGHT CORE ITSELF. v0.7 imported five stage interfaces and wrapped
+# relay-pos/att/rate — controllers falcon-core dropped on 2026-06-03 when it
+# moved to geometric SE(3) + ADRC (#388). Depending on falcon-core directly is
+# what makes the published component the vehicle we verify, and it is what the
+# scripts/audit-component-deps.rs check exists to keep true.
+falcon-core = { path = "../../../crates/falcon-core" }
 
 [package.metadata.component]
 package = "pulseengine:falcon-cascade"
