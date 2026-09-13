@@ -227,3 +227,20 @@ Falsifiable, as always: this arc is wrong if a replayed log diverges from its re
 #drone #autopilot #formalverification #kani #rust #robotics #embedded #gps #battery #filtering
 
 _video: falcon-v1.118-122-narrated.mp4 (af_sky, data segments rendered from real test traces)_
+
+---
+
+## v1.137
+**Title:** Falcon v1.137 — The WebAssembly Build Had Never Flown | verified drone flight stack
+
+A colleague asked whether we had ever run Gazebo against our WebAssembly components. We had not. Every SITL result we had — hover, Monte-Carlo campaigns, rotor-out recovery — came from the native build; the published wasm components had never flown anything. Wiring a host to them took an afternoon and immediately found why nobody had noticed: the estimator hardcoded a 1 kHz integration step, and no interface let a host say otherwise. At 250 Hz the vehicle climbs to 29 metres against a 2 metre target and reports no error at all. At 1 kHz — the one rate it assumed — before and after are identical, which is exactly how it survived. Seam v0.8 lets the host declare its own period; every rate now holds 2 metres.
+
+Every pixel of the chart is plotted from CSVs the test harness wrote (bench-evidence/wasm-sitl/). The "before" trace is not an old build — it is the same v0.8 component told to assume 1 kHz, which is precisely what v0.7 did unconditionally, so the comparison is one binary and one component.
+
+Honest about what is NOT fixed: the same work showed the seam accepts no position, barometer or magnetometer measurement. With a position fix now supplied AND fused, the composed cascade still destabilises above about 0.07 m/s² accelerometer noise, where the native cascade holds 0.39 m at 0.2. That gap is real, is tracked in #380, and is not claimed closed by this release.
+
+Falsifiable: this release is wrong if a host at any rate between 100 Hz and 1 kHz fails to hold the commanded altitude on the SITL plant, or if the published components' behaviour still depends on the host's tick rate.
+
+#drone #autopilot #webassembly #componentmodel #formalverification #rust #robotics #embedded
+
+_video: falcon-v1.137-wasm-tick-rate.mp4 (macOS say fallback — Speaches host 192.168.178.28:8000 unreachable at render time; data plotted from real traces)_
