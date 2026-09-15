@@ -278,7 +278,7 @@ jobs:
           #
           # 25 s is therefore the honest duration: it measures the settled hold
           # rather than a transient passing through the target. Beyond ~26 s a
-          # separate horizontal divergence takes over, tracked in #399 — this
+          # separate horizontal divergence takes over, tracked in #403 — this
           # leg stops short of it deliberately and says so.
           set +e
           DIFFERENTIAL=1 BACKEND=gazebo ./target/release/cascade-sitl-wasm \
