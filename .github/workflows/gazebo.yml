@@ -85,7 +85,7 @@ jobs:
       # wac. Neither is on a hosted runner. install-action serves prebuilt
       # binaries, so this is seconds rather than a source build of both.
       - name: Install cargo-component + wac
-        uses: taiki-e/install-action@v2.87.6
+        uses: taiki-e/install-action@v2.87.12
         with:
           tool: cargo-component,wac-cli
 

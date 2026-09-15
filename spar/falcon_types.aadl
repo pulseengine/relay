@@ -59,6 +59,28 @@ public
       Data_Size => 16 Bytes;
   end MotorPwm;
 
+  -- v0.8: one tick's worth of estimator input. Replaces the bare ImuSample
+  -- on EkfThread. `dt_s` is the host's ACTUAL control period — v0.7 had no
+  -- way to state it, so the estimator hardcoded 1 kHz and an off-rate host
+  -- got a silently wrong answer (250 Hz measured 27 m of altitude error).
+  -- The aiding measurements are optional at the WIT level; AADL has no
+  -- option<> so they are modelled as present-with-validity, matching how the
+  -- native FlightBackend already returns Option<Vec3> from read_position /
+  -- read_mag / read_heading.
+  --   24 (imu) + 4 (dt) + 12 (pos) + 12 (mag) + 4 (heading) + 3 valid flags
+  --   padded to 4-byte alignment = 60 Bytes.
+  data SensorFrame
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 60 Bytes;
+  end SensorFrame;
+
+  data Vec3
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 12 Bytes;
+  end Vec3;
+
   data Waypoint
     -- NED target + heading = 4 × 4 = 16 bytes.
     properties
