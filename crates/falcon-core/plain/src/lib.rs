@@ -473,6 +473,13 @@ impl CascadePartition {
         (self.kp_alt, self.kd_alt)
     }
     /// Current altitude integral gain (tuning observability, v1.119).
+    /// The altitude loop's accumulated integral (m·s). Read-only, for
+    /// diagnosis: an integral that keeps growing through a hold is the
+    /// signature of transient windup rather than steady-bias rejection.
+    pub fn altitude_integral(&self) -> f32 {
+        self.alt_int
+    }
+
     pub fn altitude_integral_gain(&self) -> f32 {
         self.ki_alt
     }
@@ -640,7 +647,39 @@ impl CascadePartition {
             // thrust = hover − kp·alt_err − ki·∫alt_err + kd·v_z. The integral
             // (v1.22) rejects a steady thrust deficit (the air-density lapse).
             let alt_err = self.setpoint[2] - est.p[2];
-            self.alt_int += alt_err * dt;
+            // ANTI-WINDUP (v1.139): integrate ONLY when the vehicle is not
+            // already converging on the setpoint.
+            //
+            // The integral exists to reject a STEADY thrust deficit (air-density
+            // lapse). Charging it during the APPROACH makes it an oscillator
+            // instead. Measured on the gz falcon-quad holding 2 m, before this
+            // gate — the integral peaks exactly as the target is reached, and
+            // the vehicle then limit-cycles through it:
+            //
+            //   t=7.9s  true_z -2.14 (at target)  alt_int -6.26  <- peak charge
+            //   t=13.9  true_z -2.64 (overshoot)  alt_int -3.45
+            //   t=25.9  true_z -2.07              alt_int +1.52
+            //   t=39.9  true_z -0.08 (near ground) alt_int -5.72
+            //
+            // At ki 0.03 a +-6 integral is a +-0.19 thrust swing on a 0.585
+            // hover. Reported independently from a Windows/WSL2 bench as "it
+            // starts oscillating after about 15 seconds".
+            //
+            // WHY THIS CONDITION and not the two obvious ones. A velocity gate
+            // cannot separate the cases: the climb runs at only 0.1-0.29 m/s,
+            // so any threshold loose enough to be meaningful stays open through
+            // the whole transient. An error band cannot either: the thrust-lapse
+            // sag this integral MUST reject is ~1.5 m, larger than the band that
+            // would block the climb. Their product does separate them —
+            // converging (error and vertical velocity share a sign) is the
+            // transient; stuck (velocity ~0 with error present) is the steady
+            // deficit. NED sign convention: below the target means alt_err < 0
+            // and closing it means v[2] < 0, so converging is a POSITIVE
+            // product either way up.
+            let converging = alt_err * est.v[2] > 0.0;
+            if !converging {
+                self.alt_int += alt_err * dt;
+            }
             let cap = if self.ki_alt > 0.0 { self.alt_int_max / self.ki_alt } else { 0.0 };
             self.alt_int = self.alt_int.clamp(-cap, cap);
             (self.hover_thrust - self.kp_alt * alt_err - self.ki_alt * self.alt_int
@@ -880,6 +919,11 @@ impl FlightCore {
 
     pub fn altitude_integral_gain(&self) -> f32 {
         self.casc.altitude_integral_gain()
+    }
+
+    /// Forwards `CascadePartition::altitude_integral` — read-only diagnosis.
+    pub fn altitude_integral(&self) -> f32 {
+        self.casc.altitude_integral()
     }
 
     pub fn hover_thrust(&self) -> f32 {
