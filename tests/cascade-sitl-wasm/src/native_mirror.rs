@@ -31,6 +31,7 @@ struct FrameBackend {
     position: Option<Vec3>,
     mag: Option<Vec3>,
     heading: Option<f32>,
+    motor_rpm: Option<[i32; 4]>,
     dt: f32,
     motors: [f32; 4],
 }
@@ -44,6 +45,9 @@ impl FlightBackend for FrameBackend {
     }
     fn read_heading(&mut self) -> Option<f32> {
         self.heading
+    }
+    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+        self.motor_rpm
     }
     fn read_position(&mut self) -> Option<Vec3> {
         self.position
@@ -121,6 +125,7 @@ impl NativeCascade {
         position: Option<Vec3>,
         mag: Option<Vec3>,
         heading: Option<f32>,
+        motor_rpm: Option<[i32; 4]>,
         dt_s: f32,
     ) -> [f32; 4] {
         let dt = if dt_s.is_finite() {
@@ -133,6 +138,7 @@ impl NativeCascade {
             position,
             mag,
             heading,
+            motor_rpm,
             dt,
             motors: [0.0; 4],
         };

@@ -55,14 +55,14 @@ wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.9.0;
+            export pulseengine:falcon-cascade/controller@0.10.0;
         }
     "#,
     path: "../../wit/falcon-cascade",
 });
 
 use pulseengine::falcon_cascade::types::{
-    ImuSample as WitImu, SensorFrame, Vec3, VehicleConfig, Waypoint,
+    ImuSample as WitImu, RotorRpm, SensorFrame, Vec3, VehicleConfig, Waypoint,
 };
 
 fn main() -> Result<()> {
@@ -215,6 +215,17 @@ fn main() -> Result<()> {
 
     let mut peak_tilt = 0.0f32;
     let (mut pace_fresh, mut pace_deadline) = (0u32, 0u32);
+    // v0.10 seam exercise. FAIL_ROTOR=<idx>@<seconds> kills a rotor mid-flight;
+    // NO_RPM=1 withholds the ESC telemetry. Together they make the new field
+    // FALSIFIABLE rather than merely present: with telemetry the rotor-out FDI
+    // inside the component can see the loss, without it the FDI is inert, and
+    // the two runs must not produce the same flight.
+    let fail_rotor: Option<(usize, u32)> = std::env::var("FAIL_ROTOR").ok().and_then(|v| {
+        let (idx, at) = v.split_once('@')?;
+        Some((idx.parse().ok()?, (at.parse::<f32>().ok()? / dt) as u32))
+    });
+    let no_rpm = std::env::var("NO_RPM").is_ok();
+    let mut rpm_frames = 0u32;
     for tick in 0..ticks {
         let tick_start = std::time::Instant::now();
         let (s, true_pos) = plant.measure(noise);
@@ -242,12 +253,20 @@ fn main() -> Result<()> {
         // 8 s, on a calibration that holds 2.00 m with them present.
         let mag_body = plant.mag_body_ned().map(|m| Vec3 { x: m[0], y: m[1], z: m[2] });
         let heading_rad = plant.heading_ned();
+        // v0.10: ESC telemetry, so the rotor-out FDI is live inside the
+        // component rather than inert. The native backend has always fed this.
+        let rpm = if no_rpm { None } else { plant.motor_rpm() };
+        if rpm.is_some() {
+            rpm_frames += 1;
+        }
+        let motor_rpm = rpm.map(|r| RotorRpm { m1: r[0], m2: r[1], m3: r[2], m4: r[3] });
         let frame = SensorFrame {
             imu,
             dt_s: dt,
             position_ned,
             mag_body,
             heading_rad,
+            motor_rpm,
         };
         let m = controller.call_step(&mut store, frame, target)?;
 
@@ -263,6 +282,7 @@ fn main() -> Result<()> {
                 position_ned.map(|p| [p.x, p.y, p.z]),
                 mag_body.map(|m| [m.x, m.y, m.z]),
                 heading_rad,
+                rpm,
                 dt,
             );
             let dmax = [
@@ -273,6 +293,12 @@ fn main() -> Result<()> {
         }
         let tilt = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
         peak_tilt = peak_tilt.max(tilt);
+        if let Some((r, at)) = fail_rotor {
+            if tick == at {
+                plant.fail_rotor(r);
+                println!("  !! rotor {r} FAILED at tick {tick} ({:.2}s)", tick as f32 * dt);
+            }
+        }
         plant.step([m.m1, m.m2, m.m3, m.m4], dt);
 
         // Mirrors examples/falcon-sitl-gz two-stage pacing exactly.
@@ -341,6 +367,10 @@ fn main() -> Result<()> {
     // Wall-vs-sim, printed always: the failure this fixes was INVISIBLE — the
     // run completed, reported a plausible-looking altitude, and nothing said the
     // clock had come apart. A desync should never again be silent.
+    // Reported unconditionally: "the field exists" and "the field carried data
+    // on every tick" are different claims, and only the second means the FDI
+    // inside the component could see anything at all.
+    println!("esc telem : {rpm_frames}/{ticks} ticks carried per-rotor RPM");
     let wall = run_start.elapsed().as_secs_f32();
     let scheduled = ticks as f32 * dt;
     println!(

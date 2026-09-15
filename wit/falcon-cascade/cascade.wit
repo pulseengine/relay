@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.9.0;
+package pulseengine:falcon-cascade@0.10.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -92,6 +92,28 @@ interface types {
         /// Absolute heading (rad, NED). An alternative to `mag-body` for hosts
         /// that already resolve yaw; both correct the same unobservable state.
         heading-rad: option<f32>,
+        /// Per-rotor ESC telemetry (bidirectional DShot, or equivalent).
+        ///
+        /// v0.10. Without it the rotor-out FDI is INERT: a rotor loss goes
+        /// undetected, because the information never crosses the boundary. The
+        /// native backend has always fed it; the seam simply had no field, so
+        /// the capability was verified in falcon-core and unreachable from a
+        /// component — the same orphan-signal shape as the hardcoded tick
+        /// period and the missing calibration.
+        ///
+        /// Note this was invisible to the wasm/native differential too: both
+        /// sides received `none` and agreed perfectly. An equivalence test is
+        /// blind to a channel neither side receives.
+        ///
+        /// `none` = no telemetry, and the FDI falls back to its RPM-free path.
+        motor-rpm: option<rotor-rpm>,
+    }
+
+    /// Per-rotor measured speed, in the airframe's motor order — the same order
+    /// as `motor-pwm`. A flat record rather than a list: no allocation, and it
+    /// lowers to a flat scalar sequence like every other record here.
+    record rotor-rpm {
+        m1: s32, m2: s32, m3: s32, m4: s32,
     }
 
     /// Airframe calibration — the numbers the control law needs and CANNOT

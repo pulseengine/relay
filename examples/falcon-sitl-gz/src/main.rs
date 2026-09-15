@@ -1522,10 +1522,13 @@ fn run_flightcore(
                 let tilt_deg = libm::acosf((1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2])).clamp(-1.0, 1.0))
                     * 57.2958;
                 eprintln!(
-                    "t={:.2} true_z={:.2} tilt={:.0}deg gyro=[{:+.1},{:+.1},{:+.1}] failed={:?} mot=[{:.2},{:.2},{:.2},{:.2}]",
-                    t, last_true[2], tilt_deg, g[0], g[1], g[2], core.failed_motor(),
+                    "t={:.2} true_z={:.2} est_z={:.2} vz={:+.2} alt_int={:+.3} \
+xy=[{:+.2},{:+.2}] tilt={:.0}deg yaw={:+.2} mot=[{:.2},{:.2},{:.2},{:.2}]",
+                    t, last_true[2], e.p[2], e.v[2], core.altitude_integral(),
+                    last_true[0], last_true[1], tilt_deg, yaw,
                     m[0], m[1], m[2], m[3],
                 );
+                let _ = (a, g);
             }
 
             let alt_err = -target_alt_m - last_true[2]; // NED z error

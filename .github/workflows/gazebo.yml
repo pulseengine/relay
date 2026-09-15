@@ -154,7 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           ./target/release/falcon-sitl-gz \
-            --backend=gazebo --scenario=flightcore --duration=8 \
+            --backend=gazebo --scenario=flightcore --duration=25 \
             | tee /tmp/native-gz.txt
           grep -q 'PASS' /tmp/native-gz.txt || { echo "::error::native flightcore did not PASS on gz"; exit 1; }
 
@@ -266,23 +266,23 @@ jobs:
           # not "the wasm behaves similarly to native on the same world", but
           # "the wasm and native computed the same bytes from the same inputs,
           # while flying it".
-          # 8 s (2000 ticks), NOT the 10 s this used to run, and the reason is
-          # a real defect rather than a tuning preference. The altitude hold
-          # creeps UPWARD over a long hold — measured on gz, same commit:
+          # 25 s (6250 ticks). This used to be 8 s, chosen to stay clear of the
+          # altitude limit cycle (#396) — the gate was dodging a defect.
           #
-          #     8 s  -> 0.16 m     10 s -> 0.43 m     16 s -> 0.62 m (FAIL)
+          # #396 is fixed (the altitude integral no longer charges during the
+          # approach), and the numbers inverted: without the windup there is no
+          # overshoot, so the climb is slower and 8 s no longer REACHES 2 m.
+          # Measured on the same commit:
           #
-          # and the native binary does the same (16 s -> 0.61 m), which is what
-          # bit-identical control predicts. So it is a falcon-core property, not
-          # a wasm one, and it is tracked in #396.
+          #      8 s -> 0.55 m (still climbing)     25 s -> 0.02 m (settled)
           #
-          # At 10 s the gate would sit 0.07 m under its own threshold and go
-          # amber on noise. Shortening to 8 s is chosen with eyes open: this leg
-          # still catches "did not fly", "diverged" and "the boundary changed
-          # the answer", and the creep is gated by #396, not hidden by it.
+          # 25 s is therefore the honest duration: it measures the settled hold
+          # rather than a transient passing through the target. Beyond ~26 s a
+          # separate horizontal divergence takes over, tracked in #403 — this
+          # leg stops short of it deliberately and says so.
           set +e
           DIFFERENTIAL=1 BACKEND=gazebo ./target/release/cascade-sitl-wasm \
-            /tmp/composed.wasm 2000 0.004 2>&1 | tee /tmp/wasm-gz.txt
+            /tmp/composed.wasm 6250 0.004 2>&1 | tee /tmp/wasm-gz.txt
           set -e
           if ! grep -q 'LOOP CLOSES' /tmp/wasm-gz.txt; then
             echo "::error::the wasm cascade did not execute in gz — infrastructure failure, not a flight outcome"

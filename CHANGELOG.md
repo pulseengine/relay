@@ -35,6 +35,50 @@ A maintainer-flagged cleanup pass (cold audit confirmed the drift):
   load-bearing (shared utility types in the gz bench), so full retirement is a
   larger refactor than a hygiene pass warrants — left for a scoped follow-up.
 
+## [falcon-v1.138.0] — 2026-09-15
+
+> **Second drift note.** Per-version entries stop at `falcon-v1.34.0` above;
+> `v1.35` … `v1.137` shipped as tags without CHANGELOG entries. This entry
+> covers the **v1.136 → v1.138 arc** (the tags themselves were never cut, so
+> this release bundles them), and is written because the release answers
+> questions from outside the team.
+
+### Added
+- **The published wasm cascade flies real Gazebo.** `configure(vehicle-config)`
+  at `pulseengine:falcon-cascade@0.9.0` — nine airframe values a host can
+  install. Before it, every number was frozen at `FlightCore::new(0.5, ..)`
+  inside the component, so the published cascade could not lift a gz airframe
+  and no host could correct it from outside. Holds 2.00 m, bit-identical to
+  native across every tick.
+- **ESC telemetry on the seam** (`@0.10.0`, `rotor-rpm`). `read_motor_rpm` had
+  no field at all, so the rotor-out FDI in the published component was inert by
+  construction — the information never crossed the boundary.
+- **Gazebo is a CI target** for the first time, with the flight recorded as
+  video on every run, and a hard gate on the hold error.
+- `scripts/gz-trial.rs` — one gz trial against a pristine world with a settled
+  vehicle. `FlightCore::altitude_integral()` and an extended `FC_DEBUG` trace.
+
+### Fixed
+- **The 15-second swing** (#396). The altitude integral charged through the
+  whole climb and spent it as overshoot: `alt_int` peaked at −6.26 exactly as
+  the target was reached, then limit-cycled. Now charges only when the vehicle
+  is not already converging. 25 s hold: 0.62 m → **0.02 m**.
+- **Yaw was unobservable** — the harness offered no `mag-body`/`heading-rad`
+  though the seam already carried both; the vehicle climbed and then fell.
+- **The launch datum was captured mid-drop**, and then before physics had
+  started. 1 gz run in 3 never flew; now three runs agree to 0.16 m.
+- An 8 KiB shadow-stack overflow in the component, fixed without raising the
+  budget (the no-grow invariant is what lets the image lower to bare metal).
+- The Verus gate had never passed, and was hiding two broken proofs (#377).
+
+### Known, filed, not fixed
+- **#403** — the horizontal loop diverges after ~26 s of hold. Was hidden under
+  the altitude oscillation.
+- **#398** — rotor-out recovery does not hold on the gz plant.
+- **#397** — `//:falcon-cascade` has not built under Bazel since #393, so the
+  cascade's witness MC/DC coverage is not being produced.
+- **synth#1267** — the cascade tick declines on cortex-m7dp (GI-FPU-002).
+
 ## [falcon-v1.34.0] — 2026-06-05
 
 **MAVLink mission download — a ground station reads the mission back.** The
