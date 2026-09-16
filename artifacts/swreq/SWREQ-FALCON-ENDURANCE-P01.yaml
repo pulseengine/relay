@@ -1,0 +1,66 @@
+artifacts:
+  - id: SWREQ-FALCON-ENDURANCE-P01
+    type: sw-req
+    title: "ENDURANCE-P01 — a position hold shall stay bounded for HOURS, not seconds, and be watched nightly"
+    status: proposed
+    release: falcon-v1.139.0
+    description: >
+      Commanded to hold a fixed NED position, the vehicle shall remain within
+      1.0 m horizontally and 0.5 m vertically of the setpoint for at least ONE
+      HOUR on the reference Gazebo plant, and shall be exercised nightly at
+      multi-hour durations on the analytic plant.
+
+      WHY IT EXISTS. The current ceiling is about 26 seconds (#403). A flight
+      stack whose hold is measured in seconds cannot do the job the vehicle
+      exists for; every mission length of interest is minutes to hours.
+
+      WHAT IS ALREADY TRUE, MEASURED. The control law and every integrator are
+      numerically stable over hours. On the analytic plant, flightcore scenario,
+      250 Hz:
+
+        duration     final_dist   rms_steady   est_z     wall
+        1 h          0.01 m       0.01 m       -1.99 m   1.32 s
+        4 h          0.01 m       0.01 m       -1.99 m   5.36 s
+        12 h         0.01 m       0.01 m       -1.99 m   16.01 s
+
+      Twelve hours is ~10^7 ticks with no drift in the hold, no growth in any
+      integrator, and no f32 degradation. So the hours problem is NOT windup,
+      NOT numeric drift, and NOT the controller. Whatever breaks at 26 s is in
+      the gz sensor path — 5 Hz aiding, real noise, the estimator's response to
+      them — which is where #403 must be diagnosed.
+
+      HOW MUCH THAT EVIDENCE IS WORTH, honestly. The analytic plant is close to
+      the mixer's own inverse, so it cannot reveal an allocation error and it
+      does not model sensor noise, latency or the aiding cadence. A 12 h PASS
+      there establishes that the MATH does not degrade. It does not establish
+      that a vehicle flies. Only the gz number satisfies this requirement; the
+      analytic soak exists to keep the math half honest cheaply, and to localise
+      any future regression to one side of that line.
+
+      COST, which is why this is affordable nightly. 12 h of analytic flight
+      costs 16 s of wall clock (~2700x real time), so the whole multi-hour tier
+      is seconds of compute. The gz tier runs near real time (RTF ~0.85-0.98),
+      so an hour of gz flight costs about an hour — nightly, not per-PR.
+
+      THE RATCHET. Until the gz hold reaches an hour, the nightly job shall
+      record the longest duration that holds and FAIL if it regresses below the
+      established floor. A number that is published every night and may not get
+      worse is worth more than a target nobody measures.
+
+      BOTH PATHS. The soak shall run the wasm component as well as the native
+      binary, per SWREQ-FALCON-WASMEQ-P01 — an endurance property that holds for
+      only one of the two is a seam defect, and a divergence that takes an hour
+      to appear is exactly what a per-PR differential cannot see.
+
+      DEPENDS ON: #403 (horizontal divergence at ~26 s) is the blocking defect.
+      #413 (battery defaults to a healthy 16.0 V) also matters here: a real
+      endurance flight must eventually trip a battery failsafe, and today it
+      never can.
+
+      FALSIFICATION: wrong if a 1 h stationary 2 m gz hold leaves the vehicle
+      more than 1.0 m horizontally or 0.5 m vertically from the setpoint, or if
+      the analytic 12 h soak shows any unbounded integrator.
+    tags: [requirement, falcon, endurance, soak, gazebo, nightly, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
