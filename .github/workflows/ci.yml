@@ -42,10 +42,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      # Pre-existing cFS crates emit rustfmt deltas; v0.1 tolerates
-      # them while v0.2 cleans the workspace up.
+      # `Format` is a REQUIRED status check. It carried `continue-on-error: true`
+      # from d30a5e3 (2026-05-18, the v0.1.0 release) until v1.139 — so for its
+      # entire life it could not report failure, and it was promoted to required
+      # while in that state. The comment that stood here said "v0.1 tolerates
+      # them while v0.2 cleans the workspace up"; we were at v1.138.
+      #
+      # The mask WAS hiding a live violation. On main 3ec4a2f this step logged
+      # 893 `Diff in` hunks and `exit code 1` while the job reported success —
+      # and the jobs API reports a continue-on-error step as `success` too, so
+      # only the log tells. An earlier note here blamed local-vs-CI rustfmt
+      # divergence; there was none: a local `cargo fmt --all` passes this check.
+      # Run it. (#409)
       - run: cargo fmt --all -- --check
-        continue-on-error: true
 
   clippy:
     name: Clippy
