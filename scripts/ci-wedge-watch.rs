@@ -499,12 +499,18 @@ mod tests {
     }
 
     #[test]
-    fn a_leg_running_normally_is_not_flagged() {
-        // The `relay-notch` leg found running for two minutes in the same sweep.
-        let h = hist("Kani (relay-notch)", &[110, 125, 140, 131]);
-        let r = find_wedges(1_000 + 120, &[job("Kani (relay-notch)", 1_000)], &h, POLICY);
+    fn a_slow_leg_running_normally_is_not_flagged() {
+        // `Kani (relay-notch)`'s real successful durations on 2026-09-16: 888,
+        // 816, 656 s (median 13.6 min). Watching it sit at 18.8 min, a human
+        // guessed "wedged" from a remembered two-minute sighting; the detector,
+        // reading the history, did not. Per-job baselines exist for this case.
+        let h = hist("Kani (relay-notch)", &[888, 816, 656]);
+        let running = [job("Kani (relay-notch)", 0)];
+        let r = find_wedges(1_128, &running, &h, POLICY);
         assert!(r.wedged.is_empty());
         assert!(r.no_baseline.is_empty());
+        // Its threshold is 5 x 816 s = 68 min, not a global number.
+        assert_eq!(find_wedges(4_081, &running, &h, POLICY).wedged[0].threshold_s, 4_080);
     }
 
     #[test]

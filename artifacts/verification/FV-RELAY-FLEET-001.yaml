@@ -12,8 +12,9 @@ artifacts:
       THE DECISION, REPLAYED. `scripts/ci-wedge-watch.rs` separates a pure
       `find_wedges` from the API collection. Its tests use the four real
       relay-mix-quad completions (168, 170, 173, 201 s; median 171 s, threshold
-      855 s): not flagged at 14 min, flagged at 15, flagged at 105. Also: a leg
-      running normally is not flagged; the 10-minute floor keeps a 20-second job
+      855 s): not flagged at 14 min, flagged at 15, flagged at 105. Also: a slow
+      leg running normally is not flagged (relay-notch's real 888/816/656 s,
+      threshold 68 min — measured after a human misjudged it wedged at 18.8 min); the 10-minute floor keeps a 20-second job
       at 15x its median from alarming; fewer than three samples is reported as
       "no baseline", never guessed; history is keyed by workflow AND job name;
       the job-summary markdown and the alarm rows (`<job url>\t<row>`) render
