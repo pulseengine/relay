@@ -36,9 +36,9 @@ name: Fleet status
 #
 # CRITICAL PLACEMENT RULE: this workflow must NOT run on `rust-cpu`. A monitor
 # scheduled on the fleet it monitors goes down with it — that is precisely how
-# the outage stayed invisible. `status` runs on `light`; `wedge` runs HOSTED
-# (see that job). The wedges it looks for happen on `rust-cpu` — watching them
-# from outside that label is the point, not an oversight to be "fixed".
+# the outage stayed invisible. Both jobs run on `light`. The wedges they look
+# for happen on `rust-cpu` — watching from outside that label is the point, not
+# an oversight to be "fixed". (Not hosted either: see the `wedge` job.)
 #
 # Security: no `${{ }}` is expanded inside any `run:` block; every input is
 # bound through `env:` and dereferenced as a quoted shell variable.
@@ -220,27 +220,21 @@ jobs:
 
   wedge:
     name: Wedged jobs (in_progress far past their median)
-    # HOSTED, unlike `status`, for two reasons. The check only calls the GitHub
-    # API, so it needs nothing from the fleet — a monitor independent of the
-    # fleet it watches is the placement rule taken one step further. And `light`
-    # is the single box behind the REQUIRED Format check, while this job compiles
-    # a rust-script whenever the cache is cold. relay is public, so hosted
-    # minutes are free.
-    runs-on: ubuntu-latest
+    # `light`, like `status` — NOT hosted. The first draft of this job ran on
+    # `ubuntu-latest` (it only calls the API) and was reversed on measurement:
+    # on 2026-09-16 relay's hosted jobs waited 60–120 min for a runner, because
+    # hosted concurrency is shared across the org and other repos' matrices
+    # held it. A wedge alarm two hours late is no better than the human it
+    # replaces. `light` is three boxes (ci-01-5/-8/-10); a cold rust-script
+    # install there measured 0–49 s, and the self-hosted home usually keeps it.
+    runs-on: [self-hosted, linux, x64, light]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
           sparse-checkout: scripts
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/bin/rust-script
-            ~/.cargo/registry
-            ~/.cache/rust-script
-          key: ci-wedge-watch-${{ runner.os }}-${{ hashFiles('scripts/ci-wedge-watch.rs') }}
-          restore-keys: ci-wedge-watch-${{ runner.os }}-
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Install rust-script
         shell: bash
@@ -257,10 +251,11 @@ jobs:
           # 0 = nothing wedged, 1 = wedged, anything else = could not evaluate.
           # `shell: bash` runs with -e, so a bare call exiting 1 would end the
           # step before rc is recorded — and a wedge would read as UNKNOWN.
+          # The detector renders both files itself — no `jq` on the runner.
           rc=0
-          ./scripts/ci-wedge-watch.rs --repo "$REPO" --format json > "$RUNNER_TEMP/wedge.json" || rc=$?
+          ./scripts/ci-wedge-watch.rs --repo "$REPO" \
+            --summary-md "$RUNNER_TEMP/wedge.md" --alarm-tsv "$RUNNER_TEMP/wedge.tsv" || rc=$?
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          cat "$RUNNER_TEMP/wedge.json"
           if [ "$rc" -gt 1 ]; then
             echo "::error::wedge check could not evaluate (exit $rc) — status is UNKNOWN, not green"
           fi
@@ -271,34 +266,16 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          f="$RUNNER_TEMP/wedge.json"
-          {
-            echo "## Wedged jobs"
-            echo
-            case "${RC:-unset}" in
-              0)
-                echo "### 🟢 No job running past 5x its median duration"
+          case "${RC:-unset}" in
+            0|1) cat "$RUNNER_TEMP/wedge.md" >> "$GITHUB_STEP_SUMMARY" ;;
+            *)
+              {
+                echo "## Wedged jobs"
                 echo
-                echo "$(jq '.running' "$f") job(s) running."
-                ;;
-              1)
-                echo "### 🔴 $(jq '.wedged | length' "$f") job(s) wedged — running past 5x their median"
-                echo
-                jq -r '.wedged[] | "- `\(.workflow) / \(.job)` on `\(.runner)` — running **\(.elapsed_s / 60 | floor) min**, median \(.median_s / 6 | floor | . / 10) min over \(.samples) runs ([job](\(.job_url)))"' "$f"
-                ;;
-              *)
                 echo "### 🟡 UNKNOWN — the check could not evaluate (exit ${RC:-unset}). This is not a pass."
-                ;;
-            esac
-            if [ "${RC:-}" = "0" ] || [ "${RC:-}" = "1" ]; then
-              if [ "$(jq '.no_baseline | length' "$f")" -gt 0 ]; then
-                echo
-                echo "Running without enough successful history to judge (reported, never guessed):"
-                echo
-                jq -r '.no_baseline[] | "- `\(.workflow) / \(.job)` on `\(.runner)` — \(.elapsed_s / 60 | floor) min, \(.samples) sample(s)"' "$f"
-              fi
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
 
       - name: Raise the alarm if a job is wedged
         if: steps.detect.outputs.rc == '1'
@@ -309,7 +286,6 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          f="$RUNNER_TEMP/wedge.json"
           TITLE="CI fleet: a job is wedged in_progress (5x its median duration)"
           existing=$(gh issue list --repo "$REPO" --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
           # One rolling issue, and each wedged job reported ONCE: a wedge lasts
@@ -325,7 +301,7 @@ jobs:
               continue
             fi
             rows="${rows}${line}"$'\n'
-          done < <(jq -r '.wedged[] | [.job_url, "- `\(.workflow) / \(.job)` on `\(.runner)` — running \(.elapsed_s / 60 | floor) min against a median of \(.median_s / 6 | floor | . / 10) min over \(.samples) successful runs ([job](\(.job_url)))"] | @tsv' "$f")
+          done < "$RUNNER_TEMP/wedge.tsv"
           if [ -z "$rows" ]; then
             echo "Every wedged job is already reported on #${existing}."
             exit 0

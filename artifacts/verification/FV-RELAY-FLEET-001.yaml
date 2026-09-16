@@ -15,7 +15,9 @@ artifacts:
       855 s): not flagged at 14 min, flagged at 15, flagged at 105. Also: a leg
       running normally is not flagged; the 10-minute floor keeps a 20-second job
       at 15x its median from alarming; fewer than three samples is reported as
-      "no baseline", never guessed; history is keyed by workflow AND job name.
+      "no baseline", never guessed; history is keyed by workflow AND job name;
+      the job-summary markdown and the alarm rows (`<job url>\t<row>`) render
+      from a report without `jq`.
 
       THE TESTS CAN FAIL. Mutating the comparison to `elapsed_s > threshold_s *
       10` fails two of them (the #429 replay and the floor test) — checked
@@ -28,15 +30,23 @@ artifacts:
       nonexistent repository it exited 2 with the API error. relay itself had no
       jobs running, so a relay-only live run would have been vacuous.
 
+      PLACEMENT, REVERSED ON MEASUREMENT. The first draft ran the job on hosted
+      `ubuntu-latest`. The same evening relay's hosted jobs waited 60–120 min
+      for a runner (org-shared hosted concurrency), which would make the alarm
+      as late as the human it replaces. The job runs on `light` (three boxes),
+      where `jq` is not known to be installed — so the detector now writes the
+      summary and alarm files itself and the workflow uses no `jq`.
+
       THE WORKFLOW BLOCKS WERE EXECUTED, not only linted. shellcheck is not
       installed locally, so actionlint did not check the run blocks. The detect,
       summary and alarm blocks were extracted from the YAML and run under the
       flags GitHub uses for `shell: bash` (`bash --noprofile --norc -eo
-      pipefail`), against the loom JSON with a stub detector and a stub `gh`.
-      Detector exits 0, 1 and 2 each recorded the matching `rc` and let the step
-      finish; the summary rendered the green, wedged and UNKNOWN forms; the alarm
-      posted 17 rows for no existing issue, and 16 when an existing issue
-      already named one job.
+      pipefail`), with a stub detector replaying files the REAL detector wrote
+      against loom (forced policy: 7 wedged rows) and a stub `gh`. Detector exits
+      0, 1 and 2 each recorded the matching `rc` and let the step finish; the
+      summary step published the detector's markdown, and the UNKNOWN banner for
+      exit 2; the alarm posted 7 rows for no existing issue, and 6 — without the
+      already-named job — when an existing issue named one.
 
       THAT EXECUTION FOUND A BUG the first draft had. The detect step called the
       detector bare and read `$?` on the next line. Under `-e` an exit of 1 ends
@@ -59,7 +69,7 @@ artifacts:
         - run: "grep -q \"if: steps.detect.outputs.rc != '0' && steps.detect.outputs.rc != '1'\" .github/workflows/fleet-status.yml"
         - run: "grep -q \"if: steps.starve.outputs.api_ok != 'true'\" .github/workflows/fleet-status.yml"
         # The exit code survives `shell: bash`'s -e (the bug found by running it).
-        - run: "grep -q 'ci-wedge-watch.rs --repo \"$REPO\" --format json > \"$RUNNER_TEMP/wedge.json\" || rc=$?' .github/workflows/fleet-status.yml"
+        - run: "grep -q -- '--alarm-tsv \"$RUNNER_TEMP/wedge.tsv\" || rc=$?' .github/workflows/fleet-status.yml"
         # Baseline from successful runs — the measured trap (2) in FLEET-P01.
         - run: "grep -q 'runs?status=success&per_page=' scripts/ci-wedge-watch.rs"
     links:

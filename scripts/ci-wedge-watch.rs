@@ -41,7 +41,8 @@
 //!
 //! Usage:
 //!   scripts/ci-wedge-watch.rs --repo pulseengine/relay
-//!   scripts/ci-wedge-watch.rs --format json          # for the workflow
+//!   scripts/ci-wedge-watch.rs --format json
+//!   scripts/ci-wedge-watch.rs --summary-md s.md --alarm-tsv rows.tsv   # the workflow
 //!   scripts/ci-wedge-watch.rs --multiplier 5 --floor-min 10 --min-samples 3
 //!   rust-script --test scripts/ci-wedge-watch.rs     # replays #429's data
 //!
@@ -284,6 +285,70 @@ fn minutes(s: i64) -> String {
     format!("{:.1}", s as f64 / 60.0)
 }
 
+/// The job-summary section. Rendered here rather than by `jq` in the workflow:
+/// the job runs on self-hosted `light`, where `jq` is not known to be installed.
+fn summary_markdown(r: &Report, p: Policy) -> String {
+    let mut s = String::from("## Wedged jobs\n\n");
+    if r.wedged.is_empty() {
+        s += &format!("### 🟢 No job running past {}x its median duration\n\n", p.multiplier);
+        s += &format!("{} job(s) running.\n", r.running);
+    } else {
+        s += &format!(
+            "### 🔴 {} job(s) wedged — running past {}x their median\n\n",
+            r.wedged.len(),
+            p.multiplier
+        );
+        for w in &r.wedged {
+            s += &format!(
+                "- `{} / {}` on `{}` — running **{} min**, median {} min over {} runs ([job]({}))\n",
+                w.workflow,
+                w.job,
+                w.runner,
+                w.elapsed_s / 60,
+                minutes(w.median_s),
+                w.samples,
+                w.job_url
+            );
+        }
+    }
+    if !r.no_baseline.is_empty() {
+        s += "\nRunning without enough successful history to judge (reported, never guessed):\n\n";
+        for n in &r.no_baseline {
+            s += &format!(
+                "- `{} / {}` on `{}` — {} min, {} sample(s)\n",
+                n.workflow,
+                n.job,
+                n.runner,
+                n.elapsed_s / 60,
+                n.samples
+            );
+        }
+    }
+    s
+}
+
+/// One line per wedged job: `<job url>\t<markdown row>`. The URL comes first so
+/// the alarm step can skip jobs an open issue already names.
+fn alarm_rows(r: &Report) -> String {
+    let clean = |x: &str| x.replace(['\t', '\n'], " ");
+    r.wedged
+        .iter()
+        .map(|w| {
+            format!(
+                "{}\t- `{} / {}` on `{}` — running {} min against a median of {} min over {} successful runs ([job]({}))\n",
+                clean(&w.job_url),
+                clean(&w.workflow),
+                clean(&w.job),
+                clean(&w.runner),
+                w.elapsed_s / 60,
+                minutes(w.median_s),
+                w.samples,
+                clean(&w.job_url)
+            )
+        })
+        .collect()
+}
+
 fn arg<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
     args.iter().position(|a| a == key).and_then(|i| args.get(i + 1)).map(String::as_str)
 }
@@ -317,6 +382,19 @@ fn main() -> ExitCode {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let report = find_wedges(now, &running, &history, policy);
+
+    // Files for the workflow. Failing to write one is failing to report.
+    for (key, body) in [
+        ("--summary-md", summary_markdown(&report, policy)),
+        ("--alarm-tsv", alarm_rows(&report)),
+    ] {
+        if let Some(path) = arg(&args, key) {
+            if let Err(e) = std::fs::write(path, body) {
+                eprintln!("ci-wedge-watch: could not write {key} {path}: {e}");
+                return ExitCode::from(2);
+            }
+        }
+    }
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report).expect("report serializes"));
@@ -448,6 +526,30 @@ mod tests {
         // No history at all is the same case, not a crash.
         let r = find_wedges(10_000, &[job("Kani (relay-other)", 0)], &BTreeMap::new(), POLICY);
         assert_eq!(r.no_baseline.len(), 1);
+    }
+
+    #[test]
+    fn the_workflow_files_render_without_jq() {
+        let start = parse_utc("2026-09-16T15:17:58Z").unwrap();
+        let h = hist("Kani (relay-mix-quad)", &MIX_QUAD_OK);
+        let running = [job("Kani (relay-mix-quad)", start), job("Kani (relay-new)", start)];
+        let r = find_wedges(start + 105 * 60, &running, &h, POLICY);
+
+        let md = summary_markdown(&r, POLICY);
+        assert!(md.contains("### 🔴 1 job(s) wedged"), "{md}");
+        assert!(md.contains("`Kani / Kani (relay-mix-quad)`"), "{md}");
+        assert!(md.contains("running **105 min**, median 2.9 min over 4 runs"), "{md}");
+        assert!(md.contains("`Kani / Kani (relay-new)`"), "no-baseline job listed: {md}");
+
+        let rows = alarm_rows(&r);
+        assert_eq!(rows.lines().count(), 1, "only the wedged job alarms: {rows}");
+        let (url, row) = rows.lines().next().unwrap().split_once('\t').unwrap();
+        assert_eq!(url, "https://example.invalid/Kani (relay-mix-quad)");
+        assert!(row.starts_with("- `Kani / Kani (relay-mix-quad)`"), "{row}");
+
+        let quiet = find_wedges(start + 60, &running[..1], &h, POLICY);
+        assert!(summary_markdown(&quiet, POLICY).contains("### 🟢"));
+        assert!(alarm_rows(&quiet).is_empty());
     }
 
     #[test]
