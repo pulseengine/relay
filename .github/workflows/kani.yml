@@ -142,9 +142,28 @@ jobs:
           - relay-modextra
     steps:
       - uses: actions/checkout@v7
+      # KANI VERSION IS PINNED. The action's `kani-version` input defaults to
+      # `latest`, and we did not set it — so every run installed whatever Kani
+      # had most recently released. On 2026-09-16 that broke all 45 engines at
+      # once:
+      #
+      #   kani-0.68.0 released   2026-09-16T03:43:14Z
+      #   first failing CI run   2026-09-16T03:55:44Z   (12 minutes later)
+      #   last passing CI run    2026-09-15T19:49       (the v1.138.0 tag)
+      #
+      # Every leg failed in ~11 s, which is far too fast for model checking, and
+      # `cargo kani` on relay-lc passes locally on 0.67.0 (9/9 harnesses, 0
+      # failures). So the proofs did not regress; the toolchain moved under a
+      # REQUIRED gate and blocked every merge in the repo.
+      #
+      # 0.67.0 is exactly what `latest` resolved to while the gate was green
+      # (released 2026-01-16), so this pins the known-good state rather than
+      # choosing a new one. Moving to 0.68.0 is a deliberate change with its own
+      # validation, not something an upstream release should do to us at 03:43.
       - name: Kani verify ${{ matrix.engine }}
         uses: model-checking/kani-github-action@v1
         with:
+          kani-version: '0.67.0'
           working-directory: crates/${{ matrix.engine }}
 
   # Roll-up over the full engine matrix: ONE required context for branch
