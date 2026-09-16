@@ -1,0 +1,67 @@
+artifacts:
+  - id: FV-RELAY-FLEET-001
+    type: sw-verification
+    title: "FLEET-P01 — the wedge detector replays #429's measured wedge and cannot report UNKNOWN as green (v1.139)"
+    status: implemented
+    release: falcon-v1.139.0
+    description: >
+      Verifies SWREQ-RELAY-FLEET-P01 at two levels: the decision logic against
+      the data #429 measured, and the workflow wiring that turns "could not
+      evaluate" into a failed monitor run.
+
+      THE DECISION, REPLAYED. `scripts/ci-wedge-watch.rs` separates a pure
+      `find_wedges` from the API collection. Its tests use the four real
+      relay-mix-quad completions (168, 170, 173, 201 s; median 171 s, threshold
+      855 s): not flagged at 14 min, flagged at 15, flagged at 105. Also: a leg
+      running normally is not flagged; the 10-minute floor keeps a 20-second job
+      at 15x its median from alarming; fewer than three samples is reported as
+      "no baseline", never guessed; history is keyed by workflow AND job name.
+
+      THE TESTS CAN FAIL. Mutating the comparison to `elapsed_s > threshold_s *
+      10` fails two of them (the #429 replay and the floor test) — checked
+      before this artifact was written.
+
+      OBSERVED LIVE, not only in tests (2026-09-16, recorded here, not re-run by
+      the gate because it depends on whatever is running at that moment): against
+      pulseengine/loom with 21 jobs running, the real policy found 0 wedged and 4
+      without a baseline; forced to 0.01x it flagged 17 and exited 1; against a
+      nonexistent repository it exited 2 with the API error. relay itself had no
+      jobs running, so a relay-only live run would have been vacuous.
+
+      THE WORKFLOW BLOCKS WERE EXECUTED, not only linted. shellcheck is not
+      installed locally, so actionlint did not check the run blocks. The detect,
+      summary and alarm blocks were extracted from the YAML and run under the
+      flags GitHub uses for `shell: bash` (`bash --noprofile --norc -eo
+      pipefail`), against the loom JSON with a stub detector and a stub `gh`.
+      Detector exits 0, 1 and 2 each recorded the matching `rc` and let the step
+      finish; the summary rendered the green, wedged and UNKNOWN forms; the alarm
+      posted 17 rows for no existing issue, and 16 when an existing issue
+      already named one job.
+
+      THAT EXECUTION FOUND A BUG the first draft had. The detect step called the
+      detector bare and read `$?` on the next line. Under `-e` an exit of 1 ends
+      the step first, so `rc` was never recorded: a real wedge would have skipped
+      the alarm and been reported as UNKNOWN. Control, same flags: the old form
+      with a detector exiting 1 ended the step with exit 1 and an empty output.
+      The step now captures the code with `|| rc=$?`. The first local run of the
+      blocks used plain `bash`, which is how it passed.
+
+      NOT CLAIMED: that the scheduled workflow has run on GitHub. That is
+      observable only after merge, and is the evidence for promotion to
+      `verified` in a separate change.
+    tags: [verification, relay, ci, fleet, v1.139]
+    fields:
+      method: automated-test
+      steps:
+        # The decision logic, against #429's measured durations.
+        - run: "rust-script --test scripts/ci-wedge-watch.rs"
+        # The monitor fails its own run when either check cannot evaluate.
+        - run: "grep -q \"if: steps.detect.outputs.rc != '0' && steps.detect.outputs.rc != '1'\" .github/workflows/fleet-status.yml"
+        - run: "grep -q \"if: steps.starve.outputs.api_ok != 'true'\" .github/workflows/fleet-status.yml"
+        # The exit code survives `shell: bash`'s -e (the bug found by running it).
+        - run: "grep -q 'ci-wedge-watch.rs --repo \"$REPO\" --format json > \"$RUNNER_TEMP/wedge.json\" || rc=$?' .github/workflows/fleet-status.yml"
+        # Baseline from successful runs — the measured trap (2) in FLEET-P01.
+        - run: "grep -q 'runs?status=success&per_page=' scripts/ci-wedge-watch.rs"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-FLEET-P01
