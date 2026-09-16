@@ -1493,7 +1493,10 @@ fn run_flightcore(
     // counter must persist across steps — reconstructing it per tick would
     // suppress every fix). GNSS divisor 50 @ 250 Hz = 5 Hz fixes.
     {
-        let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
+        // GNSS_DIV: aiding cadence in ticks (default 50 = 5 Hz at 250 Hz). A knob
+        // for #403, to separate an update-RATE lag from a filter-GAIN lag.
+        let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|s| s.parse().ok()).unwrap_or(50);
+        let mut backend = SitlBackend::new(physics, dt, 0.0, gnss_div);
         for step in 0..n {
             let tick_start = Instant::now();
             let t = step as f32 * dt;
@@ -1527,6 +1530,20 @@ xy=[{:+.2},{:+.2}] tilt={:.0}deg yaw={:+.2} mot=[{:.2},{:.2},{:.2},{:.2}]",
                     t, last_true[2], e.p[2], e.v[2], core.altitude_integral(),
                     last_true[0], last_true[1], tilt_deg, yaw,
                     m[0], m[1], m[2], m[3],
+                );
+                // #403 — the diagnostic that separates the two hypotheses. The
+                // line above has TRUE horizontal position only, so it cannot
+                // tell "the controller is unstable" (estimate TRACKS truth while
+                // both wander) from "the estimate has gone bad" (estimate and
+                // truth DISAGREE, and the controller is steering to a wrong
+                // belief). Emitted as a separate, grep-able line so the existing
+                // trace keeps its shape.
+                eprintln!(
+                    "H t={:.2} true_n={:+.3} true_e={:+.3} est_n={:+.3} est_e={:+.3} \
+err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
+                    t, last_true[0], last_true[1], e.p[0], e.p[1],
+                    e.p[0] - last_true[0], e.p[1] - last_true[1],
+                    e.v[0], e.v[1], g[2], yaw,
                 );
                 let _ = (a, g);
             }
