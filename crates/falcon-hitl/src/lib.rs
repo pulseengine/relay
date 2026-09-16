@@ -164,8 +164,8 @@ impl<T: Transport> FlightBackend for LinkBackend<T> {
     fn dt(&self) -> f32 {
         self.dt
     }
-    fn read_battery_v(&mut self) -> f32 {
-        self.cache.battery
+    fn read_battery_v(&mut self) -> Option<f32> {
+        Some(self.cache.battery)
     }
 }
 
@@ -205,7 +205,13 @@ impl<B: FlightBackend> SimServer<B> {
             pos_valid: pos.is_some(),
             mag: mag.unwrap_or([0.0; 3]),
             mag_valid: mag.is_some(),
-            battery: self.backend.read_battery_v(),
+            // 0.0 V, not a plausible resting voltage, when the backend has no
+            // battery sense (#413). The sibling fields above carry an explicit
+            // `_valid` flag; `battery` has none, and adding one changes the HITL
+            // wire format — so until that protocol changes, the fallback is
+            // chosen to be fail-SAFE: 0 V reads as critically flat, never as a
+            // healthy pack. A real cell is never 0 V, so it is unambiguous.
+            battery: self.backend.read_battery_v().unwrap_or(0.0),
         };
         encode_sensor(&frame, reply);
     }

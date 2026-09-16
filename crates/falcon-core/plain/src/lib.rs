@@ -60,10 +60,20 @@ pub trait FlightBackend {
     fn write_motors(&mut self, motors: &[f32]);
     /// Control period (s) for this tick.
     fn dt(&self) -> f32;
-    /// Battery voltage (V). Default = a healthy pack; real backends read the
-    /// ADC. Used by the supervisor's low-battery failsafe (v1.8).
-    fn read_battery_v(&mut self) -> f32 {
-        16.0
+    /// Battery voltage (V), or `None` when this backend has no battery sense.
+    ///
+    /// `None` MEANS ABSENT, NOT HEALTHY. The default used to be a hardcoded
+    /// 16.0 V — a healthy 4S pack — so a backend that supplied nothing asserted
+    /// the pack was fine, forever. The low-battery failsafe and the BatteryOk
+    /// pre-arm row both consume this, so on the published wasm component, in gz
+    /// SITL, and on any HardwareBackend whose driver did not override it, both
+    /// reported healthy no matter how flat the pack was (#413).
+    ///
+    /// Every OTHER absent channel on this trait already returns `None` and the
+    /// core skips that fusion — `read_battery_i` included. Voltage was the one
+    /// that fabricated a plausible number instead.
+    fn read_battery_v(&mut self) -> Option<f32> {
+        None
     }
     /// Battery discharge current (A) from the power module's current sense
     /// (PM02D), or `None` when no current sensing exists. With current the
@@ -1160,6 +1170,9 @@ pub struct FlightSupervisor {
     /// The latest battery state, refreshed every step (telemetry seam:
     /// SYS_STATUS battery fields + degraded flag come from here).
     batt_state: relay_batt::BattState,
+    /// Did this backend supply a battery voltage on the last tick? `false`
+    /// means ABSENT, and the BatteryOk pre-arm row fails accordingly (#413).
+    batt_present: bool,
     /// Stored mission legs (NED), flown in order while in Mission mode.
     waypoints: [Vec3; MAX_WAYPOINTS],
     wp_count: usize,
@@ -1209,6 +1222,8 @@ impl FlightSupervisor {
                 ..relay_batt::BattConfig::default()
             }),
             batt_state: relay_batt::BattState::default(),
+            // Starts false: nothing has been read yet, so nothing is known.
+            batt_present: false,
             waypoints: [home; MAX_WAYPOINTS],
             wp_count: 0,
             wp_index: 0,
@@ -1312,7 +1327,10 @@ impl FlightSupervisor {
         self.preflight.estimator_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
         self.preflight.calibration_present =
             self.core.calibration() != relay_calib::CalParams::identity();
-        self.preflight.battery_ok = !(self.batt_state.low || self.batt_state.critical);
+        // No battery data => NOT ok. A vehicle that cannot see its pack must not
+        // report that the pack is fine.
+        self.preflight.battery_ok =
+            self.batt_present && !(self.batt_state.low || self.batt_state.critical);
         // GNSS-P02: a latched receiver divergence or spoof walk-off blocks
         // arming (the flag only clears via a ground reset).
         if self.core.nav_compromised() {
@@ -1513,7 +1531,18 @@ impl FlightSupervisor {
         // compensated + coulomb-counted; flagged voltage-only fallback when no
         // current sense) — a throttle-punch sag does not false-trigger, and a
         // rebounding spent pack cannot hide.
-        self.batt_state = self.batt_est.update(b.dt(), b.read_battery_v(), b.read_battery_i());
+        // ABSENCE IS NOT HEALTH (#413). A backend with no battery sense returns
+        // `None`; feeding the estimator a fabricated voltage would make the
+        // low-battery failsafe and the BatteryOk pre-arm row assert a healthy
+        // pack forever. Record the absence instead and let the pre-arm gate
+        // refuse, which is the fail-safe direction.
+        match b.read_battery_v() {
+            Some(v) => {
+                self.batt_present = true;
+                self.batt_state = self.batt_est.update(b.dt(), v, b.read_battery_i());
+            }
+            None => self.batt_present = false,
+        }
         // PREARM-P03 hardware row: ESC/eRPM telemetry alive (the notch's and
         // FDI's source). DECLARE-ON-FIRST-SIGHT: a vehicle that has never
         // shown eRPM (no bidir-DShot) is not gated on it, but once seen,
@@ -1774,11 +1803,16 @@ pub trait MotorDriver {
     fn write(&mut self, motors: &[f32]);
 }
 
-/// A battery-voltage driver (ADC), volts. Default keeps a healthy pack so a
-/// board without a monitor still flies; override to read the real divider.
+/// A battery-voltage driver (ADC), volts, or `None` when the board has no
+/// monitor.
+///
+/// The default used to return 16.0 V with the rationale "so a board without a
+/// monitor still flies". A board without a battery monitor should NOT fly on a
+/// fabricated reading — it should fail the BatteryOk pre-arm row and say so.
+/// Override this to read the real divider (#413).
 pub trait BatteryDriver {
-    fn voltage(&mut self) -> f32 {
-        16.0
+    fn voltage(&mut self) -> Option<f32> {
+        None
     }
 }
 
@@ -1818,7 +1852,7 @@ where
     fn dt(&self) -> f32 {
         self.dt
     }
-    fn read_battery_v(&mut self) -> f32 {
+    fn read_battery_v(&mut self) -> Option<f32> {
         self.battery.voltage()
     }
 }
@@ -2287,8 +2321,8 @@ impl FlightBackend for SimBackend {
     fn dt(&self) -> f32 {
         self.dt
     }
-    fn read_battery_v(&mut self) -> f32 {
-        self.battery_v
+    fn read_battery_v(&mut self) -> Option<f32> {
+        Some(self.battery_v)
     }
     fn read_range(&mut self) -> Option<f32> {
         if !self.range_enabled {
@@ -2682,8 +2716,8 @@ mod tests {
             fn read_mag(&mut self) -> Option<Vec3> {
                 None
             }
-            fn read_battery_v(&mut self) -> f32 {
-                16.0
+            fn read_battery_v(&mut self) -> Option<f32> {
+                Some(16.0)
             }
             fn write_motors(&mut self, m: &[f32]) {
                 self.last = [m[0], m[1], m[2], m[3]];
@@ -3931,8 +3965,14 @@ mod tests {
         for _ in 0..6000 {
             core.step(&mut hw); // the WHOLE loop runs through the driver traits
         }
-        // the battery seam answered through the trait too (default healthy pack)
-        assert!((hw.read_battery_v() - 16.0).abs() < 1e-6);
+        // The battery seam answers through the trait too — and with no driver
+        // override it reports ABSENT, not a healthy pack. This assertion used to
+        // require 16.0 V and so encoded the fail-unsafe default it was meant to
+        // exercise (#413).
+        assert!(
+            hw.read_battery_v().is_none(),
+            "a HardwareBackend with no battery driver must report absence, not health"
+        );
         let tilt = plant.borrow().tilt();
         assert!(
             tilt < 0.1,
@@ -4238,8 +4278,8 @@ mod tests {
             fn read_mag(&mut self) -> Option<Vec3> {
                 None
             }
-            fn read_battery_v(&mut self) -> f32 {
-                16.0
+            fn read_battery_v(&mut self) -> Option<f32> {
+                Some(16.0)
             }
             fn write_motors(&mut self, _: &[f32]) {}
             fn dt(&self) -> f32 {
@@ -4303,8 +4343,8 @@ mod tests {
             fn read_mag(&mut self) -> Option<Vec3> {
                 None
             }
-            fn read_battery_v(&mut self) -> f32 {
-                16.0
+            fn read_battery_v(&mut self) -> Option<f32> {
+                Some(16.0)
             }
             fn write_motors(&mut self, _: &[f32]) {}
             fn dt(&self) -> f32 {
@@ -4354,6 +4394,61 @@ mod tests {
     /// and letting the estimator settle, with a healthy battery + a loaded fence,
     /// arming is permitted. Proves the gate is no longer inert all-pass defaults.
     #[test]
+    /// #413 — ABSENCE IS NOT HEALTH. A backend with no battery sense must make
+    /// the BatteryOk pre-arm row FAIL, and must block arming.
+    ///
+    /// This is the falsification criterion from the issue: before the fix,
+    /// `read_battery_v` defaulted to 16.0 V — a healthy 4S pack — so a vehicle
+    /// that could not see its battery at all reported that the battery was
+    /// fine, forever, and armed happily. The published wasm component, gz SITL
+    /// and any HardwareBackend without a battery driver were all in that state.
+    ///
+    /// Note what this test does NOT do: it does not override `read_battery_v`.
+    /// The whole point is the DEFAULT, so the test must inherit it — overriding
+    /// it here would verify a path no real backend takes.
+    #[test]
+    fn absent_battery_blocks_arming() {
+        use relay_calib::CalParams;
+        struct NoBatteryBackend;
+        impl FlightBackend for NoBatteryBackend {
+            fn read_imu(&mut self) -> ImuSample {
+                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+            }
+            fn read_position(&mut self) -> Option<Vec3> {
+                Some([0.0, 0.0, 0.0])
+            }
+            fn read_mag(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn write_motors(&mut self, _: &[f32]) {}
+            fn dt(&self) -> f32 {
+                0.004
+            }
+            // read_battery_v deliberately NOT overridden — inherit the default.
+        }
+
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        let mut b = NoBatteryBackend;
+        // A calibration is installed so that CALIBRATION is not what blocks us —
+        // otherwise this test would pass for the wrong reason.
+        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        for _ in 0..1500 {
+            sup.step(&mut b);
+        }
+
+        assert_eq!(
+            sup.arm_blocked_reason(),
+            Some(relay_preflight::CheckFail::Battery),
+            "a vehicle that cannot see its pack must be blocked ON THE BATTERY row"
+        );
+        sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Disarmed,
+            "must refuse to arm with no battery data"
+        );
+    }
+
     fn prearm_gate_fed_by_real_state() {
         use relay_calib::CalParams;
         struct RestBackend {
@@ -4369,8 +4464,8 @@ mod tests {
             fn read_mag(&mut self) -> Option<Vec3> {
                 None
             }
-            fn read_battery_v(&mut self) -> f32 {
-                self.batt
+            fn read_battery_v(&mut self) -> Option<f32> {
+                Some(self.batt)
             }
             fn write_motors(&mut self, _: &[f32]) {}
             fn dt(&self) -> f32 {
@@ -4823,8 +4918,8 @@ mod failsafe_campaign {
         fn read_mag(&mut self) -> Option<Vec3> {
             None
         }
-        fn read_battery_v(&mut self) -> f32 {
-            16.0
+        fn read_battery_v(&mut self) -> Option<f32> {
+            Some(16.0)
         }
         fn write_motors(&mut self, _: &[f32]) {}
         fn dt(&self) -> f32 {

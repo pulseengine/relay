@@ -97,7 +97,7 @@ impl<B: FlightBackend, L: BlockLog> FlightBackend for LoggingBackend<'_, B, L> {
         self.cur.rpm = r;
         r
     }
-    fn read_battery_v(&mut self) -> f32 {
+    fn read_battery_v(&mut self) -> Option<f32> {
         self.inner.read_battery_v()
     }
     fn read_gnss_dual(
