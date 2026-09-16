@@ -1,0 +1,64 @@
+artifacts:
+  - id: SWREQ-FALCON-SHOWCASE-P01
+    type: sw-req
+    title: "SHOWCASE-P01 — one loopable Gazebo demo that exercises the whole stack, flown by BOTH the wasm component and the native binary"
+    status: proposed
+    release: falcon-v1.139.0
+    description: >
+      There shall be a single runnable demo that flies a scripted sequence in
+      Gazebo, exercising the stack's advertised capabilities end to end, and
+      that can be driven EITHER by the published wasm component OR by the native
+      binary with no change to the scenario. It shall produce a recording that
+      loops cleanly.
+
+      WHY IT EXISTS. What we can currently record is a 25 s hover. Every other
+      capability the stack advertises — MAVLink telemetry and commanding,
+      waypoint following, rotor-out detection and reconfiguration, geofence and
+      battery failsafes, precision landing — is demonstrated only by unit tests,
+      if at all. A stack that cannot be SHOWN doing a thing has a weaker claim to
+      doing it than one that can, and this project has repeatedly found that the
+      difference between "tested" and "demonstrated in the loop" is where the
+      defects live: the rotor-out recovery that passed 2000 idealised trials and
+      flips on the real plant, the components that reported bit-exact
+      equivalence while sitting on the ground.
+
+      SCOPE — the sequence shall include, at minimum:
+        - arm and take off
+        - waypoint following (a mission with more than one leg)
+        - MAVLink: live telemetry out, and at least one command in
+        - rotor-out: kill a rotor in flight, show the FDI isolate it and the
+          allocator reconfigure
+        - a failsafe: geofence or low battery, ending in RTL
+        - land
+
+      BOTH PATHS, ONE SCENARIO. The same sequence shall run against the wasm
+      component and against the native binary, selected by a flag. This is the
+      point rather than a convenience: it is the demonstration of "develop in
+      wasm, deploy that wasm unchanged" at the level of a whole mission rather
+      than a single tick, and any capability that turns out to be reachable from
+      only one of the two paths is a seam gap this requirement is meant to
+      surface.
+
+      KNOWN GAPS IT WILL COLLIDE WITH, named so they are not discovered as
+      surprises. Several of the listed capabilities are currently NOT reachable
+      from the wasm component at all: `FlightSupervisor` — and therefore every
+      failsafe, the mode machine and waypoint sequencing — is not exported
+      (#414); the battery input is a hardcoded healthy 16.0 V (#413); rotor-out
+      recovery does not hold on the gz plant even natively (#398); and the
+      horizontal hold diverges after ~26 s, which bounds how long any sequence
+      can run (#403). This requirement therefore DEPENDS on those, and its
+      honest first deliverable may be a demo that runs natively and documents
+      precisely which legs the wasm path cannot yet fly.
+
+      LOOPABLE. The recording shall start and end in the same visual state
+      (vehicle landed at the launch point, camera fixed) so it can be played on
+      repeat without a visible seam, and shall be driven by real flight output
+      rather than captions over generic footage.
+
+      FALSIFICATION: wrong if the demo cannot be run end to end from one command
+      against both backends, or if the recording it produces does not show each
+      listed capability actually occurring.
+    tags: [requirement, falcon, showcase, gazebo, wasm, demo, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
