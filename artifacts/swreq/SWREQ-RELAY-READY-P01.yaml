@@ -1,0 +1,44 @@
+artifacts:
+  - id: SWREQ-RELAY-READY-P01
+    type: sw-req
+    title: "READY-P01 — release readiness shall be recomputed from the tree, and shall give no verdict rather than a wrong one"
+    status: implemented
+    release: falcon-v1.139.0
+    description: >
+      Release readiness for the next unreleased version shall be computed from
+      the rivet artifacts and the repository's tags, published nightly, and
+      reported as exactly one of: ready (every scoped artifact verified or
+      accepted), not ready, or COULD NOT EVALUATE. "Could not evaluate" shall
+      never be reported as either verdict.
+
+      WHY IT EXISTS. Readiness was carried in an agent's head and a scratch
+      state file, and both drifted: the loop's pending gates still said "TAG
+      falcon-v1.136.0" after v1.138.0 had shipped. #423 added
+      `scripts/release-readiness.rs` and a nightly workflow — without a
+      requirement, which is itself the untracked-work gap this backfills.
+
+      WHAT WAS WRONG WITH #423, each shown with a control against its code:
+      (1) The nightly job never published a report. `shell: bash` runs with -e,
+      so the script's exit 1 — "not ready", the normal state — ended the step
+      before the exit code was read. Its first scheduled run (2026-09-16) failed
+      with `Process completed with exit code 1` and an empty summary.
+      (2) An unparseable artifact file was warned about and skipped, silently
+      shrinking every scope. With a release's only blocker in a broken file the
+      tool reported "1/1 artifacts done (100%)" and exit 0 — READY.
+      (3) With no tags visible (a failed `git`, a shallow clone) the tag set
+      defaulted to empty, so the report re-targeted the oldest scope in the tree
+      and still issued a verdict.
+      (4) The next release was chosen in string order: with v1.99.0 tagged it
+      picked falcon-v1.100.0 over falcon-v1.99.1.
+      (5) Any runtime error exited 1, indistinguishable from "not ready".
+
+      It REPORTS. It does not tag. Cutting a release stays a stop-and-ask.
+
+      FALSIFICATION: wrong if the nightly job fails, or writes no summary, on a
+      tree that is merely not ready; or if the tool issues a ready/not-ready
+      verdict while an artifact file is unparseable or no release tags are
+      visible.
+    tags: [requirement, relay, release, readiness, verification-gate, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
