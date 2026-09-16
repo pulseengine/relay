@@ -4388,12 +4388,6 @@ mod tests {
         assert_ne!(sup.mode(), relay_fsm::Mode::Terminated, "high wind recovers (RTL), it does NOT terminate");
     }
 
-    /// v1.99 — the pre-arm gate is fed by REAL vehicle state via update_preflight
-    /// (called each step). A fresh, uncalibrated vehicle is refused arming
-    /// (no calibration, estimator not converged); after installing a calibration
-    /// and letting the estimator settle, with a healthy battery + a loaded fence,
-    /// arming is permitted. Proves the gate is no longer inert all-pass defaults.
-    #[test]
     /// #413 — ABSENCE IS NOT HEALTH. A backend with no battery sense must make
     /// the BatteryOk pre-arm row FAIL, and must block arming.
     ///
@@ -4449,6 +4443,12 @@ mod tests {
         );
     }
 
+    /// v1.99 — the pre-arm gate is fed by REAL vehicle state via update_preflight
+    /// (called each step). A fresh, uncalibrated vehicle is refused arming
+    /// (no calibration, estimator not converged); after installing a calibration
+    /// and letting the estimator settle, with a healthy battery + a loaded fence,
+    /// arming is permitted. Proves the gate is no longer inert all-pass defaults.
+    #[test]
     fn prearm_gate_fed_by_real_state() {
         use relay_calib::CalParams;
         struct RestBackend {
