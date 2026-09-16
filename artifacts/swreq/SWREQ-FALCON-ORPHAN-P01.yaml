@@ -1,0 +1,79 @@
+artifacts:
+  - id: SWREQ-FALCON-ORPHAN-P01
+    type: sw-req
+    title: "ORPHAN-P01 — every implemented capability shall be WIRED, RETIRED or PARKED; none shall stay implemented-verified-unreachable"
+    status: proposed
+    release: falcon-v1.139.0
+    description: >
+      Every capability in the tree shall have exactly one recorded disposition:
+
+        WIRE   — it is reachable from the flight path and from the published
+                 seam, and something exercises it end to end.
+        RETIRE — it is deleted. Not deprecated, not commented out: gone, with
+                 the reason in the commit.
+        PARK   — it is deliberately not in the flight path, the reason is
+                 recorded ON the crate, and it is excluded from every count of
+                 what the stack can do.
+
+      No capability shall remain in the fourth state: implemented, verified,
+      advertised, and unreachable.
+
+      WHY IT EXISTS. That fourth state is the most expensive one we have. It
+      costs maintenance and proof time, it inflates every capability claim we
+      make, and it is invisible to every gate — a Kani proof shows the function
+      is correct given its inputs, and a wasm/native differential shows both
+      sides agree. Neither can see a function nothing calls, or a channel with
+      no producer.
+
+      MEASURED INVENTORY (2026-09-16 audit). Twelve flight-relevant crates have
+      ZERO consumers in Cargo AND Bazel, most of them Kani-gated:
+
+        relay-fsafe      the VERIFIED failsafe arbiter (total, most-severe-wins,
+                         latching over RC-loss, datalink-loss, geofence,
+                         position-loss, low + critical battery, stale offboard).
+                         falcon-core hand-rolls a SUBSET of this inline instead.
+                         Two implementations; the verified one is the unused one.
+        relay-rc         all manual modes + bounded-output-under-NaN proof
+        relay-sensvote   triple-redundant median voting + GNSS-loss fallback
+        relay-offboard   setpoint-stream staleness timeout
+        relay-avoid      collision prevention + precision landing
+        relay-mix-multi  hexa/octo allocation
+        relay-dronecan   the esc.Status RPM decoder validated against pydronecan
+                         reference vectors — the natural producer for the
+                         motor-rpm seam just added
+        falcon-esc-dshot DShot frames + battery ADC — the natural producer for
+                         the battery channel that currently defaults to healthy
+        falcon-baromag   IST8310 mag + BMP388 baro — the natural producer for
+                         read_baro, which has no seam to plug into
+        falcon-imu-icm42688  the one real driver; nothing instantiates it
+        falcon-param     the MAVLink PARAM bridge
+        falcon-hitl      the HITL link backend
+
+      And within reachable code: `FlightSupervisor` (every failsafe, the mode
+      machine, all 19 pre-arm rows) is not exported by the published component
+      (#414); 7 of the 19 pre-arm rows are never fed, so their reason strings
+      are unreachable; the blackbox recorder records no flight; the in-flight
+      tuning link is test-only; and 5 of the 12 FlightBackend channels have no
+      driver trait at all, so they cannot be implemented on real hardware even
+      in principle.
+
+      THE ORDERING RULE. Disposition is decided by whether the capability is
+      needed for the vehicle we are actually flying, NOT by how much work it
+      was or how well it is proven. A verified crate nothing calls is worth less
+      than an unverified one that flies, because the first one is also a claim
+      we are making and not keeping.
+
+      PRIORITISE BY WHAT IS ALREADY BROKEN BECAUSE OF THE ORPHAN. Three of the
+      twelve are the missing producers for channels that are currently absent
+      or fail-unsafe: relay-dronecan feeds motor-rpm, falcon-esc-dshot feeds
+      battery (#413), falcon-baromag feeds baro. Wiring those three closes open
+      defects rather than merely tidying the inventory. relay-fsafe is the
+      fourth: it replaces a hand-rolled subset with the verified total function.
+
+      FALSIFICATION: wrong if any crate in the tree has zero consumers and no
+      recorded PARK reason, or if any capability named in a README, an OCI
+      description or a release note is unreachable from the shipped artifact.
+    tags: [requirement, falcon, orphan, architecture, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

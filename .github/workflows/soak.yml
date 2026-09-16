@@ -1,0 +1,164 @@
+# Nightly endurance soak — ENDURANCE-P01.
+#
+# The stack must hold position for HOURS. The ceiling today is about 26 seconds
+# on the gz plant (#403). This job exists to make that number visible every
+# night and to stop it getting worse while it is being fixed.
+#
+# TWO TIERS, because their costs differ by three orders of magnitude:
+#
+#   Tier 1 — analytic plant, MULTI-HOUR. 12 h of flight costs ~16 s of wall
+#     clock (~2700x real time), so hours of coverage are essentially free. This
+#     tier proves the control MATH does not degrade: no integrator windup, no
+#     f32 drift, no estimator rot over ~10^7 ticks.
+#
+#     What it is NOT: the analytic plant is close to the mixer's own inverse and
+#     models no sensor noise, latency or aiding cadence. It cannot show that a
+#     vehicle flies. It is the cheap half, and it is labelled as such so nobody
+#     reads a 12 h PASS here as an endurance claim.
+#
+#   Tier 2 — gz plant, REAL PHYSICS, near real time (RTF ~0.85-0.98), so an
+#     hour of flight costs about an hour. Nightly, never per-PR. This is the
+#     tier that can actually satisfy ENDURANCE-P01, and today it fails early.
+#
+# THE RATCHET. Tier 2 does not demand an hour it cannot yet reach. It measures
+# the longest duration that still holds and fails if that regresses below
+# GZ_FLOOR_S. A published number that may not get worse beats a target nobody
+# measures.
+name: Soak
+
+on:
+  schedule:
+    # 03:17 UTC — off the hour, so it does not collide with every other
+    # cron in the org competing for the same self-hosted fleet.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      gz_max_s:
+        description: 'Longest gz duration to attempt (seconds)'
+        default: '120'
+
+permissions:
+  contents: read
+
+jobs:
+  analytic-soak:
+    name: Analytic soak (multi-hour)
+    runs-on: [self-hosted, linux, x64, rust-cpu]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the bench
+        run: cargo build --release -p falcon-sitl-gz
+
+      - name: Hold for 1 h, 4 h and 12 h
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAIL=0
+          for D in 3600 14400 43200; do
+            H=$((D / 3600))
+            OUT=$(./target/release/falcon-sitl-gz \
+                    --backend=mock --scenario=flightcore --duration=$D 2>&1)
+            echo "$OUT" | grep -E 'verdict|^PASS|^FAIL' || true
+
+            # The scenario's own verdict is the oracle; do not re-derive it.
+            if ! grep -q '^PASS' <<<"$OUT"; then
+              echo "::error::analytic soak FAILED at ${H} h — the control math degrades over long runs"
+              FAIL=1
+              continue
+            fi
+
+            # A hold can pass while an integrator grows without bound underneath
+            # it — that is the failure mode this tier exists to catch, and it is
+            # exactly how the 15-second swing (#396) hid until it was traced.
+            EST=$(sed -nE 's/.*est_z=(-?[0-9.]+)m.*/\1/p' <<<"$OUT" | tail -1)
+            RMS=$(sed -nE 's/.*rms_steady=([0-9.]+)m.*/\1/p' <<<"$OUT" | tail -1)
+            # Commanded -2.0 m. Measured 2026-09-16 at 1/4/12 h: est_z -1.99, rms 0.01.
+            if ! awk -v e="$EST" -v r="$RMS" \
+                 'BEGIN { exit !(((e + 2.0) < 0.5) && ((e + 2.0) > -0.5) && (r < 0.5)) }'; then
+              echo "::error::${H} h: hold degraded — est_z=${EST} rms=${RMS}"
+              FAIL=1
+              continue
+            fi
+            echo "  ${H} h OK: est_z=${EST} m, rms=${RMS} m"
+          done
+          [ "$FAIL" = 0 ] || exit 1
+
+  gz-endurance:
+    name: gz endurance watch (the real ceiling)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # The longest gz hold measured good on 2026-09-16 was 25 s (three runs:
+      # 0.04, 0.21, 0.10 m). The floor is what must not regress; it is NOT the
+      # target. ENDURANCE-P01's target is 3600.
+      GZ_FLOOR_S: '25'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Gazebo Harmonic
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl lsb-release gnupg
+          sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
+            -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
+          sudo apt-get update
+          sudo apt-get install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
+
+      - name: Build the bench with the real bridge
+        run: cargo build --release -p falcon-sitl-gz --features gazebo
+
+      - name: Climb the ladder until the hold breaks
+        shell: bash
+        run: |
+          set -uo pipefail
+          MAX="${{ github.event.inputs.gz_max_s || '120' }}"
+          BEST=0
+          # Each rung gets a FRESH server: /world/falcon/control does not answer
+          # a reset request, so a reused world starts wherever the last run left
+          # the vehicle. Same reason scripts/gz-trial.rs restarts per trial.
+          for D in 25 40 60 90 120 300 900 3600; do
+            [ "$D" -gt "$MAX" ] && break
+            pkill -f 'gz sim' 2>/dev/null || true
+            sleep 3
+            nohup gz sim -s -r -v2 examples/falcon-sitl-gz/worlds/falcon-quad.sdf \
+              > /tmp/gz-soak-$D.log 2>&1 &
+            IMU=/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+            for i in $(seq 1 30); do
+              gz topic -l 2>/dev/null | grep -qx "$IMU" && break
+              sleep 2
+            done
+
+            OUT=$(timeout $((D + 300)) ./target/release/falcon-sitl-gz \
+                    --backend=gazebo --scenario=flightcore --duration=$D 2>&1)
+            echo "── ${D}s ──"; grep -E 'verdict|^PASS|^FAIL' <<<"$OUT" || true
+
+            if grep -q '^PASS' <<<"$OUT"; then
+              BEST=$D
+            else
+              echo "  hold breaks at ${D}s"
+              break
+            fi
+          done
+          pkill -f 'gz sim' 2>/dev/null || true
+
+          echo "::notice::gz endurance: longest holding duration ${BEST}s (floor ${GZ_FLOOR_S}s, ENDURANCE-P01 target 3600s)"
+          if [ "$BEST" -lt "${GZ_FLOOR_S}" ]; then
+            echo "::error::gz endurance REGRESSED: ${BEST}s < floor ${GZ_FLOOR_S}s"
+            exit 1
+          fi
+          # Deliberately NOT a failure while below target: #403 is the tracked
+          # defect. Failing nightly on a known-open bug trains people to ignore
+          # this job, which is how a gate stops meaning anything.
+          if [ "$BEST" -lt 3600 ]; then
+            echo "::warning::gz hold is ${BEST}s, short of the 1 h ENDURANCE-P01 target — tracked in #403"
+          fi
