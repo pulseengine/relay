@@ -25,13 +25,21 @@ pub struct DwellResult {
 
 impl DwellEntry {
     pub const fn empty() -> Self {
-        DwellEntry { address: 0, size: 0, rate_divisor: 1, enabled: false }
+        DwellEntry {
+            address: 0,
+            size: 0,
+            rate_divisor: 1,
+            enabled: false,
+        }
     }
 }
 
 impl DwellRequest {
     pub const fn empty() -> Self {
-        DwellRequest { address: 0, size: 0 }
+        DwellRequest {
+            address: 0,
+            size: 0,
+        }
     }
 }
 

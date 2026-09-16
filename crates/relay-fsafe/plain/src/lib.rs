@@ -102,7 +102,9 @@ pub struct FailsafeArbiter {
 impl FailsafeArbiter {
     /// A fresh arbiter with no failsafe latched.
     pub fn new() -> Self {
-        Self { latched: FailsafeAction::None }
+        Self {
+            latched: FailsafeAction::None,
+        }
     }
 
     /// Evaluate this cycle's triggers and return the action to take. The result
@@ -147,20 +149,36 @@ mod tests {
     #[test]
     fn rc_loss_returns_to_launch() {
         let mut a = FailsafeArbiter::new();
-        assert_eq!(a.evaluate(Triggers { rc_loss: true, ..t() }), FailsafeAction::Rtl);
+        assert_eq!(
+            a.evaluate(Triggers {
+                rc_loss: true,
+                ..t()
+            }),
+            FailsafeAction::Rtl
+        );
     }
 
     #[test]
     fn offboard_stale_holds() {
         let mut a = FailsafeArbiter::new();
-        assert_eq!(a.evaluate(Triggers { offboard_stale: true, ..t() }), FailsafeAction::Hold);
+        assert_eq!(
+            a.evaluate(Triggers {
+                offboard_stale: true,
+                ..t()
+            }),
+            FailsafeAction::Hold
+        );
     }
 
     #[test]
     fn most_severe_wins() {
         let mut a = FailsafeArbiter::new();
         // RC loss (Rtl) + critical battery (Land) ⇒ Land.
-        let act = a.evaluate(Triggers { rc_loss: true, critical_battery: true, ..t() });
+        let act = a.evaluate(Triggers {
+            rc_loss: true,
+            critical_battery: true,
+            ..t()
+        });
         assert_eq!(act, FailsafeAction::Land);
     }
 
@@ -168,7 +186,11 @@ mod tests {
     fn no_blind_rtl_when_position_lost() {
         let mut a = FailsafeArbiter::new();
         // RC loss would be Rtl, but position is lost ⇒ must be Land, never Rtl.
-        let act = a.evaluate(Triggers { rc_loss: true, position_loss: true, ..t() });
+        let act = a.evaluate(Triggers {
+            rc_loss: true,
+            position_loss: true,
+            ..t()
+        });
         assert_eq!(act, FailsafeAction::Land);
         assert_ne!(act, FailsafeAction::Rtl);
     }
@@ -176,17 +198,29 @@ mod tests {
     #[test]
     fn latch_does_not_downgrade() {
         let mut a = FailsafeArbiter::new();
-        a.evaluate(Triggers { critical_battery: true, ..t() }); // Land
+        a.evaluate(Triggers {
+            critical_battery: true,
+            ..t()
+        }); // Land
         // triggers clear, but the latch holds the severe action.
         assert_eq!(a.evaluate(t()), FailsafeAction::Land);
         // a less-severe trigger cannot lower it.
-        assert_eq!(a.evaluate(Triggers { offboard_stale: true, ..t() }), FailsafeAction::Land);
+        assert_eq!(
+            a.evaluate(Triggers {
+                offboard_stale: true,
+                ..t()
+            }),
+            FailsafeAction::Land
+        );
     }
 
     #[test]
     fn reset_clears_on_disarm() {
         let mut a = FailsafeArbiter::new();
-        a.evaluate(Triggers { rc_loss: true, ..t() });
+        a.evaluate(Triggers {
+            rc_loss: true,
+            ..t()
+        });
         a.reset();
         assert_eq!(a.action(), FailsafeAction::None);
     }

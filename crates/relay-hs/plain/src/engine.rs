@@ -7,7 +7,12 @@ pub const MAX_ALERTS_PER_CHECK: usize = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum HsAction { NoAction = 0, Event = 1, RestartApp = 2, ProcessorReset = 3 }
+pub enum HsAction {
+    NoAction = 0,
+    Event = 1,
+    RestartApp = 2,
+    ProcessorReset = 3,
+}
 
 #[derive(Clone, Copy)]
 pub struct AppMonitor {
@@ -54,7 +59,12 @@ impl AppMonitor {
 
 impl HsAlert {
     pub const fn empty() -> Self {
-        HsAlert { app_id: 0, action: HsAction::NoAction, miss_count: 0, time: 0 }
+        HsAlert {
+            app_id: 0,
+            action: HsAction::NoAction,
+            miss_count: 0,
+            time: 0,
+        }
     }
 }
 
@@ -67,7 +77,9 @@ impl HealthTable {
     }
 
     pub fn register_app(&mut self, app_id: u32, max_miss: u32, action: HsAction) -> bool {
-        if self.app_count as usize >= MAX_APPS { return false; }
+        if self.app_count as usize >= MAX_APPS {
+            return false;
+        }
         let idx = self.app_count as usize;
         self.apps[idx] = AppMonitor {
             app_id,
@@ -94,7 +106,9 @@ impl HealthTable {
         }
     }
 
-    pub fn app_count(&self) -> u32 { self.app_count }
+    pub fn app_count(&self) -> u32 {
+        self.app_count
+    }
 
     pub fn check_health(&mut self, time: u64) -> HsResult {
         let mut result = HsResult {
@@ -105,14 +119,20 @@ impl HealthTable {
         let count = self.app_count;
         let mut i: u32 = 0;
         while i < count {
-            if result.alert_count as usize >= MAX_ALERTS_PER_CHECK { break; }
+            if result.alert_count as usize >= MAX_ALERTS_PER_CHECK {
+                break;
+            }
             let idx = i as usize;
             let app = self.apps[idx];
 
             if app.enabled {
                 if app.last_count == app.expected_count {
                     // Counter hasn't changed — increment miss
-                    let new_miss = if app.current_miss < u32::MAX { app.current_miss + 1 } else { u32::MAX };
+                    let new_miss = if app.current_miss < u32::MAX {
+                        app.current_miss + 1
+                    } else {
+                        u32::MAX
+                    };
                     self.apps[idx].current_miss = new_miss;
                     if new_miss >= app.max_miss {
                         let aidx = result.alert_count as usize;
@@ -182,8 +202,7 @@ impl EkfHealthMonitor {
         if self.rtl_latched {
             return false;
         }
-        let (new_hist, over_count) =
-            Self::step_window(self.history, self.window, over_limit);
+        let (new_hist, over_count) = Self::step_window(self.history, self.window, over_limit);
         self.history = new_hist;
         if over_count >= self.trip_threshold {
             self.rtl_latched = true;

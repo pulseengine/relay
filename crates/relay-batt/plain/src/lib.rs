@@ -234,15 +234,23 @@ impl BatteryEstimator {
     pub fn update(&mut self, dt_s: f32, volts: f32, amps: Option<f32>) -> BattState {
         let dt = sanitize(dt_s, 0.0, DT_MAX, 0.0);
         let v = sanitize(volts, 0.0, V_MAX, 0.0);
-        let cells = if self.cfg.cells == 0 { 1 } else { self.cfg.cells } as f32;
+        let cells = if self.cfg.cells == 0 {
+            1
+        } else {
+            self.cfg.cells
+        } as f32;
 
         match amps {
             Some(a) => {
                 let i = sanitize(a, 0.0, I_MAX, 0.0);
                 // Coulomb count: A·s → mAh, drift-bounded.
                 let cap = sanitize(self.cfg.capacity_mah, 1.0, 1.0e6, 5000.0);
-                self.consumed_mah =
-                    sanitize(self.consumed_mah + i * dt * (1000.0 / 3600.0), 0.0, cap, cap);
+                self.consumed_mah = sanitize(
+                    self.consumed_mah + i * dt * (1000.0 / 3600.0),
+                    0.0,
+                    cap,
+                    cap,
+                );
 
                 // Online R: accept only decorrelation-safe big current steps.
                 if self.have_prev {
@@ -266,11 +274,18 @@ impl BatteryEstimator {
                 let soc_coulomb = sanitize(1.0 - self.consumed_mah / cap, 0.0, 1.0, 0.0);
                 let soc_ocv = ocv_soc_cell(rest / cells);
                 // Conservative fusion: either signal low pulls the SoC down.
-                let soc = if soc_coulomb < soc_ocv { soc_coulomb } else { soc_ocv };
+                let soc = if soc_coulomb < soc_ocv {
+                    soc_coulomb
+                } else {
+                    soc_ocv
+                };
 
-                let low = self.low.update(dt, soc < self.cfg.low_soc, self.cfg.debounce_s);
+                let low = self
+                    .low
+                    .update(dt, soc < self.cfg.low_soc, self.cfg.debounce_s);
                 let critical =
-                    self.critical.update(dt, soc < self.cfg.crit_soc, self.cfg.debounce_s);
+                    self.critical
+                        .update(dt, soc < self.cfg.crit_soc, self.cfg.debounce_s);
                 BattState {
                     volts: v,
                     rest_volts: rest,
@@ -386,7 +401,10 @@ mod tests {
             let s = est.update(0.02, 3.85 * 4.0, Some(2.0));
             tripped = s.critical;
         }
-        assert!(tripped, "spent pack must trip critical despite healthy volts");
+        assert!(
+            tripped,
+            "spent pack must trip critical despite healthy volts"
+        );
     }
 
     /// mAh integration error < 2% over a simulated 20-minute flight with
@@ -405,7 +423,11 @@ mod tests {
         for k in 0..steps {
             // Duty profile: hover 18 A with 40 A climbs every 2 min.
             let t = k as f32 * dt;
-            let i_true = if (t / 120.0).fract() < 0.1 { 40.0 } else { 18.0 };
+            let i_true = if (t / 120.0).fract() < 0.1 {
+                40.0
+            } else {
+                18.0
+            };
             lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
             // Zero-mean ±2 A uniform sensor noise.
             let noise = ((lcg >> 8) as f32 / 16777216.0 - 0.5) * 4.0;
@@ -442,7 +464,10 @@ mod tests {
         }
         assert!(s_fb.degraded, "fallback must be flagged");
         assert!(!s_comp.degraded);
-        assert!(s_fb.low, "wider fallback margin trips at 3.68 < 3.70 V/cell");
+        assert!(
+            s_fb.low,
+            "wider fallback margin trips at 3.68 < 3.70 V/cell"
+        );
         assert!(
             s_comp.rest_volts > s_fb.rest_volts,
             "compensation credits the sag the fallback cannot"

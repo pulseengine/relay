@@ -199,7 +199,11 @@ pub fn decode_basic_id(buf: &[u8; FRAME_BYTES]) -> Option<BasicId> {
     let ua_type = UaType::from_code(buf[2])?;
     let mut uas_id = [0u8; UAS_ID_BYTES];
     uas_id.copy_from_slice(&buf[3..3 + UAS_ID_BYTES]);
-    Some(BasicId { id_type, ua_type, uas_id })
+    Some(BasicId {
+        id_type,
+        ua_type,
+        uas_id,
+    })
 }
 
 /// Encode a Location / Vector message into the 25-byte frame.
@@ -221,7 +225,8 @@ pub fn encode_location(msg: &Location, buf: &mut [u8; FRAME_BYTES]) {
 /// (≥ 360°), or an out-of-range timestamp (≥ 86 400 s).
 pub fn decode_location(buf: &[u8; FRAME_BYTES]) -> Option<Location> {
     let (msg_type_code, version) = (buf[0] >> 4, buf[0] & 0x0F);
-    if version != PROTOCOL_VERSION || MessageType::from_code(msg_type_code)? != MessageType::Location
+    if version != PROTOCOL_VERSION
+        || MessageType::from_code(msg_type_code)? != MessageType::Location
     {
         return None;
     }
@@ -267,13 +272,13 @@ mod tests {
     fn sample_location() -> Location {
         Location {
             status: OperationalStatus::Airborne,
-            latitude_e7: 47_502_345_6,    // 47.5023456°
-            longitude_e7: 19_040_123_4,    // 19.0401234°
-            altitude_cm: 12_000,           // 120.00 m
-            ground_speed_cms: 850,         // 8.5 m/s
-            vertical_speed_cms: -25,       // -0.25 m/s
-            track_centideg: 18_000,        // 180.00° (due south)
-            timestamp_decisec: 432_000,    // 12:00:00.0 UTC
+            latitude_e7: 47_502_345_6,  // 47.5023456°
+            longitude_e7: 19_040_123_4, // 19.0401234°
+            altitude_cm: 12_000,        // 120.00 m
+            ground_speed_cms: 850,      // 8.5 m/s
+            vertical_speed_cms: -25,    // -0.25 m/s
+            track_centideg: 18_000,     // 180.00° (due south)
+            timestamp_decisec: 432_000, // 12:00:00.0 UTC
         }
     }
 

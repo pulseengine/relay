@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn less_than() {
         assert!(compare_i64(1, ComparisonOp::LessThan, 2));
-        assert!(! compare_i64(2, ComparisonOp::LessThan, 2));
+        assert!(!compare_i64(2, ComparisonOp::LessThan, 2));
     }
     #[test]
     fn all_ops_total_on_zero_zero() {

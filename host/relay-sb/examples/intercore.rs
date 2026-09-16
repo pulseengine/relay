@@ -58,7 +58,11 @@ fn ring_view(used: usize) -> String {
 
 fn hex(bytes: &[u8], max: usize) -> String {
     let n = bytes.len().min(max);
-    let mut s = bytes[..n].iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join("");
+    let mut s = bytes[..n]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join("");
     if bytes.len() > max {
         s.push('…');
     }
@@ -116,7 +120,15 @@ fn main() {
         let mut buf = [0u8; FRAME_CAP];
         let n = m7.wrap(format!("MSG{i}").as_bytes(), &mut buf).unwrap();
         let ok = mailbox.push(Frame { buf, len: n });
-        println!("   push MSG{i} → {}   {}", if ok { format!("{G}accepted{X}") } else { format!("{R}refused{X}") }, ring_view(mailbox.len()));
+        println!(
+            "   push MSG{i} → {}   {}",
+            if ok {
+                format!("{G}accepted{X}")
+            } else {
+                format!("{R}refused{X}")
+            },
+            ring_view(mailbox.len())
+        );
         beat(450);
     }
     let mut buf = [0u8; FRAME_CAP];
@@ -124,7 +136,11 @@ fn main() {
     let refused = !mailbox.push(Frame { buf, len: n });
     println!(
         "   push OVERFLOW → {Y}⊘ {}{X}   {}   {DIM}(MessageTransport::push → false){X}",
-        if refused { "BACKPRESSURE: refused, head intact" } else { "??" },
+        if refused {
+            "BACKPRESSURE: refused, head intact"
+        } else {
+            "??"
+        },
         ring_view(mailbox.len())
     );
     while mailbox.pop().is_some() {} // drain

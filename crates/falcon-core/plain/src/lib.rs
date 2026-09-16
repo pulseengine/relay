@@ -20,9 +20,9 @@
 #![allow(clippy::needless_range_loop)]
 
 use relay_adrc::{AdrcRate, GyroLpf};
-use relay_geo::{quat_to_rotmat, thrust_axis_ned, GeoAtt, GeoGains};
+use relay_geo::{GeoAtt, GeoGains, quat_to_rotmat, thrust_axis_ned};
 use relay_iekf::{Iekf, Imu as IekfImu, NavState, RotorFaultDetector, Vec3};
-use relay_mix_quad::{motors_to_torque_signs, QuadMixer};
+use relay_mix_quad::{QuadMixer, motors_to_torque_signs};
 
 /// One inertial-measurement sample in the body frame.
 #[derive(Clone, Copy, Debug)]
@@ -91,8 +91,10 @@ pub trait FlightBackend {
     /// flag) feeds the estimator instead.
     fn read_gnss_dual(
         &mut self,
-    ) -> Option<(Option<falcon_gnss_ubx::dual::NedFix>, Option<falcon_gnss_ubx::dual::NedFix>)>
-    {
+    ) -> Option<(
+        Option<falcon_gnss_ubx::dual::NedFix>,
+        Option<falcon_gnss_ubx::dual::NedFix>,
+    )> {
         None
     }
     /// Downward rangefinder distance (m), already wire-decoded and
@@ -132,7 +134,6 @@ pub trait FlightBackend {
 /// both cores (the raw IMU sample + heading), passed in by the caller so
 /// a sim backend's one sample is never drawn twice.
 pub struct EstimatorPartition {
-
     iekf: Iekf,
     grav_var: f32,
     pos_var: f32,
@@ -153,7 +154,8 @@ pub struct EstimatorPartition {
     /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
     /// `set_calibration` installs solved offsets — the explicit replacement for
     /// the prior identity-remap placeholder (raw samples flowed in uncorrected).
-    calib: relay_calib::CalParams,    /// Control-step counter, for the FDI spin-up guard. At arm/spin-up the ESC
+    calib: relay_calib::CalParams,
+    /// Control-step counter, for the FDI spin-up guard. At arm/spin-up the ESC
     /// RPM lags the commanded throttle (real actuators, or a sim reporting the
     /// achieved rotor state), so the commanded-vs-achieved effectiveness
     /// residual spikes on EVERY rotor for the first fraction of a second — which
@@ -168,7 +170,6 @@ pub struct EstimatorPartition {
 impl EstimatorPartition {
     fn new(warmup: u32) -> Self {
         EstimatorPartition {
-
             iekf: Iekf::level(),
             grav_var: 0.5,
             pos_var: 0.01,
@@ -261,7 +262,6 @@ impl EstimatorPartition {
         }
     }
 
-
     /// One estimator tick: fanned-out IMU sample + heading, own reads of
     /// GNSS/mag/baro, publish the estimate. The partition's ONLY output.
     pub fn step<B: FlightBackend>(
@@ -282,7 +282,8 @@ impl EstimatorPartition {
         self.iekf.update_gravity(accel, self.grav_var);
         self.fuse_gnss(b);
         if let Some(m) = b.read_mag() {
-            self.iekf.update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
+            self.iekf
+                .update_magnetometer(self.calib.apply_mag(m), 0.0, self.mag_var);
         }
         // v1.113 — direct heading update: a backend that resolves a clean
         // absolute yaw (fused compass / GNSS heading / sim truth) feeds it
@@ -298,7 +299,8 @@ impl EstimatorPartition {
         // estimation rather than a hand-rolled complementary filter.
         if let Some(bz) = b.read_baro() {
             let e = self.iekf.state();
-            self.iekf.update_position([e.p[0], e.p[1], bz], self.baro_var);
+            self.iekf
+                .update_position([e.p[0], e.p[1], bz], self.baro_var);
         }
         self.step_count = self.step_count.saturating_add(1);
         self.iekf.state()
@@ -415,8 +417,8 @@ impl CascadePartition {
             setpoint: [0.0; 3],
             kp_alt: 0.05,
             kd_alt: 0.30,
-            ki_alt: 0.0, // opt-in (set_altitude_integral_gain): the integral is
-            alt_int: 0.0, // for high-altitude thrust-lapse compensation; default
+            ki_alt: 0.0,      // opt-in (set_altitude_integral_gain): the integral is
+            alt_int: 0.0,     // for high-altitude thrust-lapse compensation; default
             alt_int_max: 0.4, // off as it interacts with aggressive alt transients.
             landing: false,
             landing_descent: 0.5, // m/s controlled descent rate (NED z, +down)
@@ -471,12 +473,19 @@ impl CascadePartition {
     }
     /// Set the hover-thrust feedforward (per-airframe; clamped to [0,1]).
     pub fn set_hover_thrust_core(&mut self, t: f32) {
-        self.hover_thrust = if t.is_finite() { t.clamp(0.0, 1.0) } else { self.hover_thrust };
+        self.hover_thrust = if t.is_finite() {
+            t.clamp(0.0, 1.0)
+        } else {
+            self.hover_thrust
+        };
     }
     /// Set the landing descent rate (m/s, NED +down; clamped to [0.1, 2]).
     pub fn set_landing_descent(&mut self, vz: f32) {
-        self.landing_descent =
-            if vz.is_finite() { vz.clamp(0.1, 2.0) } else { self.landing_descent };
+        self.landing_descent = if vz.is_finite() {
+            vz.clamp(0.1, 2.0)
+        } else {
+            self.landing_descent
+        };
     }
     /// Current altitude P/D gains (tuning observability, v1.119).
     pub fn altitude_gains(&self) -> (f32, f32) {
@@ -649,8 +658,7 @@ impl CascadePartition {
                 } else {
                     self.hover_thrust
                 };
-                (hover_eff - self.kvz_land * (self.landing_descent - est.v[2]))
-                    .clamp(0.0, 1.0)
+                (hover_eff - self.kvz_land * (self.landing_descent - est.v[2])).clamp(0.0, 1.0)
             }
         } else {
             // ── Position altitude P-I-D (v1.2; v1.20 baro-anchored; v1.22 +I) ──
@@ -690,7 +698,11 @@ impl CascadePartition {
             if !converging {
                 self.alt_int += alt_err * dt;
             }
-            let cap = if self.ki_alt > 0.0 { self.alt_int_max / self.ki_alt } else { 0.0 };
+            let cap = if self.ki_alt > 0.0 {
+                self.alt_int_max / self.ki_alt
+            } else {
+                0.0
+            };
             self.alt_int = self.alt_int.clamp(-cap, cap);
             (self.hover_thrust - self.kp_alt * alt_err - self.ki_alt * self.alt_int
                 + self.kd_alt * est.v[2])
@@ -706,7 +718,11 @@ impl CascadePartition {
         let perr = [self.setpoint[0] - est.p[0], self.setpoint[1] - est.p[1]];
         for i in 0..2 {
             self.pos_int[i] += perr[i] * dt;
-            let cap = if self.ki_pos > 0.0 { self.pos_int_max / self.ki_pos } else { 0.0 };
+            let cap = if self.ki_pos > 0.0 {
+                self.pos_int_max / self.ki_pos
+            } else {
+                0.0
+            };
             self.pos_int[i] = self.pos_int[i].clamp(-cap, cap);
         }
         let mut a_cmd = [
@@ -739,7 +755,8 @@ impl CascadePartition {
             let r = quat_to_rotmat(est.q);
             let b3_d = thrust_axis_ned(a_cmd).unwrap_or([0.0, 0.0, 1.0]);
             let torque = self.geo.moment_reduced(&r, gyro_ctrl, b3_d);
-            self.mixer.mix_rotor_out(failed, torque, thrust, ROTOR_OUT_FLOOR)
+            self.mixer
+                .mix_rotor_out(failed, torque, thrust, ROTOR_OUT_FLOOR)
         } else {
             // NORMAL: full-attitude geometric desired-rate → ADRC torque → mix.
             let omega_d = self.geo.desired_rate(est.q, a_cmd, self.yaw_setpoint);
@@ -789,10 +806,7 @@ impl CascadePartition {
         // command-ALIGNED residual, not this gate.
         let fdi_steady = tilt_cos > 0.90 && rp_rate2 < 4.0; // ≲26° tilt, ≲2 rad/s roll+pitch
         let mut dbg_resid = [0.0f32; 4];
-        if self.failed_motor.is_none()
-            && self.step_count >= self.fdi_warmup_steps
-            && fdi_steady
-        {
+        if self.failed_motor.is_none() && self.step_count >= self.fdi_warmup_steps && fdi_steady {
             if let Some(rpm) = rpm_now {
                 let mut resid = [0.0f32; 4];
                 let mut i = 0;
@@ -979,7 +993,6 @@ impl FlightCore {
     pub fn set_altitude_gains(&mut self, kp: f32, kd: f32) {
         self.casc.set_altitude_gains(kp, kd)
     }
-
 }
 
 /// The PARTITIONED deployment shape (PART-P01, v1.124): the two halves of
@@ -1004,7 +1017,13 @@ pub struct PartitionedCore {
 }
 
 impl PartitionedCore {
-    pub fn new(hover_thrust: f32, loop_hz: f32, delay_ticks: usize, jitter: bool, seed: u32) -> Self {
+    pub fn new(
+        hover_thrust: f32,
+        loop_hz: f32,
+        delay_ticks: usize,
+        jitter: bool,
+        seed: u32,
+    ) -> Self {
         let warmup = ((loop_hz * 0.2) as u32).max(10);
         PartitionedCore {
             est: EstimatorPartition::new(warmup),
@@ -1227,7 +1246,10 @@ impl FlightSupervisor {
             waypoints: [home; MAX_WAYPOINTS],
             wp_count: 0,
             wp_index: 0,
-            zones: [KeepoutZone { center: home, radius: 0.0 }; MAX_KEEPOUT_ZONES],
+            zones: [KeepoutZone {
+                center: home,
+                radius: 0.0,
+            }; MAX_KEEPOUT_ZONES],
             zone_count: 0,
             rtl_latched: false,
             runaway_count: 0,
@@ -1269,7 +1291,11 @@ impl FlightSupervisor {
     /// Set the hover-thrust feedforward on the wrapped core (per-plant: the
     /// analytic sim hovers at ~0.49, the real gz falcon-quad at ~0.585).
     pub fn set_hover_thrust(&mut self, t: f32) {
-        self.core.casc.hover_thrust = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.5 };
+        self.core.casc.hover_thrust = if t.is_finite() {
+            t.clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
     }
 
     pub fn mode(&self) -> relay_fsm::Mode {
@@ -1341,11 +1367,20 @@ impl FlightSupervisor {
         use relay_preflight::CheckId;
         let t = &mut self.check_table;
         t.set(CheckId::SensorsHealthy, self.preflight.sensors_healthy);
-        t.set(CheckId::EstimatorConverged, self.preflight.estimator_converged);
-        t.set(CheckId::CalibrationPresent, self.preflight.calibration_present);
+        t.set(
+            CheckId::EstimatorConverged,
+            self.preflight.estimator_converged,
+        );
+        t.set(
+            CheckId::CalibrationPresent,
+            self.preflight.calibration_present,
+        );
         t.set(CheckId::GeofenceLoaded, self.preflight.geofence_loaded);
         t.set(CheckId::BatteryOk, self.preflight.battery_ok);
-        t.set(CheckId::FailsafeConfigured, self.preflight.failsafe_configured);
+        t.set(
+            CheckId::FailsafeConfigured,
+            self.preflight.failsafe_configured,
+        );
         t.set(CheckId::EstimatorInnovation, !self.core.nav_compromised());
         t.set(CheckId::GnssAgreement, !self.core.gnss_diverged());
         t.set(
@@ -1418,7 +1453,12 @@ impl FlightSupervisor {
             relay_preflight::arm_check_table(&self.check_table),
             relay_preflight::TableVerdict::Allowed
         );
-        let g = relay_fsm::Gates { level, throttle_low, have_position: true, prearm_ok };
+        let g = relay_fsm::Gates {
+            level,
+            throttle_low,
+            have_position: true,
+            prearm_ok,
+        };
         self.fsm.on(ev, g);
     }
 
@@ -1491,8 +1531,7 @@ impl FlightSupervisor {
             // OBSTRUCTS only if it is ahead, before the goal, and laterally close.
             let along = -rx * ux + -ry * uy;
             let perp = relay_math::sqrtf(((rx * rx + ry * ry) - along * along).max(0.0));
-            let obstructs =
-                along > 0.0 && along < glen + safe && perp < safe + KEEPOUT_INFLUENCE;
+            let obstructs = along > 0.0 && along < glen + safe && perp < safe + KEEPOUT_INFLUENCE;
             // Deflect when the zone blocks the path (and the vehicle is within
             // reach of it), OR as a hard guard whenever the vehicle is inside the
             // safe ring. Crucially NOT when the zone is merely near but off-path
@@ -1523,7 +1562,12 @@ impl FlightSupervisor {
         let dy = est.p[1] - self.home[1];
         let dist_home = relay_math::sqrtf(dx * dx + dy * dy);
         let alt_agl = -est.p[2]; // NED z negative = up
-        let g = Gates { level: true, throttle_low: true, have_position: true, prearm_ok: true };
+        let g = Gates {
+            level: true,
+            throttle_low: true,
+            have_position: true,
+            prearm_ok: true,
+        };
 
         // ── FAILSAFE actuation (the audit's gap): geofence breach OR low
         // battery from any flying state ⇒ Failsafe ⇒ the FSM commands RTL. ──
@@ -1548,10 +1592,16 @@ impl FlightSupervisor {
         // shown eRPM (no bidir-DShot) is not gated on it, but once seen,
         // its LOSS blocks arming (one-way, like every declared row).
         match b.read_motor_rpm() {
-            Some(_) => self.check_table.set(relay_preflight::CheckId::EscTelemetry, true),
+            Some(_) => self
+                .check_table
+                .set(relay_preflight::CheckId::EscTelemetry, true),
             None => {
-                if self.check_table.is_required(relay_preflight::CheckId::EscTelemetry) {
-                    self.check_table.set(relay_preflight::CheckId::EscTelemetry, false);
+                if self
+                    .check_table
+                    .is_required(relay_preflight::CheckId::EscTelemetry)
+                {
+                    self.check_table
+                        .set(relay_preflight::CheckId::EscTelemetry, false);
                 }
             }
         }
@@ -1649,8 +1699,7 @@ impl FlightSupervisor {
         // at an uncontrolled ~3.4 m/s. The velocity-landing law arrests that
         // and rides down at its commanded descent rate instead.)
         let landing = matches!(self.fsm.mode(), Mode::Land)
-            && (self.core.failed_motor().is_some()
-                || (horiz_speed < 0.4 && dist_home < 0.5));
+            && (self.core.failed_motor().is_some() || (horiz_speed < 0.4 && dist_home < 0.5));
         self.core.set_landing(landing);
 
         // ── mode → setpoint ── (horizontal hold target; while landing the core's
@@ -1685,7 +1734,10 @@ impl FlightSupervisor {
         // Disarmed kept the altitude loop live and flew the vehicle away
         // (and "Terminate = motors cut" was only ever an FSM claim, never an
         // actuator command — the software half of PART-P02's backstop).
-        if matches!(self.fsm.mode(), Mode::Disarmed | Mode::Armed | Mode::Terminated) {
+        if matches!(
+            self.fsm.mode(),
+            Mode::Disarmed | Mode::Armed | Mode::Terminated
+        ) {
             self.core.step_estimate_only(b); // estimator warm, motors OFF
             return;
         }
@@ -1701,7 +1753,12 @@ impl FlightSupervisor {
             && self.fsm.is_airborne()
             && self.fsm.mode() != Mode::Land
         {
-            let land = Gates { level: true, throttle_low: true, have_position: false, prearm_ok: true };
+            let land = Gates {
+                level: true,
+                throttle_low: true,
+                have_position: false,
+                prearm_ok: true,
+            };
             self.fsm.on(Event::Failsafe, land);
             self.rtl_latched = true;
         }
@@ -2076,7 +2133,11 @@ impl SimBackend {
     }
 
     fn integrate(&mut self, torque: Vec3) {
-        let jo = [self.j[0] * self.omega[0], self.j[1] * self.omega[1], self.j[2] * self.omega[2]];
+        let jo = [
+            self.j[0] * self.omega[0],
+            self.j[1] * self.omega[1],
+            self.j[2] * self.omega[2],
+        ];
         let gyro = [
             self.omega[1] * jo[2] - self.omega[2] * jo[1],
             self.omega[2] * jo[0] - self.omega[0] * jo[2],
@@ -2089,8 +2150,16 @@ impl SimBackend {
             self.omega[i] += self.dt * (torque[i] - gyro[i] - drag) / self.j[i];
         }
         // first-order rotation integration (Rᵢ₊₁ = Rᵢ·(I + [ω]ₓdt))
-        let wd = [self.omega[0] * self.dt, self.omega[1] * self.dt, self.omega[2] * self.dt];
-        let incr = [[1.0, -wd[2], wd[1]], [wd[2], 1.0, -wd[0]], [-wd[1], wd[0], 1.0]];
+        let wd = [
+            self.omega[0] * self.dt,
+            self.omega[1] * self.dt,
+            self.omega[2] * self.dt,
+        ];
+        let incr = [
+            [1.0, -wd[2], wd[1]],
+            [wd[2], 1.0, -wd[0]],
+            [-wd[1], wd[0], 1.0],
+        ];
         let mut m = [[0.0f32; 3]; 3];
         for i in 0..3 {
             for jj in 0..3 {
@@ -2270,7 +2339,11 @@ impl FlightBackend for SimBackend {
             }
         }
         const K_WIND: f32 = 0.15;
-        if self.wind[0] != 0.0 || self.wind[1] != 0.0 || self.gust_amp != 0.0 || self.path.turbulence > 0.0 {
+        if self.wind[0] != 0.0
+            || self.wind[1] != 0.0
+            || self.gust_amp != 0.0
+            || self.path.turbulence > 0.0
+        {
             for i in 0..2 {
                 let gust = self.gust_amp * self.noise_unit();
                 accel[i] += K_WIND * (self.wind[i] + gust + self.turb_state[i] - self.vel[i]);
@@ -2314,7 +2387,8 @@ impl FlightBackend for SimBackend {
         self.last_collective = collective;
         if self.battery_drain {
             let current = collective; // ∝ total motor power
-            self.battery_charge = (self.battery_charge - current * 5.0e-5 * self.dt / 0.002).max(0.0);
+            self.battery_charge =
+                (self.battery_charge - current * 5.0e-5 * self.dt / 0.002).max(0.0);
             self.battery_v = 12.6 + 4.2 * self.battery_charge - 0.3 * current;
         }
     }
@@ -2339,8 +2413,10 @@ impl FlightBackend for SimBackend {
     }
     fn read_gnss_dual(
         &mut self,
-    ) -> Option<(Option<falcon_gnss_ubx::dual::NedFix>, Option<falcon_gnss_ubx::dual::NedFix>)>
-    {
+    ) -> Option<(
+        Option<falcon_gnss_ubx::dual::NedFix>,
+        Option<falcon_gnss_ubx::dual::NedFix>,
+    )> {
         use falcon_gnss_ubx::dual::NedFix;
         if !self.gnss_dual_enabled {
             return None;
@@ -2352,7 +2428,12 @@ impl FlightBackend for SimBackend {
         let a = if self.gnss_a_down {
             None
         } else {
-            Some(NedFix { pos: base, acc_m: self.gnss_a_acc, sats: 14, fix_ok: true })
+            Some(NedFix {
+                pos: base,
+                acc_m: self.gnss_a_acc,
+                sats: 14,
+                fix_ok: true,
+            })
         };
         let b = if self.gnss_b_down {
             None
@@ -2360,7 +2441,12 @@ impl FlightBackend for SimBackend {
             let mut pb = base;
             pb[0] += self.gnss_b_offset[0];
             pb[1] += self.gnss_b_offset[1];
-            Some(NedFix { pos: pb, acc_m: self.gnss_b_acc, sats: 14, fix_ok: true })
+            Some(NedFix {
+                pos: pb,
+                acc_m: self.gnss_b_acc,
+                sats: 14,
+                fix_ok: true,
+            })
         };
         Some((a, b))
     }
@@ -2405,7 +2491,7 @@ mod blackbox_replay_tests {
     extern crate std;
     use super::blackbox_backend::*;
     use super::*;
-    use relay_log::blackbox::{scan, BlockLog, TickRecord, REC_TICK, TICK_MAX};
+    use relay_log::blackbox::{BlockLog, REC_TICK, TICK_MAX, TickRecord, scan};
     use std::vec::Vec;
 
     struct VecLog(Vec<u8>);
@@ -2463,9 +2549,21 @@ mod blackbox_replay_tests {
             replayed.step(&mut rb);
             let est = replayed.state();
             let t = rb.current().unwrap();
-            assert_eq!(est.q.map(f32::to_bits), t.est_q.map(f32::to_bits), "q tick {checked}");
-            assert_eq!(est.v.map(f32::to_bits), t.est_v.map(f32::to_bits), "v tick {checked}");
-            assert_eq!(est.p.map(f32::to_bits), t.est_p.map(f32::to_bits), "p tick {checked}");
+            assert_eq!(
+                est.q.map(f32::to_bits),
+                t.est_q.map(f32::to_bits),
+                "q tick {checked}"
+            );
+            assert_eq!(
+                est.v.map(f32::to_bits),
+                t.est_v.map(f32::to_bits),
+                "v tick {checked}"
+            );
+            assert_eq!(
+                est.p.map(f32::to_bits),
+                t.est_p.map(f32::to_bits),
+                "p tick {checked}"
+            );
             assert_eq!(
                 replayed.cov_summary().map(f32::to_bits),
                 t.cov.map(f32::to_bits),
@@ -2498,7 +2596,9 @@ mod blackbox_replay_tests {
             Ok(b) => b,
             Err(_) => {
                 // First-build bootstrap: golden not yet generated.
-                std::eprintln!("golden log missing — run `cargo test regen_golden_log -- --ignored` and commit it");
+                std::eprintln!(
+                    "golden log missing — run `cargo test regen_golden_log -- --ignored` and commit it"
+                );
                 return;
             }
         };
@@ -2532,7 +2632,7 @@ mod blackbox_replay_tests {
     #[test]
     fn supervised_flight_logs_boot_ticks_and_events() {
         use relay_fsm::Event;
-        use relay_log::blackbox::{encode_boot, encode_event, REC_BOOT, REC_EVENT};
+        use relay_log::blackbox::{REC_BOOT, REC_EVENT, encode_boot, encode_event};
         let dt = 0.002f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let mut plant = SimBackend::new(level, dt);
@@ -2571,7 +2671,10 @@ mod blackbox_replay_tests {
         assert_eq!(used, bytes.len(), "no torn tail");
         assert_eq!(boots, 1);
         assert_eq!(ticks, 8000);
-        assert!(events >= 1, "mode transitions must appear as events (got {events})");
+        assert!(
+            events >= 1,
+            "mode transitions must appear as events (got {events})"
+        );
     }
 
     /// Writes the golden fixture (deliberate, reviewed regeneration only).
@@ -2616,7 +2719,6 @@ mod tests {
 
     use super::*;
 
-
     /// The SAME verified cascade, run through the HAL seam against the sim
     /// backend, recovers a tilted body to level — demonstrating the flight
     /// core is backend-agnostic (the seam carries the real IEKF + geometric +
@@ -2637,7 +2739,10 @@ mod tests {
             core.step(&mut backend);
         }
         let tilt = backend.tilt();
-        assert!(tilt < 0.1, "core must recover to level through the HAL: {tilt} rad (start {tilt0})");
+        assert!(
+            tilt < 0.1,
+            "core must recover to level through the HAL: {tilt} rad (start {tilt0})"
+        );
     }
 
     /// The backend is a SEAM, not a fixed simulator: a trivial stand-in
@@ -2657,7 +2762,10 @@ mod tests {
         }
         impl FlightBackend for BiasedGyro {
             fn read_imu(&mut self) -> ImuSample {
-                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0, 0.0, self.bias_z] }
+                ImuSample {
+                    accel: [0.0, 0.0, -GRAVITY],
+                    gyro: [0.0, 0.0, self.bias_z],
+                }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 None
@@ -2679,7 +2787,10 @@ mod tests {
         }
 
         let mut cal = FlightCore::new(0.5, 250.0);
-        cal.set_calibration(CalParams { gyro_bias: [0.0, 0.0, bias], ..CalParams::identity() });
+        cal.set_calibration(CalParams {
+            gyro_bias: [0.0, 0.0, bias],
+            ..CalParams::identity()
+        });
         let mut bc = BiasedGyro { bias_z: bias };
         for _ in 0..250 {
             cal.step(&mut bc);
@@ -2691,7 +2802,10 @@ mod tests {
             + (qu[1] - qc[1]).abs()
             + (qu[2] - qc[2]).abs()
             + (qu[3] - qc[3]).abs();
-        assert!(diff > 0.05, "calibration must change the estimate (yaw drift suppressed): diff {diff}");
+        assert!(
+            diff > 0.05,
+            "calibration must change the estimate (yaw drift suppressed): diff {diff}"
+        );
         // the installed calibration is reported back.
         assert_eq!(cal.calibration().gyro_bias, [0.0, 0.0, bias]);
     }
@@ -2708,7 +2822,10 @@ mod tests {
         }
         impl FlightBackend for RpmBackend {
             fn read_imu(&mut self) -> ImuSample {
-                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+                ImuSample {
+                    accel: [0.0, 0.0, -GRAVITY],
+                    gyro: [0.0; 3],
+                }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 Some([0.0, 0.0, -2.0]) // at the 2 m cruise altitude
@@ -2739,8 +2856,14 @@ mod tests {
             }
         }
         let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 200.0, 2.0, 14.0);
-        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
-        let mut b = RpmBackend { last: [0.5; 4], inject: false };
+        sup.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
+        let mut b = RpmBackend {
+            last: [0.5; 4],
+            inject: false,
+        };
 
         for _ in 0..1500 {
             sup.step(&mut b);
@@ -2761,7 +2884,11 @@ mod tests {
         for _ in 0..40 {
             sup.step(&mut b);
         }
-        assert_eq!(sup.mode(), relay_fsm::Mode::Land, "motor failure commands Land");
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Land,
+            "motor failure commands Land"
+        );
     }
 
     /// v1.103 — the production FlightCore detects a dead rotor from ESC RPM and
@@ -2779,7 +2906,10 @@ mod tests {
         }
         impl FlightBackend for RpmBackend {
             fn read_imu(&mut self) -> ImuSample {
-                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+                ImuSample {
+                    accel: [0.0, 0.0, -GRAVITY],
+                    gyro: [0.0; 3],
+                }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 Some([0.0, 0.0, -5.0]) // holding 5 m up
@@ -2809,20 +2939,32 @@ mod tests {
         }
         let mut core = FlightCore::new(0.5, 250.0);
         core.set_altitude(-5.0); // hold 5 m → commands hover thrust to all rotors
-        let mut b = RpmBackend { last: [0.5; 4], failed: 2, inject: false };
+        let mut b = RpmBackend {
+            last: [0.5; 4],
+            failed: 2,
+            inject: false,
+        };
 
         // healthy: the FDI never isolates a rotor.
         for _ in 0..100 {
             core.step(&mut b);
         }
-        assert_eq!(core.failed_motor(), None, "healthy rotors must not be isolated");
+        assert_eq!(
+            core.failed_motor(),
+            None,
+            "healthy rotors must not be isolated"
+        );
 
         // rotor 2 dies (RPM → 0 under a nonzero command) → isolated quickly.
         b.inject = true;
         for _ in 0..30 {
             core.step(&mut b);
         }
-        assert_eq!(core.failed_motor(), Some(2), "the CUSUM FDI isolates the dead rotor");
+        assert_eq!(
+            core.failed_motor(),
+            Some(2),
+            "the CUSUM FDI isolates the dead rotor"
+        );
 
         // the reconfigured allocator commands the failed rotor 0 and the three
         // healthy rotors within [floor, 1] (MIX-P08 in the production loop).
@@ -2830,7 +2972,10 @@ mod tests {
         assert_eq!(b.last[2], 0.0, "failed rotor commanded 0");
         for (i, &v) in b.last.iter().enumerate() {
             if i != 2 {
-                assert!((ROTOR_OUT_FLOOR - 1e-6..=1.0 + 1e-6).contains(&v), "healthy rotor {i} = {v}");
+                assert!(
+                    (ROTOR_OUT_FLOOR - 1e-6..=1.0 + 1e-6).contains(&v),
+                    "healthy rotor {i} = {v}"
+                );
             }
         }
     }
@@ -2863,8 +3008,15 @@ mod tests {
             core.step(&mut backend);
         }
         let hover_tilt = backend.tilt();
-        assert!(hover_tilt < 0.1, "must reach a level hover first: {hover_tilt} rad");
-        assert_eq!(core.failed_motor(), None, "no false isolation while healthy");
+        assert!(
+            hover_tilt < 0.1,
+            "must reach a level hover first: {hover_tilt} rad"
+        );
+        assert_eq!(
+            core.failed_motor(),
+            None,
+            "no false isolation while healthy"
+        );
 
         // Rotor 0 dies. A 3-rotor quad cannot hover, so the honest recovery is
         // a controlled spin-DESCENT: hold the thrust axis near-level while the
@@ -2886,7 +3038,11 @@ mod tests {
             }
         }
 
-        assert_eq!(core.failed_motor(), Some(0), "FDI must isolate the dead rotor");
+        assert_eq!(
+            core.failed_motor(),
+            Some(0),
+            "FDI must isolate the dead rotor"
+        );
         // The whole point: the thrust axis never tips anywhere near inverted. A
         // pre-v1.114 run blew through 90° to ~180° (parasitic-moment flip); the
         // rank-3 allocation holds it near-level throughout the descent (the
@@ -2917,7 +3073,10 @@ mod tests {
         }
         impl FlightBackend for NullBackend {
             fn read_imu(&mut self) -> ImuSample {
-                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+                ImuSample {
+                    accel: [0.0, 0.0, -GRAVITY],
+                    gyro: [0.0; 3],
+                }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 None
@@ -2958,8 +3117,16 @@ mod tests {
         for _ in 0..15000 {
             core.step(&mut backend);
         }
-        assert!((backend.pos[2] + 2.0).abs() < 0.25, "altitude must reach −2 m: {}", backend.pos[2]);
-        assert!(backend.tilt() < 0.1, "should stay level while holding altitude: {}", backend.tilt());
+        assert!(
+            (backend.pos[2] + 2.0).abs() < 0.25,
+            "altitude must reach −2 m: {}",
+            backend.pos[2]
+        );
+        assert!(
+            backend.tilt() < 0.1,
+            "should stay level while holding altitude: {}",
+            backend.tilt()
+        );
     }
 
     /// v1.3 — full 6-DoF: the backend-agnostic core flies to and holds a
@@ -2983,8 +3150,16 @@ mod tests {
             backend.pos[2] + 2.0,
         ];
         let err = relay_math::sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
-        assert!(err < 0.5, "must reach the position setpoint through the HAL: {err} m, pos {:?}", backend.pos);
-        assert!(backend.tilt() < 0.15, "settle near level: {} rad", backend.tilt());
+        assert!(
+            err < 0.5,
+            "must reach the position setpoint through the HAL: {err} m, pos {:?}",
+            backend.pos
+        );
+        assert!(
+            backend.tilt() < 0.15,
+            "settle near level: {} rad",
+            backend.tilt()
+        );
     }
 
     /// The verified ADRC inner loop REJECTS a sustained body-torque
@@ -3010,7 +3185,10 @@ mod tests {
         // after the ESO converges, the disturbance is cancelled and the body
         // holds near level (a plain proportional loop would sit at a steady
         // offset; ADRC drives it out).
-        assert!(peak_after < 0.12, "ESO must reject the disturbance: steady tilt {peak_after} rad");
+        assert!(
+            peak_after < 0.12,
+            "ESO must reject the disturbance: steady tilt {peak_after} rad"
+        );
     }
 
     // ── v1.8 supervisor: geofence→RTL actuation + battery failsafe ────────
@@ -3032,7 +3210,11 @@ mod tests {
         for _ in 0..8000 {
             sup.step(&mut backend);
         }
-        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter after takeoff");
+        assert_eq!(
+            sup.mode(),
+            Mode::Loiter,
+            "should reach Loiter after takeoff"
+        );
         sup.set_mission([4.0, 0.0, -2.0]); // OUTSIDE the 1.5 m fence
         sup.command(Event::RequestMission, true, false);
         for _ in 0..40000 {
@@ -3041,8 +3223,13 @@ mod tests {
                 break;
             }
         }
-        let dh = relay_math::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
-        assert!(dh < 1.0, "RTL must bring it home, not to [4,0]: horiz {dh} m, pos {:?}", backend.pos);
+        let dh =
+            relay_math::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
+        assert!(
+            dh < 1.0,
+            "RTL must bring it home, not to [4,0]: horiz {dh} m, pos {:?}",
+            backend.pos
+        );
         assert!(
             matches!(sup.mode(), Mode::Land | Mode::Disarmed),
             "RTL should be landing/landed, mode {:?}",
@@ -3073,7 +3260,11 @@ mod tests {
         for _ in 0..8000 {
             sup.step(&mut b);
         }
-        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter after takeoff");
+        assert_eq!(
+            sup.mode(),
+            Mode::Loiter,
+            "should reach Loiter after takeoff"
+        );
         sup.command(Event::RequestMission, true, false);
 
         // Fly the mission. Track the closest approach to each waypoint and the
@@ -3106,9 +3297,15 @@ mod tests {
         }
 
         for (i, d) in min_d.iter().enumerate() {
-            assert!(*d < WAYPOINT_RADIUS + 0.2, "waypoint {i} not visited: min dist {d} m");
+            assert!(
+                *d < WAYPOINT_RADIUS + 0.2,
+                "waypoint {i} not visited: min dist {d} m"
+            );
         }
-        assert!(order_ok, "waypoints must be flown in order (leg index monotonic)");
+        assert!(
+            order_ok,
+            "waypoints must be flown in order (leg index monotonic)"
+        );
         assert!(
             disarmed,
             "mission must complete autonomously: return home + land + disarm (mode {:?})",
@@ -3131,7 +3328,10 @@ mod tests {
 
         // A single far waypoint straight across a zone that sits on the path.
         sup.set_mission_waypoints(&[[10.0, 0.0, -2.0]]);
-        let zone = KeepoutZone { center: [5.0, 0.0, -2.0], radius: 2.0 };
+        let zone = KeepoutZone {
+            center: [5.0, 0.0, -2.0],
+            radius: 2.0,
+        };
         sup.set_keepout_zones(&[zone]);
 
         sup.command(Event::Arm, true, true);
@@ -3162,7 +3362,10 @@ mod tests {
             }
         }
         // visited the far waypoint (so it really crossed the obstacle field) …
-        assert!(min_wp < WAYPOINT_RADIUS + 0.3, "waypoint not reached: min dist {min_wp} m");
+        assert!(
+            min_wp < WAYPOINT_RADIUS + 0.3,
+            "waypoint not reached: min dist {min_wp} m"
+        );
         // … but never entered the no-fly zone …
         assert!(
             min_zone > zone.radius,
@@ -3170,7 +3373,11 @@ mod tests {
             zone.radius
         );
         // … and still completed the sortie autonomously.
-        assert!(disarmed, "mission with avoidance must still complete (mode {:?})", sup.mode());
+        assert!(
+            disarmed,
+            "mission with avoidance must still complete (mode {:?})",
+            sup.mode()
+        );
     }
 
     /// A low battery actuates a failsafe (the audit's "no battery failsafe"):
@@ -3209,8 +3416,8 @@ mod tests {
     /// over the ArrayNvm mock), not a hand-set flag.
     #[test]
     fn defaults_fallback_params_block_arming() {
-        use relay_param::persist::{load, save, ArrayNvm, Layout, LoadOutcome};
         use relay_param::ParamStore;
+        use relay_param::persist::{ArrayNvm, Layout, LoadOutcome, load, save};
         use relay_preflight::CheckId;
 
         let dt = 0.004f32;
@@ -3237,7 +3444,11 @@ mod tests {
             sup.step(&mut b);
         }
         sup.command(relay_fsm::Event::Arm, true, true);
-        assert_eq!(sup.mode(), relay_fsm::Mode::Disarmed, "defaults-fallback must not arm");
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Disarmed,
+            "defaults-fallback must not arm"
+        );
         assert_eq!(sup.arm_blocked_check(), Some(CheckId::ParamsFromNvm));
         assert_eq!(
             CheckId::ParamsFromNvm.reason_text(),
@@ -3253,7 +3464,11 @@ mod tests {
         sup.set_check(CheckId::ParamsFromNvm, rep2.outcome == LoadOutcome::Loaded);
         sup.step(&mut b);
         sup.command(relay_fsm::Event::Arm, true, true);
-        assert_eq!(sup.mode(), relay_fsm::Mode::Armed, "arms after the NVM load");
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Armed,
+            "arms after the NVM load"
+        );
     }
 
     /// PART-P02 (a): the F100 pass-through conformance fixture for gale#65.
@@ -3307,7 +3522,12 @@ mod tests {
              # phase,m0_bits,m1_bits,m2_bits,m3_bits  — f32 bit patterns (hex);\n\
              # EXPECTED F100 OUTPUT == INPUT, byte-exact (no re-mix, no floors).\n",
         );
-        let cap = |core: &mut FlightCore, b: &mut SimBackend, phase: &str, n: usize, every: usize, out: &mut std::string::String| {
+        let cap = |core: &mut FlightCore,
+                   b: &mut SimBackend,
+                   phase: &str,
+                   n: usize,
+                   every: usize,
+                   out: &mut std::string::String| {
             for k in 0..n {
                 core.step(b);
                 if k % every == 0 {
@@ -3524,7 +3744,10 @@ mod tests {
             }
             let mean = sum / n as f64;
             let var = (sum2 / n as f64 - mean * mean).max(0.0);
-            assert!(b.tilt() < 0.2, "hover must hold (telemetry={rpm_telemetry})");
+            assert!(
+                b.tilt() < 0.2,
+                "hover must hold (telemetry={rpm_telemetry})"
+            );
             (var.sqrt()) as f32
         }
         let with_notch = hover_thrash(true);
@@ -3580,7 +3803,10 @@ mod tests {
         b.gnss_dual_enabled = true;
         b.ground_contact = true;
         let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
-        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        sup.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
         for _ in 0..2000 {
             sup.step(&mut b);
         }
@@ -3589,8 +3815,14 @@ mod tests {
         for _ in 0..2000 {
             sup.step(&mut b);
         }
-        assert!(sup.core().gnss_diverged(), "sustained 12 m split must latch");
-        assert!(sup.arm_blocked_reason().is_some(), "divergence blocks arming");
+        assert!(
+            sup.core().gnss_diverged(),
+            "sustained 12 m split must latch"
+        );
+        assert!(
+            sup.arm_blocked_reason().is_some(),
+            "divergence blocks arming"
+        );
         let e = sup.core().state();
         assert!(
             relay_math::fabsf(e.p[0]) < 2.0,
@@ -3644,9 +3876,15 @@ mod tests {
                 "trial {trial} fault {fault}: estimate stepped {max_step} m"
             );
             if fault == 3 {
-                assert!(core.gnss_diverged(), "trial {trial}: walk must raise the flag");
+                assert!(
+                    core.gnss_diverged(),
+                    "trial {trial}: walk must raise the flag"
+                );
             } else {
-                assert!(!core.gnss_diverged(), "trial {trial} fault {fault}: false flag");
+                assert!(
+                    !core.gnss_diverged(),
+                    "trial {trial} fault {fault}: false flag"
+                );
             }
         }
     }
@@ -3774,7 +4012,10 @@ mod tests {
             sup.step(&mut backend);
         }
         assert_eq!(sup.mode(), Mode::Loiter);
-        assert!(!sup.battery().degraded, "current sense present ⇒ compensated path");
+        assert!(
+            !sup.battery().degraded,
+            "current sense present ⇒ compensated path"
+        );
 
         // 4-second 300 A punch: terminal sags to 8.2 V — WAY below the 14 V
         // raw threshold that used to gate the failsafe directly.
@@ -3783,7 +4024,11 @@ mod tests {
         for _ in 0..2000 {
             sup.step(&mut backend);
         }
-        assert_eq!(sup.mode(), Mode::Loiter, "sag must not false-trigger the failsafe");
+        assert_eq!(
+            sup.mode(),
+            Mode::Loiter,
+            "sag must not false-trigger the failsafe"
+        );
 
         // Same terminal voltage, near-zero current, sustained: nothing to
         // credit back — a pack genuinely THIS low at rest is an emergency.
@@ -3812,8 +4057,10 @@ mod tests {
     fn holds_through_accelerometer_vibration() {
         let dt = 0.002f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-        let mut backend = SimBackend::new(level, dt)
-            .with_pathology(Pathology { vibration: 1.5, ..Default::default() });
+        let mut backend = SimBackend::new(level, dt).with_pathology(Pathology {
+            vibration: 1.5,
+            ..Default::default()
+        });
         let mut core = FlightCore::new(0.5, 1.0 / dt);
         core.set_altitude(-2.0);
         let mut peak = 0.0f32;
@@ -3823,8 +4070,15 @@ mod tests {
                 peak = peak.max(backend.tilt());
             }
         }
-        assert!(peak < 0.15, "IEKF must reject accel vibration: peak tilt {peak} rad");
-        assert!((backend.pos[2] + 2.0).abs() < 0.4, "altitude held under vibration: {}", backend.pos[2]);
+        assert!(
+            peak < 0.15,
+            "IEKF must reject accel vibration: peak tilt {peak} rad"
+        );
+        assert!(
+            (backend.pos[2] + 2.0).abs() < 0.4,
+            "altitude held under vibration: {}",
+            backend.pos[2]
+        );
     }
 
     /// A slow gyro bias drift (0.004 rad/s², ≈0.5°/s after 12 s): the IEKF's
@@ -3834,8 +4088,10 @@ mod tests {
     fn iekf_tracks_gyro_bias_drift() {
         let dt = 0.002f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-        let mut backend = SimBackend::new(level, dt)
-            .with_pathology(Pathology { gyro_bias_drift: 0.004, ..Default::default() });
+        let mut backend = SimBackend::new(level, dt).with_pathology(Pathology {
+            gyro_bias_drift: 0.004,
+            ..Default::default()
+        });
         let mut core = FlightCore::new(0.5, 1.0 / dt);
         core.set_altitude(-2.0);
         let mut peak = 0.0f32;
@@ -3847,7 +4103,10 @@ mod tests {
         }
         // injected bias reaches ≈0.004·30 = 0.12 rad/s; without bias estimation
         // the attitude would integrate that into a steady tilt. The IEKF holds.
-        assert!(peak < 0.15, "IEKF gyro-bias state must track the drift: peak tilt {peak} rad");
+        assert!(
+            peak < 0.15,
+            "IEKF gyro-bias state must track the drift: peak tilt {peak} rad"
+        );
     }
 
     /// A GPS dropout mid-flight (2 s, steps 6000–7000): while holding position,
@@ -3871,13 +4130,22 @@ mod tests {
         for k in 0..15000 {
             core.step(&mut backend);
             if (6000..8000).contains(&k) {
-                let d = relay_math::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
+                let d = relay_math::sqrtf(
+                    backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1],
+                );
                 peak_drift = peak_drift.max(d);
             }
         }
-        let final_d = relay_math::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
-        assert!(peak_drift < 2.0, "dropout drift must stay bounded: {peak_drift} m");
-        assert!(final_d < 0.5, "position must re-converge after the fix returns: {final_d} m");
+        let final_d =
+            relay_math::sqrtf(backend.pos[0] * backend.pos[0] + backend.pos[1] * backend.pos[1]);
+        assert!(
+            peak_drift < 2.0,
+            "dropout drift must stay bounded: {peak_drift} m"
+        );
+        assert!(
+            final_d < 0.5,
+            "position must re-converge after the fix returns: {final_d} m"
+        );
     }
 
     /// Magnetometer interference (0.3 of unit field per axis): the heading
@@ -3887,8 +4155,10 @@ mod tests {
     fn tolerates_mag_interference() {
         let dt = 0.002f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-        let mut backend = SimBackend::new(level, dt)
-            .with_pathology(Pathology { mag_interference: 0.3, ..Default::default() });
+        let mut backend = SimBackend::new(level, dt).with_pathology(Pathology {
+            mag_interference: 0.3,
+            ..Default::default()
+        });
         let mut core = FlightCore::new(0.5, 1.0 / dt);
         core.set_altitude(-2.0);
         let mut peak = 0.0f32;
@@ -3898,8 +4168,15 @@ mod tests {
                 peak = peak.max(backend.tilt());
             }
         }
-        assert!(peak < 0.15, "mag interference must not destabilise attitude: peak tilt {peak} rad");
-        assert!((backend.pos[2] + 2.0).abs() < 0.4, "altitude held under mag interference: {}", backend.pos[2]);
+        assert!(
+            peak < 0.15,
+            "mag interference must not destabilise attitude: peak tilt {peak} rad"
+        );
+        assert!(
+            (backend.pos[2] + 2.0).abs() < 0.4,
+            "altitude held under mag interference: {}",
+            backend.pos[2]
+        );
     }
 
     // ── v1.11 — the real-hardware backend SEAM, composed end-to-end ───────
@@ -4019,7 +4296,10 @@ mod tests {
         let d_pd = fly_under_wind([3.0, 4.0, 0.0], 0.0, Some(0.0), 30000);
         let d_pid = fly_under_wind([3.0, 4.0, 0.0], 0.0, None, 30000);
         assert!(d_pd > 1.5, "P-D alone should offset under wind: {d_pd} m");
-        assert!(d_pid < d_pd * 0.5, "the integral must cut the offset: PID {d_pid} m vs PD {d_pd} m");
+        assert!(
+            d_pid < d_pd * 0.5,
+            "the integral must cut the offset: PID {d_pid} m vs PD {d_pd} m"
+        );
     }
 
     /// Gusts on top of the steady wind stay bounded — the integral tracks the
@@ -4027,7 +4307,10 @@ mod tests {
     #[test]
     fn rejects_wind_gusts() {
         let d = fly_under_wind([3.0, 0.0, 0.0], 2.0, None, 30000); // 3 m/s + 2 m/s gusts
-        assert!(d < 1.0, "P-I-D must keep gusty wind bounded: {d} m from home");
+        assert!(
+            d < 1.0,
+            "P-I-D must keep gusty wind bounded: {d} m from home"
+        );
     }
 
     // ── v1.17 aerodynamic drag (quadratic, ∝ v²) ──────────────────────────
@@ -4107,7 +4390,10 @@ mod tests {
         }
         // after ~40 s the injected bias has random-walked to ≈0.01·√40 ≈ 0.06
         // rad/s; the IEKF tracks it, so the steady tilt stays bounded.
-        assert!(peak < 0.15, "IEKF must hold under random-walk gyro bias: peak tilt {peak} rad");
+        assert!(
+            peak < 0.15,
+            "IEKF must hold under random-walk gyro bias: peak tilt {peak} rad"
+        );
     }
 
     // ── v1.19 GNSS realism: continuous position noise + INTERMITTENT periodic
@@ -4145,7 +4431,10 @@ mod tests {
     #[test]
     fn holds_under_noisy_intermittent_gps() {
         let peak = fly_noisy_gps(0.09); // var = (0.3 m)² — matched to the fix noise
-        assert!(peak < 1.5, "variance-matched filter must hold under noisy GNSS: peak {peak} m");
+        assert!(
+            peak < 1.5,
+            "variance-matched filter must hold under noisy GNSS: peak {peak} m"
+        );
     }
 
     /// FALSIFICATION: the optimistic default variance (0.01 = 1 cm²) over-trusts
@@ -4156,8 +4445,14 @@ mod tests {
     fn optimistic_variance_diverges_under_noisy_gps() {
         let peak_optimistic = fly_noisy_gps(0.01); // default 1 cm² — over-trusting
         let peak_matched = fly_noisy_gps(0.09); // matched
-        assert!(peak_optimistic > 10.0, "over-trust should diverge: {peak_optimistic} m");
-        assert!(peak_matched < peak_optimistic * 0.1, "matched must be far better: {peak_matched} vs {peak_optimistic} m");
+        assert!(
+            peak_optimistic > 10.0,
+            "over-trust should diverge: {peak_optimistic} m"
+        );
+        assert!(
+            peak_matched < peak_optimistic * 0.1,
+            "matched must be far better: {peak_matched} vs {peak_optimistic} m"
+        );
     }
 
     // ── v1.20 barometer fusion: an independent vertical source so altitude
@@ -4191,7 +4486,10 @@ mod tests {
     fn baro_holds_altitude_through_gps_loss() {
         let err_baro = alt_err_through_gps_loss(true);
         let err_nobaro = alt_err_through_gps_loss(false);
-        assert!(err_baro < 1.5, "baro must hold altitude through GPS loss: {err_baro} m");
+        assert!(
+            err_baro < 1.5,
+            "baro must hold altitude through GPS loss: {err_baro} m"
+        );
         assert!(
             err_baro < err_nobaro,
             "baro must beat GPS-only dead-reckoning: baro {err_baro} vs no-baro {err_nobaro} m"
@@ -4226,7 +4524,10 @@ mod tests {
             }
         }
         assert!(fired, "draining battery must actuate the failsafe");
-        assert!(min_v < 14.0, "voltage must have SAGGED below threshold from drain, not set: {min_v} V");
+        assert!(
+            min_v < 14.0,
+            "voltage must have SAGGED below threshold from drain, not set: {min_v} V"
+        );
         assert!(
             backend.battery_charge < 0.9,
             "charge must have genuinely depleted: {}",
@@ -4269,8 +4570,15 @@ mod tests {
             fn read_imu(&mut self) -> ImuSample {
                 // tilted: gravity measured along body-x ⇒ the estimate converges
                 // to a ~90° tilt (well past the runaway limit); else level.
-                let accel = if self.tilted { [GRAVITY, 0.0, 0.0] } else { [0.0, 0.0, -GRAVITY] };
-                ImuSample { accel, gyro: [0.0; 3] }
+                let accel = if self.tilted {
+                    [GRAVITY, 0.0, 0.0]
+                } else {
+                    [0.0, 0.0, -GRAVITY]
+                };
+                ImuSample {
+                    accel,
+                    gyro: [0.0; 3],
+                }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 Some([0.0, 0.0, 0.0])
@@ -4287,7 +4595,10 @@ mod tests {
             }
         }
         let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
-        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        sup.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
         let mut b = TumbleBackend { tilted: false };
 
         // converge level, then arm + take off (airborne, still level).
@@ -4302,7 +4613,11 @@ mod tests {
         for _ in 0..200 {
             sup.step(&mut b);
         }
-        assert_ne!(sup.mode(), relay_fsm::Mode::Terminated, "level flight must not terminate");
+        assert_ne!(
+            sup.mode(),
+            relay_fsm::Mode::Terminated,
+            "level flight must not terminate"
+        );
 
         // now a sustained tumble → flight termination. The tilt blows through the
         // high-wind band (~47 cycles, < the wind debounce) into the runaway range,
@@ -4311,7 +4626,11 @@ mod tests {
         for _ in 0..3000 {
             sup.step(&mut b);
         }
-        assert_eq!(sup.mode(), relay_fsm::Mode::Terminated, "sustained attitude runaway cuts motors");
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Terminated,
+            "sustained attitude runaway cuts motors"
+        );
     }
 
     /// v1.101 expanded failsafe — HIGH WIND: control saturation while leaning hard
@@ -4335,7 +4654,10 @@ mod tests {
                 } else {
                     [0.0, 0.0, -GRAVITY]
                 };
-                ImuSample { accel, gyro: [0.0; 3] }
+                ImuSample {
+                    accel,
+                    gyro: [0.0; 3],
+                }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 Some([100.0, 0.0, 0.0]) // away from home: an RTL flies, never lands
@@ -4354,7 +4676,10 @@ mod tests {
         // effectively-infinite fence so the tilt-corrupted position estimate can
         // never trip the GEOFENCE failsafe — isolating the high-wind path.
         let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 1.0e9, 2.0, 14.0);
-        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        sup.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
         let mut b = WindBackend { windy: false };
         // converge level, arm, take off.
         for _ in 0..1500 {
@@ -4377,15 +4702,26 @@ mod tests {
             sup.step(&mut b);
             // the FIRST failsafe to fire does so from Takeoff → Rtl (recovery).
             if sup.rtl_latched && before == relay_fsm::Mode::Takeoff {
-                fired_at_takeoff = sup.mode() == relay_fsm::Mode::Rtl || sup.mode() == relay_fsm::Mode::Land;
+                fired_at_takeoff =
+                    sup.mode() == relay_fsm::Mode::Rtl || sup.mode() == relay_fsm::Mode::Land;
             }
             if sup.rtl_latched {
                 break;
             }
         }
-        assert!(sup.rtl_latched, "sustained high-wind saturation must fire the RTL-class failsafe");
-        assert!(fired_at_takeoff, "the failsafe fired from normal flight (Takeoff → RTL recovery)");
-        assert_ne!(sup.mode(), relay_fsm::Mode::Terminated, "high wind recovers (RTL), it does NOT terminate");
+        assert!(
+            sup.rtl_latched,
+            "sustained high-wind saturation must fire the RTL-class failsafe"
+        );
+        assert!(
+            fired_at_takeoff,
+            "the failsafe fired from normal flight (Takeoff → RTL recovery)"
+        );
+        assert_ne!(
+            sup.mode(),
+            relay_fsm::Mode::Terminated,
+            "high wind recovers (RTL), it does NOT terminate"
+        );
     }
 
     /// #413 — ABSENCE IS NOT HEALTH. A backend with no battery sense must make
@@ -4406,7 +4742,10 @@ mod tests {
         struct NoBatteryBackend;
         impl FlightBackend for NoBatteryBackend {
             fn read_imu(&mut self) -> ImuSample {
-                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+                ImuSample {
+                    accel: [0.0, 0.0, -GRAVITY],
+                    gyro: [0.0; 3],
+                }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 Some([0.0, 0.0, 0.0])
@@ -4425,7 +4764,10 @@ mod tests {
         let mut b = NoBatteryBackend;
         // A calibration is installed so that CALIBRATION is not what blocks us —
         // otherwise this test would pass for the wrong reason.
-        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        sup.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
         for _ in 0..1500 {
             sup.step(&mut b);
         }
@@ -4456,7 +4798,10 @@ mod tests {
         }
         impl FlightBackend for RestBackend {
             fn read_imu(&mut self) -> ImuSample {
-                ImuSample { accel: [0.0, 0.0, -GRAVITY], gyro: [0.0; 3] }
+                ImuSample {
+                    accel: [0.0, 0.0, -GRAVITY],
+                    gyro: [0.0; 3],
+                }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 Some([0.0, 0.0, 0.0])
@@ -4481,26 +4826,50 @@ mod tests {
             sup.step(&mut b);
         }
         sup.command(relay_fsm::Event::Arm, true, true);
-        assert_eq!(sup.mode(), relay_fsm::Mode::Disarmed, "must not arm without calibration");
-        assert_eq!(sup.arm_blocked_reason(), Some(relay_preflight::CheckFail::Calibration));
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Disarmed,
+            "must not arm without calibration"
+        );
+        assert_eq!(
+            sup.arm_blocked_reason(),
+            Some(relay_preflight::CheckFail::Calibration)
+        );
 
         // install a (non-identity) calibration → step once to refresh → arms.
-        sup.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        sup.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
         sup.step(&mut b);
         assert_eq!(sup.arm_blocked_reason(), None, "all real checks pass");
         sup.command(relay_fsm::Event::Arm, true, true);
-        assert_eq!(sup.mode(), relay_fsm::Mode::Armed, "arms once the real signals are good");
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Armed,
+            "arms once the real signals are good"
+        );
 
         // a low battery (read each step) blocks re-arming after a disarm.
         let mut low = RestBackend { batt: 13.0 };
         let mut sup2 = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
-        sup2.set_calibration(CalParams { gyro_bias: [0.001, 0.0, 0.0], ..CalParams::identity() });
+        sup2.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
         for _ in 0..1500 {
             sup2.step(&mut low);
         }
         sup2.command(relay_fsm::Event::Arm, true, true);
-        assert_eq!(sup2.mode(), relay_fsm::Mode::Disarmed, "low battery blocks arming");
-        assert_eq!(sup2.arm_blocked_reason(), Some(relay_preflight::CheckFail::Battery));
+        assert_eq!(
+            sup2.mode(),
+            relay_fsm::Mode::Disarmed,
+            "low battery blocks arming"
+        );
+        assert_eq!(
+            sup2.arm_blocked_reason(),
+            Some(relay_preflight::CheckFail::Battery)
+        );
     }
 
     /// v1.97 pre-arm gate (the seam): the FlightSupervisor refuses to arm unless
@@ -4514,7 +4883,11 @@ mod tests {
         // all checks FAILING (Default = all false): arming refused, reason = first.
         sup.set_preflight(PreflightChecks::default());
         sup.command(relay_fsm::Event::Arm, true, true); // level + throttle idle
-        assert_eq!(sup.mode(), relay_fsm::Mode::Disarmed, "no arm with failed pre-arm checks");
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Disarmed,
+            "no arm with failed pre-arm checks"
+        );
         assert_eq!(sup.arm_blocked_reason(), Some(CheckFail::Sensors));
 
         // only the battery failing → blocked on Battery, still won't arm.
@@ -4541,13 +4914,20 @@ mod tests {
         });
         assert_eq!(sup.arm_blocked_reason(), None);
         sup.command(relay_fsm::Event::Arm, true, true);
-        assert_eq!(sup.mode(), relay_fsm::Mode::Armed, "arms once every pre-arm check passes");
+        assert_eq!(
+            sup.mode(),
+            relay_fsm::Mode::Armed,
+            "arms once every pre-arm check passes"
+        );
     }
 
     #[test]
     fn holds_altitude_under_thrust_lapse() {
         let alt = final_altitude_under_lapse(20.0, 0.01, Some(0.02)); // integral ON
-        assert!((alt - 20.0).abs() < 1.0, "must hold 20 m despite thrust lapse: {alt} m");
+        assert!(
+            (alt - 20.0).abs() < 1.0,
+            "must hold 20 m despite thrust lapse: {alt} m"
+        );
     }
 
     /// FALSIFICATION: with the altitude integral DISABLED (P-D only) the thrust
@@ -4557,7 +4937,10 @@ mod tests {
     fn bare_altitude_pd_sags_under_lapse() {
         let alt_pd = final_altitude_under_lapse(20.0, 0.01, Some(0.0)); // integral OFF
         let alt_pid = final_altitude_under_lapse(20.0, 0.01, Some(0.02)); // integral ON
-        assert!(alt_pd < 19.0, "P-D alone should sag below target under lapse: {alt_pd} m");
+        assert!(
+            alt_pd < 19.0,
+            "P-D alone should sag below target under lapse: {alt_pd} m"
+        );
         assert!(
             (alt_pid - 20.0).abs() < 1.0 && alt_pid > alt_pd,
             "the integral must close the gap: pid {alt_pid} vs pd {alt_pd} m"
@@ -4619,7 +5002,10 @@ mod tests {
         }
         let e = [b.pos[0] - 1.5, b.pos[1] + 1.0, b.pos[2] + 2.0];
         let err = relay_math::sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
-        assert!(err < 0.6, "position hold must stay bounded under motor lag: {err} m");
+        assert!(
+            err < 0.6,
+            "position hold must stay bounded under motor lag: {err} m"
+        );
     }
 
     // ── v1.24 ground effect: a thrust cushion near the surface (landing/takeoff).
@@ -4639,7 +5025,10 @@ mod tests {
             core.step(&mut b);
         }
         let alt = -b.pos[2];
-        assert!((alt - 2.0).abs() < 0.3, "ground effect must aid takeoff to altitude: {alt} m");
+        assert!(
+            (alt - 2.0).abs() < 0.3,
+            "ground effect must aid takeoff to altitude: {alt} m"
+        );
     }
 
     /// HONEST LIMITATION (documented, not faked): ground effect cushions the
@@ -4683,8 +5072,10 @@ mod tests {
     fn holds_position_under_turbulence() {
         let dt = 0.002f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-        let mut b = SimBackend::new(level, dt)
-            .with_pathology(Pathology { turbulence: 2.0, ..Default::default() });
+        let mut b = SimBackend::new(level, dt).with_pathology(Pathology {
+            turbulence: 2.0,
+            ..Default::default()
+        });
         let mut core = FlightCore::new(0.5, 1.0 / dt);
         core.set_position([0.0, 0.0, -2.0]);
         let mut peak = 0.0f32;
@@ -4698,7 +5089,10 @@ mod tests {
         // bounded under continuous turbulence — it does not diverge (an
         // over-authority wind blew the vehicle to 100s of metres; this rides
         // out the persistent gusts within a few metres).
-        assert!(peak < 4.0, "turbulence must stay bounded (not diverge): peak {peak} m");
+        assert!(
+            peak < 4.0,
+            "turbulence must stay bounded (not diverge): peak {peak} m"
+        );
     }
 
     // ── v1.27 velocity-based touchdown: the clean landing the v1.24 ground-
@@ -4725,8 +5119,15 @@ mod tests {
             core.step(&mut b);
         }
         let alt = -b.pos[2];
-        assert!(alt < 0.15, "velocity touchdown must reach the surface through ground effect: {alt} m");
-        assert!(b.vel[2].abs() < 0.3, "should settle on touchdown: vz {} m/s", b.vel[2]);
+        assert!(
+            alt < 0.15,
+            "velocity touchdown must reach the surface through ground effect: {alt} m"
+        );
+        assert!(
+            b.vel[2].abs() < 0.3,
+            "should settle on touchdown: vz {} m/s",
+            b.vel[2]
+        );
     }
 
     // ── v1.29: wire the v1.27 velocity-landing into the FlightSupervisor ──
@@ -4757,7 +5158,11 @@ mod tests {
         for _ in 0..8000 {
             sup.step(&mut b);
         }
-        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter after takeoff");
+        assert_eq!(
+            sup.mode(),
+            Mode::Loiter,
+            "should reach Loiter after takeoff"
+        );
 
         sup.command(Event::RequestLand, true, false); // → Land (velocity touchdown)
         let mut disarmed = false;
@@ -4778,7 +5183,11 @@ mod tests {
         // Touchdown→Disarmed interrupts the descent at the 0.15 m trigger and the
         // disarmed position-hold settles just above it through ground effect — on
         // the surface (vs the ~1.3 m float without the velocity-landing).
-        assert!(-b.pos[2] < 0.25, "must settle on the surface (not float): {} m", -b.pos[2]);
+        assert!(
+            -b.pos[2] < 0.25,
+            "must settle on the surface (not float): {} m",
+            -b.pos[2]
+        );
     }
 
     /// v1.117 (FAULT-P04) — the SUPERVISED rotor-out chain ends on the ground:
@@ -4803,7 +5212,11 @@ mod tests {
         for _ in 0..8000 {
             sup.step(&mut b);
         }
-        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter after takeoff");
+        assert_eq!(
+            sup.mode(),
+            Mode::Loiter,
+            "should reach Loiter after takeoff"
+        );
         // The failure must be injected from a SETTLED hover — otherwise the
         // sink metrics measure the pre-existing limit cycle, not the recovery
         // (this precondition caught exactly that on first write).
@@ -4841,14 +5254,22 @@ mod tests {
                 break;
             }
         }
-        assert!(land_cmded, "motor failsafe must command Land (mode {:?})", sup.mode());
+        assert!(
+            land_cmded,
+            "motor failsafe must command Land (mode {:?})",
+            sup.mode()
+        );
         assert!(
             landed,
             "supervised rotor-out must touch down + disarm: mode {:?}, alt {} m",
             sup.mode(),
             -b.pos[2]
         );
-        assert!(-b.pos[2] < 0.25, "must settle on the surface: {} m", -b.pos[2]);
+        assert!(
+            -b.pos[2] < 0.25,
+            "must settle on the surface: {} m",
+            -b.pos[2]
+        );
         // The lift-loss transient is bounded (arrested well short of freefall
         // from 2 m ≈ 6.3 m/s) and the FINAL APPROACH is gentle (the velocity
         // landing commands 0.5 m/s; allow margin for the rotor-out wobble).
@@ -4856,10 +5277,20 @@ mod tests {
             peak_sink_transient < 4.0,
             "lift-loss transient must be arrested: peak {peak_sink_transient} m/s"
         );
-        assert!(approach_sink < 1.0, "final approach must be gentle: {approach_sink} m/s");
-        assert!(peak_tilt < 0.5, "must stay near-level during the descent: peak {peak_tilt} rad");
+        assert!(
+            approach_sink < 1.0,
+            "final approach must be gentle: {approach_sink} m/s"
+        );
+        assert!(
+            peak_tilt < 0.5,
+            "must stay near-level during the descent: peak {peak_tilt} rad"
+        );
         // Upright on the ground.
-        assert!(b.tilt() < 0.35, "must be upright at touchdown: {} rad", b.tilt());
+        assert!(
+            b.tilt() < 0.35,
+            "must be upright at touchdown: {} rad",
+            b.tilt()
+        );
     }
 }
 
@@ -4963,7 +5394,11 @@ mod failsafe_campaign {
                 pos: [0.0, 0.0, 0.0],
             };
             airborne(&mut sup, &mut b);
-            assert_ne!(sup.mode(), Mode::Terminated, "trial {i}: terminated on level takeoff");
+            assert_ne!(
+                sup.mode(),
+                Mode::Terminated,
+                "trial {i}: terminated on level takeoff"
+            );
             if runaway {
                 b.tilt = rng.range(1.15, 1.50); // strictly > TILT_RUNAWAY_LIMIT
                 for _ in 0..4000 {
@@ -4980,7 +5415,11 @@ mod failsafe_campaign {
                 for _ in 0..500 {
                     sup.step(&mut b);
                 }
-                assert_eq!(sup.mode(), Mode::Terminated, "trial {i}: terminate did not latch");
+                assert_eq!(
+                    sup.mode(),
+                    Mode::Terminated,
+                    "trial {i}: terminate did not latch"
+                );
                 term_fires += 1;
             } else {
                 b.tilt = rng.range(0.0, 0.95); // strictly < TILT_RUNAWAY_LIMIT

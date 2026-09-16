@@ -76,7 +76,10 @@ pub fn decode_tf02_frame(frame: &[u8; TF02_FRAME_LEN]) -> Result<Tf02Sample, Tf0
     // Division, not ×0.01: the f32 quotient is correctly rounded, so the
     // envelope bounds are EXACT (10/100 == 0.1f32; 4000/100 == 40.0f32) —
     // Kani caught 10 × 0.01f32 = 0.099999994 escaping the envelope.
-    Ok(Tf02Sample { distance_m: dist_cm as f32 / 100.0, strength })
+    Ok(Tf02Sample {
+        distance_m: dist_cm as f32 / 100.0,
+        strength,
+    })
 }
 
 /// Streaming resync scanner: find and decode the first valid frame in
@@ -127,7 +130,10 @@ mod tests {
         let f = [0x59, 0x59, 0x2C, 0x02, 0x38, 0x04, 0x00, 0x00, 0x1C];
         assert_eq!(
             decode_tf02_frame(&f),
-            Ok(Tf02Sample { distance_m: 5.56, strength: 1080 })
+            Ok(Tf02Sample {
+                distance_m: 5.56,
+                strength: 1080
+            })
         );
         // and the constructor agrees with the hand-worked bytes:
         assert_eq!(frame(556, 1080, 0), f);
@@ -147,14 +153,26 @@ mod tests {
     /// out-of-envelope returns NEVER reach the caller as a range.
     #[test]
     fn quality_gate_rejects() {
-        assert_eq!(decode_tf02_frame(&frame(556, 59, 0)), Err(Tf02Reject::LowStrength));
-        assert_eq!(decode_tf02_frame(&frame(556, 0xFFFF, 0)), Err(Tf02Reject::LowStrength));
+        assert_eq!(
+            decode_tf02_frame(&frame(556, 59, 0)),
+            Err(Tf02Reject::LowStrength)
+        );
+        assert_eq!(
+            decode_tf02_frame(&frame(556, 0xFFFF, 0)),
+            Err(Tf02Reject::LowStrength)
+        );
         assert_eq!(
             decode_tf02_frame(&frame(0xFFFF, 1080, 0)),
             Err(Tf02Reject::InvalidSentinel)
         );
-        assert_eq!(decode_tf02_frame(&frame(5, 1080, 0)), Err(Tf02Reject::OutOfEnvelope));
-        assert_eq!(decode_tf02_frame(&frame(4050, 1080, 0)), Err(Tf02Reject::OutOfEnvelope));
+        assert_eq!(
+            decode_tf02_frame(&frame(5, 1080, 0)),
+            Err(Tf02Reject::OutOfEnvelope)
+        );
+        assert_eq!(
+            decode_tf02_frame(&frame(4050, 1080, 0)),
+            Err(Tf02Reject::OutOfEnvelope)
+        );
         // envelope boundaries are inclusive:
         assert!(decode_tf02_frame(&frame(10, 1080, 0)).is_ok());
         assert!(decode_tf02_frame(&frame(4000, 1080, 0)).is_ok());
@@ -169,7 +187,13 @@ mod tests {
         stream[..7].copy_from_slice(&[0x00, 0x59, 0x12, 0xFF, 0x59, 0x00, 0xAB]);
         stream[7..16].copy_from_slice(&f);
         let (r, used) = scan_tf02(&stream);
-        assert_eq!(r, Some(Ok(Tf02Sample { distance_m: 2.0, strength: 500 })));
+        assert_eq!(
+            r,
+            Some(Ok(Tf02Sample {
+                distance_m: 2.0,
+                strength: 500
+            }))
+        );
         assert_eq!(used, 16);
         // no frame at all: consumed leaves a potential partial header tail.
         let (r, used) = scan_tf02(&stream[..7]);
@@ -187,7 +211,13 @@ mod tests {
         stream[1] = 0x59; // false start, checksum will fail
         stream[2..11].copy_from_slice(&f);
         let (r, _used) = scan_tf02(&stream);
-        assert_eq!(r, Some(Ok(Tf02Sample { distance_m: 3.0, strength: 800 })));
+        assert_eq!(
+            r,
+            Some(Ok(Tf02Sample {
+                distance_m: 3.0,
+                strength: 800
+            }))
+        );
     }
 
     mod proptests {

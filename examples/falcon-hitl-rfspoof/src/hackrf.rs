@@ -78,10 +78,14 @@ impl HackRfConfig {
     pub fn hackrf_transfer_argv(&self) -> [String; 9] {
         [
             "hackrf_transfer".into(),
-            "-t".into(), self.iq_path.clone(),
-            "-f".into(), self.freq_hz.to_string(),
-            "-s".into(), self.sample_rate_hz.to_string(),
-            "-x".into(), self.gain_db.to_string(),
+            "-t".into(),
+            self.iq_path.clone(),
+            "-f".into(),
+            self.freq_hz.to_string(),
+            "-s".into(),
+            self.sample_rate_hz.to_string(),
+            "-x".into(),
+            self.gain_db.to_string(),
         ]
     }
 }
@@ -105,10 +109,17 @@ impl GpsSdrSimConfig {
     pub fn argv(&self) -> [String; 9] {
         [
             "gps-sdr-sim".into(),
-            "-e".into(), self.nav_path.clone(),
-            "-l".into(), format!("{},{},{}", self.spoof_lat_deg, self.spoof_lon_deg, self.spoof_alt_m),
-            "-o".into(), self.out_iq_path.clone(),
-            "-d".into(), self.duration_s.to_string(),
+            "-e".into(),
+            self.nav_path.clone(),
+            "-l".into(),
+            format!(
+                "{},{},{}",
+                self.spoof_lat_deg, self.spoof_lon_deg, self.spoof_alt_m
+            ),
+            "-o".into(),
+            self.out_iq_path.clone(),
+            "-d".into(),
+            self.duration_s.to_string(),
         ]
     }
 }
@@ -156,7 +167,9 @@ impl HackRfBench {
 }
 
 impl HitlBench for HackRfBench {
-    fn name(&self) -> &'static str { self.label }
+    fn name(&self) -> &'static str {
+        self.label
+    }
 
     fn step(&mut self, dt: f32) {
         self.t += dt;

@@ -22,8 +22,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use relay_ekf_stub::{EkfStub, Timestamp};
 use relay_mavlink::{
-    encode_frame, parse_frame, peek_message_id, CodecError, Frame, FrameHeader, Heartbeat,
-    HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, HEARTBEAT_PAYLOAD_LEN, MAGIC_V2, MAX_FRAME_SIZE,
+    CodecError, Frame, FrameHeader, HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, HEARTBEAT_PAYLOAD_LEN,
+    Heartbeat, MAGIC_V2, MAX_FRAME_SIZE, encode_frame, parse_frame, peek_message_id,
 };
 
 const DEFAULT_PORT: u16 = 14550;
@@ -170,7 +170,10 @@ fn run_vehicle(args: &Args) -> Result<(), String> {
     let mut next_send = Instant::now();
     let mut buf = [0u8; MAX_FRAME_SIZE];
 
-    eprintln!("vehicle: emitting heartbeats at {} Hz → {}", args.rate_hz, args.remote);
+    eprintln!(
+        "vehicle: emitting heartbeats at {} Hz → {}",
+        args.rate_hz, args.remote
+    );
 
     loop {
         if let Some(d) = args.duration {
@@ -294,7 +297,9 @@ mod tests {
         let vehicle_bind: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let gcs_sock = UdpSocket::bind(gcs_bind).expect("gcs bind");
         let vehicle_sock = UdpSocket::bind(vehicle_bind).expect("vehicle bind");
-        gcs_sock.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        gcs_sock
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
 
         let gcs_addr = gcs_sock.local_addr().unwrap();
         let vehicle_addr = vehicle_sock.local_addr().unwrap();
@@ -396,13 +401,14 @@ mod tests {
         thread::sleep(Duration::from_millis(2));
         let t2 = current_timestamp();
         // Either seconds incremented, or fraction did.
-        assert!(t2.seconds > t1.seconds
-            || (t2.seconds == t1.seconds && t2.fraction > t1.fraction));
+        assert!(t2.seconds > t1.seconds || (t2.seconds == t1.seconds && t2.fraction > t1.fraction));
     }
 
     #[test]
     fn args_default_ports_for_vehicle_mode() {
-        let argv = ["falcon-hello", "--mode", "vehicle"].iter().map(|s| s.to_string());
+        let argv = ["falcon-hello", "--mode", "vehicle"]
+            .iter()
+            .map(|s| s.to_string());
         let args = Args::parse(argv).expect("parse");
         assert_eq!(args.mode, Mode::Vehicle);
         assert_eq!(args.bind.port(), DEFAULT_PORT + 1);
@@ -411,7 +417,9 @@ mod tests {
 
     #[test]
     fn args_default_ports_for_gcs_mode() {
-        let argv = ["falcon-hello", "--mode", "gcs"].iter().map(|s| s.to_string());
+        let argv = ["falcon-hello", "--mode", "gcs"]
+            .iter()
+            .map(|s| s.to_string());
         let args = Args::parse(argv).expect("parse");
         assert_eq!(args.mode, Mode::Gcs);
         assert_eq!(args.bind.port(), DEFAULT_PORT);
@@ -420,7 +428,9 @@ mod tests {
 
     #[test]
     fn args_rejects_unknown_mode() {
-        let argv = ["falcon-hello", "--mode", "spy"].iter().map(|s| s.to_string());
+        let argv = ["falcon-hello", "--mode", "spy"]
+            .iter()
+            .map(|s| s.to_string());
         let err = Args::parse(argv).unwrap_err();
         assert!(err.contains("unknown --mode"));
     }

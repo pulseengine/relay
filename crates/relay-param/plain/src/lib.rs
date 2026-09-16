@@ -76,10 +76,18 @@ impl<const N: usize> ParamStore<N> {
     /// An empty store.
     pub fn new() -> Self {
         let blank = Param {
-            def: ParamDef { id: [0; 16], min: 0.0, max: 0.0, default: 0.0 },
+            def: ParamDef {
+                id: [0; 16],
+                min: 0.0,
+                max: 0.0,
+                default: 0.0,
+            },
             value: 0.0,
         };
-        ParamStore { params: [blank; N], count: 0 }
+        ParamStore {
+            params: [blank; N],
+            count: 0,
+        }
     }
 
     /// Register a parameter (value initialised to its default). Returns false if
@@ -105,7 +113,9 @@ impl<const N: usize> ParamStore<N> {
     }
 
     fn index_of(&self, id: &ParamId) -> Option<usize> {
-        self.params[..self.count].iter().position(|p| &p.def.id == id)
+        self.params[..self.count]
+            .iter()
+            .position(|p| &p.def.id == id)
     }
 
     /// The current value of a parameter (for PARAM_VALUE).
@@ -167,8 +177,18 @@ mod tests {
 
     fn store() -> ParamStore<4> {
         let mut s = ParamStore::new();
-        s.register(ParamDef { id: param_id("MC_ROLL_P"), min: 0.0, max: 12.0, default: 6.5 });
-        s.register(ParamDef { id: param_id("BAT_LOW_V"), min: 10.0, max: 16.8, default: 14.0 });
+        s.register(ParamDef {
+            id: param_id("MC_ROLL_P"),
+            min: 0.0,
+            max: 12.0,
+            default: 6.5,
+        });
+        s.register(ParamDef {
+            id: param_id("BAT_LOW_V"),
+            min: 10.0,
+            max: 16.8,
+            default: 14.0,
+        });
         s
     }
 
@@ -191,7 +211,10 @@ mod tests {
         let mut s = store();
         assert_eq!(s.set(&param_id("MC_ROLL_P"), 99.0), SetResult::OutOfRange);
         assert_eq!(s.set(&param_id("MC_ROLL_P"), -1.0), SetResult::OutOfRange);
-        assert_eq!(s.set(&param_id("MC_ROLL_P"), f32::NAN), SetResult::OutOfRange);
+        assert_eq!(
+            s.set(&param_id("MC_ROLL_P"), f32::NAN),
+            SetResult::OutOfRange
+        );
         assert_eq!(s.get(&param_id("MC_ROLL_P")), Some(6.5)); // unchanged
     }
 
@@ -211,8 +234,18 @@ mod tests {
     #[test]
     fn full_store_register_fails() {
         let mut s: ParamStore<1> = ParamStore::new();
-        assert!(s.register(ParamDef { id: param_id("A"), min: 0.0, max: 1.0, default: 0.5 }));
-        assert!(!s.register(ParamDef { id: param_id("B"), min: 0.0, max: 1.0, default: 0.5 }));
+        assert!(s.register(ParamDef {
+            id: param_id("A"),
+            min: 0.0,
+            max: 1.0,
+            default: 0.5
+        }));
+        assert!(!s.register(ParamDef {
+            id: param_id("B"),
+            min: 0.0,
+            max: 1.0,
+            default: 0.5
+        }));
     }
 }
 
@@ -227,9 +260,24 @@ mod persist_tests {
 
     fn schema() -> ParamStore<4> {
         let mut s = ParamStore::new();
-        s.register(ParamDef { id: param_id("MC_ROLL_P"), min: 0.0, max: 12.0, default: 6.5 });
-        s.register(ParamDef { id: param_id("BAT_LOW_V"), min: 10.0, max: 16.8, default: 14.0 });
-        s.register(ParamDef { id: param_id("GF_RADIUS"), min: 5.0, max: 500.0, default: 100.0 });
+        s.register(ParamDef {
+            id: param_id("MC_ROLL_P"),
+            min: 0.0,
+            max: 12.0,
+            default: 6.5,
+        });
+        s.register(ParamDef {
+            id: param_id("BAT_LOW_V"),
+            min: 10.0,
+            max: 16.8,
+            default: 14.0,
+        });
+        s.register(ParamDef {
+            id: param_id("GF_RADIUS"),
+            min: 5.0,
+            max: 500.0,
+            default: 100.0,
+        });
         s
     }
 
@@ -268,7 +316,10 @@ mod persist_tests {
         s.set(&param_id("MC_ROLL_P"), 9.0);
         save(&s, &mut nvm, LAYOUT, VER).unwrap();
         let mut s2 = schema();
-        assert_eq!(load(&mut s2, &nvm, LAYOUT, VER).outcome, LoadOutcome::Loaded);
+        assert_eq!(
+            load(&mut s2, &nvm, LAYOUT, VER).outcome,
+            LoadOutcome::Loaded
+        );
         assert_eq!(s2.get(&param_id("MC_ROLL_P")), Some(9.0));
     }
 
@@ -340,14 +391,29 @@ mod persist_tests {
         // orphan is skipped_unknown, the now-out-of-bounds value rejected —
         // and BOTH are visible in the report (loud, never silent).
         let mut wide = ParamStore::<4>::new();
-        wide.register(ParamDef { id: param_id("MC_ROLL_P"), min: 0.0, max: 50.0, default: 6.5 });
-        wide.register(ParamDef { id: param_id("OLD_PARAM"), min: 0.0, max: 1.0, default: 0.5 });
+        wide.register(ParamDef {
+            id: param_id("MC_ROLL_P"),
+            min: 0.0,
+            max: 50.0,
+            default: 6.5,
+        });
+        wide.register(ParamDef {
+            id: param_id("OLD_PARAM"),
+            min: 0.0,
+            max: 1.0,
+            default: 0.5,
+        });
         wide.set(&param_id("MC_ROLL_P"), 40.0); // legal then, illegal later
         let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
         save(&wide, &mut nvm, LAYOUT, VER).unwrap();
 
         let mut tight = ParamStore::<4>::new();
-        tight.register(ParamDef { id: param_id("MC_ROLL_P"), min: 0.0, max: 12.0, default: 6.5 });
+        tight.register(ParamDef {
+            id: param_id("MC_ROLL_P"),
+            min: 0.0,
+            max: 12.0,
+            default: 6.5,
+        });
         let r = load(&mut tight, &nvm, LAYOUT, VER);
         assert_eq!(r.outcome, LoadOutcome::Loaded);
         assert_eq!((r.applied, r.skipped_unknown, r.rejected), (0, 1, 1));
@@ -360,7 +426,10 @@ mod persist_tests {
         let s = schema();
         assert_eq!(save(&s, &mut nvm, LAYOUT, VER), Err(SaveError::Capacity));
         let mut s2 = schema();
-        assert_eq!(load(&mut s2, &nvm, LAYOUT, VER).outcome, LoadOutcome::FreshDefaults);
+        assert_eq!(
+            load(&mut s2, &nvm, LAYOUT, VER).outcome,
+            LoadOutcome::FreshDefaults
+        );
     }
 }
 
@@ -375,8 +444,18 @@ mod persist_proptests {
 
     fn schema() -> ParamStore<2> {
         let mut s = ParamStore::new();
-        s.register(ParamDef { id: param_id("P"), min: -3.0, max: 7.0, default: 1.0 });
-        s.register(ParamDef { id: param_id("Q"), min: 0.0, max: 100.0, default: 50.0 });
+        s.register(ParamDef {
+            id: param_id("P"),
+            min: -3.0,
+            max: 7.0,
+            default: 1.0,
+        });
+        s.register(ParamDef {
+            id: param_id("Q"),
+            min: 0.0,
+            max: 100.0,
+            default: 50.0,
+        });
         s
     }
 

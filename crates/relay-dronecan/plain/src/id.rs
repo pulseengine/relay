@@ -53,22 +53,33 @@ mod tests {
     #[test]
     fn nodestatus_id_round_trips() {
         // priority 16, DTID 341 (NodeStatus), node 42
-        let m = MessageId { priority: 16, data_type_id: 341, source_node_id: 42 };
+        let m = MessageId {
+            priority: 16,
+            data_type_id: 341,
+            source_node_id: 42,
+        };
         let raw = encode_message_id(&m);
         assert_eq!(decode_message_id(raw), Some(m));
     }
 
     #[test]
     fn service_frame_is_rejected() {
-        let raw = encode_message_id(&MessageId { priority: 0, data_type_id: 1, source_node_id: 1 })
-            | SERVICE_NOT_MESSAGE;
+        let raw = encode_message_id(&MessageId {
+            priority: 0,
+            data_type_id: 1,
+            source_node_id: 1,
+        }) | SERVICE_NOT_MESSAGE;
         assert_eq!(decode_message_id(raw), None);
     }
 
     #[test]
     fn fields_are_masked_to_width() {
         // node id is 7 bits: 0x7F is the max
-        let m = MessageId { priority: 31, data_type_id: 0xFFFF, source_node_id: 0x7F };
+        let m = MessageId {
+            priority: 31,
+            data_type_id: 0xFFFF,
+            source_node_id: 0x7F,
+        };
         assert_eq!(decode_message_id(encode_message_id(&m)), Some(m));
     }
 }

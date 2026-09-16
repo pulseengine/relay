@@ -56,7 +56,12 @@ impl<const N: usize> TelemetryScheduler<N> {
         for (c, s) in countdown.iter_mut().zip(slots.iter()) {
             *c = s.interval_ticks; // stagger-free start; first emit after one interval
         }
-        TelemetryScheduler { slots, countdown, age: [0; N], deferred: 0 }
+        TelemetryScheduler {
+            slots,
+            countdown,
+            age: [0; N],
+            deferred: 0,
+        }
     }
 
     /// The no-starvation precondition: every critical frame fits the budget
@@ -157,14 +162,46 @@ mod tests {
 
     fn falcon_set() -> TelemetryScheduler<8> {
         TelemetryScheduler::new([
-            StreamSlot { interval_ticks: 10, frame_bytes: 21, priority: Priority::Critical },
-            StreamSlot { interval_ticks: 10, frame_bytes: 66, priority: Priority::Critical },
-            StreamSlot { interval_ticks: 1, frame_bytes: 40, priority: Priority::Normal },
-            StreamSlot { interval_ticks: 2, frame_bytes: 40, priority: Priority::Normal },
-            StreamSlot { interval_ticks: 2, frame_bytes: 32, priority: Priority::Normal },
-            StreamSlot { interval_ticks: 5, frame_bytes: 43, priority: Priority::Normal },
-            StreamSlot { interval_ticks: 5, frame_bytes: 64, priority: Priority::Normal },
-            StreamSlot { interval_ticks: 5, frame_bytes: 49, priority: Priority::Normal },
+            StreamSlot {
+                interval_ticks: 10,
+                frame_bytes: 21,
+                priority: Priority::Critical,
+            },
+            StreamSlot {
+                interval_ticks: 10,
+                frame_bytes: 66,
+                priority: Priority::Critical,
+            },
+            StreamSlot {
+                interval_ticks: 1,
+                frame_bytes: 40,
+                priority: Priority::Normal,
+            },
+            StreamSlot {
+                interval_ticks: 2,
+                frame_bytes: 40,
+                priority: Priority::Normal,
+            },
+            StreamSlot {
+                interval_ticks: 2,
+                frame_bytes: 32,
+                priority: Priority::Normal,
+            },
+            StreamSlot {
+                interval_ticks: 5,
+                frame_bytes: 43,
+                priority: Priority::Normal,
+            },
+            StreamSlot {
+                interval_ticks: 5,
+                frame_bytes: 64,
+                priority: Priority::Normal,
+            },
+            StreamSlot {
+                interval_ticks: 5,
+                frame_bytes: 49,
+                priority: Priority::Normal,
+            },
         ])
     }
 

@@ -14,7 +14,11 @@ fn verify_ring_total_and_bounded() {
     kani::assume(n <= 10);
     let mut i = 0;
     while i < n {
-        log.record(LogEntry { t_ms: i, kind: 0, data: [0.0; 2] });
+        log.record(LogEntry {
+            t_ms: i,
+            kind: 0,
+            data: [0.0; 2],
+        });
         assert!(log.len() <= 4);
         i += 1;
     }
@@ -29,10 +33,7 @@ fn verify_encode_decode_identity() {
     let e = LogEntry {
         t_ms: kani::any(),
         kind: kani::any(),
-        data: [
-            f32::from_bits(kani::any()),
-            f32::from_bits(kani::any()),
-        ],
+        data: [f32::from_bits(kani::any()), f32::from_bits(kani::any())],
     };
     let back = LogEntry::decode(&e.encode());
     assert!(back.t_ms == e.t_ms);

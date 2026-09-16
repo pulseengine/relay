@@ -21,7 +21,7 @@
 //! tampered tag → BadMac, wrong SPI → UnknownSpi, replay → Replay.
 
 use crate::ascon::{self, KEY_LEN, TAG_LEN};
-use crate::header::{SecurityHeader, SEC_HEADER_LEN};
+use crate::header::{SEC_HEADER_LEN, SecurityHeader};
 use crate::{ReplayVerdict, ReplayWindow};
 
 /// Smallest possible frame: header + empty payload + tag.
@@ -126,7 +126,13 @@ impl SecurityChannel {
             Confidentiality::Aead => {
                 // encrypt payload in place; AD = header, PT = payload.
                 let (header, rest) = out.split_at_mut(SEC_HEADER_LEN);
-                ascon::seal(&self.key, &nonce, header, payload, &mut rest[..payload.len()])
+                ascon::seal(
+                    &self.key,
+                    &nonce,
+                    header,
+                    payload,
+                    &mut rest[..payload.len()],
+                )
             }
         };
         out[body_end..frame_len].copy_from_slice(&tag);
@@ -364,7 +370,10 @@ mod tests {
         let n = tx.wrap(b"unlock", &mut buf).unwrap();
         buf[SEC_HEADER_LEN] ^= 0xFF; // flip a ciphertext byte
         let mut out = [0u8; 64];
-        assert_eq!(rx.verify_into(&buf[..n], &mut out), Err(VerifyError::BadMac));
+        assert_eq!(
+            rx.verify_into(&buf[..n], &mut out),
+            Err(VerifyError::BadMac)
+        );
     }
 
     #[test]

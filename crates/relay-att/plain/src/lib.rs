@@ -60,7 +60,10 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
-    pub const ZERO: Self = Self { seconds: 0, fraction: 0 };
+    pub const ZERO: Self = Self {
+        seconds: 0,
+        fraction: 0,
+    };
 }
 
 /// Attitude controller tuning gains.
@@ -247,7 +250,10 @@ mod tests {
 
     fn ts(secs: f32) -> Timestamp {
         let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-        Timestamp { seconds: secs as u64, fraction: frac }
+        Timestamp {
+            seconds: secs as u64,
+            fraction: frac,
+        }
     }
 
     #[test]
@@ -264,7 +270,11 @@ mod tests {
         let half = (20.0_f32).to_radians() * 0.5;
         let q_sp = [half.cos(), half.sin(), 0.0, 0.0];
         let r = a.tick(ts(0.001), [1.0, 0.0, 0.0, 0.0], q_sp);
-        assert!(r[0] > 0.0, "+roll setpoint must produce +x rate, got {}", r[0]);
+        assert!(
+            r[0] > 0.0,
+            "+roll setpoint must produce +x rate, got {}",
+            r[0]
+        );
         assert!(r[1].abs() < 1.0e-6);
         assert!(r[2].abs() < 1.0e-6);
     }
@@ -275,7 +285,11 @@ mod tests {
         let half = (-20.0_f32).to_radians() * 0.5;
         let q_sp = [half.cos(), half.sin(), 0.0, 0.0];
         let r = a.tick(ts(0.001), [1.0, 0.0, 0.0, 0.0], q_sp);
-        assert!(r[0] < 0.0, "-roll setpoint must produce -x rate, got {}", r[0]);
+        assert!(
+            r[0] < 0.0,
+            "-roll setpoint must produce -x rate, got {}",
+            r[0]
+        );
     }
 
     #[test]
@@ -292,7 +306,10 @@ mod tests {
             assert!(
                 r[i].abs() <= a.gains().rate_max[i] + 1.0e-6,
                 "r[{}]={} exceeds rate_max[{}]={}",
-                i, r[i], i, a.gains().rate_max[i]
+                i,
+                r[i],
+                i,
+                a.gains().rate_max[i]
             );
         }
     }
@@ -306,8 +323,11 @@ mod tests {
         let q = [r2, 0.0, r2, 0.0]; // 90° pitch
         let q_sp = [0.9659_f32, 0.0, 0.2588, 0.0]; // 30° pitch
         a.tick(ts(0.001), q, q_sp);
-        assert!(is_unit_quaternion(a.last_q_err()),
-            "q_err not unit: {:?}", a.last_q_err());
+        assert!(
+            is_unit_quaternion(a.last_q_err()),
+            "q_err not unit: {:?}",
+            a.last_q_err()
+        );
     }
 
     #[test]
@@ -329,14 +349,19 @@ mod tests {
         let q_sp = [h_sp.cos(), h_sp.sin(), 0.0, 0.0];
         a.tick(ts(0.001), q, q_sp);
         let q_err = a.last_q_err();
-        assert!(q_err[0] >= 0.0,
+        assert!(
+            q_err[0] >= 0.0,
             "q_err scalar must be non-negative after sign correction, got {:?}",
-            q_err);
+            q_err
+        );
         // Shortest-arc magnitude is small (10° = 2*5°, vec ≈ sin(5°)).
         let vec_mag = (q_err[1].powi(2) + q_err[2].powi(2) + q_err[3].powi(2)).sqrt();
-        assert!(vec_mag < 0.1,
+        assert!(
+            vec_mag < 0.1,
             "shortest-arc vec magnitude should be small (~sin(5°)≈0.087), got {} ({:?})",
-            vec_mag, q_err);
+            vec_mag,
+            q_err
+        );
     }
 
     #[test]
@@ -360,9 +385,14 @@ mod tests {
             // ω_lin / exact = 2*sin(θ/2) / θ. For θ=30° this is
             // 0.9886, i.e. 1.14% off. Loosen budget to 1.5% to cover
             // up to 30° edge.
-            assert!(err <= 0.015,
+            assert!(
+                err <= 0.015,
                 "deg={}: linearised={} exact={} relerr={}",
-                deg, r[0], exact, err);
+                deg,
+                r[0],
+                exact,
+                err
+            );
         }
     }
 
@@ -385,20 +415,20 @@ mod tests {
         for &x in &[0.0_f32, 0.5, 1.0, 2.0, 9.0, 100.0, 1.0e6] {
             let mine = sqrt_f32(x);
             let exact = x.sqrt();
-            assert!((mine - exact).abs() <= exact.abs() * 1.0e-5 + 1.0e-6,
-                "sqrt({}): mine={} exact={}", x, mine, exact);
+            assert!(
+                (mine - exact).abs() <= exact.abs() * 1.0e-5 + 1.0e-6,
+                "sqrt({}): mine={} exact={}",
+                x,
+                mine,
+                exact
+            );
         }
     }
 
     use proptest::prelude::*;
 
     fn arb_unit_quaternion() -> impl Strategy<Value = [f32; 4]> {
-        (
-            -1.0_f32..1.0,
-            -1.0_f32..1.0,
-            -1.0_f32..1.0,
-            -1.0_f32..1.0,
-        )
+        (-1.0_f32..1.0, -1.0_f32..1.0, -1.0_f32..1.0, -1.0_f32..1.0)
             .prop_filter("non-zero", |(a, b, c, d)| {
                 a * a + b * b + c * c + d * d > 1.0e-3
             })
