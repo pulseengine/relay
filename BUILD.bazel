@@ -1055,8 +1055,11 @@ rust_library(
 # The comment that stood here said "No control-crate dep: the cascade is pure
 # orchestration". That stopped being true at #393, when the component was
 # rewritten to wrap falcon_core::FlightCore directly instead of composing five
-# stage interfaces. The comment stayed, the dep was never added, and this target
-# has failed to build ever since (#397).
+# stage interfaces. The comment stayed and the dep was never added, so this
+# target failed to build from #393 until #397 added the dep below.
+#
+# Past tense deliberately: a comment describing a CURRENT breakage is false the
+# moment it is fixed, which is the very defect class this sentence records.
 rust_wasm_component_bindgen(
     name = "falcon-cascade",
     crate_features = [
