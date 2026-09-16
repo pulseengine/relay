@@ -1,0 +1,55 @@
+artifacts:
+  - id: SWREQ-FALCON-HOLD-P01
+    type: sw-req
+    title: "HOLD-P01 — a stationary position hold shall stay bounded for at least 60 s, horizontally as well as vertically"
+    status: proposed
+    release: falcon-v1.139.0
+    description: >
+      Commanded to hold a fixed NED position, the vehicle shall remain within
+      0.5 m vertically and 1.0 m horizontally of the setpoint for at least 60 s
+      on the reference Gazebo plant.
+
+      WHY IT EXISTS. v1.138.0 fixed the ALTITUDE half: the altitude integral
+      charged through the climb and spent it as overshoot, producing a limit
+      cycle a colleague reported as "es fängt nach etwa 15 sekunden an zu
+      schwingen". With that fixed the altitude holds cleanly — and a SECOND
+      instability became visible underneath it. Measured over 40 s after the
+      fix:
+
+        t=21.9  true_z -1.98   xy=[+0.41,-0.64]    tilt 0 deg
+        t=25.9  true_z -1.97   xy=[-1.55,+2.01]    tilt 1 deg
+        t=31.9  true_z -1.41   xy=[+11.21,-5.02]   tilt 2 deg
+        t=39.9  true_z -0.04   xy=[-22.95,-2.58]   tilt 6 deg
+
+      The horizontal excursion comes FIRST; the altitude loss follows it as tilt
+      steals the vertical thrust component (#403).
+
+      WHY IT WAS INVISIBLE. The `flightcore` scenario's `final_dist` is the
+      ALTITUDE error alone (`alt_err = -target_alt_m - last_true[2]`), not 3D
+      distance, so every native gz verdict to date has reported horizontal drift
+      as zero BY CONSTRUCTION. A hold gate that cannot see horizontal error is
+      the empty-scope-passes shape again, and closing that measurement gap is
+      part of this requirement, not a follow-up to it.
+
+      NOT THE SAME DEFECT as the altitude one, and deliberately not fixed the
+      same way. There is no horizontal transient to wind up from — the setpoint
+      is the launch point and `perr` starts at zero — and applying the altitude
+      anti-windup condition here breaks three verified wind-rejection tests
+      (`holds_position_under_steady_wind`, `rejects_wind_gusts`, and the
+      `f100_passthrough` fixture). It was tried and reverted.
+
+      FIRST JOB, BEFORE ANY FIX: separate "the controller is unstable" from "the
+      estimate has gone bad". The traced `xy` samples move up to 25 m in 2 s,
+      about 12 m/s, which the observed 1-2 deg tilt cannot produce
+      (`g*tan(2deg) ~ 0.34 m/s^2`). Either the vehicle thrashes far harder
+      between samples than the 0.1 s-sampled tilt suggests, or the position and
+      velocity the loop acts on are not trustworthy late in the run —
+      `est_z` and `true_z` also separate from about t=31. A per-tick trace of
+      both true and estimated horizontal position and velocity settles it.
+
+      FALSIFICATION: wrong if a 60 s stationary 2 m gz hold leaves the vehicle
+      more than 1.0 m horizontally or 0.5 m vertically from the setpoint.
+    tags: [requirement, falcon, control, gazebo, hold, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

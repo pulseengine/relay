@@ -15,16 +15,27 @@ name: Gazebo
 # repo, and the fleet's rust-cpu boxes are for the heavy Rust gates.
 
 on:
+  # NO PATH FILTER, deliberately — this is the precondition for making the job
+  # a REQUIRED context, and it was learned the hard way.
+  #
+  # The filter that stood here listed the paths that "affect the flight". It was
+  # correct about that and irrelevant to the question that matters. A required
+  # status check that does not RUN does not pass by default: it never reports,
+  # and the PR stays blocked forever. Promoting this job while it was filtered
+  # deadlocked every merge in the repo within minutes — PR #426 sat BLOCKED with
+  # zero failing checks because it touched only `.github/workflows/kani.yml`,
+  # and removing the required context returned it to CLEAN instantly (#427).
+  #
+  # The mirror image of that is #417: a job that is SKIPPED but still reports
+  # `success` verifies nothing while looking green. Both come from the same
+  # place — a gate whose workflow does not always run. The only shape that is
+  # safe to require is one that always runs and always reports.
+  #
+  # The cost is about 7 minutes of runner time per PR. That is cheap against
+  # what this job is: the only gate that flies the actually-published wasm
+  # component through real physics and compares it to native, bit for bit.
   pull_request:
     branches: [main]
-    paths:
-      - 'examples/falcon-sitl-gz/**'
-      - 'tests/cascade-sitl-wasm/**'
-      - 'crates/falcon-core/**'
-      - 'crates/relay-iekf/**'
-      - 'wasm/cm/**'
-      - 'wit/falcon-cascade/**'
-      - '.github/workflows/gazebo.yml'
   push:
     branches: [main]
   workflow_dispatch:
@@ -85,7 +96,7 @@ jobs:
       # wac. Neither is on a hosted runner. install-action serves prebuilt
       # binaries, so this is seconds rather than a source build of both.
       - name: Install cargo-component + wac
-        uses: taiki-e/install-action@v2.87.6
+        uses: taiki-e/install-action@v2.87.12
         with:
           tool: cargo-component,wac-cli
 
@@ -154,7 +165,7 @@ jobs:
         run: |
           set -euo pipefail
           ./target/release/falcon-sitl-gz \
-            --backend=gazebo --scenario=flightcore --duration=8 \
+            --backend=gazebo --scenario=flightcore --duration=25 \
             | tee /tmp/native-gz.txt
           grep -q 'PASS' /tmp/native-gz.txt || { echo "::error::native flightcore did not PASS on gz"; exit 1; }
 
@@ -266,23 +277,23 @@ jobs:
           # not "the wasm behaves similarly to native on the same world", but
           # "the wasm and native computed the same bytes from the same inputs,
           # while flying it".
-          # 8 s (2000 ticks), NOT the 10 s this used to run, and the reason is
-          # a real defect rather than a tuning preference. The altitude hold
-          # creeps UPWARD over a long hold — measured on gz, same commit:
+          # 25 s (6250 ticks). This used to be 8 s, chosen to stay clear of the
+          # altitude limit cycle (#396) — the gate was dodging a defect.
           #
-          #     8 s  -> 0.16 m     10 s -> 0.43 m     16 s -> 0.62 m (FAIL)
+          # #396 is fixed (the altitude integral no longer charges during the
+          # approach), and the numbers inverted: without the windup there is no
+          # overshoot, so the climb is slower and 8 s no longer REACHES 2 m.
+          # Measured on the same commit:
           #
-          # and the native binary does the same (16 s -> 0.61 m), which is what
-          # bit-identical control predicts. So it is a falcon-core property, not
-          # a wasm one, and it is tracked in #396.
+          #      8 s -> 0.55 m (still climbing)     25 s -> 0.02 m (settled)
           #
-          # At 10 s the gate would sit 0.07 m under its own threshold and go
-          # amber on noise. Shortening to 8 s is chosen with eyes open: this leg
-          # still catches "did not fly", "diverged" and "the boundary changed
-          # the answer", and the creep is gated by #396, not hidden by it.
+          # 25 s is therefore the honest duration: it measures the settled hold
+          # rather than a transient passing through the target. Beyond ~26 s a
+          # separate horizontal divergence takes over, tracked in #403 — this
+          # leg stops short of it deliberately and says so.
           set +e
           DIFFERENTIAL=1 BACKEND=gazebo ./target/release/cascade-sitl-wasm \
-            /tmp/composed.wasm 2000 0.004 2>&1 | tee /tmp/wasm-gz.txt
+            /tmp/composed.wasm 6250 0.004 2>&1 | tee /tmp/wasm-gz.txt
           set -e
           if ! grep -q 'LOOP CLOSES' /tmp/wasm-gz.txt; then
             echo "::error::the wasm cascade did not execute in gz — infrastructure failure, not a flight outcome"

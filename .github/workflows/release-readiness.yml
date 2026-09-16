@@ -1,0 +1,84 @@
+# Nightly: what is the next release actually waiting on?
+#
+# WHY. Release readiness was carried in an agent's head and a scratch state
+# file, and both drifted. The loop's `pending_gates` still said "TAG
+# falcon-v1.136.0" after v1.138.0 had shipped; its watermark sat six days stale
+# while twelve new issues were filed. A number recomputed from the tree every
+# night cannot drift like that.
+#
+# THIS JOB REPORTS. It does not tag, merge, close or promote anything. Cutting a
+# release is a decision with a signature on it and a partner consuming the
+# output, and the release process names tagging an explicit stop-and-ask. The
+# point here is that the decision is well-informed, not that it is automatic.
+name: Release readiness
+
+on:
+  schedule:
+    # 06:43 UTC — after the nightly soak, off the hour.
+    - cron: '43 6 * * *'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release to report on (default: the next untagged one)'
+        required: false
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  readiness:
+    name: Next release readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Tags are load-bearing here: "the next release" is defined as the lowest
+      # scoped version AHEAD of the latest tag, so a shallow clone would make
+      # the tool pick a release that shipped months ago.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install rust-script
+        run: cargo install rust-script --locked || true
+
+      - name: Report
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REL: ${{ github.event.inputs.release }}
+        run: |
+          set -uo pipefail
+          ARGS=(--markdown)
+          [ -n "${REL:-}" ] && ARGS+=(--release "$REL")
+
+          ./scripts/release-readiness.rs "${ARGS[@]}" > /tmp/readiness.md
+          READY=$?
+
+          {
+            cat /tmp/readiness.md
+            echo
+            echo "### Open issues"
+            echo
+            echo "\`$(gh issue list --state open --limit 200 --json number --jq 'length')\` open."
+            echo
+            echo "The issue list is context, not scope: an issue only belongs to a"
+            echo "release once it is landed as a rivet artifact with a \`release:\`"
+            echo "field. That is the step this report exists to keep honest —"
+            echo "untracked work is invisible to the plan and resurfaces as a"
+            echo "release-time surprise."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat /tmp/readiness.md
+
+          # Never fail the job on "not ready" — that is the normal state for most
+          # of a release cycle, and a job that is red by default stops being read.
+          if [ "$READY" -eq 0 ]; then
+            echo "::notice::every artifact in the next release's scope is done — the V-model gate and a green tag-commit CI are what remain"
+          else
+            echo "::notice::next release still has blocking artifacts (see the job summary)"
+          fi
+          exit 0
