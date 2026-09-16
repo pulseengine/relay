@@ -166,6 +166,55 @@ rust_library(
     urls = ["https://static.crates.io/crates/libm/libm-0.2.16.crate"],
 )
 
+# embedded-io / embedded-io-async — the UBX driver's async byte-source bounds.
+# Same treatment as libm above (http_archive, not crate_universe): both are pure
+# no_std with no build script, embedded-io has NO dependencies and
+# embedded-io-async depends only on embedded-io, so a single rust_library over
+# src/ is the whole BUILD. They are here because //:falcon-cascade needs
+# falcon-core, falcon-core needs falcon-gnss-ubx, and that is the only crate in
+# the closure with an out-of-repo dependency (#397). sha256 values are the
+# Cargo.lock checksums, which are the sha256 of the .crate tarball.
+http_archive(
+    name = "embedded_io_crate",
+    build_file_content = """\
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "embedded_io",
+    srcs = glob(["src/**/*.rs"]),
+    # lib.rs does `#![doc = include_str!("../README.md")]`, so the README has to
+    # be in the sandbox or the crate does not compile at all.
+    compile_data = ["README.md"],
+    edition = "2021",
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7",
+    strip_prefix = "embedded-io-0.7.1",
+    type = "tar.gz",
+    urls = ["https://static.crates.io/crates/embedded-io/embedded-io-0.7.1.crate"],
+)
+
+http_archive(
+    name = "embedded_io_async_crate",
+    build_file_content = """\
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "embedded_io_async",
+    srcs = glob(["src/**/*.rs"]),
+    compile_data = ["README.md"],
+    edition = "2021",
+    deps = ["@embedded_io_crate//:embedded_io"],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0",
+    strip_prefix = "embedded-io-async-0.7.0",
+    type = "tar.gz",
+    urls = ["https://static.crates.io/crates/embedded-io-async/embedded-io-async-0.7.0.crate"],
+)
+
 # WASI WIT interfaces from rules_wasm_component
 wasi_wit_ext = use_extension("@rules_wasm_component//wasm:extensions.bzl", "wasi_wit")
 wasi_wit_ext.init()
