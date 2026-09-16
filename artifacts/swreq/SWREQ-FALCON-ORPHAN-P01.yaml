@@ -1,0 +1,136 @@
+artifacts:
+  - id: SWREQ-FALCON-ORPHAN-P01
+    type: sw-req
+    title: "ORPHAN-P01 — every capability shall be WIRED, PARKED against a named configuration axis, or RETIRED; none shall stay implemented-verified-unreachable"
+    status: proposed
+    release: falcon-v1.139.0
+    description: >
+      Every capability in the tree shall have exactly one recorded disposition:
+
+        WIRE   — it is reachable from the flight path and from the published
+                 seam, and something exercises it end to end.
+        RETIRE — it is deleted. Not deprecated, not commented out: gone, with
+                 the reason in the commit.
+        PARK   — it is deliberately not in the flight path, the reason is
+                 recorded ON the crate, and it is excluded from every count of
+                 what the stack can do.
+
+      No capability shall remain in the fourth state: implemented, verified,
+      advertised, and unreachable.
+
+      WHY IT EXISTS. That fourth state is the most expensive one we have. It
+      costs maintenance and proof time, it inflates every capability claim we
+      make, and it is invisible to every gate — a Kani proof shows the function
+      is correct given its inputs, and a wasm/native differential shows both
+      sides agree. Neither can see a function nothing calls, or a channel with
+      no producer.
+
+      MEASURED INVENTORY (2026-09-16 audit). Twelve flight-relevant crates have
+      ZERO consumers in Cargo AND Bazel, most of them Kani-gated:
+
+        relay-fsafe      the VERIFIED failsafe arbiter (total, most-severe-wins,
+                         latching over RC-loss, datalink-loss, geofence,
+                         position-loss, low + critical battery, stale offboard).
+                         falcon-core hand-rolls a SUBSET of this inline instead.
+                         Two implementations; the verified one is the unused one.
+        relay-rc         all manual modes + bounded-output-under-NaN proof
+        relay-sensvote   triple-redundant median voting + GNSS-loss fallback
+        relay-offboard   setpoint-stream staleness timeout
+        relay-avoid      collision prevention + precision landing
+        relay-mix-multi  hexa/octo allocation
+        relay-dronecan   the esc.Status RPM decoder validated against pydronecan
+                         reference vectors — the natural producer for the
+                         motor-rpm seam just added
+        falcon-esc-dshot DShot frames + battery ADC — the natural producer for
+                         the battery channel that currently defaults to healthy
+        falcon-baromag   IST8310 mag + BMP388 baro — the natural producer for
+                         read_baro, which has no seam to plug into
+        falcon-imu-icm42688  the one real driver; nothing instantiates it
+        falcon-param     the MAVLink PARAM bridge
+        falcon-hitl      the HITL link backend
+
+      And within reachable code: `FlightSupervisor` (every failsafe, the mode
+      machine, all 19 pre-arm rows) is not exported by the published component
+      (#414); 7 of the 19 pre-arm rows are never fed, so their reason strings
+      are unreachable; the blackbox recorder records no flight; the in-flight
+      tuning link is test-only; and 5 of the 12 FlightBackend channels have no
+      driver trait at all, so they cannot be implemented on real hardware even
+      in principle.
+
+      THE DISPOSITION RULE, in the PX4 shape. PX4 is one flight stack, one
+      configuration to begin with, many airframes and buses afterwards. That is
+      the target shape here, and it settles most of these dispositions: a crate
+      that serves a PLANNED configuration axis is PARKED against that axis by
+      name, not retired. Retirement is for capabilities that serve neither the
+      first configuration nor any named axis.
+
+      WHAT MAKES THEM UNREACHABLE IS A MISSING LAYER, not twelve separate
+      oversights. There is nothing in the tree that can express WHICH
+      configuration the vehicle is. `falcon-config` is bench-local tuning —
+      position/altitude gains and a mixer floor. It carries no airframe
+      geometry, no rotor count, no bus selection. Until something can say "quad
+      X over DroneCAN" versus "hexa over direct I2C", every crate serving the
+      second case is unreachable by construction, and `configure(vehicle-config)`
+      (v0.9) is the first plank of that layer rather than the whole of it.
+
+      CONFIGURATION #1 — DroneCAN, and one crate carries most of it.
+      `relay-dronecan` already decodes `baro`, `battery_info`, `esc_status`,
+      `mag`, `raw_command` and `node_status`, with the esc.Status decoder
+      validated against pydronecan reference vectors. It is therefore the single
+      producer for FOUR of the five empty sensor channels:
+
+        esc_status    -> read_motor_rpm   (seam added v0.10, no producer)
+        battery_info  -> read_battery_v/i (#413 — currently defaults to a
+                                           healthy 16.0 V, fail-unsafe)
+        baro          -> read_baro        (no seam field exists)
+        mag           -> read_mag         (supplied from truth in SITL only)
+
+      Wiring this one crate closes #413 and fills three empty channels. It is
+      both the highest-value disposition and the configuration the programme has
+      chosen to start from, so it is not a judgement call.
+
+      DISPOSITIONS.
+
+        WIRE — needed by configuration #1, or needed regardless of it:
+          relay-dronecan     bus + 4 sensor producers (above)
+          relay-fsafe        the VERIFIED failsafe arbiter; falcon-core
+                             hand-rolls a subset of it inline today
+          falcon-param       the MAVLink PARAM bridge. "Allow more
+                             configurations" REQUIRES a parameter system — in
+                             PX4 that is how a configuration is selected and
+                             inspected. Currently test-only.
+          falcon-imu-icm42688  the 6X-RT's own IMU; the one real driver
+
+        PARK against a named axis — these ARE the "allow more" roadmap, and
+        retiring them would be deleting it:
+          relay-mix-multi    AIRFRAME axis: hexa/octo. The reason `relay-geo`'s
+                             allocation is general at all.
+          relay-rc           MODE axis: manual Stabilized/Acro
+          relay-offboard     MODE axis: offboard setpoint streams
+          relay-sensvote     REDUNDANCY axis: triple sensors, GNSS-loss fallback
+          relay-avoid        FEATURE axis: collision prevention, precision landing
+          falcon-esc-dshot   BUS axis: configuration #2, direct ESC. DroneCAN
+                             covers ESC + battery in configuration #1.
+          falcon-baromag     BUS axis: configuration #2, direct I2C baro/mag.
+                             Same reason.
+          falcon-hitl        TEST-RIG axis
+
+        RETIRE — decide explicitly, do not default to it. On this inventory the
+        honest answer is that NONE of the twelve is obviously useless; each one
+        is either configuration #1 or a named axis above. Anything later found
+        to serve neither gets deleted outright, with the reason in the commit —
+        not deprecated, not left compiling.
+
+      A PARK IS NOT A FREE PASS. A parked crate still costs proof and
+      maintenance time, and still appears in any naive count of "what the stack
+      does". Parking requires the reason recorded ON the crate and exclusion
+      from every capability claim, or it decays back into the fourth state this
+      requirement exists to abolish.
+
+      FALSIFICATION: wrong if any crate in the tree has zero consumers and no
+      recorded PARK reason, or if any capability named in a README, an OCI
+      description or a release note is unreachable from the shipped artifact.
+    tags: [requirement, falcon, orphan, architecture, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

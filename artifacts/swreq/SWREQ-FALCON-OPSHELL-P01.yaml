@@ -1,0 +1,92 @@
+artifacts:
+  - id: SWREQ-FALCON-OPSHELL-P01
+    type: sw-req
+    title: "OPSHELL-P01 — the operational shell: what stands between a verified flight core and a vehicle that can actually be flown"
+    status: proposed
+    release: falcon-v1.139.0
+    description: >
+      The stack shall provide the operational surface a pilot needs between
+      "the control loop is correct" and "this vehicle is safe to fly": a
+      ground-station interface, sensor calibration with persistence, a
+      continuously-evaluated arming gate that explains itself, an independent
+      kill path, and logging that starts at boot.
+
+      WHY IT EXISTS, and it is the central finding of the PX4 study. Almost
+      nothing standing between this stack and a real first flight is
+      control-theory work. The estimator, geometric SE(3) attitude loop, ADRC
+      inner loop and mixer are built and verified and hold position in Gazebo.
+      What is missing is the shell around them — and it is the shell, not the
+      control law, that determines whether a first flight ends well.
+
+      THE GOOD NEWS: MOST OF IT IS ALREADY BUILT AND SIMPLY NOT WIRED.
+      `relay-mavlink` already carries heartbeat, command-long, global-position,
+      mission, param, telemetry and a telemetry scheduler, and it has
+      consumers. `relay-calib` and `relay-preflight` are wired into falcon-core.
+      What is disconnected is the part a pilot touches:
+
+        relay-rc       0 consumers — RC input, manual modes, and therefore the
+                       KILL SWITCH. PX4 wires the kill switch to its own RC
+                       channel precisely so it works regardless of mode; a stack
+                       whose only "stop" is a mode change has no kill path at
+                       all, which is the most safety-critical gap possible for a
+                       first flight.
+        relay-fsafe    0 consumers — the verified failsafe arbiter. PX4 makes
+                       RC-loss, datalink-loss, low-battery and geofence actions
+                       INDEPENDENTLY configurable, because which one fires and
+                       what it does is, from the operator's side, the actual
+                       product. falcon-core hand-rolls a subset inline.
+        falcon-param   0 consumers — the MAVLink PARAM bridge. Every setup
+                       screen in QGroundControl is param read/write; without it
+                       none of calibration, mode assignment or safety
+                       configuration has a user interface.
+
+      MANDATORY FOR A FIRST SAFE FLIGHT, from the PX4 operational study:
+        - A ground-station surface: HEARTBEAT at >=1 Hz with a vehicle type,
+          the PARAM protocol, COMMAND_LONG + COMMAND_ACK (arming is
+          MAV_CMD_COMPONENT_ARM_DISARM; calibration is
+          MAV_CMD_PREFLIGHT_CALIBRATION), AUTOPILOT_VERSION capability flags,
+          and the HUD set (ATTITUDE, GLOBAL_POSITION_INT, GPS_RAW_INT,
+          BATTERY_STATUS, SYS_STATUS with its sensor-health bits).
+        - Calibration with persistence: gyro bias, 6-orientation accel, LEVEL
+          HORIZON, and compass hard/soft-iron — each storing offsets a reboot
+          preserves.
+        - Board orientation, actuator mapping and per-motor spin direction.
+        - A continuously-evaluated arming gate that reports WHICH check failed
+          in terms an operator can act on.
+        - Independently configurable failsafe actions with a separate kill path.
+        - Logging FROM BOOT, not from arming.
+
+      THE TWO HIGHEST-RISK ITEMS FOR OUR SPECIFIC HARDWARE, called out because
+      both are invisible on a bench and neither is a control problem:
+        1. PROPS-OFF SPIN-DIRECTION AND OUTPUT-MAPPING TEST. A motor spinning
+           the wrong way for its position breaks the mixer's zero-sum-moment
+           assumption. This repo has already been bitten by exactly that class
+           once — the rotor-out parasitic moment of v1.114 — in simulation. On a
+           vehicle it is a flip at liftoff.
+        2. COMPASS CALIBRATION AND INTERFERENCE. The textbook cause of
+           toilet-bowling and flyaway: a yaw belief that disagrees with reality
+           makes the position loop push the wrong way, and the error compounds.
+           Worse, it can pass on the ground and only diverge in flight. The
+           X500's GPS/compass mast sits near ESC and power wiring.
+
+      LOGGING FROM BOOT IS NOT A NICE-TO-HAVE FOR US. PX4's default starts a
+      log at arming. During bring-up most sessions are a series of REJECTED
+      arming attempts — exactly the events that need diagnosing — and every one
+      of them produces no log at all under that default. Our blackbox recorder
+      (LOG-P02/LOG-P03, with a bit-exact replay oracle) exists and is wired into
+      nothing; this is where it earns its place.
+
+      QGC INTEROPERABILITY CAVEAT, recorded before it costs a day: QGroundControl
+      branches behaviour on the autopilot type it is told. A stack reporting
+      MAV_AUTOPILOT_GENERIC gets a degraded UI — a known QGC issue shows flight
+      modes arriving correctly on the wire while the mode dropdown stays empty.
+      Decide deliberately whether to present as PX4-compatible or to accept the
+      degradation.
+
+      FALSIFICATION: wrong if a competent PX4 operator, given this stack and the
+      X500/6X-RT hardware, cannot calibrate, configure, arm, fly and download a
+      log without reading source code.
+    tags: [requirement, falcon, operational, mavlink, calibration, arming, px4, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

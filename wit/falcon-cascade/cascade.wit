@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.7.0;
+package pulseengine:falcon-cascade@0.10.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -58,6 +58,115 @@ interface types {
     record waypoint {
         north: f32, east: f32, down: f32, yaw: f32,
     }
+
+    /// A 3-vector; the frame is named by the field that uses it.
+    record vec3 {
+        x: f32, y: f32, z: f32,
+    }
+
+    /// Everything the flight core needs for ONE tick.
+    ///
+    /// v0.8 replaces the bare `imu-sample`, because v0.7 could not express two
+    /// things a host must be able to say — both found by actually driving the
+    /// published components rather than by reading the interface.
+    ///
+    /// `dt-s` — the host's ACTUAL control period. v0.7 had no way to state it,
+    /// so every stage hardcoded its own and they disagreed with each other by up
+    /// to 20x (estimator 1 ms, position 20 ms, attitude 4 ms, rate 1 ms) while
+    /// the cascade called all five once per tick. Measured on the SITL plant,
+    /// holding 2.0 m: 1000 Hz -> 0.00 m error, 400 Hz -> 10.43 m, 250 Hz -> 27.17 m,
+    /// with no error signal of any kind.
+    ///
+    /// The aiding measurements — v0.7 took the IMU alone, so position was
+    /// observable only by dead reckoning. The flight core fuses GNSS, the
+    /// magnetometer and an absolute heading; a seam that cannot carry them
+    /// cannot carry the flight core. Every field is `option<>`, and all-`none`
+    /// is a valid IMU-only host that simply inherits the drift.
+    record sensor-frame {
+        imu: imu-sample,
+        dt-s: f32,
+        /// NED position fix (m) — GNSS or equivalent.
+        position-ned: option<vec3>,
+        /// Body-frame magnetometer. Any consistent unit; normalised internally.
+        mag-body: option<vec3>,
+        /// Absolute heading (rad, NED). An alternative to `mag-body` for hosts
+        /// that already resolve yaw; both correct the same unobservable state.
+        heading-rad: option<f32>,
+        /// Per-rotor ESC telemetry (bidirectional DShot, or equivalent).
+        ///
+        /// v0.10. Without it the rotor-out FDI is INERT: a rotor loss goes
+        /// undetected, because the information never crosses the boundary. The
+        /// native backend has always fed it; the seam simply had no field, so
+        /// the capability was verified in falcon-core and unreachable from a
+        /// component — the same orphan-signal shape as the hardcoded tick
+        /// period and the missing calibration.
+        ///
+        /// Note this was invisible to the wasm/native differential too: both
+        /// sides received `none` and agreed perfectly. An equivalence test is
+        /// blind to a channel neither side receives.
+        ///
+        /// `none` = no telemetry, and the FDI falls back to its RPM-free path.
+        motor-rpm: option<rotor-rpm>,
+    }
+
+    /// Per-rotor measured speed, in the airframe's motor order — the same order
+    /// as `motor-pwm`. A flat record rather than a list: no allocation, and it
+    /// lowers to a flat scalar sequence like every other record here.
+    record rotor-rpm {
+        m1: s32, m2: s32, m3: s32, m4: s32,
+    }
+
+    /// Airframe calibration — the numbers the control law needs and CANNOT
+    /// derive from the sensor stream.
+    ///
+    /// v0.9 exists because the v0.8 component could fly NOTHING but its own
+    /// defaults: every value below was frozen at construction, so no host could
+    /// correct them from outside and no amount of retuning could make the
+    /// published component hold altitude on a real plant.
+    ///
+    /// MEASURED on the gz falcon-quad, 2 m hold, 2000 ticks @ 250 Hz, one
+    /// knob at a time against the tuned native reference (0.16 m hold error):
+    ///
+    ///   hover-thrust 0.585 -> 0.5, tuning kept  : 2.65 m, est_z -58.8 m
+    ///   tuning dropped, hover-thrust kept       : 0.66 m, est_z  -1.3 m
+    ///   both (i.e. exactly the v0.8 defaults)   : 1.91 m, never left the ground
+    ///
+    /// Both groups are load-bearing and `hover-thrust` dominates: at 0.5 the
+    /// airframe cannot lift, the estimator is then driven by a specific force
+    /// that never matches the commanded one, and the altitude estimate diverges
+    /// by an order of magnitude. That is the failure mode a host MUST be able
+    /// to correct, and before v0.9 it could not.
+    record vehicle-config {
+        /// Normalised collective throttle that holds THIS airframe in a steady
+        /// hover. The dominant term — see the measurements above. gz
+        /// falcon-quad 0.585; the SITL mock plant 0.49.
+        hover-thrust: f32,
+        /// Control-loop rate (Hz). AUTHORITATIVE: the estimator and the ADRC
+        /// observer are discretised on it. `sensor-frame.dt-s` remains the
+        /// per-tick integration step (it varies); this is the design rate. A
+        /// host that supplies neither inherits a guess, which is how the v0.7
+        /// stages ended up 20x apart.
+        loop-rate-hz: f32,
+        /// Position-measurement variance (m²). The default over-trusts a real
+        /// GNSS: on a long static hover the covariance collapses, the outlier
+        /// gate then rejects correct fixes, and the estimate goes deaf. 0.25
+        /// for the gz NavSat.
+        pos-var: f32,
+        /// Additive process-noise floor (variance/s) on velocity. Keeps the
+        /// δv↔δp correlation alive so a long hover cannot starve the filter.
+        process-floor-vel: f32,
+        /// Additive process-noise floor (variance/s) on position.
+        process-floor-pos: f32,
+        /// Altitude-loop proportional gain.
+        altitude-kp: f32,
+        /// Altitude-loop derivative gain.
+        altitude-kd: f32,
+        /// Altitude-loop integral gain, trimming the residual hover-feedforward
+        /// error. Safe only once the loop is damped and the estimate tracks.
+        altitude-ki: f32,
+        /// Horizontal position-loop integral gain. 0 disables it.
+        position-ki: f32,
+    }
 }
 
 /// State estimator — wraps relay-ekf (Mahony complementary filter).
@@ -104,21 +213,34 @@ world mixer-component    { export mixer; }
 /// wit-bindgen export macro is generated the same, interface-shaped
 /// way the leaf components rely on.
 interface controller {
-    use types.{imu-sample, waypoint, motor-pwm};
-    /// One full cascade pass: estimate → position → attitude → rate
-    /// → mixer.
-    step: func(imu: imu-sample, target: waypoint) -> motor-pwm;
+    use types.{sensor-frame, waypoint, motor-pwm, vehicle-config};
+    /// One full flight-core tick: estimate, fuse whatever aiding the frame
+    /// carries, then geometric SE(3) attitude → ADRC rate → mixer, with the
+    /// rotor-out FDI and the altitude/position loops the vehicle actually flies.
+    step: func(sensors: sensor-frame, target: waypoint) -> motor-pwm;
+
+    /// Install this vehicle's calibration.
+    ///
+    /// Call ONCE before the first `step`. Calling it later is legal and
+    /// RE-INITIALISES the control core — estimator state included — because
+    /// `loop-rate-hz` is fixed at construction and a partially-applied
+    /// configuration is worse than an explicit reset. A host that never calls
+    /// this keeps the built-in defaults, which fly the SITL mock plant and
+    /// nothing else.
+    configure: func(cfg: vehicle-config);
 }
 
 /// Imports the five controller interfaces, exports `controller`.
 /// The implementation calls estimate → position → attitude → rate
 /// → mixer in order. wac satisfies the imports from the leaf
 /// components (BUILD.bazel `wac_plug`).
+/// v0.8: the cascade component wraps falcon-core's FlightCore directly, so it
+/// imports NOTHING. The five-stage decomposition it used to compose was a
+/// wasm-side invention that never corresponded to the flight architecture —
+/// which is exactly how it drifted onto the legacy PID controllers while
+/// falcon-core moved to geometric SE(3) + ADRC, unnoticed for three months
+/// (#388). One component, one tick, one clock, and the same control law the
+/// vehicle flies.
 world cascade {
-    import ekf;
-    import position;
-    import attitude;
-    import rate;
-    import mixer;
     export controller;
 }

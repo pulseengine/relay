@@ -22,6 +22,10 @@ anyhow = "1"
 libm = "0.2"
 relay-ekf = { path = "../../crates/relay-ekf" }
 
+# The NATIVE half of the equivalence test: the SAME flight core the cascade
+# component wraps. Both sides call falcon-core; only the route differs.
+falcon-core = { path = "../../crates/falcon-core" }
+
 # Optional — only with feature `gazebo`. Versions match examples/falcon-sitl-gz
 # EXACTLY; a different gz-transport here would be a different bridge than the
 # one every native SITL result was produced with, and the comparison would stop

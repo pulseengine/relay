@@ -41,7 +41,7 @@ artifacts:
       steps:
         - run: cargo test -p relay-preflight
         - run: cargo test -p relay-preflight --release
-        - run: cargo test -p falcon-core
+        - run: cargo test -p falcon-core prearm
         - run: cargo kani -p relay-preflight
     links:
       - type: verifies

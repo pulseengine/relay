@@ -35,7 +35,7 @@ artifacts:
       method: automated-test
       steps:
         - run: cargo test -p falcon-gnss-ubx
-        - run: cargo test -p falcon-core
+        - run: cargo test -p falcon-core gnss
         - run: cargo kani -p falcon-gnss-ubx
     links:
       - type: verifies

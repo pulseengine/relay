@@ -1,0 +1,66 @@
+artifacts:
+  - id: SWREQ-FALCON-CONFIG-P01
+    type: sw-req
+    title: "CONFIG-P01 — the stack shall express WHICH configuration it is: airframe, bus and modes, selectable like PX4"
+    status: proposed
+    release: falcon-v1.139.0
+    description: >
+      There shall be a configuration layer that names the vehicle's airframe
+      geometry, its sensor/actuator bus, and its enabled modes, such that
+      supporting a second configuration is a configuration change rather than a
+      code change.
+
+      WHY IT EXISTS. The programme's stated shape is PX4's: one flight stack,
+      ONE configuration to begin with (DroneCAN), many airframes and buses
+      afterwards. Nothing in the tree can currently express which configuration
+      a vehicle is. `falcon-config` is bench-local tuning — position and
+      altitude gains and a mixer floor; it carries no airframe geometry, no
+      rotor count and no bus selection.
+
+      THIS IS THE ROOT OF THE ORPHAN PROBLEM, not a separate concern. Twelve
+      flight-relevant crates have zero consumers (ORPHAN-P01), and most of them
+      are not dead code — they are the SECOND configuration: hexa/octo
+      allocation, manual and offboard modes, sensor redundancy, direct-bus
+      drivers. They are unreachable because there is no layer that could select
+      them, so every one of them would have to be reached by editing code. A
+      capability that can only be enabled by a code change is not a
+      configuration axis; it is an unused branch.
+
+      WHAT THE LAYER MUST CARRY, minimally:
+        - AIRFRAME: rotor count and geometry, so `relay-mix-multi` becomes
+          selectable rather than unreachable. `relay-geo`'s allocation is
+          already general; the mixer choice is what is hardcoded.
+        - BUS: which producer supplies each sensor channel. Configuration #1 is
+          DroneCAN, where `relay-dronecan` alone feeds baro, battery, esc_status
+          and mag. Configuration #2 is the direct path (`falcon-baromag`,
+          `falcon-esc-dshot`).
+        - MODES: which of manual / offboard / mission are enabled, so
+          `relay-rc` and `relay-offboard` are reachable.
+
+      RELATION TO WHAT ALREADY EXISTS. `configure(vehicle-config)` at
+      `pulseengine:falcon-cascade@0.9.0` (v1.138) is the first plank: it moved
+      nine airframe TUNING values out of the component, where they had been
+      frozen at construction. It carries no structural selection — no geometry,
+      no bus, no modes. This requirement is the rest of that seam, and the WIT
+      record is the natural place for the structural half to land.
+
+      AND IT NEEDS A WAY IN. `falcon-param` (the MAVLink PARAM bridge) is
+      test-only today. In PX4 the parameter system is how a configuration is
+      selected, inspected and changed from a GCS; without it a "configuration"
+      is a recompile. Wiring it is part of this requirement, not a follow-up.
+
+      SCOPE DISCIPLINE — this is not a plugin framework. Exactly two
+      configurations need to work: the DroneCAN quad we are flying, and one
+      second configuration chosen to prove the axis is real. A layer that
+      supports two concrete cases is evidence; a layer that supports a
+      hypothetical N is speculation, and this codebase has already paid for one
+      abstraction invented ahead of its use (the five-stage cascade
+      decomposition that drifted for three months, #388).
+
+      FALSIFICATION: wrong if adding a hexa airframe, or moving a sensor from
+      DroneCAN to a direct bus, requires editing any crate under `crates/` other
+      than the configuration definition itself.
+    tags: [requirement, falcon, configuration, airframe, dronecan, px4, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

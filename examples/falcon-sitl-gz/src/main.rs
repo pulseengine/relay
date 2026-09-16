@@ -1435,9 +1435,26 @@ fn run_flightcore(
     // altitude offset the P-loop can't null, so the altitude INTEGRAL trims it.
     let hover_thrust = if name == "mock" { 0.49 } else { 0.585 };
 
+    // ABLATION KNOBS. Default = exactly the tuned configuration above, so an
+    // unset environment reproduces the shipped behaviour bit-for-bit. They exist
+    // because the wasm cascade flies this same FlightCore with NONE of this
+    // tuning, and "the tuning block as a whole" is not an attributable cause:
+    // each knob has to be isolatable or the fix is a guess. SEED_ALT also lets
+    // the estimator be initialised at the GROUND rather than at the setpoint,
+    // which is the only initialisation a real vehicle can perform.
+    let hover_thrust = std::env::var("HOVER_THRUST")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(hover_thrust);
+    let est_tuning = std::env::var("EST_TUNING").map(|v| v != "0").unwrap_or(true);
+    let seed_alt = std::env::var("SEED_ALT")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(-target_alt_m);
+
     let mut core = FlightCore::new(hover_thrust, 1.0 / dt);
-    core.set_altitude(-target_alt_m); // NED z: negative = up.
-    if name != "mock" {
+    core.set_altitude(seed_alt); // NED z: negative = up.
+    if name != "mock" && est_tuning {
         // The default pos_var (0.01 = 1 cm²) over-trusts the gz NavSat: on a long
         // static hover the position covariance COLLAPSES, so the NIS outlier gate
         // then rejects the (correct) fixes and the estimate goes deaf → the true
@@ -1505,10 +1522,13 @@ fn run_flightcore(
                 let tilt_deg = libm::acosf((1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2])).clamp(-1.0, 1.0))
                     * 57.2958;
                 eprintln!(
-                    "t={:.2} true_z={:.2} tilt={:.0}deg gyro=[{:+.1},{:+.1},{:+.1}] failed={:?} mot=[{:.2},{:.2},{:.2},{:.2}]",
-                    t, last_true[2], tilt_deg, g[0], g[1], g[2], core.failed_motor(),
+                    "t={:.2} true_z={:.2} est_z={:.2} vz={:+.2} alt_int={:+.3} \
+xy=[{:+.2},{:+.2}] tilt={:.0}deg yaw={:+.2} mot=[{:.2},{:.2},{:.2},{:.2}]",
+                    t, last_true[2], e.p[2], e.v[2], core.altitude_integral(),
+                    last_true[0], last_true[1], tilt_deg, yaw,
                     m[0], m[1], m[2], m[3],
                 );
+                let _ = (a, g);
             }
 
             let alt_err = -target_alt_m - last_true[2]; // NED z error

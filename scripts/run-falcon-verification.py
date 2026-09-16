@@ -142,6 +142,16 @@ BENCH_PATTERNS = [
     re.compile(r"\brate-loop-proof\b"),               # standalone crate; needs a pre-built .wasm argument
     re.compile(r"\bwasmtime\b"),
     re.compile(r"\bwasmtime-flight-test\b"),
+    # The wasm==native differential harness needs a LIVE gz server. Matched on
+    # the ENV-VAR form, because `--backend=gazebo` above does not cover it.
+    #
+    # NOT matched on the binary name: `cascade-sitl-wasm` also appears in the
+    # PATH `tests/cascade-sitl-wasm/src/...`, so a name pattern silently marked
+    # that artifact's three grep steps bench-only too — turning real assertions
+    # into skips while the gate still reported success. Caught by --dry-run
+    # before it shipped; it is precisely the empty-scope-passes-a-gate shape
+    # this gate exists to prevent.
+    re.compile(r"\bBACKEND=gazebo\b"),
 ]
 
 

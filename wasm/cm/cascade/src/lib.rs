@@ -1,22 +1,26 @@
-//! falcon-cascade — the control-cascade orchestrator component.
+//! falcon-cascade — THE FLIGHT CORE, as one component.
 //!
-//! Imports the five controller interfaces (`ekf`, `position`,
-//! `attitude`, `rate`, `mixer`) and exports the top-level `step`.
-//! `step` runs the cascade in order:
+//! v0.8 rework. v0.7 imported five stage interfaces (`ekf`, `position`,
+//! `attitude`, `rate`, `mixer`) and composed them with `wac plug`. That
+//! decomposition was a wasm-side invention which never corresponded to the
+//! flight architecture, and it drifted: the stages wrapped relay-pos/att/rate,
+//! which falcon-core DROPPED on 2026-06-03 when it moved to geometric SE(3) +
+//! ADRC. For three months and ~40 releases the published components implemented
+//! a control stack the vehicle does not fly, and nothing noticed because nothing
+//! compared the two dependency sets (#388).
 //!
-//! ```text
-//!   imu ─► ekf.estimate ─► state
-//!   state, waypoint ─► position.tick ─► attitude-setpoint
-//!   state, att-sp   ─► attitude.tick ─► rate-setpoint
-//!   state, rate-sp  ─► rate.tick     ─► torque-setpoint
-//!   torque-sp       ─► mixer.mix     ─► motor-pwm
-//! ```
+//! This component wraps `falcon_core::FlightCore` directly, so what is published
+//! IS what is verified and flown: IEKF estimator, geometric SE(3) attitude, ADRC
+//! inner loop, mixer with rotor-out FDI, and the altitude/position loops.
 //!
-//! The imports are satisfied by the five leaf components at
-//! composition time — `wac plug` (or falcon-cascade.wac) wires the
-//! graph. This component contains no control logic itself: it is
-//! pure orchestration, which is the point of the Component Model
-//! split — the cascade topology lives in one small, auditable place.
+//! It imports nothing. One component, one tick, one clock — which also removes
+//! the other half of the defect: the five stages each advanced their own
+//! hardcoded clock (20 ms, 4 ms, 1 ms) while the cascade called all five once
+//! per tick, so they disagreed with each other by up to 20x.
+//!
+//! `FlightCore` drives a `FlightBackend` rather than returning motors, so the
+//! component supplies a capture backend: the sensor frame goes in as the `read_*`
+//! answers, and `write_motors` is caught on the way out.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -36,23 +40,205 @@ mod bindings;
 // trait lives under `exports::`. The five imported controller
 // interfaces live at the bindings root.
 use bindings::exports::pulseengine::falcon_cascade::controller::Guest;
-use bindings::pulseengine::falcon_cascade::{attitude, ekf, mixer, position, rate};
-use bindings::pulseengine::falcon_cascade::types::{ImuSample, MotorPwm, Waypoint};
+use bindings::pulseengine::falcon_cascade::types::{
+    MotorPwm, SensorFrame, VehicleConfig, Waypoint,
+};
+
+use core::cell::RefCell;
+use falcon_core::{FlightBackend, FlightCore, ImuSample as CoreImu};
+
+/// falcon-core's `Vec3` alias is private, so it is restated here. Same shape
+/// (`[f32; 3]`, NED); if that ever diverges this stops compiling, which is the
+/// right failure.
+type Vec3 = [f32; 3];
+
+struct SingleThreaded<T>(RefCell<T>);
+// SAFETY: the component model guarantees single-threaded, non-reentrant access.
+unsafe impl<T> Sync for SingleThreaded<T> {}
+
+/// Lazily built: `FlightCore::new` needs the host's loop rate, which only
+/// arrives with the first frame. Constructing it on a guessed rate is exactly
+/// the defect v0.8 exists to remove.
+static CORE: SingleThreaded<Option<FlightCore>> = SingleThreaded(RefCell::new(None));
+
+/// The host's calibration, if it supplied one. `None` keeps the v0.8 defaults.
+static CONFIG: SingleThreaded<Option<VehicleConfig>> = SingleThreaded(RefCell::new(None));
+
+/// Sanitise one host-supplied number. A calibration arrives across an ABI from
+/// code this component does not control, and `pos-var = 0` or a NaN gain does
+/// not fail loudly — it quietly destroys the filter several seconds later. A
+/// rejected value falls back to the built-in default, which is wrong for the
+/// airframe but not divergent.
+fn sane(v: f32, default: f32, positive: bool) -> f32 {
+    if v.is_finite() && (!positive || v > 0.0) {
+        v
+    } else {
+        default
+    }
+}
+
+/// The two values that can only be supplied at CONSTRUCTION: hover thrust and
+/// loop rate. Split out from the tuning below because `FlightCore` must be built
+/// directly into its slot — see `apply_tuning`.
+fn core_params(cfg: Option<&VehicleConfig>, frame_hz: f32) -> (f32, f32) {
+    match cfg {
+        // Unconfigured: byte-for-byte the v0.8 behaviour, so an existing host
+        // that never calls `configure` sees no change whatsoever.
+        None => (0.5, frame_hz),
+        Some(c) => (
+            sane(c.hover_thrust, 0.5, true),
+            sane(c.loop_rate_hz, frame_hz, true),
+        ),
+    }
+}
+
+/// Apply the live-settable half of the calibration, IN PLACE.
+///
+/// This is deliberately not a `-> FlightCore` builder. A builder returns the
+/// core by value through its own frame, and `FlightCore` is large (the IEKF
+/// carries a full covariance matrix) while this component links a 8 KiB shadow
+/// stack — a budget that is a shipped property, not an accident, because the
+/// no-grow invariant is what lets jess lower the image to bare metal. The
+/// by-value form overflowed that stack and trapped as an out-of-bounds access
+/// inside `FlightCore::new`. Constructing into the slot and mutating through
+/// `&mut` keeps exactly one core in memory at all times.
+fn apply_tuning(core: &mut FlightCore, c: &VehicleConfig) {
+    core.set_pos_var(sane(c.pos_var, 0.01, true));
+    core.set_process_floor(
+        sane(c.process_floor_vel, 0.0, false),
+        sane(c.process_floor_pos, 0.0, false),
+    );
+    core.set_altitude_gains(
+        sane(c.altitude_kp, 0.05, false),
+        sane(c.altitude_kd, 0.30, false),
+    );
+    core.set_altitude_integral_gain(sane(c.altitude_ki, 0.0, false));
+    // falcon-core's default ki_pos is 0.02, NOT zero — an unconfigured host must
+    // keep it, and a rejected value must fall back to it rather than to 0.
+    core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
+}
+
+/// One tick's sensors in, motors out.
+///
+/// `FlightCore` pulls from a backend and pushes motors into it, which is the
+/// seam that lets the SAME code run against SITL, Gazebo or real hardware. A
+/// component has to answer with a value instead, so this stands in for one tick:
+/// every `read_*` returns what the frame carried, and `write_motors` is caught.
+///
+/// Returning `None` where the frame carried nothing is the point — the core
+/// then skips that fusion step rather than being handed a fabricated zero,
+/// which would be silently wrong rather than merely absent.
+struct FrameBackend {
+    imu: CoreImu,
+    position: Option<Vec3>,
+    mag: Option<Vec3>,
+    heading: Option<f32>,
+    /// v0.10: per-rotor ESC telemetry. `None` leaves the rotor-out FDI on its
+    /// RPM-free path, which is what every published component did until now.
+    motor_rpm: Option<[i32; 4]>,
+    dt: f32,
+    motors: [f32; 4],
+}
+
+impl FlightBackend for FrameBackend {
+    fn read_imu(&mut self) -> CoreImu {
+        self.imu
+    }
+    fn read_position(&mut self) -> Option<Vec3> {
+        self.position
+    }
+    fn read_mag(&mut self) -> Option<Vec3> {
+        self.mag
+    }
+    fn read_heading(&mut self) -> Option<f32> {
+        self.heading
+    }
+    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+        self.motor_rpm
+    }
+    fn write_motors(&mut self, motors: &[f32]) {
+        for (i, m) in self.motors.iter_mut().enumerate() {
+            *m = motors.get(i).copied().unwrap_or(0.0);
+        }
+    }
+    fn dt(&self) -> f32 {
+        self.dt
+    }
+}
 
 struct Component;
 
 impl Guest for Component {
-    fn step(imu: ImuSample, target: Waypoint) -> MotorPwm {
-        // 1. State estimation.
-        let state = ekf::estimate(imu);
-        // 2. Outer position loop → attitude setpoint.
-        let att_sp = position::tick(state, target);
-        // 3. Attitude loop → rate setpoint.
-        let rate_sp = attitude::tick(state, att_sp);
-        // 4. Rate loop → torque setpoint.
-        let torque = rate::tick(state, rate_sp);
-        // 5. Control allocation → per-motor PWM.
-        mixer::mix(torque)
+    fn step(sensors: SensorFrame, target: Waypoint) -> MotorPwm {
+        #[cfg(not(feature = "std"))]
+        falcon_cm_rt::BumpArena::reset();
+
+        // The host's ACTUAL period. Clamped to [0.1 ms, 100 ms] so a garbage
+        // frame cannot wind the filters; a non-finite value falls back to the
+        // v0.7 constant, the only rate that was ever safe to assume.
+        let dt = if sensors.dt_s.is_finite() {
+            sensors.dt_s.clamp(0.0001, 0.1)
+        } else {
+            0.001
+        };
+
+        let imu = sensors.imu;
+        let mut backend = FrameBackend {
+            imu: CoreImu {
+                accel: [imu.ax, imu.ay, imu.az],
+                gyro: [imu.gx, imu.gy, imu.gz],
+            },
+            position: sensors.position_ned.map(|p| [p.x, p.y, p.z]),
+            mag: sensors.mag_body.map(|m| [m.x, m.y, m.z]),
+            heading: sensors.heading_rad,
+            motor_rpm: sensors.motor_rpm.map(|r| [r.m1, r.m2, r.m3, r.m4]),
+            dt,
+            motors: [0.0; 4],
+        };
+
+        {
+            let mut guard = CORE.0.borrow_mut();
+            // Built from the host's calibration if `configure` was called, and
+            // from the v0.8 defaults otherwise. The loop rate comes from the
+            // calibration or from the frame — never from a constant.
+            let cfg = CONFIG.0.borrow();
+            let fresh = guard.is_none();
+            let (hover, hz) = core_params(cfg.as_ref(), 1.0 / dt);
+            // `get_or_insert_with` writes the core straight into the slot; the
+            // tuning is then applied through `&mut`, never by value.
+            let core = guard.get_or_insert_with(|| FlightCore::new(hover, hz));
+            if fresh {
+                if let Some(c) = cfg.as_ref() {
+                    apply_tuning(core, c);
+                }
+            }
+            core.set_position([target.north, target.east, target.down]);
+            core.step(&mut backend);
+        }
+
+        MotorPwm {
+            m1: backend.motors[0],
+            m2: backend.motors[1],
+            m3: backend.motors[2],
+            m4: backend.motors[3],
+        }
+    }
+
+    /// Install the calibration and DROP the existing core, so the next `step`
+    /// rebuilds from it.
+    ///
+    /// Dropping is deliberate. `loop_rate_hz` is fixed at construction while
+    /// every other knob is live-settable, so applying a late `configure` in
+    /// place would silently honour eight fields and ignore the ninth. A host
+    /// would then be flying a rate it did not ask for with no error of any
+    /// kind — the same shape of defect as the hardcoded `dt` this seam was
+    /// built to remove. An explicit re-initialisation is louder and cheaper.
+    fn configure(cfg: VehicleConfig) {
+        #[cfg(not(feature = "std"))]
+        falcon_cm_rt::BumpArena::reset();
+
+        *CONFIG.0.borrow_mut() = Some(cfg);
+        *CORE.0.borrow_mut() = None;
     }
 }
 
