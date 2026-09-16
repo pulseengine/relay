@@ -15,16 +15,27 @@ name: Gazebo
 # repo, and the fleet's rust-cpu boxes are for the heavy Rust gates.
 
 on:
+  # NO PATH FILTER, deliberately — this is the precondition for making the job
+  # a REQUIRED context, and it was learned the hard way.
+  #
+  # The filter that stood here listed the paths that "affect the flight". It was
+  # correct about that and irrelevant to the question that matters. A required
+  # status check that does not RUN does not pass by default: it never reports,
+  # and the PR stays blocked forever. Promoting this job while it was filtered
+  # deadlocked every merge in the repo within minutes — PR #426 sat BLOCKED with
+  # zero failing checks because it touched only `.github/workflows/kani.yml`,
+  # and removing the required context returned it to CLEAN instantly (#427).
+  #
+  # The mirror image of that is #417: a job that is SKIPPED but still reports
+  # `success` verifies nothing while looking green. Both come from the same
+  # place — a gate whose workflow does not always run. The only shape that is
+  # safe to require is one that always runs and always reports.
+  #
+  # The cost is about 7 minutes of runner time per PR. That is cheap against
+  # what this job is: the only gate that flies the actually-published wasm
+  # component through real physics and compares it to native, bit for bit.
   pull_request:
     branches: [main]
-    paths:
-      - 'examples/falcon-sitl-gz/**'
-      - 'tests/cascade-sitl-wasm/**'
-      - 'crates/falcon-core/**'
-      - 'crates/relay-iekf/**'
-      - 'wasm/cm/**'
-      - 'wit/falcon-cascade/**'
-      - '.github/workflows/gazebo.yml'
   push:
     branches: [main]
   workflow_dispatch:
