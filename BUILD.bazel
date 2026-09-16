@@ -936,8 +936,130 @@ meld_fuse(
     components = [":falcon-cascade-stream-composed"],
 )
 
-# ── cascade orchestrator — imports the five, exports `step` ───────
-# No control-crate dep: the cascade is pure orchestration.
+# ── falcon-core and its closure, as bazel rust_libraries (#397) ───
+# //:falcon-cascade wraps falcon_core::FlightCore since #393. The CARGO build
+# was updated; the BAZEL target was not, so it has not built since — and the
+# meld_fuse + witness MC/DC coverage it feeds has produced nothing. These are
+# the 12 crates of falcon-core's transitive closure that had no target yet
+# (relay-math, relay-iekf and relay-mix-quad already had one).
+#
+# Deps mirror each crate's Cargo.toml [dependencies] exactly; they are
+# generated from the manifests rather than hand-listed, because a bazel dep set
+# that drifts from the cargo one is the same defect class this whole target is
+# being repaired for.
+rust_library(
+    name = "relay-geo",
+    srcs = glob(["crates/relay-geo/plain/src/**/*.rs"]),
+    edition = "2024",
+    deps = [
+        ":relay-math",
+    ],
+)
+
+rust_library(
+    name = "relay-adrc",
+    srcs = glob(["crates/relay-adrc/plain/src/**/*.rs"]),
+    edition = "2024",
+    deps = [
+        ":relay-math",
+    ],
+)
+
+rust_library(
+    name = "relay-fsm",
+    srcs = glob(["crates/relay-fsm/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "relay-preflight",
+    srcs = glob(["crates/relay-preflight/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "relay-calib",
+    srcs = glob(["crates/relay-calib/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "relay-batt",
+    srcs = glob(["crates/relay-batt/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "relay-flowrange",
+    srcs = glob(["crates/relay-flowrange/plain/src/**/*.rs"]),
+    edition = "2024",
+    deps = [
+        ":relay-math",
+    ],
+)
+
+rust_library(
+    name = "relay-notch",
+    srcs = glob(["crates/relay-notch/plain/src/**/*.rs"]),
+    edition = "2024",
+    deps = [
+        ":relay-math",
+    ],
+)
+
+rust_library(
+    name = "relay-log",
+    srcs = glob(["crates/relay-log/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "relay-param",
+    srcs = glob(["crates/relay-param/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "falcon-gnss-ubx",
+    srcs = glob(["crates/falcon-gnss-ubx/src/**/*.rs"]),
+    edition = "2024",
+    deps = [
+        "@embedded_io_async_crate//:embedded_io_async",
+        "@embedded_io_crate//:embedded_io",
+    ],
+)
+
+rust_library(
+    name = "falcon-core",
+    srcs = glob(["crates/falcon-core/plain/src/**/*.rs"]),
+    edition = "2024",
+    deps = [
+        ":falcon-gnss-ubx",
+        ":relay-adrc",
+        ":relay-batt",
+        ":relay-calib",
+        ":relay-flowrange",
+        ":relay-fsm",
+        ":relay-geo",
+        ":relay-iekf",
+        ":relay-log",
+        ":relay-math",
+        ":relay-mix-quad",
+        ":relay-notch",
+        ":relay-param",
+        ":relay-preflight",
+    ],
+)
+
+# ── cascade orchestrator — THE FLIGHT CORE, as one component ──────
+# The comment that stood here said "No control-crate dep: the cascade is pure
+# orchestration". That stopped being true at #393, when the component was
+# rewritten to wrap falcon_core::FlightCore directly instead of composing five
+# stage interfaces. The comment stayed and the dep was never added, so this
+# target failed to build from #393 until #397 added the dep below.
+#
+# Past tense deliberately: a comment describing a CURRENT breakage is false the
+# moment it is fixed, which is the very defect class this sentence records.
 rust_wasm_component_bindgen(
     name = "falcon-cascade",
     crate_features = [
@@ -946,6 +1068,7 @@ rust_wasm_component_bindgen(
     ],
     srcs = ["wasm/cm/cascade/src/lib.rs"],
     wit = ":falcon_cascade_wit",
+    deps = [":falcon-core"],
     profiles = ["release"],
 )
 

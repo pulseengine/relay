@@ -16,14 +16,24 @@ artifacts:
                  `error[E0463]: can't find crate for core/std`. They never ran.
                  Red on six consecutive main commits, 2026-09-11 to 2026-09-15
                  (#405).
-        Bazel  — `//:falcon-cascade` has not built since #393, so the fused
-                 image and the witness MC/DC coverage it feeds have produced
-                 nothing for four days (#397).
+        Bazel  — `//:falcon-cascade` has not built since #393; the target's
+                 comment still said "No control-crate dep" long after the
+                 component started wrapping falcon-core. Red on every main
+                 commit from 2026-09-11, blocking nothing (#397). FIXED.
 
       Neither is in the required-contexts set, so neither blocked a merge, and
       the release-execution traceability gate did not surface them either: it
       audits artifact status and trace links, and both tracks' artifacts were
       already `verified` from when the tracks last ran.
+
+      A CORRECTION TO THIS ARTIFACT'S OWN FIRST DRAFT, kept because it is the
+      same error it is written to prevent. The draft said the Bazel breakage
+      also stopped the cascade's witness MC/DC coverage. It did not:
+      `//:falcon-cascade-coverage` is `tags = ["manual"]` and appears in no
+      workflow, so CI has NEVER produced it — before #393 or after (#407). The
+      breakage was narrower than claimed, and the coverage gap is older and
+      separate. Attributing a long-standing absence to the most recent change
+      is exactly how a gap gets "fixed" without being closed.
 
       THE DISTINCTION THIS REQUIREMENT ADDS. VGATE-P01 forbids orphaned proofs,
       P02 forbids untraced ones, P03 requires a cited enforcer to be OBSERVED to
