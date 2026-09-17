@@ -43,8 +43,9 @@ HOLD-P01 first: an hours-long hold is meaningless while a 60 s hold diverges.
 
 **SWREQ-FALCON-HOLD-P01**
 
+- #452 — `SimBackend`'s accelerometer cannot show thrust: 18 closed-loop hold tests run on a vehicle that never accelerates — *the harness fix and the estimator fix must land together (#434); disclosed as a structural gap in the v1.139 notes by maintainer decision 2026-09-17*
 - #403 — Horizontal position loop diverges after ~26 s of hold — was hidden under the altitude limit cycle (#396) — *the blocker for flying longer than ~26 s*
-- #434 — FlightCore's hold loop is UNSTABLE when position fixes arrive at ≤10 Hz — zero noise, deterministic, reproduces on SimBackend in <1 s (likely mechanism of #403) — *the <1 s oracle: hold loop unstable at <=10 Hz aiding; the fix must make it converge*
+- #434 — FlightCore's hold loop is UNSTABLE when position fixes arrive at ≤10 Hz — zero noise, deterministic, reproduces on SimBackend in <1 s (likely mechanism of #403) — *mechanism measured 2026-09-17: two failures, the harness's gravity-only accelerometer (vertical) and the per-tick `update_gravity` on a specific-force reading (all fix rates). Proposed fix: gravity update on the ground only + honest harness; gz run is the confirming measurement*
 
 **SWREQ-FALCON-ENDURANCE-P01**
 
