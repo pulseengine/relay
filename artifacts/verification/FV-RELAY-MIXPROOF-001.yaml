@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-MIXPROOF-001
     type: sw-verification
     title: "MIXPROOF-P01 — the compositional MIX-P06 proof passes, can fail, and halves the instance (v1.140)"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       Verifies SWREQ-RELAY-MIXPROOF-P01 on three counts: the proof still
@@ -40,13 +40,34 @@ artifacts:
       divisions over free finite inputs, with no mixer arithmetic in front of
       them.
 
-      NOT CLAIMED YET: that the CI stall is gone. The stall never reproduced
-      on a developer machine, so local timing cannot show it. The baseline is
-      13 stalls in 42 CI executions (31%). Promotion to `verified` needs at
-      least 10 consecutive `Kani (relay-mix-quad)` executions on CI of this
-      tree or later with no stall; under the old 31% rate, 10 clean runs in a
-      row has a probability of about 2.4%. Each execution is to be recorded by
-      run id.
+      THE STALL IS GONE, MEASURED (2026-09-17). Baseline before this change:
+      13 stalls in 42 CI executions (31%). After it, the `Kani (relay-mix-quad)`
+      job ran 11 consecutive times without a stall — 10 re-runs of #451's Kani
+      run 35250155750, plus the push run on main bd74cfe (job 105329420032, ci-01-9,
+      3m02s). Under the old rate, 11 clean runs in a row has a probability of
+      0.69^11 = 1.6%.
+
+      | # | job | runner | duration |
+      |---|---|---|---|
+      | 1 | 105300311113 | ci-01-10 | 2m24s |
+      | 2 | 105306097014 | ci-01-12 | 2m56s |
+      | 3 | 105313338284 | ci-01-12 | 3m27s |
+      | 4 | 105315376929 | ci-01-11 | 4m42s |
+      | 5 | 105317420217 | ci-01-9 | 3m22s |
+      | 6 | 105321575992 | ci-01-7 | 3m46s |
+      | 7 | 105323666393 | ci-01-12 | 2m27s |
+      | 8 | 105324796491 | ci-01-11 | 2m17s |
+      | 9 | 105325941893 | ci-01-6 | 6m03s |
+      | 10 | 105328467829 | ci-01-11 | 7m04s |
+
+      Seven different runners, including ci-01-6, -7, -10 and -11, each of which
+      had held a stall of this harness. Slowest 7m04s, against the 60-minute cap.
+
+      NOT CLAIMED: that no Kani harness can stall again. `Kani (relay-param)`
+      was cancelled at 52 minutes on main bd74cfe (its log is no longer
+      retrievable, so the harness is unidentified) and re-run. If the heavy tail
+      is a property of large float instances rather than of this one harness,
+      other legs will show it; that belongs to CIFLOW-P01 (v1.142), not here.
     tags: [verification, relay, ci, kani, mixer, v1.140]
     fields:
       method: formal-verification
