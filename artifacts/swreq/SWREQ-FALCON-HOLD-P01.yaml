@@ -83,9 +83,13 @@ artifacts:
       estimate it corrects, and at 10x gyro-bias drift it diverges to 1-13 km
       on three seeds, where the chosen policy stays under 2.5 m.
 
-      STILL OPEN FOR THIS REQUIREMENT: the acceptance above is stated on the
-      reference Gazebo plant, and every number here is `SimBackend`. The gz run
-      is what promotes this, not the unit suite.
+      MEASURED ON THE GZ PLANT (2026-09-17, the Soak ladder at 5 Hz aiding):
+      main holds 40 s and FAILS the 60 s rung (altitude error 1.46 m, rms
+      1.87 m, est_z −0.53 m); with the fix every rung to 300 s passes with
+      altitude error 0.00 m and horizontal peak 0.04 m. 300 s was the ceiling
+      dispatched, not an observed limit. The requirement's own 60 s bar is
+      therefore met on the plant it is stated on, with 0.5 m vertical and
+      1.0 m horizontal now both CHECKED by the verdict.
 
     tags: [requirement, falcon, control, gazebo, hold, v1.140]
     links:

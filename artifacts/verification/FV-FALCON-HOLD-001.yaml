@@ -1,13 +1,32 @@
 artifacts:
   - id: FV-FALCON-HOLD-001
     type: sw-verification
-    title: "HOLD-P01 — the 5 Hz hold converges on a plant whose accelerometer behaves like a real one (v1.140, SimBackend half)"
+    title: "HOLD-P01 — the 5 Hz hold converges, on SimBackend and on the gz plant: 40 s → 300 s (v1.140)"
     status: implemented
     release: falcon-v1.140.0
     description: >
-      Verifies SWREQ-FALCON-HOLD-P01 on `SimBackend` only. The requirement's
-      acceptance is stated on the reference Gazebo plant, so this artifact is
-      deliberately `implemented`: the gz run is what promotes it.
+      Verifies SWREQ-FALCON-HOLD-P01 on `SimBackend` AND on the reference
+      Gazebo plant. It stays `implemented` only because the two-commit rule
+      puts promotion in the code-free PR that follows the change.
+
+      THE GZ MEASUREMENT, the one the requirement is stated on (2026-09-17,
+      the `Soak` workflow's gz ladder, `--scenario=flightcore` at the default
+      GNSS_DIV=50 = 5 Hz aiding at 250 Hz, each rung on a fresh server):
+
+      | rung | main (run 35276573490) | with this change (run 35274954189) |
+      |---|---|---|
+      | 25 s | PASS, alt err 0.01 m | PASS, alt 0.12 m, horiz peak 0.02 m |
+      | 40 s | PASS, alt err 0.24 m (degrading) | PASS, alt 0.02 m, horiz peak 0.03 m |
+      | 60 s | **FAIL, alt err 1.46 m, rms 1.87 m, est_z −0.53 m** | PASS, alt 0.00 m, horiz peak 0.03 m |
+      | 90 s | — | PASS, horiz peak 0.04 m |
+      | 120 s | — | PASS, horiz peak 0.04 m |
+      | 300 s | — | PASS, alt 0.00 m, horiz peak 0.04 m |
+
+      Longest holding duration: **40 s on main, 300 s with this change** — and
+      300 s is the ladder's ceiling as dispatched, not an observed limit. The
+      vehicle on main does not drift away; it SAGS (est_z −0.53 m at the 60 s
+      rung: it is down at half a metre while commanded to 2 m), which is the
+      altitude half of #403 following the horizontal loss.
 
       THE HARNESS NOW REPORTS SPECIFIC FORCE (#452). `SimBackend` carries the
       non-gravitational acceleration its own physics produced — thrust, wind,
@@ -70,8 +89,23 @@ artifacts:
       were regenerated with their own ignored regen tests and the diffs
       committed.
 
-      NOT CLAIMED HERE: anything about the Gazebo plant or the integrator's
-      rig; magnetometer disturbance or vibration, which is what tilt
+      THE GZ VERDICT CAN NOW SEE THE HORIZONTAL HALF. `final_dist` was the
+      ALTITUDE error alone, so every gz hold verdict to date reported
+      horizontal drift as zero by construction (SWREQ-FALCON-HOLD-P01 names
+      closing this as part of the requirement). The verdict now carries
+      `final_horiz`, `peak_horiz` and `rms_horiz_steady`, and PASS requires
+      HOLD-P01's 1.0 m horizontal alongside the 0.5 m vertical. Every branch
+      rung above is measured against that stricter verdict; main's rungs are
+      the altitude-only one, so main's 40 s "PASS" is the weaker claim.
+
+      AND THE LADDER NOW PUBLISHES ITS NUMBER. Under `shell: bash`'s -e, the
+      failing rung killed the step before printing the rung or the
+      longest-holding notice: both soak runs on main that day (08:41 and
+      21:08) ended at `exit 1` with no number. The rung's exit code is now
+      captured, and the break message says whether it was a timeout, a verdict
+      FAIL, or a bench that exited without a verdict.
+
+      NOT CLAIMED HERE: the integrator's rig; magnetometer disturbance or vibration, which is what tilt
       observability leans on once the accelerometer is out of the loop; wind
       and turbulence beyond the existing suite; and runs longer than 180 s.
     tags: [verification, falcon, hold, estimator, sensor-fidelity, v1.140]
@@ -86,6 +120,9 @@ artifacts:
         # The harness reports specific force, and the estimator gates the update.
         - run: "grep -q 'specific_force_ned' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q '!self.in_flight || self.ticks_since_aiding > self.gravity_hold_ticks' crates/falcon-core/plain/src/lib.rs"
+        # The gz verdict measures the horizontal half, and the ladder keeps its number.
+        - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 2.0' examples/falcon-sitl-gz/src/main.rs"
+        - run: "grep -qF -- '|| RC=$?' .github/workflows/soak.yml"
     links:
       - type: verifies
         target: SWREQ-FALCON-HOLD-P01
