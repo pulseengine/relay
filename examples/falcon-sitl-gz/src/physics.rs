@@ -12,7 +12,7 @@
 //! the stub for the real bridge.
 
 use libm::sqrtf;
-use relay_ekf::{quat_mul, ImuSample};
+use relay_ekf::{ImuSample, quat_mul};
 
 // Same physical constants the falcon-sitl-hover SITL uses.
 pub const INERTIA: f32 = 0.0125; // kg·m²
@@ -49,25 +49,33 @@ pub trait Physics {
     /// "gz isn't publishing" (`imu_recv == 0`) from "gz publishes
     /// but our subscriber dropped frames" — same diagnostic shape
     /// as `MavlinkBench`'s `frames_recv` / `gpi_recv` from v0.18.2.
-    fn counters(&self) -> Option<(u64, u64, u64)> { None }
+    fn counters(&self) -> Option<(u64, u64, u64)> {
+        None
+    }
 
     /// v0.19.7 — true NED body velocity (m/s), if the backend supplies
     /// one. `None` means "no true velocity source; finite-difference
     /// position yourself". The real gz bridge overrides this with the
     /// OdometryPublisher twist (deterministic, unlike finite-diff
     /// NavSat which left the altitude velocity-cascade marginal).
-    fn velocity_ned(&self) -> Option<[f32; 3]> { None }
+    fn velocity_ned(&self) -> Option<[f32; 3]> {
+        None
+    }
 
     /// v0.22 — true NED heading (yaw, rad), if the backend supplies one.
     /// `None` means "no heading reference". The real gz bridge overrides
     /// this from the OdometryPublisher pose orientation — the "compass"
     /// that makes yaw observable for the IEKF (yaw is unobservable from
     /// IMU+GPS alone, the v0.21 ±130° wander).
-    fn heading_ned(&self) -> Option<f32> { None }
+    fn heading_ned(&self) -> Option<f32> {
+        None
+    }
 
     /// v0.22 — latest body-frame magnetometer reading (Tesla, NED body
     /// frame), or `None` if no magnetometer. The real heading source.
-    fn mag_body_ned(&self) -> Option<[f32; 3]> { None }
+    fn mag_body_ned(&self) -> Option<[f32; 3]> {
+        None
+    }
 
     /// v1.113 — per-rotor reported RPM (ESC telemetry), or `None` if the plant
     /// has no rotor feedback. This is the ACHIEVED-per-rotor source the
@@ -77,7 +85,9 @@ pub trait Physics {
     /// Without it the FDI is inert, so a SITL rotor-out flight cannot exercise
     /// the recovery. Default `None` (backends without ESC feedback fly without
     /// rotor-fault detection, exactly as the `FlightBackend` default intends).
-    fn motor_rpm(&self) -> Option<[i32; 4]> { None }
+    fn motor_rpm(&self) -> Option<[i32; 4]> {
+        None
+    }
 
     /// v1.113 — inject a single-rotor failure: rotor `rotor`'s thrust (and its
     /// reported RPM) drop to zero from now on. The hook the rotor-out scenario
@@ -147,7 +157,9 @@ impl MockPhysics {
 }
 
 impl Physics for MockPhysics {
-    fn name(&self) -> &'static str { "mock" }
+    fn name(&self) -> &'static str {
+        "mock"
+    }
 
     fn step(&mut self, motor_pwm: [f32; 4], dt: f32) {
         // Sum the four motor PWMs into a normalised collective thrust;
@@ -182,8 +194,7 @@ impl Physics for MockPhysics {
             self.q[3] + 0.5 * qdot[3] * dt,
         ];
         let n = sqrtf(
-            q_new[0] * q_new[0] + q_new[1] * q_new[1]
-                + q_new[2] * q_new[2] + q_new[3] * q_new[3],
+            q_new[0] * q_new[0] + q_new[1] * q_new[1] + q_new[2] * q_new[2] + q_new[3] * q_new[3],
         );
         if n > 1.0e-12 {
             q_new = [q_new[0] / n, q_new[1] / n, q_new[2] / n, q_new[3] / n];
@@ -231,7 +242,10 @@ impl Physics for MockPhysics {
             fb[3] + noise_std * self.next_unit_normal(),
         ];
         let sample = ImuSample {
-            time: relay_ekf::Timestamp { seconds: 0, fraction: 0 },
+            time: relay_ekf::Timestamp {
+                seconds: 0,
+                fraction: 0,
+            },
             accel_body,
             gyro_body,
         };
@@ -291,7 +305,9 @@ impl GazeboPhysics {
 
 #[cfg(not(feature = "gazebo"))]
 impl Physics for GazeboPhysics {
-    fn name(&self) -> &'static str { "gazebo (stub)" }
+    fn name(&self) -> &'static str {
+        "gazebo (stub)"
+    }
 
     fn step(&mut self, _motor_pwm: [f32; 4], _dt: f32) {
         eprintln!(
@@ -303,7 +319,10 @@ impl Physics for GazeboPhysics {
     fn measure(&mut self, _noise_std: f32) -> (ImuSample, [f32; 3]) {
         (
             ImuSample {
-                time: relay_ekf::Timestamp { seconds: 0, fraction: 0 },
+                time: relay_ekf::Timestamp {
+                    seconds: 0,
+                    fraction: 0,
+                },
                 accel_body: [0.0; 3],
                 gyro_body: [0.0; 3],
             },
@@ -325,9 +344,7 @@ impl Physics for GazeboPhysics {
 
 #[cfg(feature = "gazebo")]
 mod gz_real {
-    use super::{Physics, ImuSample};
-    use std::sync::Mutex;
-    use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+    use super::{ImuSample, Physics};
     use crossbeam_channel::Receiver;
     use gz_msgs::actuators::Actuators;
     use gz_msgs::imu::IMU;
@@ -336,6 +353,8 @@ mod gz_real {
     use gz_msgs::odometry::Odometry;
     use gz_msgs::pose_v::Pose_V;
     use gz_transport::{Node, Publisher};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
     // The gz.msgs types (Actuators / IMU / NavSat / Pose_V / Magnetometer /
     // Odometry) now come from the `gz-msgs` crate (protobuf), imported above —
@@ -374,7 +393,11 @@ mod gz_real {
         /// World-origin default — useful for SDF worlds whose vehicle
         /// spawns at lat/lon (0, 0) and want raw deltas without an
         /// anchor.
-        pub const ORIGIN: Self = Self { lat_deg: 0.0, lon_deg: 0.0, alt_m: 0.0 };
+        pub const ORIGIN: Self = Self {
+            lat_deg: 0.0,
+            lon_deg: 0.0,
+            alt_m: 0.0,
+        };
 
         /// Equirectangular projection of (lat_deg, lon_deg, alt_m)
         /// to local NED in metres. Down is positive — alt above
@@ -455,12 +478,10 @@ mod gz_real {
             let model = model.into();
             let mut node = Node::new()?;
 
-            let imu_topic = format!(
-                "/world/{world}/model/{model}/link/base_link/sensor/imu_sensor/imu"
-            );
-            let navsat_topic = format!(
-                "/world/{world}/model/{model}/link/base_link/sensor/navsat_sensor/navsat"
-            );
+            let imu_topic =
+                format!("/world/{world}/model/{model}/link/base_link/sensor/imu_sensor/imu");
+            let navsat_topic =
+                format!("/world/{world}/model/{model}/link/base_link/sensor/navsat_sensor/navsat");
             let odom_topic = format!("/model/{model}/odometry");
             let pose_topic = format!("/model/{model}/pose");
             let mag_topic = format!(
@@ -609,7 +630,10 @@ mod gz_real {
                     .map(|v| [v.x as f32, v.y as f32, v.z as f32])
                     .unwrap_or([0.0; 3]);
                 last_imu = Some(ImuSample {
-                    time: relay_ekf::Timestamp { seconds: 0, fraction: 0 },
+                    time: relay_ekf::Timestamp {
+                        seconds: 0,
+                        fraction: 0,
+                    },
                     accel_body: enu_to_ned(accel),
                     gyro_body: enu_to_ned(gyro),
                 });
@@ -638,8 +662,7 @@ mod gz_real {
             for msg in self.odom_rx.try_iter() {
                 if let Some(tw) = msg.twist.as_ref() {
                     if let Some(lin) = tw.linear.as_ref() {
-                        last_vel =
-                            Some(enu_to_ned([lin.x as f32, lin.y as f32, lin.z as f32]));
+                        last_vel = Some(enu_to_ned([lin.x as f32, lin.y as f32, lin.z as f32]));
                     }
                 }
             }
@@ -721,11 +744,19 @@ mod gz_real {
 
         fn measure(&mut self, _noise_std: f32) -> (ImuSample, [f32; 3]) {
             self.pump();
-            let sample = self.latest_imu.lock().unwrap().clone().unwrap_or(ImuSample {
-                time: relay_ekf::Timestamp { seconds: 0, fraction: 0 },
-                accel_body: [0.0; 3],
-                gyro_body: [0.0; 3],
-            });
+            let sample = self
+                .latest_imu
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or(ImuSample {
+                    time: relay_ekf::Timestamp {
+                        seconds: 0,
+                        fraction: 0,
+                    },
+                    accel_body: [0.0; 3],
+                    gyro_body: [0.0; 3],
+                });
             let pos = *self.latest_position_ned_m.lock().unwrap();
             (sample, pos)
         }
@@ -819,7 +850,11 @@ mod gz_real {
         // `MavlinkBench::Home::project_ned_cm` tests in
         // examples/falcon-hitl-rfspoof/src/mavlink.rs.
         fn budapest_home() -> Home {
-            Home { lat_deg: 47.5023456, lon_deg: 19.0401234, alt_m: 120.0 }
+            Home {
+                lat_deg: 47.5023456,
+                lon_deg: 19.0401234,
+                alt_m: 120.0,
+            }
         }
 
         #[test]
@@ -841,7 +876,11 @@ mod gz_real {
 
         #[test]
         fn lat_step_translates_to_north() {
-            let h = Home { lat_deg: 0.0, lon_deg: 0.0, alt_m: 0.0 };
+            let h = Home {
+                lat_deg: 0.0,
+                lon_deg: 0.0,
+                alt_m: 0.0,
+            };
             // 1° of latitude ≈ 111_195 m on a 6_371_000 m-radius sphere.
             let p = h.project_to_ned_m(1.0, 0.0, 0.0);
             assert!((p[0] - 111_195.0).abs() < 1.0, "north = {}", p[0]);
@@ -871,7 +910,10 @@ mod tests {
         // → zero thrust → falls under gravity; check the fall is
         // physically reasonable).
         p.step([0.0; 4], 0.01);
-        assert!(p.v_ned[2] > 0.0, "no thrust → should accelerate down (+z NED)");
+        assert!(
+            p.v_ned[2] > 0.0,
+            "no thrust → should accelerate down (+z NED)"
+        );
         assert!(p.v_ned[2] < 1.0, "1 step at dt=0.01 → v ≈ g*dt = 0.098 m/s");
     }
 

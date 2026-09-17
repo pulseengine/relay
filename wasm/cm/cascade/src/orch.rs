@@ -1,5 +1,12 @@
-//! Shared cascade orchestration — the per-tick flight-control pipeline
-//! (iekf -> pos -> att -> rate -> mixer) over the five VERIFIED engines.
+//! Shared cascade orchestration — the LEGACY five-stage per-tick pipeline
+//! (iekf -> pos -> att -> rate -> mixer).
+//!
+//! NOT THE FLIGHT CORE (#411, #419). Since #393 the sync `falcon-cascade`
+//! component (lib.rs) wraps `falcon_core::FlightCore` — geometric SE(3) + ADRC —
+//! a different control law. relay-pos/-att/-rate have no Kani or Verus in CI.
+//! This pipeline is kept as the relay P3 stream-composition demonstrator
+//! (STREAM-P11/P15) and the witness MC/DC subject (#202); it ships as
+//! falcon-cascade-stream-{composed,fused}, `role: legacy-stream-demonstrator`.
 //!
 //! Single source of the wiring, used by BOTH the async P3 stream component
 //! (`stream.rs`, exported as the `monitor` stream transformer) and the sync

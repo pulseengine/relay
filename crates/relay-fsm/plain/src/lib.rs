@@ -50,7 +50,10 @@ impl Mode {
     /// is EXCLUDED: its motors are already cut by design (the termination is the
     /// intentional last-resort), so the never-cut-motors-airborne concern is moot.
     pub fn is_airborne(self) -> bool {
-        matches!(self, Mode::Takeoff | Mode::Loiter | Mode::Mission | Mode::Rtl | Mode::Land)
+        matches!(
+            self,
+            Mode::Takeoff | Mode::Loiter | Mode::Mission | Mode::Rtl | Mode::Land
+        )
     }
 }
 
@@ -106,7 +109,9 @@ impl Default for FlightFsm {
 
 impl FlightFsm {
     pub fn new() -> Self {
-        FlightFsm { mode: Mode::Disarmed }
+        FlightFsm {
+            mode: Mode::Disarmed,
+        }
     }
 
     pub fn mode(&self) -> Mode {
@@ -171,7 +176,12 @@ mod tests {
     fn g(level: bool, throttle_low: bool, have_position: bool) -> Gates {
         // prearm_ok defaults true here so the existing physical-gate tests are
         // unchanged; the prearm-blocks-arm cases set it explicitly below.
-        Gates { level, throttle_low, have_position, prearm_ok: true }
+        Gates {
+            level,
+            throttle_low,
+            have_position,
+            prearm_ok: true,
+        }
     }
 
     #[test]
@@ -179,9 +189,18 @@ mod tests {
         let mut f = FlightFsm::new();
         assert_eq!(f.mode(), Mode::Disarmed);
         assert_eq!(f.on(Event::Arm, g(true, true, true)), Mode::Armed);
-        assert_eq!(f.on(Event::RequestTakeoff, g(true, true, true)), Mode::Takeoff);
-        assert_eq!(f.on(Event::ReachedAltitude, g(true, false, true)), Mode::Loiter);
-        assert_eq!(f.on(Event::RequestMission, g(true, false, true)), Mode::Mission);
+        assert_eq!(
+            f.on(Event::RequestTakeoff, g(true, true, true)),
+            Mode::Takeoff
+        );
+        assert_eq!(
+            f.on(Event::ReachedAltitude, g(true, false, true)),
+            Mode::Loiter
+        );
+        assert_eq!(
+            f.on(Event::RequestMission, g(true, false, true)),
+            Mode::Mission
+        );
         assert_eq!(f.on(Event::ReachedHome, g(true, false, true)), Mode::Loiter);
         assert_eq!(f.on(Event::RequestLand, g(true, false, true)), Mode::Land);
         assert_eq!(f.on(Event::Touchdown, g(true, true, true)), Mode::Disarmed);
@@ -200,7 +219,12 @@ mod tests {
         // Physically ready (level + throttle idle) but the commander pre-arm
         // verdict is false → arming is refused, the motors stay safe.
         let mut f = FlightFsm::new();
-        let blocked = Gates { level: true, throttle_low: true, have_position: true, prearm_ok: false };
+        let blocked = Gates {
+            level: true,
+            throttle_low: true,
+            have_position: true,
+            prearm_ok: false,
+        };
         assert_eq!(f.on(Event::Arm, blocked), Mode::Disarmed);
         // and once the checks pass, the same physical state arms.
         assert_eq!(f.on(Event::Arm, g(true, true, true)), Mode::Armed);
@@ -210,7 +234,11 @@ mod tests {
     fn cannot_disarm_airborne() {
         for start in [Mode::Takeoff, Mode::Loiter, Mode::Mission, Mode::Rtl] {
             let mut f = FlightFsm { mode: start };
-            assert_eq!(f.on(Event::RequestDisarm, g(true, true, true)), start, "disarm must no-op in {start:?}");
+            assert_eq!(
+                f.on(Event::RequestDisarm, g(true, true, true)),
+                start,
+                "disarm must no-op in {start:?}"
+            );
         }
     }
 
@@ -227,12 +255,28 @@ mod tests {
             Mode::Rtl,
         ] {
             let mut f = FlightFsm { mode: start };
-            assert_eq!(f.on(Event::Terminate, g(true, true, true)), Mode::Terminated, "{start:?} → Terminated");
+            assert_eq!(
+                f.on(Event::Terminate, g(true, true, true)),
+                Mode::Terminated,
+                "{start:?} → Terminated"
+            );
         }
         // and Terminated is absorbing: no event leaves it.
-        let mut f = FlightFsm { mode: Mode::Terminated };
-        for ev in [Event::Arm, Event::RequestTakeoff, Event::Failsafe, Event::Touchdown, Event::RequestDisarm] {
-            assert_eq!(f.on(ev, g(true, true, true)), Mode::Terminated, "Terminated absorbs {ev:?}");
+        let mut f = FlightFsm {
+            mode: Mode::Terminated,
+        };
+        for ev in [
+            Event::Arm,
+            Event::RequestTakeoff,
+            Event::Failsafe,
+            Event::Touchdown,
+            Event::RequestDisarm,
+        ] {
+            assert_eq!(
+                f.on(ev, g(true, true, true)),
+                Mode::Terminated,
+                "Terminated absorbs {ev:?}"
+            );
         }
     }
 
@@ -240,9 +284,17 @@ mod tests {
     fn failsafe_recovers_from_flight() {
         for start in [Mode::Takeoff, Mode::Loiter, Mode::Mission] {
             let mut f = FlightFsm { mode: start };
-            assert_eq!(f.on(Event::Failsafe, g(true, false, true)), Mode::Rtl, "with position → RTL");
+            assert_eq!(
+                f.on(Event::Failsafe, g(true, false, true)),
+                Mode::Rtl,
+                "with position → RTL"
+            );
             let mut f2 = FlightFsm { mode: start };
-            assert_eq!(f2.on(Event::Failsafe, g(true, false, false)), Mode::Land, "no position → Land");
+            assert_eq!(
+                f2.on(Event::Failsafe, g(true, false, false)),
+                Mode::Land,
+                "no position → Land"
+            );
         }
     }
 }
@@ -351,7 +403,9 @@ mod kani_harness {
     /// back to an armed/flying mode without an on-ground reset (a fresh FSM).
     #[kani::proof]
     fn verify_terminated_is_absorbing() {
-        let mut f = FlightFsm { mode: Mode::Terminated };
+        let mut f = FlightFsm {
+            mode: Mode::Terminated,
+        };
         let g = Gates {
             level: kani::any(),
             throttle_low: kani::any(),
@@ -366,7 +420,10 @@ mod kani_harness {
     #[kani::proof]
     fn verify_failsafe_recovers() {
         let start = any_mode();
-        kani::assume(matches!(start, Mode::Takeoff | Mode::Loiter | Mode::Mission | Mode::Rtl));
+        kani::assume(matches!(
+            start,
+            Mode::Takeoff | Mode::Loiter | Mode::Mission | Mode::Rtl
+        ));
         let mut f = FlightFsm { mode: start };
         let g = Gates {
             level: kani::any(),

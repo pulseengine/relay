@@ -56,7 +56,7 @@ pub fn reference_evaluate(
 mod tests {
     use super::*;
     use proptest::prelude::*;
-    use relay_lc::engine::{compare, MAX_VIOLATIONS_PER_CYCLE};
+    use relay_lc::engine::{MAX_VIOLATIONS_PER_CYCLE, compare};
 
     fn op_from_u8(v: u8) -> ComparisonOp {
         match v % 6 {

@@ -2,7 +2,7 @@
 # workspace (generated bindings module won't build under plain cargo).
 [package]
 name = "falcon-iekf-cm"
-description = "Formally-verified invariant-EKF (SE₂(3)) navigation estimator as a WebAssembly Component — fuses IMU/GNSS/mag/baro into a 16-state attitude/velocity/position/bias estimate."
+description = "Invariant-EKF estimator (relay-iekf) as a WebAssembly Component: IMU propagation with gravity-direction updates ONLY. It does not fuse GNSS, yaw or magnetometer; the falcon-cascade component (FlightCore) does. Kani harnesses on relay-iekf run in CI."
 homepage = "https://pulseengine.eu"
 documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
 authors = ["PulseEngine"]

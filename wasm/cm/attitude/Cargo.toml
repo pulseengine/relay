@@ -2,7 +2,7 @@
 # workspace (generated bindings module won't build under plain cargo).
 [package]
 name = "falcon-attitude-cm"
-description = "Formally-verified geometric SO(3) attitude controller as a WebAssembly Component — attitude setpoint + vehicle state → body-rate setpoint."
+description = "LEGACY quaternion-error proportional attitude controller (relay-att) as a WebAssembly Component — attitude setpoint + vehicle state → body-rate setpoint. Not the attitude control the falcon flight core flies (geometric SE(3), inside the falcon-cascade component)."
 homepage = "https://pulseengine.eu"
 documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
 authors = ["PulseEngine"]

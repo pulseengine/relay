@@ -18,7 +18,11 @@ pub fn crc16_add(mut crc: u16, data: &[u8]) -> u16 {
         crc ^= (b as u16) << 8;
         let mut i = 0;
         while i < 8 {
-            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
             i += 1;
         }
     }

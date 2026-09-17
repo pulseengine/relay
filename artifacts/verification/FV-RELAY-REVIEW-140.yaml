@@ -1,0 +1,24 @@
+artifacts:
+  - id: FV-RELAY-REVIEW-140
+    type: sw-verification
+    title: "REVIEW — independent multi-agent review of falcon-v1.140.0 before tag (v1.140)"
+    status: proposed
+    release: falcon-v1.140.0
+    description: >
+      The review checkpoint for falcon-v1.140.0, the HOLD release — a position hold that stays bounded, and rotor-out on the gz plant.
+
+      EVIDENCE REQUIRED FOR `verified`: `/code-review ultra` run on the
+      release candidate (previous tag..HEAD), the run identified, and every
+      finding listed with its disposition — fixed (PR), filed (issue +
+      release), or dismissed (rationale). Promotion is a separate, code-free
+      PR under the two-commit rule.
+
+      While this artifact is `proposed`, scripts/release-readiness.rs
+      reports falcon-v1.140.0 as not ready. That is the point: the review cannot
+      be forgotten, only done or explicitly de-scoped by the maintainer.
+    tags: [verification, relay, review, release, v1.140]
+    fields:
+      method: review
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-REVIEW-P01

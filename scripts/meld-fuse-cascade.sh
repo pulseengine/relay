@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# meld-fuse-cascade.sh — fuse the VERIFIED falcon control cascade (the five
-# Component Model leaves, incl. the verified IEKF) into a single WebAssembly
-# module with `meld` — the PulseEngine fusion step (CLAUDE.md: "Meld fuses
-# components, wires streams at build time").  This is the embedded artifact:
-# one module → loom → synth → gale on a real target.
+# meld-fuse-cascade.sh — fuse the five per-stage Component Model leaves
+# (iekf, position, attitude, rate, mixer) into a single WebAssembly module with
+# `meld` — the PulseEngine fusion step (CLAUDE.md: "Meld fuses components,
+# wires streams at build time").
+#
+# NOT THE FLIGHT CORE (#388, #419). Three of these leaves wrap LEGACY
+# controllers the flight core does not fly (relay-pos, relay-att, relay-rate;
+# no Kani or Verus in CI) — falcon-core flies geometric SE(3) + ADRC, shipped as
+# the single `falcon-cascade` component. The fused output exercises the
+# meld -> loom -> synth -> gale pipeline; it is NOT a deployable flight artifact.
 #
 # meld is NOT provisioned in the CI bazel toolchain, so this runs locally /
 # on a bench (like the gz flights), not inside the gate. Output: the fused

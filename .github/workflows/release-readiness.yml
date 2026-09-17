@@ -43,7 +43,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install rust-script
-        run: cargo install rust-script --locked || true
+        # No `|| true`: a missing rust-script used to surface later as exit 127,
+        # indistinguishable from a verdict. Fail here, where the cause is.
+        run: command -v rust-script >/dev/null || cargo install rust-script --locked
 
       - name: Report
         shell: bash
@@ -55,8 +57,17 @@ jobs:
           ARGS=(--markdown)
           [ -n "${REL:-}" ] && ARGS+=(--release "$REL")
 
-          ./scripts/release-readiness.rs "${ARGS[@]}" > /tmp/readiness.md
-          READY=$?
+          # `shell: bash` runs with -e. A bare call exiting 1 — "not ready", the
+          # normal state — ended this step before READY was read, so the report
+          # never reached the summary and the job went red every night. The
+          # first scheduled run (2026-09-16) did exactly that.
+          READY=0
+          ./scripts/release-readiness.rs "${ARGS[@]}" > /tmp/readiness.md || READY=$?
+          if [ "$READY" -gt 1 ]; then
+            echo "## Release readiness: UNKNOWN — could not evaluate (exit $READY). This is not a 'not ready'; see the log." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::release readiness could not be evaluated (exit $READY) — see the log; this is not a 'not ready'"
+            exit 1
+          fi
 
           {
             cat /tmp/readiness.md

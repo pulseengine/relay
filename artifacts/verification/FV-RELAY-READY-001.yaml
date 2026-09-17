@@ -1,0 +1,48 @@
+artifacts:
+  - id: FV-RELAY-READY-001
+    type: sw-verification
+    title: "READY-P01 — fixture repos pin all four verdict bugs; the nightly step survives `bash -e` (v1.139)"
+    status: verified
+    release: falcon-v1.139.0
+    description: >
+      Verifies SWREQ-RELAY-READY-P01 with fixture repositories built by the
+      tool's own tests, plus the workflow wiring.
+
+      THE TESTS. `run_at(root, …)` reads only `root`, so each test builds a
+      throwaway git repo (tags point at a blob — no commit, no signing) with
+      chosen artifact files: ready → 0; not ready → 1; the release's only
+      blocker in an unparseable file → no verdict; no tags → no verdict; v1.99.0
+      tagged with v1.99.1 and v1.100.0 scoped → targets v1.99.1.
+
+      THE TESTS CAN FAIL. Three mutants, each reverting one fix — the
+      unparseable bail, the no-tags bail, and version ordering (back to map
+      order) — each fail exactly the one matching test (3 passed, 1 failed).
+
+      CONTROLS AGAINST #423's CODE (recorded, 2026-09-16): the old script on the
+      hidden-blocker fixture printed "1/1 artifacts done (100%)" and exited 0;
+      on the no-tags fixture it exited 0; on the ordering fixture it targeted
+      falcon-v1.100.0. The workflow's Report block, extracted and run under
+      `bash --noprofile --norc -eo pipefail` with a stub script: new block —
+      exit 0 and 1 finish the step with an 11-line summary, exit 2 and 127 fail
+      the step with an ::error:: and an UNKNOWN summary line; old block with
+      exit 1 — step exit 1, no summary written, matching the real 2026-09-16
+      scheduled run (job log: `Process completed with exit code 1`).
+
+      On the real tree the refactored tool still reports falcon-v1.139.0,
+      0 of 9 done, exit 1, in both text and --markdown forms.
+
+      NOT CLAIMED: a green scheduled run on GitHub. That is observable only after
+      merge and is the evidence for promotion to `verified` in a separate change.
+    tags: [verification, relay, release, readiness, v1.139]
+    fields:
+      method: automated-test
+      steps:
+        # The four verdict bugs, against fixture repos.
+        - run: "rust-script --test scripts/release-readiness.rs"
+        # The exit code survives `shell: bash`'s -e.
+        - run: "grep -q '/tmp/readiness.md || READY=$?' .github/workflows/release-readiness.yml"
+        # A failed rust-script install fails where it happens, not as a verdict.
+        - run: "! grep -q 'cargo install rust-script --locked || true' .github/workflows/release-readiness.yml"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-READY-P01

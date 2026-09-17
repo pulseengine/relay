@@ -1,0 +1,73 @@
+artifacts:
+  - id: FV-FALCON-BATT-003
+    type: sw-verification
+    title: "BATT — an absent battery reads as ABSENT, not healthy, and blocks arming (v1.139)"
+    status: verified
+    release: falcon-v1.139.0
+    description: >
+      Verification that a backend supplying no battery data can no longer assert
+      that the pack is fine.
+
+      WHAT WAS WRONG (#413). `FlightBackend::read_battery_v` returned `f32` and
+      defaulted to `16.0` — a healthy 4S pack. Nothing in the flight path
+      overrode it: not the gz `SitlBackend`, not the wasm component's
+      `FrameBackend`, and the WIT seam had no battery field at all. The value is
+      consumed by the battery estimator, which drives the low/critical battery
+      failsafe and the `BatteryOk` and `BatteryTakeoffMargin` pre-arm rows. So on
+      the published component, in SITL, and on any `HardwareBackend` whose
+      driver did not override `voltage()`, all three reported healthy forever.
+
+      THE ASYMMETRY THAT GIVES IT AWAY: every other absent channel on the trait
+      returns `None` and the core SKIPS that fusion — `read_battery_i`
+      included, in the very next method. Voltage was the one that fabricated a
+      plausible number instead. The `BatteryDriver` default stated the rationale
+      outright: "Default keeps a healthy pack so a board without a monitor still
+      flies."
+
+      THE FIX. `read_battery_v` and `BatteryDriver::voltage` now return
+      `Option<f32>`, defaulting to `None`. `FlightSupervisor` records whether a
+      voltage arrived and the pre-arm row becomes
+
+        battery_ok = batt_present && !(low || critical)
+
+      so absence fails the row rather than passing it. The estimator is not fed
+      a fabricated sample at all.
+
+      WHY THE TEST INHERITS THE DEFAULT. `absent_battery_blocks_arming`
+      deliberately does NOT override `read_battery_v`: the property under test
+      IS the default, and a test that overrode it would verify a path no real
+      backend takes — which is exactly how the defect survived.
+
+      THE TEST WAS PROVEN ABLE TO FAIL. With the pre-arm line temporarily
+      restored to its old form (`true && !(low || critical)`), the test FAILS;
+      with the fix it passes. A pre-arm test that cannot fail would be worse than
+      none here, since it would certify the very thing that was broken.
+
+      SCOPE (honest). This makes absence visible and fail-safe. It does NOT give
+      the vehicle battery telemetry: no seam field carries voltage to the wasm
+      component, and `relay-dronecan` — which decodes `battery_info` and is the
+      natural producer — still has zero consumers. A vehicle flying the
+      published component now REFUSES TO ARM rather than silently believing a
+      flat pack is full, which is the correct direction, but the channel itself
+      remains unwired (ORPHAN-P01, CONFIG-P01).
+
+      One consumer was adjusted rather than converted: `falcon-hitl`'s wire frame
+      has a bare `battery: f32` with no validity flag beside it (unlike its
+      `pos_valid`/`mag_valid` siblings), and adding one changes the HITL
+      protocol. Its fallback is 0.0 V — fail-safe, since a real cell is never
+      0 V, so it reads as critically flat rather than as a healthy pack.
+    tags: [verification, falcon, battery, failsafe, prearm, v1.139]
+    fields:
+      method: test
+      steps:
+        # The property, and it is proven falsifiable (see the description).
+        - run: "cargo test -p falcon-core --release absent_battery_blocks_arming"
+        # The default signals absence rather than a plausible voltage.
+        - run: "grep -A1 'fn read_battery_v(&mut self) -> Option<f32>' crates/falcon-core/plain/src/lib.rs | grep -q 'None'"
+        # ...and the hardware driver default likewise.
+        - run: "grep -A1 'fn voltage(&mut self) -> Option<f32>' crates/falcon-core/plain/src/lib.rs | grep -q 'None'"
+        # Absence must reach the pre-arm row, not stop at the estimator.
+        - run: "grep -q 'self.batt_present && !(self.batt_state.low' crates/falcon-core/plain/src/lib.rs"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-ORPHAN-P01

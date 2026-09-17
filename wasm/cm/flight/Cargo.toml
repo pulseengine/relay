@@ -1,6 +1,6 @@
 [package]
 name = "falcon-flight-component"
-description = "Formally-verified drone flight core (invariant-EKF estimator → geometric SE(3) attitude control → ADRC → mixer) as a portable WebAssembly Component. Runs the same cascade that is Kani/Verus/Rocq/Lean-verified natively and bare-metal on Cortex-M."
+description = "Self-contained DEMO component: runs falcon-core's FlightCore against a simulated plant compiled into the component and returns a stabilization metric. It cannot be driven by a host. The drivable flight core is the falcon-cascade component in the falcon-components bundle."
 version = "0.1.0"
 edition = "2021"
 publish = false

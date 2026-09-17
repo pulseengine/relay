@@ -18,11 +18,11 @@
 //! Compositional proofs (WCET(A ∘ B) ≤ WCET(A) + WCET(B) + overhead,
 //! mem(A ∘ B) ≤ mem(A) + mem(B) + buffer) live in proofs/rocq and proofs/lean.
 #![no_std]
-pub mod crc32;
+pub mod ccsds;
 pub mod compare;
+pub mod crc32;
+pub mod filter;
+pub mod merge;
 pub mod persistence;
 pub mod rate_divide;
 pub mod time_gate;
-pub mod ccsds;
-pub mod merge;
-pub mod filter;

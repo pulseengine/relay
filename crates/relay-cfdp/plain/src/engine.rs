@@ -139,36 +139,34 @@ impl TransactionTable {
             TransactionState::Idle => {
                 self.transactions[idx as usize].state = TransactionState::MetadataSent;
                 result.add_action(CfdpAction::SendMetadata);
-            },
+            }
             TransactionState::MetadataSent => {
                 self.transactions[idx as usize].state = TransactionState::DataSending;
                 let len = txn.file_size;
                 if len > 0 {
-                    result.add_action(CfdpAction::SendData { offset: 0, length: len });
+                    result.add_action(CfdpAction::SendData {
+                        offset: 0,
+                        length: len,
+                    });
                 }
-            },
+            }
             TransactionState::DataSending => {
                 self.transactions[idx as usize].bytes_sent = txn.file_size;
                 self.transactions[idx as usize].state = TransactionState::EofSent;
                 result.add_action(CfdpAction::SendEof);
-            },
+            }
             TransactionState::EofSent => {
                 self.transactions[idx as usize].state = TransactionState::Finished;
                 result.add_action(CfdpAction::Complete);
-            },
-            TransactionState::Finished => {},
-            TransactionState::Cancelled => {},
+            }
+            TransactionState::Finished => {}
+            TransactionState::Cancelled => {}
         }
 
         result
     }
 
-    pub fn process_nak(
-        &mut self,
-        transaction_id: u32,
-        offset: u32,
-        length: u32,
-    ) -> CfdpResult {
+    pub fn process_nak(&mut self, transaction_id: u32, offset: u32, length: u32) -> CfdpResult {
         let mut result = CfdpResult::new();
         let idx = self.find_transaction(transaction_id);
         if idx as usize >= MAX_TRANSACTIONS || idx >= self.count {
@@ -191,13 +189,20 @@ impl TransactionTable {
 
         let clamped_length = if offset < txn.file_size {
             let remaining = txn.file_size - offset;
-            if length < remaining { length } else { remaining }
+            if length < remaining {
+                length
+            } else {
+                remaining
+            }
         } else {
             0
         };
 
         if clamped_length > 0 {
-            result.add_action(CfdpAction::Retransmit { offset, length: clamped_length });
+            result.add_action(CfdpAction::Retransmit {
+                offset,
+                length: clamped_length,
+            });
         }
 
         result
@@ -215,28 +220,31 @@ impl TransactionTable {
             TransactionState::Idle => {
                 self.transactions[idx as usize].state = TransactionState::MetadataSent;
                 result.add_action(CfdpAction::SendMetadata);
-            },
+            }
             TransactionState::MetadataSent => {
                 result.add_action(CfdpAction::SendMetadata);
-            },
+            }
             TransactionState::DataSending => {
                 let remaining = txn.file_size - txn.bytes_sent;
                 if remaining > 0 {
-                    result.add_action(CfdpAction::SendData { offset: txn.bytes_sent, length: remaining });
+                    result.add_action(CfdpAction::SendData {
+                        offset: txn.bytes_sent,
+                        length: remaining,
+                    });
                 } else {
                     self.transactions[idx as usize].state = TransactionState::EofSent;
                     result.add_action(CfdpAction::SendEof);
                 }
-            },
+            }
             TransactionState::EofSent => {
                 result.add_action(CfdpAction::SendAck);
-            },
+            }
             TransactionState::Finished => {
                 result.add_action(CfdpAction::Complete);
-            },
+            }
             TransactionState::Cancelled => {
                 result.add_action(CfdpAction::Cancel);
-            },
+            }
         }
 
         result

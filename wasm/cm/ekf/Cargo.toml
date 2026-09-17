@@ -2,7 +2,7 @@
 # workspace (generated bindings module won't build under plain cargo).
 [package]
 name = "falcon-ekf-cm"
-description = "Falcon v0.7 — ekf as a Component Model component (wac cascade)"
+description = "LEGACY Mahony complementary attitude filter on SO(3) (relay-ekf) as a WebAssembly Component. Despite the name, not an extended Kalman filter, and not the estimator the falcon flight core uses (the invariant EKF, relay-iekf)."
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"

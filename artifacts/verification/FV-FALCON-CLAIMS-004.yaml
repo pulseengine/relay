@@ -1,0 +1,47 @@
+artifacts:
+  - id: FV-FALCON-CLAIMS-004
+    type: sw-verification
+    title: "CLAIMS — 'delivered' is derived from the dependency graph, not prose; the stale PX4 parity table is marked historical (#422, v1.139)"
+    status: verified
+    release: falcon-v1.139.0
+    description: >
+      Partial verification of SWREQ-FALCON-CLAIMS-P01, for its #422 instance —
+      the strategic document you would read to decide what to build next.
+
+      WHAT WAS WRONG. docs/PX4-PARITY-ASSESSMENT.md (v1.56, 82+ versions
+      stale) listed capabilities under "Our crate (shipped)". Checked against
+      the dependency graph, five have no consumer anywhere: falcon-baromag,
+      relay-rc, relay-mix-multi, relay-sensvote, relay-modextra. #422 named
+      four; the mechanical check found the fifth.
+
+      THE FIX. scripts/capability-reachability.rs derives, from `cargo
+      metadata`'s resolved graph, whether each crate under crates/ is in the
+      transitive normal-dependency closure of a shipped root: the flight core
+      (falcon-core), a published wasm component (manifest deps plus relay_*
+      imports in Bazel-only sources, #411), or the released binary
+      (falcon-hello). relay is a shared framework, so a crate falcon does not
+      ship may be a sibling repo's dependency: those are an explicit, dated
+      list (wohl's 10 path dependencies, verified 2026-09-17; no sibling has a
+      git dependency) and reported as such, never as consumer-less — and the
+      document says plainly that "not shipped" is not "dead" and that nothing
+      is retired from it (ORPHAN-P01 decides flight capabilities). Output is
+      deterministic and committed as docs/CAPABILITY-REACHABILITY.md: 28 of 60
+      crates under crates/ have no consumer, 10 are wohl's. `--check` fails
+      when the committed file no longer matches the tree. The parity document
+      is marked HISTORICAL with the five false credits named and the generated
+      table as the authority.
+
+      NOT CLAIMED: a current PX4 parity narrative — that belongs with
+      ORPHAN-P01 / CONFIG-P01 (v1.141). The EXTERNAL list cannot be checked in
+      CI (no sibling checkouts); it is dated for that reason.
+    tags: [verification, falcon, claims, docs, reachability, v1.139]
+    fields:
+      method: automated-test
+      steps:
+        - run: "rust-script --test scripts/capability-reachability.rs"
+        # The committed table matches the tree (fails if a dependency changed without regenerating).
+        - run: "./scripts/capability-reachability.rs --check"
+        - run: "grep -q 'HISTORICAL — do not plan from this document' docs/PX4-PARITY-ASSESSMENT.md"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-CLAIMS-P01

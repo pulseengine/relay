@@ -7,7 +7,7 @@
 //! multiplication is intractable.
 #![cfg(kani)]
 
-use crate::{sanitize, TripLatch};
+use crate::{TripLatch, sanitize};
 
 /// BATT-K01 — `sanitize` is total and in-range for ANY f32 input
 /// (incl. NaN/±∞), provided the bounds are ordered and the NaN default

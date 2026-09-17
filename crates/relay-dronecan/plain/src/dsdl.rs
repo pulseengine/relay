@@ -129,7 +129,13 @@ mod tests {
     #[test]
     fn write_then_read_round_trips() {
         // the codec is self-inverse for any offset/width/value in range
-        for &(o, w, v) in &[(0usize, 14usize, 8191u64), (14, 14, 0x2000), (32, 2, 2), (34, 3, 5), (5, 18, 0x3ABCD)] {
+        for &(o, w, v) in &[
+            (0usize, 14usize, 8191u64),
+            (14, 14, 0x2000),
+            (32, 2, 2),
+            (34, 3, 5),
+            (5, 18, 0x3ABCD),
+        ] {
             let mut buf = [0u8; 16];
             write_uint(&mut buf, o, w, v);
             assert_eq!(read_uint(&buf, o, w), v & ((1u64 << w) - 1), "o={o} w={w}");

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-COV-004
     type: sw-verification
     title: "Cascade witness MC/DC via wasmtime+WASI subprocess harness (v0.15.1)"
-    status: verified
+    status: implemented
     description: >
       v0.15.1 closes the cascade-target witness coverage WASI gap
       recorded in FV-FALCON-COV-001 (v0.13) and confirmed in
@@ -73,7 +73,10 @@ artifacts:
            flag today. //:falcon-cascade-coverage still tagged
            ["manual"] until the rule learns the flag (or we add a
            Bazel macro that runs witness + the harness via
-           genrule). Tracked as a follow-up.
+           genrule). Tracked as #407 (the coverage target has never been produced in CI).
+
+      DEMOTED verified -> implemented (2026-09-17, #415, maintainer decision). The only CI-executed step builds the harness crate; the MC/DC evidence step is `$WITNESS run /path/to/instrumented.wasm`, an unfilled placeholder that runs nowhere, and the coverage target that would produce it (//:falcon-cascade-coverage) has never been produced in CI and currently fails to fuse (#407). RESTORE once CI runs witness on the real instrumented cascade and publishes a truth table with zero unresolved gap rows (#145, #222, #407).
+
     tags: [verification, falcon, witness, mcdc, wasi, harness, v0.15.1]
     fields:
       method: structural-coverage-mcdc + subprocess-harness

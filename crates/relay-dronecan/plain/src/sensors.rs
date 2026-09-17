@@ -125,7 +125,9 @@ mod tests {
     /// use the DSDL codec (the LSB-first read_bits was wrong).
     #[test]
     fn esc_status_decodes_fields() {
-        let p = [0x07, 0, 0, 0, 0x00, 0x49, 0x00, 0x3c, 0x88, 0x5c, 0x88, 0x13, 0x19, 0x0c];
+        let p = [
+            0x07, 0, 0, 0, 0x00, 0x49, 0x00, 0x3c, 0x88, 0x5c, 0x88, 0x13, 0x19, 0x0c,
+        ];
         let s = decode_esc_status(&p).unwrap();
         assert_eq!(s.error_count, 7);
         assert_eq!(s.voltage, 10.0);

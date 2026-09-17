@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-OCI-001
     type: sw-verification
     title: "OCI-P01 — signed per-component publish, WASI-free build, and through-wasm closed-loop proof (v1.129)"
-    status: verified
+    status: implemented
     release: falcon-v1.129.0
     description: >
       Verification of SWREQ-FALCON-OCI-P01, the jess consumption contract
@@ -95,6 +95,9 @@ artifacts:
       conversion — the pattern is proven and mechanical, and jess's per-stage
       skip report prioritizes the order. Nothing here claims on-target lowering:
       that is jess's half of the split.
+
+      DEMOTED verified -> implemented (2026-09-17, #415, maintainer decision). None of this artifact's three steps runs in any CI: all need cargo-component / wasm-tools, which the gate runner lacks, and step 2 cannot even follow step 1 (each step is its own subprocess, so the `cd` does not carry over). scripts/check-evidence.rs flags it as verified with zero executed evidence. RESTORE `verified` in a separate code-free PR once a CI job builds the rate component and asserts its WIT imports (one `falcon:cascade` import, zero wasi:*) and the rate-loop-proof closed loop, with the run cited.
+
     tags: [verification, falcon, oci, wasm, component-model, jess-contract, v1.129]
     fields:
       method: test

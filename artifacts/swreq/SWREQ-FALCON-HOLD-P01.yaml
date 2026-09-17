@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "HOLD-P01 — a stationary position hold shall stay bounded for at least 60 s, horizontally as well as vertically"
     status: proposed
-    release: falcon-v1.139.0
+    release: falcon-v1.140.0
     description: >
       Commanded to hold a fixed NED position, the vehicle shall remain within
       0.5 m vertically and 1.0 m horizontally of the setpoint for at least 60 s
@@ -49,7 +49,10 @@ artifacts:
 
       FALSIFICATION: wrong if a 60 s stationary 2 m gz hold leaves the vehicle
       more than 1.0 m horizontally or 0.5 m vertically from the setpoint.
-    tags: [requirement, falcon, control, gazebo, hold, v1.139]
+
+      RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.140, the HOLD release. v1.139 is a short integrity and promotion round; this is flight work with its own oracle now. #403's likely mechanism reproduces deterministically in under a second on SimBackend (#434: the hold loop is unstable at <=10 Hz position aiding, zero noise), and the fix must make that reproduction converge.
+
+    tags: [requirement, falcon, control, gazebo, hold, v1.140]
     links:
       - type: derives-from
         target: SYSREQ-FALCON-010

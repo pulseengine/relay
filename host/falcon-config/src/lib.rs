@@ -121,11 +121,19 @@ pub struct PosCfg {
 // Priority for now: airmode gives the yaw loop FULL authority, which the
 // negative-b0 yaw WORKAROUND can't yet handle (it diverges). Airmode
 // becomes the default once the yaw sign is properly fixed (Track A #4).
-fn default_mixer_mode() -> MixerMode { MixerMode::Priority }
+fn default_mixer_mode() -> MixerMode {
+    MixerMode::Priority
+}
 
-fn default_loop_dt() -> f32 { 0.001 }
-fn default_outer_decim() -> u32 { 10 }
-fn default_gyro_lpf_hz() -> f32 { 60.0 }
+fn default_loop_dt() -> f32 {
+    0.001
+}
+fn default_outer_decim() -> u32 {
+    10
+}
+fn default_gyro_lpf_hz() -> f32 {
+    60.0
+}
 
 /// The whole falcon-quad tuning set.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -165,7 +173,11 @@ impl FalconConfig {
     }
 
     pub fn to_geo_gains(&self) -> relay_geo::GeoGains {
-        relay_geo::GeoGains { k_r: self.geo.k_r, k_omega: self.geo.k_omega, j: self.geo.j }
+        relay_geo::GeoGains {
+            k_r: self.geo.k_r,
+            k_omega: self.geo.k_omega,
+            j: self.geo.j,
+        }
     }
 
     pub fn to_adrc(&self) -> relay_adrc::AdrcRate {
@@ -204,8 +216,18 @@ impl Default for FalconConfig {
                 j: [0.0217, 0.0217, 0.04],
             },
             adrc: [
-                AdrcCfg { omega_o: 40.0, omega_c: 12.0, b0: 30.0, tau: 0.0125 },
-                AdrcCfg { omega_o: 40.0, omega_c: 12.0, b0: 30.0, tau: 0.0125 },
+                AdrcCfg {
+                    omega_o: 40.0,
+                    omega_c: 12.0,
+                    b0: 30.0,
+                    tau: 0.0125,
+                },
+                AdrcCfg {
+                    omega_o: 40.0,
+                    omega_c: 12.0,
+                    b0: 30.0,
+                    tau: 0.0125,
+                },
                 // Yaw: ω_o high / ω_c low (control bw below the motor pole)
                 // + actuator lag τ=0.025 in the ESO. b0 is NEGATIVE (−6),
                 // and that is now *validated*, not a fudge: the frame-yaw
@@ -219,7 +241,12 @@ impl Default for FalconConfig {
                 // body torque unchanged) but showed WORSE in limited gz runs
                 // (0/6 vs 3/4) — unresolved (gz startup nondeterminism vs a
                 // hidden asymmetry), so we keep the verified-good b0=−6.
-                AdrcCfg { omega_o: 30.0, omega_c: 3.0, b0: -6.0, tau: 0.025 },
+                AdrcCfg {
+                    omega_o: 30.0,
+                    omega_c: 3.0,
+                    b0: -6.0,
+                    tau: 0.025,
+                },
             ],
             pos: PosCfg {
                 // Gentle horizontal gains: high gains excited the limit
@@ -236,7 +263,7 @@ impl Default for FalconConfig {
                 mixer_floor: 0.2,
                 use_adrc: true,
                 yaw_mode: YawMode::RateHold,
-                loop_dt: default_loop_dt(),       // 1 kHz inner loop
+                loop_dt: default_loop_dt(),         // 1 kHz inner loop
                 outer_decim: default_outer_decim(), // 100 Hz outer loop
                 gyro_lpf_hz: default_gyro_lpf_hz(), // 60 Hz gyro LPF
                 mixer_mode: default_mixer_mode(),   // priority

@@ -27,11 +27,7 @@
 
 #[inline]
 fn finite_or(x: f32, d: f32) -> f32 {
-    if x.is_finite() {
-        x
-    } else {
-        d
-    }
+    if x.is_finite() { x } else { d }
 }
 
 /// Cap an approach speed `v_cmd` (≥ 0, toward the obstacle) at `v_allowed`. Pure
@@ -40,11 +36,7 @@ fn finite_or(x: f32, d: f32) -> f32 {
 pub fn cap_approach(v_cmd: f32, v_allowed: f32) -> f32 {
     let v = finite_or(v_cmd, 0.0).max(0.0);
     let a = finite_or(v_allowed, 0.0).max(0.0);
-    if a < v {
-        a
-    } else {
-        v
-    }
+    if a < v { a } else { v }
 }
 
 /// Braking-limited speed for a usable clear distance `usable` (m) and max
@@ -55,11 +47,7 @@ pub fn braking_speed(usable: f32, a_max: f32) -> f32 {
     let u = finite_or(usable, 0.0).max(0.0);
     let a = finite_or(a_max, 0.0).max(0.0);
     let s = relay_math::sqrtf(2.0 * a * u);
-    if s.is_finite() && s >= 0.0 {
-        s
-    } else {
-        0.0
-    }
+    if s.is_finite() && s >= 0.0 { s } else { 0.0 }
 }
 
 /// The collision-prevention velocity cap: limit the commanded approach speed so
@@ -132,7 +120,11 @@ mod tests {
 
     #[test]
     fn never_exceeds_command_or_goes_negative() {
-        for &(v, d, m, a) in &[(2.0, 5.0, 1.0, 3.0), (10.0, 0.5, 1.0, 4.0), (-1.0, 5.0, 1.0, 3.0)] {
+        for &(v, d, m, a) in &[
+            (2.0, 5.0, 1.0, 3.0),
+            (10.0, 0.5, 1.0, 4.0),
+            (-1.0, 5.0, 1.0, 3.0),
+        ] {
             let r = limit_approach_speed(v, d, m, a);
             assert!(r >= 0.0 && r <= v.max(0.0));
         }

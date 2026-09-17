@@ -54,13 +54,24 @@ pub struct DispatchResult {
 
 impl AtsCommand {
     pub const fn empty() -> Self {
-        AtsCommand { execute_at_sec: 0, command_code: 0, payload_offset: 0, payload_len: 0, dispatched: false }
+        AtsCommand {
+            execute_at_sec: 0,
+            command_code: 0,
+            payload_offset: 0,
+            payload_len: 0,
+            dispatched: false,
+        }
     }
 }
 
 impl RtsCommand {
     pub const fn empty() -> Self {
-        RtsCommand { delay_sec: 0, command_code: 0, payload_offset: 0, payload_len: 0 }
+        RtsCommand {
+            delay_sec: 0,
+            command_code: 0,
+            payload_offset: 0,
+            payload_len: 0,
+        }
     }
 }
 
@@ -78,7 +89,11 @@ impl RtsSequence {
 
 impl DispatchedCommand {
     pub const fn empty() -> Self {
-        DispatchedCommand { command_code: 0, payload_offset: 0, payload_len: 0 }
+        DispatchedCommand {
+            command_code: 0,
+            payload_offset: 0,
+            payload_len: 0,
+        }
     }
 }
 
@@ -92,15 +107,21 @@ impl CommandStore {
     }
 
     pub fn load_ats_command(&mut self, cmd: AtsCommand) -> bool {
-        if self.ats_count as usize >= MAX_ATS_COMMANDS { return false; }
+        if self.ats_count as usize >= MAX_ATS_COMMANDS {
+            return false;
+        }
         self.ats_table[self.ats_count as usize] = cmd;
         self.ats_count = self.ats_count + 1;
         true
     }
 
     pub fn start_rts(&mut self, rts_id: u32, current_time_sec: u64) -> bool {
-        if rts_id as usize >= MAX_RTS_SEQUENCES { return false; }
-        if self.rts_sequences[rts_id as usize].command_count == 0 { return false; }
+        if rts_id as usize >= MAX_RTS_SEQUENCES {
+            return false;
+        }
+        if self.rts_sequences[rts_id as usize].command_count == 0 {
+            return false;
+        }
         self.rts_sequences[rts_id as usize].running = true;
         self.rts_sequences[rts_id as usize].start_time_sec = current_time_sec;
         self.rts_sequences[rts_id as usize].current_index = 0;
@@ -108,21 +129,29 @@ impl CommandStore {
     }
 
     pub fn stop_rts(&mut self, rts_id: u32) -> bool {
-        if rts_id as usize >= MAX_RTS_SEQUENCES { return false; }
+        if rts_id as usize >= MAX_RTS_SEQUENCES {
+            return false;
+        }
         self.rts_sequences[rts_id as usize].running = false;
         true
     }
 
     pub fn load_rts_command(&mut self, rts_id: u32, cmd: RtsCommand) -> bool {
-        if rts_id as usize >= MAX_RTS_SEQUENCES { return false; }
+        if rts_id as usize >= MAX_RTS_SEQUENCES {
+            return false;
+        }
         let seq = &mut self.rts_sequences[rts_id as usize];
-        if seq.command_count as usize >= MAX_RTS_COMMANDS { return false; }
+        if seq.command_count as usize >= MAX_RTS_COMMANDS {
+            return false;
+        }
         seq.commands[seq.command_count as usize] = cmd;
         seq.command_count = seq.command_count + 1;
         true
     }
 
-    pub fn ats_count(&self) -> u32 { self.ats_count }
+    pub fn ats_count(&self) -> u32 {
+        self.ats_count
+    }
 
     pub fn process_tick(&mut self, current_time_sec: u64) -> DispatchResult {
         let mut result = DispatchResult {
@@ -134,7 +163,9 @@ impl CommandStore {
         let ats_count = self.ats_count;
         let mut i: u32 = 0;
         while i < ats_count {
-            if result.dispatch_count as usize >= MAX_DISPATCH_PER_TICK { break; }
+            if result.dispatch_count as usize >= MAX_DISPATCH_PER_TICK {
+                break;
+            }
             let cmd = self.ats_table[i as usize];
             if !cmd.dispatched && cmd.execute_at_sec <= current_time_sec {
                 let idx = result.dispatch_count as usize;
@@ -152,7 +183,9 @@ impl CommandStore {
         // Check RTS sequences
         let mut r: u32 = 0;
         while r < MAX_RTS_SEQUENCES as u32 {
-            if result.dispatch_count as usize >= MAX_DISPATCH_PER_TICK { break; }
+            if result.dispatch_count as usize >= MAX_DISPATCH_PER_TICK {
+                break;
+            }
             let seq = self.rts_sequences[r as usize];
             if seq.running && seq.current_index < seq.command_count {
                 let cmd = seq.commands[seq.current_index as usize];
@@ -238,18 +271,24 @@ mod tests {
     #[test]
     fn test_rts_sequence_execution() {
         let mut store = CommandStore::new();
-        store.load_rts_command(0, RtsCommand {
-            delay_sec: 0,
-            command_code: 0x10,
-            payload_offset: 0,
-            payload_len: 4,
-        });
-        store.load_rts_command(0, RtsCommand {
-            delay_sec: 5,
-            command_code: 0x11,
-            payload_offset: 4,
-            payload_len: 4,
-        });
+        store.load_rts_command(
+            0,
+            RtsCommand {
+                delay_sec: 0,
+                command_code: 0x10,
+                payload_offset: 0,
+                payload_len: 4,
+            },
+        );
+        store.load_rts_command(
+            0,
+            RtsCommand {
+                delay_sec: 5,
+                command_code: 0x11,
+                payload_offset: 4,
+                payload_len: 4,
+            },
+        );
         assert!(store.start_rts(0, 100));
 
         // First command fires immediately (delay=0, elapsed=0)
@@ -270,18 +309,24 @@ mod tests {
     #[test]
     fn test_rts_stop() {
         let mut store = CommandStore::new();
-        store.load_rts_command(0, RtsCommand {
-            delay_sec: 0,
-            command_code: 0x20,
-            payload_offset: 0,
-            payload_len: 0,
-        });
-        store.load_rts_command(0, RtsCommand {
-            delay_sec: 10,
-            command_code: 0x21,
-            payload_offset: 0,
-            payload_len: 0,
-        });
+        store.load_rts_command(
+            0,
+            RtsCommand {
+                delay_sec: 0,
+                command_code: 0x20,
+                payload_offset: 0,
+                payload_len: 0,
+            },
+        );
+        store.load_rts_command(
+            0,
+            RtsCommand {
+                delay_sec: 10,
+                command_code: 0x21,
+                payload_offset: 0,
+                payload_len: 0,
+            },
+        );
         assert!(store.start_rts(0, 0));
         let r1 = store.process_tick(0);
         assert_eq!(r1.dispatch_count, 1);

@@ -88,8 +88,8 @@ fn verify_ascon_mac_total() {
     let _ = ascon::mac(&key, &nonce, &buf[..len]);
 }
 
-use crate::frame::{SecurityChannel, MIN_FRAME_LEN};
-use crate::header::{SecurityHeader, SEC_HEADER_LEN};
+use crate::frame::{MIN_FRAME_LEN, SecurityChannel};
+use crate::header::{SEC_HEADER_LEN, SecurityHeader};
 
 /// SEC-K07 — the Security-Header parser is total: any buffer (any bytes, any
 /// length) yields Some/None, never a panic.

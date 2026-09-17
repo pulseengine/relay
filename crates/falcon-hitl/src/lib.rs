@@ -134,7 +134,11 @@ impl<T: Transport> LinkBackend<T> {
         let zero = [0u8; ACTUATOR_FRAME_LEN];
         let mut reply = [0u8; SENSOR_FRAME_LEN];
         transport.exchange(&zero, &mut reply);
-        LinkBackend { transport, cache: decode_sensor(&reply), dt }
+        LinkBackend {
+            transport,
+            cache: decode_sensor(&reply),
+            dt,
+        }
     }
 
     /// The latest sensor frame (telemetry / tests).
@@ -145,7 +149,10 @@ impl<T: Transport> LinkBackend<T> {
 
 impl<T: Transport> FlightBackend for LinkBackend<T> {
     fn read_imu(&mut self) -> ImuSample {
-        ImuSample { accel: self.cache.accel, gyro: self.cache.gyro }
+        ImuSample {
+            accel: self.cache.accel,
+            gyro: self.cache.gyro,
+        }
     }
     fn read_position(&mut self) -> Option<Vec3> {
         self.cache.pos_valid.then_some(self.cache.pos)
@@ -164,8 +171,8 @@ impl<T: Transport> FlightBackend for LinkBackend<T> {
     fn dt(&self) -> f32 {
         self.dt
     }
-    fn read_battery_v(&mut self) -> f32 {
-        self.cache.battery
+    fn read_battery_v(&mut self) -> Option<f32> {
+        Some(self.cache.battery)
     }
 }
 
@@ -205,7 +212,13 @@ impl<B: FlightBackend> SimServer<B> {
             pos_valid: pos.is_some(),
             mag: mag.unwrap_or([0.0; 3]),
             mag_valid: mag.is_some(),
-            battery: self.backend.read_battery_v(),
+            // 0.0 V, not a plausible resting voltage, when the backend has no
+            // battery sense (#413). The sibling fields above carry an explicit
+            // `_valid` flag; `battery` has none, and adding one changes the HITL
+            // wire format — so until that protocol changes, the fallback is
+            // chosen to be fail-SAFE: 0 V reads as critically flat, never as a
+            // healthy pack. A real cell is never 0 V, so it is unambiguous.
+            battery: self.backend.read_battery_v().unwrap_or(0.0),
         };
         encode_sensor(&frame, reply);
     }
@@ -222,11 +235,7 @@ mod tests {
         server: SimServer<B>,
     }
     impl<B: FlightBackend> Transport for Loopback<B> {
-        fn exchange(
-            &mut self,
-            out: &[u8; ACTUATOR_FRAME_LEN],
-            reply: &mut [u8; SENSOR_FRAME_LEN],
-        ) {
+        fn exchange(&mut self, out: &[u8; ACTUATOR_FRAME_LEN], reply: &mut [u8; SENSOR_FRAME_LEN]) {
             self.server.serve(out, reply);
         }
     }

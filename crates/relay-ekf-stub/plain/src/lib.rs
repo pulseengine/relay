@@ -48,7 +48,12 @@ pub struct EkfStub {
 
 impl EkfStub {
     pub const fn new() -> Self {
-        Self { last_time: Timestamp { seconds: 0, fraction: 0 } }
+        Self {
+            last_time: Timestamp {
+                seconds: 0,
+                fraction: 0,
+            },
+        }
     }
 
     /// Advance the stub by one tick. The real EKF (v0.2+) consumes
@@ -78,7 +83,11 @@ pub const QUATERNION_NORM_TOLERANCE: f32 = 1.0e-6;
 /// Mirrors the contract that the real EKF will satisfy under Verus.
 pub fn is_unit_quaternion(q: [f32; 4]) -> bool {
     let norm_sq = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
-    let diff = if norm_sq >= 1.0 { norm_sq - 1.0 } else { 1.0 - norm_sq };
+    let diff = if norm_sq >= 1.0 {
+        norm_sq - 1.0
+    } else {
+        1.0 - norm_sq
+    };
     diff <= QUATERNION_NORM_TOLERANCE
 }
 
@@ -89,13 +98,22 @@ mod tests {
     #[test]
     fn fresh_stub_has_zero_time() {
         let s = EkfStub::new();
-        assert_eq!(s.last_time(), Timestamp { seconds: 0, fraction: 0 });
+        assert_eq!(
+            s.last_time(),
+            Timestamp {
+                seconds: 0,
+                fraction: 0
+            }
+        );
     }
 
     #[test]
     fn tick_returns_identity_quaternion() {
         let mut s = EkfStub::new();
-        let state = s.tick(Timestamp { seconds: 1, fraction: 0 });
+        let state = s.tick(Timestamp {
+            seconds: 1,
+            fraction: 0,
+        });
         assert_eq!(state.quaternion, [1.0, 0.0, 0.0, 0.0]);
         assert!(is_unit_quaternion(state.quaternion));
     }
@@ -103,7 +121,10 @@ mod tests {
     #[test]
     fn tick_returns_zero_position_and_velocity() {
         let mut s = EkfStub::new();
-        let state = s.tick(Timestamp { seconds: 1, fraction: 0 });
+        let state = s.tick(Timestamp {
+            seconds: 1,
+            fraction: 0,
+        });
         assert_eq!(state.position_ned, [0.0, 0.0, 0.0]);
         assert_eq!(state.velocity_ned, [0.0, 0.0, 0.0]);
     }
@@ -111,7 +132,10 @@ mod tests {
     #[test]
     fn tick_passes_time_through() {
         let mut s = EkfStub::new();
-        let t = Timestamp { seconds: 42, fraction: 12345 };
+        let t = Timestamp {
+            seconds: 42,
+            fraction: 12345,
+        };
         let state = s.tick(t);
         assert_eq!(state.time, t);
         assert_eq!(s.last_time(), t);
@@ -122,7 +146,10 @@ mod tests {
         // Real EKF reports innovation as residual magnitude; stub
         // never sees sensor disagreement, so it stays at 0.0.
         let mut s = EkfStub::new();
-        let state = s.tick(Timestamp { seconds: 0, fraction: 0 });
+        let state = s.tick(Timestamp {
+            seconds: 0,
+            fraction: 0,
+        });
         assert_eq!(state.innovation, 0.0);
     }
 
@@ -130,7 +157,10 @@ mod tests {
     fn deterministic_across_ticks_with_same_time() {
         let mut a = EkfStub::new();
         let mut b = EkfStub::new();
-        let t = Timestamp { seconds: 7, fraction: 0 };
+        let t = Timestamp {
+            seconds: 7,
+            fraction: 0,
+        };
         let state_a = a.tick(t);
         let state_b = b.tick(t);
         assert_eq!(state_a, state_b);

@@ -1,7 +1,8 @@
 //! Sync coverage sibling of the P3 stream cascade (#202).
 //!
 //! Exports a call-return `step` so the witness MC/DC harness can drive the SAME
-//! verified engine branches the async-lift `monitor` stream export hides. Shares
+//! engine branches the async-lift `monitor` stream export hides. Those are the
+//! LEGACY five-stage pipeline's engines, not the flight core's (#411, #419). Shares
 //! the cascade wiring via `cascade_orch` — no second copy of the pipeline. Runs
 //! identical engine code to the stream component; only the outer ABI differs
 //! (sync call-return vs async stream), which is exactly the difference that
