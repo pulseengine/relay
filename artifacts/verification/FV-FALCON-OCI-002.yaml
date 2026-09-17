@@ -108,8 +108,8 @@ artifacts:
         # ...and all eight export the shared bounded-arena CM runtime
         - run: "test \"$(grep -l 'export_cm_rt' wasm/cm/*/src/lib.rs | wc -l)\" -eq 8"
         # (b) the binding evidence, per published blob
-        - run: "wasm-tools component wit falcon_rate_cm.wasm  # bench-only: expect 0 wasi:* imports"
-        - run: "wasm-tools print falcon_rate_cm.wasm | grep -c 'memory.grow'  # bench-only: expect 0"
+        - run: "wasm-tools component wit wasm/cm/rate/target/wasm32-unknown-unknown/release/falcon_rate_cm.wasm  # bench-only, after scripts/build-components.sh: expect 0 wasi:* imports"
+        - run: "wasm-tools print wasm/cm/rate/target/wasm32-unknown-unknown/release/falcon_rate_cm.wasm | grep -c 'memory.grow'  # bench-only, after scripts/build-components.sh: expect 0"
     links:
       - type: verifies
         target: SWREQ-FALCON-OCI-P02

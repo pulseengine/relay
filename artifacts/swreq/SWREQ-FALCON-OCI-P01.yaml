@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-OCI-P01
     type: sw-req
     title: "OCI-P01 — publish each verified cascade stage as a signed, lowerable OCI component"
-    status: verified
+    status: implemented
     release: falcon-v1.129.0
     description: >
       The verified flight components shall be consumable by the system
@@ -36,6 +36,9 @@ artifacts:
       test. This is the relay half of the agreed proof split: relay proves the
       loop closes in source (SIL); jess proves it still closes after the
       wasm->ARM lowering (Renode, on-target differential).
+
+      DEMOTED verified -> implemented (2026-09-17, #415), following the maintainer's decision to demote FV-FALCON-OCI-001: that artifact was this requirement's ONLY verification, so leaving the requirement `verified` would keep exactly the unbacked claim the decision removed. RESTORE together with FV-FALCON-OCI-001.
+
     tags: [falcon, oci, wasm, component-model, distribution, jess-contract, v1.129]
     fields:
       req-type: interface
