@@ -34,7 +34,13 @@ pub struct CiConfig {
 
 impl CommandHeader {
     pub const fn empty() -> Self {
-        CommandHeader { stream_id: 0, sequence: 0, length: 0, function_code: 0, checksum: 0 }
+        CommandHeader {
+            stream_id: 0,
+            sequence: 0,
+            length: 0,
+            function_code: 0,
+            checksum: 0,
+        }
     }
 }
 
@@ -137,7 +143,10 @@ mod tests {
             function_code: 5,
             checksum: 0,
         };
-        assert_eq!(validate_header(&config, &header), CiValidation::InvalidStreamId);
+        assert_eq!(
+            validate_header(&config, &header),
+            CiValidation::InvalidStreamId
+        );
     }
 
     #[test]
@@ -163,7 +172,10 @@ mod tests {
             function_code: 99,
             checksum: 0,
         };
-        assert_eq!(validate_header(&config, &header), CiValidation::InvalidCmdCode);
+        assert_eq!(
+            validate_header(&config, &header),
+            CiValidation::InvalidCmdCode
+        );
     }
 
     #[test]
@@ -176,7 +188,10 @@ mod tests {
             function_code: 5,
             checksum: 0,
         };
-        assert_eq!(validate_header(&config, &header), CiValidation::LengthMismatch);
+        assert_eq!(
+            validate_header(&config, &header),
+            CiValidation::LengthMismatch
+        );
     }
 
     #[test]

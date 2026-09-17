@@ -354,7 +354,10 @@ mod conformance {
             heading_deg: 90,
             throttle_pct: 58,
         };
-        assert_hex(&m.encode_payload(), "000000000000204000000040000000bf5a003a00");
+        assert_hex(
+            &m.encode_payload(),
+            "000000000000204000000040000000bf5a003a00",
+        );
     }
 
     #[test]

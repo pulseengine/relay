@@ -46,18 +46,18 @@ use std::time::Instant;
 
 use libm::sqrtf;
 use relay_att::{AttController, Timestamp as AttTimestamp};
-use relay_ekf::{quat_mul, Ekf, ImuSample, Timestamp as EkfTimestamp};
+use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp, quat_mul};
+use relay_lc::engine::Geofence;
 use relay_mix_quad::QuadMixer;
 use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTimestamp};
-use relay_lc::engine::Geofence;
 use relay_rate::{RatePid, Timestamp as RateTimestamp};
 use relay_sc::engine::{CommandStore, RtsCommand};
 
 const SAMPLE_RATE_HZ: f32 = 1000.0;
 const TRAJECTORY_SECONDS: f32 = 5.0;
 const GRAVITY: f32 = 9.81;
-const INERTIA: f32 = 0.005;     // kg·m², 500 g, 10-inch quad
-const FRICTION: f32 = 0.001;    // rad/s damping coefficient
+const INERTIA: f32 = 0.005; // kg·m², 500 g, 10-inch quad
+const FRICTION: f32 = 0.001; // rad/s damping coefficient
 /// Thrust scale: normalised thrust 0.5 produces 1g acceleration at hover.
 const THRUST_SCALE: f32 = 19.62;
 const DRAG_COEFFICIENT: f32 = 0.4;
@@ -130,8 +130,7 @@ impl Plant {
     fn step(&mut self, torque: [f32; 3], dt: f32) {
         // omega_dot = (torque - friction*omega) / inertia
         for i in 0..3 {
-            self.omega[i] +=
-                ((torque[i] - FRICTION * self.omega[i]) / INERTIA) * dt;
+            self.omega[i] += ((torque[i] - FRICTION * self.omega[i]) / INERTIA) * dt;
         }
         self.integrate_quaternion(dt);
     }
@@ -142,8 +141,7 @@ impl Plant {
     fn step_full(&mut self, torque: [f32; 3], thrust_normalised: f32, dt: f32) {
         // Rotational.
         for i in 0..3 {
-            self.omega[i] +=
-                ((torque[i] - FRICTION * self.omega[i]) / INERTIA) * dt;
+            self.omega[i] += ((torque[i] - FRICTION * self.omega[i]) / INERTIA) * dt;
         }
         self.integrate_quaternion(dt);
 
@@ -175,8 +173,7 @@ impl Plant {
             self.q[3] + 0.5 * qdot[3] * dt,
         ];
         let n = sqrtf(
-            q_new[0] * q_new[0] + q_new[1] * q_new[1]
-                + q_new[2] * q_new[2] + q_new[3] * q_new[3],
+            q_new[0] * q_new[0] + q_new[1] * q_new[1] + q_new[2] * q_new[2] + q_new[3] * q_new[3],
         );
         if n > 1.0e-12 {
             q_new = [q_new[0] / n, q_new[1] / n, q_new[2] / n, q_new[3] / n];
@@ -249,22 +246,34 @@ struct ScenarioResult {
 
 fn ekf_ts_of(secs: f32) -> EkfTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    EkfTimestamp { seconds: secs as u64, fraction: frac }
+    EkfTimestamp {
+        seconds: secs as u64,
+        fraction: frac,
+    }
 }
 
 fn rate_ts_of(secs: f32) -> RateTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    RateTimestamp { seconds: secs as u64, fraction: frac }
+    RateTimestamp {
+        seconds: secs as u64,
+        fraction: frac,
+    }
 }
 
 fn att_ts_of(secs: f32) -> AttTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    AttTimestamp { seconds: secs as u64, fraction: frac }
+    AttTimestamp {
+        seconds: secs as u64,
+        fraction: frac,
+    }
 }
 
 fn pos_ts_of(secs: f32) -> PosTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    PosTimestamp { seconds: secs as u64, fraction: frac }
+    PosTimestamp {
+        seconds: secs as u64,
+        fraction: frac,
+    }
 }
 
 fn quat_error_deg(a: [f32; 4], b: [f32; 4]) -> f32 {
@@ -402,9 +411,8 @@ fn run_disturbance(noise_std: f32) -> ScenarioResult {
         plant.step(torque, dt);
 
         if i > impulse_step && i <= impulse_step + recovery_window {
-            let mag = sqrtf(
-                plant.omega[0].powi(2) + plant.omega[1].powi(2) + plant.omega[2].powi(2),
-            );
+            let mag =
+                sqrtf(plant.omega[0].powi(2) + plant.omega[1].powi(2) + plant.omega[2].powi(2));
             if mag > peak_after_impulse {
                 peak_after_impulse = mag;
             }
@@ -461,9 +469,7 @@ fn run_hover(noise_std: f32) -> ScenarioResult {
             }
         }
         plant.step(torque, dt);
-        let mag = sqrtf(
-            plant.omega[0].powi(2) + plant.omega[1].powi(2) + plant.omega[2].powi(2),
-        );
+        let mag = sqrtf(plant.omega[0].powi(2) + plant.omega[1].powi(2) + plant.omega[2].powi(2));
         if mag > peak {
             peak = mag;
         }
@@ -477,13 +483,8 @@ fn run_hover(noise_std: f32) -> ScenarioResult {
     }
     let elapsed = t0.elapsed().as_micros();
 
-    let final_mag = sqrtf(
-        plant.omega[0].powi(2) + plant.omega[1].powi(2) + plant.omega[2].powi(2),
-    );
-    let pass = !nan_seen
-        && !convergence.is_nan()
-        && convergence <= 1.0
-        && final_mag <= 0.02;
+    let final_mag = sqrtf(plant.omega[0].powi(2) + plant.omega[1].powi(2) + plant.omega[2].powi(2));
+    let pass = !nan_seen && !convergence.is_nan() && convergence <= 1.0 && final_mag <= 0.02;
 
     ScenarioResult {
         label: "hover",
@@ -519,7 +520,7 @@ fn run_mission(noise_std: f32) -> ScenarioResult {
     let setpoint = PositionSetpoint::hover_at(waypoint);
 
     let pos_decimation = 20_usize; // 1 kHz / 20 = 50 Hz pos rate
-    let att_decimation = 4_usize;  // 1 kHz / 4  = 250 Hz att rate
+    let att_decimation = 4_usize; // 1 kHz / 4  = 250 Hz att rate
     let mut current_attitude_setpoint = [1.0_f32, 0.0, 0.0, 0.0];
     let mut current_thrust = 0.5_f32; // start at hover
     let mut current_rate_setpoint = [0.0_f32; 3];
@@ -559,11 +560,8 @@ fn run_mission(noise_std: f32) -> ScenarioResult {
         }
         // 3. Attitude loop (250 Hz).
         if i % att_decimation == 0 {
-            current_rate_setpoint = att.tick(
-                att_ts_of(t),
-                st.quaternion,
-                current_attitude_setpoint,
-            );
+            current_rate_setpoint =
+                att.tick(att_ts_of(t), st.quaternion, current_attitude_setpoint);
         }
         // 4. Rate loop (1 kHz).
         let torque = rate_pid.tick(rate_ts_of(t), gyro, current_rate_setpoint);
@@ -617,11 +615,11 @@ fn run_mission(noise_std: f32) -> ScenarioResult {
     ScenarioResult {
         label: "mission",
         samples: n,
-        final_omega: plant.v_ned,        // repurpose final-ω slot for final velocity
+        final_omega: plant.v_ned, // repurpose final-ω slot for final velocity
         peak_omega_after_setup: peak_dist_err, // peak distance error (m)
         rms_error_steady: rms_steady,
         convergence_time_s: convergence,
-        overshoot_pct: final_dist,        // repurpose overshoot slot for final distance (m)
+        overshoot_pct: final_dist, // repurpose overshoot slot for final distance (m)
         nan_seen,
         elapsed_micros: elapsed,
         pass,
@@ -671,8 +669,7 @@ fn run_attitude(noise_std: f32) -> ScenarioResult {
         }
         // Outer loop (250 Hz): refresh rate setpoint.
         if i % att_decimation == 0 {
-            current_rate_setpoint =
-                att.tick(att_ts_of(t), st.quaternion, attitude_setpoint);
+            current_rate_setpoint = att.tick(att_ts_of(t), st.quaternion, attitude_setpoint);
         }
         // Inner loop (1 kHz): rate PID -> torque.
         let torque = pid.tick(rate_ts_of(t), gyro, current_rate_setpoint);
@@ -952,10 +949,10 @@ fn run_untethered(noise_std: f32) -> ScenarioResult {
 
     // Waypoints table — command payload_offset indexes here.
     let waypoints: [[f32; 3]; 4] = [
-        [10.0, 0.0, 0.0],   // 0: north 10 m
-        [0.0, 10.0, 0.0],   // 1: east 10 m
-        [-10.0, 0.0, 0.0],  // 2: south 10 m
-        [0.0, 0.0, 0.0],    // 3: home
+        [10.0, 0.0, 0.0],  // 0: north 10 m
+        [0.0, 10.0, 0.0],  // 1: east 10 m
+        [-10.0, 0.0, 0.0], // 2: south 10 m
+        [0.0, 0.0, 0.0],   // 3: home
     ];
     let leg_secs: u32 = 8;
     for (k, _wp) in waypoints.iter().enumerate() {
@@ -1055,9 +1052,8 @@ fn run_untethered(noise_std: f32) -> ScenarioResult {
 
     let visit_threshold = 2.5_f32;
     let visited = min_dist_per_wp.iter().all(|&d| d <= visit_threshold);
-    let final_dist_home = sqrtf(
-        plant.p_ned[0].powi(2) + plant.p_ned[1].powi(2) + plant.p_ned[2].powi(2),
-    );
+    let final_dist_home =
+        sqrtf(plant.p_ned[0].powi(2) + plant.p_ned[1].powi(2) + plant.p_ned[2].powi(2));
     let peak_visit_err = min_dist_per_wp.iter().cloned().fold(0.0_f32, f32::max);
 
     let pass = !nan_seen && visited && final_dist_home <= visit_threshold;
@@ -1065,15 +1061,15 @@ fn run_untethered(noise_std: f32) -> ScenarioResult {
     ScenarioResult {
         label: "untethered",
         samples: n,
-        final_omega: plant.p_ned,                 // final NED position
-        peak_omega_after_setup: peak_visit_err,   // worst-case min approach
+        final_omega: plant.p_ned,               // final NED position
+        peak_omega_after_setup: peak_visit_err, // worst-case min approach
         rms_error_steady: 0.0,
         convergence_time_s: if visited {
             (waypoints.len() as f32) * (leg_secs as f32)
         } else {
             f32::NAN
         },
-        overshoot_pct: final_dist_home,           // final distance home (m)
+        overshoot_pct: final_dist_home, // final distance home (m)
         nan_seen,
         elapsed_micros: elapsed,
         pass,
@@ -1242,32 +1238,54 @@ fn print_result(r: &ScenarioResult) {
     println!("--- scenario: {} ---", r.label);
     println!("  samples              {}", r.samples);
     if r.label == "mission" {
-        println!("  final v (m/s NED)    [{:+.3}, {:+.3}, {:+.3}]",
-            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        println!(
+            "  final v (m/s NED)    [{:+.3}, {:+.3}, {:+.3}]",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]
+        );
         println!("  peak distance error  {:.3} m", r.peak_omega_after_setup);
         println!("  final distance       {:.3} m", r.overshoot_pct);
-        println!("  RMS distance (steady){:.3} m (last 2s)", r.rms_error_steady);
+        println!(
+            "  RMS distance (steady){:.3} m (last 2s)",
+            r.rms_error_steady
+        );
     } else if r.label == "fault" {
-        println!("  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
-            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        println!(
+            "  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]
+        );
         println!("  peak EKF innovation  {:.4}", r.peak_omega_after_setup);
     } else if r.label == "untethered" {
-        println!("  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
-            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        println!(
+            "  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]
+        );
         println!("  worst waypoint min   {:.3} m", r.peak_omega_after_setup);
         println!("  final distance home  {:.3} m", r.overshoot_pct);
     } else if r.label == "geofence" {
-        println!("  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
-            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
-        println!("  peak true-N (truth)  {:+.2} m (fence at +15.00 m)", r.peak_omega_after_setup);
+        println!(
+            "  final position (NED) [{:+.2}, {:+.2}, {:+.2}] m",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]
+        );
+        println!(
+            "  peak true-N (truth)  {:+.2} m (fence at +15.00 m)",
+            r.peak_omega_after_setup
+        );
     } else {
-        println!("  final ω (rad/s)      [{:+.4}, {:+.4}, {:+.4}]",
-            r.final_omega[0], r.final_omega[1], r.final_omega[2]);
+        println!(
+            "  final ω (rad/s)      [{:+.4}, {:+.4}, {:+.4}]",
+            r.final_omega[0], r.final_omega[1], r.final_omega[2]
+        );
         if r.label == "attitude" {
             println!("  peak attitude err    {:.3}°", r.peak_omega_after_setup);
-            println!("  RMS error (steady)   {:.3}° (last 1s)", r.rms_error_steady);
+            println!(
+                "  RMS error (steady)   {:.3}° (last 1s)",
+                r.rms_error_steady
+            );
         } else {
-            println!("  peak ω above sp      {:.4} rad/s", r.peak_omega_after_setup);
+            println!(
+                "  peak ω above sp      {:.4} rad/s",
+                r.peak_omega_after_setup
+            );
         }
     }
     if r.label == "step" {
@@ -1281,9 +1299,15 @@ fn print_result(r: &ScenarioResult) {
             println!("  convergence/recovery never");
         }
     } else if r.label == "disturbance" {
-        println!("  recovery time        {:.3}s after impulse", r.convergence_time_s);
+        println!(
+            "  recovery time        {:.3}s after impulse",
+            r.convergence_time_s
+        );
     } else if r.label == "fault" {
-        println!("  RTL detection        {:.3}s after fault injection", r.convergence_time_s);
+        println!(
+            "  RTL detection        {:.3}s after fault injection",
+            r.convergence_time_s
+        );
     } else if r.label == "untethered" {
         println!("  mission completed    in {:.1}s", r.convergence_time_s);
     } else if r.label == "geofence" {
@@ -1293,7 +1317,10 @@ fn print_result(r: &ScenarioResult) {
     }
     println!("  loop wall time       {} µs", r.elapsed_micros);
     println!("  NaN/∞ seen           {}", r.nan_seen);
-    println!("  outcome              {}", if r.pass { "PASS" } else { "FAIL" });
+    println!(
+        "  outcome              {}",
+        if r.pass { "PASS" } else { "FAIL" }
+    );
 }
 
 fn print_help() {
@@ -1337,7 +1364,10 @@ fn main() -> ExitCode {
                 Some("geofence") => scenario = Scenario::Geofence,
                 Some("all") => scenario = Scenario::All,
                 other => {
-                    eprintln!("error: --scenario expects step|disturbance|hover|attitude|mission|fault|untethered|geofence|all, got {:?}", other);
+                    eprintln!(
+                        "error: --scenario expects step|disturbance|hover|attitude|mission|fault|untethered|geofence|all, got {:?}",
+                        other
+                    );
                     return ExitCode::from(2);
                 }
             },
@@ -1402,7 +1432,11 @@ fn main() -> ExitCode {
         println!("falcon-sitl-hover: PASS");
         ExitCode::SUCCESS
     } else {
-        let failed: Vec<&str> = results.iter().filter(|r| !r.pass).map(|r| r.label).collect();
+        let failed: Vec<&str> = results
+            .iter()
+            .filter(|r| !r.pass)
+            .map(|r| r.label)
+            .collect();
         println!("falcon-sitl-hover: FAIL ({})", failed.join(", "));
         ExitCode::from(1)
     }
@@ -1451,8 +1485,11 @@ mod tests {
         assert!(r.pass, "attitude result: {:?}", r);
         assert!(!r.nan_seen);
         assert!(r.convergence_time_s <= 1.5);
-        assert!(r.rms_error_steady <= 2.0,
-            "attitude RMS-steady {:.3}° exceeds 2° budget", r.rms_error_steady);
+        assert!(
+            r.rms_error_steady <= 2.0,
+            "attitude RMS-steady {:.3}° exceeds 2° budget",
+            r.rms_error_steady
+        );
     }
 
     #[test]
@@ -1469,10 +1506,16 @@ mod tests {
         let r = run_mission(0.0);
         assert!(r.pass, "mission result: {:?}", r);
         assert!(!r.nan_seen);
-        assert!(r.convergence_time_s <= 10.0,
-            "mission convergence {} exceeds 10 s", r.convergence_time_s);
-        assert!(r.overshoot_pct <= 0.5,
-            "final distance {} m exceeds 0.5 m", r.overshoot_pct);
+        assert!(
+            r.convergence_time_s <= 10.0,
+            "mission convergence {} exceeds 10 s",
+            r.convergence_time_s
+        );
+        assert!(
+            r.overshoot_pct <= 0.5,
+            "final distance {} m exceeds 0.5 m",
+            r.overshoot_pct
+        );
     }
 
     #[test]
@@ -1480,8 +1523,11 @@ mod tests {
         let r = run_mission(0.05);
         assert!(!r.nan_seen);
         // Looser budget with noise.
-        assert!(r.overshoot_pct <= 1.5,
-            "noisy mission final distance {} m exceeds 1.5 m", r.overshoot_pct);
+        assert!(
+            r.overshoot_pct <= 1.5,
+            "noisy mission final distance {} m exceeds 1.5 m",
+            r.overshoot_pct
+        );
     }
 
     #[test]
@@ -1490,11 +1536,16 @@ mod tests {
         assert!(r.pass, "fault result: {:?}", r);
         assert!(!r.nan_seen);
         assert!(!r.convergence_time_s.is_nan(), "RTL never triggered");
-        assert!(r.convergence_time_s <= 0.5,
-            "RTL detection latency {:.3}s exceeds 0.5s budget", r.convergence_time_s);
-        assert!(r.peak_omega_after_setup > 0.4,
+        assert!(
+            r.convergence_time_s <= 0.5,
+            "RTL detection latency {:.3}s exceeds 0.5s budget",
+            r.convergence_time_s
+        );
+        assert!(
+            r.peak_omega_after_setup > 0.4,
             "fault should drive EKF innovation past the 0.4 limit, got {:.3}",
-            r.peak_omega_after_setup);
+            r.peak_omega_after_setup
+        );
     }
 
     #[test]
@@ -1503,7 +1554,10 @@ mod tests {
         assert!(!r.nan_seen);
         // A hard accelerometer bias dwarfs the IMU noise floor — RTL
         // must still latch, just with a looser latency budget.
-        assert!(!r.convergence_time_s.is_nan(), "RTL never triggered under noise");
+        assert!(
+            !r.convergence_time_s.is_nan(),
+            "RTL never triggered under noise"
+        );
         assert!(r.convergence_time_s <= 1.0);
     }
 
@@ -1529,7 +1583,10 @@ mod tests {
                 wd.observe(0.02);
             }
         }
-        assert!(!wd.rtl_active(), "watchdog tripped on isolated noise spikes");
+        assert!(
+            !wd.rtl_active(),
+            "watchdog tripped on isolated noise spikes"
+        );
     }
 
     #[test]
@@ -1559,9 +1616,11 @@ mod tests {
         assert!(!r.nan_seen);
         // Truth genuinely drove past the +15 m fence — proves the
         // spoof was effective (the controller can't see this).
-        assert!(r.peak_omega_after_setup > 15.0,
+        assert!(
+            r.peak_omega_after_setup > 15.0,
             "peak true-N {:.3} m did not exceed +15 m fence",
-            r.peak_omega_after_setup);
+            r.peak_omega_after_setup
+        );
         assert!(!r.convergence_time_s.is_nan(), "geofence never latched");
     }
 
@@ -1572,11 +1631,17 @@ mod tests {
         assert!(!r.nan_seen);
         assert!(!r.convergence_time_s.is_nan(), "mission did not complete");
         // peak_omega_after_setup holds the worst-case min approach (m).
-        assert!(r.peak_omega_after_setup <= 2.5,
-            "worst waypoint min {:.3} m exceeded 2.5 m budget", r.peak_omega_after_setup);
+        assert!(
+            r.peak_omega_after_setup <= 2.5,
+            "worst waypoint min {:.3} m exceeded 2.5 m budget",
+            r.peak_omega_after_setup
+        );
         // overshoot_pct holds the final distance home (m).
-        assert!(r.overshoot_pct <= 2.5,
-            "final distance home {:.3} m exceeded 2.5 m budget", r.overshoot_pct);
+        assert!(
+            r.overshoot_pct <= 2.5,
+            "final distance home {:.3} m exceeded 2.5 m budget",
+            r.overshoot_pct
+        );
     }
 
     #[test]
@@ -1585,8 +1650,7 @@ mod tests {
         for _ in 0..1000 {
             plant.step_full([0.001, -0.001, 0.0005], 0.5, 1.0 / 1000.0);
             let n = sqrtf(
-                plant.q[0].powi(2) + plant.q[1].powi(2)
-                    + plant.q[2].powi(2) + plant.q[3].powi(2),
+                plant.q[0].powi(2) + plant.q[1].powi(2) + plant.q[2].powi(2) + plant.q[3].powi(2),
             );
             assert!((n - 1.0).abs() < 1.0e-3);
             for k in 0..3 {
@@ -1604,8 +1668,7 @@ mod tests {
             let n = sqrtf(
                 plant.q[0].powi(2) + plant.q[1].powi(2) + plant.q[2].powi(2) + plant.q[3].powi(2),
             );
-            assert!((n - 1.0).abs() < 1.0e-3,
-                "plant quaternion non-unit: {}", n);
+            assert!((n - 1.0).abs() < 1.0e-3, "plant quaternion non-unit: {}", n);
         }
     }
 }

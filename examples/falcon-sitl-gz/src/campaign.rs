@@ -19,7 +19,7 @@
 
 use relay_geo::{GeoAtt, GeoGains};
 use relay_iekf::RotorFaultDetector;
-use relay_mix_quad::{motors_to_torque_signs, QuadMixer};
+use relay_mix_quad::{QuadMixer, motors_to_torque_signs};
 
 // ── Deterministic, splittable RNG ───────────────────────────────────────────
 
@@ -66,7 +66,11 @@ const FLOOR: f32 = 0.15;
 
 fn integ_rot(r: &[[f32; 3]; 3], w: [f32; 3], dt: f32) -> [[f32; 3]; 3] {
     let wd = [w[0] * dt, w[1] * dt, w[2] * dt];
-    let incr = [[1.0, -wd[2], wd[1]], [wd[2], 1.0, -wd[0]], [-wd[1], wd[0], 1.0]];
+    let incr = [
+        [1.0, -wd[2], wd[1]],
+        [wd[2], 1.0, -wd[0]],
+        [-wd[1], wd[0], 1.0],
+    ];
     let mut m = [[0.0f32; 3]; 3];
     for i in 0..3 {
         for jj in 0..3 {
@@ -338,8 +342,12 @@ mod tests {
         let rep = run_motor_out_campaign(MOTOR_OUT_TRIALS, MOTOR_OUT_SEED);
         eprintln!(
             "motor-out campaign: {} trials, {} failures | worst peak tilt {:.3} rad, worst final tilt {:.3} rad, worst detect latency {} steps ({:.0} ms)",
-            rep.trials, rep.failures, rep.worst_peak_tilt, rep.worst_final_tilt,
-            rep.worst_detect_latency_steps, rep.worst_detect_latency_steps as f32 * DT * 1000.0
+            rep.trials,
+            rep.failures,
+            rep.worst_peak_tilt,
+            rep.worst_final_tilt,
+            rep.worst_detect_latency_steps,
+            rep.worst_detect_latency_steps as f32 * DT * 1000.0
         );
 
         // Primary safety assertion: not one trial in the envelope fails.
@@ -353,12 +361,14 @@ mod tests {
         assert!(
             rep.worst_peak_tilt < 1.4,
             "worst peak tilt across {} trials = {:.3} rad (tumble bound 1.4)",
-            rep.trials, rep.worst_peak_tilt
+            rep.trials,
+            rep.worst_peak_tilt
         );
         assert!(
             rep.worst_final_tilt < 0.5,
             "worst final tilt across {} trials = {:.3} rad (settle bound 0.5)",
-            rep.trials, rep.worst_final_tilt
+            rep.trials,
+            rep.worst_final_tilt
         );
         // Tighter REGRESSION bounds, set just above the measured worst case
         // (peak 0.832, final 0.097, detect 1 step at seed 0xFA1C_0DEAD_0001) —
@@ -582,8 +592,12 @@ mod fullloop_tests {
         let rep = run_fullloop_motor_out_campaign(FL_TRIALS, FL_SEED);
         eprintln!(
             "full-loop motor-out campaign: {} trials, {} failures | worst peak tilt {:.3} rad, worst yaw {:.1} rad/s, worst detect {} steps | (reported, not gated: least net descent {:.2} m — altitude is the supervisor's LAND job)",
-            rep.trials, rep.failures, rep.worst_peak_tilt, rep.worst_yaw_rate,
-            rep.worst_detect_latency_steps, rep.least_descent
+            rep.trials,
+            rep.failures,
+            rep.worst_peak_tilt,
+            rep.worst_yaw_rate,
+            rep.worst_detect_latency_steps,
+            rep.least_descent
         );
 
         // Primary safety assertion: not one trial in the envelope fails — the
@@ -665,8 +679,10 @@ pub fn run_fdi_noise_campaign(n: u32, campaign_seed: u64) -> FdiReport {
             Some(f) if f != t.failed_rotor => {
                 rep.wrong += 1;
                 if rep.failing.len() < 20 {
-                    rep.failing
-                        .push((i, format!("{t:?}: isolated {f}, expected {}", t.failed_rotor)));
+                    rep.failing.push((
+                        i,
+                        format!("{t:?}: isolated {f}, expected {}", t.failed_rotor),
+                    ));
                 }
             }
             Some(_) => {
@@ -762,7 +778,10 @@ pub struct SupLandReport {
 pub fn run_supervised_rotorout_landing_campaign(n: u32, campaign_seed: u64) -> SupLandReport {
     const DT: f32 = 0.002;
     let level = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-    let mut rep = SupLandReport { trials: n, ..Default::default() };
+    let mut rep = SupLandReport {
+        trials: n,
+        ..Default::default()
+    };
     for i in 0..n {
         let mut rng = trial_rng(campaign_seed, i);
         let t = sample_supland(&mut rng, i);
@@ -804,7 +823,11 @@ pub fn run_supervised_rotorout_landing_campaign(n: u32, campaign_seed: u64) -> S
 
         let mut reason = String::new();
         if !landed {
-            reason = format!("never touched down (mode {:?}, alt {:.2})", sup.mode(), -b.pos[2]);
+            reason = format!(
+                "never touched down (mode {:?}, alt {:.2})",
+                sup.mode(),
+                -b.pos[2]
+            );
         } else if approach_sink >= 1.2 {
             reason = format!("hard approach: {approach_sink:.2} m/s");
         } else if peak_tilt >= 0.6 {
@@ -859,7 +882,7 @@ mod supland_tests {
 /// tilt and the body rate back to level.
 #[derive(Clone, Copy, Debug)]
 struct AttStabTrial {
-    roll0: f32,       // initial tilt components (rad)
+    roll0: f32, // initial tilt components (rad)
     pitch0: f32,
     omega0: [f32; 3], // initial body rate (rad/s)
 }
@@ -1158,7 +1181,11 @@ mod campaign2_tests {
         let rep = run_att_stab_campaign(ATT_STAB_TRIALS, ATT_STAB_SEED);
         eprintln!(
             "att-stab campaign: {} trials, {} failures | worst peak tilt {:.4} rad, worst final tilt {:.4} rad, worst final |ω| {:.4} rad/s",
-            rep.trials, rep.failures, rep.worst_peak_tilt, rep.worst_final_tilt, rep.worst_final_rate
+            rep.trials,
+            rep.failures,
+            rep.worst_peak_tilt,
+            rep.worst_final_tilt,
+            rep.worst_final_rate
         );
 
         // Primary safety assertion: not one trial in the envelope fails.
@@ -1172,17 +1199,20 @@ mod campaign2_tests {
         assert!(
             rep.worst_peak_tilt < 1.4,
             "worst peak tilt across {} trials = {:.4} rad (divergence bound 1.4)",
-            rep.trials, rep.worst_peak_tilt
+            rep.trials,
+            rep.worst_peak_tilt
         );
         assert!(
             rep.worst_final_tilt < 0.05,
             "worst final tilt across {} trials = {:.4} rad (settle bound 0.05)",
-            rep.trials, rep.worst_final_tilt
+            rep.trials,
+            rep.worst_final_tilt
         );
         assert!(
             rep.worst_final_rate < 0.05,
             "worst final rate across {} trials = {:.4} rad/s (rate-null bound 0.05)",
-            rep.trials, rep.worst_final_rate
+            rep.trials,
+            rep.worst_final_rate
         );
         // Tighter REGRESSION bounds, set just above the measured worst case
         // (peak 0.5540, final 0.0000, rate 0.0002 at seed 0x0FA1C0DEAD000002).
@@ -1210,7 +1240,11 @@ mod campaign2_tests {
         let rep = run_hexa_campaign(HEXA_TRIALS, HEXA_SEED);
         eprintln!(
             "hexa campaign: {} trials, {} failures | worst peak tilt {:.4} rad, worst final tilt {:.4} rad, worst final |ω| {:.4} rad/s",
-            rep.trials, rep.failures, rep.worst_peak_tilt, rep.worst_final_tilt, rep.worst_final_rate
+            rep.trials,
+            rep.failures,
+            rep.worst_peak_tilt,
+            rep.worst_final_tilt,
+            rep.worst_final_rate
         );
 
         assert_eq!(
@@ -1222,17 +1256,20 @@ mod campaign2_tests {
         assert!(
             rep.worst_peak_tilt < 1.4,
             "worst peak tilt across {} trials = {:.4} rad (divergence bound 1.4)",
-            rep.trials, rep.worst_peak_tilt
+            rep.trials,
+            rep.worst_peak_tilt
         );
         assert!(
             rep.worst_final_tilt < 0.05,
             "worst final tilt across {} trials = {:.4} rad (settle bound 0.05)",
-            rep.trials, rep.worst_final_tilt
+            rep.trials,
+            rep.worst_final_tilt
         );
         assert!(
             rep.worst_final_rate < 0.05,
             "worst final rate across {} trials = {:.4} rad/s (rate-null bound 0.05)",
-            rep.trials, rep.worst_final_rate
+            rep.trials,
+            rep.worst_final_rate
         );
         // Tighter REGRESSION bounds, set just above the measured worst case
         // (peak 0.5226, final 0.0000, rate 0.0001 at seed 0x0FA1C0DEAD000003).
@@ -1424,8 +1461,12 @@ mod campaign3_tests {
         let rep = run_estimator_campaign(EST_TRIALS, EST_SEED);
         eprintln!(
             "estimator campaign: {} trials, {} failures | worst tilt-err {:.4} rad, worst dropout pos-err {:.3} m, worst reconverged pos-err {:.3} m, worst NEES {:.2}",
-            rep.trials, rep.failures, rep.worst_tilt_err, rep.worst_dropout_pos_err,
-            rep.worst_reconverged_pos_err, rep.worst_nees
+            rep.trials,
+            rep.failures,
+            rep.worst_tilt_err,
+            rep.worst_dropout_pos_err,
+            rep.worst_reconverged_pos_err,
+            rep.worst_nees
         );
         assert_eq!(
             rep.failures, 0,
@@ -1519,7 +1560,13 @@ fn run_maneuver_trial(t: ManeuverTrial, rng: &mut SplitMix64) -> ManeuverOutcome
             (1.0 + t.scale_err) * a_true[1] + gaussian(rng) * t.accel_sigma,
             -9.81 + gaussian(rng) * t.accel_sigma,
         ];
-        f.propagate(IekfImu { gyro: [0.0; 3], accel }, dt);
+        f.propagate(
+            IekfImu {
+                gyro: [0.0; 3],
+                accel,
+            },
+            dt,
+        );
         // NO gravity aiding under motion: specific force != gravity (aiding here
         // would read the maneuver accel as a tilt). gyro=0 keeps attitude level.
         if step % 20 == 0 {
@@ -1532,10 +1579,9 @@ fn run_maneuver_trial(t: ManeuverTrial, rng: &mut SplitMix64) -> ManeuverOutcome
         }
         let s = f.state();
         if step > 800 {
-            let perr = ((s.p[0] - tp[0]).powi(2)
-                + (s.p[1] - tp[1]).powi(2)
-                + (s.p[2] - tp[2]).powi(2))
-            .sqrt();
+            let perr =
+                ((s.p[0] - tp[0]).powi(2) + (s.p[1] - tp[1]).powi(2) + (s.p[2] - tp[2]).powi(2))
+                    .sqrt();
             o.peak_pos_err = o.peak_pos_err.max(perr);
             o.peak_tilt = o.peak_tilt.max(s.tilt_rad());
             let nees = f.nees_velocity(tv);
@@ -1613,9 +1659,21 @@ mod campaign4_tests {
         );
         // Regression bounds just above the measured worst (seed 0x0FA1_C0DE_3A17_0001:
         // pos-err 0.91 m, vel-NEES 11.2, tilt 0.064 rad).
-        assert!(rep.worst_pos_err < 2.0, "REGRESSION: worst pos err {:.2} m (was ~0.91)", rep.worst_pos_err);
-        assert!(rep.worst_tilt < 0.12, "REGRESSION: worst tilt {:.3} rad (was ~0.064)", rep.worst_tilt);
-        assert!(rep.worst_vel_nees < 30.0, "REGRESSION: worst vel-NEES {:.1} (was ~11.2)", rep.worst_vel_nees);
+        assert!(
+            rep.worst_pos_err < 2.0,
+            "REGRESSION: worst pos err {:.2} m (was ~0.91)",
+            rep.worst_pos_err
+        );
+        assert!(
+            rep.worst_tilt < 0.12,
+            "REGRESSION: worst tilt {:.3} rad (was ~0.064)",
+            rep.worst_tilt
+        );
+        assert!(
+            rep.worst_vel_nees < 30.0,
+            "REGRESSION: worst vel-NEES {:.1} (was ~11.2)",
+            rep.worst_vel_nees
+        );
     }
 }
 
@@ -1740,7 +1798,10 @@ mod campaign5_tests {
             "spoof campaign: {} trials | {detected} detected (worst latency {worst_latency} fixes), {clean} no-false-alarm",
             SPOOF_TRIALS
         );
-        assert!(detected > 150 && clean > 150, "both regimes well-sampled ({detected}/{clean})");
+        assert!(
+            detected > 150 && clean > 150,
+            "both regimes well-sampled ({detected}/{clean})"
+        );
     }
 }
 
@@ -1755,9 +1816,9 @@ mod campaign5_tests {
 #[derive(Clone, Copy, Debug)]
 struct MotorOutDispTrial {
     base: MotorOutTrial,
-    act_sigma: f32,      // per-rotor multiplicative thrust noise
+    act_sigma: f32,        // per-rotor multiplicative thrust noise
     wind_torque: [f32; 3], // constant disturbance torque
-    gust_sigma: f32,     // per-step gust torque
+    gust_sigma: f32,       // per-step gust torque
 }
 
 const MO_ACT_SIGMA: (f32, f32) = (0.0, 0.05); // ≤5% actuator scatter
@@ -1895,7 +1956,10 @@ mod campaign6_tests {
             "motor-out DISPERSED campaign: {} trials, {} failures | worst peak tilt {:.3} rad, worst final tilt {:.3} rad",
             MOD_TRIALS, fails, worst_peak, worst_final
         );
-        assert_eq!(fails, 0, "dispersed motor-out recovery failed in {fails}/{MOD_TRIALS}");
+        assert_eq!(
+            fails, 0,
+            "dispersed motor-out recovery failed in {fails}/{MOD_TRIALS}"
+        );
         assert!(worst_peak < 1.4, "worst peak tilt {:.3}", worst_peak);
         assert!(worst_final < 0.5, "worst final tilt {:.3}", worst_final);
     }
@@ -1958,7 +2022,10 @@ const MISSION_START_OFFSET: f32 = 1.0;
 
 fn sample_mission(rng: &mut SplitMix64) -> MissionTrial {
     MissionTrial {
-        wind: [rng.range(-MISSION_WIND, MISSION_WIND), rng.range(-MISSION_WIND, MISSION_WIND)],
+        wind: [
+            rng.range(-MISSION_WIND, MISSION_WIND),
+            rng.range(-MISSION_WIND, MISSION_WIND),
+        ],
         thrust_scale: rng.range(MISSION_THRUST_SCALE.0, MISSION_THRUST_SCALE.1),
         start_offset: [
             rng.range(-MISSION_START_OFFSET, MISSION_START_OFFSET),
@@ -1981,7 +2048,11 @@ fn run_mission_trial(t: MissionTrial) -> (f32, bool, u32, f32, bool) {
     let dt = 0.02f32;
     let max_steps = 3000u32; // 60 s budget
     let arrival_radius = 0.6f32;
-    let mut p = [wps[0][0] + t.start_offset[0], wps[0][1] + t.start_offset[1], wps[0][2]];
+    let mut p = [
+        wps[0][0] + t.start_offset[0],
+        wps[0][1] + t.start_offset[1],
+        wps[0][2],
+    ];
     let mut v = [0.0f32; 3];
     let mut q = [1.0f32, 0.0, 0.0, 0.0];
     let mut wp = 1usize;
@@ -2011,7 +2082,10 @@ fn run_mission_trial(t: MissionTrial) -> (f32, bool, u32, f32, bool) {
         if step > 50 {
             max_cross = max_cross.max(cross_track(wps[wp - 1], wps[wp], p));
         }
-        let d = ((p[0] - wps[wp][0]).powi(2) + (p[1] - wps[wp][1]).powi(2) + (p[2] - wps[wp][2]).powi(2)).sqrt();
+        let d = ((p[0] - wps[wp][0]).powi(2)
+            + (p[1] - wps[wp][1]).powi(2)
+            + (p[2] - wps[wp][2]).powi(2))
+        .sqrt();
         if d < arrival_radius {
             wp += 1;
         }
@@ -2035,7 +2109,9 @@ mod campaign7_tests {
             thrust_scale: 1.0,
             start_offset: [0.0, 0.0],
         });
-        eprintln!("mission diag (nominal): reached={r0} steps={s0} max_cross={c0:.2} final_x={fx0:.2}");
+        eprintln!(
+            "mission diag (nominal): reached={r0} steps={s0} max_cross={c0:.2} final_x={fx0:.2}"
+        );
 
         let (mut reached, mut worst_cross, mut worst_steps) = (0u32, 0.0f32, 0u32);
         let mut fails = 0u32;
@@ -2057,10 +2133,17 @@ mod campaign7_tests {
             MISSION_TRIALS, worst_cross
         );
         assert_eq!(fails, 0, "mission failed in {fails}/{MISSION_TRIALS}");
-        assert_eq!(reached, MISSION_TRIALS, "every trial must complete all waypoints");
+        assert_eq!(
+            reached, MISSION_TRIALS,
+            "every trial must complete all waypoints"
+        );
         // Physical corridor half-width 3 m; regression bound just above the
         // measured worst (1.02 m at seed 0x0FA1_C0DE_3155_0001).
-        assert!(worst_cross < 3.0, "worst cross-track {:.2} m (corridor 3)", worst_cross);
+        assert!(
+            worst_cross < 3.0,
+            "worst cross-track {:.2} m (corridor 3)",
+            worst_cross
+        );
         assert!(
             worst_cross < 1.6,
             "REGRESSION: worst cross-track {:.2} m exceeded 1.6 (was ~1.02)",

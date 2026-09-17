@@ -26,17 +26,17 @@ pub enum MergeChoice {
 /// Pure decision: round-robin merge arbitration.
 /// `last_was_left` should be initialized to `false` so the first tie
 /// favors Left (matches natural left-to-right reading order).
-pub fn merge_choose(
-    left_has: bool,
-    right_has: bool,
-    last_was_left: bool,
-) -> MergeChoice {
+pub fn merge_choose(left_has: bool, right_has: bool, last_was_left: bool) -> MergeChoice {
     match (left_has, right_has) {
         (false, false) => MergeChoice::None,
         (true, false) => MergeChoice::Left,
         (false, true) => MergeChoice::Right,
         (true, true) => {
-            if last_was_left { MergeChoice::Right } else { MergeChoice::Left }
+            if last_was_left {
+                MergeChoice::Right
+            } else {
+                MergeChoice::Left
+            }
         }
     }
 }

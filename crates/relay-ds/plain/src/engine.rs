@@ -7,7 +7,11 @@ pub const MAX_DECISIONS_PER_CHECK: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum FileType { Sequence = 0, Time = 1, Count = 2 }
+pub enum FileType {
+    Sequence = 0,
+    Time = 1,
+    Count = 2,
+}
 
 #[derive(Clone, Copy)]
 pub struct FilterEntry {
@@ -64,14 +68,18 @@ impl FilterTable {
     }
 
     pub fn add_filter(&mut self, entry: FilterEntry) -> bool {
-        if self.filter_count as usize >= MAX_FILTERS { return false; }
+        if self.filter_count as usize >= MAX_FILTERS {
+            return false;
+        }
         let idx = self.filter_count as usize;
         self.filters[idx] = entry;
         self.filter_count = self.filter_count + 1;
         true
     }
 
-    pub fn filter_count(&self) -> u32 { self.filter_count }
+    pub fn filter_count(&self) -> u32 {
+        self.filter_count
+    }
 
     pub fn evaluate(&self, data_id: u32) -> FilterResult {
         let mut result = FilterResult {
@@ -82,7 +90,9 @@ impl FilterTable {
         let count = self.filter_count;
         let mut i: u32 = 0;
         while i < count {
-            if result.decision_count as usize >= MAX_DECISIONS_PER_CHECK { break; }
+            if result.decision_count as usize >= MAX_DECISIONS_PER_CHECK {
+                break;
+            }
             let idx = i as usize;
             let f = self.filters[idx];
 

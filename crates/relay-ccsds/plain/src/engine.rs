@@ -31,7 +31,11 @@ pub struct CcsdsHeader {
 }
 
 pub fn encode_header(header: &CcsdsHeader, buf: &mut [u8; 6]) {
-    let type_bit: u8 = if header.packet_type == PacketType::Command { 1 } else { 0 };
+    let type_bit: u8 = if header.packet_type == PacketType::Command {
+        1
+    } else {
+        0
+    };
     let sec_bit: u8 = if header.sec_header_flag { 1 } else { 0 };
     let apid_masked: u16 = header.apid & 0x07FF;
     let apid_hi: u8 = ((apid_masked >> 8) & 0x07) as u8;

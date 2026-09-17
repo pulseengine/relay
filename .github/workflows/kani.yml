@@ -71,6 +71,15 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # A cap, not a budget (#429). Without one a hung leg holds its runner for
+    # GitHub's default 360 min while the PR looks merely slow. `Kani
+    # (relay-mix-quad)` hung inside the Kani step FOUR times on 2026-09-16/17
+    # (52, 96, 105, 125 min; normal ~3–4 min), on three different runners, so
+    # it is a per-leg intermittent hang, not one bad box. Measured over 180
+    # successful leg runs, the slowest was relay-notch at 25.1 min; 60 min is
+    # 2.4x that. A timed-out leg is `cancelled`, which `kani-gate` below fails
+    # closed on — the hang becomes a red gate to re-run, not a silent hold.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

@@ -85,8 +85,8 @@ pub fn validate_request(config: &MmConfig, req: &MmRequest) -> MmValidation {
             if !is_aligned(req.address, req.size) {
                 return MmValidation::AlignmentError;
             }
-        },
-        _ => {},
+        }
+        _ => {}
     }
 
     MmValidation::Valid
@@ -125,7 +125,10 @@ mod tests {
             size: 4,
             value: 0,
         };
-        assert_eq!(validate_request(&config, &req), MmValidation::AddressOutOfRange);
+        assert_eq!(
+            validate_request(&config, &req),
+            MmValidation::AddressOutOfRange
+        );
     }
 
     #[test]
@@ -161,7 +164,10 @@ mod tests {
             size: 4,
             value: 0,
         };
-        assert_eq!(validate_request(&config, &req), MmValidation::AlignmentError);
+        assert_eq!(
+            validate_request(&config, &req),
+            MmValidation::AlignmentError
+        );
     }
 
     #[test]
@@ -183,7 +189,10 @@ mod tests {
             size: 4,
             value: 0,
         };
-        assert_eq!(validate_request(&config, &req2), MmValidation::AddressOutOfRange);
+        assert_eq!(
+            validate_request(&config, &req2),
+            MmValidation::AddressOutOfRange
+        );
     }
 
     #[test]

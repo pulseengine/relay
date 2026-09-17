@@ -13,7 +13,7 @@
 //! aggregates that are algebraically identical to the solvers over the same
 //! samples — pinned by equivalence tests), `no_std`, no panics.
 
-use crate::{accel_6point, CalParams, Vec3};
+use crate::{CalParams, Vec3, accel_6point};
 
 // ── Gyro null flow ───────────────────────────────────────────────────────────
 
@@ -60,12 +60,16 @@ impl GyroNullFlow {
         if self.n >= self.needed {
             return WindowStatus::Done;
         }
-        let still = gyro.iter().all(|a| a.is_finite() && a.abs() <= self.motion_thresh);
+        let still = gyro
+            .iter()
+            .all(|a| a.is_finite() && a.abs() <= self.motion_thresh);
         if !still {
             self.sum = [0.0; 3];
             self.n = 0;
             self.restarts = self.restarts.saturating_add(1);
-            return WindowStatus::Collecting { remaining: self.needed };
+            return WindowStatus::Collecting {
+                remaining: self.needed,
+            };
         }
         self.sum[0] += gyro[0];
         self.sum[1] += gyro[1];
@@ -74,7 +78,9 @@ impl GyroNullFlow {
         if self.n >= self.needed {
             WindowStatus::Done
         } else {
-            WindowStatus::Collecting { remaining: self.needed - self.n }
+            WindowStatus::Collecting {
+                remaining: self.needed - self.n,
+            }
         }
     }
 
@@ -166,12 +172,36 @@ impl Accel6PointFlow {
         let dom = self.dom_frac * self.g;
         let off = self.off_frac * self.g;
         let faces = [
-            (Face::XPos, a[0] >= dom, a[1].abs() <= off && a[2].abs() <= off),
-            (Face::XNeg, a[0] <= -dom, a[1].abs() <= off && a[2].abs() <= off),
-            (Face::YPos, a[1] >= dom, a[0].abs() <= off && a[2].abs() <= off),
-            (Face::YNeg, a[1] <= -dom, a[0].abs() <= off && a[2].abs() <= off),
-            (Face::ZPos, a[2] >= dom, a[0].abs() <= off && a[1].abs() <= off),
-            (Face::ZNeg, a[2] <= -dom, a[0].abs() <= off && a[1].abs() <= off),
+            (
+                Face::XPos,
+                a[0] >= dom,
+                a[1].abs() <= off && a[2].abs() <= off,
+            ),
+            (
+                Face::XNeg,
+                a[0] <= -dom,
+                a[1].abs() <= off && a[2].abs() <= off,
+            ),
+            (
+                Face::YPos,
+                a[1] >= dom,
+                a[0].abs() <= off && a[2].abs() <= off,
+            ),
+            (
+                Face::YNeg,
+                a[1] <= -dom,
+                a[0].abs() <= off && a[2].abs() <= off,
+            ),
+            (
+                Face::ZPos,
+                a[2] >= dom,
+                a[0].abs() <= off && a[1].abs() <= off,
+            ),
+            (
+                Face::ZNeg,
+                a[2] <= -dom,
+                a[0].abs() <= off && a[1].abs() <= off,
+            ),
         ];
         for (f, dom_ok, off_ok) in faces {
             if dom_ok && off_ok {
@@ -212,7 +242,11 @@ impl Accel6PointFlow {
         self.n[i] += 1;
         if self.n[i] >= self.needed {
             let inv = 1.0 / self.n[i] as f32;
-            self.face_mean[i] = [self.sum[i][0] * inv, self.sum[i][1] * inv, self.sum[i][2] * inv];
+            self.face_mean[i] = [
+                self.sum[i][0] * inv,
+                self.sum[i][1] * inv,
+                self.sum[i][2] * inv,
+            ];
             self.captured[i] = true;
             self.current = None;
             if self.captured.iter().all(|&c| c) {
@@ -221,7 +255,10 @@ impl Accel6PointFlow {
                 SixPointStatus::FaceCaptured { face }
             }
         } else {
-            SixPointStatus::Sampling { face, remaining: self.needed - self.n[i] }
+            SixPointStatus::Sampling {
+                face,
+                remaining: self.needed - self.n[i],
+            }
         }
     }
 
@@ -276,7 +313,10 @@ pub enum MagSweepVerdict {
     Accepted,
     /// Sweep rejected: the smallest per-axis half-range (gauss) and the
     /// min/max half-range ratio that failed the gate — operator retries.
-    Rejected { min_half_range: f32, anisotropy: f32 },
+    Rejected {
+        min_half_range: f32,
+        anisotropy: f32,
+    },
 }
 
 impl MagSweepFlow {
@@ -306,7 +346,9 @@ impl MagSweepFlow {
         if self.n >= self.needed {
             WindowStatus::Done
         } else {
-            WindowStatus::Collecting { remaining: self.needed - self.n }
+            WindowStatus::Collecting {
+                remaining: self.needed - self.n,
+            }
         }
     }
 
@@ -321,7 +363,13 @@ impl MagSweepFlow {
         max_anisotropy: f32,
     ) -> (MagSweepVerdict, Option<(Vec3, Vec3)>) {
         if self.n < self.needed {
-            return (MagSweepVerdict::Rejected { min_half_range: 0.0, anisotropy: f32::INFINITY }, None);
+            return (
+                MagSweepVerdict::Rejected {
+                    min_half_range: 0.0,
+                    anisotropy: f32::INFINITY,
+                },
+                None,
+            );
         }
         let half = [
             (self.hi[0] - self.lo[0]) * 0.5,
@@ -338,9 +386,19 @@ impl MagSweepFlow {
                 max_h = h;
             }
         }
-        let anisotropy = if min_h > 0.0 { max_h / min_h } else { f32::INFINITY };
+        let anisotropy = if min_h > 0.0 {
+            max_h / min_h
+        } else {
+            f32::INFINITY
+        };
         if !(min_h.is_finite() && min_h >= min_span && anisotropy <= max_anisotropy) {
-            return (MagSweepVerdict::Rejected { min_half_range: min_h, anisotropy }, None);
+            return (
+                MagSweepVerdict::Rejected {
+                    min_half_range: min_h,
+                    anisotropy,
+                },
+                None,
+            );
         }
         let offset = [
             (self.lo[0] + self.hi[0]) * 0.5,

@@ -71,13 +71,23 @@ pub struct ChecksumTable {
 
 impl Region {
     pub const fn empty() -> Self {
-        Region { region_id: 0, baseline_crc: 0, enabled: false, last_checked: 0 }
+        Region {
+            region_id: 0,
+            baseline_crc: 0,
+            enabled: false,
+            last_checked: 0,
+        }
     }
 }
 
 impl CheckResult {
     pub const fn empty() -> Self {
-        CheckResult { region_id: 0, computed_crc: 0, baseline_crc: 0, mismatch: false }
+        CheckResult {
+            region_id: 0,
+            computed_crc: 0,
+            baseline_crc: 0,
+            mismatch: false,
+        }
     }
 }
 
@@ -141,11 +151,7 @@ impl ChecksumTable {
 
     /// Check a batch of regions. Input is an array of (region_id, data) pairs.
     /// Output bounded by MAX_CHECK_PER_CYCLE.
-    pub fn check_batch(
-        &mut self,
-        region_data: &[(u32, &[u8])],
-        current_time: u64,
-    ) -> CheckOutput {
+    pub fn check_batch(&mut self, region_data: &[(u32, &[u8])], current_time: u64) -> CheckOutput {
         let mut output = CheckOutput {
             results: [CheckResult::empty(); MAX_CHECK_PER_CYCLE],
             result_count: 0,

@@ -34,13 +34,22 @@ const ACCEL: [f32; 3] = [0.15, -0.09, -9.79];
 const DT: f32 = 0.001; // 1 kHz rate loop
 
 fn ts_rate(ms: u64) -> RateTime {
-    RateTime { seconds: ms / 1000, fraction: ((ms % 1000) * (1u64 << 32) / 1000) as u32 }
+    RateTime {
+        seconds: ms / 1000,
+        fraction: ((ms % 1000) * (1u64 << 32) / 1000) as u32,
+    }
 }
 fn ts_att(ms: u64) -> AttTime {
-    AttTime { seconds: ms / 1000, fraction: ((ms % 1000) * (1u64 << 32) / 1000) as u32 }
+    AttTime {
+        seconds: ms / 1000,
+        fraction: ((ms % 1000) * (1u64 << 32) / 1000) as u32,
+    }
 }
 fn ts_pos(ms: u64) -> PosTime {
-    PosTime { seconds: ms / 1000, fraction: ((ms % 1000) * (1u64 << 32) / 1000) as u32 }
+    PosTime {
+        seconds: ms / 1000,
+        fraction: ((ms % 1000) * (1u64 << 32) / 1000) as u32,
+    }
 }
 
 /// IEKF — one propagate step at the rate-loop dt. The estimator is the heaviest
@@ -52,7 +61,13 @@ fn bench_iekf(c: &mut Criterion) {
         let mut t = 0u64;
         b.iter(|| {
             t = t.wrapping_add(1);
-            ekf.propagate(black_box(Imu { gyro: GYRO, accel: ACCEL }), black_box(DT));
+            ekf.propagate(
+                black_box(Imu {
+                    gyro: GYRO,
+                    accel: ACCEL,
+                }),
+                black_box(DT),
+            );
             black_box(ekf.state())
         })
     });
@@ -106,7 +121,11 @@ fn bench_rate(c: &mut Criterion) {
         let mut ms = 0u64;
         b.iter(|| {
             ms = ms.wrapping_add(1); // 1 kHz
-            black_box(pid.tick(black_box(ts_rate(ms)), black_box(GYRO), black_box([0.0, 0.0, 0.0])))
+            black_box(pid.tick(
+                black_box(ts_rate(ms)),
+                black_box(GYRO),
+                black_box([0.0, 0.0, 0.0]),
+            ))
         })
     });
 }
@@ -138,10 +157,22 @@ fn bench_full_cascade(c: &mut Criterion) {
         b.iter(|| {
             ms = ms.wrapping_add(1);
             // 1. estimator
-            ekf.propagate(black_box(Imu { gyro: GYRO, accel: ACCEL }), DT);
+            ekf.propagate(
+                black_box(Imu {
+                    gyro: GYRO,
+                    accel: ACCEL,
+                }),
+                DT,
+            );
             let st = ekf.state();
             // 2. position -> attitude setpoint
-            let att_sp = pos.tick(ts_pos(ms), [0.3, -0.2, -4.8], [0.05, -0.03, 0.01], [1.0, 0.0, 0.0, 0.0], sp);
+            let att_sp = pos.tick(
+                ts_pos(ms),
+                [0.3, -0.2, -4.8],
+                [0.05, -0.03, 0.01],
+                [1.0, 0.0, 0.0, 0.0],
+                sp,
+            );
             // 3. attitude -> rate setpoint
             let rate_sp = att.tick(ts_att(ms), att_sp.quaternion, [1.0, 0.0, 0.0, 0.0]);
             // 4. rate -> torque

@@ -79,7 +79,8 @@ pub const DIVERGE_FLOOR_M: f32 = 5.0;
 pub const DIVERGE_DEBOUNCE: u32 = 10;
 
 fn sane3(p: &[f32; 3]) -> bool {
-    p.iter().all(|v| v.is_finite() && *v >= -MAX_POS_M && *v <= MAX_POS_M)
+    p.iter()
+        .all(|v| v.is_finite() && *v >= -MAX_POS_M && *v <= MAX_POS_M)
 }
 
 /// Squared 2D distance — every gate compares SQUARED quantities (order-
@@ -101,7 +102,10 @@ fn healthy(fix: &Option<NedFix>, est: Option<[f32; 3]>) -> Option<NedFix> {
     if !sane3(&f.pos) || !f.acc_m.is_finite() || f.acc_m <= 0.0 || f.acc_m > MAX_ACC_M {
         return None;
     }
-    let f = NedFix { acc_m: f.acc_m.max(MIN_ACC_M), ..f };
+    let f = NedFix {
+        acc_m: f.acc_m.max(MIN_ACC_M),
+        ..f
+    };
     if let Some(e) = est {
         if sane3(&e) && dist2d_sq(&f.pos, &e) > INNOVATION_GATE_M * INNOVATION_GATE_M {
             return None;
@@ -125,7 +129,10 @@ impl Default for DualGnss {
 
 impl DualGnss {
     pub fn new() -> Self {
-        DualGnss { diverge_count: 0, diverged: false }
+        DualGnss {
+            diverge_count: 0,
+            diverged: false,
+        }
     }
 
     /// Clear the latched divergence flag (ground reset only).
@@ -183,8 +190,17 @@ impl DualGnss {
                 // Blended accuracy: conservatively the better receiver's
                 // (the true inverse-variance value is smaller; reporting
                 // min keeps the field sqrt-free and never over-claims).
-                let acc = if fa.acc_m <= fb.acc_m { fa.acc_m } else { fb.acc_m };
-                GnssDecision { pos: Some(pos), acc_m: acc, source: GnssSource::Blend, diverged: false }
+                let acc = if fa.acc_m <= fb.acc_m {
+                    fa.acc_m
+                } else {
+                    fb.acc_m
+                };
+                GnssDecision {
+                    pos: Some(pos),
+                    acc_m: acc,
+                    source: GnssSource::Blend,
+                    diverged: false,
+                }
             }
             (Some(f), None) => GnssDecision {
                 pos: Some(f.pos),
@@ -217,7 +233,12 @@ mod tests {
     use super::*;
 
     fn fix(x: f32, y: f32, acc: f32) -> Option<NedFix> {
-        Some(NedFix { pos: [x, y, -10.0], acc_m: acc, sats: 12, fix_ok: true })
+        Some(NedFix {
+            pos: [x, y, -10.0],
+            acc_m: acc,
+            sats: 12,
+            fix_ok: true,
+        })
     }
 
     /// Both healthy: the blend lies between the fixes, weighted toward the
@@ -228,8 +249,15 @@ mod tests {
         let dec = d.update(fix(0.0, 0.0, 1.0), fix(1.0, 0.0, 2.0), None);
         let p = dec.pos.unwrap();
         assert_eq!(dec.source, GnssSource::Blend);
-        assert!(p[0] > 0.0 && p[0] < 0.5, "weighted toward A (acc 1 vs 2): {}", p[0]);
-        assert!(dec.acc_m <= 1.0, "blend accuracy never worse than the best receiver");
+        assert!(
+            p[0] > 0.0 && p[0] < 0.5,
+            "weighted toward A (acc 1 vs 2): {}",
+            p[0]
+        );
+        assert!(
+            dec.acc_m <= 1.0,
+            "blend accuracy never worse than the best receiver"
+        );
         assert!(!dec.diverged);
     }
 
@@ -245,7 +273,11 @@ mod tests {
         assert_eq!(after.source, GnssSource::B);
         let p1 = after.pos.unwrap();
         let step = ((p1[0] - p0[0]).powi(2) + (p1[1] - p0[1]).powi(2)).sqrt();
-        assert!(step <= 1.0, "failover step {} must stay within B's accuracy", step);
+        assert!(
+            step <= 1.0,
+            "failover step {} must stay within B's accuracy",
+            step
+        );
     }
 
     /// Degradation failovers: accuracy collapse and a jump the innovation
@@ -254,14 +286,27 @@ mod tests {
     fn accuracy_collapse_and_jump_disqualify() {
         let mut d = DualGnss::new();
         let dec = d.update(
-            Some(NedFix { pos: [0.0; 3], acc_m: 50.0, sats: 12, fix_ok: true }),
+            Some(NedFix {
+                pos: [0.0; 3],
+                acc_m: 50.0,
+                sats: 12,
+                fix_ok: true,
+            }),
             fix(0.1, 0.0, 1.0),
             None,
         );
-        assert_eq!(dec.source, GnssSource::B, "acc 50 m > ceiling disqualifies A");
+        assert_eq!(
+            dec.source,
+            GnssSource::B,
+            "acc 50 m > ceiling disqualifies A"
+        );
         // jump: estimator at origin, A reports 40 m away.
         let dec = d.update(fix(40.0, 0.0, 1.0), fix(0.1, 0.0, 1.0), Some([0.0; 3]));
-        assert_eq!(dec.source, GnssSource::B, "innovation gate rejects the jump");
+        assert_eq!(
+            dec.source,
+            GnssSource::B,
+            "innovation gate rejects the jump"
+        );
     }
 
     /// Divergence: sustained disagreement latches the flag; the selector
@@ -273,11 +318,19 @@ mod tests {
         let mut d = DualGnss::new();
         let mut last = None;
         for _ in 0..DIVERGE_DEBOUNCE {
-            last = Some(d.update(fix(0.0, 0.0, 1.0), fix(10.0, 0.0, 1.0), Some([2.0, 0.0, -10.0])));
+            last = Some(d.update(
+                fix(0.0, 0.0, 1.0),
+                fix(10.0, 0.0, 1.0),
+                Some([2.0, 0.0, -10.0]),
+            ));
         }
         let dec = last.unwrap();
         assert!(dec.diverged, "sustained 10 m split must latch divergence");
-        assert_eq!(dec.source, GnssSource::A, "picks the estimator-consistent side");
+        assert_eq!(
+            dec.source,
+            GnssSource::A,
+            "picks the estimator-consistent side"
+        );
         // and it stays latched through re-agreement:
         let dec = d.update(fix(0.0, 0.0, 1.0), fix(0.1, 0.0, 1.0), None);
         assert!(dec.diverged, "divergence is latched");
@@ -303,8 +356,18 @@ mod tests {
         assert!(dec.pos.is_none());
         assert_eq!(dec.source, GnssSource::None);
         let dec = d.update(
-            Some(NedFix { pos: [f32::NAN; 3], acc_m: 1.0, sats: 12, fix_ok: true }),
-            Some(NedFix { pos: [0.0; 3], acc_m: 1.0, sats: 3, fix_ok: true }),
+            Some(NedFix {
+                pos: [f32::NAN; 3],
+                acc_m: 1.0,
+                sats: 12,
+                fix_ok: true,
+            }),
+            Some(NedFix {
+                pos: [0.0; 3],
+                acc_m: 1.0,
+                sats: 3,
+                fix_ok: true,
+            }),
             None,
         );
         assert!(dec.pos.is_none(), "NaN pos and 3 sats both unhealthy");

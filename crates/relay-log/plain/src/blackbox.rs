@@ -342,7 +342,10 @@ pub fn scan<F: FnMut(ScannedRecord<'_>)>(bytes: &[u8], mut sink: F) -> (usize, u
         if crc32(body) != stored {
             return (n, at);
         }
-        sink(ScannedRecord { rec_type, payload: &bytes[at + HDR..at + HDR + len] });
+        sink(ScannedRecord {
+            rec_type,
+            payload: &bytes[at + HDR..at + HDR + len],
+        });
         n += 1;
         at += total;
     }
@@ -362,7 +365,13 @@ pub struct BlackboxWriter<L: BlockLog> {
 
 impl<L: BlockLog> BlackboxWriter<L> {
     pub fn new(log: L, budget_per_tick: usize) -> Self {
-        BlackboxWriter { log, budget_per_tick, spent_this_tick: 0, dropped: 0, written: 0 }
+        BlackboxWriter {
+            log,
+            budget_per_tick,
+            spent_this_tick: 0,
+            dropped: 0,
+            written: 0,
+        }
     }
 
     /// Start a new control tick (resets the budget window).

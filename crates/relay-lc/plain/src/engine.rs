@@ -4,56 +4,118 @@
 //!      + LC-specific glue (watchpoint table, sensor-id match, bounded output).
 //! Source of truth: ../src/engine.rs.
 
-pub use crate::compare::{compare_i64 as compare, ComparisonOp};
+pub use crate::compare::{ComparisonOp, compare_i64 as compare};
 
 pub const MAX_WATCHPOINTS: usize = 128;
 pub const MAX_VIOLATIONS_PER_CYCLE: usize = 32;
 
 #[derive(Clone, Copy, Debug)]
-pub struct Watchpoint { pub sensor_id: u32, pub op: ComparisonOp, pub threshold: i64, pub enabled: bool, pub persistence: u32, pub current_count: u32 }
+pub struct Watchpoint {
+    pub sensor_id: u32,
+    pub op: ComparisonOp,
+    pub threshold: i64,
+    pub enabled: bool,
+    pub persistence: u32,
+    pub current_count: u32,
+}
 
 #[derive(Clone, Copy, Debug)]
-pub struct Violation { pub watchpoint_id: u32, pub measured: i64, pub threshold: i64, pub op: ComparisonOp }
+pub struct Violation {
+    pub watchpoint_id: u32,
+    pub measured: i64,
+    pub threshold: i64,
+    pub op: ComparisonOp,
+}
 
 #[derive(Clone, Copy, Debug)]
-pub struct SensorReading { pub sensor_id: u32, pub value: i64 }
+pub struct SensorReading {
+    pub sensor_id: u32,
+    pub value: i64,
+}
 
-pub struct EvalResult { pub violations: [Violation; MAX_VIOLATIONS_PER_CYCLE], pub violation_count: u32 }
+pub struct EvalResult {
+    pub violations: [Violation; MAX_VIOLATIONS_PER_CYCLE],
+    pub violation_count: u32,
+}
 
-pub struct WatchpointTable { entries: [Watchpoint; MAX_WATCHPOINTS], entry_count: u32 }
+pub struct WatchpointTable {
+    entries: [Watchpoint; MAX_WATCHPOINTS],
+    entry_count: u32,
+}
 
-impl Watchpoint { pub const fn empty() -> Self { Watchpoint { sensor_id: 0, op: ComparisonOp::LessThan, threshold: 0, enabled: false, persistence: 1, current_count: 0 } } }
-impl Violation { pub const fn empty() -> Self { Violation { watchpoint_id: 0, measured: 0, threshold: 0, op: ComparisonOp::LessThan } } }
+impl Watchpoint {
+    pub const fn empty() -> Self {
+        Watchpoint {
+            sensor_id: 0,
+            op: ComparisonOp::LessThan,
+            threshold: 0,
+            enabled: false,
+            persistence: 1,
+            current_count: 0,
+        }
+    }
+}
+impl Violation {
+    pub const fn empty() -> Self {
+        Violation {
+            watchpoint_id: 0,
+            measured: 0,
+            threshold: 0,
+            op: ComparisonOp::LessThan,
+        }
+    }
+}
 
 impl WatchpointTable {
-    pub const NEW: Self = WatchpointTable { entries: [Watchpoint::empty(); MAX_WATCHPOINTS], entry_count: 0 };
-    pub fn new() -> Self { Self::NEW }
+    pub const NEW: Self = WatchpointTable {
+        entries: [Watchpoint::empty(); MAX_WATCHPOINTS],
+        entry_count: 0,
+    };
+    pub fn new() -> Self {
+        Self::NEW
+    }
 
     pub fn add_watchpoint(&mut self, wp: Watchpoint) -> bool {
-        if self.entry_count as usize >= MAX_WATCHPOINTS { return false; }
+        if self.entry_count as usize >= MAX_WATCHPOINTS {
+            return false;
+        }
         self.entries[self.entry_count as usize] = wp;
         self.entry_count += 1;
         true
     }
 
-    pub fn count(&self) -> u32 { self.entry_count }
+    pub fn count(&self) -> u32 {
+        self.entry_count
+    }
 
     pub fn evaluate(&mut self, reading: SensorReading) -> EvalResult {
-        let mut result = EvalResult { violations: [Violation::empty(); MAX_VIOLATIONS_PER_CYCLE], violation_count: 0 };
+        let mut result = EvalResult {
+            violations: [Violation::empty(); MAX_VIOLATIONS_PER_CYCLE],
+            violation_count: 0,
+        };
         let count = self.entry_count;
         let mut i: u32 = 0;
         while i < count {
-            if result.violation_count as usize >= MAX_VIOLATIONS_PER_CYCLE { break; }
+            if result.violation_count as usize >= MAX_VIOLATIONS_PER_CYCLE {
+                break;
+            }
             let idx = i as usize;
             let wp = self.entries[idx];
             if wp.enabled && wp.sensor_id == reading.sensor_id {
                 // Composition of verified primitives: compare → persistence::decide → persistence::apply.
                 let violated = compare(reading.value, wp.op, wp.threshold);
-                let decision = crate::persistence::decide(violated, wp.current_count, wp.persistence);
-                self.entries[idx].current_count = crate::persistence::apply(decision, wp.current_count);
+                let decision =
+                    crate::persistence::decide(violated, wp.current_count, wp.persistence);
+                self.entries[idx].current_count =
+                    crate::persistence::apply(decision, wp.current_count);
                 if decision == crate::persistence::PersistenceDecision::Fire {
                     let vidx = result.violation_count as usize;
-                    result.violations[vidx] = Violation { watchpoint_id: i, measured: reading.value, threshold: wp.threshold, op: wp.op };
+                    result.violations[vidx] = Violation {
+                        watchpoint_id: i,
+                        measured: reading.value,
+                        threshold: wp.threshold,
+                        op: wp.op,
+                    };
                     result.violation_count += 1;
                 }
             }
@@ -85,14 +147,7 @@ pub struct Geofence {
 }
 
 impl Geofence {
-    pub fn new(
-        min_n: i32,
-        max_n: i32,
-        min_e: i32,
-        max_e: i32,
-        min_d: i32,
-        max_d: i32,
-    ) -> Self {
+    pub fn new(min_n: i32, max_n: i32, min_e: i32, max_e: i32, min_d: i32, max_d: i32) -> Self {
         Geofence {
             min_n,
             max_n,
@@ -132,14 +187,168 @@ impl Geofence {
 mod tests {
     use super::*;
 
-    #[test] fn test_empty() { let mut t = WatchpointTable::new(); assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 100 }).violation_count, 0); }
-    #[test] fn test_gt_violation() { let mut t = WatchpointTable::new(); t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 50, enabled: true, persistence: 1, current_count: 0 }); assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 100 }).violation_count, 1); assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 30 }).violation_count, 0); }
-    #[test] fn test_persistence() { let mut t = WatchpointTable::new(); t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 50, enabled: true, persistence: 3, current_count: 0 }); let r = SensorReading { sensor_id: 1, value: 100 }; assert_eq!(t.evaluate(r).violation_count, 0); assert_eq!(t.evaluate(r).violation_count, 0); assert_eq!(t.evaluate(r).violation_count, 1); }
-    #[test] fn test_persistence_reset() { let mut t = WatchpointTable::new(); t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 50, enabled: true, persistence: 3, current_count: 0 }); let bad = SensorReading { sensor_id: 1, value: 100 }; let good = SensorReading { sensor_id: 1, value: 10 }; t.evaluate(bad); t.evaluate(bad); t.evaluate(good); assert_eq!(t.evaluate(bad).violation_count, 0); assert_eq!(t.evaluate(bad).violation_count, 0); assert_eq!(t.evaluate(bad).violation_count, 1); }
-    #[test] fn test_sensor_filter() { let mut t = WatchpointTable::new(); t.add_watchpoint(Watchpoint { sensor_id: 42, op: ComparisonOp::LessThan, threshold: 10, enabled: true, persistence: 1, current_count: 0 }); assert_eq!(t.evaluate(SensorReading { sensor_id: 99, value: 0 }).violation_count, 0); assert_eq!(t.evaluate(SensorReading { sensor_id: 42, value: 5 }).violation_count, 1); }
-    #[test] fn test_disabled() { let mut t = WatchpointTable::new(); t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0, enabled: false, persistence: 1, current_count: 0 }); assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 999 }).violation_count, 0); }
-    #[test] fn test_ops() { assert!(compare(5, ComparisonOp::LessThan, 10)); assert!(compare(10, ComparisonOp::GreaterThan, 5)); assert!(compare(5, ComparisonOp::Equal, 5)); assert!(compare(5, ComparisonOp::NotEqual, 6)); }
-    #[test] fn test_bounded() { let mut t = WatchpointTable::new(); for _ in 0..(MAX_VIOLATIONS_PER_CYCLE + 10) { t.add_watchpoint(Watchpoint { sensor_id: 1, op: ComparisonOp::GreaterThan, threshold: 0, enabled: true, persistence: 1, current_count: 0 }); } assert_eq!(t.evaluate(SensorReading { sensor_id: 1, value: 100 }).violation_count, MAX_VIOLATIONS_PER_CYCLE as u32); }
+    #[test]
+    fn test_empty() {
+        let mut t = WatchpointTable::new();
+        assert_eq!(
+            t.evaluate(SensorReading {
+                sensor_id: 1,
+                value: 100
+            })
+            .violation_count,
+            0
+        );
+    }
+    #[test]
+    fn test_gt_violation() {
+        let mut t = WatchpointTable::new();
+        t.add_watchpoint(Watchpoint {
+            sensor_id: 1,
+            op: ComparisonOp::GreaterThan,
+            threshold: 50,
+            enabled: true,
+            persistence: 1,
+            current_count: 0,
+        });
+        assert_eq!(
+            t.evaluate(SensorReading {
+                sensor_id: 1,
+                value: 100
+            })
+            .violation_count,
+            1
+        );
+        assert_eq!(
+            t.evaluate(SensorReading {
+                sensor_id: 1,
+                value: 30
+            })
+            .violation_count,
+            0
+        );
+    }
+    #[test]
+    fn test_persistence() {
+        let mut t = WatchpointTable::new();
+        t.add_watchpoint(Watchpoint {
+            sensor_id: 1,
+            op: ComparisonOp::GreaterThan,
+            threshold: 50,
+            enabled: true,
+            persistence: 3,
+            current_count: 0,
+        });
+        let r = SensorReading {
+            sensor_id: 1,
+            value: 100,
+        };
+        assert_eq!(t.evaluate(r).violation_count, 0);
+        assert_eq!(t.evaluate(r).violation_count, 0);
+        assert_eq!(t.evaluate(r).violation_count, 1);
+    }
+    #[test]
+    fn test_persistence_reset() {
+        let mut t = WatchpointTable::new();
+        t.add_watchpoint(Watchpoint {
+            sensor_id: 1,
+            op: ComparisonOp::GreaterThan,
+            threshold: 50,
+            enabled: true,
+            persistence: 3,
+            current_count: 0,
+        });
+        let bad = SensorReading {
+            sensor_id: 1,
+            value: 100,
+        };
+        let good = SensorReading {
+            sensor_id: 1,
+            value: 10,
+        };
+        t.evaluate(bad);
+        t.evaluate(bad);
+        t.evaluate(good);
+        assert_eq!(t.evaluate(bad).violation_count, 0);
+        assert_eq!(t.evaluate(bad).violation_count, 0);
+        assert_eq!(t.evaluate(bad).violation_count, 1);
+    }
+    #[test]
+    fn test_sensor_filter() {
+        let mut t = WatchpointTable::new();
+        t.add_watchpoint(Watchpoint {
+            sensor_id: 42,
+            op: ComparisonOp::LessThan,
+            threshold: 10,
+            enabled: true,
+            persistence: 1,
+            current_count: 0,
+        });
+        assert_eq!(
+            t.evaluate(SensorReading {
+                sensor_id: 99,
+                value: 0
+            })
+            .violation_count,
+            0
+        );
+        assert_eq!(
+            t.evaluate(SensorReading {
+                sensor_id: 42,
+                value: 5
+            })
+            .violation_count,
+            1
+        );
+    }
+    #[test]
+    fn test_disabled() {
+        let mut t = WatchpointTable::new();
+        t.add_watchpoint(Watchpoint {
+            sensor_id: 1,
+            op: ComparisonOp::GreaterThan,
+            threshold: 0,
+            enabled: false,
+            persistence: 1,
+            current_count: 0,
+        });
+        assert_eq!(
+            t.evaluate(SensorReading {
+                sensor_id: 1,
+                value: 999
+            })
+            .violation_count,
+            0
+        );
+    }
+    #[test]
+    fn test_ops() {
+        assert!(compare(5, ComparisonOp::LessThan, 10));
+        assert!(compare(10, ComparisonOp::GreaterThan, 5));
+        assert!(compare(5, ComparisonOp::Equal, 5));
+        assert!(compare(5, ComparisonOp::NotEqual, 6));
+    }
+    #[test]
+    fn test_bounded() {
+        let mut t = WatchpointTable::new();
+        for _ in 0..(MAX_VIOLATIONS_PER_CYCLE + 10) {
+            t.add_watchpoint(Watchpoint {
+                sensor_id: 1,
+                op: ComparisonOp::GreaterThan,
+                threshold: 0,
+                enabled: true,
+                persistence: 1,
+                current_count: 0,
+            });
+        }
+        assert_eq!(
+            t.evaluate(SensorReading {
+                sensor_id: 1,
+                value: 100
+            })
+            .violation_count,
+            MAX_VIOLATIONS_PER_CYCLE as u32
+        );
+    }
 
     // --- Geofence unit tests (v0.12) — give miri something concrete
     // to interpret. The exhaustive arbitrary-input coverage lives in
@@ -149,33 +358,38 @@ mod tests {
         Geofence::new(-1_000, 1_000, -1_000, 1_000, -1_000, 1_000)
     }
 
-    #[test] fn geofence_inside_does_not_trip() {
+    #[test]
+    fn geofence_inside_does_not_trip() {
         let mut g = fence();
         assert!(!g.check(0, 0, 0));
         assert!(!g.violation_active());
     }
 
-    #[test] fn geofence_outside_n_trips_once() {
+    #[test]
+    fn geofence_outside_n_trips_once() {
         let mut g = fence();
-        assert!(g.check(2_000, 0, 0));   // rising edge
+        assert!(g.check(2_000, 0, 0)); // rising edge
         assert!(g.violation_active());
-        assert!(!g.check(3_000, 0, 0));  // already latched — silent
-        assert!(!g.check(0, 0, 0));      // even returning inside — still silent
+        assert!(!g.check(3_000, 0, 0)); // already latched — silent
+        assert!(!g.check(0, 0, 0)); // even returning inside — still silent
     }
 
-    #[test] fn geofence_outside_e_trips() {
+    #[test]
+    fn geofence_outside_e_trips() {
         let mut g = fence();
         assert!(g.check(0, -2_000, 0));
         assert!(g.violation_active());
     }
 
-    #[test] fn geofence_outside_d_trips() {
+    #[test]
+    fn geofence_outside_d_trips() {
         let mut g = fence();
         assert!(g.check(0, 0, 2_000));
         assert!(g.violation_active());
     }
 
-    #[test] fn geofence_boundary_inclusive() {
+    #[test]
+    fn geofence_boundary_inclusive() {
         // Exact boundary values are inside per >= / <= in check().
         let mut g = fence();
         assert!(!g.check(1_000, 1_000, 1_000));

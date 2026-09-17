@@ -95,10 +95,22 @@ impl BatteryMonitor {
     /// `volts_per_count` calibrates the ADC + divider; `low_v`/`critical_v` are
     /// the failsafe thresholds (critical ≤ low). Degenerate args are sanitised.
     pub fn new(volts_per_count: f32, low_v: f32, critical_v: f32) -> Self {
-        let vpc = if volts_per_count.is_finite() && volts_per_count > 0.0 { volts_per_count } else { 0.0 };
+        let vpc = if volts_per_count.is_finite() && volts_per_count > 0.0 {
+            volts_per_count
+        } else {
+            0.0
+        };
         let low = if low_v.is_finite() { low_v } else { 0.0 };
-        let crit = if critical_v.is_finite() { critical_v.min(low) } else { 0.0 };
-        Self { volts_per_count: vpc, low_v: low, critical_v: crit }
+        let crit = if critical_v.is_finite() {
+            critical_v.min(low)
+        } else {
+            0.0
+        };
+        Self {
+            volts_per_count: vpc,
+            low_v: low,
+            critical_v: crit,
+        }
     }
 
     /// Pack voltage from a raw ADC count.
@@ -168,7 +180,11 @@ pub struct BatteryAdc<A> {
 impl<A: relay_hal::AdcIn> BatteryAdc<A> {
     /// Wrap an `AdcIn` reading rail `channel`, with the given monitor calibration.
     pub fn new(adc: A, channel: u8, monitor: BatteryMonitor) -> Self {
-        Self { adc, channel, monitor }
+        Self {
+            adc,
+            channel,
+            monitor,
+        }
     }
 
     /// Async read of the battery state: pull the raw count via `AdcIn`, then
@@ -292,7 +308,10 @@ mod tests {
     #[test]
     fn esc_send_emits_dshot_frames() {
         let motors = [0.0_f32, 0.25, 0.5, 1.0];
-        let mut esc = DShotEsc::new(MockPwm { last: None, fail: false });
+        let mut esc = DShotEsc::new(MockPwm {
+            last: None,
+            fail: false,
+        });
         block_on(esc.send(&motors)).unwrap();
         let sent = esc.release().last.expect("a frame batch was sent");
         let expected = [
@@ -307,7 +326,10 @@ mod tests {
     /// The async path is fallible: a sink error propagates as Err.
     #[test]
     fn esc_send_propagates_sink_error() {
-        let mut esc = DShotEsc::new(MockPwm { last: None, fail: true });
+        let mut esc = DShotEsc::new(MockPwm {
+            last: None,
+            fail: true,
+        });
         assert_eq!(block_on(esc.send(&[0.0; 4])), Err(MockPwmError));
     }
 
@@ -348,7 +370,14 @@ mod tests {
     #[test]
     fn battery_adc_propagates_error() {
         let monitor = BatteryMonitor::new(0.016, 14.0, 13.2);
-        let mut bat = BatteryAdc::new(MockAdc { count: 0, fail: true }, 3, monitor);
+        let mut bat = BatteryAdc::new(
+            MockAdc {
+                count: 0,
+                fail: true,
+            },
+            3,
+            monitor,
+        );
         assert_eq!(block_on(bat.read_state()), Err(MockPwmError));
     }
 

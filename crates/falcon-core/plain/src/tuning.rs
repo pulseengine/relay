@@ -10,7 +10,7 @@
 //! K01-proven store write, then the setters' own clamps).
 
 use crate::FlightCore;
-use relay_param::{param_id, ParamDef, ParamStore};
+use relay_param::{ParamDef, ParamStore, param_id};
 
 /// Register falcon's tunable knobs (schema bounds + current-behavior
 /// defaults). Idempotent per store; returns false if the store lacks room.
@@ -18,13 +18,38 @@ pub fn register_tuning<const N: usize>(store: &mut ParamStore<N>) -> bool {
     let defs = [
         // Altitude P-I-D (the gz-reconciled defaults are per-plant; these
         // are the analytic-plant baseline the core constructs with).
-        ParamDef { id: param_id("MC_ALT_P"), min: 0.01, max: 1.0, default: 0.05 },
-        ParamDef { id: param_id("MC_ALT_D"), min: 0.0, max: 3.0, default: 0.30 },
-        ParamDef { id: param_id("MC_ALT_I"), min: 0.0, max: 0.2, default: 0.0 },
+        ParamDef {
+            id: param_id("MC_ALT_P"),
+            min: 0.01,
+            max: 1.0,
+            default: 0.05,
+        },
+        ParamDef {
+            id: param_id("MC_ALT_D"),
+            min: 0.0,
+            max: 3.0,
+            default: 0.30,
+        },
+        ParamDef {
+            id: param_id("MC_ALT_I"),
+            min: 0.0,
+            max: 0.2,
+            default: 0.0,
+        },
         // Hover-thrust feedforward (per-airframe).
-        ParamDef { id: param_id("MC_HOVER_THR"), min: 0.2, max: 0.8, default: 0.5 },
+        ParamDef {
+            id: param_id("MC_HOVER_THR"),
+            min: 0.2,
+            max: 0.8,
+            default: 0.5,
+        },
         // Landing descent rate (m/s, NED +down).
-        ParamDef { id: param_id("MC_LAND_VZ"), min: 0.2, max: 1.5, default: 0.5 },
+        ParamDef {
+            id: param_id("MC_LAND_VZ"),
+            min: 0.2,
+            max: 1.5,
+            default: 0.5,
+        },
     ];
     for d in defs {
         if !store.register(d) {

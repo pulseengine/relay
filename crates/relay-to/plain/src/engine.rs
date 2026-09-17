@@ -25,7 +25,11 @@ pub struct SubscriptionTable {
 
 impl Subscription {
     pub const fn empty() -> Self {
-        Subscription { msg_id: 0, priority: 0, enabled: false }
+        Subscription {
+            msg_id: 0,
+            priority: 0,
+            enabled: false,
+        }
     }
 }
 
@@ -43,7 +47,11 @@ impl SubscriptionTable {
             return false;
         }
         let idx = self.entry_count as usize;
-        self.entries[idx] = Subscription { msg_id, priority, enabled: true };
+        self.entries[idx] = Subscription {
+            msg_id,
+            priority,
+            enabled: true,
+        };
         self.entry_count = self.entry_count + 1;
         true
     }

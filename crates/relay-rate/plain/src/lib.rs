@@ -55,7 +55,10 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
-    pub const ZERO: Self = Self { seconds: 0, fraction: 0 };
+    pub const ZERO: Self = Self {
+        seconds: 0,
+        fraction: 0,
+    };
 
     /// Seconds (f32) from the epoch.
     pub fn as_secs_f32(self) -> f32 {
@@ -259,11 +262,7 @@ impl RatePid {
 
             // 2. Provisional integral update.
             let cand_integral = self.integral[i] + error * dt;
-            let cand_integral = clamp_f32(
-                cand_integral,
-                -self.gains.i_max[i],
-                self.gains.i_max[i],
-            );
+            let cand_integral = clamp_f32(cand_integral, -self.gains.i_max[i], self.gains.i_max[i]);
 
             // 3. Provisional output.
             let cand_torque = self.gains.kp[i] * error
@@ -319,7 +318,10 @@ mod tests {
 
     fn t_at(secs: f32) -> Timestamp {
         let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-        Timestamp { seconds: secs as u64, fraction: frac }
+        Timestamp {
+            seconds: secs as u64,
+            fraction: frac,
+        }
     }
 
     #[test]
@@ -341,7 +343,11 @@ mod tests {
     fn positive_error_drives_positive_torque() {
         let mut p = RatePid::new();
         let out = p.tick(t_at(0.001), [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
-        assert!(out[0] > 0.0, "+x error must produce +x torque, got {}", out[0]);
+        assert!(
+            out[0] > 0.0,
+            "+x error must produce +x torque, got {}",
+            out[0]
+        );
         assert_eq!(out[1], 0.0);
         assert_eq!(out[2], 0.0);
     }
@@ -350,7 +356,11 @@ mod tests {
     fn negative_error_drives_negative_torque() {
         let mut p = RatePid::new();
         let out = p.tick(t_at(0.001), [0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
-        assert!(out[0] < 0.0, "-x error must produce -x torque, got {}", out[0]);
+        assert!(
+            out[0] < 0.0,
+            "-x error must produce -x torque, got {}",
+            out[0]
+        );
     }
 
     #[test]
@@ -365,7 +375,10 @@ mod tests {
                 assert!(
                     out[i].abs() <= p.gains().torque_max[i] + 1.0e-6,
                     "out[{}]={} exceeds torque_max[{}]={}",
-                    i, out[i], i, p.gains().torque_max[i]
+                    i,
+                    out[i],
+                    i,
+                    p.gains().torque_max[i]
                 );
             }
         }
@@ -385,7 +398,10 @@ mod tests {
             assert!(
                 p.integral()[i].abs() <= p.gains().i_max[i] + 1.0e-6,
                 "integral[{}]={} exceeds i_max[{}]={}",
-                i, p.integral()[i], i, p.gains().i_max[i]
+                i,
+                p.integral()[i],
+                i,
+                p.gains().i_max[i]
             );
         }
     }
@@ -441,8 +457,15 @@ mod tests {
                 converged_at = step as f32 * dt;
             }
         }
-        assert!(!converged_at.is_nan(), "rate did not converge to setpoint within 3 s");
-        assert!(converged_at < 2.0, "convergence took {:.2}s > 2.0s budget", converged_at);
+        assert!(
+            !converged_at.is_nan(),
+            "rate did not converge to setpoint within 3 s"
+        );
+        assert!(
+            converged_at < 2.0,
+            "convergence took {:.2}s > 2.0s budget",
+            converged_at
+        );
         assert!(
             (omega[0] - 1.0).abs() < 0.01,
             "steady-state error {:.4} rad/s exceeds 0.01 budget",

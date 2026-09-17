@@ -32,11 +32,7 @@ pub enum PersistenceDecision {
 ///
 /// This is the minimum kernel. No state is mutated here; the caller owns
 /// the counter and applies the decision.
-pub fn decide(
-    event_fired: bool,
-    current_count: u32,
-    persistence: u32,
-) -> PersistenceDecision {
+pub fn decide(event_fired: bool, current_count: u32, persistence: u32) -> PersistenceDecision {
     if !event_fired {
         return PersistenceDecision::Pass;
     }

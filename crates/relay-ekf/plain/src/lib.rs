@@ -68,7 +68,10 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
-    pub const ZERO: Self = Self { seconds: 0, fraction: 0 };
+    pub const ZERO: Self = Self {
+        seconds: 0,
+        fraction: 0,
+    };
 
     /// Seconds (f32) from the epoch.
     pub fn as_secs_f32(self) -> f32 {
@@ -440,7 +443,10 @@ mod tests {
     fn imu_at(secs: f32, accel: [f32; 3], gyro: [f32; 3]) -> ImuSample {
         let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
         ImuSample {
-            time: Timestamp { seconds: secs as u64, fraction: frac },
+            time: Timestamp {
+                seconds: secs as u64,
+                fraction: frac,
+            },
             accel_body: accel,
             gyro_body: gyro,
         }
@@ -505,11 +511,16 @@ mod tests {
         assert!(is_unit_quaternion(q));
         // Verify body-z axis is aligned with NED-z within tolerance.
         let z_body_in_ned = rotate_body_to_ned_inverse(quat_conj(q), [0.0, 0.0, 1.0]);
-        assert!(z_body_in_ned[2] > 0.99,
+        assert!(
+            z_body_in_ned[2] > 0.99,
             "body-down axis should be aligned with NED-down after convergence; got z={}",
-            z_body_in_ned[2]);
-        assert!(e.last_innovation() < 0.01,
-            "innovation should converge near zero; got {}", e.last_innovation());
+            z_body_in_ned[2]
+        );
+        assert!(
+            e.last_innovation() < 0.01,
+            "innovation should converge near zero; got {}",
+            e.last_innovation()
+        );
     }
 
     #[test]
@@ -527,9 +538,11 @@ mod tests {
         // After convergence the body-z axis should still align with NED-z
         // (yaw doesn't tilt the gravity-aligned frame).
         let z_body_in_ned = rotate_body_to_ned_inverse(quat_conj(q), [0.0, 0.0, 1.0]);
-        assert!(z_body_in_ned[2] > 0.99,
+        assert!(
+            z_body_in_ned[2] > 0.99,
             "yaw rotation must not tilt the attitude estimate; z={}",
-            z_body_in_ned[2]);
+            z_body_in_ned[2]
+        );
     }
 
     #[test]
@@ -541,12 +554,20 @@ mod tests {
         for deg in [0.0_f32, 5.0, 10.0, 20.0, 40.0, 60.0] {
             let rad = deg.to_radians();
             // Tilt accel about body-x: gravity now has body-y component.
-            let accel = [0.0, relay_math::sinf(rad) * 9.81, relay_math::cosf(rad) * 9.81];
+            let accel = [
+                0.0,
+                relay_math::sinf(rad) * 9.81,
+                relay_math::cosf(rad) * 9.81,
+            ];
             let mut e = Ekf::new();
             e.tick(imu_at(0.01, accel, [0.0; 3]));
-            assert!(e.last_innovation() + 1.0e-6 >= prev,
+            assert!(
+                e.last_innovation() + 1.0e-6 >= prev,
                 "innovation must be non-decreasing in tilt: deg={} inn={} prev={}",
-                deg, e.last_innovation(), prev);
+                deg,
+                e.last_innovation(),
+                prev
+            );
             prev = e.last_innovation();
         }
     }
@@ -563,8 +584,12 @@ mod tests {
             e.tick(imu_at(t, bad_accel, [0.0; 3]));
         }
         for i in 0..3 {
-            assert!(e.bias()[i].abs() <= 0.5 + 1.0e-6,
-                "bias[{}] = {} out of bound", i, e.bias()[i]);
+            assert!(
+                e.bias()[i].abs() <= 0.5 + 1.0e-6,
+                "bias[{}] = {} out of bound",
+                i,
+                e.bias()[i]
+            );
         }
         assert!(is_unit_quaternion(e.quaternion()));
     }

@@ -207,16 +207,17 @@ mod tests {
     }
     impl MockBus {
         fn new(who: u8, data: [u8; 12]) -> Self {
-            MockBus { who, data, writes: [(0, 0); 8], n_writes: 0 }
+            MockBus {
+                who,
+                data,
+                writes: [(0, 0); 8],
+                n_writes: 0,
+            }
         }
     }
     impl RegBus for MockBus {
         fn read_reg(&mut self, reg: u8) -> u8 {
-            if reg == REG_WHO_AM_I {
-                self.who
-            } else {
-                0
-            }
+            if reg == REG_WHO_AM_I { self.who } else { 0 }
         }
         fn write_reg(&mut self, reg: u8, val: u8) {
             if self.n_writes < self.writes.len() {
@@ -225,7 +226,10 @@ mod tests {
             }
         }
         fn read_burst(&mut self, reg: u8, buf: &mut [u8]) {
-            assert_eq!(reg, REG_ACCEL_DATA_X1, "driver must burst from the data block");
+            assert_eq!(
+                reg, REG_ACCEL_DATA_X1,
+                "driver must burst from the data block"
+            );
             buf.copy_from_slice(&self.data);
         }
     }
@@ -262,8 +266,16 @@ mod tests {
         let s = imu.read();
         assert!((s.accel[0]).abs() < 1e-4);
         assert!((s.accel[1]).abs() < 1e-4);
-        assert!((s.accel[2] - 9.80665).abs() < 1e-3, "AZ → 1 g: {}", s.accel[2]);
-        assert!((s.gyro[0] - 0.174533).abs() < 1e-4, "GX → 10 dps: {}", s.gyro[0]);
+        assert!(
+            (s.accel[2] - 9.80665).abs() < 1e-3,
+            "AZ → 1 g: {}",
+            s.accel[2]
+        );
+        assert!(
+            (s.gyro[0] - 0.174533).abs() < 1e-4,
+            "GX → 10 dps: {}",
+            s.gyro[0]
+        );
         assert!((s.gyro[1]).abs() < 1e-6 && (s.gyro[2]).abs() < 1e-6);
     }
 
@@ -282,7 +294,11 @@ mod tests {
         let mut imu = Icm42688::new(MockBus::new(WHO_AM_I_VALUE, data));
         imu.init().unwrap();
         let s = imu.read();
-        assert!((s.accel[2] + 9.80665).abs() < 1e-3, "AZ → −1 g: {}", s.accel[2]);
+        assert!(
+            (s.accel[2] + 9.80665).abs() < 1e-3,
+            "AZ → −1 g: {}",
+            s.accel[2]
+        );
     }
 
     /// The driver satisfies the seam: it plugs into a `HardwareBackend` as the
@@ -352,7 +368,9 @@ mod tests {
     #[test]
     fn async_spi_path_matches_sync_decode() {
         // −1 g on AZ, +2000-dps-ish on GX, arbitrary on the rest.
-        let data = [0x10, 0x00, 0xF0, 0x00, 0xF8, 0x00, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB];
+        let data = [
+            0x10, 0x00, 0xF0, 0x00, 0xF8, 0x00, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB,
+        ];
 
         // sync RegBus path
         let mut sync_imu = Icm42688::new(MockBus::new(WHO_AM_I_VALUE, data));
