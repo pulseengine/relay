@@ -310,17 +310,35 @@ MANIFEST="$BUNDLE_DIR/manifest.json"
   printf '  "toolchain": "%s",\n' "$TOOLCHAIN_STR"
   printf '  "components": [\n'
   first=1
-  emit_entry() {  # $1=name $2=file $3=kind
-    local dest="$BUNDLE_DIR/$2" sha bytes
+  json_escape() { sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+  emit_entry() {  # $1=name $2=file $3=kind $4=role $5=description
+    local dest="$BUNDLE_DIR/$2" sha bytes desc
     sha=$(shasum -a 256 "$dest" | awk '{print $1}')
     bytes=$(wc -c < "$dest" | tr -d ' ')
+    desc=$(printf '%s' "$5" | json_escape)
     if [ "$first" = "1" ]; then first=0; else printf ',\n'; fi
-    printf '    { "name": "%s", "file": "%s", "kind": "%s", "sha256": "%s", "bytes": %s, "toolchain": "%s" }' \
-      "$1" "$2" "$3" "$sha" "$bytes" "$TOOLCHAIN_STR"
+    printf '    { "name": "%s", "file": "%s", "kind": "%s", "role": "%s", "description": "%s", "sha256": "%s", "bytes": %s, "toolchain": "%s" }' \
+      "$1" "$2" "$3" "$4" "$desc" "$sha" "$bytes" "$TOOLCHAIN_STR"
+  }
+  # ROLE (#411, SWREQ-FALCON-CLAIMS-P01). `kind` said "flight-component" for all
+  # eight cargo components — the undrivable demo, four legacy stages the flight
+  # core does not fly, and the flight core itself alike. `role` says which is
+  # which; `description` is the component's Cargo.toml description (the same
+  # text published as its OCI description, held honest by
+  # scripts/check-component-claims.rs).
+  role_of() {
+    case "$1" in
+      cascade)                    echo "flight-core" ;;
+      iekf|falcon-mixer)          echo "flight-core-stage" ;;
+      ekf|attitude|rate|position) echo "legacy-stage" ;;
+      flight)                     echo "demo" ;;
+      *)                          echo "unclassified" ;;
+    esac
   }
   for dir in flight iekf ekf attitude rate position falcon-mixer cascade; do
     slug="${dir#falcon-}"
-    emit_entry "falcon-$slug" "falcon-$slug-v$MM.wasm" "flight-component"
+    cdesc=$(sed -n 's/^description *= *"\(.*\)"$/\1/p' "$HERE/wasm/cm/$dir/Cargo.toml" 2>/dev/null | head -1)
+    emit_entry "falcon-$slug" "falcon-$slug-v$MM.wasm" "flight-component" "$(role_of "$dir")" "$cdesc"
   done
   # The P3 stream artifacts are IN the bundle and therefore covered by the
   # cosign-signed SHA256SUMS — but until v1.136 they were absent from this
@@ -334,7 +352,8 @@ MANIFEST="$BUNDLE_DIR/manifest.json"
   # rather than by reading filenames.
   for tgt in falcon-cascade-stream-composed falcon-cascade-stream-fused; do
     [ -f "$BUNDLE_DIR/$tgt-v$MM.wasm" ] || continue   # bazel-absent path
-    emit_entry "$tgt" "$tgt-v$MM.wasm" "p3-stream-artifact"
+    emit_entry "$tgt" "$tgt-v$MM.wasm" "p3-stream-artifact" "legacy-stream-demonstrator" \
+      "relay P3 async stream-composition demonstrator (SWREQ-RELAY-STREAM-P15), built from the LEGACY five-stage controllers (relay-att, relay-pos, relay-rate via wasm/cm/cascade/src/orch.rs). NOT the falcon flight core, and a different control law from falcon-cascade (#411)."
   done
   printf '\n  ]\n}\n'
 } > "$MANIFEST"
