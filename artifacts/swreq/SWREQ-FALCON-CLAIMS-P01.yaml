@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-CLAIMS-P01
     type: sw-req
     title: "CLAIMS-P01 — what we publish and document about a component shall match what that component is"
-    status: proposed
+    status: implemented
     release: falcon-v1.139.0
     description: >
       Every claim a user can read without opening the source — OCI package
