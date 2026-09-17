@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-FALCON-FAULT-005
+    type: sw-verification
+    title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.140)"
+    status: proposed
+    release: falcon-v1.140.0
+    description: >
+      Re-verification of SWREQ-FALCON-FAULT-P02 against the gz plant, opened
+      by a regression rather than filed as a new requirement: the property
+      already exists and is `implemented`.
+
+      THE REGRESSION (#398). With the v0.10 seam carrying per-rotor RPM, the
+      wasm cascade's FDI sees the loss but the vehicle does not recover on
+      the gz falcon-quad. Rotor 0 killed at 4.00 s of a 10 s hold at 2 m:
+      with ESC telemetry supplied it ends at altitude 0.000 m; withheld
+      (NO_RPM=1), 0.008 m. The trajectories differ, so the telemetry reaches
+      the FDI; both end on the ground. Meanwhile the motor_out Monte-Carlo
+      campaign reports 2000 dispersed trials, 0 failures, on its own plant.
+      That gap between campaign and real plant is the one
+      relay-rotor-out-parasitic-and-idealized-harness already cost once.
+
+      EVIDENCE REQUIRED FOR `verified`: the same rotor-out scenario on the gz
+      plant, native AND wasm, holding altitude after the loss, run three
+      times (gz rig rule), with the command and its output recorded as
+      steps.
+
+      WHY v1.140. Rotor-out recovery is a hold property under a fault; it
+      belongs with HOLD-P01, and v1.141's SHOWCASE-P01 (engine drop) depends
+      on it.
+    tags: [verification, falcon, fault, rotor-out, gazebo, wasm, v1.140]
+    fields:
+      method: simulation
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FAULT-P02

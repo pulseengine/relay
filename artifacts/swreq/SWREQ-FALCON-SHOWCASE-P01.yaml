@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "SHOWCASE-P01 — one loopable Gazebo demo that exercises the whole stack, flown by BOTH the wasm component and the native binary"
     status: proposed
-    release: falcon-v1.139.0
+    release: falcon-v1.141.0
     description: >
       There shall be a single runnable demo that flies a scripted sequence in
       Gazebo, exercising the stack's advertised capabilities end to end, and
@@ -58,7 +58,10 @@ artifacts:
       FALSIFICATION: wrong if the demo cannot be run end to end from one command
       against both backends, or if the recording it produces does not show each
       listed capability actually occurring.
-    tags: [requirement, falcon, showcase, gazebo, wasm, demo, v1.139]
+
+      RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.141, the flying-demo release. A loopable demo of the whole stack needs a position hold that stays bounded, which is v1.140's HOLD-P01, and a rotor-out recovery that holds on the gz plant, which is v1.140's FV-FALCON-FAULT-005 (#398).
+
+    tags: [requirement, falcon, showcase, gazebo, wasm, demo, v1.141]
     links:
       - type: derives-from
         target: SYSREQ-FALCON-010
