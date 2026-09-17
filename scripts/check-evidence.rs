@@ -79,9 +79,28 @@ impl Tree {
 
 const KNOWN_ENV: &[&str] = &["HOME", "PATH", "PWD", "REPO", "RUNNER_TEMP", "CARGO_TARGET_DIR", "TMPDIR"];
 
+/// `cmd` with single-quoted segments removed. The shell expands nothing inside
+/// '...', so `$VAR` and `<name>` there are literal text (a grep pattern, say),
+/// not an unset variable or an unfilled placeholder.
+fn unquoted(cmd: &str) -> String {
+    let mut out = String::with_capacity(cmd.len());
+    let mut in_single = false;
+    for ch in cmd.chars() {
+        if ch == '\'' {
+            in_single = !in_single;
+            continue;
+        }
+        if !in_single {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 /// Every reason one step's citation does not resolve. Pure given `tree`.
 fn check_step(cmd: &str, tree: &Tree) -> Vec<String> {
     let mut out = Vec::new();
+    let expanded = unquoted(cmd);
 
     // A step that is only `cd <dir>`: each step is its own subprocess, so it
     // changes nothing for the next one.
@@ -93,14 +112,14 @@ fn check_step(cmd: &str, tree: &Tree) -> Vec<String> {
     if cmd.contains("/path/to/") {
         out.push("placeholder path `/path/to/…`".into());
     }
-    for c in Regex::new(r"\$\{?([A-Z][A-Z0-9_]*)").unwrap().captures_iter(cmd) {
+    for c in Regex::new(r"\$\{?([A-Z][A-Z0-9_]*)").unwrap().captures_iter(&expanded) {
         let v = &c[1];
         if !KNOWN_ENV.contains(&v) && !v.starts_with("GITHUB_") && std::env::var(v).is_err() {
             out.push(format!("unset variable `${v}`"));
         }
     }
     // `<crate>`-style placeholders, but not generics such as `Option<f32>`.
-    if Regex::new(r"(?:^|[\s/=])<[a-z][a-z0-9_-]*>").unwrap().is_match(cmd) && !cmd.contains("<<") {
+    if Regex::new(r"(?:^|[\s/=])<[a-z][a-z0-9_-]*>").unwrap().is_match(&expanded) && !expanded.contains("<<") {
         out.push("angle-bracket placeholder `<…>`".into());
     }
 
@@ -365,6 +384,18 @@ mod tests {
         assert!(check_step("tool --crate <crate>", &t).iter().any(|m| m.contains("placeholder")));
         std::fs::write(t.root.join("crates/demo/src/extra.rs"), "mod flow_tests {\n}\n").unwrap();
         assert!(check_step("cargo test -p demo flow_tests", &t).is_empty(), "a module name is a valid filter");
+    }
+
+    #[test]
+    fn single_quoted_text_is_literal_not_a_variable_or_placeholder() {
+        let t = tree_named("single_quoted_text_is_literal_not_a_variable_or_placeholder");
+        std::fs::write(t.root.join("scripts/verification-tracks.rs"), "").unwrap();
+        // FV-RELAY-VGATE-005's real step: `$OUT` is grep pattern text, not a variable.
+        let step = "grep -q './scripts/verification-tracks.rs --sha \"$(git rev-parse HEAD)\" >> \"$OUT\" || rc=$?' scripts/real.rs";
+        assert!(check_step(step, &t).is_empty(), "{:?}", check_step(step, &t));
+        assert!(check_step("grep -q '<crate>' scripts/real.rs", &t).is_empty());
+        // Outside quotes the same text is still caught.
+        assert!(check_step("echo $OUT_UNSET_FOR_TEST", &t).iter().any(|m| m.contains("unset variable")));
     }
 
     #[test]
