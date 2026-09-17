@@ -67,9 +67,20 @@ artifacts:
       (relay-notch, 25.1 min). A timed-out leg is `cancelled`, which the
       `kani-gate` aggregate fails closed on (checked in the workflow).
 
-      NOT CLAIMED: that the scheduled workflow has run on GitHub. That is
-      observable only after merge, and is the evidence for promotion to
-      `verified` in a separate change.
+      THE FIRST REAL RUN COULD NOT EVALUATE — AND THAT WAS CORRECT (2026-09-17).
+      Dispatched on main 7daf818 (run 35176122362), both jobs failed at their
+      "could not be evaluated" steps: `gh` is not installed on the `light`
+      runners (`gh: command not found` on ci-01-5; `No such file or directory`
+      running gh on ci-01-8). Before #432 the starvation step swallowed that
+      into "0 queued" — it printed `queued-too-long: 0` at 22:23Z while a
+      required gate had been queued 60 min (#436). Both jobs now install a
+      pinned, SHA-256-verified gh (./.github/actions/setup-gh, v2.100.0); a
+      wrong checksum aborts before extraction (checked locally).
+
+      NOT CLAIMED: detection within 15 minutes of a wedge. The `*/15` schedule
+      actually ran every 2.4–5.5 h on 2026-09-16 (GitHub throttles scheduled
+      workflows), so unattended latency is hours; tracked on #436. Promotion to
+      `verified` needs a scheduled or dispatched run on `light` that EVALUATES.
     tags: [verification, relay, ci, fleet, v1.139]
     fields:
       method: automated-test
@@ -83,6 +94,10 @@ artifacts:
         - run: "grep -q -- '--alarm-tsv \"$RUNNER_TEMP/wedge.tsv\" || rc=$?' .github/workflows/fleet-status.yml"
         # Kani legs are capped: a hang becomes a red gate, not a 360-min hold.
         - run: "grep -q '^    timeout-minutes: 60$' .github/workflows/kani.yml"
+        # Both jobs install gh rather than assume it (#436), pinned by checksum.
+        - run: "test \"$(grep -c 'uses: ./.github/actions/setup-gh' .github/workflows/fleet-status.yml)\" -eq 2"
+        - run: "grep -q \"GH_SHA256: '[0-9a-f]\\{64\\}'\" .github/actions/setup-gh/action.yml"
+        - run: "grep -q 'sha256sum -c -' .github/actions/setup-gh/action.yml"
         # Baseline from successful runs — the measured trap (2) in FLEET-P01.
         - run: "grep -q 'runs?status=success&per_page=' scripts/ci-wedge-watch.rs"
     links:

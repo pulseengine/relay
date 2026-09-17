@@ -30,6 +30,11 @@ name: Fleet status
 #      2026-09-16 one Kani leg wedged three times (52, 96, 105 min against a
 #      ~3 min baseline) and each was found by a human reading durations.
 #
+# `gh` IS INSTALLED BY THIS WORKFLOW, not assumed. The `light` boxes do not
+# ship it: the starvation step ran for months with `gh: command not found`
+# swallowed by `2>/dev/null || true`, reporting "0 queued" during a 107-minute
+# queue (#436). Both jobs use ./.github/actions/setup-gh (pinned + SHA-256).
+#
 # "COULD NOT EVALUATE" IS NOT GREEN. A failed API query used to be swallowed
 # (`|| true`) into an empty result, which reads exactly like a healthy fleet.
 # Both checks now report UNKNOWN and fail the monitor's own job instead.
@@ -65,6 +70,12 @@ jobs:
     runs-on: [self-hosted, linux, x64, light]
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/actions
+
+      - uses: ./.github/actions/setup-gh
+
       - name: Detect starvation (queued far longer than jobs take to start)
         id: starve
         env:
@@ -232,7 +243,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          sparse-checkout: scripts
+          sparse-checkout: |
+            scripts
+            .github/actions
+
+      - uses: ./.github/actions/setup-gh
 
       - uses: dtolnay/rust-toolchain@stable
 
