@@ -25,11 +25,7 @@ pub type Ned = [f32; 3];
 
 #[inline]
 fn fin(x: f32) -> f32 {
-    if x.is_finite() {
-        x
-    } else {
-        0.0
-    }
+    if x.is_finite() { x } else { 0.0 }
 }
 
 #[inline]
@@ -65,8 +61,16 @@ pub fn follow_setpoint(target: Ned, offset: Ned) -> Ned {
 /// ABOVE the current altitude (z only increases / down is +z). Total / NaN-safe.
 pub fn land_in_place(current: Ned, descent_rate: f32, dt: f32) -> Ned {
     let c = fin3(current);
-    let rate = if descent_rate.is_finite() && descent_rate > 0.0 { descent_rate } else { 0.0 };
-    let d = if dt.is_finite() && dt > 0.0 { dt.min(1.0) } else { 0.0 };
+    let rate = if descent_rate.is_finite() && descent_rate > 0.0 {
+        descent_rate
+    } else {
+        0.0
+    };
+    let d = if dt.is_finite() && dt > 0.0 {
+        dt.min(1.0)
+    } else {
+        0.0
+    };
     [c[0], c[1], c[2] + rate * d] // down is +z → descend
 }
 
@@ -76,7 +80,11 @@ pub fn land_in_place(current: Ned, descent_rate: f32, dt: f32) -> Ned {
 /// (return at home altitude).
 pub fn rtl_setpoint(home: Ned, safe_alt_m: f32) -> Ned {
     let h = fin3(home);
-    let alt = if safe_alt_m.is_finite() && safe_alt_m > 0.0 { safe_alt_m } else { 0.0 };
+    let alt = if safe_alt_m.is_finite() && safe_alt_m > 0.0 {
+        safe_alt_m
+    } else {
+        0.0
+    };
     [h[0], h[1], h[2] - alt] // up = -z in NED
 }
 
@@ -126,7 +134,11 @@ mod tests {
     fn all_nan_safe() {
         let n = f32::NAN;
         assert!(poi_yaw([n, n, n], [n, n, n], n).is_finite());
-        assert!(follow_setpoint([n, 1.0, 2.0], [n, n, n]).iter().all(|x| x.is_finite()));
+        assert!(
+            follow_setpoint([n, 1.0, 2.0], [n, n, n])
+                .iter()
+                .all(|x| x.is_finite())
+        );
         assert!(land_in_place([n, n, n], n, n).iter().all(|x| x.is_finite()));
         assert!(rtl_setpoint([n, n, n], n).iter().all(|x| x.is_finite()));
     }

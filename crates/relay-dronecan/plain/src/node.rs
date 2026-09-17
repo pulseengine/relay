@@ -9,8 +9,8 @@
 //! follow-on. The decode/dispatch step is the verified reassembler — the async
 //! path adds only the await on the bus.
 
-use crate::msg::{encode_node_status, NodeStatus, DTID_NODE_STATUS};
-use crate::transfer::{encode_single_frame, Reassembler, Transfer};
+use crate::msg::{DTID_NODE_STATUS, NodeStatus, encode_node_status};
+use crate::transfer::{Reassembler, Transfer, encode_single_frame};
 use relay_hal::CanBus;
 
 /// DroneCAN transfer priority used for the NodeStatus heartbeat (mid priority).
@@ -89,8 +89,18 @@ mod tests {
 
     impl MockCanBus {
         fn new() -> Self {
-            let empty = CanFrame { id: 0, dlc: 0, data: [0; 8] };
-            Self { rx: [empty; 4], rx_len: 0, rx_pos: 0, tx: [empty; 4], tx_len: 0 }
+            let empty = CanFrame {
+                id: 0,
+                dlc: 0,
+                data: [0; 8],
+            };
+            Self {
+                rx: [empty; 4],
+                rx_len: 0,
+                rx_pos: 0,
+                tx: [empty; 4],
+                tx_len: 0,
+            }
         }
     }
 
@@ -141,7 +151,9 @@ mod tests {
         bus.rx[0] = frame;
         bus.rx_len = 1;
         let mut node = DroneCanNode::new(bus, 9, 0);
-        let asyncd = block_on(node.poll()).unwrap().expect("poll yields the transfer");
+        let asyncd = block_on(node.poll())
+            .unwrap()
+            .expect("poll yields the transfer");
 
         assert_eq!(asyncd.data_type_id, sync.data_type_id);
         assert_eq!(asyncd.len, sync.len);

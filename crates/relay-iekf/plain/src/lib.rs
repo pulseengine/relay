@@ -133,7 +133,11 @@ fn sanitise3(v: Vec3) -> Vec3 {
 /// `1 + α·‖·‖²` arithmetic so the bound is a comparison-only Kani proof.
 #[inline]
 fn clamp_factor(x: f32, max: f32) -> f32 {
-    let max = if max.is_finite() && max >= 1.0 { max } else { 1.0 };
+    let max = if max.is_finite() && max >= 1.0 {
+        max
+    } else {
+        1.0
+    };
     if !x.is_finite() || x < 1.0 {
         1.0
     } else if x > max {
@@ -149,9 +153,21 @@ fn clamp_factor(x: f32, max: f32) -> f32 {
 fn quat_to_rotmat(q: Quat) -> [[f32; 3]; 3] {
     let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
     [
-        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
-        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
-        [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)],
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - w * z),
+            2.0 * (x * z + w * y),
+        ],
+        [
+            2.0 * (x * y + w * z),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - w * x),
+        ],
+        [
+            2.0 * (x * z - w * y),
+            2.0 * (y * z + w * x),
+            1.0 - 2.0 * (x * x + y * y),
+        ],
     ]
 }
 
@@ -423,15 +439,25 @@ impl Iekf {
     pub fn with_config(state: NavState, cfg: IekfConfig) -> Self {
         let mut p = mat_zero();
         let v = [
-            cfg.p0[0] * cfg.p0[0], cfg.p0[1] * cfg.p0[1], cfg.p0[2] * cfg.p0[2],
-            cfg.p0[3] * cfg.p0[3], cfg.p0[4] * cfg.p0[4],
+            cfg.p0[0] * cfg.p0[0],
+            cfg.p0[1] * cfg.p0[1],
+            cfg.p0[2] * cfg.p0[2],
+            cfg.p0[3] * cfg.p0[3],
+            cfg.p0[4] * cfg.p0[4],
         ];
         for blk in 0..5 {
             for i in 0..3 {
                 p[blk * 3 + i][blk * 3 + i] = v[blk];
             }
         }
-        Iekf { state, p, cfg, q_vel_extra: 0.0, q_pos_extra: 0.0, variance_floor_hits: 0 }
+        Iekf {
+            state,
+            p,
+            cfg,
+            q_vel_extra: 0.0,
+            q_pos_extra: 0.0,
+            variance_floor_hits: 0,
+        }
     }
 
     pub fn level() -> Self {
@@ -482,13 +508,21 @@ impl Iekf {
     ///   p⁺ = p + v dt + ½ (R·a + g) dt²
     /// ```
     pub fn propagate(&mut self, imu: Imu, dt: f32) {
-        let dt = if dt.is_finite() { dt.clamp(1e-4, 0.1) } else { 1e-3 };
+        let dt = if dt.is_finite() {
+            dt.clamp(1e-4, 0.1)
+        } else {
+            1e-3
+        };
         let s = &mut self.state;
 
         let gyro = sanitise3(imu.gyro);
         let accel = sanitise3(imu.accel);
         let omega = [gyro[0] - s.b_g[0], gyro[1] - s.b_g[1], gyro[2] - s.b_g[2]];
-        let acc_b = [accel[0] - s.b_a[0], accel[1] - s.b_a[1], accel[2] - s.b_a[2]];
+        let acc_b = [
+            accel[0] - s.b_a[0],
+            accel[1] - s.b_a[1],
+            accel[2] - s.b_a[2],
+        ];
 
         // Specific force rotated into NED, plus gravity → inertial accel.
         let acc_n_body = q_rotate(s.q, acc_b);
@@ -503,7 +537,10 @@ impl Iekf {
         let r_hat = quat_to_rotmat(s.q);
 
         // Attitude: right-multiply by the body-frame incremental rotation.
-        s.q = q_normalize(q_mul(s.q, so3_exp([omega[0] * dt, omega[1] * dt, omega[2] * dt])));
+        s.q = q_normalize(q_mul(
+            s.q,
+            so3_exp([omega[0] * dt, omega[1] * dt, omega[2] * dt]),
+        ));
 
         // Position uses the pre-update velocity (semi-implicit is a later
         // refinement); velocity then integrates the inertial accel.
@@ -1010,11 +1047,7 @@ fn nis3(r: Vec3, s_inv: &[[f32; 3]; 3]) -> f32 {
         }
         acc += r[i] * row;
     }
-    if acc.is_finite() {
-        acc
-    } else {
-        f32::INFINITY
-    }
+    if acc.is_finite() { acc } else { f32::INFINITY }
 }
 
 fn nees_block(p: &Mat, base: usize, e: Vec3) -> f32 {
@@ -1043,11 +1076,7 @@ fn nees_block(p: &Mat, base: usize, e: Vec3) -> f32 {
         }
         None => {
             let e2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
-            if e2 < 1e-20 {
-                0.0
-            } else {
-                f32::INFINITY
-            }
+            if e2 < 1e-20 { 0.0 } else { f32::INFINITY }
         }
     }
 }
@@ -1111,11 +1140,7 @@ pub fn mag_heading(mag_body: Vec3, q: Quat, declination: f32) -> Option<f32> {
         1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
     );
     let yaw = yaw_est + (declination - field_ang);
-    if yaw.is_finite() {
-        Some(yaw)
-    } else {
-        None
-    }
+    if yaw.is_finite() { Some(yaw) } else { None }
 }
 
 /// Persistence-of-excitation gate for **magless yaw observability**
@@ -1144,16 +1169,32 @@ impl YawObservability {
     pub fn new(tau: f32, threshold: f32) -> Self {
         YawObservability {
             excitation: 0.0,
-            tau: if tau.is_finite() && tau > 1e-3 { tau } else { 1.0 },
-            threshold: if threshold.is_finite() && threshold > 0.0 { threshold } else { 1.0 },
+            tau: if tau.is_finite() && tau > 1e-3 {
+                tau
+            } else {
+                1.0
+            },
+            threshold: if threshold.is_finite() && threshold > 0.0 {
+                threshold
+            } else {
+                1.0
+            },
         }
     }
 
     /// Feed the horizontal specific-force magnitude `a_horiz` (m/s²) over
     /// `dt` (s); returns the current observability verdict.
     pub fn update(&mut self, a_horiz: f32, dt: f32) -> bool {
-        let a = if a_horiz.is_finite() { a_horiz.abs() } else { 0.0 };
-        let dt = if dt.is_finite() { dt.clamp(0.0, 0.1) } else { 0.0 };
+        let a = if a_horiz.is_finite() {
+            a_horiz.abs()
+        } else {
+            0.0
+        };
+        let dt = if dt.is_finite() {
+            dt.clamp(0.0, 0.1)
+        } else {
+            0.0
+        };
         let alpha = (dt / self.tau).clamp(0.0, 1.0);
         self.excitation += alpha * (a - self.excitation);
         if !self.excitation.is_finite() {
@@ -1200,8 +1241,16 @@ impl RotorFaultDetector {
     pub fn new(threshold: f32, drift: f32) -> Self {
         RotorFaultDetector {
             cusum: [0.0; 4],
-            threshold: if threshold.is_finite() && threshold > 0.0 { threshold } else { 1.0 },
-            drift: if drift.is_finite() && drift >= 0.0 { drift } else { 0.0 },
+            threshold: if threshold.is_finite() && threshold > 0.0 {
+                threshold
+            } else {
+                1.0
+            },
+            drift: if drift.is_finite() && drift >= 0.0 {
+                drift
+            } else {
+                0.0
+            },
             failed: None,
         }
     }
@@ -1213,7 +1262,11 @@ impl RotorFaultDetector {
             return self.failed;
         }
         for i in 0..4 {
-            let r = if residual[i].is_finite() { residual[i].abs() } else { 0.0 };
+            let r = if residual[i].is_finite() {
+                residual[i].abs()
+            } else {
+                0.0
+            };
             let s = self.cusum[i] + r - self.drift;
             self.cusum[i] = if s.is_finite() && s > 0.0 { s } else { 0.0 };
             if self.cusum[i] >= self.threshold {
@@ -1256,8 +1309,16 @@ impl SpoofMonitor {
         SpoofMonitor {
             g_hi: [0.0; 3],
             g_lo: [0.0; 3],
-            threshold: if threshold.is_finite() && threshold > 0.0 { threshold } else { 1.0 },
-            drift: if drift.is_finite() && drift >= 0.0 { drift } else { 0.0 },
+            threshold: if threshold.is_finite() && threshold > 0.0 {
+                threshold
+            } else {
+                1.0
+            },
+            drift: if drift.is_finite() && drift >= 0.0 {
+                drift
+            } else {
+                0.0
+            },
             spoofed: false,
         }
     }
@@ -1269,7 +1330,11 @@ impl SpoofMonitor {
             return true;
         }
         for i in 0..3 {
-            let r = if innovation[i].is_finite() { innovation[i] } else { 0.0 };
+            let r = if innovation[i].is_finite() {
+                innovation[i]
+            } else {
+                0.0
+            };
             let hi = self.g_hi[i] + r - self.drift;
             self.g_hi[i] = if hi.is_finite() && hi > 0.0 { hi } else { 0.0 };
             let lo = self.g_lo[i] - r - self.drift;
@@ -1304,7 +1369,10 @@ mod tests {
     #[test]
     fn level_at_rest_holds_still() {
         let mut f = Iekf::level();
-        let imu = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let imu = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..1000 {
             f.propagate(imu, 0.01);
         }
@@ -1320,15 +1388,25 @@ mod tests {
     fn pure_yaw_rate_integrates_to_yaw_no_tilt() {
         let mut f = Iekf::level();
         // 1 rad/s yaw for 1 s → ~57.3° yaw, zero tilt.
-        let imu = Imu { gyro: [0.0, 0.0, 1.0], accel: [0.0, 0.0, -9.81] };
+        let imu = Imu {
+            gyro: [0.0, 0.0, 1.0],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..100 {
             f.propagate(imu, 0.01);
         }
         let s = f.state();
-        assert!(s.tilt_rad().to_degrees() < 0.5, "yaw should not tilt: {}", s.tilt_rad());
+        assert!(
+            s.tilt_rad().to_degrees() < 0.5,
+            "yaw should not tilt: {}",
+            s.tilt_rad()
+        );
         // yaw ≈ atan2(2(wz+xy), 1−2(y²+z²)) ≈ 1 rad
         let q = s.q;
-        let yaw = relay_math::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        let yaw = relay_math::atan2f(
+            2.0 * (q[0] * q[3] + q[1] * q[2]),
+            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+        );
         assert!((yaw - 1.0).abs() < 0.05, "yaw {yaw}");
     }
 
@@ -1339,7 +1417,10 @@ mod tests {
     fn forward_accel_moves_north() {
         let mut f = Iekf::level();
         // Body level; accel reads gravity reaction (−g down) + 1 m/s² north.
-        let imu = Imu { gyro: [0.0; 3], accel: [1.0, 0.0, -9.81] };
+        let imu = Imu {
+            gyro: [0.0; 3],
+            accel: [1.0, 0.0, -9.81],
+        };
         for _ in 0..100 {
             f.propagate(imu, 0.01);
         }
@@ -1353,7 +1434,10 @@ mod tests {
     #[test]
     fn position_update_pulls_toward_measurement() {
         let mut f = Iekf::level();
-        let imu = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let imu = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..50 {
             f.propagate(imu, 0.01);
         }
@@ -1361,7 +1445,10 @@ mod tests {
         assert!(f.update_position([5.0, 0.0, 0.0], 0.01));
         let s = f.state();
         assert!(s.p[0] > 0.5, "estimate should move north: {:?}", s.p);
-        assert!(f.covariance()[6][6] < var_before, "north-pos variance should shrink");
+        assert!(
+            f.covariance()[6][6] < var_before,
+            "north-pos variance should shrink"
+        );
     }
 
     /// Fed the gravity-reaction accel + repeated (noiseless) position
@@ -1370,7 +1457,10 @@ mod tests {
     #[test]
     fn converges_to_true_static_position() {
         let mut f = Iekf::level();
-        let imu = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let imu = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         let truth = [3.0, -2.0, -10.0];
         for _ in 0..800 {
             f.propagate(imu, 0.01);
@@ -1378,9 +1468,18 @@ mod tests {
         }
         let s = f.state();
         for i in 0..3 {
-            assert!((s.p[i] - truth[i]).abs() < 0.3, "p[{i}] = {} vs {}", s.p[i], truth[i]);
+            assert!(
+                (s.p[i] - truth[i]).abs() < 0.3,
+                "p[{i}] = {} vs {}",
+                s.p[i],
+                truth[i]
+            );
         }
-        assert!(s.tilt_rad().to_degrees() < 5.0, "stays roughly level: {}", s.tilt_rad().to_degrees());
+        assert!(
+            s.tilt_rad().to_degrees() < 5.0,
+            "stays roughly level: {}",
+            s.tilt_rad().to_degrees()
+        );
     }
 
     /// Heading update observes yaw: drive the estimate to ~1 rad of yaw,
@@ -1390,21 +1489,33 @@ mod tests {
     #[test]
     fn yaw_update_corrects_heading() {
         let mut f = Iekf::level();
-        let spin = Imu { gyro: [0.0, 0.0, 1.0], accel: [0.0, 0.0, -9.81] };
+        let spin = Imu {
+            gyro: [0.0, 0.0, 1.0],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..100 {
             f.propagate(spin, 0.01); // yaw → ~1 rad
         }
         let q0 = f.state().q;
-        let yaw0 = relay_math::atan2f(2.0 * (q0[0] * q0[3] + q0[1] * q0[2]), 1.0 - 2.0 * (q0[2] * q0[2] + q0[3] * q0[3]));
+        let yaw0 = relay_math::atan2f(
+            2.0 * (q0[0] * q0[3] + q0[1] * q0[2]),
+            1.0 - 2.0 * (q0[2] * q0[2] + q0[3] * q0[3]),
+        );
         assert!(yaw0 > 0.5, "setup: estimate should be yawed, got {yaw0}");
 
-        let still = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let still = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..300 {
             f.propagate(still, 0.01);
             f.update_yaw(0.0, 0.02);
         }
         let q = f.state().q;
-        let yaw = relay_math::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        let yaw = relay_math::atan2f(
+            2.0 * (q[0] * q[3] + q[1] * q[2]),
+            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+        );
         assert!(yaw.abs() < 0.1, "heading should converge to 0, got {yaw}");
     }
 
@@ -1415,20 +1526,29 @@ mod tests {
     #[test]
     fn gravity_update_corrects_tilt() {
         let mut f = Iekf::level();
-        let roll = Imu { gyro: [0.5, 0.0, 0.0], accel: [0.0, 0.0, -9.81] };
+        let roll = Imu {
+            gyro: [0.5, 0.0, 0.0],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..40 {
             f.propagate(roll, 0.01); // ~0.2 rad ≈ 11° roll
         }
         let tilt0 = f.state().tilt_rad().to_degrees();
         assert!(tilt0 > 5.0, "setup: estimate should be tilted, got {tilt0}");
 
-        let still = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let still = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..400 {
             f.propagate(still, 0.01);
             f.update_gravity([0.0, 0.0, -9.81], 0.5); // body level per accel
         }
         let tilt1 = f.state().tilt_rad().to_degrees();
-        assert!(tilt1 < 2.0, "gravity update should correct tilt, got {tilt1}");
+        assert!(
+            tilt1 < 2.0,
+            "gravity update should correct tilt, got {tilt1}"
+        );
     }
 
     proptest::proptest! {
@@ -1473,7 +1593,10 @@ mod tests {
     fn covariance_grows_without_measurements() {
         let mut f = Iekf::level();
         let tr0: f32 = (0..N).map(|i| f.covariance()[i][i]).sum();
-        let imu = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let imu = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..200 {
             f.propagate(imu, 0.01);
         }
@@ -1507,12 +1630,18 @@ mod tests {
         let before = f.nees_position(truth);
         // Confident measurement AT the current estimate (0) shrinks P_pos
         // without moving the estimate much off `truth`.
-        let imu = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let imu = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         f.propagate(imu, 0.01);
         f.update_position([0.0, 0.0, 0.0], 1e-3); // very tight ⇒ P_pos ↓
         let after = f.nees_position(truth);
         assert!(f.covariance()[6][6] < 1.0, "P_pos should shrink");
-        assert!(after > before, "tighter P ⇒ larger NEES for same error: {before} -> {after}");
+        assert!(
+            after > before,
+            "tighter P ⇒ larger NEES for same error: {before} -> {after}"
+        );
         assert!(after.is_finite());
     }
 
@@ -1531,10 +1660,18 @@ mod tests {
         let h0 = mag_heading(m_world, [1.0, 0.0, 0.0, 0.0], 0.0).unwrap();
         assert!(h0.abs() < 1e-3, "yaw 0 expected, got {h0}");
         // Body yawed +90° (east): q = Rz(π/2); the body reads R(−π/2)·m_world.
-        let qz90 = [relay_math::cosf(pi / 4.0), 0.0, 0.0, relay_math::sinf(pi / 4.0)];
+        let qz90 = [
+            relay_math::cosf(pi / 4.0),
+            0.0,
+            0.0,
+            relay_math::sinf(pi / 4.0),
+        ];
         let mb = q_rotate([qz90[0], -qz90[1], -qz90[2], -qz90[3]], m_world); // R(q)⁻¹·m_world
         let h90 = mag_heading(mb, qz90, 0.0).unwrap();
-        assert!((h90 - pi / 2.0).abs() < 1e-2, "yaw +90° expected, got {h90}");
+        assert!(
+            (h90 - pi / 2.0).abs() < 1e-2,
+            "yaw +90° expected, got {h90}"
+        );
         // Declination: field points at d=0.3 rad east of true north, body at
         // true heading 0 → must still report 0 (declination removed).
         let d = 0.3_f32;
@@ -1553,22 +1690,37 @@ mod tests {
         let pi = core::f32::consts::PI;
         let mut f = Iekf::level();
         // Drive the estimate to ~1 rad yaw error.
-        let spin = Imu { gyro: [0.0, 0.0, 1.0], accel: [0.0, 0.0, -9.81] };
+        let spin = Imu {
+            gyro: [0.0, 0.0, 1.0],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..100 {
             f.propagate(spin, 0.01);
         }
-        assert!(f.state().q[3].abs() > 0.2, "setup: estimate should be yawed");
+        assert!(
+            f.state().q[3].abs() > 0.2,
+            "setup: estimate should be yawed"
+        );
         // TRUE heading is 0; a magnetometer on the true-level-north body
         // reads the world field directly (m_world in body frame == NED).
         let m_world = [0.6_f32, 0.0, 0.8];
-        let still = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let still = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         for _ in 0..400 {
             f.propagate(still, 0.01);
             assert!(f.update_magnetometer(m_world, 0.0, 0.02));
         }
         let q = f.state().q;
-        let yaw = relay_math::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
-        assert!(yaw.abs() < 0.1, "mag update should drive heading to 0, got {yaw}");
+        let yaw = relay_math::atan2f(
+            2.0 * (q[0] * q[3] + q[1] * q[2]),
+            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+        );
+        assert!(
+            yaw.abs() < 0.1,
+            "mag update should drive heading to 0, got {yaw}"
+        );
         let _ = pi;
     }
 
@@ -1600,7 +1752,13 @@ mod tests {
             // |a_horiz| high (observable) without runaway velocity.
             let a_north = if (k / 50) % 2 == 0 { a_mag } else { -a_mag };
             let sf_body = [a_north, 0.0, -9.81]; // specific force, body=NED yaw 0
-            f.propagate(Imu { gyro: [0.0; 3], accel: sf_body }, dt);
+            f.propagate(
+                Imu {
+                    gyro: [0.0; 3],
+                    accel: sf_body,
+                },
+                dt,
+            );
             v_true[0] += a_north * dt;
             p_true[0] += v_true[0] * dt;
             if k % 2 == 0 {
@@ -1608,14 +1766,20 @@ mod tests {
             }
         }
         let q = f.state().q;
-        let yaw = relay_math::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+        let yaw = relay_math::atan2f(
+            2.0 * (q[0] * q[3] + q[1] * q[2]),
+            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+        );
         // Magless recovery from position aiding is genuinely WEAK and slow
         // (why PX4 uses a velocity-GSF and we use a magnetometer as primary
         // — docs/research/v0.22-heading-yaw-sota.md). The provable, testable
         // claim is that the −[f]× coupling makes yaw move CORRECTLY toward
         // truth under excitation (vs the [g]×-only form, which left it dead
         // at 0.4→0.399). Assert clear correct-direction recovery.
-        assert!(yaw < yaw0 - 0.03 && yaw > -0.1, "magless yaw should recover toward 0, {yaw0}→{yaw}");
+        assert!(
+            yaw < yaw0 - 0.03 && yaw > -0.1,
+            "magless yaw should recover toward 0, {yaw0}→{yaw}"
+        );
     }
 
     /// v0.30 acceleration-compensated tilt: a LEVEL body accelerating north
@@ -1640,8 +1804,14 @@ mod tests {
         }
         let tilt_comp = f_co.state().tilt_rad().to_degrees();
 
-        assert!(tilt_uncomp > 5.0, "uncompensated should tilt toward the accel: {tilt_uncomp}°");
-        assert!(tilt_comp < 1.0, "compensated should stay level: {tilt_comp}°");
+        assert!(
+            tilt_uncomp > 5.0,
+            "uncompensated should tilt toward the accel: {tilt_uncomp}°"
+        );
+        assert!(
+            tilt_comp < 1.0,
+            "compensated should stay level: {tilt_comp}°"
+        );
     }
 
     /// Rotor-FDI contract (v0.26): (1) NO FALSE ALARM while residuals stay
@@ -1653,7 +1823,10 @@ mod tests {
         // over a long run.
         let mut fdi = RotorFaultDetector::new(2.0, 0.5);
         for _ in 0..1000 {
-            assert!(fdi.update([0.4, 0.5, 0.3, 0.45]).is_none(), "false alarm below slack");
+            assert!(
+                fdi.update([0.4, 0.5, 0.3, 0.45]).is_none(),
+                "false alarm below slack"
+            );
         }
         assert!(fdi.failed().is_none());
 
@@ -1692,7 +1865,11 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(fired, Some(1), "sustained excess on rotor 1 should isolate it");
+        assert_eq!(
+            fired,
+            Some(1),
+            "sustained excess on rotor 1 should isolate it"
+        );
     }
 
     /// Magless yaw observability gate: at rest (no horizontal accel) yaw is
@@ -1719,7 +1896,11 @@ mod tests {
         for _ in 0..400 {
             g.update(0.0, 0.01);
         }
-        assert!(!g.is_observable(), "should decay to unobservable at hover, exc={}", g.excitation());
+        assert!(
+            !g.is_observable(),
+            "should decay to unobservable at hover, exc={}",
+            g.excitation()
+        );
     }
 
     /// Total: NEES is finite (or a clean INFINITY sentinel) for any inputs,
@@ -1727,7 +1908,10 @@ mod tests {
     #[test]
     fn nees_is_total() {
         let mut f = Iekf::level();
-        let imu = Imu { gyro: [0.1, -0.2, 0.3], accel: [0.5, -0.5, -9.0] };
+        let imu = Imu {
+            gyro: [0.1, -0.2, 0.3],
+            accel: [0.5, -0.5, -9.0],
+        };
         for _ in 0..50 {
             f.propagate(imu, 0.01);
         }
@@ -1756,15 +1940,29 @@ mod tests {
         for k in 0..4000 {
             let t = k as f32 * dt;
             // truth horizontal accel (no vertical motion → level attitude)
-            let a_true = [2.5 * relay_math::sinf(0.8 * t), 2.0 * relay_math::cosf(0.6 * t), 0.0];
+            let a_true = [
+                2.5 * relay_math::sinf(0.8 * t),
+                2.0 * relay_math::cosf(0.6 * t),
+                0.0,
+            ];
             for i in 0..3 {
                 tp[i] += tv[i] * dt + 0.5 * a_true[i] * dt * dt;
                 tv[i] += a_true[i] * dt;
             }
             // IMU specific force (level, body=NED): horizontal scaled by the
             // unmodeled error, vertical = the constant gravity reaction.
-            let accel = [(1.0 + scale) * a_true[0], (1.0 + scale) * a_true[1], -GRAVITY_NED[2]];
-            f.propagate(Imu { gyro: [0.0; 3], accel }, dt);
+            let accel = [
+                (1.0 + scale) * a_true[0],
+                (1.0 + scale) * a_true[1],
+                -GRAVITY_NED[2],
+            ];
+            f.propagate(
+                Imu {
+                    gyro: [0.0; 3],
+                    accel,
+                },
+                dt,
+            );
             if k % 20 == 0 {
                 let jit = 0.01 * relay_math::sinf(13.0 * t); // deterministic meas jitter
                 f.update_position([tp[0] + jit, tp[1] - jit, tp[2]], 0.01);
@@ -1798,7 +1996,10 @@ mod tests {
             adaptive < fixed,
             "adaptive Q must add conservatism under motion (fixed {fixed}, adaptive {adaptive})"
         );
-        assert!(adaptive > 0.05, "but not collapse the estimate (NEES {adaptive})");
+        assert!(
+            adaptive > 0.05,
+            "but not collapse the estimate (NEES {adaptive})"
+        );
     }
 
     // ── v0.37 sensor-fault / spoof robustness ────────────────────────────
@@ -1816,7 +2017,10 @@ mod tests {
         assert!(!accepted, "a 50 m jump fix must be gated out");
         let after = f.state().p;
         for i in 0..3 {
-            assert!((after[i] - before[i]).abs() < 1e-5, "rejected fix walked the state");
+            assert!(
+                (after[i] - before[i]).abs() < 1e-5,
+                "rejected fix walked the state"
+            );
         }
     }
 
@@ -1831,7 +2035,10 @@ mod tests {
                 rejected += 1;
             }
         }
-        assert_eq!(rejected, 0, "honest noise must pass the gate, {rejected} rejected");
+        assert_eq!(
+            rejected, 0,
+            "honest noise must pass the gate, {rejected} rejected"
+        );
     }
 
     /// The spoof monitor latches on a slow same-sign walk-off (each step too
@@ -1852,7 +2059,10 @@ mod tests {
                 break;
             }
         }
-        assert!(at.is_some() && at.unwrap() <= 12, "walk-off detected ~10 steps, got {at:?}");
+        assert!(
+            at.is_some() && at.unwrap() <= 12,
+            "walk-off detected ~10 steps, got {at:?}"
+        );
         assert!(mon.spoofed()); // latched
         assert!(mon.update([0.0; 3]), "stays latched");
     }
@@ -1865,7 +2075,10 @@ mod tests {
         for _ in 0..100 {
             mon.update([f32::NAN, f32::INFINITY, 0.0]);
         }
-        assert!(!mon.spoofed(), "non-finite innovation must not trip the alarm");
+        assert!(
+            !mon.spoofed(),
+            "non-finite innovation must not trip the alarm"
+        );
     }
 
     /// At rest (ω≈0, a≈0) the inflation factor is exactly 1 — the propagated
@@ -1873,7 +2086,10 @@ mod tests {
     /// behaviour is provably unchanged.
     #[test]
     fn at_rest_inflation_is_identity() {
-        let imu_rest = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -GRAVITY_NED[2]] };
+        let imu_rest = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -GRAVITY_NED[2]],
+        };
         let mut fixed = Iekf::with_config(NavState::identity(), {
             let mut c = IekfConfig::DEFAULT;
             c.q_motion_gyro = 0.0;
@@ -1947,7 +2163,10 @@ mod variance_floor_tests {
     #[test]
     fn floor_never_fires_on_healthy_long_run() {
         let mut f = Iekf::level();
-        let imu = Imu { gyro: [0.0; 3], accel: [0.0, 0.0, -9.81] };
+        let imu = Imu {
+            gyro: [0.0; 3],
+            accel: [0.0, 0.0, -9.81],
+        };
         for k in 0..50_000 {
             f.propagate(imu, 0.004);
             f.update_gravity(imu.accel, 0.5);
@@ -1990,7 +2209,11 @@ mod kani_harness {
         let x: f32 = kani::any();
         let y: f32 = kani::any();
         let z: f32 = kani::any();
-        kani::assume(relay_math::fabsf(x) <= drift && relay_math::fabsf(y) <= drift && relay_math::fabsf(z) <= drift);
+        kani::assume(
+            relay_math::fabsf(x) <= drift
+                && relay_math::fabsf(y) <= drift
+                && relay_math::fabsf(z) <= drift,
+        );
         let alarmed = mon.update([x, y, z]);
         assert!(!alarmed);
         assert!(!mon.spoofed());

@@ -108,7 +108,13 @@ fn p8(s: &mut [u64; 5]) {
 /// `ct` and returns the 128-bit tag. `mac` and `seal` are thin wrappers.
 ///
 /// Precondition: `ct.len() == pt.len()`.
-fn aead_encrypt(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], ad: &[u8], pt: &[u8], ct: &mut [u8]) -> [u8; TAG_LEN] {
+fn aead_encrypt(
+    key: &[u8; KEY_LEN],
+    nonce: &[u8; NONCE_LEN],
+    ad: &[u8],
+    pt: &[u8],
+    ct: &mut [u8],
+) -> [u8; TAG_LEN] {
     let k0 = load64(key, 0);
     let k1 = load64(key, 8);
 
@@ -207,7 +213,12 @@ pub fn ct_eq_tag(a: &[u8; TAG_LEN], b: &[u8; TAG_LEN]) -> bool {
 }
 
 /// Verify a MAC-floor tag in constant time.
-pub fn mac_verify(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], msg: &[u8], tag: &[u8; TAG_LEN]) -> bool {
+pub fn mac_verify(
+    key: &[u8; KEY_LEN],
+    nonce: &[u8; NONCE_LEN],
+    msg: &[u8],
+    tag: &[u8; TAG_LEN],
+) -> bool {
     ct_eq_tag(&mac(key, nonce, msg), tag)
 }
 
@@ -402,7 +413,14 @@ mod tests {
         let ct35 = hx::<1>("96");
         let tag35 = hx::<16>("2B8016836C75A7D86866588CA245D886");
         let mut pt2 = [0u8; 1];
-        assert!(open(&key(), &nonce(), &hx::<1>("30"), &ct35, &tag35, &mut pt2));
+        assert!(open(
+            &key(),
+            &nonce(),
+            &hx::<1>("30"),
+            &ct35,
+            &tag35,
+            &mut pt2
+        ));
         assert_eq!(pt2, hx::<1>("20"));
     }
 
@@ -420,14 +438,35 @@ mod tests {
             let mut ct = [0u8; 40];
             let tag = seal(&k, &n, &[0xAA, 0xBB], &pt[..len], &mut ct[..len]);
             let mut out = [0u8; 40];
-            assert!(open(&k, &n, &[0xAA, 0xBB], &ct[..len], &tag, &mut out[..len]));
+            assert!(open(
+                &k,
+                &n,
+                &[0xAA, 0xBB],
+                &ct[..len],
+                &tag,
+                &mut out[..len]
+            ));
             assert_eq!(&out[..len], &pt[..len]);
             // tampered tag rejects
             let mut bad = tag;
             bad[0] ^= 1;
-            assert!(!open(&k, &n, &[0xAA, 0xBB], &ct[..len], &bad, &mut out[..len]));
+            assert!(!open(
+                &k,
+                &n,
+                &[0xAA, 0xBB],
+                &ct[..len],
+                &bad,
+                &mut out[..len]
+            ));
             // tampered AD rejects
-            assert!(!open(&k, &n, &[0xAA, 0xCC], &ct[..len], &tag, &mut out[..len]));
+            assert!(!open(
+                &k,
+                &n,
+                &[0xAA, 0xCC],
+                &ct[..len],
+                &tag,
+                &mut out[..len]
+            ));
         }
     }
 }

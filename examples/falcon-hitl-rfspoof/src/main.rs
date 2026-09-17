@@ -19,10 +19,10 @@
 
 mod hackrf;
 mod harness;
-mod stub;
 pub mod mavlink;
+mod stub;
 
-use harness::{load_rtl_rts, run_scenario, CommandSink, NullCommandSink};
+use harness::{CommandSink, NullCommandSink, load_rtl_rts, run_scenario};
 use relay_lc::engine::Geofence;
 use relay_sc::engine::CommandStore;
 
@@ -70,13 +70,17 @@ fn main() {
         "stub" => {
             let mut b = stub::StubBench::new(0, 0, -500, 0, 20_000, -500, 2.0);
             let mut sink = NullCommandSink::new();
-            run_scenario(&mut b, &mut fence, &mut sc, &mut sink, 0.01, duration_s, 0, 1.0)
+            run_scenario(
+                &mut b, &mut fence, &mut sc, &mut sink, 0.01, duration_s, 0, 1.0,
+            )
         }
         "hackrf" => {
             // 200 m east of the fence boundary — well outside.
             let mut b = hackrf::HackRfBench::new(2.0, 0, 0, -500, 0, 20_000, -500);
             let mut sink = NullCommandSink::new();
-            run_scenario(&mut b, &mut fence, &mut sc, &mut sink, 0.01, duration_s, 0, 1.0)
+            run_scenario(
+                &mut b, &mut fence, &mut sc, &mut sink, 0.01, duration_s, 0, 1.0,
+            )
         }
         "mavlink" => {
             // Bind UDP to whatever port the FC sends to (PX4 default 14550).
@@ -84,14 +88,19 @@ fn main() {
                 .or_else(|| defaults.listen.map(String::from))
                 .unwrap_or_else(|| "0.0.0.0:14550".into());
             let sock = std::net::UdpSocket::bind(&bind_addr).unwrap_or_else(|e| {
-                eprintln!("could not bind {bind_addr}: {e}"); std::process::exit(3);
+                eprintln!("could not bind {bind_addr}: {e}");
+                std::process::exit(3);
             });
             sock.set_nonblocking(true).expect("set_nonblocking");
             println!("  mavlink: listening on {bind_addr}");
             // Default home = Budapest centre — override with --home=lat,lon,alt_m.
             let home = match arg(&args, "--home").or_else(|| defaults.home.map(String::from)) {
                 Some(s) => parse_home(&s).expect("--home=lat,lon,alt_m"),
-                None => mavlink::Home { lat_e7: 475_023_456, lon_e7: 190_401_234, alt_mm: 120_000 },
+                None => mavlink::Home {
+                    lat_e7: 475_023_456,
+                    lon_e7: 190_401_234,
+                    alt_mm: 120_000,
+                },
             };
             // v0.14.2 round-trip: when the harness latches RTL it
             // pushes a COMMAND_LONG back to the FC. --peer= picks
@@ -103,12 +112,14 @@ fn main() {
             let mut sink: Box<dyn CommandSink> = match peer_str.parse() {
                 Ok(peer) => {
                     println!("  mavlink: COMMAND_LONG sink → {peer_str}");
-                    let send_sock = std::net::UdpSocket::bind("0.0.0.0:0")
-                        .expect("bind sink socket");
+                    let send_sock =
+                        std::net::UdpSocket::bind("0.0.0.0:0").expect("bind sink socket");
                     Box::new(mavlink::UdpCommandSink::new(send_sock, peer))
                 }
                 Err(_) => {
-                    eprintln!("warning: --peer={peer_str} is not a valid socket address; using null sink");
+                    eprintln!(
+                        "warning: --peer={peer_str} is not a valid socket address; using null sink"
+                    );
                     Box::new(NullCommandSink::new())
                 }
             };
@@ -137,7 +148,16 @@ fn main() {
             // Use the full duration as the budget so the heuristic
             // fail-stop is effectively disabled in live mode; the
             // verdict's pass() still drives the exit code.
-            let v = run_scenario(&mut b, &mut fence, &mut sc, sink.as_mut(), 0.01, duration_s, 0, duration_s);
+            let v = run_scenario(
+                &mut b,
+                &mut fence,
+                &mut sc,
+                sink.as_mut(),
+                0.01,
+                duration_s,
+                0,
+                duration_s,
+            );
             // Diagnostic counters — let a bench operator distinguish
             // "PX4 isn't sending us anything" (frames_recv == 0) from
             // "PX4 sends MAVLink but no GLOBAL_POSITION_INT yet"
@@ -196,7 +216,9 @@ fn arg(args: &[String], key: &str) -> Option<String> {
 
 fn parse_home(s: &str) -> Option<mavlink::Home> {
     let parts: Vec<&str> = s.split(',').collect();
-    if parts.len() != 3 { return None; }
+    if parts.len() != 3 {
+        return None;
+    }
     let lat: f64 = parts[0].parse().ok()?;
     let lon: f64 = parts[1].parse().ok()?;
     let alt_m: f64 = parts[2].parse().ok()?;

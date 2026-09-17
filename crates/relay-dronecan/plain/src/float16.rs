@@ -17,11 +17,7 @@ pub fn f16_to_f32(bits: u16) -> f32 {
         }
         0x1F => {
             // inf (frac == 0) or NaN
-            if frac == 0 {
-                f32::INFINITY
-            } else {
-                f32::NAN
-            }
+            if frac == 0 { f32::INFINITY } else { f32::NAN }
         }
         _ => {
             // normal: (1 + frac/1024) * 2^(exp-15)

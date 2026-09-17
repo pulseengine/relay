@@ -177,7 +177,10 @@ mod tests {
             sub_mode: 1,
             vendor_status: 0xBEEF,
         };
-        assert_eq!(encode_node_status(&s), [0x04, 0x03, 0x02, 0x01, 0x99, 0xEF, 0xBE]);
+        assert_eq!(
+            encode_node_status(&s),
+            [0x04, 0x03, 0x02, 0x01, 0x99, 0xEF, 0xBE]
+        );
     }
 
     #[test]

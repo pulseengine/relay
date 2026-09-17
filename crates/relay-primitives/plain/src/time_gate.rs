@@ -27,7 +27,7 @@ mod tests {
     use super::*;
     #[test]
     fn absolute_not_due_before() {
-        assert!(! is_due_absolute(99, 100));
+        assert!(!is_due_absolute(99, 100));
     }
     #[test]
     fn absolute_due_at_exact() {
@@ -42,8 +42,8 @@ mod tests {
         let start = 1_000u64;
         for (elapsed, delay) in [(0u64, 0u64), (5, 10), (10, 10), (15, 10)] {
             assert_eq!(
-                is_due_relative(elapsed, delay), is_due_absolute(start + elapsed, start +
-                delay),
+                is_due_relative(elapsed, delay),
+                is_due_absolute(start + elapsed, start + delay),
             );
         }
     }

@@ -79,7 +79,10 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
-    pub const ZERO: Self = Self { seconds: 0, fraction: 0 };
+    pub const ZERO: Self = Self {
+        seconds: 0,
+        fraction: 0,
+    };
 
     pub fn as_secs_f32(self) -> f32 {
         self.seconds as f32 + (self.fraction as f32) / (1u64 << 32) as f32
@@ -330,9 +333,8 @@ impl PosController {
                 self.gains.i_max,
             );
             let derivative = (v_err - self.last_v_err[i]) / dt;
-            accel[i] = self.gains.kp_vel * v_err
-                + self.gains.ki_vel * cand_integral
-                + 0.0 * derivative; // kd reserved for v0.6
+            accel[i] =
+                self.gains.kp_vel * v_err + self.gains.ki_vel * cand_integral + 0.0 * derivative; // kd reserved for v0.6
             self.integral[i] = cand_integral;
             self.last_v_err[i] = v_err;
         }
@@ -394,11 +396,7 @@ impl Default for PosController {
 
 #[inline]
 fn sanitise(x: f32) -> f32 {
-    if !x.is_finite() {
-        0.0
-    } else {
-        x
-    }
+    if !x.is_finite() { 0.0 } else { x }
 }
 
 #[inline]
@@ -446,7 +444,10 @@ mod tests {
 
     fn ts(secs: f32) -> Timestamp {
         let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-        Timestamp { seconds: secs as u64, fraction: frac }
+        Timestamp {
+            seconds: secs as u64,
+            fraction: frac,
+        }
     }
 
     #[test]
@@ -461,8 +462,12 @@ mod tests {
             sp,
         );
         // Tilt should be near zero; thrust should be near hover.
-        assert!((out.thrust - c.gains().hover_thrust).abs() < 0.05,
-            "thrust {} not near hover {}", out.thrust, c.gains().hover_thrust);
+        assert!(
+            (out.thrust - c.gains().hover_thrust).abs() < 0.05,
+            "thrust {} not near hover {}",
+            out.thrust,
+            c.gains().hover_thrust
+        );
     }
 
     #[test]
@@ -481,8 +486,11 @@ mod tests {
         // Pitch should be negative (nose down) → accelerates forward.
         // Extract pitch from quaternion (small-angle: q.y ≈ pitch/2)
         let pitch_est = 2.0 * out.quaternion[2];
-        assert!(pitch_est < -0.01,
-            "forward setpoint must pitch nose-down (q.y < 0), got pitch_est={}", pitch_est);
+        assert!(
+            pitch_est < -0.01,
+            "forward setpoint must pitch nose-down (q.y < 0), got pitch_est={}",
+            pitch_est
+        );
     }
 
     #[test]
@@ -498,8 +506,11 @@ mod tests {
         );
         // Positive roll → right wing down → accelerates east.
         let roll_est = 2.0 * out.quaternion[1];
-        assert!(roll_est > 0.01,
-            "east setpoint must roll right (q.x > 0), got roll_est={}", roll_est);
+        assert!(
+            roll_est > 0.01,
+            "east setpoint must roll right (q.x > 0), got roll_est={}",
+            roll_est
+        );
     }
 
     #[test]
@@ -515,8 +526,11 @@ mod tests {
             [1.0, 0.0, 0.0, 0.0],
             sp,
         );
-        assert!(out.thrust < c.gains().hover_thrust,
-            "above-setpoint must reduce thrust, got {}", out.thrust);
+        assert!(
+            out.thrust < c.gains().hover_thrust,
+            "above-setpoint must reduce thrust, got {}",
+            out.thrust
+        );
     }
 
     #[test]
@@ -532,8 +546,11 @@ mod tests {
             [1.0, 0.0, 0.0, 0.0],
             sp,
         );
-        assert!(out.thrust > c.gains().hover_thrust,
-            "below-setpoint must increase thrust, got {}", out.thrust);
+        assert!(
+            out.thrust > c.gains().hover_thrust,
+            "below-setpoint must increase thrust, got {}",
+            out.thrust
+        );
     }
 
     #[test]
@@ -557,10 +574,18 @@ mod tests {
             let q = out.quaternion;
             let roll = 2.0 * q[1].atan2(q[0]);
             let pitch = 2.0 * q[2].atan2(q[0]);
-            assert!(roll.abs() <= c.gains().tilt_max + 1.0e-3,
-                "roll {} exceeds tilt_max {}", roll, c.gains().tilt_max);
-            assert!(pitch.abs() <= c.gains().tilt_max + 1.0e-3,
-                "pitch {} exceeds tilt_max {}", pitch, c.gains().tilt_max);
+            assert!(
+                roll.abs() <= c.gains().tilt_max + 1.0e-3,
+                "roll {} exceeds tilt_max {}",
+                roll,
+                c.gains().tilt_max
+            );
+            assert!(
+                pitch.abs() <= c.gains().tilt_max + 1.0e-3,
+                "pitch {} exceeds tilt_max {}",
+                pitch,
+                c.gains().tilt_max
+            );
         }
     }
 
@@ -582,8 +607,12 @@ mod tests {
                 sp,
             );
             for i in 0..3 {
-                assert!(c.integral()[i].abs() <= c.gains().i_max + 1.0e-6,
-                    "integral[{}] = {} exceeds i_max", i, c.integral()[i]);
+                assert!(
+                    c.integral()[i].abs() <= c.gains().i_max + 1.0e-6,
+                    "integral[{}] = {} exceeds i_max",
+                    i,
+                    c.integral()[i]
+                );
             }
         }
     }
@@ -643,8 +672,12 @@ mod tests {
         let out = c.tick(ts(0.02), [0.0; 3], [0.0; 3], q, sp);
         // Output quaternion should have approximately the same yaw.
         let yaw_out = quat_to_yaw(out.quaternion);
-        assert!((yaw_out - yaw_target).abs() < 0.05,
-            "yaw not held: expected {} got {}", yaw_target, yaw_out);
+        assert!(
+            (yaw_out - yaw_target).abs() < 0.05,
+            "yaw not held: expected {} got {}",
+            yaw_target,
+            yaw_out
+        );
     }
 
     #[test]

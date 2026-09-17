@@ -90,14 +90,14 @@ pub fn hex_x() -> Mixer<6> {
 /// 8 rotors; the top/bottom of an arm share roll/pitch, oppose in yaw.
 pub fn octo_coax() -> Mixer<8> {
     Mixer::new([
-        [1.0, -0.707, 0.707, 1.0], // arm 1 top
-        [1.0, -0.707, 0.707, -1.0], // arm 1 bottom
-        [1.0, 0.707, -0.707, 1.0], // arm 2 top
-        [1.0, 0.707, -0.707, -1.0], // arm 2 bottom
-        [1.0, 0.707, 0.707, -1.0], // arm 3 top
-        [1.0, 0.707, 0.707, 1.0], // arm 3 bottom
+        [1.0, -0.707, 0.707, 1.0],   // arm 1 top
+        [1.0, -0.707, 0.707, -1.0],  // arm 1 bottom
+        [1.0, 0.707, -0.707, 1.0],   // arm 2 top
+        [1.0, 0.707, -0.707, -1.0],  // arm 2 bottom
+        [1.0, 0.707, 0.707, -1.0],   // arm 3 top
+        [1.0, 0.707, 0.707, 1.0],    // arm 3 bottom
         [1.0, -0.707, -0.707, -1.0], // arm 4 top
-        [1.0, -0.707, -0.707, 1.0], // arm 4 bottom
+        [1.0, -0.707, -0.707, 1.0],  // arm 4 bottom
     ])
 }
 
@@ -114,7 +114,12 @@ mod tests {
 
     #[test]
     fn hover_wrench_spins_all_rotors() {
-        let w = Wrench { thrust: 0.5, roll: 0.0, pitch: 0.0, yaw: 0.0 };
+        let w = Wrench {
+            thrust: 0.5,
+            roll: 0.0,
+            pitch: 0.0,
+            yaw: 0.0,
+        };
         let out = hex_x().mix(w);
         assert!(all_in_range(&out));
         assert!(out.iter().all(|&x| (x - 0.5).abs() < 1e-6)); // even hover
@@ -123,21 +128,36 @@ mod tests {
     #[test]
     fn hex_outputs_bounded_under_saturating_command() {
         // a huge mixed demand must clamp, never exceed 1 or go negative.
-        let w = Wrench { thrust: 1.0, roll: 5.0, pitch: -5.0, yaw: 3.0 };
+        let w = Wrench {
+            thrust: 1.0,
+            roll: 5.0,
+            pitch: -5.0,
+            yaw: 3.0,
+        };
         let out = hex_x().mix(w);
         assert!(all_in_range(&out));
     }
 
     #[test]
     fn coax_outputs_bounded() {
-        let w = Wrench { thrust: 0.6, roll: -2.0, pitch: 1.0, yaw: -4.0 };
+        let w = Wrench {
+            thrust: 0.6,
+            roll: -2.0,
+            pitch: 1.0,
+            yaw: -4.0,
+        };
         let out = octo_coax().mix(w);
         assert!(all_in_range(&out));
     }
 
     #[test]
     fn nan_command_is_zeroed_not_propagated() {
-        let w = Wrench { thrust: f32::NAN, roll: 0.0, pitch: 0.0, yaw: 0.0 };
+        let w = Wrench {
+            thrust: f32::NAN,
+            roll: 0.0,
+            pitch: 0.0,
+            yaw: 0.0,
+        };
         let out = hex_x().mix(w);
         assert!(all_in_range(&out));
         assert!(out.iter().all(|&x| x == 0.0));

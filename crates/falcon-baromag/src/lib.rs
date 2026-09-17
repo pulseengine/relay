@@ -91,7 +91,10 @@ pub mod mag {
         pub fn init(&mut self) -> Result<(), DriverError> {
             let id = self.bus.read_reg(REG_WHO_AM_I);
             if id != WHO_AM_I_VALUE {
-                return Err(DriverError::WrongIdentity { got: id, want: WHO_AM_I_VALUE });
+                return Err(DriverError::WrongIdentity {
+                    got: id,
+                    want: WHO_AM_I_VALUE,
+                });
             }
             self.bus.write_reg(REG_CNTL1, MODE_CONTINUOUS);
             Ok(())
@@ -133,7 +136,10 @@ pub mod mag {
 
         /// Wrap an I2C bus at the default address.
         pub fn new(i2c: I) -> Self {
-            Self { i2c, addr: Self::DEFAULT_ADDR }
+            Self {
+                i2c,
+                addr: Self::DEFAULT_ADDR,
+            }
         }
 
         /// Wrap an I2C bus at an explicit address.
@@ -202,7 +208,11 @@ pub mod baro {
             // Nominal scales: BMP388 raw is ~24-bit over the sensor range; these
             // map a mid-range raw to ~standard sea-level pressure. Replaced by
             // the per-chip NVM trim at calibration time.
-            Self { p_scale: 0.012_5, t_scale: 0.005, t_offset: 0.0 }
+            Self {
+                p_scale: 0.012_5,
+                t_scale: 0.005,
+                t_offset: 0.0,
+            }
         }
     }
 
@@ -215,7 +225,10 @@ pub mod baro {
     impl<B: RegBus> Bmp388<B> {
         /// Wrap a bus with the default calibration.
         pub fn new(bus: B) -> Self {
-            Self { bus, cal: BaroCal::default() }
+            Self {
+                bus,
+                cal: BaroCal::default(),
+            }
         }
 
         /// Wrap a bus with an explicit calibration.
@@ -227,7 +240,10 @@ pub mod baro {
         pub fn init(&mut self) -> Result<(), DriverError> {
             let id = self.bus.read_reg(REG_CHIP_ID);
             if id != CHIP_ID_VALUE {
-                return Err(DriverError::WrongIdentity { got: id, want: CHIP_ID_VALUE });
+                return Err(DriverError::WrongIdentity {
+                    got: id,
+                    want: CHIP_ID_VALUE,
+                });
             }
             self.bus.write_reg(REG_PWR_CTRL, PWR_PRESS_TEMP_NORMAL);
             Ok(())
@@ -270,7 +286,11 @@ pub mod baro {
 
         /// Wrap an I2C bus at the default address + default calibration.
         pub fn new(i2c: I) -> Self {
-            Self { i2c, addr: Self::DEFAULT_ADDR, cal: BaroCal::default() }
+            Self {
+                i2c,
+                addr: Self::DEFAULT_ADDR,
+                cal: BaroCal::default(),
+            }
         }
 
         /// Wrap an I2C bus at an explicit address + calibration.
@@ -349,13 +369,23 @@ mod tests {
         let mut bus = MockBus::new();
         bus.set(0x00, 0xAB);
         let mut m = Ist8310::new(bus);
-        assert_eq!(m.init(), Err(DriverError::WrongIdentity { got: 0xAB, want: 0x10 }));
+        assert_eq!(
+            m.init(),
+            Err(DriverError::WrongIdentity {
+                got: 0xAB,
+                want: 0x10
+            })
+        );
     }
 
     #[test]
     fn flat_heading_cardinal() {
         // field pointing +Y (east) ⇒ heading +π/2.
-        let h = flat_heading(MagField { x_ut: 0.0, y_ut: 10.0, z_ut: 0.0 });
+        let h = flat_heading(MagField {
+            x_ut: 0.0,
+            y_ut: 10.0,
+            z_ut: 0.0,
+        });
         assert!((h - core::f32::consts::FRAC_PI_2).abs() < 1e-4);
     }
 
@@ -383,7 +413,13 @@ mod tests {
         let mut bus = MockBus::new();
         bus.set(0x00, 0x99);
         let mut b = Bmp388::new(bus);
-        assert_eq!(b.init(), Err(DriverError::WrongIdentity { got: 0x99, want: 0x50 }));
+        assert_eq!(
+            b.init(),
+            Err(DriverError::WrongIdentity {
+                got: 0x99,
+                want: 0x50
+            })
+        );
     }
 
     // ── async hardware path (embedded-hal-async I2c) ─────────────────────────
@@ -477,9 +513,15 @@ mod tests {
     /// The async paths are fallible: an I2C transport error propagates as Err.
     #[test]
     fn baromag_async_propagates_transport_error() {
-        let mut mag = Ist8310I2c::new(MockI2c { block: [0; 6], fail: true });
+        let mut mag = Ist8310I2c::new(MockI2c {
+            block: [0; 6],
+            fail: true,
+        });
         assert!(block_on(mag.read_field()).is_err());
-        let mut baro = Bmp388I2c::new(MockI2c { block: [0; 6], fail: true });
+        let mut baro = Bmp388I2c::new(MockI2c {
+            block: [0; 6],
+            fail: true,
+        });
         assert!(block_on(baro.read()).is_err());
     }
 

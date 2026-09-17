@@ -25,8 +25,8 @@
 //! Decoders never panic on arbitrary 25-byte input (proptest-fuzzed).
 
 use super::{
-    BasicId, IdType, Location, MessageType, OperationalStatus, UaType,
-    FRAME_BYTES, PROTOCOL_VERSION, UAS_ID_BYTES,
+    BasicId, FRAME_BYTES, IdType, Location, MessageType, OperationalStatus, PROTOCOL_VERSION,
+    UAS_ID_BYTES, UaType,
 };
 
 // ─── BasicId — bit-packed (lossless) ───────────────────────────────
@@ -63,7 +63,11 @@ pub fn decode_basic_id_bitpacked(buf: &[u8; FRAME_BYTES]) -> Option<BasicId> {
     let ua_type = UaType::from_code(ua_type_code)?;
     let mut uas_id = [0u8; UAS_ID_BYTES];
     uas_id.copy_from_slice(&buf[2..2 + UAS_ID_BYTES]);
-    Some(BasicId { id_type, ua_type, uas_id })
+    Some(BasicId {
+        id_type,
+        ua_type,
+        uas_id,
+    })
 }
 
 // ─── Location — bit-packed (lossy, F3411 resolution) ───────────────
@@ -215,11 +219,11 @@ mod tests {
             status: OperationalStatus::Airborne,
             latitude_e7: 475_023_456,
             longitude_e7: 190_401_234,
-            altitude_cm: 12_000,           // 120 m, on F3411 0.5 m grid
-            ground_speed_cms: 800,         // 8 m/s
-            vertical_speed_cms: -50,       // -0.5 m/s
-            track_centideg: 18_000,        // 180° even
-            timestamp_decisec: 18_000,     // 30:00 past hour
+            altitude_cm: 12_000,       // 120 m, on F3411 0.5 m grid
+            ground_speed_cms: 800,     // 8 m/s
+            vertical_speed_cms: -50,   // -0.5 m/s
+            track_centideg: 18_000,    // 180° even
+            timestamp_decisec: 18_000, // 30:00 past hour
         }
     }
 
@@ -256,7 +260,7 @@ mod tests {
         // of canonicalize → encode → decode equals the canonical input.
         let mut msg = sample_location();
         msg.track_centideg = 18_073; // sub-degree precision
-        msg.altitude_cm = 12_071;    // sub-0.5 m precision
+        msg.altitude_cm = 12_071; // sub-0.5 m precision
         let canon = canonicalize_location(&msg);
         let mut buf = [0u8; FRAME_BYTES];
         encode_location_bitpacked(&canon, &mut buf);

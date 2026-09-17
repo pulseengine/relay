@@ -96,14 +96,22 @@ mod tests {
 
     #[test]
     fn write_too_short_is_false() {
-        let h = SecurityHeader { spi: 1, channel_id: 1, counter: 1 };
+        let h = SecurityHeader {
+            spi: 1,
+            channel_id: 1,
+            counter: 1,
+        };
         let mut tiny = [0u8; SEC_HEADER_LEN - 1];
         assert!(!h.write(&mut tiny));
     }
 
     #[test]
     fn nonce_embeds_fields() {
-        let h = SecurityHeader { spi: 0x0201, channel_id: 3, counter: 0x0A09_0807_0605_0403 };
+        let h = SecurityHeader {
+            spi: 0x0201,
+            channel_id: 3,
+            counter: 0x0A09_0807_0605_0403,
+        };
         let n = h.nonce();
         assert_eq!(&n[0..2], &0x0201u16.to_le_bytes());
         assert_eq!(n[2], 3);
@@ -113,9 +121,24 @@ mod tests {
 
     #[test]
     fn distinct_headers_distinct_nonces() {
-        let a = SecurityHeader { spi: 1, channel_id: 0, counter: 5 }.nonce();
-        let b = SecurityHeader { spi: 1, channel_id: 1, counter: 5 }.nonce(); // channel differs
-        let c = SecurityHeader { spi: 1, channel_id: 0, counter: 6 }.nonce(); // counter differs
+        let a = SecurityHeader {
+            spi: 1,
+            channel_id: 0,
+            counter: 5,
+        }
+        .nonce();
+        let b = SecurityHeader {
+            spi: 1,
+            channel_id: 1,
+            counter: 5,
+        }
+        .nonce(); // channel differs
+        let c = SecurityHeader {
+            spi: 1,
+            channel_id: 0,
+            counter: 6,
+        }
+        .nonce(); // counter differs
         assert_ne!(a, b);
         assert_ne!(a, c);
     }

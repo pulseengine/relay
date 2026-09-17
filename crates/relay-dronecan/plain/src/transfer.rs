@@ -17,7 +17,7 @@
 //! state-machine core proven here is unchanged by it.
 
 use crate::crc::{crc16_add, crc16_signature};
-use crate::id::{encode_message_id, decode_message_id, MessageId};
+use crate::id::{MessageId, decode_message_id, encode_message_id};
 use crate::tail::{decode_tail, single_frame_tail};
 
 /// The CAN frame value type is owned by the relay-hal seam (jess binds FlexCAN
@@ -205,7 +205,11 @@ pub fn encode_single_frame(
     data[..payload.len()].copy_from_slice(payload);
     data[payload.len()] = single_frame_tail(transfer_id);
     Some(CanFrame {
-        id: encode_message_id(&MessageId { priority, data_type_id, source_node_id }),
+        id: encode_message_id(&MessageId {
+            priority,
+            data_type_id,
+            source_node_id,
+        }),
         dlc: (payload.len() + 1) as u8,
         data,
     })
@@ -214,8 +218,8 @@ pub fn encode_single_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::id::{encode_message_id, MessageId};
-    use crate::tail::{encode_tail, single_frame_tail, Tail};
+    use crate::id::{MessageId, encode_message_id};
+    use crate::tail::{Tail, encode_tail, single_frame_tail};
 
     const SIG: u64 = 0x0102_0304_0506_0708;
 
@@ -225,7 +229,11 @@ mod tests {
         data[..n].copy_from_slice(&body[..n]);
         data[n] = tailb;
         CanFrame {
-            id: encode_message_id(&MessageId { priority: 16, data_type_id: dtid, source_node_id: node }),
+            id: encode_message_id(&MessageId {
+                priority: 16,
+                data_type_id: dtid,
+                source_node_id: node,
+            }),
             dlc: (n + 1) as u8,
             data,
         }
@@ -234,7 +242,9 @@ mod tests {
     #[test]
     fn single_frame_transfer_emits_payload() {
         let mut r = Reassembler::new(SIG);
-        let t = r.push(&frame(341, 42, single_frame_tail(3), &[0xAA, 0xBB, 0xCC])).unwrap();
+        let t = r
+            .push(&frame(341, 42, single_frame_tail(3), &[0xAA, 0xBB, 0xCC]))
+            .unwrap();
         assert_eq!(t.data_type_id, 341);
         assert_eq!(t.source_node_id, 42);
         assert_eq!(t.transfer_id, 3);
@@ -250,12 +260,26 @@ mod tests {
         let crc_b = crc.to_le_bytes();
         let mut r = Reassembler::new(SIG);
         // frame 1: SOT, toggle 0 — [crc_lo, crc_hi, p0..p4]
-        let f1_body = [crc_b[0], crc_b[1], payload[0], payload[1], payload[2], payload[3], payload[4]];
-        let t1 = encode_tail(&Tail { start_of_transfer: true, end_of_transfer: false, toggle: false, transfer_id: 5 });
+        let f1_body = [
+            crc_b[0], crc_b[1], payload[0], payload[1], payload[2], payload[3], payload[4],
+        ];
+        let t1 = encode_tail(&Tail {
+            start_of_transfer: true,
+            end_of_transfer: false,
+            toggle: false,
+            transfer_id: 5,
+        });
         assert!(r.push(&frame(1063, 7, t1, &f1_body)).is_none());
         // frame 2: EOT, toggle 1 — [p5..p8]
-        let t2 = encode_tail(&Tail { start_of_transfer: false, end_of_transfer: true, toggle: true, transfer_id: 5 });
-        let out = r.push(&frame(1063, 7, t2, &payload[5..])).expect("transfer completes");
+        let t2 = encode_tail(&Tail {
+            start_of_transfer: false,
+            end_of_transfer: true,
+            toggle: true,
+            transfer_id: 5,
+        });
+        let out = r
+            .push(&frame(1063, 7, t2, &payload[5..]))
+            .expect("transfer completes");
         assert_eq!(&out.payload[..out.len], &payload);
         assert_eq!(out.data_type_id, 1063);
     }
@@ -265,20 +289,42 @@ mod tests {
         let payload: [u8; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
         let bad = 0x0000u16.to_le_bytes(); // wrong CRC
         let mut r = Reassembler::new(SIG);
-        let f1 = [bad[0], bad[1], payload[0], payload[1], payload[2], payload[3], payload[4]];
-        let t1 = encode_tail(&Tail { start_of_transfer: true, end_of_transfer: false, toggle: false, transfer_id: 5 });
+        let f1 = [
+            bad[0], bad[1], payload[0], payload[1], payload[2], payload[3], payload[4],
+        ];
+        let t1 = encode_tail(&Tail {
+            start_of_transfer: true,
+            end_of_transfer: false,
+            toggle: false,
+            transfer_id: 5,
+        });
         r.push(&frame(1063, 7, t1, &f1));
-        let t2 = encode_tail(&Tail { start_of_transfer: false, end_of_transfer: true, toggle: true, transfer_id: 5 });
+        let t2 = encode_tail(&Tail {
+            start_of_transfer: false,
+            end_of_transfer: true,
+            toggle: true,
+            transfer_id: 5,
+        });
         assert!(r.push(&frame(1063, 7, t2, &payload[5..])).is_none()); // CRC sink drops it
     }
 
     #[test]
     fn wrong_toggle_drops_the_transfer() {
         let mut r = Reassembler::new(SIG);
-        let t1 = encode_tail(&Tail { start_of_transfer: true, end_of_transfer: false, toggle: false, transfer_id: 5 });
+        let t1 = encode_tail(&Tail {
+            start_of_transfer: true,
+            end_of_transfer: false,
+            toggle: false,
+            transfer_id: 5,
+        });
         r.push(&frame(1063, 7, t1, &[0, 0, 1, 2, 3]));
         // continuation with the WRONG toggle (expected 1, send 0)
-        let bad = encode_tail(&Tail { start_of_transfer: false, end_of_transfer: true, toggle: false, transfer_id: 5 });
+        let bad = encode_tail(&Tail {
+            start_of_transfer: false,
+            end_of_transfer: true,
+            toggle: false,
+            transfer_id: 5,
+        });
         assert!(r.push(&frame(1063, 7, bad, &[4, 5])).is_none());
         assert!(!r.active); // dropped
     }

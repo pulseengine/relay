@@ -22,19 +22,19 @@ mod flightcore;
 mod pace;
 mod physics;
 
+use falcon_config::YawMode;
 use falcon_core::FlightCore;
 use flightcore::SitlBackend;
 use physics::{GazeboPhysics, MockPhysics, Physics};
-use relay_arm::{ArmingConfig, ArmingSequencer, ARMED};
-use relay_iekf::{Iekf, Imu as IekfImu, NavState};
-use falcon_config::YawMode;
-use relay_geo::GeoAtt;
-use relay_traj::{RefGovernor, Segment3};
+use relay_arm::{ARMED, ArmingConfig, ArmingSequencer};
 use relay_att::{AttController, Timestamp as AttTimestamp};
 use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
+use relay_geo::GeoAtt;
+use relay_iekf::{Iekf, Imu as IekfImu, NavState};
 use relay_mix_quad::QuadMixer;
 use relay_pos::{PosController, PosGains, PositionSetpoint, Timestamp as PosTimestamp};
 use relay_rate::{RatePid, Timestamp as RateTimestamp};
+use relay_traj::{RefGovernor, Segment3};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -50,7 +50,9 @@ fn main() {
     }
     let backend = arg(&args, "--backend").unwrap_or_else(|| "mock".into());
     let scenario = arg(&args, "--scenario").unwrap_or_else(|| "hover".into());
-    let duration_s: f32 = arg(&args, "--duration").and_then(|s| s.parse().ok()).unwrap_or(5.0);
+    let duration_s: f32 = arg(&args, "--duration")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5.0);
     let evidence_dir = arg(&args, "--evidence-dir").map(PathBuf::from);
 
     println!("falcon-sitl-gz: backend={backend} scenario={scenario} duration={duration_s}s");
@@ -90,7 +92,9 @@ fn main() {
         }
     };
 
-    if let Some(s) = evidence.as_mut() { s.finish(pass); }
+    if let Some(s) = evidence.as_mut() {
+        s.finish(pass);
+    }
 
     if pass {
         println!("PASS");
@@ -196,7 +200,13 @@ fn run_scenario(
         "flightcore-rotorout" => {
             // Hover, then lose rotor 0 at the midpoint; the production FDI must
             // isolate it (RPM residual) and the loop keeps the vehicle aloft.
-            run_flightcore(physics, 2.0, duration_s, Some((0, duration_s * 0.5)), evidence)
+            run_flightcore(
+                physics,
+                2.0,
+                duration_s,
+                Some((0, duration_s * 0.5)),
+                evidence,
+            )
         }
         "supervised-rotorout" => {
             // v1.117 (FAULT-P04): the FULL production FlightSupervisor flies
@@ -206,9 +216,7 @@ fn run_scenario(
             run_supervised_rotorout(physics, 2.0, duration_s, duration_s * 0.4, evidence)
         }
         other => {
-            eprintln!(
-                "  scenario {other} not yet wired; falling back to closed-loop hover",
-            );
+            eprintln!("  scenario {other} not yet wired; falling back to closed-loop hover",);
             run_closed_loop_hover(physics, duration_s, evidence)
         }
     }
@@ -263,15 +271,23 @@ fn run_frame_check(physics: &mut dyn Physics, axis: usize, duration_s: f32) -> b
         }
         if pace_real_time {
             let used = tick_start.elapsed();
-            if used < tick_period { std::thread::sleep(tick_period - used); }
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
         }
     }
-    let mean_rate = if count > 0 { sum_rate / count as f32 } else { 0.0 };
+    let mean_rate = if count > 0 {
+        sum_rate / count as f32
+    } else {
+        0.0
+    };
     // After correction, +cmd on this axis should yield +rate.
     let agrees = mean_rate > 0.0;
     println!(
         "  frame-check axis={axis_name}: commanded +0.15 (corrected={:?}) → mean sensed rate={:.4} rad/s  [{}]",
-        cmd_corrected, mean_rate, if agrees { "AGREE ✓" } else { "OPPOSE ✗" },
+        cmd_corrected,
+        mean_rate,
+        if agrees { "AGREE ✓" } else { "OPPOSE ✗" },
     );
     agrees
 }
@@ -310,7 +326,13 @@ fn run_yaw_probe(physics: &mut dyn Physics, duration_s: f32) -> bool {
         let t = step as f32 * dt;
         let (imu, pos) = physics.measure(0.0);
         // Estimator: propagate + gravity + direct heading (the FlightCore path).
-        iekf.propagate(IekfImu { gyro: imu.gyro_body, accel: imu.accel_body }, dt);
+        iekf.propagate(
+            IekfImu {
+                gyro: imu.gyro_body,
+                accel: imu.accel_body,
+            },
+            dt,
+        );
         iekf.update_gravity(imu.accel_body, 0.5);
         iekf.update_position(pos, 0.01);
         if let Some(h) = physics.heading_ned() {
@@ -333,7 +355,9 @@ fn run_yaw_probe(physics: &mut dyn Physics, duration_s: f32) -> bool {
         }
         if pace_real_time {
             let used = tick_start.elapsed();
-            if used < tick_period { std::thread::sleep(tick_period - used); }
+            if used < tick_period {
+                std::thread::sleep(tick_period - used);
+            }
         }
     }
     println!("  yaw-probe: compare signs of Δtruth_head, Δest_yaw, gyro_z vs cmd_yaw=+");
@@ -411,7 +435,9 @@ fn run_arming_check(physics: &mut dyn Physics, duration_s: f32, gated: bool) -> 
 
         let tilt = body_tilt_rad(imu_sample.accel_body);
         last_tilt = tilt;
-        if tilt > peak_tilt { peak_tilt = tilt; }
+        if tilt > peak_tilt {
+            peak_tilt = tilt;
+        }
         let arm = seq.tick(tilt, true);
         if arm.phase == ARMED && armed_at.is_none() {
             armed_at = Some(t);
@@ -433,8 +459,7 @@ fn run_arming_check(physics: &mut dyn Physics, duration_s: f32, gated: bool) -> 
             [0.0_f32; 3]
         };
         let torque = frame_correct_torque(torque_raw);
-        let motors =
-            mixer.mix_thrust_floor(torque, att_sp.thrust * scale, 0.5 * scale);
+        let motors = mixer.mix_thrust_floor(torque, att_sp.thrust * scale, 0.5 * scale);
         physics.step(motors, dt);
 
         if pace_real_time {
@@ -462,12 +487,18 @@ fn run_arming_check(physics: &mut dyn Physics, duration_s: f32, gated: bool) -> 
     println!(
         "  arming-check[{}]: armed_at={} handoff_peak={:.1}° run_peak={:.1}° final={:.1}° (tumble>{:.0}°)  [{}]  wall={:.2}s",
         if gated { "gated" } else { "UNGATED-baseline" },
-        armed_at.map(|t| format!("{t:.2}s")).unwrap_or_else(|| "NEVER".into()),
+        armed_at
+            .map(|t| format!("{t:.2}s"))
+            .unwrap_or_else(|| "NEVER".into()),
         peak_tilt_handoff.to_degrees(),
         peak_tilt.to_degrees(),
         last_tilt.to_degrees(),
         TUMBLE_RAD.to_degrees(),
-        if pass { "PASS ✓ (handoff)" } else { "FAIL ✗" },
+        if pass {
+            "PASS ✓ (handoff)"
+        } else {
+            "FAIL ✗"
+        },
         wall.as_secs_f32(),
     );
     if pass && peak_tilt >= TUMBLE_RAD {
@@ -512,14 +543,20 @@ impl Mission {
     fn sample(&self, t: f32) -> ([f32; 3], [f32; 3], [f32; 3], [f32; 3]) {
         let n = self.waypoints.len();
         if n < 2 {
-            return (self.waypoints.first().copied().unwrap_or([0.0; 3]), [0.0; 3], [0.0; 3], [0.0; 3]);
+            return (
+                self.waypoints.first().copied().unwrap_or([0.0; 3]),
+                [0.0; 3],
+                [0.0; 3],
+                [0.0; 3],
+            );
         }
         if t >= self.total_time() {
             return (self.waypoints[n - 1], [0.0; 3], [0.0; 3], [0.0; 3]);
         }
         let leg = ((t / self.leg_time) as usize).min(n - 2);
         let tl = t - leg as f32 * self.leg_time;
-        let s = Segment3::rest_to_rest(self.waypoints[leg], self.waypoints[leg + 1], self.leg_time).eval(tl);
+        let s = Segment3::rest_to_rest(self.waypoints[leg], self.waypoints[leg + 1], self.leg_time)
+            .eval(tl);
         (s.pos, s.vel, s.acc, s.jerk)
     }
 }
@@ -670,7 +707,10 @@ fn run_geo_cascade(
     // spoofer cannot steer the vehicle. FDI_OFF disables (A/B); SPOOF_WALKOFF
     // = bias rate (m/s) injects a growing position-measurement bias after 15 s.
     let fdi_on = std::env::var("FDI_OFF").is_err();
-    let spoof_rate: f32 = std::env::var("SPOOF_WALKOFF").ok().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let spoof_rate: f32 = std::env::var("SPOOF_WALKOFF")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
     // drift slack 0.03 m ≈ the noiseless-SITL innovation floor; detects a
     // walk-off whose per-fix innovation exceeds it (rate ≳ 1.5 m/s at the
     // ~50 Hz outer rate). A slower covert spoof that the filter follows keeps
@@ -750,7 +790,13 @@ fn run_geo_cascade(
         let (imu_sample, pos_ned) = physics.measure(0.0);
 
         // ── INNER (every tick): IEKF predict + gyro low-pass ──
-        iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
+        iekf.propagate(
+            IekfImu {
+                gyro: imu_sample.gyro_body,
+                accel: imu_sample.accel_body,
+            },
+            dt,
+        );
         let gyro_f = gyro_lpf.filter(imu_sample.gyro_body);
 
         // ── OUTER (every outer_decim ticks): aiding updates + position →
@@ -902,7 +948,11 @@ fn run_geo_cascade(
             } else {
                 geo.tick(est.q, gyro_f, a_cmd_held, yaw_d)
             };
-            let yaw_t = if cfg.pos.yaw_mode == YawMode::Off { 0.0 } else { m[2] * torque_scale };
+            let yaw_t = if cfg.pos.yaw_mode == YawMode::Off {
+                0.0
+            } else {
+                m[2] * torque_scale
+            };
             [m[0] * torque_scale, m[1] * torque_scale, yaw_t]
         } else {
             adrc.reset();
@@ -923,8 +973,12 @@ fn run_geo_cascade(
         let de = pos_ned[1] - setpoint_ned[1];
         let dd = pos_ned[2] - setpoint_ned[2];
         let dist = (dn * dn + de * de + dd * dd).sqrt();
-        if dist > peak_dist { peak_dist = dist; }
-        if dist < min_dist { min_dist = dist; }
+        if dist > peak_dist {
+            peak_dist = dist;
+        }
+        if dist < min_dist {
+            min_dist = dist;
+        }
         if t >= steady_start_t {
             sum_sq_steady += dist * dist;
             steady_count += 1;
@@ -934,18 +988,32 @@ fn run_geo_cascade(
         if std::env::var("POS_DEBUG").is_ok() && step % 50 == 0 {
             let iyaw = {
                 let q = est.q;
-                libm::atan2f(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]))
+                libm::atan2f(
+                    2.0 * (q[0] * q[3] + q[1] * q[2]),
+                    1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
+                )
             };
             let chdg = physics.heading_ned().unwrap_or(f32::NAN).to_degrees();
             eprintln!(
                 "    [geo] t={t:.1} pos=[{:.1},{:.1},{:.1}] dist={dist:.2} tilt={:.1}° IEKFyaw={:.1}° compass={:.1}°",
-                pos_ned[0], pos_ned[1], pos_ned[2], tilt.to_degrees(),
-                iyaw.to_degrees(), chdg,
+                pos_ned[0],
+                pos_ned[1],
+                pos_ned[2],
+                tilt.to_degrees(),
+                iyaw.to_degrees(),
+                chdg,
             );
         }
         if let Some(ref mut e) = evidence {
-            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
-                         motors, physics.counters());
+            e.write_tick(
+                step,
+                t,
+                pos_ned,
+                imu_sample.accel_body,
+                imu_sample.gyro_body,
+                motors,
+                physics.counters(),
+            );
         }
         if sim_lock {
             // Two-stage gyro-synced pacing (v0.32).
@@ -993,10 +1061,19 @@ fn run_geo_cascade(
     } else {
         f32::NAN
     };
-    let anees = if nees_n > 0 { (nees_sum / nees_n as f64) as f32 } else { f32::NAN };
+    let anees = if nees_n > 0 {
+        (nees_sum / nees_n as f64) as f32
+    } else {
+        f32::NAN
+    };
     println!(
         "  verdict: backend={} scenario=geo-hover steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
-        physics.name(), n, final_dist, peak_dist, rms_steady, wall.as_secs_f32(),
+        physics.name(),
+        n,
+        final_dist,
+        peak_dist,
+        rms_steady,
+        wall.as_secs_f32(),
     );
     // IEKF consistency report (3-DoF position, χ²₃: E=3, 95% single-sample
     // band [0.216, 9.35]). The SAFETY-relevant direction is OVER-CONFIDENT
@@ -1043,10 +1120,17 @@ fn run_geo_cascade(
     // corrections) is the honest operating accuracy — fine for hold.
     if mag_n > 0 {
         let mag_err_mean = (mag_err_sum / mag_n as f64) as f32;
-        let mag_status = if mag_err_mean.to_degrees() < 12.0 { "OK" } else { "DEGRADED" };
+        let mag_status = if mag_err_mean.to_degrees() < 12.0 {
+            "OK"
+        } else {
+            "DEGRADED"
+        };
         println!(
             "  mag-heading: closed-loop err vs truth mean={:.1}° max={:.1}° n={} [{}]",
-            mag_err_mean.to_degrees(), mag_err_max.to_degrees(), mag_n, mag_status,
+            mag_err_mean.to_degrees(),
+            mag_err_max.to_degrees(),
+            mag_n,
+            mag_status,
         );
     } else {
         println!("  mag-heading: no magnetometer frames received");
@@ -1063,7 +1147,15 @@ fn run_geo_cascade(
         );
     }
     if let Some(ref mut e) = evidence {
-        e.write_summary_hover(n, final_dist, peak_dist, rms_steady, min_dist, wall.as_secs_f32(), physics.counters());
+        e.write_summary_hover(
+            n,
+            final_dist,
+            peak_dist,
+            rms_steady,
+            min_dist,
+            wall.as_secs_f32(),
+            physics.counters(),
+        );
     }
     // PASS requires BOTH position-hold AND filter consistency: an
     // over-confident estimator is unsafe even if this run's position
@@ -1150,15 +1242,26 @@ fn run_alt_rate_hover(
         physics.step(motors, dt);
 
         let dist = alt_err.abs();
-        if dist > peak_dist_err { peak_dist_err = dist; }
-        if dist < min_dist_seen { min_dist_seen = dist; }
+        if dist > peak_dist_err {
+            peak_dist_err = dist;
+        }
+        if dist < min_dist_seen {
+            min_dist_seen = dist;
+        }
         if t >= steady_start_t {
             sum_sq_steady += dist * dist;
             steady_count += 1;
         }
         if let Some(ref mut e) = evidence {
-            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
-                         motors, physics.counters());
+            e.write_tick(
+                step,
+                t,
+                pos_ned,
+                imu_sample.accel_body,
+                imu_sample.gyro_body,
+                motors,
+                physics.counters(),
+            );
         }
         if pace_real_time {
             let used = tick_start.elapsed();
@@ -1177,7 +1280,12 @@ fn run_alt_rate_hover(
     let counters = physics.counters();
     println!(
         "  verdict: backend={} scenario=alt-rate steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
-        physics.name(), n, final_dist, peak_dist_err, rms_steady, wall.as_secs_f32(),
+        physics.name(),
+        n,
+        final_dist,
+        peak_dist_err,
+        rms_steady,
+        wall.as_secs_f32(),
     );
     if let Some((imu_recv, navsat_recv, motor_send)) = counters {
         println!(
@@ -1185,8 +1293,15 @@ fn run_alt_rate_hover(
         );
     }
     if let Some(ref mut e) = evidence {
-        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
-                              min_dist_seen, wall.as_secs_f32(), counters);
+        e.write_summary_hover(
+            n,
+            final_dist,
+            peak_dist_err,
+            rms_steady,
+            min_dist_seen,
+            wall.as_secs_f32(),
+            counters,
+        );
     }
     final_dist < 0.5 && rms_steady < 1.0
 }
@@ -1254,24 +1369,32 @@ fn run_alt_only_hover(
         //  both raise thrust to climb.)
         let alt_err = setpoint_d - pos_ned[2];
         alt_integral = (alt_integral + alt_err * dt).clamp(-i_max / ki_alt, i_max / ki_alt);
-        let thrust = (hover_thrust
-            - kp_alt * alt_err
-            - ki_alt * alt_integral
-            + kd_alt * v_d_filt)
+        let thrust = (hover_thrust - kp_alt * alt_err - ki_alt * alt_integral + kd_alt * v_d_filt)
             .clamp(0.0, 1.0);
         let motors = mixer.mix([0.0_f32; 3], thrust);
         physics.step(motors, dt);
 
         let dist = alt_err.abs();
-        if dist > peak_dist_err { peak_dist_err = dist; }
-        if dist < min_dist_seen { min_dist_seen = dist; }
+        if dist > peak_dist_err {
+            peak_dist_err = dist;
+        }
+        if dist < min_dist_seen {
+            min_dist_seen = dist;
+        }
         if t >= steady_start_t {
             sum_sq_steady += dist * dist;
             steady_count += 1;
         }
         if let Some(ref mut e) = evidence {
-            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
-                         motors, physics.counters());
+            e.write_tick(
+                step,
+                t,
+                pos_ned,
+                imu_sample.accel_body,
+                imu_sample.gyro_body,
+                motors,
+                physics.counters(),
+            );
         }
         if pace_real_time {
             let used = tick_start.elapsed();
@@ -1290,7 +1413,12 @@ fn run_alt_only_hover(
     let counters = physics.counters();
     println!(
         "  verdict: backend={} scenario=alt-only steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
-        physics.name(), n, final_dist, peak_dist_err, rms_steady, wall.as_secs_f32(),
+        physics.name(),
+        n,
+        final_dist,
+        peak_dist_err,
+        rms_steady,
+        wall.as_secs_f32(),
     );
     if let Some((imu_recv, navsat_recv, motor_send)) = counters {
         println!(
@@ -1298,8 +1426,15 @@ fn run_alt_only_hover(
         );
     }
     if let Some(ref mut e) = evidence {
-        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
-                              min_dist_seen, wall.as_secs_f32(), counters);
+        e.write_summary_hover(
+            n,
+            final_dist,
+            peak_dist_err,
+            rms_steady,
+            min_dist_seen,
+            wall.as_secs_f32(),
+            counters,
+        );
     }
     final_dist < 0.5 && rms_steady < 1.0
 }
@@ -1398,7 +1533,6 @@ fn run_supervised_rotorout(
     pass
 }
 
-
 /// v1.113 — **FlightCore-in-the-loop**. Flies the PRODUCTION
 /// [`falcon_core::FlightCore`] (the verified IEKF → geometric-SE(3) → ADRC →
 /// mixer cascade, with the single-rotor-out FDI + degraded-allocator recovery)
@@ -1446,7 +1580,9 @@ fn run_flightcore(
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(hover_thrust);
-    let est_tuning = std::env::var("EST_TUNING").map(|v| v != "0").unwrap_or(true);
+    let est_tuning = std::env::var("EST_TUNING")
+        .map(|v| v != "0")
+        .unwrap_or(true);
     let seed_alt = std::env::var("SEED_ALT")
         .ok()
         .and_then(|s| s.parse::<f32>().ok())
@@ -1495,7 +1631,10 @@ fn run_flightcore(
     {
         // GNSS_DIV: aiding cadence in ticks (default 50 = 5 Hz at 250 Hz). A knob
         // for #403, to separate an update-RATE lag from a filter-GAIN lag.
-        let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|s| s.parse().ok()).unwrap_or(50);
+        let gnss_div: u32 = std::env::var("GNSS_DIV")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(50);
         let mut backend = SitlBackend::new(physics, dt, 0.0, gnss_div);
         for step in 0..n {
             let tick_start = Instant::now();
@@ -1522,14 +1661,25 @@ fn run_flightcore(
                     1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]),
                 );
                 let m = backend.last_motors();
-                let tilt_deg = libm::acosf((1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2])).clamp(-1.0, 1.0))
-                    * 57.2958;
+                let tilt_deg =
+                    libm::acosf((1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2])).clamp(-1.0, 1.0))
+                        * 57.2958;
                 eprintln!(
                     "t={:.2} true_z={:.2} est_z={:.2} vz={:+.2} alt_int={:+.3} \
 xy=[{:+.2},{:+.2}] tilt={:.0}deg yaw={:+.2} mot=[{:.2},{:.2},{:.2},{:.2}]",
-                    t, last_true[2], e.p[2], e.v[2], core.altitude_integral(),
-                    last_true[0], last_true[1], tilt_deg, yaw,
-                    m[0], m[1], m[2], m[3],
+                    t,
+                    last_true[2],
+                    e.p[2],
+                    e.v[2],
+                    core.altitude_integral(),
+                    last_true[0],
+                    last_true[1],
+                    tilt_deg,
+                    yaw,
+                    m[0],
+                    m[1],
+                    m[2],
+                    m[3],
                 );
                 // #403 — the diagnostic that separates the two hypotheses. The
                 // line above has TRUE horizontal position only, so it cannot
@@ -1541,9 +1691,17 @@ xy=[{:+.2},{:+.2}] tilt={:.0}deg yaw={:+.2} mot=[{:.2},{:.2},{:.2},{:.2}]",
                 eprintln!(
                     "H t={:.2} true_n={:+.3} true_e={:+.3} est_n={:+.3} est_e={:+.3} \
 err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
-                    t, last_true[0], last_true[1], e.p[0], e.p[1],
-                    e.p[0] - last_true[0], e.p[1] - last_true[1],
-                    e.v[0], e.v[1], g[2], yaw,
+                    t,
+                    last_true[0],
+                    last_true[1],
+                    e.p[0],
+                    e.p[1],
+                    e.p[0] - last_true[0],
+                    e.p[1] - last_true[1],
+                    e.v[0],
+                    e.v[1],
+                    g[2],
+                    yaw,
                 );
                 let _ = (a, g);
             }
@@ -1585,10 +1743,23 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
     // Rotor-out mode: the production FDI must have ISOLATED the injected rotor
     // (via the commanded-vs-achieved RPM residual carried across the SITL seam).
     let isolated = core.failed_motor();
-    let scen = if fail.is_some() { "flightcore-rotorout" } else { "flightcore" };
+    let scen = if fail.is_some() {
+        "flightcore-rotorout"
+    } else {
+        "flightcore"
+    };
     println!(
         "  verdict: backend={} scenario={} steps={} target={:.1}m final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m est_z={:.2}m isolated={:?} wall={:.2}s",
-        name, scen, n, target_alt_m, final_dist, peak_dist_err, rms_steady, est.p[2], isolated, wall.as_secs_f32(),
+        name,
+        scen,
+        n,
+        target_alt_m,
+        final_dist,
+        peak_dist_err,
+        rms_steady,
+        est.p[2],
+        isolated,
+        wall.as_secs_f32(),
     );
     if let Some((imu_recv, navsat_recv, motor_send)) = counters {
         println!(
@@ -1596,8 +1767,15 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
         );
     }
     if let Some(ref mut e) = evidence {
-        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
-                              min_dist_seen, wall.as_secs_f32(), counters);
+        e.write_summary_hover(
+            n,
+            final_dist,
+            peak_dist_err,
+            rms_steady,
+            min_dist_seen,
+            wall.as_secs_f32(),
+            counters,
+        );
     }
     match fail {
         // Rotor-out: PASS = the production FDI ISOLATED the CORRECT (failed)
@@ -1672,7 +1850,11 @@ fn run_closed_loop_hover(
 
     let setpoint_ned = [0.0_f32, 0.0, -2.0];
     let setpoint = if std::env::var("USE_IEKF").is_ok() {
-        PositionSetpoint { position_ned: setpoint_ned, velocity_ned: [0.0; 3], yaw_setpoint: yaw_hold }
+        PositionSetpoint {
+            position_ned: setpoint_ned,
+            velocity_ned: [0.0; 3],
+            yaw_setpoint: yaw_hold,
+        }
     } else {
         PositionSetpoint::hover_at(setpoint_ned)
     };
@@ -1708,13 +1890,21 @@ fn run_closed_loop_hover(
 
         // 2. EKF — attitude estimate.
         let est = ekf.tick(imu_sample);
-        if !est.quaternion[0].is_finite() { nan_seen = true; }
+        if !est.quaternion[0].is_finite() {
+            nan_seen = true;
+        }
 
         // 2b. IEKF — propagate on IMU, correct on gz position (the
         //     "GPS"), and on heading (v0.22 "compass") which makes yaw
         //     observable (the v0.21 ±130° wander). The measured accel is
         //     body-frame specific force, exactly the IEKF's dynamics input.
-        iekf.propagate(IekfImu { gyro: imu_sample.gyro_body, accel: imu_sample.accel_body }, dt);
+        iekf.propagate(
+            IekfImu {
+                gyro: imu_sample.gyro_body,
+                accel: imu_sample.accel_body,
+            },
+            dt,
+        );
         // Adaptive gravity/tilt fusion (variance inflates under accel) +
         // position. Gives the roll/pitch observability the IMU+GPS-only
         // filter lacked (3° error → tip-over).
@@ -1747,15 +1937,13 @@ fn run_closed_loop_hover(
         // IEKF, also feed its SMOOTH velocity estimate (the finite-diff
         // v_fd from NavSat is noisy and was destabilising the vel loop).
         let use_iekf = std::env::var("USE_IEKF").is_ok();
-        let est_q = if use_iekf { iekf.state().q } else { est.quaternion };
+        let est_q = if use_iekf {
+            iekf.state().q
+        } else {
+            est.quaternion
+        };
         let v_ned = if use_iekf { iekf.state().v } else { v_fd };
-        let att_sp = pos.tick(
-            pos_ts_of(t),
-            pos_ned,
-            v_ned,
-            est_q,
-            setpoint,
-        );
+        let att_sp = pos.tick(pos_ts_of(t), pos_ned, v_ned, est_q, setpoint);
         current_att_sp = att_sp.quaternion;
         current_thrust = att_sp.thrust;
 
@@ -1774,7 +1962,9 @@ fn run_closed_loop_hover(
         };
         let torque = frame_correct_torque(torque_raw);
         for k in 0..3 {
-            if !torque[k].is_finite() { nan_seen = true; }
+            if !torque[k].is_finite() {
+                nan_seen = true;
+            }
         }
 
         // 6. MIX — torque + thrust → 4× motor PWM. v0.19.9 carries the
@@ -1785,7 +1975,9 @@ fn run_closed_loop_hover(
             current_thrust * arm.thrust_scale,
             0.5 * arm.thrust_scale,
         );
-        if motors.iter().any(|v| !v.is_finite()) { nan_seen = true; }
+        if motors.iter().any(|v| !v.is_finite()) {
+            nan_seen = true;
+        }
 
         // 7. Publish to the bridge.
         physics.step(motors, dt);
@@ -1797,13 +1989,23 @@ fn run_closed_loop_hover(
             let est_tilt = libm::acosf(bz_d.clamp(-1.0, 1.0));
             let is = iekf.state();
             let iq = is.q;
-            let iyaw = libm::atan2f(2.0 * (iq[0] * iq[3] + iq[1] * iq[2]), 1.0 - 2.0 * (iq[2] * iq[2] + iq[3] * iq[3]));
+            let iyaw = libm::atan2f(
+                2.0 * (iq[0] * iq[3] + iq[1] * iq[2]),
+                1.0 - 2.0 * (iq[2] * iq[2] + iq[3] * iq[3]),
+            );
             let chdg = physics.heading_ned().unwrap_or(f32::NAN).to_degrees();
             eprintln!(
                 "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° IEKF_tilt={:.1}° IEKF_yaw={:.1}° compass={:.1}° ipos=[{:.1},{:.1},{:.1}]",
-                pos_ned[0], pos_ned[1], pos_ned[2],
-                tilt.to_degrees(), is.tilt_rad().to_degrees(), iyaw.to_degrees(), chdg,
-                is.p[0], is.p[1], is.p[2],
+                pos_ned[0],
+                pos_ned[1],
+                pos_ned[2],
+                tilt.to_degrees(),
+                is.tilt_rad().to_degrees(),
+                iyaw.to_degrees(),
+                chdg,
+                is.p[0],
+                is.p[1],
+                is.p[2],
             );
         }
 
@@ -1812,16 +2014,27 @@ fn run_closed_loop_hover(
         let de = pos_ned[1] - setpoint_ned[1];
         let dd = pos_ned[2] - setpoint_ned[2];
         let dist = (dn * dn + de * de + dd * dd).sqrt();
-        if dist > peak_dist_err { peak_dist_err = dist; }
-        if dist < min_dist_seen { min_dist_seen = dist; }
+        if dist > peak_dist_err {
+            peak_dist_err = dist;
+        }
+        if dist < min_dist_seen {
+            min_dist_seen = dist;
+        }
         if t >= steady_start_t {
             sum_sq_steady += dist * dist;
             steady_count += 1;
         }
 
         if let Some(ref mut e) = evidence {
-            e.write_tick(step, t, pos_ned, imu_sample.accel_body, imu_sample.gyro_body,
-                         motors, physics.counters());
+            e.write_tick(
+                step,
+                t,
+                pos_ned,
+                imu_sample.accel_body,
+                imu_sample.gyro_body,
+                motors,
+                physics.counters(),
+            );
         }
 
         if pace_real_time {
@@ -1851,7 +2064,12 @@ fn run_closed_loop_hover(
 
     println!(
         "  verdict: backend={} scenario=hover steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
-        physics.name(), n, final_dist, peak_dist_err, rms_steady, wall.as_secs_f32(),
+        physics.name(),
+        n,
+        final_dist,
+        peak_dist_err,
+        rms_steady,
+        wall.as_secs_f32(),
     );
     if let Some((imu_recv, navsat_recv, motor_send)) = counters {
         println!(
@@ -1859,8 +2077,15 @@ fn run_closed_loop_hover(
         );
     }
     if let Some(ref mut e) = evidence {
-        e.write_summary_hover(n, final_dist, peak_dist_err, rms_steady,
-                              min_dist_seen, wall.as_secs_f32(), counters);
+        e.write_summary_hover(
+            n,
+            final_dist,
+            peak_dist_err,
+            rms_steady,
+            min_dist_seen,
+            wall.as_secs_f32(),
+            counters,
+        );
     }
 
     // PASS = within 0.5 m at end + RMS over last 5 s under 1.0 m + no NaN.
@@ -1869,19 +2094,31 @@ fn run_closed_loop_hover(
 
 fn ekf_ts_of(secs: f32) -> EkfTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    EkfTimestamp { seconds: secs as u64, fraction: frac }
+    EkfTimestamp {
+        seconds: secs as u64,
+        fraction: frac,
+    }
 }
 fn rate_ts_of(secs: f32) -> RateTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    RateTimestamp { seconds: secs as u64, fraction: frac }
+    RateTimestamp {
+        seconds: secs as u64,
+        fraction: frac,
+    }
 }
 fn att_ts_of(secs: f32) -> AttTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    AttTimestamp { seconds: secs as u64, fraction: frac }
+    AttTimestamp {
+        seconds: secs as u64,
+        fraction: frac,
+    }
 }
 fn pos_ts_of(secs: f32) -> PosTimestamp {
     let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    PosTimestamp { seconds: secs as u64, fraction: frac }
+    PosTimestamp {
+        seconds: secs as u64,
+        fraction: frac,
+    }
 }
 
 /// v0.19.3 open-loop smoke: command 70 % PWM constant, watch for
@@ -1919,13 +2156,22 @@ fn run_open_loop_climb(
         physics.step(motor_pwm, dt);
         let (imu, pos) = physics.measure(0.01);
         let alt_m = -pos[2]; // NED down → altitude is -z
-        if initial_alt.is_none() { initial_alt = Some(alt_m); }
+        if initial_alt.is_none() {
+            initial_alt = Some(alt_m);
+        }
         min_alt = min_alt.min(alt_m);
         max_alt = max_alt.max(alt_m);
 
         if let Some(ref mut e) = evidence {
-            e.write_tick(step, t, pos, imu.accel_body, imu.gyro_body, motor_pwm,
-                         physics.counters());
+            e.write_tick(
+                step,
+                t,
+                pos,
+                imu.accel_body,
+                imu.gyro_body,
+                motor_pwm,
+                physics.counters(),
+            );
         }
 
         t += dt;
@@ -1944,7 +2190,12 @@ fn run_open_loop_climb(
     let counters = physics.counters();
     println!(
         "  verdict: backend={} steps={} climb={:.2} m  (min={:.2} max={:.2})  wall={:.2}s",
-        physics.name(), n, net_climb, min_alt, max_alt, wall.as_secs_f32(),
+        physics.name(),
+        n,
+        net_climb,
+        min_alt,
+        max_alt,
+        wall.as_secs_f32(),
     );
     if let Some((imu_recv, navsat_recv, motor_send)) = counters {
         println!(
@@ -1991,7 +2242,11 @@ impl EvidenceSink {
             ticks,
             "step,t_s,n_m,e_m,d_m,ax_body,ay_body,az_body,gx_body,gy_body,gz_body,m0,m1,m2,m3,imu_recv,navsat_recv,motor_send"
         )?;
-        Ok(Self { harness, ticks, timestamp: format!("{ts}") })
+        Ok(Self {
+            harness,
+            ticks,
+            timestamp: format!("{ts}"),
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2009,9 +2264,24 @@ impl EvidenceSink {
         let _ = writeln!(
             self.ticks,
             "{},{:.3},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.3},{:.3},{:.3},{:.3},{},{},{}",
-            step, t, pos[0], pos[1], pos[2],
-            accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2],
-            pwm[0], pwm[1], pwm[2], pwm[3], i, n, m,
+            step,
+            t,
+            pos[0],
+            pos[1],
+            pos[2],
+            accel[0],
+            accel[1],
+            accel[2],
+            gyro[0],
+            gyro[1],
+            gyro[2],
+            pwm[0],
+            pwm[1],
+            pwm[2],
+            pwm[3],
+            i,
+            n,
+            m,
         );
     }
 
@@ -2065,7 +2335,11 @@ impl EvidenceSink {
     }
 
     fn finish(&mut self, pass: bool) {
-        let _ = writeln!(self.harness, "verdict:    {}", if pass { "PASS" } else { "FAIL" });
+        let _ = writeln!(
+            self.harness,
+            "verdict:    {}",
+            if pass { "PASS" } else { "FAIL" }
+        );
         let _ = self.harness.flush();
         let _ = self.ticks.flush();
         let _ = &self.timestamp;
@@ -2082,7 +2356,10 @@ fn build_gazebo(args: &[String], world: String, model: String) -> GazeboPhysics 
         Some(s) => parse_home(&s).expect("--home=lat,lon,alt_m"),
         None => physics::Home::ORIGIN,
     };
-    println!("  gazebo home: lat={} lon={} alt={} m", home.lat_deg, home.lon_deg, home.alt_m);
+    println!(
+        "  gazebo home: lat={} lon={} alt={} m",
+        home.lat_deg, home.lon_deg, home.alt_m
+    );
     GazeboPhysics::connect_with_home(world, model, home)
         .expect("connect_with_home: gz-transport connect failed; is `gz sim` running?")
 }
@@ -2097,11 +2374,17 @@ fn build_gazebo(_args: &[String], world: String, model: String) -> GazeboPhysics
 #[cfg(feature = "gazebo")]
 fn parse_home(s: &str) -> Option<physics::Home> {
     let parts: Vec<&str> = s.split(',').collect();
-    if parts.len() != 3 { return None; }
+    if parts.len() != 3 {
+        return None;
+    }
     let lat_deg: f64 = parts[0].parse().ok()?;
     let lon_deg: f64 = parts[1].parse().ok()?;
     let alt_m: f64 = parts[2].parse().ok()?;
-    Some(physics::Home { lat_deg, lon_deg, alt_m })
+    Some(physics::Home {
+        lat_deg,
+        lon_deg,
+        alt_m,
+    })
 }
 
 fn arg(args: &[String], key: &str) -> Option<String> {
@@ -2188,7 +2471,10 @@ mod tests {
     fn production_flightcore_holds_altitude_through_sitl_plant() {
         let mut p = MockPhysics::at_rest();
         let ok = run_flightcore(&mut p, 2.0, 25.0, None, None);
-        assert!(ok, "production FlightCore failed to hold 2 m altitude on the SITL plant");
+        assert!(
+            ok,
+            "production FlightCore failed to hold 2 m altitude on the SITL plant"
+        );
         // The true state stayed finite (no divergence / NaN escape).
         for i in 0..3 {
             assert!(p.p_ned[i].is_finite(), "p_ned[{i}] = {}", p.p_ned[i]);
@@ -2237,12 +2523,25 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("fsg-bench-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         let mut sink = EvidenceSink::open(&tmp, "mock", "hover").expect("open");
-        sink.write_tick(0, 0.0, [0.0; 3], [0.0; 3], [0.0; 3], [0.7; 4], Some((1, 2, 3)));
+        sink.write_tick(
+            0,
+            0.0,
+            [0.0; 3],
+            [0.0; 3],
+            [0.0; 3],
+            [0.7; 4],
+            Some((1, 2, 3)),
+        );
         sink.write_summary(1, 0.5, 0.0, 0.5, 0.01, Some((1, 2, 3)));
         sink.finish(true);
         // Both files exist; the CSV has the header line + one data row.
         let entries: Vec<_> = fs::read_dir(&tmp).unwrap().collect();
-        assert_eq!(entries.len(), 2, "expected harness.log + ticks.csv in {:?}", tmp);
+        assert_eq!(
+            entries.len(),
+            2,
+            "expected harness.log + ticks.csv in {:?}",
+            tmp
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -2272,7 +2571,7 @@ mod tests {
     fn fault_tolerance_chain_recovers_from_rotor_loss() {
         use relay_geo::{GeoAtt, GeoGains};
         use relay_iekf::RotorFaultDetector;
-        use relay_mix_quad::{motors_to_torque_signs, QuadMixer};
+        use relay_mix_quad::{QuadMixer, motors_to_torque_signs};
 
         let ctrl = GeoAtt::new(GeoGains::FALCON_QUAD);
         let j = GeoGains::FALCON_QUAD.j;
@@ -2353,7 +2652,11 @@ mod tests {
             }
         }
         let final_tilt = (r[2][2].clamp(-1.0, 1.0)).acos();
-        assert_eq!(isolated, Some(real_failed), "FDI must isolate the failed rotor");
+        assert_eq!(
+            isolated,
+            Some(real_failed),
+            "FDI must isolate the failed rotor"
+        );
         // The body does NOT tumble (never inverts past ~80°) and SETTLES
         // back toward upright — the reduced-attitude law recovers the
         // thrust axis. (Full hover incl. the periodic spin solution is the
@@ -2451,7 +2754,7 @@ mod tests {
     /// trajectory generator + flatness feedforward + controller compose.
     #[test]
     fn mission_follows_waypoint_trajectory() {
-        use relay_geo::{desired_attitude, thrust_axis_ned, flatness_omega_ff, GeoAtt, GeoGains};
+        use relay_geo::{GeoAtt, GeoGains, desired_attitude, flatness_omega_ff, thrust_axis_ned};
         use relay_traj::Segment3;
 
         let j = [0.0217f32, 0.0217, 0.04];
@@ -2492,7 +2795,11 @@ mod tests {
                 let b3_d = thrust_axis_ned(a_cmd).unwrap();
                 let r_d = desired_attitude(b3_d, 0.0).unwrap();
                 let c = {
-                    let d = [g_ned[0] - a_cmd[0], g_ned[1] - a_cmd[1], g_ned[2] - a_cmd[2]];
+                    let d = [
+                        g_ned[0] - a_cmd[0],
+                        g_ned[1] - a_cmd[1],
+                        g_ned[2] - a_cmd[2],
+                    ];
                     (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
                 };
                 let off = flatness_omega_ff(a_cmd, s.jerk, 0.0, 0.0).unwrap_or([0.0; 3]);
@@ -2523,7 +2830,11 @@ mod tests {
             }
             // Reached the waypoint at the end of the leg.
             let err = {
-                let d = [p[0] - wps[leg + 1][0], p[1] - wps[leg + 1][1], p[2] - wps[leg + 1][2]];
+                let d = [
+                    p[0] - wps[leg + 1][0],
+                    p[1] - wps[leg + 1][1],
+                    p[2] - wps[leg + 1][2],
+                ];
                 (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
             };
             assert!(err < 0.4, "leg {leg}: missed waypoint by {err} m (p={p:?})");
@@ -2552,7 +2863,11 @@ mod tests {
         let set = RecoverableSet::new(10.0, 0.04, 1.6); // k_R, λ_M(J), Ψ_max
         let dt = 0.001f32;
         // Tilt 0.4 rad in roll.
-        let r0 = [[1.0f32, 0.0, 0.0], [0.0, 0.92106, -0.38942], [0.0, 0.38942, 0.92106]];
+        let r0 = [
+            [1.0f32, 0.0, 0.0],
+            [0.0, 0.92106, -0.38942],
+            [0.0, 0.38942, 0.92106],
+        ];
         // Destabilizing policy: POSITIVE attitude feedback (unstable).
         let bad = |r: &[[f32; 3]; 3]| {
             let e = GeoAtt::attitude_error(r, &r_d);
@@ -2584,7 +2899,10 @@ mod tests {
                 max_psi_agile = psi;
             }
         }
-        assert!(max_psi_agile > 1.9, "bad policy alone should leave {{Ψ<2}}: max {max_psi_agile}");
+        assert!(
+            max_psi_agile > 1.9,
+            "bad policy alone should leave {{Ψ<2}}: max {max_psi_agile}"
+        );
 
         // Run 2 — SHIELDED: stays in {Ψ<2} and recovers.
         let mut sh = SimplexShield::new(set, 0.15, 0.5);
@@ -2621,7 +2939,11 @@ mod tests {
     #[cfg(test)]
     fn integ_rot(r: &[[f32; 3]; 3], w: [f32; 3], dt: f32) -> [[f32; 3]; 3] {
         let wd = [w[0] * dt, w[1] * dt, w[2] * dt];
-        let incr = [[1.0, -wd[2], wd[1]], [wd[2], 1.0, -wd[0]], [-wd[1], wd[0], 1.0]];
+        let incr = [
+            [1.0, -wd[2], wd[1]],
+            [wd[2], 1.0, -wd[0]],
+            [-wd[1], wd[0], 1.0],
+        ];
         let mut m = [[0.0f32; 3]; 3];
         for i in 0..3 {
             for jj in 0..3 {
@@ -2648,6 +2970,10 @@ mod tests {
             e0[2] * e1[0] - e0[0] * e1[2],
             e0[0] * e1[1] - e0[1] * e1[0],
         ];
-        [[e0[0], e1[0], e2[0]], [e0[1], e1[1], e2[1]], [e0[2], e1[2], e2[2]]]
+        [
+            [e0[0], e1[0], e2[0]],
+            [e0[1], e1[1], e2[1]],
+            [e0[2], e1[2], e2[2]],
+        ]
     }
 }

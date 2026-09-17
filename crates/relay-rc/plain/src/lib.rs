@@ -91,11 +91,7 @@ pub(crate) fn throttle01(x: f32) -> f32 {
 /// Clamp a positive limit to a finite non-negative value (NaN/neg ⇒ 0).
 #[inline]
 fn limit(x: f32) -> f32 {
-    if x.is_finite() && x > 0.0 {
-        x
-    } else {
-        0.0
-    }
+    if x.is_finite() && x > 0.0 { x } else { 0.0 }
 }
 
 /// Stabilized mode: sticks → a bounded attitude setpoint. Centre roll/pitch sticks
@@ -274,7 +270,11 @@ fn crsf_crc8(data: &[u8]) -> u8 {
         crc ^= b;
         let mut bit = 0;
         while bit < 8 {
-            crc = if crc & 0x80 != 0 { (crc << 1) ^ 0xD5 } else { crc << 1 };
+            crc = if crc & 0x80 != 0 {
+                (crc << 1) ^ 0xD5
+            } else {
+                crc << 1
+            };
             bit += 1;
         }
     }
@@ -317,7 +317,12 @@ mod tests {
     use super::*;
 
     fn rc(roll: f32, pitch: f32, yaw: f32, throttle: f32) -> RcInput {
-        RcInput { roll, pitch, yaw, throttle }
+        RcInput {
+            roll,
+            pitch,
+            yaw,
+            throttle,
+        }
     }
 
     #[test]
@@ -412,8 +417,10 @@ mod tests {
     #[test]
     fn sbus_endpoints_map_to_stick_extremes() {
         // centre count -> level; min/max -> stick extremes; throttle idle/full.
-        let ch = [992, 172, 1811, 172, /* rest */ 992, 992, 992, 992, 992, 992,
-                  992, 992, 992, 992, 992, 992];
+        let ch = [
+            992, 172, 1811, 172, /* rest */ 992, 992, 992, 992, 992, 992, 992, 992, 992, 992,
+            992, 992,
+        ];
         let rc = sbus_to_rc(&decode_sbus(&pack_sbus(&ch, 0)).unwrap());
         assert!(rc.roll.abs() < 1e-3); // 992 -> centre
         assert!((rc.pitch + 1.0).abs() < 2e-2); // 172 -> -100%
@@ -461,7 +468,11 @@ mod tests {
             for &b in &f[2..25] {
                 crc ^= b;
                 for _ in 0..8 {
-                    crc = if crc & 0x80 != 0 { (crc << 1) ^ 0xD5 } else { crc << 1 };
+                    crc = if crc & 0x80 != 0 {
+                        (crc << 1) ^ 0xD5
+                    } else {
+                        crc << 1
+                    };
                 }
             }
             crc
@@ -501,8 +512,9 @@ mod tests {
 
     #[test]
     fn crsf_endpoints_map_to_stick_extremes() {
-        let ch = [992, 172, 1811, 1811, 992, 992, 992, 992, 992, 992, 992, 992,
-                  992, 992, 992, 992];
+        let ch = [
+            992, 172, 1811, 1811, 992, 992, 992, 992, 992, 992, 992, 992, 992, 992, 992, 992,
+        ];
         let rc = crsf_to_rc(&decode_crsf_rc(&pack_crsf(&ch)).unwrap());
         assert!(rc.roll.abs() < 1e-3); // 992 -> centre
         assert!((rc.pitch + 1.0).abs() < 2e-2); // 172 -> -100%

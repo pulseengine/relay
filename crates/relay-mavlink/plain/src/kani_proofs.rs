@@ -20,7 +20,11 @@ fn any_slot() -> StreamSlot {
     StreamSlot {
         interval_ticks: interval,
         frame_bytes: frame,
-        priority: if critical { Priority::Critical } else { Priority::Normal },
+        priority: if critical {
+            Priority::Critical
+        } else {
+            Priority::Normal
+        },
     }
 }
 

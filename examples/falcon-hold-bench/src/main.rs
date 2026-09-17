@@ -50,8 +50,18 @@ fn q_rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
 /// Touchdown) reaches Disarmed.
 fn fsm_sequence() -> (Mode, bool) {
     let mut fsm = FlightFsm::new();
-    let ground = Gates { level: true, throttle_low: true, have_position: true, prearm_ok: true };
-    let flying = Gates { level: true, throttle_low: false, have_position: true, prearm_ok: true };
+    let ground = Gates {
+        level: true,
+        throttle_low: true,
+        have_position: true,
+        prearm_ok: true,
+    };
+    let flying = Gates {
+        level: true,
+        throttle_low: false,
+        have_position: true,
+        prearm_ok: true,
+    };
 
     fsm.on(Event::Arm, ground);
     fsm.on(Event::RequestTakeoff, flying);
@@ -84,7 +94,10 @@ fn hold_under_wind() -> (f32, f32) {
 
     let steps = 50 * 30; // 30 s
     for k in 0..steps {
-        let t = Timestamp { seconds: 0, fraction: ((k as f32 * DT) * 1e9) as u32 };
+        let t = Timestamp {
+            seconds: 0,
+            fraction: ((k as f32 * DT) * 1e9) as u32,
+        };
         let att = ctrl.tick(t, pos, vel, q, sp);
         q = att.quaternion; // ideal inner loop: achieved = commanded
 
@@ -141,7 +154,13 @@ mod tests {
     #[test]
     fn position_and_altitude_hold_station_against_wind() {
         let (horiz, alt_err) = hold_under_wind();
-        assert!(horiz <= 1.0, "horizontal drift {horiz:.3} m exceeds 1.0 m budget");
-        assert!(alt_err <= 0.5, "altitude error {alt_err:.3} m exceeds 0.5 m budget");
+        assert!(
+            horiz <= 1.0,
+            "horizontal drift {horiz:.3} m exceeds 1.0 m budget"
+        );
+        assert!(
+            alt_err <= 0.5,
+            "altitude error {alt_err:.3} m exceeds 0.5 m budget"
+        );
     }
 }

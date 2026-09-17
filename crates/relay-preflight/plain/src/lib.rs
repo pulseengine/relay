@@ -208,7 +208,10 @@ impl CheckTable {
         for r in required.iter_mut().take(6) {
             *r = true;
         }
-        CheckTable { required, passed: [false; CHECK_COUNT] }
+        CheckTable {
+            required,
+            passed: [false; CHECK_COUNT],
+        }
     }
 
     /// Set a row's pass state. Setting ANY row marks it required — an
@@ -330,7 +333,11 @@ mod tests {
         for id in CheckId::ALL.iter().take(6) {
             t.set(*id, true);
         }
-        assert_eq!(arm_check_table(&t), TableVerdict::Allowed, "six pass, rest undeclared");
+        assert_eq!(
+            arm_check_table(&t),
+            TableVerdict::Allowed,
+            "six pass, rest undeclared"
+        );
         let fresh = CheckTable::new();
         assert_eq!(
             arm_check_table(&fresh),
@@ -342,6 +349,9 @@ mod tests {
     #[test]
     fn default_is_all_failing_blocked() {
         // a fresh checks struct (all false) must NOT arm.
-        assert_eq!(arm_check(PreflightChecks::default()), ArmVerdict::Blocked(CheckFail::Sensors));
+        assert_eq!(
+            arm_check(PreflightChecks::default()),
+            ArmVerdict::Blocked(CheckFail::Sensors)
+        );
     }
 }
