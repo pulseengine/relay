@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-CLAIMS-002
     type: sw-verification
     title: "CLAIMS — the bundle says which artifact flies, and the audit sees the legacy cascade built from Bazel-only sources (#411, v1.139)"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Partial verification of SWREQ-FALCON-CLAIMS-P01, for its #411 instance.

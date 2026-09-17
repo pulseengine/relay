@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-CLAIMS-003
     type: sw-verification
     title: "CLAIMS — the documents that tell an integrator what to deploy say which component flies (#419 cluster, v1.139)"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Partial verification of SWREQ-FALCON-CLAIMS-P01, for #419's first

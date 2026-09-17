@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-EVIDENCE-P01
     type: sw-req
     title: "EVIDENCE-P01 — every verification artifact's cited evidence shall resolve to something that exists and runs"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Every test, harness, file, command or artifact id cited by a
