@@ -1,0 +1,49 @@
+artifacts:
+  - id: FV-RELAY-VGATE-005
+    type: sw-verification
+    title: "VGATE-P04 — every release's notes record, from observed CI, which verification tracks were dark on the released commit (v1.139)"
+    status: implemented
+    release: falcon-v1.139.0
+    description: >
+      Verification of SWREQ-RELAY-VGATE-P04 in its v1.139 scope: a release that
+      cannot run a verification track records that fact explicitly, generated
+      from observed CI state rather than remembered.
+
+      THE MECHANISM. release.yml's create-release job composes the release body
+      as the hand-written notes plus a section produced by
+      scripts/verification-tracks.rs on the tagged commit: for each
+      verification workflow (ci, kani, verus, lean, rocq, gazebo, bazel,
+      coverage, spar, verification-gate, soak) the latest run on that exact
+      commit, classified passed / DARK / unfinished / did not run, with
+      PR-only and scheduled tracks labelled as such rather than counted as
+      misses; then the known structural gaps (#405 #418 #410 #407 #417 #436),
+      each flagged for removal once its issue closes. If CI state cannot be
+      read the tool exits 2 and the body records "Verification tracks:
+      UNKNOWN" — never a silent omission. It records; it does not block the
+      release (making tracks RUN is SWREQ-RELAY-VGATE-P05, v1.142).
+
+      OBSERVED, 2026-09-17, on main 9c53bff: Verus 🔴 DARK (failure), Kani ⏳
+      still running, the seven other per-commit tracks passed, the
+      verification gate labelled PR-only, the soak labelled scheduled, all six
+      structural-gap issues open. The v1.138.0 situation (Verus dark, release
+      silent) is a unit test.
+
+      THE STEP WAS EXECUTED, not only linted: extracted from release.yml and
+      run under `bash --noprofile --norc -eo pipefail` in a fixture repo with a
+      stub tool — tool exit 0 → notes + section; exit 2 → notes + UNKNOWN
+      section and the step continues; no notes file → minimal body + section.
+
+      NOT CLAIMED: a real release body produced by it. That appears at the next
+      tag and is the promotion evidence.
+    tags: [verification, relay, verification-gate, release, v1.139]
+    fields:
+      method: automated-test
+      steps:
+        - run: "rust-script --test scripts/verification-tracks.rs"
+        # release.yml generates the section from the tagged commit, and records UNKNOWN on failure.
+        - run: "grep -q './scripts/verification-tracks.rs --sha \"$(git rev-parse HEAD)\" >> \"$OUT\" || rc=$?' .github/workflows/release.yml"
+        - run: "grep -q 'Verification tracks: UNKNOWN' .github/workflows/release.yml"
+        - run: "grep -q '^      actions: read$' .github/workflows/release.yml"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-VGATE-P04
