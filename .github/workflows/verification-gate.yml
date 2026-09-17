@@ -255,6 +255,12 @@ jobs:
           path: verification-output.md
           if-no-files-found: warn
 
+      # gh is not installed on the self-hosted runners (#153, #436): without
+      # this the comment step below warned "gh not on PATH" and skipped, so no
+      # PR has carried the verification summary since the v1.55 migration.
+      - uses: ./.github/actions/setup-gh
+        if: github.event_name == 'pull_request' && always() && steps.scope.outputs.run_full == 'true'
+
       - name: Post sticky PR comment
         # Cosmetic: the verification VERDICT is owned by the separate
         # "Fail job if any verification artifact failed" step below. A comment
