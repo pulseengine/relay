@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-COV-005
     type: sw-verification
     title: "witness harness improvements + bazel macro (v0.16.0)"
-    status: verified
+    status: implemented
     description: >
       v0.16.0 lands two harness improvements that close v0.15.1's
       deferred items 1 + 3, plus an upstream-bug report for item 2.
@@ -74,6 +74,9 @@ artifacts:
           SITL records via `WITNESS_HARNESS_INVOKES` should push
           81/5972 → much higher (the cascade's safety-path
           branches are downstream of step).
+
+      DEMOTED verified -> implemented (2026-09-17, #415, maintainer decision). Same as FV-FALCON-COV-004: the executed step only builds the harness; the witness run uses an unset `$WITNESS` and a /tmp input no step produces, and the coverage target has never been produced in CI (#407). RESTORE with a CI witness run on the real component, cited.
+
     tags: [verification, falcon, witness, mcdc, harness, bazel-macro, v0.16.0]
     fields:
       method: structural-coverage-mcdc + subprocess-harness + bazel-macro
