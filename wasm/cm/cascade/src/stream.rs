@@ -1,9 +1,13 @@
 // Falcon Control Cascade — COMPOSED P3 Stream Transformer component.
 //
-// stream<cascade-input{imu, target}> -> stream<motor-pwm>, running the full
-// flight-control pipeline (iekf -> pos -> att -> rate -> mixer) per tick. The
-// streamed counterpart of the sync falcon-cascade socket: one orchestrating
-// component driving all FIVE verified engines directly (STREAM-P11, v1.73).
+// stream<cascade-input{imu, target}> -> stream<motor-pwm>, running the LEGACY
+// five-stage pipeline (iekf -> pos -> att -> rate -> mixer) per tick — one
+// orchestrating component driving the five engine crates directly
+// (STREAM-P11, v1.73).
+//
+// NOT the streamed counterpart of today's falcon-cascade (#411, #419): since
+// #393 that component wraps falcon_core::FlightCore (geometric SE(3) + ADRC), a
+// different control law. This is the relay P3 stream-composition demonstrator.
 //
 // wac composes function-call interfaces, not stream data-flow, so a streamed
 // pipeline is one orchestrating component rather than a wac_plug of the five
