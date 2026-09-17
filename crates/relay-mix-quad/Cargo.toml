@@ -20,3 +20,11 @@ proptest.workspace = true
 
 [lints]
 workspace = true
+
+# verify_mix_priority_bound is compositional: it uses scale_to_fit's proven
+# contract instead of re-solving its body (#429). That needs these two
+# unstable Kani features; Kani is pinned (kani.yml, 0.67.0), so they cannot
+# change under the required gate without a deliberate bump.
+[package.metadata.kani.unstable]
+function-contracts = true
+stubbing = true

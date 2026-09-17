@@ -1,0 +1,51 @@
+artifacts:
+  - id: SWREQ-RELAY-MIXPROOF-P01
+    type: sw-req
+    title: "MIXPROOF-P01 — the MIX-P06 priority-mix bound proof shall not depend on a solver's heavy tail"
+    status: implemented
+    release: falcon-v1.140.0
+    description: >
+      The Kani proof that the priority-desaturation mixer keeps every motor
+      finite and in `[floor, 1]` for any input (MIX-P06,
+      `verify_mix_priority_bound`) shall reach its verdict in bounded time on
+      the CI fleet. A required gate that passes or stalls depending on the run
+      is not a verdict.
+
+      WHY IT EXISTS (#429). Measured over every `Kani (relay-mix-quad)` job
+      that reached model checking from 2026-09-15 to 2026-09-17: 29 passed in
+      3–4 min and 13 stalled (43–126 min, or cancelled at the 60-min cap from
+      #432). That is 31%. Every stall whose log was read (the five in #429 and
+      the three on main on 2026-09-17: 916fbca, 3ba320d, a8f6cf7) sits in
+      `verify_mix_priority_bound`, in the CaDiCaL solve after the first
+      propositional reduction. The same instance (186 629 variables, 801 030
+      clauses, identical in CI and locally) solves in 13 s on a developer
+      machine. The proof is not wrong: it is one large instance with a heavy
+      tail, and it turned main's Kani gate red three times in one day.
+
+      THE CHANGE. The harness is compositional. `scale_to_fit`, which holds
+      the mixer's float divisions, carries a Kani contract: for finite
+      arguments it returns a finite scale in `[0, 1]`.
+      `verify_scale_to_fit_contract` proves that contract for all finite
+      inputs, including Kani's NaN checks on its divisions.
+      `verify_mix_priority_bound` uses `stub_verified(scale_to_fit)`: Kani
+      asserts the precondition at both call sites and assumes only the proven
+      postcondition. The motor bound is thereby proven for every scale in
+      `[0, 1]`, a superset of what `scale_to_fit` returns, so the MIX-P06 claim
+      is unchanged. The instance drops to 407 696 clauses.
+
+      THE COST, stated. The two Kani features this needs (`function-contracts`,
+      `stubbing`) are unstable. They are enabled only for this crate, in
+      `crates/relay-mix-quad/Cargo.toml`. Kani is pinned at 0.67.0 in
+      kani.yml, so they cannot change under the gate without a deliberate
+      bump. Maintainer decision, 2026-09-17: take this in v1.140 rather than
+      wait for CIFLOW-P01 (v1.142).
+
+      FALSIFICATION: wrong if a `Kani (relay-mix-quad)` job on CI, after this
+      merges, stalls with `verify_mix_priority_bound` or
+      `verify_scale_to_fit_contract` as the harness in progress; or if either
+      harness still passes after the mixer or `scale_to_fit` is mutated to
+      break its bound.
+    tags: [requirement, relay, ci, kani, mixer, v1.140]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
