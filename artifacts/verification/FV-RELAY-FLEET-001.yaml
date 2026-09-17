@@ -98,6 +98,8 @@ artifacts:
         - run: "test \"$(grep -c 'uses: ./.github/actions/setup-gh' .github/workflows/fleet-status.yml)\" -eq 2"
         - run: "grep -q \"GH_SHA256: '[0-9a-f]\\{64\\}'\" .github/actions/setup-gh/action.yml"
         - run: "grep -q 'sha256sum -c -' .github/actions/setup-gh/action.yml"
+        # ...and so does the verification gate's PR-comment step (#153).
+        - run: "grep -q 'uses: ./.github/actions/setup-gh' .github/workflows/verification-gate.yml"
         # Baseline from successful runs — the measured trap (2) in FLEET-P01.
         - run: "grep -q 'runs?status=success&per_page=' scripts/ci-wedge-watch.rs"
     links:
