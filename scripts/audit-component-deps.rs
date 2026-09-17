@@ -36,9 +36,9 @@ use std::path::Path;
 /// Remove each entry as #388 brings that component up to the flown stack; the
 /// audit then fails if it regresses.
 const WAIVERS: &[(&str, &str)] = &[
-    ("relay-att", "#388 — wasm/cm/attitude wraps the legacy PID attitude controller; falcon-core flies geometric SE(3)"),
-    ("relay-pos", "#388 — wasm/cm/position wraps the legacy PID position controller"),
-    ("relay-rate", "#388 — wasm/cm/rate wraps the legacy PID rate controller; falcon-core flies ADRC"),
+    ("relay-att", "#388 — wasm/cm/attitude wraps the legacy PID attitude controller; falcon-core flies geometric SE(3). Also built into the shipped P3 stream pipeline via wasm/cm/cascade/src/orch.rs (#411)"),
+    ("relay-pos", "#388 — wasm/cm/position wraps the legacy PID position controller. Also in the stream pipeline via orch.rs (#411)"),
+    ("relay-rate", "#388 — wasm/cm/rate wraps the legacy PID rate controller; falcon-core flies ADRC. Also in the stream pipeline via orch.rs (#411)"),
     ("relay-ekf", "#388 — wasm/cm/ekf is the Mahony filter; falcon-core flies the IEKF"),
 ];
 
@@ -68,6 +68,46 @@ fn collect(t: &toml::map::Map<String, toml::Value>, out: &mut BTreeSet<String>) 
     }
 }
 
+/// `relay_foo_bar` identifiers in a Rust source, as crate names `relay-foo-bar`.
+fn relay_imports(text: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while let Some(off) = text[i..].find("relay_") {
+        let start = i + off;
+        let boundary = start == 0 || !(bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_');
+        let mut end = start + "relay_".len();
+        while end < bytes.len() && (bytes[end].is_ascii_lowercase() || bytes[end].is_ascii_digit() || bytes[end] == b'_') {
+            end += 1;
+        }
+        if boundary && end > start + "relay_".len() {
+            out.insert(text[start..end].replace('_', "-"));
+        }
+        i = end.max(start + 1);
+    }
+    out
+}
+
+/// Rust sources BUILD.bazel compiles from wasm/cm that are NOT a cargo crate
+/// root. #411: `wasm/cm/cascade/src/orch.rs` imported relay_att/pos/rate — the
+/// legacy cascade, shipped in the signed bundle — while cascade/Cargo.toml
+/// listed only falcon-core, so a manifest-only audit reported the directory
+/// clean. The divergence lived in undeclared sources; audit those too.
+fn bazel_only_sources() -> Result<Vec<(String, String)>> {
+    let build = std::fs::read_to_string("BUILD.bazel").context("reading BUILD.bazel")?;
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for piece in build.split('"') {
+        if let Some(rest) = piece.strip_prefix("wasm/cm/") {
+            if piece.ends_with(".rs") && !piece.ends_with("/lib.rs") && seen.insert(piece.to_string()) {
+                let comp = rest.split('/').next().unwrap_or("").to_string();
+                out.push((comp, piece.to_string()));
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn main() -> Result<()> {
     let json = std::env::args().any(|a| a == "--json");
 
@@ -88,6 +128,15 @@ fn main() -> Result<()> {
         // Empty scope must not equal pass: a wasm/cm that vanished or moved
         // would otherwise make this audit report "all clear".
         bail!("found no components under wasm/cm — refusing to report a clean audit");
+    }
+    let bazel_sources = bazel_only_sources()?;
+    let mut bazel_seen: Vec<(String, BTreeSet<String>)> = Vec::new();
+    for (comp, path) in &bazel_sources {
+        let text = std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
+        let deps = relay_imports(&text);
+        let key = format!("{comp} [bazel-only {}]", path.trim_start_matches(&format!("wasm/cm/{comp}/")));
+        bazel_seen.push((path.clone(), deps.clone()));
+        components.insert(key, deps);
     }
 
     let waived: BTreeSet<&str> = WAIVERS.iter().map(|(c, _)| *c).collect();
@@ -111,6 +160,12 @@ fn main() -> Result<()> {
     } else {
         println!("flight core (crates/falcon-core) depends on {} relay-* crates", flown.len());
         println!("components under wasm/cm: {}", components.len());
+        println!();
+        println!("BAZEL-ONLY SOURCES AUDITED (compiled by BUILD.bazel, in no Cargo.toml — #411): {}", bazel_seen.len());
+        for (path, deps) in &bazel_seen {
+            let list: Vec<&str> = deps.iter().map(String::as_str).collect();
+            println!("    {path:<40} {}", if list.is_empty() { "(no relay-* imports)".to_string() } else { list.join(" ") });
+        }
         println!();
         if !unshipped.is_empty() {
             println!("FLOWN BUT NOT WRAPPED BY ANY COMPONENT (informational):");
