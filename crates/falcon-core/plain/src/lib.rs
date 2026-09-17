@@ -149,6 +149,22 @@ pub struct EstimatorPartition {
     /// leaf): fed the position innovation each GNSS update; a sustained
     /// directional walk-off latches. OR-ed with the selector divergence into
     /// [`nav_compromised`](Self::nav_compromised).
+    /// Ticks since the last ACCEPTED position fix, and the window over which
+    /// that aiding counts as fresh (#452/#434). While position aiding is fresh
+    /// the gravity update is SKIPPED: a multirotor's accelerometer senses
+    /// specific force along the thrust axis, so taking it as gravity pulls the
+    /// tilt estimate level exactly when the vehicle tilts to accelerate, and
+    /// the hold then diverges at every fix rate. Tilt stays observable through
+    /// the position innovations instead. With no aiding — on the ground, or
+    /// through a GNSS outage — the accelerometer is the only attitude
+    /// reference there is, so the update resumes.
+    ticks_since_aiding: u32,
+    gravity_hold_ticks: u32,
+    /// Set by [`FlightCore::step`] from the cascade's own collective: the
+    /// gravity update is only suppressed while the vehicle is FLYING. On the
+    /// ground the accelerometer is the tilt reference that lets pre-arm see a
+    /// settled, level estimate, and there the reading really is gravity.
+    in_flight: bool,
     spoof: relay_iekf::SpoofMonitor,
     /// Sensor calibration applied to raw IMU/mag samples before the estimator
     /// (gyro/accel bias+scale, mag hard/soft-iron). Identity until
@@ -179,6 +195,13 @@ impl EstimatorPartition {
             // threshold 60 m·steps, drift slack 0.15 m/step: rejects zero-mean
             // GNSS noise, latches on a sustained directional walk-off.
             spoof: relay_iekf::SpoofMonitor::new(60.0, 0.15),
+            // `warmup` is 0.2 s of steps, so 5x it is one second of staleness:
+            // long enough to ride out a 5 Hz fix interval (0.2 s) and a missed
+            // fix, short enough that a real outage falls back to the
+            // accelerometer within a second.
+            ticks_since_aiding: u32::MAX,
+            gravity_hold_ticks: warmup.saturating_mul(5),
+            in_flight: false,
             step_count: 0,
             fdi_warmup_steps: warmup,
             calib: relay_calib::CalParams::identity(),
@@ -232,6 +255,12 @@ impl EstimatorPartition {
     pub fn set_process_floor(&mut self, vel: f32, pos: f32) {
         self.iekf.set_process_floor(vel, pos);
     }
+    /// Tell the estimator whether the vehicle is flying (#452). `FlightCore`
+    /// derives it from the cascade's own collective; a standalone estimator
+    /// keeps the ground behaviour, which is the pre-#452 behaviour.
+    pub fn set_in_flight(&mut self, flying: bool) {
+        self.in_flight = flying;
+    }
     /// The estimated nav state (for telemetry / tests).
     pub fn state(&self) -> NavState {
         self.iekf.state()
@@ -255,10 +284,14 @@ impl EstimatorPartition {
                 if let Some(e) = est_ref {
                     self.spoof.update([p[0] - e[0], p[1] - e[1], p[2] - e[2]]);
                 }
-                self.iekf.update_position(p, self.pos_var);
+                if self.iekf.update_position(p, self.pos_var) {
+                    self.ticks_since_aiding = 0;
+                }
             }
         } else if let Some(p) = b.read_position() {
-            self.iekf.update_position(p, self.pos_var);
+            if self.iekf.update_position(p, self.pos_var) {
+                self.ticks_since_aiding = 0;
+            }
         }
     }
 
@@ -279,7 +312,13 @@ impl EstimatorPartition {
 
         // ── Estimate ──
         self.iekf.propagate(IekfImu { gyro, accel }, dt);
-        self.iekf.update_gravity(accel, self.grav_var);
+        // GRAVITY UPDATE ONLY WITHOUT FRESH POSITION AIDING (#452/#434): the
+        // reading is specific force, which points along the thrust axis and
+        // shows almost none of the vehicle's tilt while it flies.
+        if !self.in_flight || self.ticks_since_aiding > self.gravity_hold_ticks {
+            self.iekf.update_gravity(accel, self.grav_var);
+        }
+        self.ticks_since_aiding = self.ticks_since_aiding.saturating_add(1);
         self.fuse_gnss(b);
         if let Some(m) = b.read_mag() {
             self.iekf
@@ -305,6 +344,12 @@ impl EstimatorPartition {
         self.step_count = self.step_count.saturating_add(1);
         self.iekf.state()
     }
+}
+
+/// |x| without libm (bit mask), for the cascade's own gates.
+#[inline]
+fn libm_fabsf_core(x: f32) -> f32 {
+    f32::from_bits(x.to_bits() & 0x7fff_ffff)
 }
 
 /// The CASCADE partition (PART-P01, v1.124): geometric attitude, ADRC,
@@ -456,6 +501,16 @@ impl CascadePartition {
     pub fn max_motor(&self) -> f32 {
         let m = self.mixer.last_motors();
         m[0].max(m[1]).max(m[2]).max(m[3])
+    }
+    /// FLYING, from the cascade's own last command (#452): the mean motor
+    /// output has passed 70% of the hover collective. A vehicle sitting on the
+    /// ground with its rotors idle is below it; one holding altitude is at
+    /// ~100% of it. Used to decide whether the accelerometer is a usable
+    /// gravity reference (it is, at rest; it is not, under thrust).
+    pub fn flying(&self) -> bool {
+        let m = self.mixer.last_motors();
+        let mean = (m[0] + m[1] + m[2] + m[3]) * 0.25;
+        mean > 0.7 * self.hover_thrust
     }
     /// The isolated failed rotor (latched), or `None` — the supervisor lands the
     /// vehicle when this is set (a 3-rotor quad cannot navigate; v1.103).
@@ -694,7 +749,21 @@ impl CascadePartition {
             // deficit. NED sign convention: below the target means alt_err < 0
             // and closing it means v[2] < 0, so converging is a POSITIVE
             // product either way up.
-            let converging = alt_err * est.v[2] > 0.0;
+            //
+            // A MAGNITUDE FLOOR, added with #452. The product test alone reads
+            // a vehicle that has STOPPED short as "still converging": parked
+            // 2.15 m below the setpoint under thrust lapse, the residual climb
+            // is 0.0005 m/s, which shares its sign with the error and holds the
+            // integral off forever. The old estimator hid this — its vertical
+            // velocity lagged and dithered in sign, so the integral charged by
+            // accident. With the accelerometer reporting true specific force
+            // the estimate is exact (velocity error ~0.000 m/s) and the gate
+            // never opens. 0.05 m/s sits below the 0.1-0.29 m/s climb #404
+            // measured (so the approach is still gated) and above the creep of
+            // a stalled hold.
+            const VZ_CONVERGING_MIN: f32 = 0.05;
+            let converging =
+                alt_err * est.v[2] > 0.0 && libm_fabsf_core(est.v[2]) > VZ_CONVERGING_MIN;
             if !converging {
                 self.alt_int += alt_err * dt;
             }
@@ -881,6 +950,8 @@ impl FlightCore {
         let dt = b.dt();
         let raw = b.read_imu();
         let heading = b.read_heading();
+        // The cascade's PREVIOUS command says whether we are flying (#452).
+        self.est.set_in_flight(self.casc.flying());
         let ns = self.est.step(b, raw, heading, dt);
         self.casc.step(b, &ns, raw, heading.is_some(), dt);
     }
@@ -1062,6 +1133,7 @@ impl PartitionedCore {
         let dt = b.dt();
         let raw = b.read_imu();
         let heading = b.read_heading();
+        self.est.set_in_flight(self.casc.flying());
         let ns = self.est.step(b, raw, heading, dt);
         // push newest at 0
         for i in (1..self.buf.len()).rev() {
@@ -1920,6 +1992,12 @@ where
 /// IMU/mag are synthesised from it. Swapping this for a real-hardware
 /// `FlightBackend` is the only change needed to fly the same core on a board.
 pub struct SimBackend {
+    /// SPECIFIC FORCE in NED (m/s²), what an accelerometer actually senses:
+    /// the non-gravitational acceleration the plant produced last step
+    /// (thrust + wind + drag, and the ground reaction while in contact).
+    /// A real IMU, and gz's, reports this; the gravity reaction is what it
+    /// reads at rest, and under thrust it points along the thrust axis. #452.
+    specific_force_ned: Vec3,
     /// Body→NED attitude matrix.
     pub r: [[f32; 3]; 3],
     /// Body rate (rad/s).
@@ -2052,6 +2130,9 @@ impl SimBackend {
     /// Start at attitude `r0`, at rest, at altitude 0. `dt` = control period.
     pub fn new(r0: [[f32; 3]; 3], dt: f32) -> Self {
         SimBackend {
+            // At rest on the ground the accelerometer reads the gravity
+            // reaction: −g on NED z (the vehicle is held up, not falling).
+            specific_force_ned: [0.0, 0.0, -GRAVITY],
             r: r0,
             omega: [0.0; 3],
             pos: [0.0; 3],
@@ -2183,9 +2264,11 @@ impl SimBackend {
 
 impl FlightBackend for SimBackend {
     fn read_imu(&mut self) -> ImuSample {
-        // at hover (no translation) the accelerometer reads the gravity
-        // reaction (pointing "up" = −z in NED), rotated into the body frame.
-        let mut accel = self.to_body([0.0, 0.0, -GRAVITY]);
+        // The accelerometer senses SPECIFIC FORCE, rotated into the body
+        // frame — thrust included. At rest that is the gravity reaction
+        // (−z in NED); under thrust it points along the thrust axis, which
+        // is why tilt is nearly invisible to it in flight (#452, #434).
+        let mut accel = self.to_body(self.specific_force_ned);
         // v1.9 — broadband vibration on the specific force.
         if self.path.vibration > 0.0 {
             let v = self.path.vibration;
@@ -2359,6 +2442,7 @@ impl FlightBackend for SimBackend {
                 accel[i] -= self.drag_quad * speed * va[i];
             }
         }
+        let vel_before = self.vel;
         for i in 0..3 {
             self.vel[i] += self.dt * accel[i];
             self.pos[i] += self.dt * self.vel[i];
@@ -2371,6 +2455,14 @@ impl FlightBackend for SimBackend {
                 self.vel[2] = 0.0;
             }
         }
+        // The specific force is the ACHIEVED acceleration minus gravity —
+        // taken after the ground clamp, so a vehicle resting on the surface
+        // senses the normal reaction (−g) rather than a free fall. Exact for
+        // this Euler plant: no finite-difference lag. #452.
+        for i in 0..3 {
+            self.specific_force_ned[i] = (self.vel[i] - vel_before[i]) / self.dt;
+        }
+        self.specific_force_ned[2] -= GRAVITY;
         // v1.9 — advance the tick clock and integrate the gyro bias drift
         // (once per control step; write_motors is the tail of FlightCore::step).
         self.step_n = self.step_n.wrapping_add(1);
@@ -4425,6 +4517,87 @@ mod tests {
         peak
     }
 
+    /// **#434's oracle, with a realistic accelerometer.** Hold a fixed point
+    /// with position fixes at 5 Hz — the rate an M9N actually delivers, and the
+    /// rate at which the pre-#452 core diverged without bound (75 m at 20 s,
+    /// 3.4 km at 60 s on this harness). The accelerometer now reports specific
+    /// force, so the vehicle's tilt is invisible to it and the estimator takes
+    /// tilt from the position innovations instead.
+    ///
+    /// Falsifies the fix: if `EstimatorPartition::step` fuses the accelerometer
+    /// as gravity while flying, this run diverges again.
+    #[test]
+    fn hold_converges_with_5hz_position_aiding() {
+        for &dt in &[0.002f32, 0.01] {
+            let hz = 1.0 / dt;
+            let period = (hz / 5.0) as u32; // fixes at 5 Hz
+            let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+            let mut b = SimBackend::new(level, dt).with_pathology(Pathology {
+                gps_dropout_period: period,
+                gps_dropout_len: period - 1,
+                ..Pathology::default()
+            });
+            let mut core = FlightCore::new(0.5, hz);
+            core.set_pos_var(0.25);
+            core.set_process_floor(0.30, 0.05);
+            core.set_position([0.0, 0.0, -2.0]);
+            b.pos[0] = 1.0; // start 1 m off, as #434 does
+            let mut peak = 0.0f32;
+            for i in 0..(60.0 / dt) as usize {
+                core.step(&mut b);
+                let h = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
+                if i as f32 * dt > 5.0 && h > peak {
+                    peak = h;
+                }
+            }
+            let h = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
+            assert!(
+                h < 0.5 && peak < 2.0,
+                "5 Hz aiding must converge (dt {dt}): h@60s {h} m, peak after 5 s {peak} m"
+            );
+            let alt_err = (-b.pos[2] - 2.0).abs();
+            assert!(
+                alt_err < 0.3,
+                "altitude must hold (dt {dt}): off by {alt_err} m"
+            );
+        }
+    }
+
+    /// **The accelerometer comes back when the fixes stop.** Suppressing the
+    /// gravity update is conditional on fresh aiding (#452); through a GNSS
+    /// outage the accelerometer is the only attitude reference there is, so the
+    /// update must resume and the vehicle must stay controllable.
+    #[test]
+    fn gnss_outage_restores_the_gravity_update_and_stays_bounded() {
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        let mut core = FlightCore::new(0.5, 1.0 / dt);
+        core.set_pos_var(0.25);
+        core.set_process_floor(0.30, 0.05);
+        core.set_position([0.0, 0.0, -2.0]);
+        for _ in 0..10_000 {
+            core.step(&mut b); // 20 s of aided hold
+        }
+        // 15 s with no fixes at all.
+        b.path.gps_dropout_start = 0;
+        b.path.gps_dropout_len = u32::MAX;
+        b.path.gps_dropout_period = 0;
+        let mut peak = 0.0f32;
+        for _ in 0..7_500 {
+            core.step(&mut b);
+            let h = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
+            if h > peak {
+                peak = h;
+            }
+        }
+        assert!(
+            peak < 5.0 && (-b.pos[2] - 2.0).abs() < 1.0,
+            "a 15 s outage must stay bounded: peak {peak} m, altitude off by {} m",
+            (-b.pos[2] - 2.0).abs()
+        );
+    }
+
     /// Position hold survives noisy + intermittently-dropping GNSS WHEN the
     /// filter's measurement variance matches the receiver: the IEKF smooths the
     /// 0.3 m fix noise and dead-reckons through the recurring outage, bounded.
@@ -4442,16 +4615,22 @@ mod tests {
     /// winds up on it, and the loop DIVERGES (>10 m). The honest motivation for
     /// matching the measurement variance to the real sensor (set_pos_var).
     #[test]
-    fn optimistic_variance_diverges_under_noisy_gps() {
+    fn variance_matching_helps_and_over_trust_no_longer_diverges() {
         let peak_optimistic = fly_noisy_gps(0.01); // default 1 cm² — over-trusting
-        let peak_matched = fly_noisy_gps(0.09); // matched
+        let peak_matched = fly_noisy_gps(0.09); // matched to the 0.3 m fix noise
+        // BEFORE #452 the over-trusting filter DIVERGED here (> 10 m, ~2400 m
+        // observed at v1.19), and that divergence was the stated motivation for
+        // set_pos_var. It was not the variance alone: the filter chased the fix
+        // noise into a tilt estimate corrupted by reading specific force as
+        // gravity. With the gravity update suppressed in flight, over-trust
+        // costs accuracy (0.40 m vs 0.18 m peak) and no longer diverges.
         assert!(
-            peak_optimistic > 10.0,
-            "over-trust should diverge: {peak_optimistic} m"
+            peak_matched < peak_optimistic,
+            "matching the variance must still help: {peak_matched} vs {peak_optimistic} m"
         );
         assert!(
-            peak_matched < peak_optimistic * 0.1,
-            "matched must be far better: {peak_matched} vs {peak_optimistic} m"
+            peak_optimistic < 1.5,
+            "over-trust must no longer diverge: {peak_optimistic} m"
         );
     }
 
@@ -4565,19 +4744,28 @@ mod tests {
         use relay_calib::CalParams;
         struct TumbleBackend {
             tilted: bool,
+            /// Attitude reached so far (rad), ramped while `tilted`.
+            tilt_now: f32,
         }
         impl FlightBackend for TumbleBackend {
             fn read_imu(&mut self) -> ImuSample {
-                // tilted: gravity measured along body-x ⇒ the estimate converges
-                // to a ~90° tilt (well past the runaway limit); else level.
-                let accel = if self.tilted {
-                    [GRAVITY, 0.0, 0.0]
+                // A TUMBLE IS A ROTATION (#452). The first version reported
+                // gravity along body-x with a zero gyro — a vehicle tilted 90°
+                // that never rotated, readable only by an estimator that takes
+                // the accelerometer for gravity. A tumbling vehicle's
+                // accelerometer reads its thrust axis; the tumble is in the
+                // gyro. So this rolls at 2 rad/s to ~90° (0.8 s, inside the
+                // 200-step level phase's successor) and holds.
+                let dt = 0.004;
+                let rate = if self.tilted && self.tilt_now < core::f32::consts::FRAC_PI_2 {
+                    self.tilt_now += 2.0 * dt;
+                    2.0
                 } else {
-                    [0.0, 0.0, -GRAVITY]
+                    0.0
                 };
                 ImuSample {
-                    accel,
-                    gyro: [0.0; 3],
+                    accel: [0.0, 0.0, -GRAVITY],
+                    gyro: [0.0, rate, 0.0],
                 }
             }
             fn read_position(&mut self) -> Option<Vec3> {
@@ -4599,7 +4787,10 @@ mod tests {
             gyro_bias: [0.001, 0.0, 0.0],
             ..CalParams::identity()
         });
-        let mut b = TumbleBackend { tilted: false };
+        let mut b = TumbleBackend {
+            tilted: false,
+            tilt_now: 0.0,
+        };
 
         // converge level, then arm + take off (airborne, still level).
         for _ in 0..1500 {
@@ -5328,19 +5519,52 @@ mod failsafe_campaign {
         s
     }
 
-    /// Feeds an IMU consistent with a body tilt of `tilt` rad (gravity leaning
-    /// about body-y), so the IEKF converges the estimate to ~tilt and the
-    /// runaway/wind detectors act on it — exactly the point-tests' mechanism.
+    /// Feeds an IMU consistent with a body tilt of `tilt` rad about body-y, so
+    /// the IEKF's estimate reaches ~tilt and the runaway/wind detectors act on
+    /// it — exactly the point-tests' mechanism.
+    ///
+    /// HOW THE TILT REACHES THE ESTIMATE (#452). The first version leaned the
+    /// gravity vector in the accelerometer and reported ZERO gyro: a vehicle
+    /// that is tilted without ever having rotated. That only worked while the
+    /// estimator read attitude off the accelerometer. It does not any more
+    /// while position aiding is fresh, and it was never how a vehicle tells an
+    /// IMU it is tilted: a hovering multirotor's accelerometer reads the thrust
+    /// axis (−g on body z) at ANY tilt, and the rotation shows up in the GYRO.
+    /// So this backend now ROTATES to the commanded tilt at a fixed rate and
+    /// reports that rate, then holds. The estimate gets there by integrating
+    /// the gyro, which is what happens on a real airframe.
     struct TiltBackend {
         tilt: f32,
         pos: Vec3,
+        /// Attitude actually reached so far (rad), ramped toward `tilt`.
+        tilt_now: f32,
+    }
+    impl TiltBackend {
+        /// Rotation rate while slewing to the commanded tilt (rad/s). A
+        /// runaway's own rate; fast enough that 800 steps of 0.004 s reach any
+        /// tilt in the campaigns, slow enough to stay a plausible body rate.
+        const SLEW: f32 = 1.0;
     }
     impl FlightBackend for TiltBackend {
         fn read_imu(&mut self) -> ImuSample {
-            let (s, c) = (self.tilt.sin(), self.tilt.cos());
+            let dt = 0.004;
+            let err = self.tilt - self.tilt_now;
+            let step = Self::SLEW * dt;
+            let rate = if err > step {
+                self.tilt_now += step;
+                Self::SLEW
+            } else if err < -step {
+                self.tilt_now -= step;
+                -Self::SLEW
+            } else {
+                self.tilt_now = self.tilt;
+                err / dt
+            };
             ImuSample {
-                accel: [GRAVITY * s, 0.0, -GRAVITY * c],
-                gyro: [0.0; 3],
+                // A hovering vehicle's accelerometer reads the thrust axis
+                // whatever its tilt — the tilt is in the gyro, not here.
+                accel: [0.0, 0.0, -GRAVITY],
+                gyro: [0.0, rate, 0.0],
             }
         }
         fn read_position(&mut self) -> Option<Vec3> {
@@ -5392,6 +5616,7 @@ mod failsafe_campaign {
             let mut b = TiltBackend {
                 tilt: 0.0,
                 pos: [0.0, 0.0, 0.0],
+                tilt_now: 0.0,
             };
             airborne(&mut sup, &mut b);
             assert_ne!(
@@ -5463,6 +5688,7 @@ mod failsafe_campaign {
             let mut b = TiltBackend {
                 tilt: 0.0,
                 pos: [0.0, 0.0, 0.0],
+                tilt_now: 0.0,
             };
             airborne(&mut sup, &mut b);
             if windy {

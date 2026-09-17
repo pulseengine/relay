@@ -1,0 +1,91 @@
+artifacts:
+  - id: FV-FALCON-HOLD-001
+    type: sw-verification
+    title: "HOLD-P01 — the 5 Hz hold converges on a plant whose accelerometer behaves like a real one (v1.140, SimBackend half)"
+    status: implemented
+    release: falcon-v1.140.0
+    description: >
+      Verifies SWREQ-FALCON-HOLD-P01 on `SimBackend` only. The requirement's
+      acceptance is stated on the reference Gazebo plant, so this artifact is
+      deliberately `implemented`: the gz run is what promotes it.
+
+      THE HARNESS NOW REPORTS SPECIFIC FORCE (#452). `SimBackend` carries the
+      non-gravitational acceleration its own physics produced — thrust, wind,
+      drag, and the ground reaction while in contact — and `read_imu` rotates
+      that into the body frame. It is exact for this Euler plant, taken after
+      the ground clamp, so a vehicle at rest on the surface senses the gravity
+      reaction rather than a free fall, and no finite differencing is involved.
+
+      THE ESTIMATOR USES THE ACCELEROMETER ONLY WHERE IT IS A GRAVITY
+      REFERENCE. `EstimatorPartition` skips `update_gravity` while the vehicle
+      is flying AND a position fix has been accepted within the last second.
+      `FlightCore::step` supplies "flying" from the cascade's own previous
+      collective (mean motor command above 70% of hover), so a standalone
+      estimator keeps the old behaviour and pre-arm on the ground is unchanged.
+
+      THE MEASUREMENT THAT MATTERS, and it can fail:
+        - `hold_converges_with_5hz_position_aiding` — #434's case, 1 m off the
+          setpoint with fixes at 5 Hz, at both 500 Hz and 100 Hz loop rates:
+          h@60 s < 0.5 m, peak after 5 s < 2.0 m, altitude within 0.3 m. The
+          same case before this change: 75 m at 20 s, 3.4 km at 60 s.
+        - MUTATION, run before this artifact was written: restoring the
+          unconditional gravity update makes that test fail at **5134 m**.
+        - `gnss_outage_restores_the_gravity_update_and_stays_bounded` — 20 s of
+          aided hold then 15 s with no fixes at all: peak horizontal excursion
+          under 5 m and altitude within 1 m, which is the case the policy's
+          "stale aiding" branch exists for.
+
+      THREE HARNESSES WERE IDEALIZED IN THE SAME DIRECTION and were fixed with
+      it, because a test that conveys attitude only through the accelerometer
+      cannot survive an estimator that stops reading attitude from it — and no
+      vehicle conveys attitude that way:
+        - `TiltBackend` (wind→RTL and runaway campaigns) reported a leaning
+          gravity vector with a ZERO gyro: tilted without ever rotating. It now
+          rotates at 1 rad/s to the commanded tilt and reports that rate, with
+          the accelerometer reading the thrust axis.
+        - `TumbleBackend` (`attitude_runaway_terminates_in_flight`) reported
+          gravity along body-x with a zero gyro; it now rolls at 2 rad/s.
+        - Both campaigns and the point test pass on the physical versions, so
+          the failsafes still fire on the evidence that a real tumble produces.
+
+      A DEPENDENCY THE ANTI-WINDUP GATE HAD ON THE OLD ESTIMATOR. #404's
+      altitude anti-windup ("integrate only when not converging") read a
+      vehicle stopped 2.15 m short under thrust lapse as still converging: its
+      residual climb, 0.0005 m/s, shares its sign with the error. It charged
+      before only because the old vertical-velocity estimate lagged and
+      dithered in sign. The gate now also requires |v_z| > 0.05 m/s, below the
+      0.1-0.29 m/s climb #404 measured and above a stalled hold's creep;
+      `holds_altitude_under_thrust_lapse` passes on the merit of the integral
+      rather than on estimator noise.
+
+      RE-MEASURED, NOT ASSUMED: `optimistic_variance_diverges_under_noisy_gps`
+      asserted that over-trusting the fix variance DIVERGES (> 10 m, ~2400 m at
+      v1.19). It no longer does: 0.40 m peak against the matched 0.18 m. The
+      test is renamed to what it now measures and FV-FALCON-GNSS-001 is dropped
+      to `implemented` for re-verification, since its claim 2 was that
+      divergence.
+
+      GOLDEN FIXTURES REGENERATED DELIBERATELY (LOG-P03): the estimator's
+      behaviour changed, so `golden-v1118.bblog` and `f100-passthrough-v1.csv`
+      were regenerated with their own ignored regen tests and the diffs
+      committed.
+
+      NOT CLAIMED HERE: anything about the Gazebo plant or the integrator's
+      rig; magnetometer disturbance or vibration, which is what tilt
+      observability leans on once the accelerometer is out of the loop; wind
+      and turbulence beyond the existing suite; and runs longer than 180 s.
+    tags: [verification, falcon, hold, estimator, sensor-fidelity, v1.140]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-core --lib hold_converges_with_5hz_position_aiding"
+        - run: "cargo test -p falcon-core --lib gnss_outage_restores_the_gravity_update_and_stays_bounded"
+        - run: "cargo test -p falcon-core --lib failsafe_campaign"
+        - run: "cargo test -p falcon-core --lib holds_altitude_under_thrust_lapse"
+        - run: "cargo test -p falcon-core"
+        # The harness reports specific force, and the estimator gates the update.
+        - run: "grep -q 'specific_force_ned' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q '!self.in_flight || self.ticks_since_aiding > self.gravity_hold_ticks' crates/falcon-core/plain/src/lib.rs"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HOLD-P01
