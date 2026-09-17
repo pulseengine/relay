@@ -1,0 +1,50 @@
+artifacts:
+  - id: FV-FALCON-CLAIMS-003
+    type: sw-verification
+    title: "CLAIMS — the documents that tell an integrator what to deploy say which component flies (#419 cluster, v1.139)"
+    status: implemented
+    release: falcon-v1.139.0
+    description: >
+      Partial verification of SWREQ-FALCON-CLAIMS-P01, for #419's first
+      cluster — the only one where acting on the false text puts the wrong
+      control law on a vehicle.
+
+      WHAT WAS WRONG. The #388 correction reached the code but none of the
+      documents an integrator deploys from. docs/OCI-DISTRIBUTION.md called the
+      undrivable demo "the verified flight component", said the release
+      publishes "each verified cascade stage … the components jess pulls and
+      fuses per core", and annotated falcon/attitude "geometric SO(3)".
+      scripts/meld-fuse-cascade.sh fused "the VERIFIED falcon control cascade …
+      the embedded artifact". wasm/cm/cascade/src/{orch,stream,step}.rs called
+      the legacy five-stage pipeline the flight pipeline over "five verified
+      engines" and the streamed counterpart of falcon-cascade. FV-FALCON-MELD-001
+      repeated it. Three of the five stages (relay-pos/-att/-rate) are legacy
+      controllers the flight core does not fly, with no Kani or Verus in CI.
+
+      THE FIX, text only (no build output changes). OCI-DISTRIBUTION.md opens
+      with which component flies (falcon-cascade, role flight-core in the
+      bundle manifest, not yet on OCI) and annotates each published stage as it
+      is (the same text as its checked OCI description). The meld script and
+      the three cascade sources say they are the LEGACY pipeline and why it is
+      kept (P3 stream demonstrator, MC/DC subject). FV-FALCON-MELD-001 gains a
+      recorded correction; its original text is kept.
+
+      THE ORACLE IS WEAK, AND SAYS SO: prose has no semantic check. These steps
+      pin the corrections — each false phrase absent, the deploy warning
+      present — so the text cannot silently return. The component descriptions
+      themselves are checked semantically by scripts/check-component-claims.rs
+      (FV-FALCON-CLAIMS-001).
+    tags: [verification, falcon, claims, docs, v1.139]
+    fields:
+      method: inspection
+      steps:
+        - run: "! grep -q 'geometric SO(3) attitude' docs/OCI-DISTRIBUTION.md"
+        - run: "grep -q 'Fusing the per-stage' docs/OCI-DISTRIBUTION.md"
+        # A glob, not the file name: the gate classifies any command naming
+        # meld-fuse-cascade as bench-only and would silently skip this pin.
+        - run: "! grep -q 'fuse the VERIFIED falcon control cascade' scripts/meld-*.sh"
+        - run: "! grep -q 'over the five VERIFIED engines' wasm/cm/cascade/src/orch.rs"
+        - run: "! grep -q 'FIVE verified engines' wasm/cm/cascade/src/stream.rs"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-CLAIMS-P01
