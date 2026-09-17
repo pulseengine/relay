@@ -1,0 +1,42 @@
+artifacts:
+  - id: SWREQ-RELAY-FLEET-P01
+    type: sw-req
+    title: "FLEET-P01 — a CI job wedged in_progress shall be surfaced within 5x its own median duration"
+    status: implemented
+    release: falcon-v1.139.0
+    description: >
+      The CI fleet monitor shall flag any job that has been `in_progress` for
+      longer than five times the median duration of that job's recent
+      successful runs (and at least ten minutes), and shall report a monitor
+      that could not evaluate as UNKNOWN and failed, never as healthy.
+
+      WHY IT EXISTS (#429). On 2026-09-16 `Kani (relay-mix-quad)` wedged three
+      times — 52, 96 and 105 minutes against completions of 2m48s–3m21s — each
+      holding its runner and keeping a PR unmergeable. The same leg completed
+      normally four times that day, twice while a wedged instance was running,
+      so the hang is per instance, not the workload. Every one was found by a
+      human reading a job's duration instead of its status.
+
+      WHY THE EXISTING MONITOR COULD NOT SEE IT. `fleet-status.yml` detected
+      starvation: runs queued with nowhere to run. A wedged job has a runner and
+      reports itself `in_progress`, so there is no queue to starve.
+
+      THREE TRAPS THE IMPLEMENTATION HAD TO AVOID, each measured, not assumed.
+      (1) Run status is not job status: a matrix run with queued legs reports
+      the run `queued` while one job runs, so jobs are read from queued and
+      in-progress runs alike. (2) Completed runs are mostly cancelled ones under
+      `cancel-in-progress`: the last five completed Kani runs held ONE successful
+      relay-mix-quad leg, below the sample minimum — a baseline drawn from them
+      would have reported the very wedge this exists for as "no baseline". The
+      baseline is drawn from successful runs. (3) The starvation query swallowed
+      API failures (`|| true`) into an empty result, which reads as a healthy
+      fleet.
+
+      FALSIFICATION: wrong if a job stuck `in_progress` past 5x its median
+      duration, with at least three successful runs in its recent history,
+      produces no wedge report from the monitor; or if the monitor reports green
+      on a run where its API queries failed.
+    tags: [requirement, relay, ci, fleet, verification-gate, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

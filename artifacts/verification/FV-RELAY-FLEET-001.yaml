@@ -1,0 +1,90 @@
+artifacts:
+  - id: FV-RELAY-FLEET-001
+    type: sw-verification
+    title: "FLEET-P01 — the wedge detector replays #429's measured wedge and cannot report UNKNOWN as green (v1.139)"
+    status: implemented
+    release: falcon-v1.139.0
+    description: >
+      Verifies SWREQ-RELAY-FLEET-P01 at two levels: the decision logic against
+      the data #429 measured, and the workflow wiring that turns "could not
+      evaluate" into a failed monitor run.
+
+      THE DECISION, REPLAYED. `scripts/ci-wedge-watch.rs` separates a pure
+      `find_wedges` from the API collection. Its tests use the four real
+      relay-mix-quad completions (168, 170, 173, 201 s; median 171 s, threshold
+      855 s): not flagged at 14 min, flagged at 15, flagged at 105. Also: a slow
+      leg running normally is not flagged (relay-notch's real 888/816/656 s,
+      threshold 68 min — measured after a human misjudged it wedged at 18.8 min); the 10-minute floor keeps a 20-second job
+      at 15x its median from alarming; fewer than three samples is reported as
+      "no baseline", never guessed; history is keyed by workflow AND job name;
+      the job-summary markdown and the alarm rows (`<job url>\t<row>`) render
+      from a report without `jq`.
+
+      THE TESTS CAN FAIL. Mutating the comparison to `elapsed_s > threshold_s *
+      10` fails two of them (the #429 replay and the floor test) — checked
+      before this artifact was written.
+
+      OBSERVED LIVE, not only in tests (2026-09-16, recorded here, not re-run by
+      the gate because it depends on whatever is running at that moment): against
+      pulseengine/loom with 21 jobs running, the real policy found 0 wedged and 4
+      without a baseline; forced to 0.01x it flagged 17 and exited 1; against a
+      nonexistent repository it exited 2 with the API error. relay itself had no
+      jobs running, so a relay-only live run would have been vacuous.
+
+      PLACEMENT, REVERSED ON MEASUREMENT. The first draft ran the job on hosted
+      `ubuntu-latest`. The same evening relay's hosted jobs waited 60–120 min
+      for a runner (org-shared hosted concurrency), which would make the alarm
+      as late as the human it replaces. The job runs on `light` (three boxes),
+      where `jq` is not known to be installed — so the detector now writes the
+      summary and alarm files itself and the workflow uses no `jq`.
+
+      THE WORKFLOW BLOCKS WERE EXECUTED, not only linted. shellcheck is not
+      installed locally, so actionlint did not check the run blocks. The detect,
+      summary and alarm blocks were extracted from the YAML and run under the
+      flags GitHub uses for `shell: bash` (`bash --noprofile --norc -eo
+      pipefail`), with a stub detector replaying files the REAL detector wrote
+      against loom (forced policy: 7 wedged rows) and a stub `gh`. Detector exits
+      0, 1 and 2 each recorded the matching `rc` and let the step finish; the
+      summary step published the detector's markdown, and the UNKNOWN banner for
+      exit 2; the alarm posted 7 rows for no existing issue, and 6 — without the
+      already-named job — when an existing issue named one.
+
+      THAT EXECUTION FOUND A BUG the first draft had. The detect step called the
+      detector bare and read `$?` on the next line. Under `-e` an exit of 1 ends
+      the step first, so `rc` was never recorded: a real wedge would have skipped
+      the alarm and been reported as UNKNOWN. Control, same flags: the old form
+      with a detector exiting 1 ended the step with exit 1 and an empty output.
+      The step now captures the code with `|| rc=$?`. The first local run of the
+      blocks used plain `bash`, which is how it passed.
+
+      FIRST LIVE CATCH, AND THE CAP IT LED TO (2026-09-17 00:53Z). Run against
+      relay, the detector flagged `Kani (relay-mix-quad)` on ci-01-10 at 125.4
+      min against a 4.0-min median (threshold 19.8 min), the only check
+      holding #424. It was the leg's fourth hang, all inside the Kani step, on
+      three different runners. kani.yml had no `timeout-minutes`, so a hang
+      held its runner for GitHub's default 360 min. The matrix legs are now
+      capped at 60 min: 2.4x the slowest of 180 measured successful leg runs
+      (relay-notch, 25.1 min). A timed-out leg is `cancelled`, which the
+      `kani-gate` aggregate fails closed on (checked in the workflow).
+
+      NOT CLAIMED: that the scheduled workflow has run on GitHub. That is
+      observable only after merge, and is the evidence for promotion to
+      `verified` in a separate change.
+    tags: [verification, relay, ci, fleet, v1.139]
+    fields:
+      method: automated-test
+      steps:
+        # The decision logic, against #429's measured durations.
+        - run: "rust-script --test scripts/ci-wedge-watch.rs"
+        # The monitor fails its own run when either check cannot evaluate.
+        - run: "grep -q \"if: steps.detect.outputs.rc != '0' && steps.detect.outputs.rc != '1'\" .github/workflows/fleet-status.yml"
+        - run: "grep -q \"if: steps.starve.outputs.api_ok != 'true'\" .github/workflows/fleet-status.yml"
+        # The exit code survives `shell: bash`'s -e (the bug found by running it).
+        - run: "grep -q -- '--alarm-tsv \"$RUNNER_TEMP/wedge.tsv\" || rc=$?' .github/workflows/fleet-status.yml"
+        # Kani legs are capped: a hang becomes a red gate, not a 360-min hold.
+        - run: "grep -q '^    timeout-minutes: 60$' .github/workflows/kani.yml"
+        # Baseline from successful runs — the measured trap (2) in FLEET-P01.
+        - run: "grep -q 'runs?status=success&per_page=' scripts/ci-wedge-watch.rs"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-FLEET-P01
