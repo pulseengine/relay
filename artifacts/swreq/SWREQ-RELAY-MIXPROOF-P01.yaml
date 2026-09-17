@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-MIXPROOF-P01
     type: sw-req
     title: "MIXPROOF-P01 — the MIX-P06 priority-mix bound proof shall not depend on a solver's heavy tail"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       The Kani proof that the priority-desaturation mixer keeps every motor
@@ -45,6 +45,10 @@ artifacts:
       `verify_scale_to_fit_contract` as the harness in progress; or if either
       harness still passes after the mixer or `scale_to_fit` is mutated to
       break its bound.
+
+      HELD AFTER 11 CLEAN CI EXECUTIONS (2026-09-17), listed per job in
+      FV-RELAY-MIXPROOF-001. The falsification stands for every later run: one
+      stall in this leg re-opens this requirement.
     tags: [requirement, relay, ci, kani, mixer, v1.140]
     links:
       - type: derives-from
