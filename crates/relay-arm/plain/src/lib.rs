@@ -66,7 +66,11 @@ impl ArmingConfig {
     /// Defaults tuned for the falcon-quad bench at 100 Hz:
     /// 0.3 s spin-up, 0.1 s (10 ticks) of confirmed level, 5° threshold.
     pub const fn falcon_quad_100hz() -> Self {
-        ArmingConfig { spinup_ticks: 30, level_ticks_required: 10, tilt_thresh_rad: 0.087 }
+        ArmingConfig {
+            spinup_ticks: 30,
+            level_ticks_required: 10,
+            tilt_thresh_rad: 0.087,
+        }
     }
 }
 
@@ -93,11 +97,20 @@ pub struct ArmingSequencer {
 
 impl ArmingSequencer {
     pub fn new(cfg: ArmingConfig) -> Self {
-        ArmingSequencer { phase: DISARMED, tick_in_phase: 0, level_count: 0, cfg }
+        ArmingSequencer {
+            phase: DISARMED,
+            tick_in_phase: 0,
+            level_count: 0,
+            cfg,
+        }
     }
 
-    pub fn phase(&self) -> u8 { self.phase }
-    pub fn level_count(&self) -> u32 { self.level_count }
+    pub fn phase(&self) -> u8 {
+        self.phase
+    }
+    pub fn level_count(&self) -> u32 {
+        self.level_count
+    }
 
     /// Advance one control tick.
     ///
@@ -188,8 +201,17 @@ mod kani_proofs {
         // LevelHold (else we'd already be Armed).
         kani::assume(level_count < level_ticks_required);
 
-        let cfg = ArmingConfig { spinup_ticks, level_ticks_required, tilt_thresh_rad };
-        let seq = ArmingSequencer { phase, tick_in_phase, level_count, cfg };
+        let cfg = ArmingConfig {
+            spinup_ticks,
+            level_ticks_required,
+            tilt_thresh_rad,
+        };
+        let seq = ArmingSequencer {
+            phase,
+            tick_in_phase,
+            level_count,
+            cfg,
+        };
         (seq, kani::any(), kani::any())
     }
 
@@ -230,10 +252,19 @@ mod kani_proofs {
         let level_ticks_required: u32 = kani::any();
         kani::assume(level_ticks_required <= 1000);
         let tilt_thresh_rad: f32 = kani::any();
-        let cfg = ArmingConfig { spinup_ticks, level_ticks_required, tilt_thresh_rad };
+        let cfg = ArmingConfig {
+            spinup_ticks,
+            level_ticks_required,
+            tilt_thresh_rad,
+        };
         let tick_in_phase: u32 = kani::any();
         let level_count: u32 = kani::any();
-        let mut seq = ArmingSequencer { phase, tick_in_phase, level_count, cfg };
+        let mut seq = ArmingSequencer {
+            phase,
+            tick_in_phase,
+            level_count,
+            cfg,
+        };
 
         let out = seq.tick(kani::any(), kani::any()); // tilt may be NaN/∞
         assert!(out.thrust_scale.is_finite());
@@ -246,7 +277,11 @@ mod tests {
     use super::*;
 
     fn cfg() -> ArmingConfig {
-        ArmingConfig { spinup_ticks: 5, level_ticks_required: 3, tilt_thresh_rad: 0.087 }
+        ArmingConfig {
+            spinup_ticks: 5,
+            level_ticks_required: 3,
+            tilt_thresh_rad: 0.087,
+        }
     }
 
     /// ARM-P01: torque authority is never granted before the level gate.
@@ -274,7 +309,10 @@ mod tests {
         s.tick(0.0, true); // level_count 2
         let o = s.tick(0.0, true); // level_count 3 == required → Armed
         assert_eq!(o.phase, ARMED);
-        assert!(o.torque_authority, "torque engages only after level confirmed");
+        assert!(
+            o.torque_authority,
+            "torque engages only after level confirmed"
+        );
     }
 
     /// A tilt above threshold during LevelHold resets the counter, so the
@@ -284,7 +322,9 @@ mod tests {
     fn arm_p01_tilt_resets_level_count_prevents_arming() {
         let mut s = ArmingSequencer::new(cfg());
         s.tick(0.0, true);
-        for _ in 0..5 { s.tick(0.0, true); } // reach LevelHold
+        for _ in 0..5 {
+            s.tick(0.0, true);
+        } // reach LevelHold
         assert_eq!(s.phase(), LEVEL_HOLD);
 
         s.tick(0.0, true); // count 1
@@ -302,7 +342,9 @@ mod tests {
     fn arm_p01_nan_tilt_never_arms() {
         let mut s = ArmingSequencer::new(cfg());
         s.tick(0.0, true);
-        for _ in 0..5 { s.tick(0.0, true); }
+        for _ in 0..5 {
+            s.tick(0.0, true);
+        }
         for _ in 0..100 {
             let o = s.tick(f32::NAN, true);
             assert!(!o.torque_authority, "NaN tilt must never arm");
@@ -317,7 +359,10 @@ mod tests {
         s.tick(0.0, true); // enter SpinUp (tick_in_phase becomes 1)
         for _ in 0..5 {
             let o = s.tick(0.0, true);
-            assert!(o.thrust_scale >= last, "thrust scale must not decrease in spin-up");
+            assert!(
+                o.thrust_scale >= last,
+                "thrust scale must not decrease in spin-up"
+            );
             assert!((0.0..=1.0).contains(&o.thrust_scale));
             last = o.thrust_scale;
         }

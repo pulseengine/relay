@@ -28,7 +28,12 @@
 /// Returns `None` (reading rejected) if the range is non-finite or outside the
 /// sensor's valid band `[min_valid, max_valid]`. The tilt is clamped to a sane
 /// range so an absurd attitude can't invert the sign.
-pub fn range_to_altitude(range_m: f32, tilt_rad: f32, min_valid: f32, max_valid: f32) -> Option<f32> {
+pub fn range_to_altitude(
+    range_m: f32,
+    tilt_rad: f32,
+    min_valid: f32,
+    max_valid: f32,
+) -> Option<f32> {
     if !range_m.is_finite() || range_m < min_valid || range_m > max_valid {
         return None;
     }
@@ -39,11 +44,7 @@ pub fn range_to_altitude(range_m: f32, tilt_rad: f32, min_valid: f32, max_valid:
         0.0
     };
     let alt = range_m * relay_math::cosf(t);
-    if alt.is_finite() {
-        Some(alt)
-    } else {
-        None
-    }
+    if alt.is_finite() { Some(alt) } else { None }
 }
 
 /// Horizontal velocity from optical flow.

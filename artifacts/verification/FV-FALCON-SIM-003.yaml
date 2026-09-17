@@ -80,7 +80,7 @@ artifacts:
         # smoke. The closed-loop hover is exercised against real gz in
         # FV-FALCON-SIM-013 (bench-only).
         - run: cargo run -p falcon-sitl-gz -- --scenario=open-loop-climb
-        - run: cargo run -p falcon-sitl-gz -- --backend=gazebo --world=falcon --model=quad  # bench-only
+        - run: "cargo run -p falcon-sitl-gz -- --backend=gazebo --world=falcon --model=quad  # bench-only; intentionally the STUB backend (no --features gazebo): this artifact verifies the v0.16.1 scaffold, whose Gazebo side IS the stub"
     links:
       - type: verifies
         target: SWREQ-FALCON-SIM-P03

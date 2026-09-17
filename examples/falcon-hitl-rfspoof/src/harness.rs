@@ -52,7 +52,9 @@ pub trait HitlBench {
     /// 60-tick test in microseconds" contract for `StubBench`
     /// and `InMemoryFrameSource`-backed `MavlinkBench` tests.
     /// `UdpFrameSource`-backed `MavlinkBench` overrides to true.
-    fn real_time(&self) -> bool { false }
+    fn real_time(&self) -> bool {
+        false
+    }
 
     /// `true` iff the RF spoofer is transmitting for this step.
     /// The harness uses this only for diagnostic correlation —
@@ -82,7 +84,9 @@ pub struct NullCommandSink {
 }
 
 impl NullCommandSink {
-    pub fn new() -> Self { Self { frames_sent: 0 } }
+    pub fn new() -> Self {
+        Self { frames_sent: 0 }
+    }
 }
 
 impl CommandSink for NullCommandSink {
@@ -90,7 +94,9 @@ impl CommandSink for NullCommandSink {
         self.frames_sent += 1;
         Ok(())
     }
-    fn name(&self) -> &'static str { "null" }
+    fn name(&self) -> &'static str {
+        "null"
+    }
 }
 
 /// Outcome of one HITL run — what an evidence reviewer reads.
@@ -127,8 +133,8 @@ impl HitlVerdict {
 /// `target_component` are PX4 defaults (1/1).
 fn build_rtl_frame(seq: u8) -> Vec<u8> {
     use relay_mavlink::{
-        encode_frame, FrameHeader, COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID,
-        COMMAND_LONG_PAYLOAD_LEN, HEADER_LEN, MAGIC_V2,
+        COMMAND_LONG_CRC_EXTRA, COMMAND_LONG_MSG_ID, COMMAND_LONG_PAYLOAD_LEN, FrameHeader,
+        HEADER_LEN, MAGIC_V2, encode_frame,
     };
     let cmd = CommandLong::rtl(1, 1);
     debug_assert_eq!(cmd.command, MAV_CMD_NAV_RETURN_TO_LAUNCH);
@@ -139,7 +145,7 @@ fn build_rtl_frame(seq: u8) -> Vec<u8> {
         incompat_flags: 0,
         compat_flags: 0,
         sequence: seq,
-        system_id: 255,        // GCS-style sender id
+        system_id: 255, // GCS-style sender id
         component_id: 190,
         message_id: COMMAND_LONG_MSG_ID,
     };

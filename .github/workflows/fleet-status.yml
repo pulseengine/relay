@@ -1,7 +1,8 @@
 name: Fleet status
 
 # CI-fleet health: detect STARVATION (jobs queued against a label with no live
-# runner) and publish a status summary.
+# runner) and WEDGES (jobs running far past their own normal duration), and
+# publish a status summary.
 #
 # WHY THIS EXISTS — the failure mode is SILENCE. On 2026-08-06/07 the self-hosted
 # fleet degraded three times (one wedged runner; then 4 of 7 offline; then 6 of
@@ -10,7 +11,7 @@ name: Fleet status
 # a PR sitting at 5/57 checks. Every diagnosis was a human hand-querying the
 # runners API. That is the gap this closes.
 #
-# TWO SIGNALS, DELIBERATELY IN THIS ORDER:
+# THREE SIGNALS, DELIBERATELY IN THIS ORDER:
 #
 #   1. STARVATION (always available). A run that has been `queued` far longer
 #      than jobs take to start. This needs only repo scope, and it detects the
@@ -23,9 +24,26 @@ name: Fleet status
 #      PAT with that scope to enable it; without the secret this job still runs
 #      and simply reports starvation only. It degrades, it does not fail.
 #
+#   3. WEDGE (the `wedge` job, #429). A job stuck `in_progress` past 5x the
+#      median duration of its own recent successful runs. Starvation cannot see
+#      this shape — a wedged job HAS a runner and reports itself healthy. On
+#      2026-09-16 one Kani leg wedged three times (52, 96, 105 min against a
+#      ~3 min baseline) and each was found by a human reading durations.
+#
+# `gh` IS INSTALLED BY THIS WORKFLOW, not assumed. The `light` boxes do not
+# ship it: the starvation step ran for months with `gh: command not found`
+# swallowed by `2>/dev/null || true`, reporting "0 queued" during a 107-minute
+# queue (#436). Both jobs use ./.github/actions/setup-gh (pinned + SHA-256).
+#
+# "COULD NOT EVALUATE" IS NOT GREEN. A failed API query used to be swallowed
+# (`|| true`) into an empty result, which reads exactly like a healthy fleet.
+# Both checks now report UNKNOWN and fail the monitor's own job instead.
+#
 # CRITICAL PLACEMENT RULE: this workflow must NOT run on `rust-cpu`. A monitor
 # scheduled on the fleet it monitors goes down with it — that is precisely how
-# the outage stayed invisible. It runs on `light`, with a hosted fallback.
+# the outage stayed invisible. Both jobs run on `light`. The wedges they look
+# for happen on `rust-cpu` — watching from outside that label is the point, not
+# an oversight to be "fixed". (Not hosted either: see the `wedge` job.)
 #
 # Security: no `${{ }}` is expanded inside any `run:` block; every input is
 # bound through `env:` and dereferenced as a quoted shell variable.
@@ -52,6 +70,12 @@ jobs:
     runs-on: [self-hosted, linux, x64, light]
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/actions
+
+      - uses: ./.github/actions/setup-gh
+
       - name: Detect starvation (queued far longer than jobs take to start)
         id: starve
         env:
@@ -67,8 +91,15 @@ jobs:
           stuck=0
           details=""
           # `queued` runs only — an in_progress run is being served.
-          runs=$(gh api "/repos/${REPO}/actions/runs?status=queued&per_page=50" \
-                   --jq '.workflow_runs[] | "\(.created_at)\t\(.name)\t\(.head_branch)\t\(.html_url)"' 2>/dev/null || true)
+          # A failed query must not read as an empty queue (#429).
+          if runs=$(gh api "/repos/${REPO}/actions/runs?status=queued&per_page=50" \
+                      --jq '.workflow_runs[] | "\(.created_at)\t\(.name)\t\(.head_branch)\t\(.html_url)"'); then
+            echo "api_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "api_ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::could not query queued runs — starvation status is UNKNOWN, not green"
+            runs=""
+          fi
           while IFS=$'\t' read -r created name branch url; do
             [ -z "${created:-}" ] && continue
             # BSD/GNU date differ; try GNU form first, then BSD.
@@ -130,6 +161,7 @@ jobs:
         env:
           STUCK: ${{ steps.starve.outputs.stuck }}
           DETAILS: ${{ steps.starve.outputs.details }}
+          API_OK: ${{ steps.starve.outputs.api_ok }}
           HAVE_FLEET: ${{ steps.fleet.outputs.available }}
           TOTAL: ${{ steps.fleet.outputs.total }}
           ONLINE: ${{ steps.fleet.outputs.online }}
@@ -141,7 +173,9 @@ jobs:
           {
             echo "## CI fleet status"
             echo
-            if [ "${STUCK:-0}" -gt 0 ]; then
+            if [ "${API_OK:-false}" != "true" ]; then
+              echo "### 🟡 Starvation: UNKNOWN — the queued-runs query failed. This is not a pass."
+            elif [ "${STUCK:-0}" -gt 0 ]; then
               echo "### 🔴 Starvation: ${STUCK} run(s) queued 30+ min"
               echo
               printf '%s\n' "${DETAILS:-}"
@@ -187,3 +221,117 @@ jobs:
             gh issue create --repo "$REPO" --title "$TITLE" --label ci --body "$body" || \
               gh issue create --repo "$REPO" --title "$TITLE" --body "$body"
           fi
+
+      - name: Fail if starvation could not be evaluated
+        if: steps.starve.outputs.api_ok != 'true'
+        shell: bash
+        run: |
+          echo "The starvation check could not query the API; reporting this run as failed rather than green."
+          exit 1
+
+  wedge:
+    name: Wedged jobs (in_progress far past their median)
+    # `light`, like `status` — NOT hosted. The first draft of this job ran on
+    # `ubuntu-latest` (it only calls the API) and was reversed on measurement:
+    # on 2026-09-16 relay's hosted jobs waited 60–120 min for a runner, because
+    # hosted concurrency is shared across the org and other repos' matrices
+    # held it. A wedge alarm two hours late is no better than the human it
+    # replaces. `light` is three boxes (ci-01-5/-8/-10); a cold rust-script
+    # install there measured 0–49 s, and the self-hosted home usually keeps it.
+    runs-on: [self-hosted, linux, x64, light]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            scripts
+            .github/actions
+
+      - uses: ./.github/actions/setup-gh
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install rust-script
+        shell: bash
+        run: command -v rust-script >/dev/null || cargo install rust-script --locked
+
+      - name: Detect wedged jobs
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          # 0 = nothing wedged, 1 = wedged, anything else = could not evaluate.
+          # `shell: bash` runs with -e, so a bare call exiting 1 would end the
+          # step before rc is recorded — and a wedge would read as UNKNOWN.
+          # The detector renders both files itself — no `jq` on the runner.
+          rc=0
+          ./scripts/ci-wedge-watch.rs --repo "$REPO" \
+            --summary-md "$RUNNER_TEMP/wedge.md" --alarm-tsv "$RUNNER_TEMP/wedge.tsv" || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::wedge check could not evaluate (exit $rc) — status is UNKNOWN, not green"
+          fi
+
+      - name: Publish wedge summary
+        env:
+          RC: ${{ steps.detect.outputs.rc }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          case "${RC:-unset}" in
+            0|1) cat "$RUNNER_TEMP/wedge.md" >> "$GITHUB_STEP_SUMMARY" ;;
+            *)
+              {
+                echo "## Wedged jobs"
+                echo
+                echo "### 🟡 UNKNOWN — the check could not evaluate (exit ${RC:-unset}). This is not a pass."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+
+      - name: Raise the alarm if a job is wedged
+        if: steps.detect.outputs.rc == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          TITLE="CI fleet: a job is wedged in_progress (5x its median duration)"
+          existing=$(gh issue list --repo "$REPO" --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+          # One rolling issue, and each wedged job reported ONCE: a wedge lasts
+          # many 15-minute ticks, and a comment per tick buries the signal.
+          seen=""
+          if [ -n "${existing:-}" ]; then
+            seen=$(gh issue view "$existing" --repo "$REPO" --json body,comments --jq '.body, .comments[].body')
+          fi
+          rows=""
+          while IFS=$'\t' read -r url line; do
+            [ -z "${url:-}" ] && continue
+            if [ -n "$seen" ] && printf '%s\n' "$seen" | grep -qF "$url"; then
+              continue
+            fi
+            rows="${rows}${line}"$'\n'
+          done < "$RUNNER_TEMP/wedge.tsv"
+          if [ -z "$rows" ]; then
+            echo "Every wedged job is already reported on #${existing}."
+            exit 0
+          fi
+          body=$(printf 'Job(s) running past 5x the median duration of their own recent successful runs:\n\n%s\nA wedged job holds its runner and blocks its PR while looking exactly like a slow one. The usual remedy is `gh run cancel` on the run, then `gh run rerun --failed`; if the same runner keeps wedging, restart it.\n\nDetected by: %s\n' "$rows" "$RUN_URL")
+          if [ -n "${existing:-}" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --label ci --body "$body" || \
+              gh issue create --repo "$REPO" --title "$TITLE" --body "$body"
+          fi
+
+      - name: Fail if the wedge check could not be evaluated
+        if: steps.detect.outputs.rc != '0' && steps.detect.outputs.rc != '1'
+        shell: bash
+        run: |
+          echo "The wedge check could not evaluate; reporting this run as failed rather than green."
+          exit 1

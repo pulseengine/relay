@@ -116,8 +116,8 @@ artifacts:
         - run: "grep -q 'export=__heap_base' scripts/build-components.sh"
         - run: "grep -q 'export=__data_end' scripts/build-components.sh"
         # (b) artifact-level evidence, bench-only (needs cargo-component + wasm-tools)
-        - run: "wasm-tools objdump falcon_mixer_cm.wasm | grep -c 'reloc.CODE'  # bench-only: expect >=1"
-        - run: "wasm-tools print falcon_mixer_cm.wasm | grep -c 'memory.grow'  # bench-only: expect 0 (non-regression)"
+        - run: "wasm-tools objdump wasm/cm/falcon-mixer/target/wasm32-unknown-unknown/release/falcon_mixer_cm.wasm | grep -c 'reloc.CODE'  # bench-only, after scripts/build-components.sh: expect >=1"
+        - run: "wasm-tools print wasm/cm/falcon-mixer/target/wasm32-unknown-unknown/release/falcon_mixer_cm.wasm | grep -c 'memory.grow'  # bench-only, after scripts/build-components.sh: expect 0 (non-regression)"
     links:
       - type: verifies
         target: SWREQ-FALCON-OCI-P05

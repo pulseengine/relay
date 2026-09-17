@@ -120,7 +120,11 @@ impl UbxParser {
                 }
             }
             State::Sync2 => {
-                self.state = if byte == SYNC2 { State::Header } else { State::Sync1 };
+                self.state = if byte == SYNC2 {
+                    State::Header
+                } else {
+                    State::Sync1
+                };
                 self.hdr_n = 0;
                 self.ck_a = 0;
                 self.ck_b = 0;
@@ -230,7 +234,10 @@ pub struct UbxReader<R> {
 impl<R: embedded_io_async::Read> UbxReader<R> {
     /// Wrap an async byte source.
     pub fn new(rx: R) -> Self {
-        Self { rx, parser: UbxParser::new() }
+        Self {
+            rx,
+            parser: UbxParser::new(),
+        }
     }
 
     /// Read bytes until a complete, checksum-valid NAV-PVT frame decodes, then
@@ -337,7 +344,10 @@ mod tests {
                 got = Some(pvt);
             }
         }
-        assert!(got.is_some(), "the parser must resync and decode the real frame");
+        assert!(
+            got.is_some(),
+            "the parser must resync and decode the real frame"
+        );
     }
 
     // ── async stream path (embedded-io-async Read) + inter-core carrier ──────
@@ -416,7 +426,12 @@ mod tests {
         }
         let sync_fix = sync_fix.unwrap();
         // async Read path
-        let mut rdr = UbxReader::new(MockRx { data, len: n, pos: 0, fail: false });
+        let mut rdr = UbxReader::new(MockRx {
+            data,
+            len: n,
+            pos: 0,
+            fail: false,
+        });
         let async_fix = block_on(rdr.read_fix()).unwrap();
         assert_eq!(sync_fix, async_fix);
     }
@@ -424,7 +439,12 @@ mod tests {
     /// The async path is fallible: a read transport error propagates as Err.
     #[test]
     fn gnss_async_propagates_read_error() {
-        let mut rdr = UbxReader::new(MockRx { data: [0; 128], len: 0, pos: 0, fail: true });
+        let mut rdr = UbxReader::new(MockRx {
+            data: [0; 128],
+            len: 0,
+            pos: 0,
+            fail: true,
+        });
         assert!(block_on(rdr.read_fix()).is_err());
     }
 

@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWREQ-FALCON-CLAIMS-P01
+    type: sw-req
+    title: "CLAIMS-P01 — what we publish and document about a component shall match what that component is"
+    status: verified
+    release: falcon-v1.139.0
+    description: >
+      Every claim a user can read without opening the source — OCI package
+      descriptions, release notes, README and docs — shall match the artifact
+      it describes, as of the release that publishes it.
+
+      WHY IT EXISTS. The #388 correction (published components wrapped the
+      legacy PID stack, not the verified core) never reached the places that
+      tell someone what they are getting:
+        #412 — OCI components advertise "Formally-verified geometric SO(3)"
+               (wasm/cm/attitude/Cargo.toml, piped verbatim by release.yml)
+               while wrapping something else.
+        #411 — the legacy five-stage cascade still lives in wasm/cm/cascade/
+               and ships in the signed bundle.
+        #419 — docs that describe the published stack were not corrected.
+        #422 — docs/PX4-PARITY-ASSESSMENT.md is 82 versions stale and credits
+               unreachable capability as done.
+      A verified core with false public claims fails the users it exists for:
+      they choose a component on its description.
+
+      SCOPE. One requirement, not four: the property is "claims match the
+      artifact". Each issue is one instance.
+
+      FALSIFICATION: wrong if, at a tagged release, any published OCI
+      description, release note or user-facing doc asserts a property the
+      shipped component does not have (e.g. "formally verified" for code the
+      verification does not cover), or ships a component the docs say was
+      replaced.
+    tags: [requirement, falcon, claims, oci, docs, integrity, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020

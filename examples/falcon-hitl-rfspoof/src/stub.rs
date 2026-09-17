@@ -45,8 +45,12 @@ impl StubBench {
         spoof_start_s: f32,
     ) -> Self {
         StubBench {
-            pre_n_cm, pre_e_cm, pre_d_cm,
-            spoof_n_cm, spoof_e_cm, spoof_d_cm,
+            pre_n_cm,
+            pre_e_cm,
+            pre_d_cm,
+            spoof_n_cm,
+            spoof_e_cm,
+            spoof_d_cm,
             spoof_start_s,
             t: 0.0,
         }
@@ -54,9 +58,13 @@ impl StubBench {
 }
 
 impl HitlBench for StubBench {
-    fn name(&self) -> &'static str { "stub" }
+    fn name(&self) -> &'static str {
+        "stub"
+    }
 
-    fn step(&mut self, dt: f32) { self.t += dt; }
+    fn step(&mut self, dt: f32) {
+        self.t += dt;
+    }
 
     fn position_cm(&self) -> (i32, i32, i32) {
         if self.t < self.spoof_start_s {
@@ -66,13 +74,15 @@ impl HitlBench for StubBench {
         }
     }
 
-    fn spoof_active(&self) -> bool { self.t >= self.spoof_start_s }
+    fn spoof_active(&self) -> bool {
+        self.t >= self.spoof_start_s
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::{load_rtl_rts, run_scenario, NullCommandSink};
+    use crate::harness::{NullCommandSink, load_rtl_rts, run_scenario};
     use relay_lc::engine::Geofence;
     use relay_sc::engine::CommandStore;
 
@@ -92,24 +102,28 @@ mod tests {
 
         let mut sink = NullCommandSink::new();
         let v = run_scenario(
-            &mut bench,
-            &mut fence,
-            &mut sc,
-            &mut sink,
-            0.01,   // 100 Hz tick
-            5.0,    // 5-second scenario
-            0,      // RTL RTS id
-            1.0,    // must latch within 1 s of spoof going active
+            &mut bench, &mut fence, &mut sc, &mut sink, 0.01, // 100 Hz tick
+            5.0,  // 5-second scenario
+            0,    // RTL RTS id
+            1.0,  // must latch within 1 s of spoof going active
         );
 
         assert!(v.pass(), "verdict = {:?}", v);
         assert!(v.latched);
         assert!(v.rtl_dispatched);
-        assert!(v.rtl_frame_sent, "RTL COMMAND_LONG frame should have been pushed to sink");
+        assert!(
+            v.rtl_frame_sent,
+            "RTL COMMAND_LONG frame should have been pushed to sink"
+        );
         assert_eq!(sink.frames_sent, 1, "exactly one RTL frame per latch trip");
         let latched_at = v.latched_at_s.unwrap();
         let spoof_at = v.spoof_first_seen_at_s.unwrap();
-        assert!(latched_at >= spoof_at, "latch before spoof: {} < {}", latched_at, spoof_at);
+        assert!(
+            latched_at >= spoof_at,
+            "latch before spoof: {} < {}",
+            latched_at,
+            spoof_at
+        );
         // One-tick latency since the spoof is a step-jump.
         assert!(latched_at - spoof_at < 0.05);
     }
@@ -130,20 +144,18 @@ mod tests {
 
         let mut sink = NullCommandSink::new();
         let v = run_scenario(
-            &mut bench,
-            &mut fence,
-            &mut sc,
-            &mut sink,
-            0.01,
-            5.0,
-            0,
-            10.0,  // generous budget so we don't fail-stop on the missing latch
+            &mut bench, &mut fence, &mut sc, &mut sink, 0.01, 5.0, 0,
+            10.0, // generous budget so we don't fail-stop on the missing latch
         );
 
         assert!(!v.latched);
         assert!(!v.rtl_dispatched);
         assert!(!v.rtl_frame_sent, "no frame pushed when no latch trip");
         assert_eq!(sink.frames_sent, 0);
-        assert!(v.failure.is_none(), "harness fail-stopped on a benign run: {:?}", v.failure);
+        assert!(
+            v.failure.is_none(),
+            "harness fail-stopped on a benign run: {:?}",
+            v.failure
+        );
     }
 }

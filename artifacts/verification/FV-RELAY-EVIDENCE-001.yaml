@@ -1,0 +1,41 @@
+artifacts:
+  - id: FV-RELAY-EVIDENCE-001
+    type: sw-verification
+    title: "EVIDENCE — no verified/accepted artifact rests on evidence that does not run or does not resolve (#415, v1.139)"
+    status: verified
+    release: falcon-v1.139.0
+    description: >
+      Verification of SWREQ-RELAY-EVIDENCE-P01.
+
+      THE ORACLE. scripts/check-evidence.rs reads the verification gate's own
+      --dry-run labels over all 302 verification artifacts (one source of truth
+      for "does this step run"), reads statuses from the YAML, and fails on any
+      verified/accepted artifact with (a) no step executed by the gate, the Kani
+      gate, or lean.yml/rocq.yml, or (b) a citation that does not resolve: a
+      missing path or cargo package, a `cargo test` filter matching no fn or
+      mod, an unset variable, a `/path/to/` or `<name>` placeholder, a bare
+      `.wasm` with no path, a lone `cd`, or `--backend=gazebo` without
+      `--features gazebo` unless the step says it intends the stub. The Verus
+      gate is not counted as evidence while verus.yml fails (#405). Exit 2 =
+      could not evaluate.
+
+      FIRST RUN, 2026-09-17: 15 verified artifacts flagged; review found
+      false positives in the checker itself (generics read as placeholders;
+      module-name test filters), fixed rather than waived. True findings: 6.
+      Three were repaired (OCI-002/OCI-004 real build paths; SIM-003's stub run
+      is intended and now says so). Three had evidence nothing could run and,
+      by maintainer decision, were demoted to `implemented` with a restore
+      criterion each: FV-FALCON-OCI-001, FV-FALCON-COV-004, FV-FALCON-COV-005 —
+      and SWREQ-FALCON-OCI-P01 with them, whose only verifier was OCI-001.
+      After: exit 0.
+    tags: [verification, relay, traceability, evidence, v1.139]
+    fields:
+      method: automated-test
+      steps:
+        # The rules, including #415's cases and the fixed false positives.
+        - run: "rust-script --test scripts/check-evidence.rs"
+        # The whole tree: no verified artifact on unresolvable evidence.
+        - run: "./scripts/check-evidence.rs"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-EVIDENCE-P01

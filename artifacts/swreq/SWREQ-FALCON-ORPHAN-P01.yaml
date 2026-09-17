@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "ORPHAN-P01 — every capability shall be WIRED, PARKED against a named configuration axis, or RETIRED; none shall stay implemented-verified-unreachable"
     status: proposed
-    release: falcon-v1.139.0
+    release: falcon-v1.141.0
     description: >
       Every capability in the tree shall have exactly one recorded disposition:
 
@@ -130,7 +130,10 @@ artifacts:
       FALSIFICATION: wrong if any crate in the tree has zero consumers and no
       recorded PARK reason, or if any capability named in a README, an OCI
       description or a release note is unreachable from the shipped artifact.
-    tags: [requirement, falcon, orphan, architecture, v1.139]
+
+      RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.141, with the demo that exercises what it wires: FlightSupervisor's failsafes, mode machine and pre-arm checks (#414), and the undrivable falcon-flight component (#385). It parks crates against configuration axes, which CONFIG-P01 defines in the same release.
+
+    tags: [requirement, falcon, orphan, architecture, v1.141]
     links:
       - type: derives-from
         target: SYSREQ-FALCON-010

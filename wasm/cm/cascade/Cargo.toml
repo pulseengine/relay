@@ -1,7 +1,7 @@
 # Standalone cargo-component crate — the cascade orchestrator.
 [package]
 name = "falcon-cascade-cm"
-description = "Falcon v0.8 — the flight core as one component (falcon-core::FlightCore)"
+description = "The falcon flight core (falcon-core FlightCore) as one WebAssembly Component, WIT pulseengine:falcon-cascade@0.10.0 — a sensor frame (IMU, GNSS position, magnetometer, heading, motor RPM) in, motor commands out. This is the component that flies."
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"

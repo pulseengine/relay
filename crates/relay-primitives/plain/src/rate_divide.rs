@@ -32,7 +32,7 @@ mod tests {
     #[test]
     fn divisor_zero_never_emits() {
         for c in 0..10 {
-            assert!(! should_emit(c, 0));
+            assert!(!should_emit(c, 0));
         }
     }
     #[test]
@@ -44,8 +44,8 @@ mod tests {
     #[test]
     fn divisor_five_emits_every_fifth() {
         assert!(should_emit(0, 5));
-        assert!(! should_emit(1, 5));
-        assert!(! should_emit(4, 5));
+        assert!(!should_emit(1, 5));
+        assert!(!should_emit(4, 5));
         assert!(should_emit(5, 5));
         assert!(should_emit(10, 5));
     }

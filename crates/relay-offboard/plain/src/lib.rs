@@ -38,7 +38,11 @@ pub struct OffboardSetpoint {
 impl OffboardSetpoint {
     /// A position hold-point with zero feed-forward velocity, hold-yaw.
     pub fn position(position_ned: [f32; 3]) -> Self {
-        Self { position_ned, velocity_ned: [0.0; 3], yaw: f32::NAN }
+        Self {
+            position_ned,
+            velocity_ned: [0.0; 3],
+            yaw: f32::NAN,
+        }
     }
 }
 
@@ -71,7 +75,11 @@ impl OffboardReceiver {
             timeout_us,
             last_fresh_us: 0,
             last_counter: 0,
-            sp: OffboardSetpoint { position_ned: [0.0; 3], velocity_ned: [0.0; 3], yaw: f32::NAN },
+            sp: OffboardSetpoint {
+                position_ned: [0.0; 3],
+                velocity_ned: [0.0; 3],
+                yaw: f32::NAN,
+            },
             started: false,
         }
     }
@@ -127,7 +135,11 @@ mod tests {
 
     // Concrete yaw (not NaN) so setpoint equality is well-defined in asserts.
     fn sp(n: f32) -> OffboardSetpoint {
-        OffboardSetpoint { position_ned: [n, 0.0, -5.0], velocity_ned: [0.0; 3], yaw: 0.0 }
+        OffboardSetpoint {
+            position_ned: [n, 0.0, -5.0],
+            velocity_ned: [0.0; 3],
+            yaw: 0.0,
+        }
     }
 
     #[test]

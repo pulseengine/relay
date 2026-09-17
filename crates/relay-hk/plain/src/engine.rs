@@ -33,19 +33,31 @@ pub struct HkPacket {
 
 impl CopyEntry {
     pub const fn empty() -> Self {
-        CopyEntry { source_id: 0, source_offset: 0, length: 0, output_offset: 0 }
+        CopyEntry {
+            source_id: 0,
+            source_offset: 0,
+            length: 0,
+            output_offset: 0,
+        }
     }
 }
 
 impl SourceData {
     pub const fn empty() -> Self {
-        SourceData { source_id: 0, data: [0u8; SOURCE_DATA_SIZE] }
+        SourceData {
+            source_id: 0,
+            data: [0u8; SOURCE_DATA_SIZE],
+        }
     }
 }
 
 impl HkPacket {
     pub fn new() -> Self {
-        HkPacket { data: [0u8; MAX_OUTPUT_SIZE], length: 0, sequence: 0 }
+        HkPacket {
+            data: [0u8; MAX_OUTPUT_SIZE],
+            length: 0,
+            sequence: 0,
+        }
     }
 }
 
@@ -58,13 +70,17 @@ impl CopyTable {
     }
 
     pub fn add_entry(&mut self, entry: CopyEntry) -> bool {
-        if self.entry_count as usize >= MAX_COPY_ENTRIES { return false; }
+        if self.entry_count as usize >= MAX_COPY_ENTRIES {
+            return false;
+        }
         self.entries[self.entry_count as usize] = entry;
         self.entry_count = self.entry_count + 1;
         true
     }
 
-    pub fn entry_count(&self) -> u32 { self.entry_count }
+    pub fn entry_count(&self) -> u32 {
+        self.entry_count
+    }
 
     pub fn collect(&self, sources: &[SourceData], packet: &mut HkPacket) -> bool {
         let count = self.entry_count;
@@ -74,11 +90,15 @@ impl CopyTable {
 
             // Bounds check: output region must fit in packet
             let out_end = entry.output_offset as usize + entry.length as usize;
-            if out_end > MAX_OUTPUT_SIZE { return false; }
+            if out_end > MAX_OUTPUT_SIZE {
+                return false;
+            }
 
             // Bounds check: source region must fit in source data
             let src_end = entry.source_offset as usize + entry.length as usize;
-            if src_end > SOURCE_DATA_SIZE { return false; }
+            if src_end > SOURCE_DATA_SIZE {
+                return false;
+            }
 
             // Find matching source
             let mut found = false;
@@ -98,7 +118,9 @@ impl CopyTable {
                 s = s + 1;
             }
 
-            if !found { return false; }
+            if !found {
+                return false;
+            }
 
             // Track the high-water mark for packet length
             if out_end as u32 > packet.length {
@@ -155,8 +177,18 @@ mod tests {
     #[test]
     fn test_multiple_copies() {
         let mut table = CopyTable::new();
-        table.add_entry(CopyEntry { source_id: 1, source_offset: 0, length: 2, output_offset: 0 });
-        table.add_entry(CopyEntry { source_id: 2, source_offset: 4, length: 2, output_offset: 2 });
+        table.add_entry(CopyEntry {
+            source_id: 1,
+            source_offset: 0,
+            length: 2,
+            output_offset: 0,
+        });
+        table.add_entry(CopyEntry {
+            source_id: 2,
+            source_offset: 4,
+            length: 2,
+            output_offset: 2,
+        });
 
         let mut src1 = SourceData::empty();
         src1.source_id = 1;

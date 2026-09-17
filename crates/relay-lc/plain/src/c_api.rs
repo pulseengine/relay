@@ -17,8 +17,8 @@
 //! is untouched. This file is ONLY glue.
 
 use crate::engine::{
-    ComparisonOp, EvalResult, SensorReading, Violation, Watchpoint,
-    WatchpointTable, MAX_VIOLATIONS_PER_CYCLE, MAX_WATCHPOINTS,
+    ComparisonOp, EvalResult, MAX_VIOLATIONS_PER_CYCLE, MAX_WATCHPOINTS, SensorReading, Violation,
+    Watchpoint, WatchpointTable,
 };
 
 /// Fixed-point scaling factor: multiply f64 by this to get i64.
@@ -258,7 +258,6 @@ pub extern "C" fn relay_lc_max_watchpoints() -> u32 {
 // uint32_t relay_lc_max_watchpoints(void);
 //
 // #endif /* RELAY_LC_H */
-
 #[cfg(test)]
 mod tests {
     use super::*;

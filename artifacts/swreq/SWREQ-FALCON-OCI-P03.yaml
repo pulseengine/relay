@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OCI-P03 — bounded messaging payloads: adopt the wit-bindgen fork (fixed-length lists + arena/elision)"
     status: proposed
-    release: falcon-v1.139.0
+    release: falcon-v1.142.0
     description: >
       Message-carrying seams shall declare BOUNDED payloads, so the work memory
       they require can be sized and defended rather than being unbounded.
@@ -57,7 +57,9 @@ artifacts:
       bindings baked into every published artifact. Rewrite this requirement
       around THAT migration, which needs no fork at all.
 
-    tags: [falcon, oci, wasm, wit-bindgen, messaging, embedded, v1.139]
+      RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.142, the platform release. Adopting the wit-bindgen fork (#330) does not depend on the flight work in v1.140/v1.141 and should not hold it up.
+
+    tags: [falcon, oci, wasm, wit-bindgen, messaging, embedded, v1.142]
     fields:
       req-type: interface
       priority: should

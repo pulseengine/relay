@@ -180,7 +180,11 @@ fn min_max(samples: &[Vec3]) -> (Vec3, Vec3) {
 /// a full rotation. Total: empty → zero offset. Never panics.
 pub fn mag_hardiron(samples: &[Vec3]) -> Vec3 {
     let (lo, hi) = min_max(samples);
-    [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5]
+    [
+        (lo[0] + hi[0]) * 0.5,
+        (lo[1] + hi[1]) * 0.5,
+        (lo[2] + hi[2]) * 0.5,
+    ]
 }
 
 /// Magnetometer soft-iron DIAGONAL scale: normalise each axis's half-range to the
@@ -189,7 +193,11 @@ pub fn mag_hardiron(samples: &[Vec3]) -> Vec3 {
 /// fit is a documented follow-up.
 pub fn mag_softiron_diag(samples: &[Vec3]) -> Vec3 {
     let (lo, hi) = min_max(samples);
-    let half = [(hi[0] - lo[0]) * 0.5, (hi[1] - lo[1]) * 0.5, (hi[2] - lo[2]) * 0.5];
+    let half = [
+        (hi[0] - lo[0]) * 0.5,
+        (hi[1] - lo[1]) * 0.5,
+        (hi[2] - lo[2]) * 0.5,
+    ];
     let avg = (half[0] + half[1] + half[2]) / 3.0;
     let mut scale = [1.0f32; 3];
     let mut a = 0;
@@ -202,7 +210,13 @@ pub fn mag_softiron_diag(samples: &[Vec3]) -> Vec3 {
 
 /// Solve a full [`CalParams`] from the raw calibration data: at-rest gyro
 /// samples, the accel ±g face endpoints, and the mag rotation sweep.
-pub fn solve(gyro_rest: &[Vec3], accel_pos: Vec3, accel_neg: Vec3, g: f32, mag_sweep: &[Vec3]) -> CalParams {
+pub fn solve(
+    gyro_rest: &[Vec3],
+    accel_pos: Vec3,
+    accel_neg: Vec3,
+    g: f32,
+    mag_sweep: &[Vec3],
+) -> CalParams {
     let (accel_bias, accel_scale) = accel_6point(accel_pos, accel_neg, g);
     CalParams {
         gyro_bias: gyro_null(gyro_rest),
@@ -252,12 +266,18 @@ mod flow_tests {
         f.step([0.01, 0.0, 0.0]);
         f.step([0.01, 0.0, 0.0]);
         // Bump: over threshold ⇒ restart, nothing from before survives.
-        assert!(matches!(f.step([0.5, 0.0, 0.0]), WindowStatus::Collecting { remaining: 3 }));
+        assert!(matches!(
+            f.step([0.5, 0.0, 0.0]),
+            WindowStatus::Collecting { remaining: 3 }
+        ));
         assert_eq!(f.restarts(), 1);
         assert_eq!(f.bias(), None);
         // NaN is also disqualifying.
         f.step([0.01, 0.0, 0.0]);
-        assert!(matches!(f.step([f32::NAN, 0.0, 0.0]), WindowStatus::Collecting { remaining: 3 }));
+        assert!(matches!(
+            f.step([f32::NAN, 0.0, 0.0]),
+            WindowStatus::Collecting { remaining: 3 }
+        ));
         assert_eq!(f.restarts(), 2);
     }
 
@@ -277,11 +297,26 @@ mod flow_tests {
     fn accel_flow_captures_all_faces_and_matches_solver() {
         let mut f = Accel6PointFlow::new(3, G);
         // Slight bias on x (+0.1) so the solve is non-trivial.
-        assert!(matches!(feed_face(&mut f, [G + 0.1, 0.0, 0.0], 3), SixPointStatus::FaceCaptured { face: Face::XPos }));
-        assert!(matches!(feed_face(&mut f, [-G + 0.1, 0.0, 0.0], 3), SixPointStatus::FaceCaptured { face: Face::XNeg }));
-        assert!(matches!(feed_face(&mut f, [0.0, G, 0.0], 3), SixPointStatus::FaceCaptured { face: Face::YPos }));
-        assert!(matches!(feed_face(&mut f, [0.0, -G, 0.0], 3), SixPointStatus::FaceCaptured { face: Face::YNeg }));
-        assert!(matches!(feed_face(&mut f, [0.0, 0.0, G], 3), SixPointStatus::FaceCaptured { face: Face::ZPos }));
+        assert!(matches!(
+            feed_face(&mut f, [G + 0.1, 0.0, 0.0], 3),
+            SixPointStatus::FaceCaptured { face: Face::XPos }
+        ));
+        assert!(matches!(
+            feed_face(&mut f, [-G + 0.1, 0.0, 0.0], 3),
+            SixPointStatus::FaceCaptured { face: Face::XNeg }
+        ));
+        assert!(matches!(
+            feed_face(&mut f, [0.0, G, 0.0], 3),
+            SixPointStatus::FaceCaptured { face: Face::YPos }
+        ));
+        assert!(matches!(
+            feed_face(&mut f, [0.0, -G, 0.0], 3),
+            SixPointStatus::FaceCaptured { face: Face::YNeg }
+        ));
+        assert!(matches!(
+            feed_face(&mut f, [0.0, 0.0, G], 3),
+            SixPointStatus::FaceCaptured { face: Face::ZPos }
+        ));
         assert_eq!(feed_face(&mut f, [0.0, 0.0, -G], 3), SixPointStatus::Done);
         assert_eq!(f.captured_mask(), 0b11_1111);
         let (bias, scale) = f.solve().unwrap();
@@ -299,18 +334,39 @@ mod flow_tests {
     fn accel_flow_rejects_tilted_and_shaky_faces() {
         let mut f = Accel6PointFlow::new(3, G);
         // Tilted 45° — no dominant axis within gates ⇒ never recognised.
-        assert_eq!(f.step([G * 0.7, G * 0.7, 0.0]), SixPointStatus::WaitingForFace);
+        assert_eq!(
+            f.step([G * 0.7, G * 0.7, 0.0]),
+            SixPointStatus::WaitingForFace
+        );
         // Start a valid face then shake out of it ⇒ that window restarts.
-        assert!(matches!(f.step([G, 0.0, 0.0]), SixPointStatus::Sampling { face: Face::XPos, remaining: 2 }));
-        assert_eq!(f.step([G * 0.5, G * 0.5, 0.0]), SixPointStatus::WaitingForFace);
+        assert!(matches!(
+            f.step([G, 0.0, 0.0]),
+            SixPointStatus::Sampling {
+                face: Face::XPos,
+                remaining: 2
+            }
+        ));
+        assert_eq!(
+            f.step([G * 0.5, G * 0.5, 0.0]),
+            SixPointStatus::WaitingForFace
+        );
         // Window restarted: needs the full count again.
-        assert!(matches!(f.step([G, 0.0, 0.0]), SixPointStatus::Sampling { face: Face::XPos, remaining: 2 }));
+        assert!(matches!(
+            f.step([G, 0.0, 0.0]),
+            SixPointStatus::Sampling {
+                face: Face::XPos,
+                remaining: 2
+            }
+        ));
     }
 
     #[test]
     fn accel_flow_never_rerecords_a_face() {
         let mut f = Accel6PointFlow::new(2, G);
-        assert!(matches!(feed_face(&mut f, [G, 0.0, 0.0], 2), SixPointStatus::FaceCaptured { face: Face::XPos }));
+        assert!(matches!(
+            feed_face(&mut f, [G, 0.0, 0.0], 2),
+            SixPointStatus::FaceCaptured { face: Face::XPos }
+        ));
         // Presenting the same face again is ignored (WaitingForFace).
         assert_eq!(f.step([G, 0.0, 0.0]), SixPointStatus::WaitingForFace);
         assert_eq!(f.captured_mask(), 0b00_0001);
@@ -372,8 +428,8 @@ mod flow_tests {
     /// the pre-arm `calibration_present` gate consumes).
     #[test]
     fn calibrate_persist_reboot_roundtrip() {
-        use relay_param::persist::{load, save, ArrayNvm, Layout, LoadOutcome};
-        use relay_param::{param_id, ParamDef, ParamStore};
+        use relay_param::persist::{ArrayNvm, Layout, LoadOutcome, load, save};
+        use relay_param::{ParamDef, ParamStore, param_id};
 
         // 1. Flows produce a calibration.
         let mut gy = GyroNullFlow::new(4, 0.1);
@@ -411,14 +467,27 @@ mod flow_tests {
                 // Generous physical bounds; defaults = identity calibration.
                 let d = CalParams::identity().to_named();
                 let default = d.iter().find(|(n, _)| *n == name).unwrap().1;
-                s.register(ParamDef { id: param_id(name), min: -50.0, max: 50.0, default });
+                s.register(ParamDef {
+                    id: param_id(name),
+                    min: -50.0,
+                    max: 50.0,
+                    default,
+                });
             }
-            s.register(ParamDef { id: param_id("CAL_VALID"), min: 0.0, max: 1.0, default: 0.0 });
+            s.register(ParamDef {
+                id: param_id("CAL_VALID"),
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+            });
             s
         }
         let mut store = schema();
         for (name, v) in cal.to_named() {
-            assert_eq!(store.set(&param_id(name), v), relay_param::SetResult::Applied);
+            assert_eq!(
+                store.set(&param_id(name), v),
+                relay_param::SetResult::Applied
+            );
         }
         store.set(&param_id("CAL_VALID"), 1.0);
         let mut nvm: ArrayNvm<CAP> = ArrayNvm::new();
@@ -434,13 +503,19 @@ mod flow_tests {
             vals[i] = store2.get(&param_id(name)).unwrap();
         }
         let back = CalParams::from_values(vals);
-        assert_eq!(back, cal, "reboot must reproduce the calibration bit-exactly");
+        assert_eq!(
+            back, cal,
+            "reboot must reproduce the calibration bit-exactly"
+        );
 
         // 4. A NEVER-CALIBRATED device: fresh NVM ⇒ defaults ⇒ CAL_VALID=0 —
         // the value that keeps pre-arm `calibration_present` false.
         let blank: ArrayNvm<CAP> = ArrayNvm::new();
         let mut store3 = schema();
-        assert_eq!(load(&mut store3, &blank, LAYOUT, 1).outcome, LoadOutcome::FreshDefaults);
+        assert_eq!(
+            load(&mut store3, &blank, LAYOUT, 1).outcome,
+            LoadOutcome::FreshDefaults
+        );
         assert_eq!(store3.get(&param_id("CAL_VALID")), Some(0.0));
     }
 
@@ -506,7 +581,11 @@ mod tests {
         assert!(close(bias, b, 1e-4), "bias {bias:?} vs {b:?}");
         assert!(close(scale, s, 1e-4), "scale {scale:?} vs {s:?}");
         // and applying the solved cal to the +g reading yields +G per axis.
-        let cal = CalParams { accel_bias: bias, accel_scale: scale, ..CalParams::identity() };
+        let cal = CalParams {
+            accel_bias: bias,
+            accel_scale: scale,
+            ..CalParams::identity()
+        };
         let corrected = cal.apply_accel(pos);
         assert!(close(corrected, [G, G, G], 1e-3));
     }

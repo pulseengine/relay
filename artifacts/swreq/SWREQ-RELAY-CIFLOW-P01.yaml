@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-RELAY-CIFLOW-P01
+    type: sw-req
+    title: "CIFLOW-P01 — a green PR shall merge without a human noticing it is stuck, and required gates shall not be decided by runner luck"
+    status: proposed
+    release: falcon-v1.142.0
+    description: >
+      A PR whose required checks are green shall merge without manual
+      intervention, and no required check's verdict shall depend on runner
+      load, solver luck or scheduler cadence.
+
+      WHY IT EXISTS. Each of these cost real merges in September 2026:
+        #373 — strict protection + auto-merge deadlock: auto-merge never
+               updates a BEHIND branch, so green PRs sat unmergeable for
+               weeks. It recurred on every merge in the 2026-09-16/17 train.
+        #350 — the verification gate grew into its own timeout (60 -> 90 ->
+               150 min), so a required verdict tracked runner load.
+        #345 — `rivet validate` failed once on a tree where it passes;
+               unreproduced.
+        #429 — follow-up: every recorded Kani (relay-mix-quad) hang is one
+               harness, verify_mix_priority_bound, stalling in CBMC's second
+               propositional reduction (minisat stalls it locally past 300 s).
+               The 60-min cap makes the stall visible; the harness still
+               needs to be made robust.
+        #436 — the fleet monitor's */15 schedule actually ran every 2.4–5.5 h,
+               so unattended detection latency is hours.
+
+      FALSIFICATION: wrong if, over a release cycle, a PR with every required
+      check green stays open more than 24 h without a human action, or a
+      required check fails on one attempt and passes on an identical tree
+      without a recorded cause.
+    tags: [requirement, relay, ci, merge-flow, kani, v1.142]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

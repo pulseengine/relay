@@ -21,6 +21,16 @@ artifacts:
       bench-only, skipped in the gate like the bazel/gz steps); the fusion is
       demonstrated locally via the script. Running the FUSED module on an
       emulated Cortex-M with the sim backend is v1.6.
+
+      CORRECTION (2026-09-17, #419), kept rather than rewritten above. "The
+      five verified Component Model leaves" and "the embedded deployable
+      artifact" are wrong: falcon-position/attitude/rate wrap LEGACY
+      controllers (relay-pos/-att/-rate — no Kani or Verus in CI) that the
+      flight core does not fly; falcon-core flies geometric SE(3) + ADRC and
+      ships as the single falcon-cascade component (#388). The fused module is
+      a meld -> loom -> synth pipeline exercise, not a deployable flight
+      artifact.
+
     tags: [verification, falcon, meld, fusion, embedded, v1.5]
     fields:
       method: build

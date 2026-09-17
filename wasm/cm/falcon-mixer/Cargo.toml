@@ -4,7 +4,7 @@
 # via `cargo component build`.
 [package]
 name = "falcon-mixer-cm"
-description = "Formally-verified control allocator (mixer) as a WebAssembly Component — body torque + thrust → per-motor commands (airframe-parameterizable)."
+description = "Quadrotor control allocator (relay-mix-quad) as a WebAssembly Component — body torque + thrust → per-motor commands. Kani harnesses on relay-mix-quad run in CI."
 homepage = "https://pulseengine.eu"
 documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
 authors = ["PulseEngine"]

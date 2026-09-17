@@ -2,7 +2,7 @@
 # workspace (generated bindings module won't build under plain cargo).
 [package]
 name = "falcon-rate-cm"
-description = "Formally-verified body-rate PID controller as a WebAssembly Component — body-rate setpoint + gyro → body torque. Airframe-agnostic; part of the pulseengine:falcon-cascade control loop."
+description = "LEGACY body-rate PID controller (relay-rate) as a WebAssembly Component — body-rate setpoint + gyro → body torque. Not used by the falcon flight core, which flies ADRC (see the falcon-cascade component)."
 homepage = "https://pulseengine.eu"
 documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
 authors = ["PulseEngine"]

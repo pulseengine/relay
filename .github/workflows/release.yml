@@ -186,6 +186,11 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      # scripts/verification-tracks.rs reads each verification workflow's run
+      # on the released commit, and the state of the known-gap issues
+      # (SWREQ-RELAY-VGATE-P04).
+      actions: read
+      issues: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -338,19 +343,37 @@ jobs:
 
       - name: Pick release notes body
         id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           STEM="${TAG#falcon-}"
           NOTES_FILE=".github/release-notes/${STEM}.md"
+          OUT="$RUNNER_TEMP/release-notes.md"
           if [ -f "$NOTES_FILE" ]; then
             echo "Using release notes from $NOTES_FILE"
-            printf 'notes_path=%s\n' "$NOTES_FILE" >>"$GITHUB_OUTPUT"
+            cat "$NOTES_FILE" > "$OUT"
           else
-            echo "No release notes file at $NOTES_FILE; using gh autogen"
-            printf 'notes_path=\n' >>"$GITHUB_OUTPUT"
+            # Was: fall back to gh autogen. Every release now carries the
+            # generated verification-tracks section below, so a body always
+            # exists; a release without a hand-written file gets a minimal one.
+            echo "::warning::No release notes file at $NOTES_FILE — minimal body + verification tracks"
+            printf 'Release %s\n' "$TAG" > "$OUT"
           fi
+          # SWREQ-RELAY-VGATE-P04: record what each verification track did on
+          # THIS commit, from observed CI conclusions — v1.138.0 shipped with
+          # Verus dark and said nothing. `|| rc=$?`: this shell runs with -e.
+          command -v rust-script >/dev/null || cargo install rust-script --locked
+          printf '\n' >> "$OUT"
+          rc=0
+          ./scripts/verification-tracks.rs --sha "$(git rev-parse HEAD)" >> "$OUT" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            printf '\n## Verification tracks: UNKNOWN\n\nThe CI state of this commit could not be read at release time (verification-tracks exit %s). This is recorded, not a pass.\n' "$rc" >> "$OUT"
+            echo "::warning::verification-tracks could not evaluate (exit $rc); the release notes say UNKNOWN"
+          fi
+          printf 'notes_path=%s\n' "$OUT" >>"$GITHUB_OUTPUT"
 
       - name: Create or update GitHub Release
         env:

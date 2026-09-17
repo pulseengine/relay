@@ -20,7 +20,11 @@ pub enum FilterDecision {
 }
 /// Pure decision: pass the value through iff `predicate_holds`.
 pub fn filter_decide(predicate_holds: bool) -> FilterDecision {
-    if predicate_holds { FilterDecision::Keep } else { FilterDecision::Drop }
+    if predicate_holds {
+        FilterDecision::Keep
+    } else {
+        FilterDecision::Drop
+    }
 }
 #[cfg(test)]
 mod tests {

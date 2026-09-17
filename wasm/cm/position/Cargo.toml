@@ -2,7 +2,7 @@
 # workspace (generated bindings module won't build under plain cargo).
 [package]
 name = "falcon-position-cm"
-description = "Formally-verified position/velocity controller as a WebAssembly Component — NED waypoint + vehicle state → attitude setpoint."
+description = "LEGACY position/velocity controller (relay-pos) as a WebAssembly Component — NED waypoint + vehicle state → attitude setpoint. Not used by the falcon flight core (see the falcon-cascade component)."
 homepage = "https://pulseengine.eu"
 documentation = "https://github.com/pulseengine/relay/blob/main/docs/OCI-DISTRIBUTION.md"
 authors = ["PulseEngine"]

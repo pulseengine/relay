@@ -43,11 +43,7 @@ pub struct Sample {
 
 #[inline]
 fn fin(x: f32, fallback: f32) -> f32 {
-    if x.is_finite() {
-        x
-    } else {
-        fallback
-    }
+    if x.is_finite() { x } else { fallback }
 }
 
 impl Quintic {
@@ -88,7 +84,11 @@ impl Quintic {
     /// Evaluate position/velocity/acceleration/jerk at time `t` (clamped to
     /// `[0, T]` so a sample is always on the segment).
     pub fn eval(&self, t: f32) -> Sample {
-        let t = if t.is_finite() { t.clamp(0.0, self.t_end) } else { 0.0 };
+        let t = if t.is_finite() {
+            t.clamp(0.0, self.t_end)
+        } else {
+            0.0
+        };
         let (c5, c4, c3, c2, c1, c0) = (self.c5, self.c4, self.c3, self.c2, self.c1, self.c0);
         // Horner for p; analytic derivatives.
         let p = ((((c5 * t + c4) * t + c3) * t + c2) * t + c1) * t + c0;
@@ -168,7 +168,11 @@ impl Segment3 {
 
     /// Sample the trajectory at time `t` (clamped to `[0, T]`).
     pub fn eval(&self, t: f32) -> Sample3 {
-        let s = [self.axes[0].eval(t), self.axes[1].eval(t), self.axes[2].eval(t)];
+        let s = [
+            self.axes[0].eval(t),
+            self.axes[1].eval(t),
+            self.axes[2].eval(t),
+        ];
         Sample3 {
             pos: [s[0].p, s[1].p, s[2].p],
             vel: [s[0].v, s[1].v, s[2].v],
@@ -244,7 +248,12 @@ impl RefGovernor {
     /// ramps 1 → `g_min`. `g_min` ∈ (0, 1]: the slowest advance fraction
     /// (> 0 so the mission never permanently deadlocks).
     pub fn new(err_lo: f32, err_hi: f32, g_min: f32) -> Self {
-        RefGovernor { s: 0.0, err_lo, err_hi, g_min }
+        RefGovernor {
+            s: 0.0,
+            err_lo,
+            err_hi,
+            g_min,
+        }
     }
 
     /// The error-gate factor g ∈ [g_min, 1] for a tracking error.
@@ -311,7 +320,15 @@ mod kani_proofs {
         kani::assume(c4.is_finite() && relay_math::fabsf(c4) <= 1e3);
         kani::assume(c3.is_finite() && relay_math::fabsf(c3) <= 1e3);
         kani::assume(t_end.is_finite() && t_end > 1e-3 && t_end <= 100.0);
-        let q = Quintic { c5, c4, c3, c2: 0.0, c1: 0.0, c0: 0.0, t_end };
+        let q = Quintic {
+            c5,
+            c4,
+            c3,
+            c2: 0.0,
+            c1: 0.0,
+            c0: 0.0,
+            t_end,
+        };
         let peak = q.peak_abs_jerk();
 
         let t: f32 = kani::any();
@@ -404,7 +421,11 @@ mod tests {
         for _ in 0..500 {
             on.advance(0.0, dt);
         }
-        assert!((on.time() - 10.0).abs() < 1e-3, "on-track ≈ wall time, {}", on.time());
+        assert!(
+            (on.time() - 10.0).abs() < 1e-3,
+            "on-track ≈ wall time, {}",
+            on.time()
+        );
         // Persistently behind (error past hi): advances at g_min rate only.
         let mut behind = RefGovernor::new(0.3, 1.5, 0.05);
         let mut prev = 0.0;
@@ -414,8 +435,15 @@ mod tests {
             assert!(s - prev <= dt + 1e-6, "rate ≤ dt"); // never faster than nominal
             prev = s;
         }
-        assert!((behind.time() - 0.05 * 10.0).abs() < 1e-2, "behind ≈ g_min·wall, {}", behind.time());
-        assert!(behind.time() < on.time(), "governed clock lags the wall clock when behind");
+        assert!(
+            (behind.time() - 0.05 * 10.0).abs() < 1e-2,
+            "behind ≈ g_min·wall, {}",
+            behind.time()
+        );
+        assert!(
+            behind.time() < on.time(),
+            "governed clock lags the wall clock when behind"
+        );
     }
 
     proptest::proptest! {
@@ -467,10 +495,21 @@ mod tests {
         let sT = seg.eval(4.0);
         for i in 0..3 {
             let want = [3.0, -2.0, 1.5][i];
-            assert!((sT.pos[i] - want).abs() < 1e-2, "axis {i} pos {} vs {want}", sT.pos[i]);
-            assert!(sT.vel[i].abs() < 1e-2 && sT.acc[i].abs() < 1e-2, "axis {i} not at rest");
+            assert!(
+                (sT.pos[i] - want).abs() < 1e-2,
+                "axis {i} pos {} vs {want}",
+                sT.pos[i]
+            );
+            assert!(
+                sT.vel[i].abs() < 1e-2 && sT.acc[i].abs() < 1e-2,
+                "axis {i} not at rest"
+            );
         }
-        assert!(seg.peak_abs_jerk().iter().all(|&j| j.is_finite() && j >= 0.0));
+        assert!(
+            seg.peak_abs_jerk()
+                .iter()
+                .all(|&j| j.is_finite() && j >= 0.0)
+        );
     }
 
     /// Total: finite samples + finite peak for adversarial inputs.

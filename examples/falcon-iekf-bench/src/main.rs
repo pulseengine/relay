@@ -58,7 +58,10 @@ const G: f32 = 9.81;
 struct Lcg(u64);
 impl Lcg {
     fn next_unit(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let bits = (self.0 >> 40) as u32; // 24 high bits
         (bits as f32 / (1u32 << 23) as f32) - 1.0
     }
@@ -158,7 +161,9 @@ fn main() -> ExitCode {
     println!("falcon-iekf-bench — full-state IEKF (IMU+GNSS), {SECONDS:.0} s @ {IMU_HZ:.0} Hz");
     println!("  position RMS (last 5 s): {pos_rms:.3} m   (budget ≤ 2.0)");
     println!("  velocity RMS (last 5 s): {vel_rms:.3} m/s (budget ≤ 1.5)");
-    println!("  mean position NEES:      {mean_nees:.3}    (diagnostic — consistency gated by gz EKF-002)");
+    println!(
+        "  mean position NEES:      {mean_nees:.3}    (diagnostic — consistency gated by gz EKF-002)"
+    );
     println!("  finite throughout:       {}", !any_nan);
 
     let pass = !any_nan && pos_rms <= 2.0 && vel_rms <= 1.5;
@@ -232,7 +237,13 @@ mod tests {
         let pos_rms = (sp / cnt as f64).sqrt();
         let vel_rms = (sv / cnt as f64).sqrt();
         let _mean_nees = sn / cnt as f64; // reported by main(); consistency gated by gz EKF-002
-        assert!(pos_rms <= 2.0, "position RMS {pos_rms:.3} m exceeds 2.0 m budget");
-        assert!(vel_rms <= 1.5, "velocity RMS {vel_rms:.3} m/s exceeds 1.5 budget");
+        assert!(
+            pos_rms <= 2.0,
+            "position RMS {pos_rms:.3} m exceeds 2.0 m budget"
+        );
+        assert!(
+            vel_rms <= 1.5,
+            "velocity RMS {vel_rms:.3} m/s exceeds 1.5 budget"
+        );
     }
 }

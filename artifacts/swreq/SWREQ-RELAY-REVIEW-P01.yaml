@@ -1,0 +1,36 @@
+artifacts:
+  - id: SWREQ-RELAY-REVIEW-P01
+    type: sw-req
+    title: "REVIEW-P01 — each release in the v1.139–v1.141 arc shall pass an independent multi-agent review before it is tagged"
+    status: proposed
+    release: falcon-v1.139.0
+    description: >
+      Before v1.139, v1.140 and v1.141 are tagged, the release's full change
+      set (previous tag..release candidate) shall be reviewed by an
+      independent multi-agent review — `/code-review ultra` — and every
+      finding shall be dispositioned: fixed, filed as an issue landed in a
+      named release, or dismissed with a written rationale.
+
+      WHY IT EXISTS. Requested by the maintainer on 2026-09-17 to check the
+      arc is on the right track. The evidence that per-change gates are not
+      enough is recent and specific: in two days this loop found a required
+      Format gate that could never fail, a fleet monitor that never measured,
+      a nightly readiness report that never published, and an analytic soak
+      whose "12 h hold" could not tilt — each green, each authored or
+      promoted by the same process that would review it. A review from
+      outside that process, on the whole release, is the check.
+
+      HOW IT IS ENFORCED. One review-verification artifact per release
+      (FV-RELAY-REVIEW-139/-140/-141), scoped to that release, so
+      scripts/release-readiness.rs counts an un-run review as BLOCKING. The
+      review is user-triggered and billed; the loop cannot start it. At the
+      checkpoint the loop stops, asks the maintainer to run it, triages the
+      findings, and promotes the review artifact in a code-free PR.
+
+      FALSIFICATION: wrong if a tag exists for v1.139, v1.140 or v1.141 while
+      that release's FV-RELAY-REVIEW artifact is not at `verified`, or while
+      a finding from its review has no recorded disposition.
+    tags: [requirement, relay, review, release, process, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

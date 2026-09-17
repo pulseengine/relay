@@ -1,0 +1,52 @@
+artifacts:
+  - id: FV-FALCON-CLAIMS-002
+    type: sw-verification
+    title: "CLAIMS — the bundle says which artifact flies, and the audit sees the legacy cascade built from Bazel-only sources (#411, v1.139)"
+    status: verified
+    release: falcon-v1.139.0
+    description: >
+      Partial verification of SWREQ-FALCON-CLAIMS-P01, for its #411 instance.
+
+      WHAT WAS WRONG. The signed components bundle ships
+      falcon-cascade-stream-composed / -fused — the relay P3 stream pipeline
+      (SWREQ-RELAY-STREAM-P15), built by Bazel from
+      wasm/cm/cascade/src/orch.rs, which imports relay_att, relay_pos and
+      relay_rate: the LEGACY controllers. Beside it sits falcon-cascade, the
+      flight core (FlightCore: geometric SE(3) + ADRC). Near-identical names,
+      different control laws, one signature, and nothing in the bundle said
+      which was which: manifest.json labelled all eight cargo components
+      `flight-component`. And scripts/audit-component-deps.rs, written to
+      catch exactly this, read only Cargo.toml — cascade/Cargo.toml lists only
+      falcon-core, orch.rs is in no Cargo.toml — so it reported the directory
+      clean.
+
+      THE FIX. (1) The audit also scans every Rust source BUILD.bazel compiles
+      from wasm/cm that is not a crate root (8 today) and applies the same
+      flown-or-waived rule; the relay-att/-pos/-rate waivers now name the
+      stream pipeline and #411. MUTATION: adding a `relay_sch` reference to
+      orch.rs makes the audit fail, naming "wasm/cm/cascade [bazel-only
+      src/orch.rs] wraps relay-sch"; restored byte-identical, it passes.
+      (2) manifest.json gains `role` (flight-core, flight-core-stage,
+      legacy-stage, demo, legacy-stream-demonstrator) and `description` — the
+      component's honest Cargo.toml description, or for the stream artifacts a
+      statement that they are built from the legacy controllers and are not
+      the flight core. The manifest block was executed against a fake bundle:
+      valid JSON, every role and description as intended, quotes and
+      backslashes escaped.
+
+      NOT CHANGED. The stream pipeline keeps SHIPPING: SWREQ-RELAY-STREAM-P15
+      requires it and it is the MC/DC coverage subject. Retiring it, or
+      rebuilding it on FlightCore, is a scope decision (ORPHAN-P01, v1.141).
+    tags: [verification, falcon, claims, oci, bundle, v1.139]
+    fields:
+      method: automated-test
+      steps:
+        # The audit passes, and it can see the legacy cascade's Bazel-only source.
+        - run: "./scripts/audit-component-deps.rs"
+        - run: "./scripts/audit-component-deps.rs | grep -q 'wasm/cm/cascade/src/orch.rs .*relay-att'"
+        # The bundle manifest classifies each artifact.
+        - run: "grep -q 'legacy-stream-demonstrator' scripts/build-components.sh"
+        - run: "grep -q 'flight-core-stage' scripts/build-components.sh"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-CLAIMS-P01

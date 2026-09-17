@@ -1,0 +1,24 @@
+artifacts:
+  - id: SWREQ-RELAY-EVIDENCE-P01
+    type: sw-req
+    title: "EVIDENCE-P01 — every verification artifact's cited evidence shall resolve to something that exists and runs"
+    status: verified
+    release: falcon-v1.139.0
+    description: >
+      Every test, harness, file, command or artifact id cited by a
+      verification artifact shall resolve in the tree it claims to verify, and
+      no artifact shall be `verified` on evidence that does not resolve.
+
+      WHY IT EXISTS (#415). A census of all verification YAML, parsed directly
+      (rivet's JSON drops `fields`), found 15 of 293 artifacts citing
+      something that does not resolve, including artifacts already at
+      `verified`. A `verified` status whose evidence cannot be run is the
+      traceability equivalent of a gate that cannot fail.
+
+      FALSIFICATION: wrong if, at a tagged release, a verification artifact
+      at `verified` or `accepted` cites a test, harness, path or id that does
+      not exist in that release's tree.
+    tags: [requirement, relay, traceability, evidence, integrity, v1.139]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
