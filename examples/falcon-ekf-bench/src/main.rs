@@ -45,7 +45,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use libm::{cosf, sinf, sqrtf};
-use relay_ekf::{quat_mul, Ekf, ImuSample, Timestamp};
+use relay_ekf::{Ekf, ImuSample, Timestamp, quat_mul};
 
 const SAMPLE_RATE_HZ: f32 = 200.0;
 const TRAJECTORY_SECONDS: f32 = 25.0;
@@ -53,11 +53,11 @@ const GRAVITY: f32 = 9.81;
 
 /// Phase boundaries and gyro signals for the test trajectory.
 const PHASES: &[(f32, f32, [f32; 3])] = &[
-    (0.0,  5.0,  [0.0, 0.0, 0.0]),   // rest at 20° pitch
-    (5.0,  10.0, [0.3, 0.0, 0.0]),   // roll right
-    (10.0, 15.0, [0.0, 0.0, 0.0]),   // rest
-    (15.0, 20.0, [0.0, 0.0, 0.5]),   // yaw left
-    (20.0, 25.0, [0.0, 0.0, 0.0]),   // rest
+    (0.0, 5.0, [0.0, 0.0, 0.0]),   // rest at 20° pitch
+    (5.0, 10.0, [0.3, 0.0, 0.0]),  // roll right
+    (10.0, 15.0, [0.0, 0.0, 0.0]), // rest
+    (15.0, 20.0, [0.0, 0.0, 0.5]), // yaw left
+    (20.0, 25.0, [0.0, 0.0, 0.0]), // rest
 ];
 
 /// Initial true attitude: 20° pitch (about body-y).
@@ -96,8 +96,7 @@ fn integrate_truth(q: [f32; 4], omega_body: [f32; 3], dt: f32) -> [f32; 4] {
         q[3] + 0.5 * qdot[3] * dt,
     ];
     let n = sqrtf(
-        q_new[0] * q_new[0] + q_new[1] * q_new[1]
-            + q_new[2] * q_new[2] + q_new[3] * q_new[3],
+        q_new[0] * q_new[0] + q_new[1] * q_new[1] + q_new[2] * q_new[2] + q_new[3] * q_new[3],
     );
     if n < 1.0e-12 {
         q
@@ -120,7 +119,7 @@ struct BenchResult {
     rms_error_deg_steady: f32, // last 2.5 s
     peak_error_deg: f32,
     final_error_deg: f32,
-    convergence_time_s: f32,   // first time error drops below 5° and stays there
+    convergence_time_s: f32, // first time error drops below 5° and stays there
     elapsed_micros: u128,
     nan_seen: bool,
 }
@@ -173,7 +172,10 @@ fn run_bench(noise_std: f32) -> BenchResult {
         ];
         let frac = ((t.fract() as f64) * ((1u64 << 32) as f64)) as u32;
         let sample = ImuSample {
-            time: Timestamp { seconds: t as u64, fraction: frac },
+            time: Timestamp {
+                seconds: t as u64,
+                fraction: frac,
+            },
             accel_body: accel_meas,
             gyro_body: gyro_meas,
         };
@@ -218,13 +220,19 @@ fn print_result(label: &str, r: &BenchResult) {
     println!("--- {label} ---");
     println!("  samples              {}", r.samples);
     println!("  RMS error (full)     {:.3}°", r.rms_error_deg_full);
-    println!("  RMS error (steady)   {:.3}°  (last 2.5 s)", r.rms_error_deg_steady);
+    println!(
+        "  RMS error (steady)   {:.3}°  (last 2.5 s)",
+        r.rms_error_deg_steady
+    );
     println!("  peak error           {:.3}°", r.peak_error_deg);
     println!("  final error          {:.3}°", r.final_error_deg);
     if r.convergence_time_s.is_nan() {
         println!("  convergence time     never");
     } else {
-        println!("  convergence time     {:.2}s  (first sustained <5°)", r.convergence_time_s);
+        println!(
+            "  convergence time     {:.2}s  (first sustained <5°)",
+            r.convergence_time_s
+        );
     }
     println!("  estimator wall time  {} µs", r.elapsed_micros);
     println!("  NaN/∞ seen           {}", r.nan_seen);
@@ -292,9 +300,8 @@ fn main() -> ExitCode {
     // filter cannot observe heading from gravity, so residual yaw
     // drift after the trajectory's yaw phase is fundamental until
     // v0.4 wires magnetometer fusion.
-    let pass_clean = clean.rms_error_deg_steady <= 5.0
-        && clean.final_error_deg <= 5.0
-        && !clean.nan_seen;
+    let pass_clean =
+        clean.rms_error_deg_steady <= 5.0 && clean.final_error_deg <= 5.0 && !clean.nan_seen;
     let pass_noisy = noisy.as_ref().map_or(true, |r| {
         r.rms_error_deg_steady <= 8.0  // looser tolerance with noise
             && r.final_error_deg <= 8.0
@@ -325,11 +332,13 @@ mod tests {
         assert!(!r.nan_seen);
         assert!(
             r.rms_error_deg_steady <= 5.0,
-            "RMS steady error {}° exceeds 5° budget", r.rms_error_deg_steady
+            "RMS steady error {}° exceeds 5° budget",
+            r.rms_error_deg_steady
         );
         assert!(
             r.final_error_deg <= 5.0,
-            "final error {}° exceeds 5° budget", r.final_error_deg
+            "final error {}° exceeds 5° budget",
+            r.final_error_deg
         );
     }
 

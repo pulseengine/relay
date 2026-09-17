@@ -33,7 +33,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use relay_mavlink::{ParamRequestRead, ParamSet, ParamValue, MAV_PARAM_TYPE_REAL32};
+use relay_mavlink::{MAV_PARAM_TYPE_REAL32, ParamRequestRead, ParamSet, ParamValue};
 use relay_param::{ParamId, ParamStore, SetResult};
 
 /// The (index, count) of a parameter id, by scanning the store — the PARAM_VALUE
@@ -158,18 +158,24 @@ mod tuning_tests {
         assert_eq!(core.altitude_gains().0, 0.15, "live on the very next cycle");
 
         // Out-of-range: rejected at the store; the core NEVER sees it.
-        let bad = ParamSet { param_value: 99.0, ..set };
+        let bad = ParamSet {
+            param_value: 99.0,
+            ..set
+        };
         let ack = on_param_set(&mut store, &bad).expect("known param");
         assert_eq!(ack.param_value, 0.15, "ack reverts the GCS UI");
         apply_tuning(&store, &mut core);
         assert_eq!(core.altitude_gains().0, 0.15, "core unchanged");
 
         // The other knobs apply too.
-        on_param_set(&mut store, &ParamSet {
-            param_id: param_id("MC_LAND_VZ"),
-            param_value: 0.8,
-            ..set
-        });
+        on_param_set(
+            &mut store,
+            &ParamSet {
+                param_id: param_id("MC_LAND_VZ"),
+                param_value: 0.8,
+                ..set
+            },
+        );
         apply_tuning(&store, &mut core);
         assert_eq!(core.landing_descent(), 0.8);
 
@@ -191,8 +197,18 @@ mod tests {
 
     fn store() -> ParamStore<4> {
         let mut s = ParamStore::new();
-        s.register(ParamDef { id: param_id("MC_ROLL_P"), min: 0.0, max: 12.0, default: 6.5 });
-        s.register(ParamDef { id: param_id("BAT_LOW_V"), min: 10.0, max: 16.8, default: 14.0 });
+        s.register(ParamDef {
+            id: param_id("MC_ROLL_P"),
+            min: 0.0,
+            max: 12.0,
+            default: 6.5,
+        });
+        s.register(ParamDef {
+            id: param_id("BAT_LOW_V"),
+            min: 10.0,
+            max: 16.8,
+            default: 14.0,
+        });
         s
     }
 
@@ -292,8 +308,8 @@ mod tests {
     #[test]
     fn full_frame_param_set_drives_store() {
         use relay_mavlink::{
-            encode_frame, parse_frame, FrameHeader, MAGIC_V2, PARAM_SET_CRC_EXTRA,
-            PARAM_SET_MSG_ID, PARAM_SET_PAYLOAD_LEN, PARAM_VALUE_CRC_EXTRA, PARAM_VALUE_MSG_ID,
+            FrameHeader, MAGIC_V2, PARAM_SET_CRC_EXTRA, PARAM_SET_MSG_ID, PARAM_SET_PAYLOAD_LEN,
+            PARAM_VALUE_CRC_EXTRA, PARAM_VALUE_MSG_ID, encode_frame, parse_frame,
         };
         let mut s = store();
         // GCS builds + frames a PARAM_SET for MC_ROLL_P = 9.0 (in range).

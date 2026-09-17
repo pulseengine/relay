@@ -217,7 +217,11 @@ impl SoftwareBus {
     }
 
     /// Subscribe a component to a channel.
-    pub fn subscribe(&mut self, channel: ChannelId, subscriber: SubscriberId) -> Result<(), SbError> {
+    pub fn subscribe(
+        &mut self,
+        channel: ChannelId,
+        subscriber: SubscriberId,
+    ) -> Result<(), SbError> {
         let result = self.subscriptions.subscribe(channel, subscriber);
         if result.is_ok() {
             self.stats.subscriptions_active = self.subscriptions.subscriber_count();
@@ -226,7 +230,11 @@ impl SoftwareBus {
     }
 
     /// Unsubscribe a component from a channel.
-    pub fn unsubscribe(&mut self, channel: ChannelId, subscriber: SubscriberId) -> Result<(), SbError> {
+    pub fn unsubscribe(
+        &mut self,
+        channel: ChannelId,
+        subscriber: SubscriberId,
+    ) -> Result<(), SbError> {
         let result = self.subscriptions.unsubscribe(channel, subscriber);
         if result.is_ok() {
             self.stats.subscriptions_active = self.subscriptions.subscriber_count();

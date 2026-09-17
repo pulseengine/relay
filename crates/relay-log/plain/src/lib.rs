@@ -78,8 +78,17 @@ impl<const N: usize> Default for FlightLog<N> {
 impl<const N: usize> FlightLog<N> {
     /// An empty logger.
     pub fn new() -> Self {
-        let blank = LogEntry { t_ms: 0, kind: 0, data: [0.0; 2] };
-        FlightLog { buf: [blank; N], start: 0, len: 0, dropped: 0 }
+        let blank = LogEntry {
+            t_ms: 0,
+            kind: 0,
+            data: [0.0; 2],
+        };
+        FlightLog {
+            buf: [blank; N],
+            start: 0,
+            len: 0,
+            dropped: 0,
+        }
     }
 
     /// Record an entry. When the ring is full the OLDEST entry is overwritten and
@@ -149,7 +158,11 @@ pub(crate) fn crc32(data: &[u8]) -> u32 {
         crc ^= b as u32;
         let mut i = 0;
         while i < 8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
             i += 1;
         }
     }
@@ -164,7 +177,11 @@ mod tests {
     use super::*;
 
     fn e(t: u32, k: u8) -> LogEntry {
-        LogEntry { t_ms: t, kind: k, data: [t as f32, -(t as f32)] }
+        LogEntry {
+            t_ms: t,
+            kind: k,
+            data: [t as f32, -(t as f32)],
+        }
     }
 
     #[test]
@@ -195,14 +212,26 @@ mod tests {
 
     #[test]
     fn encode_decode_roundtrips_exactly() {
-        let original = LogEntry { t_ms: 123456, kind: 7, data: [1.5, -2.25] };
+        let original = LogEntry {
+            t_ms: 123456,
+            kind: 7,
+            data: [1.5, -2.25],
+        };
         assert_eq!(LogEntry::decode(&original.encode()), original);
     }
 
     #[test]
     fn replay_decodes_a_stream() {
-        let a = LogEntry { t_ms: 10, kind: 1, data: [1.0, 2.0] };
-        let b = LogEntry { t_ms: 20, kind: 2, data: [3.0, 4.0] };
+        let a = LogEntry {
+            t_ms: 10,
+            kind: 1,
+            data: [1.0, 2.0],
+        };
+        let b = LogEntry {
+            t_ms: 20,
+            kind: 2,
+            data: [3.0, 4.0],
+        };
         let mut stream = [0u8; 32];
         stream[0..16].copy_from_slice(&a.encode());
         stream[16..32].copy_from_slice(&b.encode());
@@ -297,7 +326,12 @@ mod blackbox_tests {
             let expect = boundaries.iter().filter(|&&b| b <= cut).count();
             let (cnt, used) = scan(&stream[..cut], |_| {});
             assert_eq!(cnt, expect, "cut at {cut}");
-            let expect_used = boundaries.iter().filter(|&&b| b <= cut).max().copied().unwrap_or(0);
+            let expect_used = boundaries
+                .iter()
+                .filter(|&&b| b <= cut)
+                .max()
+                .copied()
+                .unwrap_or(0);
             assert_eq!(used, expect_used, "cut at {cut}");
         }
     }

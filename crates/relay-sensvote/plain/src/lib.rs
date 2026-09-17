@@ -108,7 +108,11 @@ pub struct GpsFreshness {
 impl GpsFreshness {
     /// Declares the fix stale after `timeout_us` without an update.
     pub fn new(timeout_us: u64) -> Self {
-        Self { timeout_us, last_fix_us: 0, started: false }
+        Self {
+            timeout_us,
+            last_fix_us: 0,
+            started: false,
+        }
     }
 
     /// Record a fresh GPS fix observed at `now_us`.

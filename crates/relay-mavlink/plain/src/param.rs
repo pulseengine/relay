@@ -58,7 +58,10 @@ impl ParamRequestList {
         if payload.len() != PARAM_REQUEST_LIST_PAYLOAD_LEN {
             return None;
         }
-        Some(Self { target_system: payload[0], target_component: payload[1] })
+        Some(Self {
+            target_system: payload[0],
+            target_component: payload[1],
+        })
     }
 }
 
@@ -241,7 +244,10 @@ mod tests {
         assert_eq!(PARAM_REQUEST_LIST_MSG_ID, 21);
         assert_eq!(PARAM_REQUEST_LIST_CRC_EXTRA, 159);
         let canonical = [0x01, 0x01];
-        let m = ParamRequestList { target_system: 1, target_component: 1 };
+        let m = ParamRequestList {
+            target_system: 1,
+            target_component: 1,
+        };
         assert_eq!(m.encode_payload(), canonical);
         assert_eq!(ParamRequestList::decode_payload(&canonical), Some(m));
     }

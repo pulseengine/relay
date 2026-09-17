@@ -141,7 +141,11 @@ fn crc32(data: &[u8]) -> u32 {
         crc ^= b as u32;
         let mut i = 0;
         while i < 8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
             i += 1;
         }
     }
@@ -165,8 +169,11 @@ pub fn save<const N: usize, M: NvmBytes>(
     // Which slot is currently active? Write the OTHER one.
     let mut sel = [0u8; 1];
     nvm.read(0, &mut sel).map_err(|_| SaveError::Nvm)?;
-    let (target_slot, new_selector) =
-        if sel[0] == SELECTOR_A { (1u8, SELECTOR_B) } else { (0u8, SELECTOR_A) };
+    let (target_slot, new_selector) = if sel[0] == SELECTOR_A {
+        (1u8, SELECTOR_B)
+    } else {
+        (0u8, SELECTOR_A)
+    };
     let base = layout.slot_offset(target_slot);
 
     // Header: magic | schema_version | count | crc(over first 12 bytes).
@@ -205,7 +212,12 @@ pub fn load<const N: usize, M: NvmBytes>(
     layout: Layout,
     schema_version: u32,
 ) -> LoadReport {
-    let report = |outcome| LoadReport { outcome, applied: 0, skipped_unknown: 0, rejected: 0 };
+    let report = |outcome| LoadReport {
+        outcome,
+        applied: 0,
+        skipped_unknown: 0,
+        rejected: 0,
+    };
     if nvm.capacity() < layout.required_capacity() {
         return report(LoadOutcome::FreshDefaults);
     }
@@ -244,8 +256,16 @@ pub fn load<const N: usize, M: NvmBytes>(
     let mut i = 0usize;
     while i < count as usize {
         let mut rec = [0u8; RECORD_LEN];
-        if nvm.read(base + HEADER_LEN + i * RECORD_LEN, &mut rec).is_err() {
-            return LoadReport { outcome: LoadOutcome::NvmFault, applied, skipped_unknown, rejected };
+        if nvm
+            .read(base + HEADER_LEN + i * RECORD_LEN, &mut rec)
+            .is_err()
+        {
+            return LoadReport {
+                outcome: LoadOutcome::NvmFault,
+                applied,
+                skipped_unknown,
+                rejected,
+            };
         }
         let rcrc = u32::from_le_bytes([rec[20], rec[21], rec[22], rec[23]]);
         if rcrc != crc32(&rec[0..20]) {
@@ -266,7 +286,12 @@ pub fn load<const N: usize, M: NvmBytes>(
         }
         i += 1;
     }
-    LoadReport { outcome: LoadOutcome::Loaded, applied, skipped_unknown, rejected }
+    LoadReport {
+        outcome: LoadOutcome::Loaded,
+        applied,
+        skipped_unknown,
+        rejected,
+    }
 }
 
 /// A fixed-size in-memory NVM — the test/Kani mock AND the Renode-stage

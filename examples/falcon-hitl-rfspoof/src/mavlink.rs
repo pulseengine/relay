@@ -35,9 +35,8 @@
 
 use crate::harness::{CommandSink, HitlBench};
 use relay_mavlink::{
-    parse_frame, peek_message_id, GlobalPositionInt,
-    GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID,
-    GLOBAL_POSITION_INT_PAYLOAD_LEN,
+    GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID, GLOBAL_POSITION_INT_PAYLOAD_LEN,
+    GlobalPositionInt, parse_frame, peek_message_id,
 };
 use std::net::{SocketAddr, UdpSocket};
 
@@ -92,7 +91,9 @@ pub trait FrameSource {
     /// actually deliver them). `UdpFrameSource` overrides to true;
     /// `InMemoryFrameSource` keeps the default false so unit tests
     /// stay fast.
-    fn is_realtime(&self) -> bool { false }
+    fn is_realtime(&self) -> bool {
+        false
+    }
 }
 
 /// In-memory `FrameSource` — for tests + the deterministic backend.
@@ -109,7 +110,9 @@ impl InMemoryFrameSource {
 }
 
 impl FrameSource for InMemoryFrameSource {
-    fn name(&self) -> &'static str { "mem" }
+    fn name(&self) -> &'static str {
+        "mem"
+    }
     fn next_frame(&mut self) -> Option<&[u8]> {
         if self.cursor >= self.frames.len() {
             return None;
@@ -202,10 +205,12 @@ impl UdpFrameSource {
     /// HEARTBEAT just means the next call retries.
     fn send_heartbeat(&mut self) {
         use relay_mavlink::{
-            encode_frame, FrameHeader, Heartbeat, HEADER_LEN,
-            HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, HEARTBEAT_PAYLOAD_LEN, MAGIC_V2,
+            FrameHeader, HEADER_LEN, HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, HEARTBEAT_PAYLOAD_LEN,
+            Heartbeat, MAGIC_V2, encode_frame,
         };
-        let Some(peer) = self.register_peer else { return };
+        let Some(peer) = self.register_peer else {
+            return;
+        };
         let payload = Heartbeat::gcs().encode_payload();
         let header = FrameHeader {
             magic: MAGIC_V2,
@@ -228,8 +233,12 @@ impl UdpFrameSource {
 }
 
 impl FrameSource for UdpFrameSource {
-    fn name(&self) -> &'static str { "udp" }
-    fn is_realtime(&self) -> bool { true }
+    fn name(&self) -> &'static str {
+        "udp"
+    }
+    fn is_realtime(&self) -> bool {
+        true
+    }
     fn next_frame(&mut self) -> Option<&[u8]> {
         // Keep the registration alive by sending a HEARTBEAT every
         // second when a peer is configured. PX4-SITL forgets peers
@@ -269,7 +278,9 @@ impl UdpCommandSink {
 }
 
 impl CommandSink for UdpCommandSink {
-    fn name(&self) -> &'static str { "udp" }
+    fn name(&self) -> &'static str {
+        "udp"
+    }
     fn send_frame(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
         self.sock
             .send_to(bytes, self.peer)
@@ -370,7 +381,9 @@ impl<S: FrameSource> MavlinkBench<S> {
 }
 
 impl<S: FrameSource> HitlBench for MavlinkBench<S> {
-    fn name(&self) -> &'static str { "mavlink" }
+    fn name(&self) -> &'static str {
+        "mavlink"
+    }
     fn step(&mut self, dt: f32) {
         self.t += dt;
         self.drain_frames();
@@ -378,14 +391,18 @@ impl<S: FrameSource> HitlBench for MavlinkBench<S> {
     fn position_cm(&self) -> (i32, i32, i32) {
         (self.last_n_cm, self.last_e_cm, self.last_d_cm)
     }
-    fn real_time(&self) -> bool { self.source.is_realtime() }
-    fn spoof_active(&self) -> bool { self.spoof_active }
+    fn real_time(&self) -> bool {
+        self.source.is_realtime()
+    }
+    fn spoof_active(&self) -> bool {
+        self.spoof_active
+    }
 }
 
 /// Build a MAVLink v2 frame carrying a GLOBAL_POSITION_INT payload.
 /// Used by tests + by bench tooling to script trajectories.
 pub fn build_global_position_frame(seq: u8, msg: &GlobalPositionInt) -> Vec<u8> {
-    use relay_mavlink::{encode_frame, FrameHeader, GLOBAL_POSITION_INT_CRC_EXTRA, MAGIC_V2};
+    use relay_mavlink::{FrameHeader, GLOBAL_POSITION_INT_CRC_EXTRA, MAGIC_V2, encode_frame};
     let payload = msg.encode_payload();
     let header = FrameHeader {
         magic: MAGIC_V2,
@@ -407,13 +424,17 @@ pub fn build_global_position_frame(seq: u8, msg: &GlobalPositionInt) -> Vec<u8> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::{load_rtl_rts, run_scenario, NullCommandSink};
+    use crate::harness::{NullCommandSink, load_rtl_rts, run_scenario};
     use relay_lc::engine::Geofence;
     use relay_sc::engine::CommandStore;
 
     fn budapest_home() -> Home {
         // ~Budapest centre.
-        Home { lat_e7: 475_023_456, lon_e7: 190_401_234, alt_mm: 120_000 }
+        Home {
+            lat_e7: 475_023_456,
+            lon_e7: 190_401_234,
+            alt_mm: 120_000,
+        }
     }
 
     fn pos_at(home: Home, n_cm: i32, e_cm: i32, d_cm: i32) -> GlobalPositionInt {
@@ -429,9 +450,13 @@ mod tests {
         let alt_mm = home.alt_mm + ((-d_cm as f64) * 10.0) as i32;
         GlobalPositionInt {
             time_boot_ms: 0,
-            lat_e7, lon_e7, alt_mm,
+            lat_e7,
+            lon_e7,
+            alt_mm,
             relative_alt_mm: -d_cm * 10,
-            vx_cms: 0, vy_cms: 0, vz_cms: 0,
+            vx_cms: 0,
+            vy_cms: 0,
+            vz_cms: 0,
             hdg_cdeg: 0,
         }
     }
@@ -470,8 +495,8 @@ mod tests {
     fn mavlink_bench_trips_and_dispatches_on_spoof() {
         let home = budapest_home();
         let frames: Vec<Vec<u8>> = vec![
-            build_global_position_frame(0, &pos_at(home, 0, 0, -500)),     // t=0 in-fence
-            build_global_position_frame(1, &pos_at(home, 0, 0, -500)),     // t=1 in-fence
+            build_global_position_frame(0, &pos_at(home, 0, 0, -500)), // t=0 in-fence
+            build_global_position_frame(1, &pos_at(home, 0, 0, -500)), // t=1 in-fence
             build_global_position_frame(2, &pos_at(home, 0, 20_000, -500)), // t=2+ outside
         ];
         let src = InMemoryFrameSource::new(frames);
@@ -508,7 +533,9 @@ mod tests {
         load_rtl_rts(&mut sc, 0, 0xA17C);
 
         let mut sink = NullCommandSink::new();
-        let v = run_scenario(&mut bench, &mut fence, &mut sc, &mut sink, 1.0, 5.0, 0, 10.0);
+        let v = run_scenario(
+            &mut bench, &mut fence, &mut sc, &mut sink, 1.0, 5.0, 0, 10.0,
+        );
         assert!(!v.latched);
         assert!(!v.rtl_dispatched);
         assert!(!v.rtl_frame_sent);

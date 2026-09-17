@@ -160,9 +160,13 @@ pub fn decode_packet(buf: &[u8]) -> Result<SensorPacket, DecodeError> {
 /// Convert a Loxone f64 Celsius temperature to Wohl i32 centidegrees
 pub fn celsius_to_centidegrees(celsius: f64) -> i32 {
     let scaled = celsius * 100.0;
-    if scaled >= i32::MAX as f64 { i32::MAX }
-    else if scaled <= i32::MIN as f64 { i32::MIN }
-    else { scaled as i32 }
+    if scaled >= i32::MAX as f64 {
+        i32::MAX
+    } else if scaled <= i32::MIN as f64 {
+        i32::MIN
+    } else {
+        scaled as i32
+    }
 }
 
 /// Convert Wohl i32 centidegrees back to f64 Celsius
@@ -173,9 +177,13 @@ pub fn centidegrees_to_celsius(cd: i32) -> f64 {
 /// Convert a Loxone f64 watts to Wohl i32 (watts × 10)
 pub fn watts_to_fixed(watts: f64) -> i32 {
     let scaled = watts * 10.0;
-    if scaled >= i32::MAX as f64 { i32::MAX }
-    else if scaled <= i32::MIN as f64 { i32::MIN }
-    else { scaled as i32 }
+    if scaled >= i32::MAX as f64 {
+        i32::MAX
+    } else if scaled <= i32::MIN as f64 {
+        i32::MIN
+    } else {
+        scaled as i32
+    }
 }
 
 #[cfg(test)]
@@ -281,13 +289,29 @@ mod tests {
 
     #[test]
     fn test_all_sensor_types() {
-        for st in [SENSOR_TEMP, SENSOR_HUMIDITY, SENSOR_CO2, SENSOR_PM25, SENSOR_VOC,
-                   SENSOR_CONTACT, SENSOR_WATER, SENSOR_MOTION,
-                   SENSOR_POWER, SENSOR_ENERGY,
-                   SENSOR_LUX, SENSOR_PRESSURE, SENSOR_WIND, SENSOR_RAIN] {
+        for st in [
+            SENSOR_TEMP,
+            SENSOR_HUMIDITY,
+            SENSOR_CO2,
+            SENSOR_PM25,
+            SENSOR_VOC,
+            SENSOR_CONTACT,
+            SENSOR_WATER,
+            SENSOR_MOTION,
+            SENSOR_POWER,
+            SENSOR_ENERGY,
+            SENSOR_LUX,
+            SENSOR_PRESSURE,
+            SENSOR_WIND,
+            SENSOR_RAIN,
+        ] {
             let packet = SensorPacket {
-                device_id: 1, sequence: 0, sensor_type: st,
-                quality: QUALITY_GOOD, zone_id: 1, value: 42,
+                device_id: 1,
+                sequence: 0,
+                sensor_type: st,
+                quality: QUALITY_GOOD,
+                zone_id: 1,
+                value: 42,
             };
             let mut buf = [0u8; PACKET_SIZE];
             encode_packet(&packet, &mut buf);

@@ -7,10 +7,10 @@
 #![cfg(kani)]
 
 use crate::dsdl;
-use crate::id::{decode_message_id, encode_message_id, MessageId};
-use crate::msg::{decode_node_status, encode_node_status, encode_raw_command, NodeStatus, MAX_ESC};
+use crate::id::{MessageId, decode_message_id, encode_message_id};
+use crate::msg::{MAX_ESC, NodeStatus, decode_node_status, encode_node_status, encode_raw_command};
 use crate::tail::{decode_tail, encode_tail};
-use crate::transfer::{encode_single_frame, CanFrame, Reassembler, MAX_PAYLOAD};
+use crate::transfer::{CanFrame, MAX_PAYLOAD, Reassembler, encode_single_frame};
 
 /// DC-K01 — the message-id round-trip is exact for in-range fields: encode then
 /// decode recovers priority/dtid/node for ANY field values (masked to width).
@@ -162,8 +162,15 @@ fn verify_dsdl_read_bounded() {
     // NodeStatus health(2)/mode(3)/sub_mode(3); esc.Status power_rating(7)/
     // esc_index(5)/rpm(18); esc.RawCommand int14; + an out-of-range case (120+18
     // > 128) exercising the stream_bit guard.
-    let cases: [(usize, usize); 7] =
-        [(32, 2), (34, 3), (37, 3), (98, 7), (105, 5), (80, 18), (120, 18)];
+    let cases: [(usize, usize); 7] = [
+        (32, 2),
+        (34, 3),
+        (37, 3),
+        (98, 7),
+        (105, 5),
+        (80, 18),
+        (120, 18),
+    ];
     let mut i = 0;
     while i < cases.len() {
         let (o, w) = cases[i];

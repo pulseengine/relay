@@ -89,7 +89,11 @@ fn reduce(x: f32) -> (i32, f32) {
     // round-half-away in pure core (no_std has no f32::round): exact for
     // the envelope's quadrant counts (|n| ≤ 82 at |x| ≤ 128).
     let t = x * FRAC_2_PI;
-    let n = if t >= 0.0 { (t + 0.5) as i64 } else { (t - 0.5) as i64 } as f32;
+    let n = if t >= 0.0 {
+        (t + 0.5) as i64
+    } else {
+        (t - 0.5) as i64
+    } as f32;
     let r = ((x - n * PIO2_HI) - n * PIO2_MID) - n * PIO2_LO;
     // Belt for far-out-of-envelope inputs where the reduction has
     // degraded: the polynomials are only evaluated on a bounded r, so the
@@ -217,8 +221,16 @@ mod tests {
         for k in 0..n {
             let x = -128.0 + 256.0 * (k as f32 + 0.5) / n as f32;
             let (rs, rc) = ref_f32(x);
-            let ds = if rs.abs() >= 1e-3 { ulp_diff(sinf(x), rs) } else { 0 };
-            let dc = if rc.abs() >= 1e-3 { ulp_diff(cosf(x), rc) } else { 0 };
+            let ds = if rs.abs() >= 1e-3 {
+                ulp_diff(sinf(x), rs)
+            } else {
+                0
+            };
+            let dc = if rc.abs() >= 1e-3 {
+                ulp_diff(cosf(x), rc)
+            } else {
+                0
+            };
             let d = ds.max(dc);
             if x.abs() <= 4.0 * core::f32::consts::PI {
                 worst_inner = worst_inner.max(d);
@@ -237,10 +249,20 @@ mod tests {
     /// finite value in [-1, 1] (non-finite input → 0.0 by spec).
     #[test]
     fn f32_kernels_total_and_bounded() {
-        for bits in [0u32, 0x7F80_0000, 0xFF80_0000, 0x7FC0_0000, 0x0000_0001, 0x7F7F_FFFF] {
+        for bits in [
+            0u32,
+            0x7F80_0000,
+            0xFF80_0000,
+            0x7FC0_0000,
+            0x0000_0001,
+            0x7F7F_FFFF,
+        ] {
             let x = f32::from_bits(bits);
             for v in [sinf(x), cosf(x)] {
-                assert!(v.is_finite() && (-1.0001..=1.0001).contains(&v), "x={x} -> {v}");
+                assert!(
+                    v.is_finite() && (-1.0001..=1.0001).contains(&v),
+                    "x={x} -> {v}"
+                );
             }
         }
         let mut lcg = 0x1357_9BDFu32;
@@ -248,7 +270,10 @@ mod tests {
             lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
             let x = f32::from_bits(lcg);
             for v in [sinf(x), cosf(x)] {
-                assert!(v.is_finite() && (-1.0001..=1.0001).contains(&v), "x={x} -> {v}");
+                assert!(
+                    v.is_finite() && (-1.0001..=1.0001).contains(&v),
+                    "x={x} -> {v}"
+                );
             }
         }
     }
@@ -284,8 +309,8 @@ mod tests {
     #[test]
     #[ignore = "exhaustive ~2.2e9-point sweep — run on demand / nightly qualification"]
     fn f32_kernels_exhaustive_worst_case_bound() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
         use std::thread;
 
         // worst abs error stored as raw bits of the f32 (monotone for +ve).
@@ -306,8 +331,12 @@ mod tests {
                         let (rs, rc) = ref_f32(x);
                         let (ks, kc) = (sinf(x), cosf(x));
                         la = la.max((ks - rs).abs()).max((kc - rc).abs());
-                        if rs.abs() >= 1e-3 { lu = lu.max(ulp_diff(ks, rs)); }
-                        if rc.abs() >= 1e-3 { lu = lu.max(ulp_diff(kc, rc)); }
+                        if rs.abs() >= 1e-3 {
+                            lu = lu.max(ulp_diff(ks, rs));
+                        }
+                        if rc.abs() >= 1e-3 {
+                            lu = lu.max(ulp_diff(kc, rc));
+                        }
                     }
                     bits += n_threads as u64;
                 }
@@ -315,11 +344,18 @@ mod tests {
                 wu.fetch_max(lu, Ordering::Relaxed);
             }));
         }
-        for h in handles { h.join().unwrap(); }
+        for h in handles {
+            h.join().unwrap();
+        }
         let worst_abs = f32::from_bits(worst_abs_bits.load(Ordering::Relaxed));
         let worst_ulp = worst_ulp_off.load(Ordering::Relaxed);
-        std::eprintln!("EXHAUSTIVE — worst |abs err| = {worst_abs:e}, worst ulp (|value|≥1e-3) = {worst_ulp}");
-        assert!(worst_abs <= 1.2e-7, "worst absolute error {worst_abs:e} exceeds 1 ulp-of-unity");
+        std::eprintln!(
+            "EXHAUSTIVE — worst |abs err| = {worst_abs:e}, worst ulp (|value|≥1e-3) = {worst_ulp}"
+        );
+        assert!(
+            worst_abs <= 1.2e-7,
+            "worst absolute error {worst_abs:e} exceeds 1 ulp-of-unity"
+        );
         assert!(worst_ulp <= 2, "worst off-zero ulp {worst_ulp} exceeds 2");
     }
 

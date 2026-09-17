@@ -124,7 +124,9 @@ fn bench_cfdp(c: &mut Criterion) {
 
     let mut table = TransactionTable::new();
     let txn = table
-        .begin_send(/* file_size */ 65_536, /* max_retransmit */ 1_000_000)
+        .begin_send(
+            /* file_size */ 65_536, /* max_retransmit */ 1_000_000,
+        )
         .expect("transaction slot available");
 
     c.bench_function("cfdp/process_nak__retransmit_event", |b| {
@@ -132,12 +134,5 @@ fn bench_cfdp(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    engines,
-    bench_lc,
-    bench_sch,
-    bench_sc,
-    bench_hs,
-    bench_cfdp
-);
+criterion_group!(engines, bench_lc, bench_sch, bench_sc, bench_hs, bench_cfdp);
 criterion_main!(engines);

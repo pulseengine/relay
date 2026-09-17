@@ -13,7 +13,7 @@
 
 use crate::{FlightBackend, ImuSample, NavState};
 use relay_iekf::Vec3;
-use relay_log::blackbox::{BlackboxWriter, BlockLog, TickRecord, TICK_MAX};
+use relay_log::blackbox::{BlackboxWriter, BlockLog, TICK_MAX, TickRecord};
 
 /// Wraps a live backend; call [`LoggingBackend::finish_tick`] after each
 /// `FlightCore::step` with the estimator state to seal that tick's record.
@@ -102,8 +102,10 @@ impl<B: FlightBackend, L: BlockLog> FlightBackend for LoggingBackend<'_, B, L> {
     }
     fn read_gnss_dual(
         &mut self,
-    ) -> Option<(Option<falcon_gnss_ubx::dual::NedFix>, Option<falcon_gnss_ubx::dual::NedFix>)>
-    {
+    ) -> Option<(
+        Option<falcon_gnss_ubx::dual::NedFix>,
+        Option<falcon_gnss_ubx::dual::NedFix>,
+    )> {
         // Forwarded, NOT logged: the TickRecord carries the SELECTED position
         // (what the estimator consumed); per-receiver raw lanes are part of
         // the schema-v2 slice (#277).
@@ -160,7 +162,10 @@ impl<'a> ReplayBackend<'a> {
 impl FlightBackend for ReplayBackend<'_> {
     fn read_imu(&mut self) -> ImuSample {
         let t = &self.ticks[self.at.min(self.ticks.len() - 1)];
-        ImuSample { accel: t.accel, gyro: t.gyro }
+        ImuSample {
+            accel: t.accel,
+            gyro: t.gyro,
+        }
     }
     fn read_position(&mut self) -> Option<Vec3> {
         self.ticks.get(self.at).and_then(|t| t.pos)

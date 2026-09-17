@@ -290,7 +290,10 @@ mod tests {
         let max = atts.iter().cloned().fold(f32::MIN, f32::max);
         // deep-notch DFT floors can differ hugely in dB; the criterion is
         // about the WORST point staying within 3 dB of nominal (20 dB).
-        assert!(min >= 20.0 - 3.0, "sweep worst point {min:.1} dB (max {max:.1})");
+        assert!(
+            min >= 20.0 - 3.0,
+            "sweep worst point {min:.1} dB (max {max:.1})"
+        );
     }
 
     /// Added phase lag at the rate-loop crossover (≈ 5 Hz for the ADRC
@@ -409,7 +412,10 @@ mod tests {
         }
         // residual (output minus true body signal) is far below the
         // injected vibration power — and the body signal survived.
-        assert!(out_pow < 0.05 * in_pow, "residual {out_pow:.1} vs in {in_pow:.1}");
+        assert!(
+            out_pow < 0.05 * in_pow,
+            "residual {out_pow:.1} vs in {in_pow:.1}"
+        );
         assert!(sig_pow > 0.0);
     }
 

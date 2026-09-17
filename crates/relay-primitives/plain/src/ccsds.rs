@@ -152,15 +152,15 @@ mod tests {
     #[test]
     fn decode_too_short() {
         let buf = [0u8; 3];
-        assert!(matches!(decode_header(& buf), Err(ParseError::TooShort)));
+        assert!(matches!(decode_header(&buf), Err(ParseError::TooShort)));
     }
     #[test]
     fn checksum_empty_is_zero() {
-        assert_eq!(compute_checksum(& []), 0);
+        assert_eq!(compute_checksum(&[]), 0);
     }
     #[test]
     fn checksum_xor() {
-        assert_eq!(compute_checksum(& [0x01, 0x02, 0x04]), 0x07);
+        assert_eq!(compute_checksum(&[0x01, 0x02, 0x04]), 0x07);
     }
     #[test]
     fn checksum_self_inverse() {
@@ -169,6 +169,6 @@ mod tests {
         let mut all = [0u8; 6];
         all[..5].copy_from_slice(&data);
         all[5] = cs;
-        assert_eq!(compute_checksum(& all), 0);
+        assert_eq!(compute_checksum(&all), 0);
     }
 }

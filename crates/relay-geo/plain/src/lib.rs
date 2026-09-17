@@ -38,7 +38,11 @@ pub const GRAVITY_NED: Vec3 = [0.0, 0.0, 9.81];
 
 #[inline]
 fn cross(a: Vec3, b: Vec3) -> Vec3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 #[inline]
 fn dot(a: Vec3, b: Vec3) -> f32 {
@@ -99,9 +103,21 @@ fn vee(m: &Mat3) -> Vec3 {
 pub fn quat_to_rotmat(q: [f32; 4]) -> Mat3 {
     let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
     [
-        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
-        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
-        [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)],
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - w * z),
+            2.0 * (x * z + w * y),
+        ],
+        [
+            2.0 * (x * y + w * z),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - w * x),
+        ],
+        [
+            2.0 * (x * z - w * y),
+            2.0 * (y * z + w * x),
+            1.0 - 2.0 * (x * x + y * y),
+        ],
     ]
 }
 
@@ -303,8 +319,7 @@ impl GeoAtt {
     /// the direct-torque yaw loop).
     pub fn desired_rate(&self, q_est: [f32; 4], a_cmd_ned: Vec3, yaw_d: f32) -> Vec3 {
         let r = quat_to_rotmat(q_est);
-        let r_d = thrust_axis_ned(sanitise3(a_cmd_ned))
-            .and_then(|b3| desired_attitude(b3, yaw_d));
+        let r_d = thrust_axis_ned(sanitise3(a_cmd_ned)).and_then(|b3| desired_attitude(b3, yaw_d));
         match r_d {
             Some(r_d) => {
                 let e = Self::attitude_error(&r, &r_d);
@@ -323,8 +338,7 @@ impl GeoAtt {
     pub fn tick(&self, q_est: [f32; 4], omega_body: Vec3, a_cmd_ned: Vec3, yaw_d: f32) -> Vec3 {
         let r = quat_to_rotmat(q_est);
         let omega = sanitise3(omega_body);
-        let r_d = thrust_axis_ned(sanitise3(a_cmd_ned))
-            .and_then(|b3| desired_attitude(b3, yaw_d));
+        let r_d = thrust_axis_ned(sanitise3(a_cmd_ned)).and_then(|b3| desired_attitude(b3, yaw_d));
         match r_d {
             Some(r_d) => sanitise3(self.moment(&r, omega, &r_d)),
             None => {
@@ -368,20 +382,32 @@ pub struct RecoverableSet {
 
 impl RecoverableSet {
     pub const fn new(k_r: f32, lambda_j: f32, psi_max: f32) -> Self {
-        RecoverableSet { k_r, lambda_j, psi_max }
+        RecoverableSet {
+            k_r,
+            lambda_j,
+            psi_max,
+        }
     }
 
     /// Signed margin to the recoverable boundary: `≥ 0` ⇔ recoverable.
     /// `margin = min(ψ_max − Ψ,  2k_R(2−Ψ)/λ_M(J) − ‖e_Ω‖²)`. Returns
     /// `−∞` (definitely outside / fail-safe) on any non-finite input.
     pub fn margin(&self, psi: f32, e_omega_sq: f32) -> f32 {
-        if !psi.is_finite() || !e_omega_sq.is_finite() || !self.lambda_j.is_finite() || self.lambda_j <= 0.0 {
+        if !psi.is_finite()
+            || !e_omega_sq.is_finite()
+            || !self.lambda_j.is_finite()
+            || self.lambda_j <= 0.0
+        {
             return f32::NEG_INFINITY;
         }
         let psi_margin = self.psi_max - psi;
         let rate_cap = 2.0 * self.k_r * (2.0 - psi) / self.lambda_j;
         let rate_margin = rate_cap - e_omega_sq;
-        let m = if psi_margin < rate_margin { psi_margin } else { rate_margin };
+        let m = if psi_margin < rate_margin {
+            psi_margin
+        } else {
+            rate_margin
+        };
         if m.is_finite() { m } else { f32::NEG_INFINITY }
     }
 
@@ -417,9 +443,22 @@ impl SimplexShield {
     /// inside the set); `exit` = deeper margin at which to return to agile
     /// (`exit > enter`). Degenerate args clamped to a safe ordering.
     pub fn new(set: RecoverableSet, enter: f32, exit: f32) -> Self {
-        let enter = if enter.is_finite() && enter > 0.0 { enter } else { 0.1 };
-        let exit = if exit.is_finite() && exit > enter { exit } else { enter * 2.0 };
-        SimplexShield { set, engaged: true, enter, exit }
+        let enter = if enter.is_finite() && enter > 0.0 {
+            enter
+        } else {
+            0.1
+        };
+        let exit = if exit.is_finite() && exit > enter {
+            exit
+        } else {
+            enter * 2.0
+        };
+        SimplexShield {
+            set,
+            engaged: true,
+            enter,
+            exit,
+        }
     }
 
     /// True while the certified fallback is in control.
@@ -431,7 +470,13 @@ impl SimplexShield {
     /// Select the command: `agile` while safely inside the recoverable set,
     /// else the certified `fallback`. `psi`, `e_omega_sq` = current
     /// geometric error `(Ψ, ‖Ω‖²)`. Returns `(command, used_fallback)`.
-    pub fn filter(&mut self, psi: f32, e_omega_sq: f32, agile: Vec3, fallback: Vec3) -> (Vec3, bool) {
+    pub fn filter(
+        &mut self,
+        psi: f32,
+        e_omega_sq: f32,
+        agile: Vec3,
+        fallback: Vec3,
+    ) -> (Vec3, bool) {
         self.step(self.set.margin(psi, e_omega_sq), agile, fallback)
     }
 
@@ -524,7 +569,11 @@ mod tests {
         for i in 0..3 {
             for j in 0..3 {
                 let want = if i == j { 1.0 } else { 0.0 };
-                assert!((r_d[i][j] - want).abs() < 1e-5, "R_d[{i}][{j}]={}", r_d[i][j]);
+                assert!(
+                    (r_d[i][j] - want).abs() < 1e-5,
+                    "R_d[{i}][{j}]={}",
+                    r_d[i][j]
+                );
             }
         }
         let e = GeoAtt::attitude_error(&identity3(), &r_d);
@@ -550,14 +599,23 @@ mod tests {
         // Pure yaw error: R = I, R_d = Rz(20°).
         let r_d_yaw = rot_z(20f32.to_radians());
         let e_yaw = GeoAtt::attitude_error(&identity3(), &r_d_yaw);
-        assert!(e_yaw[0].abs() < 1e-4 && e_yaw[1].abs() < 1e-4, "yaw err leaked to roll/pitch: {e_yaw:?}");
-        assert!(e_yaw[2].abs() > 0.05, "yaw err should be present: {e_yaw:?}");
+        assert!(
+            e_yaw[0].abs() < 1e-4 && e_yaw[1].abs() < 1e-4,
+            "yaw err leaked to roll/pitch: {e_yaw:?}"
+        );
+        assert!(
+            e_yaw[2].abs() > 0.05,
+            "yaw err should be present: {e_yaw:?}"
+        );
 
         // Pure roll error at a non-zero heading: R = Rz(90°), R_d = Rz(90°)Rx(15°).
         let r = rot_z(90f32.to_radians());
         let r_d = matmul3(&r, &rot_x(15f32.to_radians()));
         let e = GeoAtt::attitude_error(&r, &r_d);
-        assert!(e[2].abs() < 1e-3, "tilt at heading=90° leaked into YAW (the Euler bug): {e:?}");
+        assert!(
+            e[2].abs() < 1e-3,
+            "tilt at heading=90° leaked into YAW (the Euler bug): {e:?}"
+        );
         assert!(e[0].abs() > 0.05, "roll error should be present: {e:?}");
     }
 
@@ -599,8 +657,20 @@ mod tests {
     fn flatness_feedforward_matches_attitude_derivative() {
         let yaw = 0.0f32;
         let dt = 1e-4f32;
-        let accel = |t: f32| [0.5 * relay_math::sinf(t), 0.3 * relay_math::cosf(0.7 * t), 0.2 * t];
-        let jerk = |t: f32| [0.5 * relay_math::cosf(t), -0.21 * relay_math::sinf(0.7 * t), 0.2];
+        let accel = |t: f32| {
+            [
+                0.5 * relay_math::sinf(t),
+                0.3 * relay_math::cosf(0.7 * t),
+                0.2 * t,
+            ]
+        };
+        let jerk = |t: f32| {
+            [
+                0.5 * relay_math::cosf(t),
+                -0.21 * relay_math::sinf(0.7 * t),
+                0.2,
+            ]
+        };
         for k in 1..20 {
             let t = k as f32 * 0.15;
             let (a, jc) = (accel(t), jerk(t));
@@ -618,7 +688,8 @@ mod tests {
                 assert!(
                     (w_ff[i] - w_fd[i]).abs() < 0.05,
                     "axis {i} at t={t}: ff {} vs fd {}",
-                    w_ff[i], w_fd[i]
+                    w_ff[i],
+                    w_fd[i]
                 );
             }
         }
@@ -629,11 +700,16 @@ mod tests {
     #[test]
     fn reduced_error_zero_at_alignment_no_yaw() {
         let e0 = GeoAtt::attitude_error_reduced(&identity3(), [0.0, 0.0, 1.0]);
-        assert!(e0[0].abs() < 1e-6 && e0[1].abs() < 1e-6 && e0[2] == 0.0,
-            "zero at alignment: {e0:?}");
+        assert!(
+            e0[0].abs() < 1e-6 && e0[1].abs() < 1e-6 && e0[2] == 0.0,
+            "zero at alignment: {e0:?}"
+        );
         let e1 = GeoAtt::attitude_error_reduced(&rot_x(0.3), [0.0, 0.0, 1.0]);
         assert_eq!(e1[2], 0.0, "no yaw component: {e1:?}");
-        assert!(e1[0].abs() + e1[1].abs() > 0.1, "tilt produces error: {e1:?}");
+        assert!(
+            e1[0].abs() + e1[1].abs() > 0.1,
+            "tilt produces error: {e1:?}"
+        );
     }
 
     /// v0.26 reduced-attitude control: a tilted body under `moment_reduced`
@@ -660,8 +736,14 @@ mod tests {
             r = integrate_rotation(&r, omega, dt);
         }
         let tilt1 = relay_math::acosf(r[2][2].clamp(-1.0, 1.0));
-        assert!(tilt1 < tilt0, "thrust-axis tilt must decrease: {tilt0} -> {tilt1}");
-        assert!(tilt1 < 0.05, "thrust axis should align to target: tilt={tilt1}");
+        assert!(
+            tilt1 < tilt0,
+            "thrust-axis tilt must decrease: {tilt0} -> {tilt1}"
+        );
+        assert!(
+            tilt1 < 0.05,
+            "thrust axis should align to target: tilt={tilt1}"
+        );
     }
 
     /// Integrate R by the body rate over dt, with Gram-Schmidt
@@ -683,10 +765,18 @@ mod tests {
         let c0 = [m[0][0], m[1][0], m[2][0]];
         let c1 = [m[0][1], m[1][1], m[2][1]];
         let e0 = normalize(c0).unwrap();
-        let p1 = [c1[0] - dot(e0, c1) * e0[0], c1[1] - dot(e0, c1) * e0[1], c1[2] - dot(e0, c1) * e0[2]];
+        let p1 = [
+            c1[0] - dot(e0, c1) * e0[0],
+            c1[1] - dot(e0, c1) * e0[1],
+            c1[2] - dot(e0, c1) * e0[2],
+        ];
         let e1 = normalize(p1).unwrap();
         let e2 = cross(e0, e1);
-        [[e0[0], e1[0], e2[0]], [e0[1], e1[1], e2[1]], [e0[2], e1[2], e2[2]]]
+        [
+            [e0[0], e1[0], e2[0]],
+            [e0[1], e1[1], e2[1]],
+            [e0[2], e1[2], e2[2]],
+        ]
     }
 
     /// v0.23 — RUNNABLE Lyapunov certificate (the oracle backing the Lean
@@ -709,14 +799,20 @@ mod tests {
         let kr = 8.0f32;
         let kw = 2.0f32;
         let j = [0.0217f32, 0.0217, 0.04];
-        let ctrl = GeoAtt::new(GeoGains { k_r: [kr; 3], k_omega: [kw; 3], j });
+        let ctrl = GeoAtt::new(GeoGains {
+            k_r: [kr; 3],
+            k_omega: [kw; 3],
+            j,
+        });
         let r_d = identity3();
         let dt = 1e-4f32;
 
         let angles = [0.2f32, 0.8, 1.5, 2.4, 2.9]; // up to ~166° (Ψ<2)
         let omegas = [
-            [1.0f32, 0.0, 0.0], [0.0, 2.0, -1.0],
-            [3.0, -2.0, 4.0], [-5.0, 1.0, 2.0],
+            [1.0f32, 0.0, 0.0],
+            [0.0, 2.0, -1.0],
+            [3.0, -2.0, 4.0],
+            [-5.0, 1.0, 2.0],
         ];
         let mut checked = 0;
         for &ax in &angles {
@@ -728,30 +824,36 @@ mod tests {
                 for &omega in &omegas {
                     // FACT 1: M − Ω×JΩ == −k_R e_R − k_Ω Ω (exact, f32).
                     let m = ctrl.moment(&r, omega, &r_d);
-                    let jo = [j[0]*omega[0], j[1]*omega[1], j[2]*omega[2]];
+                    let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
                     let j_omega_dot = {
                         let g = cross(omega, jo);
-                        [m[0]-g[0], m[1]-g[1], m[2]-g[2]]
+                        [m[0] - g[0], m[1] - g[1], m[2] - g[2]]
                     };
                     for i in 0..3 {
                         let want = -kr * e_r[i] - kw * omega[i];
-                        assert!((j_omega_dot[i] - want).abs() < 1e-3,
-                            "FACT1 axis {i}: JΩ̇={} vs {want}", j_omega_dot[i]);
+                        assert!(
+                            (j_omega_dot[i] - want).abs() < 1e-3,
+                            "FACT1 axis {i}: JΩ̇={} vs {want}",
+                            j_omega_dot[i]
+                        );
                     }
                     // FACT 2: Ψ̇ == ½ e_R·Ω (finite-diff of real psi).
                     let r1 = integrate_rotation(&r, omega, dt);
                     let psi_dot = (GeoAtt::psi(&r1, &r_d) - psi) / dt;
                     let half_e_dot_w = 0.5 * dot(e_r, omega);
                     let tol2 = 0.02 + 0.03 * half_e_dot_w.abs();
-                    assert!((psi_dot - half_e_dot_w).abs() <= tol2,
-                        "FACT2: Ψ̇={psi_dot} vs ½e_R·Ω={half_e_dot_w}; Ψ={psi}");
+                    assert!(
+                        (psi_dot - half_e_dot_w).abs() <= tol2,
+                        "FACT2: Ψ̇={psi_dot} vs ½e_R·Ω={half_e_dot_w}; Ψ={psi}"
+                    );
                     // Assembled V̇ from the REAL moment + e_R.
                     let vdot = dot(omega, j_omega_dot) + kr * dot(e_r, omega);
                     let expected = -kw * dot(omega, omega);
-                    assert!(vdot <= 0.0,
-                        "V̇ must be ≤ 0: {vdot} at Ψ={psi}, ω={omega:?}");
-                    assert!((vdot - expected).abs() < 1e-2,
-                        "V̇ ({vdot}) must equal −k_Ω‖Ω‖² ({expected}); Ψ={psi}");
+                    assert!(vdot <= 0.0, "V̇ must be ≤ 0: {vdot} at Ψ={psi}, ω={omega:?}");
+                    assert!(
+                        (vdot - expected).abs() < 1e-2,
+                        "V̇ ({vdot}) must equal −k_Ω‖Ω‖² ({expected}); Ψ={psi}"
+                    );
                     checked += 1;
                 }
             }
@@ -775,15 +877,21 @@ mod tests {
         let kr = 8.0f32;
         let kw = 2.0f32;
         let j = [0.0217f32, 0.0217, 0.04];
-        let ctrl = GeoAtt::new(GeoGains { k_r: [kr; 3], k_omega: [kw; 3], j });
+        let ctrl = GeoAtt::new(GeoGains {
+            k_r: [kr; 3],
+            k_omega: [kw; 3],
+            j,
+        });
         let r_d = identity3();
         let dt = 1e-5f32;
         let c = 0.02f32; // cross-term coupling (small ⇒ V stays PD, V̇ ND)
 
         let angles = [0.2f32, 0.8, 1.5, 2.4, 2.9];
         let omegas = [
-            [1.0f32, 0.0, 0.0], [0.0, 2.0, -1.0],
-            [3.0, -2.0, 4.0], [-5.0, 1.0, 2.0],
+            [1.0f32, 0.0, 0.0],
+            [0.0, 2.0, -1.0],
+            [3.0, -2.0, 4.0],
+            [-5.0, 1.0, 2.0],
         ];
         let (mut c_lo, mut c_hi, mut c_d) = (f32::INFINITY, 0.0f32, f32::INFINITY);
         let mut checked = 0;
@@ -795,21 +903,32 @@ mod tests {
                 let e_r = GeoAtt::attitude_error(&r, &r_d);
                 for &omega in &omegas {
                     let m = ctrl.moment(&r, omega, &r_d);
-                    let jo = [j[0]*omega[0], j[1]*omega[1], j[2]*omega[2]];
-                    let jwd = { let g = cross(omega, jo); [m[0]-g[0], m[1]-g[1], m[2]-g[2]] };
-                    let omega_dot = [jwd[0]/j[0], jwd[1]/j[1], jwd[2]/j[2]]; // Ω̇
+                    let jo = [j[0] * omega[0], j[1] * omega[1], j[2] * omega[2]];
+                    let jwd = {
+                        let g = cross(omega, jo);
+                        [m[0] - g[0], m[1] - g[1], m[2] - g[2]]
+                    };
+                    let omega_dot = [jwd[0] / j[0], jwd[1] / j[1], jwd[2] / j[2]]; // Ω̇
                     // central-difference ė_R of the real attitude_error
                     let rp = integrate_rotation(&r, omega, dt);
                     let rm = integrate_rotation(&r, omega, -dt);
                     let ep = GeoAtt::attitude_error(&rp, &r_d);
                     let em = GeoAtt::attitude_error(&rm, &r_d);
-                    let e_r_dot = [(ep[0]-em[0])/(2.0*dt), (ep[1]-em[1])/(2.0*dt), (ep[2]-em[2])/(2.0*dt)];
+                    let e_r_dot = [
+                        (ep[0] - em[0]) / (2.0 * dt),
+                        (ep[1] - em[1]) / (2.0 * dt),
+                        (ep[2] - em[2]) / (2.0 * dt),
+                    ];
 
                     let vdot_base = dot(omega, jwd) + kr * dot(e_r, omega); // = −k_Ω‖Ω‖²
                     let cross_dot = dot(e_r_dot, omega) + dot(e_r, omega_dot);
                     let vdot = vdot_base + c * cross_dot;
-                    let v = 0.5*(j[0]*omega[0]*omega[0] + j[1]*omega[1]*omega[1] + j[2]*omega[2]*omega[2])
-                            + 2.0*kr*psi + c*dot(e_r, omega);
+                    let v = 0.5
+                        * (j[0] * omega[0] * omega[0]
+                            + j[1] * omega[1] * omega[1]
+                            + j[2] * omega[2] * omega[2])
+                        + 2.0 * kr * psi
+                        + c * dot(e_r, omega);
                     let rs = dot(e_r, e_r) + dot(omega, omega);
 
                     // V is positive-DEFINITE (the cross term does not spoil it).
@@ -817,11 +936,17 @@ mod tests {
                     // V̇ is negative-DEFINITE — strictly dissipative everywhere
                     // (the semidefinite base gives V̇=0 at Ω=0; the cross term
                     // makes it < 0 even there). Small tol for finite-diff noise.
-                    assert!(vdot < 1e-2, "V̇ must be < 0 (strict): {vdot} at Ψ={psi}, ω={omega:?}");
+                    assert!(
+                        vdot < 1e-2,
+                        "V̇ must be < 0 (strict): {vdot} at Ψ={psi}, ω={omega:?}"
+                    );
                     // Exponential-decay inequality on the REAL controller:
                     // V̇ ≤ −γ·V with γ = 0.05 (below the measured c_D/c_hi).
-                    assert!(vdot <= -0.05 * v + 1e-2,
-                        "V̇ ({vdot}) must be ≤ −0.05·V ({}) at Ψ={psi}", -0.05 * v);
+                    assert!(
+                        vdot <= -0.05 * v + 1e-2,
+                        "V̇ ({vdot}) must be ≤ −0.05·V ({}) at Ψ={psi}",
+                        -0.05 * v
+                    );
                     if rs > 0.5 {
                         c_lo = c_lo.min(v / rs);
                         c_hi = c_hi.max(v / rs);
@@ -837,8 +962,15 @@ mod tests {
         // c_hi≈31.9, c_D≈1.90 ⇒ conservative rate γ = c_D/c_hi ≈ 0.056.)
         assert!(c_lo > 0.025, "V positive-definite floor too small: {c_lo}");
         assert!(c_hi < 40.0, "V radial cap unexpectedly large: {c_hi}");
-        assert!(c_d > 1.5, "−V̇ dissipation floor must be strictly positive: {c_d}");
-        assert!(c_d / c_hi > 0.05, "exponential rate γ must exceed 0.05: {}", c_d / c_hi);
+        assert!(
+            c_d > 1.5,
+            "−V̇ dissipation floor must be strictly positive: {c_d}"
+        );
+        assert!(
+            c_d / c_hi > 0.05,
+            "exponential rate γ must exceed 0.05: {}",
+            c_d / c_hi
+        );
         assert!(checked >= 80, "grid too small: {checked}");
     }
 
@@ -874,14 +1006,20 @@ mod tests {
                     let ev_sq = e_v[0] * e_v[0] + e_v[1] * e_v[1] + e_v[2] * e_v[2];
                     let expected = -kv * ev_sq;
                     // cross-terms cancel ⇒ V̇_pos == −k_v‖e_v‖² ≤ 0
-                    assert!((vdot - expected).abs() < 1e-3, "V̇_pos {vdot} ≠ −k_v‖e_v‖² {expected}");
+                    assert!(
+                        (vdot - expected).abs() < 1e-3,
+                        "V̇_pos {vdot} ≠ −k_v‖e_v‖² {expected}"
+                    );
                     assert!(vdot <= 1e-4, "V̇_pos must be ≤ 0, got {vdot}");
                     // combined full-state with a sample attitude term
                     let omega = [1.0f32, -2.0, 0.5];
                     let kw = 2.0f32;
                     let w_sq = omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2];
                     let vdot_full = -kw * w_sq + vdot;
-                    assert!(vdot_full <= 1e-4, "full-state V̇ must be ≤ 0, got {vdot_full}");
+                    assert!(
+                        vdot_full <= 1e-4,
+                        "full-state V̇ must be ≤ 0, got {vdot_full}"
+                    );
                     checked += 1;
                 }
             }
@@ -894,7 +1032,10 @@ mod tests {
     #[test]
     fn recoverable_set_matches_lyapunov_region() {
         let set = RecoverableSet::new(8.0, 0.04, 1.8); // k_R, λ_M(J), Ψ_max
-        assert!(set.recoverable(0.1, 1.0), "near-level low-rate is recoverable");
+        assert!(
+            set.recoverable(0.1, 1.0),
+            "near-level low-rate is recoverable"
+        );
         assert!(!set.recoverable(1.9, 0.0), "Ψ past the ceiling is not");
         // Rate cap at Ψ=0: 2·8·2/0.04 = 800; just over ⇒ outside.
         assert!(set.recoverable(0.0, 700.0));

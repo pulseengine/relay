@@ -11,7 +11,16 @@ pub struct FilePath {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum FmCommand { Copy = 0, Move = 1, Rename = 2, Delete = 3, CreateDir = 4, DeleteDir = 5, Decompress = 6, Concat = 7 }
+pub enum FmCommand {
+    Copy = 0,
+    Move = 1,
+    Rename = 2,
+    Delete = 3,
+    CreateDir = 4,
+    DeleteDir = 5,
+    Decompress = 6,
+    Concat = 7,
+}
 
 #[derive(Clone, Copy)]
 pub struct FmRequest {
@@ -22,16 +31,29 @@ pub struct FmRequest {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
-pub enum FmValidation { Valid = 0, InvalidPath = 1, PathTooLong = 2, SourceEqDest = 3, InvalidCommand = 4 }
+pub enum FmValidation {
+    Valid = 0,
+    InvalidPath = 1,
+    PathTooLong = 2,
+    SourceEqDest = 3,
+    InvalidCommand = 4,
+}
 
 impl FilePath {
     pub const fn empty() -> Self {
-        FilePath { bytes: [0u8; MAX_PATH_LEN], len: 0 }
+        FilePath {
+            bytes: [0u8; MAX_PATH_LEN],
+            len: 0,
+        }
     }
 
     pub fn from_bytes(src: &[u8]) -> Self {
         let mut path = FilePath::empty();
-        let copy_len = if src.len() <= MAX_PATH_LEN { src.len() } else { MAX_PATH_LEN };
+        let copy_len = if src.len() <= MAX_PATH_LEN {
+            src.len()
+        } else {
+            MAX_PATH_LEN
+        };
         let mut i = 0;
         while i < copy_len {
             path.bytes[i] = src[i];
@@ -93,7 +115,7 @@ pub fn validate_request(req: &FmRequest) -> FmValidation {
     match req.command {
         FmCommand::Delete | FmCommand::DeleteDir => {
             // These commands don't need a dest path
-        },
+        }
         _ => {
             if !validate_path(&req.dest) {
                 if req.dest.len as usize > MAX_PATH_LEN {
@@ -101,7 +123,7 @@ pub fn validate_request(req: &FmRequest) -> FmValidation {
                 }
                 return FmValidation::InvalidPath;
             }
-        },
+        }
     }
     // Check source == dest for Copy/Move/Rename
     match req.command {
@@ -109,8 +131,8 @@ pub fn validate_request(req: &FmRequest) -> FmValidation {
             if paths_equal(&req.source, &req.dest) {
                 return FmValidation::SourceEqDest;
             }
-        },
-        _ => {},
+        }
+        _ => {}
     }
     FmValidation::Valid
 }
@@ -154,7 +176,11 @@ mod tests {
     fn test_source_eq_dest_rejected() {
         let src = make_path(b"/data/file.bin");
         let dest = make_path(b"/data/file.bin");
-        let req = FmRequest { command: FmCommand::Copy, source: src, dest };
+        let req = FmRequest {
+            command: FmCommand::Copy,
+            source: src,
+            dest,
+        };
         assert_eq!(validate_request(&req), FmValidation::SourceEqDest);
     }
 
@@ -162,7 +188,11 @@ mod tests {
     fn test_valid_copy_command() {
         let src = make_path(b"/data/a.bin");
         let dest = make_path(b"/data/b.bin");
-        let req = FmRequest { command: FmCommand::Copy, source: src, dest };
+        let req = FmRequest {
+            command: FmCommand::Copy,
+            source: src,
+            dest,
+        };
         assert_eq!(validate_request(&req), FmValidation::Valid);
     }
 
@@ -170,7 +200,11 @@ mod tests {
     fn test_delete_no_dest_needed() {
         let src = make_path(b"/data/old.bin");
         let dest = FilePath::empty(); // empty dest is fine for delete
-        let req = FmRequest { command: FmCommand::Delete, source: src, dest };
+        let req = FmRequest {
+            command: FmCommand::Delete,
+            source: src,
+            dest,
+        };
         assert_eq!(validate_request(&req), FmValidation::Valid);
     }
 
@@ -179,18 +213,46 @@ mod tests {
         // Valid
         let src = make_path(b"/a");
         let dest = make_path(b"/b");
-        assert_eq!(validate_request(&FmRequest { command: FmCommand::Move, source: src, dest }), FmValidation::Valid);
+        assert_eq!(
+            validate_request(&FmRequest {
+                command: FmCommand::Move,
+                source: src,
+                dest
+            }),
+            FmValidation::Valid
+        );
 
         // InvalidPath (empty source)
-        assert_eq!(validate_request(&FmRequest { command: FmCommand::Copy, source: FilePath::empty(), dest }), FmValidation::InvalidPath);
+        assert_eq!(
+            validate_request(&FmRequest {
+                command: FmCommand::Copy,
+                source: FilePath::empty(),
+                dest
+            }),
+            FmValidation::InvalidPath
+        );
 
         // PathTooLong
         let mut long = FilePath::empty();
         long.len = (MAX_PATH_LEN as u32) + 1;
-        assert_eq!(validate_request(&FmRequest { command: FmCommand::Copy, source: long, dest }), FmValidation::PathTooLong);
+        assert_eq!(
+            validate_request(&FmRequest {
+                command: FmCommand::Copy,
+                source: long,
+                dest
+            }),
+            FmValidation::PathTooLong
+        );
 
         // SourceEqDest
-        assert_eq!(validate_request(&FmRequest { command: FmCommand::Rename, source: src, dest: src }), FmValidation::SourceEqDest);
+        assert_eq!(
+            validate_request(&FmRequest {
+                command: FmCommand::Rename,
+                source: src,
+                dest: src
+            }),
+            FmValidation::SourceEqDest
+        );
     }
 
     #[test]
@@ -210,12 +272,21 @@ mod tests {
         let src = make_path(b"/src");
         let dest = make_path(b"/dest");
         let commands = [
-            FmCommand::Copy, FmCommand::Move, FmCommand::Rename,
-            FmCommand::Delete, FmCommand::CreateDir, FmCommand::DeleteDir,
-            FmCommand::Decompress, FmCommand::Concat,
+            FmCommand::Copy,
+            FmCommand::Move,
+            FmCommand::Rename,
+            FmCommand::Delete,
+            FmCommand::CreateDir,
+            FmCommand::DeleteDir,
+            FmCommand::Decompress,
+            FmCommand::Concat,
         ];
         for cmd in commands {
-            let req = FmRequest { command: cmd, source: src, dest };
+            let req = FmRequest {
+                command: cmd,
+                source: src,
+                dest,
+            };
             let v = validate_request(&req);
             assert_eq!(v, FmValidation::Valid);
         }

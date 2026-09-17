@@ -14,7 +14,12 @@ fn verify_out_of_range_never_lands() {
     let max: f32 = kani::any();
     kani::assume(min.is_finite() && max.is_finite() && min <= max);
     let id = param_id("P");
-    s.register(ParamDef { id, min, max, default: min });
+    s.register(ParamDef {
+        id,
+        min,
+        max,
+        default: min,
+    });
 
     let before = s.get(&id).unwrap();
     let v: f32 = kani::any();
@@ -31,7 +36,12 @@ fn verify_out_of_range_never_lands() {
 fn verify_set_total_and_in_range_applies() {
     let mut s: ParamStore<1> = ParamStore::new();
     let id = param_id("P");
-    s.register(ParamDef { id, min: 0.0, max: 10.0, default: 5.0 });
+    s.register(ParamDef {
+        id,
+        min: 0.0,
+        max: 10.0,
+        default: 5.0,
+    });
     let v: f32 = kani::any();
     kani::assume(v.is_finite() && v >= 0.0 && v <= 10.0);
     assert!(s.set(&id, v) == SetResult::Applied);
