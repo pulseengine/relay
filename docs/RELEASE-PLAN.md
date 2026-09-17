@@ -22,7 +22,7 @@ Cuttable in days. Mostly promotion PRs for fixes already merged.
 **Merged, awaiting promotion / tag**
 
 - #413 — FAIL-UNSAFE: read_battery_v defaults to 16.0 V — a healthy pack — and nothing in the flight path overrides it — *FV-FALCON-BATT-003 — fix merged in #430; this issue closes WITH the tag*
-- #429 — CI jobs wedge in_progress for 30x their normal duration, and the fleet monitor cannot see it (watches queued, not stuck) — *SWREQ-RELAY-FLEET-P01 — wedge alarm + Kani cap merged (#432); harness robustness continues under CIFLOW-P01*
+- #429 — CI jobs wedge in_progress for 30x their normal duration, and the fleet monitor cannot see it (watches queued, not stuck) — *SWREQ-RELAY-FLEET-P01 — wedge alarm + Kani cap merged (#432); the stalling harness itself moved to SWREQ-RELAY-MIXPROOF-P01 in v1.140*
 - #436 — The fleet monitor has never measured starvation: gh isn't installed on the light runners, and every green run since 2026-08-07 was an empty result — *SWREQ-RELAY-FLEET-P01 — gh installed on light (#437, in flight); cron cadence continues under CIFLOW-P01*
 - #153 — Self-hosted runners lack `gh` (+ Node 20 deprecation): verification-gate PR comment can't post on smithy — *SWREQ-RELAY-FLEET-P01 — verification-gate PR comment gets gh (#437, in flight)*
 
@@ -54,6 +54,10 @@ HOLD-P01 first: an hours-long hold is meaningless while a 60 s hold diverges.
 **FV-FALCON-FAULT-005 (re-verifies SWREQ-FALCON-FAULT-P02 on the gz plant)**
 
 - #398 — Rotor-out recovery does not hold on the gz plant — vehicle descends with OR without ESC telemetry
+
+**SWREQ-RELAY-MIXPROOF-P01 — the MIX-P06 proof stops stalling the Kani gate** (pulled forward from CIFLOW-P01 by maintainer decision, 2026-09-17)
+
+- #429 — `verify_mix_priority_bound` stalled 13 of 42 CI executions (31%), three times on main on 2026-09-17 — *compositional proof: `scale_to_fit` contract + `stub_verified`; verified after 10 consecutive CI executions without a stall*
 
 **Candidates — scoped at the start of v1.140 if HOLD work touches them**
 
