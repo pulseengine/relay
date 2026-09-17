@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-FLEET-001
     type: sw-verification
     title: "FLEET-P01 — the wedge detector replays #429's measured wedge and cannot report UNKNOWN as green (v1.139)"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Verifies SWREQ-RELAY-FLEET-P01 at two levels: the decision logic against

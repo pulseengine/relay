@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-READY-P01
     type: sw-req
     title: "READY-P01 — release readiness shall be recomputed from the tree, and shall give no verdict rather than a wrong one"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Release readiness for the next unreleased version shall be computed from

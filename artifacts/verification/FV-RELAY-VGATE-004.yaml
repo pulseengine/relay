@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-VGATE-004
     type: sw-verification
     title: "VGATE-P04 — the required Format gate can report failure again (v1.139)"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Partial verification of SWREQ-RELAY-VGATE-P04, for one instance of the
