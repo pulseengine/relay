@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-FLEET-P01
     type: sw-req
     title: "FLEET-P01 — a CI job wedged in_progress shall be surfaced within 5x its own median duration"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       The CI fleet monitor shall flag any job that has been `in_progress` for
