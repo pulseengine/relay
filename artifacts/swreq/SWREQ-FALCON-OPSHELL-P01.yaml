@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OPSHELL-P01 — the operational shell: what stands between a verified flight core and a vehicle that can actually be flown"
     status: proposed
-    release: falcon-v1.139.0
+    release: falcon-v1.142.0
     description: >
       The stack shall provide the operational surface a pilot needs between
       "the control loop is correct" and "this vehicle is safe to fly": a
@@ -86,7 +86,10 @@ artifacts:
       FALSIFICATION: wrong if a competent PX4 operator, given this stack and the
       X500/6X-RT hardware, cannot calibrate, configure, arm, fly and download a
       log without reading source code.
-    tags: [requirement, falcon, operational, mavlink, calibration, arming, px4, v1.139]
+
+      RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.142, the platform release. The operational shell sits on top of a named configuration (CONFIG-P01) and a wired supervisor (ORPHAN-P01), both in v1.141.
+
+    tags: [requirement, falcon, operational, mavlink, calibration, arming, px4, v1.142]
     links:
       - type: derives-from
         target: SYSREQ-FALCON-010

@@ -53,6 +53,20 @@ artifacts:
       FALSIFICATION: wrong if a release can be tagged while any verification
       track fails to execute, without that fact being recorded in the release
       as a known gap.
+
+      RELEASE PLAN (2026-09-17): SCOPE FOR v1.139, stated so it cannot quietly
+      widen. This requirement is satisfied in v1.139 by its second branch:
+      a release that cannot run a verification track RECORDS that fact
+      explicitly as a known gap. Concretely, the release process shall list every
+      dark or vacuous track in the release notes, generated from observed CI
+      state rather than remembered. Making those tracks RUN is a separate,
+      larger requirement, SWREQ-RELAY-VGATE-P05 (v1.142): Verus cannot find
+      core/std (#405), the Verus PR trigger is path-filtered on Lean paths
+      (#418), the verification gate has no main backstop (#410), cascade
+      coverage has never been produced (#407), and the required gates can pass
+      vacuously for wasm-only PRs (#417). FV-RELAY-VGATE-004 (the Format gate
+      can fail again) already discharges one instance.
+
     tags: [requirement, relay, verification-gate, release, v1.139]
     links:
       - type: derives-from

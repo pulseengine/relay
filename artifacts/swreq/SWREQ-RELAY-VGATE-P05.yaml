@@ -1,0 +1,32 @@
+artifacts:
+  - id: SWREQ-RELAY-VGATE-P05
+    type: sw-req
+    title: "VGATE-P05 — every verification track the release cites shall actually RUN, on main and on the PRs that change what it verifies"
+    status: proposed
+    release: falcon-v1.142.0
+    description: >
+      Every verification track cited as evidence (Verus, Kani, Rocq, Lean,
+      witness coverage, the verification gate) shall execute on `main` and on
+      every PR that changes what it verifies, and shall be able to fail.
+
+      WHY IT EXISTS, AND WHY IT IS SEPARATE FROM VGATE-P04. VGATE-P04 (v1.139)
+      makes a dark track VISIBLE in the release. This requirement makes it
+      RUN. Known instances, each an issue:
+        #405 — Verus has verified nothing since 2026-09-11: the toolchain
+               cannot find core/std.
+        #418 — verus.yml's PR trigger is path-filtered on LEAN paths, so the
+               Verus gate never runs on the PRs that change Verus code.
+        #410 — the required verification gate has no main backstop, and its
+               scope filter can exclude what a PR changed.
+        #407 — //:falcon-cascade-coverage fails to fuse (duplicate
+               cabi_realloc export); CI has never produced the coverage.
+        #417 — all three required gates can pass vacuously for a PR that
+               touches only the shipped wasm components.
+
+      FALSIFICATION: wrong if any cited verification track fails to execute
+      on the last main commit of a release, or a PR changing verified code
+      merges with that track skipped or vacuous.
+    tags: [requirement, relay, verification-gate, verus, coverage, v1.142]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
