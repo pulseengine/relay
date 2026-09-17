@@ -1,26 +1,41 @@
 # OCI distribution + wasm.directory
 
-The verified flight component (`pulseengine:falcon-flight`, the `falcon-flight-vX.wasm`
-artifact) is published to **ghcr.io as an OCI 1.1 artifact** on every tagged
-release, in addition to the cosign-signed GitHub Release. This makes it
+The falcon components are published to **ghcr.io as OCI 1.1 artifacts** on every
+tagged release, in addition to the cosign-signed GitHub Release.
+
+> **Which component flies — read this before deploying (#388, #411, #419).**
+> The flight core — `falcon-core`'s `FlightCore`: invariant EKF + geometric SE(3)
+> attitude + ADRC — ships as **one** component, `falcon-cascade`
+> (`falcon-cascade-vX.wasm`, `role: "flight-core"` in the bundle's
+> `manifest.json`), inside the signed `falcon-components-vX.tar.gz`. It is **not
+> yet published to OCI.** Of the per-stage OCI components below, only `iekf` and
+> `mixer` wrap crates the flight core uses; `position`, `attitude` and `rate` wrap
+> **legacy** controllers the flight core does not fly, and `flight` is a
+> self-contained demo that cannot be driven by a host. **Fusing the per-stage
+> components does not produce the flown control law.** This makes it
 `wkg oci pull`-able and indexable by [wasm.directory](https://wasm.directory) —
 a meta-registry that indexes OCI registries rather than hosting packages itself.
 
 ## What the release does automatically
 
-`.github/workflows/release.yml` (flight-component job) publishes **each verified
-cascade stage as its own cosign-signed OCI entity** (jess#167 decision 5) — the
-fine-grained components jess `wkg oci pull`s and fuses/lowers/places per core:
+`.github/workflows/release.yml` (flight-component job) publishes **each cascade
+stage as its own cosign-signed OCI entity** (jess#167 decision 5). Per stage, what
+it is — the same text is the package's OCI description, checked by
+`scripts/check-component-claims.rs`:
 
 ```
-ghcr.io/pulseengine/falcon/flight:<full-version>     # runnable demo (sealed loop)
-ghcr.io/pulseengine/falcon/iekf:<full-version>       # invariant-EKF estimator
-ghcr.io/pulseengine/falcon/position:<full-version>   # position/velocity controller
-ghcr.io/pulseengine/falcon/attitude:<full-version>   # geometric SO(3) attitude
-ghcr.io/pulseengine/falcon/rate:<full-version>       # body-rate PID
-ghcr.io/pulseengine/falcon/mixer:<full-version>      # control allocator
+ghcr.io/pulseengine/falcon/flight:<full-version>     # DEMO: sealed loop against a simulator compiled in; not drivable
+ghcr.io/pulseengine/falcon/iekf:<full-version>       # invariant-EKF estimator (relay-iekf) — used by the flight core
+ghcr.io/pulseengine/falcon/position:<full-version>   # LEGACY position controller (relay-pos) — NOT flown
+ghcr.io/pulseengine/falcon/attitude:<full-version>   # LEGACY quaternion-error P attitude (relay-att) — NOT flown
+ghcr.io/pulseengine/falcon/rate:<full-version>       # LEGACY body-rate PID (relay-rate) — NOT flown
+ghcr.io/pulseengine/falcon/mixer:<full-version>      # quadrotor control allocator (relay-mix-quad) — used by the flight core
 #   ...each also tagged :latest
 ```
+
+Whether the legacy stages keep being published, and whether `falcon-cascade`
+joins OCI, is SWREQ-FALCON-ORPHAN-P01 (v1.141) — announced to consumers before
+anything they pull changes.
 
 Each is built **WASI-free** (`--no-default-features`, so it lowers to bare metal
 — see `wasm/cm/*`) and pushed with `wkg` (wasm-pkg-tools) so it carries the
