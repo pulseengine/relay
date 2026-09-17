@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-CLAIMS-004
     type: sw-verification
     title: "CLAIMS — 'delivered' is derived from the dependency graph, not prose; the stale PX4 parity table is marked historical (#422, v1.139)"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Partial verification of SWREQ-FALCON-CLAIMS-P01, for its #422 instance —
