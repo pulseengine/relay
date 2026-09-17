@@ -1,0 +1,56 @@
+artifacts:
+  - id: FV-FALCON-CLAIMS-001
+    type: sw-verification
+    title: "CLAIMS — published component descriptions state what each wraps, and claim no verification CI does not run (#412, v1.139)"
+    status: implemented
+    release: falcon-v1.139.0
+    description: >
+      Partial verification of SWREQ-FALCON-CLAIMS-P01, for its OCI-description
+      instance (#412). `release.yml` publishes each `wasm/cm/*/Cargo.toml`
+      `description` verbatim as `org.opencontainers.image.description`.
+
+      WHAT WAS PUBLISHED, MEASURED 2026-09-17. Five of six OCI components said
+      "Formally-verified". Three of them wrapped crates with no code-level
+      verification in CI at all (relay-att, relay-pos, relay-rate: not in the
+      45-leg Kani matrix, no verus_test). attitude was advertised as a
+      "geometric SO(3)" controller while wrapping relay-att, a quaternion-error
+      proportional controller that the flight core does not use.
+      flight named Kani/Verus/Rocq/Lean, none of which runs on falcon-core. The
+      "ekf" component is a Mahony complementary filter.
+
+      THE FIX. Each description now says what the component wraps, marks the
+      three legacy stages and the Mahony filter as LEGACY and not used by the
+      flight core, states that flight is a self-contained demo that cannot be
+      driven, and names verification only where CI runs it ("Kani harnesses on
+      relay-iekf / relay-mix-quad run in CI"). While writing it, the first
+      draft of the iekf text overclaimed too — it listed GNSS, yaw and
+      magnetometer updates the component never calls (it calls only propagate
+      and update_gravity). Checked against the component source and corrected.
+
+      THE ORACLE. scripts/check-component-claims.rs refuses generic formal
+      adjectives, refuses Lean/Rocq mentions (model proofs, not code proofs),
+      and allows "Kani"/"Verus" only for crates in kani.yml's matrix / BUILD.bazel
+      verus_test targets. Against the falcon-v1.138.0 descriptions it exits 1
+      with 18 unsupported claims across attitude, falcon-mixer, flight, iekf,
+      position and rate; after the fix it exits 0. It exits 2, not 0, if its
+      inputs fail to parse or no components are found.
+
+      NOT CLAIMED. Whether those three legacy components should still be
+      PUBLISHED is a separate decision (they reach consumers such as jess;
+      changing what ships must be announced first) — SWREQ-FALCON-ORPHAN-P01,
+      v1.141. The rest of CLAIMS-P01 (#411 legacy pipeline in the bundle, #419
+      docs, #422 PX4 parity doc) is open.
+    tags: [verification, falcon, claims, oci, v1.139]
+    fields:
+      method: automated-test
+      steps:
+        # The rule, including the published #412 attitude text being refused.
+        - run: "rust-script --test scripts/check-component-claims.rs"
+        # Every component description on the tree.
+        - run: "./scripts/check-component-claims.rs"
+        # What the checker cannot see: the architectural claim and the iekf scope.
+        - run: "! grep -q 'geometric SO(3) attitude controller' wasm/cm/attitude/Cargo.toml"
+        - run: "grep -q 'gravity-direction updates ONLY' wasm/cm/iekf/Cargo.toml"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-CLAIMS-P01
