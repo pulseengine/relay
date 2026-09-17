@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-READY-001
     type: sw-verification
     title: "READY-P01 — fixture repos pin all four verdict bugs; the nightly step survives `bash -e` (v1.139)"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Verifies SWREQ-RELAY-READY-P01 with fixture repositories built by the
