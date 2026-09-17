@@ -138,14 +138,30 @@ jobs:
               sleep 2
             done
 
+            # `shell: bash` runs with -e, so a FAILING rung used to kill this
+            # step before it could print the rung or the ladder's result: both
+            # soak runs on main (2026-09-17 08:41 and 21:08) died right after
+            # the 40 s rung with exit 1 and never published a longest-holding
+            # number — the measurement was lost exactly where it matters. Same
+            # trap as the wedge detector's (#432). Capture the code instead.
+            RC=0
             OUT=$(timeout $((D + 300)) ./target/release/falcon-sitl-gz \
-                    --backend=gazebo --scenario=flightcore --duration=$D 2>&1)
+                    --backend=gazebo --scenario=flightcore --duration=$D 2>&1) || RC=$?
             echo "── ${D}s ──"; grep -E 'verdict|^PASS|^FAIL' <<<"$OUT" || true
 
-            if grep -q '^PASS' <<<"$OUT"; then
+            if [ "$RC" = 0 ] && grep -q '^PASS' <<<"$OUT"; then
               BEST=$D
             else
-              echo "  hold breaks at ${D}s"
+              # rc 124 is `timeout`; anything else non-zero with no PASS is the
+              # bench's own FAIL. Say which, so a crash is never read as a hold
+              # that merely broke.
+              if [ "$RC" = 124 ]; then
+                echo "  hold breaks at ${D}s (the bench TIMED OUT)"
+              elif grep -q '^FAIL' <<<"$OUT"; then
+                echo "  hold breaks at ${D}s (verdict FAIL)"
+              else
+                echo "  hold breaks at ${D}s (bench exited $RC without a verdict)"
+              fi
               break
             fi
           done
