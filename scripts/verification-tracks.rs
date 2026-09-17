@@ -71,6 +71,7 @@ const STRUCTURAL: &[(u32, &str)] = &[
     (407, "//:falcon-cascade-coverage fails to fuse; cascade MC/DC coverage has never been produced in CI"),
     (417, "the required gates can pass vacuously for a PR that touches only the shipped wasm components"),
     (436, "scheduled monitors run every few hours, not on their cron cadence"),
+    (452, "SimBackend's accelerometer reports gravity only, so 18 closed-loop hold and estimator tests never see the vehicle accelerate"),
 ];
 
 #[derive(Debug, Clone, serde::Deserialize)]

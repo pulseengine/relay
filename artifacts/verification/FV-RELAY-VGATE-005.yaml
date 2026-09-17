@@ -35,6 +35,16 @@ artifacts:
 
       NOT CLAIMED: a real release body produced by it. That appears at the next
       tag and is the promotion evidence.
+      A TRACK CAN ALSO BE GREEN AND MEAN LESS THAN IT SEEMS. Added 2026-09-17
+      by maintainer decision: #452 joins the structural list. `SimBackend`'s
+      accelerometer returns the gravity reaction whatever the motors do, so the
+      18 closed-loop hold and estimator tests in falcon-core — wind, turbulence,
+      vibration, intermittent GNSS, gyro-bias random walk, the HAL and hardware
+      seams, geofence actuation — run on a vehicle whose accelerometer cannot
+      show it accelerating. Measured: with a specific-force accelerometer and no
+      other change, those 18 fail (#434 has the mechanism and the surviving fix).
+      The fix is v1.140 work; this release states the gap rather than implying
+      the hold evidence is plant-realistic.
     tags: [verification, relay, verification-gate, release, v1.139]
     fields:
       method: automated-test
@@ -44,6 +54,8 @@ artifacts:
         - run: "grep -q './scripts/verification-tracks.rs --sha \"$(git rev-parse HEAD)\" >> \"$OUT\" || rc=$?' .github/workflows/release.yml"
         - run: "grep -q 'Verification tracks: UNKNOWN' .github/workflows/release.yml"
         - run: "grep -q '^      actions: read$' .github/workflows/release.yml"
+        # The gap list covers harness fidelity too, not only tracks that cannot run (#452).
+        - run: "grep -q '(452, \"SimBackend' scripts/verification-tracks.rs"
     links:
       - type: verifies
         target: SWREQ-RELAY-VGATE-P04
