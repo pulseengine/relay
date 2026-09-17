@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-BATT-003
     type: sw-verification
     title: "BATT — an absent battery reads as ABSENT, not healthy, and blocks arming (v1.139)"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Verification that a backend supplying no battery data can no longer assert
