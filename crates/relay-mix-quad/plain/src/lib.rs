@@ -520,6 +520,20 @@ fn sanitise(x: f32) -> f32 {
 /// Largest scale `s ∈ [0,1]` keeping `base[i] + s·delta[i] ∈ [floor,1]`
 /// for every motor (the per-group desaturation step). Returns 0 if a
 /// constraint is already violated at s=0 or the result is non-finite.
+///
+/// The Kani contract below is proven for ALL finite inputs by
+/// `verify_scale_to_fit_contract`, and `verify_mix_priority_bound` uses
+/// the proven contract in place of this body (#429): the precondition is
+/// checked at each call site, the postcondition is what the caller gets.
+#[cfg_attr(
+    kani,
+    kani::requires(
+        base.iter().all(|b| b.is_finite())
+            && delta.iter().all(|d| d.is_finite())
+            && floor.is_finite()
+    )
+)]
+#[cfg_attr(kani, kani::ensures(|s: &f32| s.is_finite() && *s >= 0.0 && *s <= 1.0))]
 fn scale_to_fit(base: &[f32; 4], delta: &[f32; 4], floor: f32) -> f32 {
     const EPS: f32 = 1.0e-6;
     let mut s = 1.0_f32;
@@ -764,9 +778,32 @@ mod kani_proofs {
         }
     }
 
+    /// `scale_to_fit`'s contract, for ALL finite `base`, `delta`, `floor`:
+    /// the scale is finite and in `[0, 1]`, and no operation in the body
+    /// produces NaN. Kani's float checks on the four divisions live here.
+    #[kani::proof_for_contract(super::scale_to_fit)]
+    fn verify_scale_to_fit_contract() {
+        let base: [f32; 4] = kani::any();
+        let delta: [f32; 4] = kani::any();
+        let floor: f32 = kani::any();
+        let _ = super::scale_to_fit(&base, &delta, floor);
+    }
+
     /// MIX-P06: the priority-desaturation mix holds the SAME bound — every
     /// motor ∈ [floor,1] and finite for ANY (incl. non-finite) input.
+    ///
+    /// Compositional (#429). Monolithic, this harness was one ~800k-clause
+    /// instance whose second solve stalled for 43–126 min on CI runners
+    /// while passing in seconds elsewhere — a solver heavy tail, seven times
+    /// in about 31 hours. `stub_verified` replaces both `scale_to_fit` calls
+    /// with its contract proven in `verify_scale_to_fit_contract`: Kani
+    /// ASSERTS the precondition (finite arguments) at each call site and
+    /// assumes only the proven postcondition. The bound is therefore shown
+    /// for every scale in `[0, 1]`, a superset of what `scale_to_fit` returns,
+    /// in about half the clauses. Needs Kani's unstable `function-contracts`
+    /// and `stubbing` features, enabled for this crate in its Cargo.toml.
     #[kani::proof]
+    #[kani::stub_verified(super::scale_to_fit)]
     fn verify_mix_priority_bound() {
         let floor: f32 = kani::any();
         kani::assume(floor.is_finite() && floor >= 0.0 && floor <= 1.0);

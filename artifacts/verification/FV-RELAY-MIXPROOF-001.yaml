@@ -1,0 +1,66 @@
+artifacts:
+  - id: FV-RELAY-MIXPROOF-001
+    type: sw-verification
+    title: "MIXPROOF-P01 — the compositional MIX-P06 proof passes, can fail, and halves the instance (v1.140)"
+    status: implemented
+    release: falcon-v1.140.0
+    description: >
+      Verifies SWREQ-RELAY-MIXPROOF-P01 on three counts: the proof still
+      proves the bound, each part of it can fail, and the instance that
+      stalled is smaller.
+
+      IT PROVES THE SAME BOUND. `cargo kani` on relay-mix-quad (Kani 0.67.0,
+      the kani.yml pin, features enabled from the crate's Cargo.toml with no
+      command-line flags): 7 of 7 harnesses SUCCESSFUL, locally, 2026-09-17.
+      Comparing the check lists of the monolithic and compositional
+      `verify_mix_priority_bound`: both keep the three motor-bound assertions
+      and the mixer's 9 multiplication and 11 addition NaN checks. The
+      monolithic one also checked `scale_to_fit`'s division and subtraction
+      NaN checks through its inlined calls. In the compositional one those
+      calls go to the contract. The body's checks are still listed, but the
+      body is no longer called or encoded; they are discharged in
+      `verify_scale_to_fit_contract`. The contract's precondition is a checked
+      assertion (SUCCESS) at the call sites, not an assumption (M3 below).
+
+      EACH PART CAN FAIL, checked before this artifact was written, one
+      mutation at a time:
+        M1. The mixer without its final `clamp_floor` makes
+            `verify_mix_priority_bound` FAIL on all three motor-bound
+            assertions.
+        M2. `scale_to_fit` without its final guard (returning `s` unchecked)
+            makes `verify_scale_to_fit_contract` FAIL on the postcondition.
+        M3. The mixer without `sanitise` on the roll/pitch delta makes
+            `verify_mix_priority_bound` FAIL on the precondition, which shows
+            the precondition is enforced at the call site, not assumed.
+
+      THE INSTANCE IS SMALLER. `verify_mix_priority_bound` went from 186 629
+      variables / 801 030 clauses (the size logged by every stalled CI run)
+      to 133 772 / 407 696, with 7.7–8.4 s wall time over three local runs.
+      The contract proof is 4.5 M clauses but solves in about 1.3 s: four
+      divisions over free finite inputs, with no mixer arithmetic in front of
+      them.
+
+      NOT CLAIMED YET: that the CI stall is gone. The stall never reproduced
+      on a developer machine, so local timing cannot show it. The baseline is
+      13 stalls in 42 CI executions (31%). Promotion to `verified` needs at
+      least 10 consecutive `Kani (relay-mix-quad)` executions on CI of this
+      tree or later with no stall; under the old 31% rate, 10 clean runs in a
+      row has a probability of about 2.4%. Each execution is to be recorded by
+      run id.
+    tags: [verification, relay, ci, kani, mixer, v1.140]
+    fields:
+      method: formal-verification
+      steps:
+        # The contract, for all finite inputs (CI: Kani gate, relay-mix-quad leg).
+        - run: "cargo kani -p relay-mix-quad --harness verify_scale_to_fit_contract"
+        # The MIX-P06 bound, using the proven contract.
+        - run: "cargo kani -p relay-mix-quad --harness verify_mix_priority_bound"
+        # The harness really is compositional, and the features are crate-local.
+        - run: "grep -q 'kani::stub_verified(super::scale_to_fit)' crates/relay-mix-quad/plain/src/lib.rs"
+        - run: "grep -q 'kani::proof_for_contract(super::scale_to_fit)' crates/relay-mix-quad/plain/src/lib.rs"
+        - run: "grep -q '^\\[package.metadata.kani.unstable\\]$' crates/relay-mix-quad/Cargo.toml"
+        # Kani stays pinned, so the unstable features cannot move under the gate.
+        - run: "grep -q \"kani-version: '0.67.0'\" .github/workflows/kani.yml"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-MIXPROOF-P01

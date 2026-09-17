@@ -20,8 +20,9 @@ artifacts:
         #429 — follow-up: every recorded Kani (relay-mix-quad) hang is one
                harness, verify_mix_priority_bound, stalling in CBMC's second
                propositional reduction (minisat stalls it locally past 300 s).
-               The 60-min cap makes the stall visible; the harness still
-               needs to be made robust.
+               The 60-min cap makes the stall visible. Making the harness
+               robust moved to SWREQ-RELAY-MIXPROOF-P01 (v1.140) by
+               maintainer decision on 2026-09-17.
         #436 — the fleet monitor's */15 schedule actually ran every 2.4–5.5 h,
                so unattended detection latency is hours.
 
