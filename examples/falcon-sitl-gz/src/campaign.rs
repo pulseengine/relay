@@ -450,7 +450,12 @@ pub struct FullLoopReport {
     pub failures: u32,
     pub worst_peak_tilt: f32, // worst tilt after the failure (rad)
     pub worst_yaw_rate: f32,  // worst |yaw rate| (rad/s) — the relinquished spin
-    pub least_descent: f32,   // smallest net altitude lost (m) — must stay > 0
+    // Smallest net altitude LOST (m) across the deck. Negative means a trial
+    // GAINED altitude after the rotor loss. The old comment here read "must
+    // stay > 0" while the gate below said altitude is deliberately NOT
+    // asserted — the two contradicted each other and nothing checked either
+    // (#398).
+    pub least_descent: f32,
     pub worst_detect_latency_steps: u32,
     pub failing: Vec<(u32, String)>,
 }
@@ -564,7 +569,18 @@ pub fn run_fullloop_motor_out_campaign(n: u32, campaign_seed: u64) -> FullLoopRe
         // bringing it DOWN is the FlightSupervisor's job (it commands LAND on a
         // motor failure — covered by falcon-core `motor_failure_commands_land`).
         // This campaign guards the ATTITUDE-domain invariant v1.114 fixed (no
-        // parasitic-moment flip); `least_descent` is REPORTED, not asserted.
+        // parasitic-moment flip). The DEPTH of the descent stays unasserted for
+        // the reason above — but a CLIMB does not. A vehicle that has just lost
+        // a quarter of its thrust authority must not GAIN altitude; one that
+        // does is not neutrally buoyant, it is out of control. Measured before
+        // the #452/#434 estimator fix, this deck's least descent was −62.01 m —
+        // a trial climbed 62 metres and the campaign still reported 200/200,
+        // because nothing looked. After the fix it is +1.75 m. The bound is
+        // deliberately weak (1 m of climb) so it catches a runaway without
+        // pretending to gate the descent profile.
+        if o.net_descent < -1.0 {
+            reason = format!("CLIMBED {:.2} m after the rotor loss", -o.net_descent);
+        }
         if !reason.is_empty() {
             rep.failures += 1;
             if rep.failing.len() < 20 {
