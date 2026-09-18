@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-VGATE-P04
     type: sw-req
     title: "VGATE-P04 — a verification track that CANNOT RUN shall block the release, not merely go red"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       A verification track whose toolchain fails to execute shall be treated as
