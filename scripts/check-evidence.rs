@@ -108,6 +108,20 @@ fn check_step(cmd: &str, tree: &Tree) -> Vec<String> {
         out.push("a lone `cd` — steps run as separate processes, the next step starts at the repo root".into());
     }
 
+    // Commands the GATE'S RUNNERS do not have. A step can exist, resolve and
+    // run on a laptop and still be unrunnable where the gate executes it —
+    // which is a step that verifies nothing. `gh` is the measured case: it is
+    // not installed on the self-hosted fleet (#153/#436), and an artifact that
+    // cited `gh pr view` as its evidence failed the gate with rc=127 on
+    // 2026-09-18. Composite actions install it for WORKFLOWS; an artifact step
+    // gets no such help.
+    if Regex::new(r"(?:^|[\s;&|(])gh\s").unwrap().is_match(&expanded) {
+        out.push(
+            "`gh` is not installed on the gate's runners — this step cannot run where it is checked (#153/#436)"
+                .into(),
+        );
+    }
+
     // Placeholders that were never filled in.
     if cmd.contains("/path/to/") {
         out.push("placeholder path `/path/to/…`".into());
@@ -363,6 +377,23 @@ mod tests {
         std::fs::write(root.join("scripts/real.rs"), "").unwrap();
         std::fs::write(root.join("crates/demo/src/lib.rs"), "#[test]\nfn absent_battery_blocks_arming() {}\n").unwrap();
         Tree { packages: BTreeMap::from([("demo".to_string(), root.join("crates/demo"))]), root }
+    }
+
+    #[test]
+    fn a_gh_step_is_refused_because_the_runners_have_no_gh() {
+        let tree = tree_named("gh-rule");
+        let found = check_step("gh pr view 458 --repo pulseengine/relay --json state", &tree);
+        assert!(
+            found.iter().any(|f| f.contains("`gh` is not installed")),
+            "a step that calls gh must be refused: {found:?}"
+        );
+        // A word that merely contains "gh" must not trip it.
+        assert!(
+            check_step("cargo test -p demo --lib flight_gh_guard", &tree)
+                .iter()
+                .all(|f| !f.contains("`gh` is not installed")),
+            "substring matches must not trip it"
+        );
     }
 
     #[test]

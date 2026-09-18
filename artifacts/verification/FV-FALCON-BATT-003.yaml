@@ -56,6 +56,14 @@ artifacts:
       `pos_valid`/`mag_valid` siblings), and adding one changes the HITL
       protocol. Its fallback is 0.0 V — fail-safe, since a real cell is never
       0 V, so it reads as critically flat rather than as a healthy pack.
+      SCOPE, stated so the claim is not read wider than it is. This artifact
+      covers the PRE-ARM half: an absent reading blocks arming. The IN-FLIGHT
+      half — a pack that stops reporting after takeoff — was NOT covered and
+      was open until the v1.139 review found it: the failsafe reads latches
+      that only advance when the estimator is updated, so a vehicle that armed
+      healthy and lost its sense flew on. That is SWREQ-FALCON-BATTERY-P03 +
+      FV-FALCON-BATTERY-003, fixed for v1.140.
+
     tags: [verification, falcon, battery, failsafe, prearm, v1.139]
     fields:
       method: test
