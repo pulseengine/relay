@@ -81,36 +81,74 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          # A job normally starts within a couple of minutes. 30 min queued
-          # means nothing is picking it up.
+          # A self-hosted job normally starts within a couple of minutes;
+          # 30 min queued means nothing is picking it up. HOSTED runners are a
+          # different story: org-shared concurrency was measured at 60-120 min
+          # on 2026-09-16, so a hosted job waiting an hour is contention, not a
+          # dead fleet, and waking someone for it is noise (#449, #462).
           THRESHOLD_MIN: '30'
+          HOSTED_THRESHOLD_MIN: '120'
         shell: bash
         run: |
           set -uo pipefail
           now=$(date -u +%s)
           stuck=0
           details=""
-          # `queued` runs only — an in_progress run is being served.
+          age_min() {  # ISO-8601 -> minutes old; BSD and GNU date differ
+            local ts
+            ts=$(date -u -d "$1" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || echo 0)
+            [ "$ts" = "0" ] && { echo -1; return; }
+            echo $(( (now - ts) / 60 ))
+          }
+          # MEASURE JOBS, NOT RUN STATUS (#449). A matrix run stays `queued`
+          # while its legs are being served one after another, so run age said
+          # "starving" three times (#447, #455, #462) for a fleet that was
+          # working: #462's CI run was reported at 54 min while its first job
+          # had started 4 seconds after creation. A run is starving only if a
+          # JOB has been queued past the threshold AND nothing else in that run
+          # has started since — otherwise the fleet is serving it, slowly.
           # A failed query must not read as an empty queue (#429).
-          if runs=$(gh api "/repos/${REPO}/actions/runs?status=queued&per_page=50" \
-                      --jq '.workflow_runs[] | "\(.created_at)\t\(.name)\t\(.head_branch)\t\(.html_url)"'); then
+          if ids=$(gh api "/repos/${REPO}/actions/runs?status=queued&per_page=50" \
+                      --jq '.workflow_runs[].id'); then
             echo "api_ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "api_ok=false" >> "$GITHUB_OUTPUT"
             echo "::error::could not query queued runs — starvation status is UNKNOWN, not green"
-            runs=""
+            ids=""
           fi
-          while IFS=$'\t' read -r created name branch url; do
-            [ -z "${created:-}" ] && continue
-            # BSD/GNU date differ; try GNU form first, then BSD.
-            ts=$(date -u -d "$created" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$created" +%s 2>/dev/null || echo 0)
-            [ "$ts" = "0" ] && continue
-            age=$(( (now - ts) / 60 ))
-            if [ "$age" -ge "$THRESHOLD_MIN" ]; then
+          while read -r id; do
+            [ -z "${id:-}" ] && continue
+            jobs=$(gh api "/repos/${REPO}/actions/runs/${id}/jobs?per_page=100" \
+                     --jq '.jobs[] | "\(.status)\t\(.started_at // "-")\t\(.created_at // "-")\t\(.name)\t\(.labels | join(","))\t\(.html_url)"') || continue
+            # The most recent start anywhere in this run: proof the fleet is serving it.
+            # "-" is the absent marker: an EMPTY field cannot be used here,
+            # because tab is an IFS whitespace character and consecutive tabs
+            # collapse — the fields would shift by one and every timestamp
+            # would be a job name (measured).
+            last_start=$(awk -F'\t' '$2 != "-" {print $2}' <<< "$jobs" | sort | tail -1)
+            last_start_age=-1
+            [ -n "$last_start" ] && last_start_age=$(age_min "$last_start")
+            while IFS=$'\t' read -r status started created name labels url; do
+              [ "$status" = "queued" ] || continue
+              [ "${created:-}" = "-" ] && continue
+              age=$(age_min "$created")
+              [ "$age" -lt 0 ] && continue
+              # Hosted contention is not fleet death; say which, and hold it to
+              # its own threshold.
+              case ",$labels," in
+                *,ubuntu-latest,*|*,windows-latest,*|*,macos-latest,*|*,ubuntu-*,*) limit="$HOSTED_THRESHOLD_MIN"; kind="hosted" ;;
+                *) limit="$THRESHOLD_MIN"; kind="self-hosted" ;;
+              esac
+              [ "$age" -lt "$limit" ] && continue
+              # Something in this run started more recently than this job has
+              # been waiting => the fleet is working through it.
+              if [ "$last_start_age" -ge 0 ] && [ "$last_start_age" -lt "$age" ]; then
+                continue
+              fi
               stuck=$((stuck+1))
-              details="${details}- \`${name}\` on \`${branch}\` — queued **${age} min** ([run](${url}))"$'\n'
-            fi
-          done <<< "$runs"
+              details="${details}- \`${name}\` (${kind}: \`${labels}\`) — queued **${age} min**, nothing in its run has started since ([job](${url}))"$'\n'
+            done <<< "$jobs"
+          done <<< "$ids"
           {
             echo "stuck=$stuck"
             echo "details<<STARVE_EOF"
