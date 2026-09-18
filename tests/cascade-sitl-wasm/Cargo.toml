@@ -22,6 +22,12 @@ anyhow = "1"
 libm = "0.2"
 relay-ekf = { path = "../../crates/relay-ekf" }
 
+# The included physics.rs applies the VERIFIED mixer's own torque allocation
+# (#435), so this crate needs the mixer for the same reason the example does.
+# The file is included rather than copied precisely so the two cannot drift —
+# which means its dependencies have to match on both sides.
+relay-mix-quad = { path = "../../crates/relay-mix-quad" }
+
 # The NATIVE half of the equivalence test: the SAME flight core the cascade
 # component wraps. Both sides call falcon-core; only the route differs.
 falcon-core = { path = "../../crates/falcon-core" }
