@@ -96,9 +96,23 @@ jobs:
       - name: Two-commit rule (verification independence)
         if: github.event_name == 'pull_request'
         env:
+          # NOT `pull_request.base.sha` alone: that is the base as it was when
+          # the PR event fired, and CI checks out the PR's MERGE commit. On a
+          # branch that has fallen behind, the diff from that stale base
+          # therefore contains MAIN's own commits — so a PR that only changes
+          # code was failed for "promoting artifacts to verified" that someone
+          # else had promoted on main (measured on #456, 2026-09-18: the two
+          # flagged lines came from #461). The merge base of the checked-out
+          # merge commit and the base branch is the honest starting point.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         shell: bash
-        run: scripts/check-verification-independence.sh "$BASE_SHA"
+        run: |
+          set -euo pipefail
+          git fetch -q origin "$BASE_REF" --depth=200 || true
+          base=$(git merge-base "origin/$BASE_REF" HEAD 2>/dev/null || echo "$BASE_SHA")
+          echo "two-commit rule: diffing from $base (event base was $BASE_SHA)"
+          scripts/check-verification-independence.sh "$base"
 
       # ── Scope fast-path (2026-07-21) ─────────────────────────────────
       # The falcon verification sweep (~370 steps, ~45m) only reflects
