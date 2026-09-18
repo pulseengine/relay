@@ -56,13 +56,23 @@ pub struct AdrcGains {
 impl AdrcGains {
     /// Build with no actuator-lag model (instant actuator).
     pub const fn new(omega_o: f32, omega_c: f32, b0: f32) -> Self {
-        AdrcGains { omega_o, omega_c, b0, tau: 0.0 }
+        AdrcGains {
+            omega_o,
+            omega_c,
+            b0,
+            tau: 0.0,
+        }
     }
 
     /// Build with an explicit actuator time constant τ (the recommended
     /// form for the lag-sensitive yaw axis).
     pub const fn with_tau(omega_o: f32, omega_c: f32, b0: f32, tau: f32) -> Self {
-        AdrcGains { omega_o, omega_c, b0, tau }
+        AdrcGains {
+            omega_o,
+            omega_c,
+            b0,
+            tau,
+        }
     }
 
     /// Bandwidth-parameterized construction (Gao 2003): pick the controller
@@ -74,7 +84,12 @@ impl AdrcGains {
     /// phase margin. This constructor makes [`well_separated`] true by
     /// construction for any `min_ratio ≤ separation`.
     pub fn from_bandwidth(omega_c: f32, separation: f32, b0: f32, tau: f32) -> Self {
-        AdrcGains { omega_o: separation * omega_c, omega_c, b0, tau }
+        AdrcGains {
+            omega_o: separation * omega_c,
+            omega_c,
+            b0,
+            tau,
+        }
     }
 
     /// Observer/controller timescale-separation invariant: ω_o ≥ ratio·ω_c.
@@ -97,10 +112,7 @@ impl AdrcGains {
     /// outer position→attitude cascade). A `margin` < 1 leaves headroom.
     #[inline]
     pub fn eso_dt_stable(&self, dt: f32, margin: f32) -> bool {
-        self.omega_o.is_finite()
-            && dt.is_finite()
-            && dt > 0.0
-            && self.omega_o * dt < 2.0 * margin
+        self.omega_o.is_finite() && dt.is_finite() && dt > 0.0 && self.omega_o * dt < 2.0 * margin
     }
 }
 
@@ -116,7 +128,13 @@ pub struct AdrcAxis {
 
 impl AdrcAxis {
     pub fn new(g: AdrcGains) -> Self {
-        AdrcAxis { z1: 0.0, z2: 0.0, u_prev: 0.0, u_act: 0.0, g }
+        AdrcAxis {
+            z1: 0.0,
+            z2: 0.0,
+            u_prev: 0.0,
+            u_act: 0.0,
+            g,
+        }
     }
 
     /// Disturbance estimate (rad/s²) — the lumped unmodeled torque/J the
@@ -130,14 +148,34 @@ impl AdrcAxis {
     /// outer loop, `dt` (s). Returns the control output `u` (torque,
     /// normalised to the same units the mixer expects).
     pub fn tick(&mut self, omega_meas: f32, omega_d: f32, dt: f32) -> f32 {
-        let dt = if dt.is_finite() { dt.clamp(1e-4, 0.1) } else { 1e-3 };
-        let om = if omega_meas.is_finite() { omega_meas } else { 0.0 };
+        let dt = if dt.is_finite() {
+            dt.clamp(1e-4, 0.1)
+        } else {
+            1e-3
+        };
+        let om = if omega_meas.is_finite() {
+            omega_meas
+        } else {
+            0.0
+        };
         let od = if omega_d.is_finite() { omega_d } else { 0.0 };
 
         // Guard the tuning (positive, finite) so the law is total.
-        let omega_o = if self.g.omega_o.is_finite() && self.g.omega_o > 0.0 { self.g.omega_o } else { 10.0 };
-        let omega_c = if self.g.omega_c.is_finite() && self.g.omega_c > 0.0 { self.g.omega_c } else { 3.0 };
-        let b0 = if self.g.b0.is_finite() && self.g.b0.abs() > 1e-3 { self.g.b0 } else { 1.0 };
+        let omega_o = if self.g.omega_o.is_finite() && self.g.omega_o > 0.0 {
+            self.g.omega_o
+        } else {
+            10.0
+        };
+        let omega_c = if self.g.omega_c.is_finite() && self.g.omega_c > 0.0 {
+            self.g.omega_c
+        } else {
+            3.0
+        };
+        let b0 = if self.g.b0.is_finite() && self.g.b0.abs() > 1e-3 {
+            self.g.b0
+        } else {
+            1.0
+        };
         let beta1 = 2.0 * omega_o;
         let beta2 = omega_o * omega_o;
         let kp = omega_c;
@@ -219,17 +257,32 @@ impl Biquad {
             b2: ((1.0 - cw) * 0.5) / a0,
             a1: (-2.0 * cw) / a0,
             a2: (1.0 - alpha) / a0,
-            x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+            x1: 0.0,
+            x2: 0.0,
+            y1: 0.0,
+            y2: 0.0,
         }
     }
 
     fn passthrough() -> Self {
-        Biquad { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0, x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0 }
+        Biquad {
+            b0: 1.0,
+            b1: 0.0,
+            b2: 0.0,
+            a1: 0.0,
+            a2: 0.0,
+            x1: 0.0,
+            x2: 0.0,
+            y1: 0.0,
+            y2: 0.0,
+        }
     }
 
     pub fn filter(&mut self, x: f32) -> f32 {
         let x = if x.is_finite() { x } else { 0.0 };
-        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
+            - self.a1 * self.y1
+            - self.a2 * self.y2;
         let y = if y.is_finite() { y } else { 0.0 };
         self.x2 = self.x1;
         self.x1 = x;
@@ -253,7 +306,11 @@ impl GyroLpf {
     }
 
     pub fn filter(&mut self, gyro: [f32; 3]) -> [f32; 3] {
-        [self.axes[0].filter(gyro[0]), self.axes[1].filter(gyro[1]), self.axes[2].filter(gyro[2])]
+        [
+            self.axes[0].filter(gyro[0]),
+            self.axes[1].filter(gyro[1]),
+            self.axes[2].filter(gyro[2]),
+        ]
     }
 }
 
@@ -264,7 +321,13 @@ pub struct AdrcRate {
 
 impl AdrcRate {
     pub fn new(gains: [AdrcGains; 3]) -> Self {
-        AdrcRate { axes: [AdrcAxis::new(gains[0]), AdrcAxis::new(gains[1]), AdrcAxis::new(gains[2])] }
+        AdrcRate {
+            axes: [
+                AdrcAxis::new(gains[0]),
+                AdrcAxis::new(gains[1]),
+                AdrcAxis::new(gains[2]),
+            ],
+        }
     }
 
     /// Falcon-quad defaults: roll/pitch fast (high effectiveness), yaw
@@ -305,7 +368,11 @@ impl AdrcRate {
     }
 
     pub fn disturbance(&self) -> [f32; 3] {
-        [self.axes[0].disturbance(), self.axes[1].disturbance(), self.axes[2].disturbance()]
+        [
+            self.axes[0].disturbance(),
+            self.axes[1].disturbance(),
+            self.axes[2].disturbance(),
+        ]
     }
 }
 
@@ -360,14 +427,28 @@ impl CommandFilter {
     /// bandwidth ω_c for separation. `max_mag`/`max_rate` saturate the
     /// command and its slew (use f32::INFINITY to disable a limit).
     pub fn new(omega_n: f32, max_mag: f32, max_rate: f32) -> Self {
-        let omega_n = if omega_n.is_finite() && omega_n > 0.0 { omega_n } else { 1.0 };
-        CommandFilter { omega_n, max_mag, max_rate, y: 0.0, yd: 0.0 }
+        let omega_n = if omega_n.is_finite() && omega_n > 0.0 {
+            omega_n
+        } else {
+            1.0
+        };
+        CommandFilter {
+            omega_n,
+            max_mag,
+            max_rate,
+            y: 0.0,
+            yd: 0.0,
+        }
     }
 
     /// Filter one sample of the raw command `u` over `dt` seconds; returns
     /// the smoothed, separation-bounded command.
     pub fn step(&mut self, u: f32, dt: f32) -> f32 {
-        let dt = if dt.is_finite() { dt.clamp(1e-4, 0.1) } else { 1e-3 };
+        let dt = if dt.is_finite() {
+            dt.clamp(1e-4, 0.1)
+        } else {
+            1e-3
+        };
         let u = if u.is_finite() { u } else { 0.0 };
         // Sanitise state so the law is total even from a non-finite state.
         let y0 = if self.y.is_finite() { self.y } else { 0.0 };
@@ -411,7 +492,11 @@ impl CommandFilter3 {
     }
 
     pub fn step(&mut self, u: [f32; 3], dt: f32) -> [f32; 3] {
-        [self.axes[0].step(u[0], dt), self.axes[1].step(u[1], dt), self.axes[2].step(u[2], dt)]
+        [
+            self.axes[0].step(u[0], dt),
+            self.axes[1].step(u[1], dt),
+            self.axes[2].step(u[2], dt),
+        ]
     }
 
     pub fn reset(&mut self) {
@@ -463,7 +548,10 @@ mod tests {
         // need not equal 2 exactly — but it must be a substantial, finite,
         // same-sign estimate (not zero, not NaN).
         assert!(d_est.is_finite());
-        assert!(d_est > 0.5, "ESO should identify a positive disturbance, got {d_est}");
+        assert!(
+            d_est > 0.5,
+            "ESO should identify a positive disturbance, got {d_est}"
+        );
     }
 
     /// The gyro LPF passes DC unchanged and strongly attenuates a
@@ -485,7 +573,9 @@ mod tests {
         for k in 0..2000 {
             let x = relay_math::sinf(2.0 * core::f32::consts::PI * 300.0 * (k as f32) / fs);
             let y = lpf2.filter([x, 0.0, 0.0])[0].abs();
-            if k > 200 && y > peak { peak = y; }
+            if k > 200 && y > peak {
+                peak = y;
+            }
         }
         assert!(peak < 0.15, "300 Hz should be attenuated, peak {peak}");
     }
@@ -496,7 +586,10 @@ mod tests {
     fn regulates_rate_to_zero_under_disturbance() {
         let g = AdrcGains::new(20.0, 5.0, 6.0);
         let (omega, _) = sim_axis(4.0, 0.05, 1.5, 0.0, g);
-        assert!(omega.abs() < 0.15, "rate should be held near 0, got {omega}");
+        assert!(
+            omega.abs() < 0.15,
+            "rate should be held near 0, got {omega}"
+        );
     }
 
     proptest::proptest! {
@@ -562,7 +655,9 @@ mod tests {
         let mut last = 0.0f32;
         for _ in 0..2000 {
             let y = cf.step(1.0, dt);
-            if y > peak { peak = y; }
+            if y > peak {
+                peak = y;
+            }
             last = y;
         }
         // Critically damped ⇒ the step response never overshoots the target
@@ -664,7 +759,13 @@ mod kani_harness {
         // the step preserves it gives the running guarantee for all time.
         kani::assume(y.is_finite() && y.abs() <= max_mag);
         kani::assume(yd.is_finite() && yd.abs() <= max_rate);
-        let mut cf = CommandFilter { omega_n, max_mag, max_rate, y, yd };
+        let mut cf = CommandFilter {
+            omega_n,
+            max_mag,
+            max_rate,
+            y,
+            yd,
+        };
         let out = cf.step(u, dt);
         assert!(out <= max_mag && out >= -max_mag);
         assert!(cf.rate() <= max_rate && cf.rate() >= -max_rate);

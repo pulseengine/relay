@@ -86,7 +86,9 @@ pub struct QuadMixer {
 
 impl QuadMixer {
     pub const fn new() -> Self {
-        Self { last_motors: [0.0; 4] }
+        Self {
+            last_motors: [0.0; 4],
+        }
     }
 
     pub fn last_motors(&self) -> [f32; 4] {
@@ -168,12 +170,7 @@ impl QuadMixer {
     /// Invariant (MIX-P05, proved in the verus tree + Kani harness):
     /// for `thrust ∈ [floor, 1]` and `floor ∈ [0, 1]`, every output
     /// motor is in `[floor, 1]` ⊆ `[0, 1]` and finite.
-    pub fn mix_thrust_floor(
-        &mut self,
-        torque_body: [f32; 3],
-        thrust: f32,
-        floor: f32,
-    ) -> [f32; 4] {
+    pub fn mix_thrust_floor(&mut self, torque_body: [f32; 3], thrust: f32, floor: f32) -> [f32; 4] {
         let t = clamp01(sanitise(thrust));
         let floor = clamp01(sanitise(floor));
         // Collective base; if thrust is below the floor we can't
@@ -205,13 +202,19 @@ impl QuadMixer {
         for &di in &d {
             if di > EPS {
                 let lim = (1.0 - base) / di;
-                if lim < s { s = lim; }
+                if lim < s {
+                    s = lim;
+                }
             } else if di < -EPS {
                 let lim = (base - floor) / (-di);
-                if lim < s { s = lim; }
+                if lim < s {
+                    s = lim;
+                }
             }
         }
-        if s < 0.0 || !s.is_finite() { s = 0.0; }
+        if s < 0.0 || !s.is_finite() {
+            s = 0.0;
+        }
 
         let mut m = [0.0_f32; 4];
         for i in 0..4 {
@@ -238,12 +241,7 @@ impl QuadMixer {
     /// Invariant (same as MIX-P05): for `floor ∈ [0,1]` and any torque,
     /// every output motor ∈ `[floor, 1]` and finite — the final
     /// `clamp_floor` makes it a hard guarantee.
-    pub fn mix_priority(
-        &mut self,
-        torque_body: [f32; 3],
-        thrust: f32,
-        floor: f32,
-    ) -> [f32; 4] {
+    pub fn mix_priority(&mut self, torque_body: [f32; 3], thrust: f32, floor: f32) -> [f32; 4] {
         let t = clamp01(sanitise(thrust));
         let floor = clamp01(sanitise(floor));
         let base = if t < floor { floor } else { t };
@@ -266,7 +264,12 @@ impl QuadMixer {
         let base_rp = [base + drp[0], base + drp[1], base + drp[2], base + drp[3]];
         let sy = scale_to_fit(&base_rp, &dy, floor);
         // 2. ROLL/PITCH next: scale to fit with the reduced yaw applied.
-        let base_y = [base + sy * dy[0], base + sy * dy[1], base + sy * dy[2], base + sy * dy[3]];
+        let base_y = [
+            base + sy * dy[0],
+            base + sy * dy[1],
+            base + sy * dy[2],
+            base + sy * dy[3],
+        ];
         let srp = scale_to_fit(&base_y, &drp, floor);
 
         let mut m = [0.0_f32; 4];
@@ -304,8 +307,12 @@ impl QuadMixer {
         }
         let (mut dmin, mut dmax) = (d[0], d[0]);
         for &di in &d[1..] {
-            if di < dmin { dmin = di; }
-            if di > dmax { dmax = di; }
+            if di < dmin {
+                dmin = di;
+            }
+            if di > dmax {
+                dmax = di;
+            }
         }
 
         // If the differential spread exceeds the available range, scale the
@@ -329,8 +336,12 @@ impl QuadMixer {
         let mut m = [t + d[0], t + d[1], t + d[2], t + d[3]];
         let (mut lo, mut hi) = (m[0], m[0]);
         for &v in &m[1..] {
-            if v < lo { lo = v; }
-            if v > hi { hi = v; }
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
         }
         let shift = if lo < idle {
             idle - lo
@@ -503,16 +514,26 @@ fn clamp01(x: f32) -> f32 {
 
 #[inline]
 fn sanitise(x: f32) -> f32 {
-    if !x.is_finite() {
-        0.0
-    } else {
-        x
-    }
+    if !x.is_finite() { 0.0 } else { x }
 }
 
 /// Largest scale `s ∈ [0,1]` keeping `base[i] + s·delta[i] ∈ [floor,1]`
 /// for every motor (the per-group desaturation step). Returns 0 if a
 /// constraint is already violated at s=0 or the result is non-finite.
+///
+/// The Kani contract below is proven for ALL finite inputs by
+/// `verify_scale_to_fit_contract`, and `verify_mix_priority_bound` uses
+/// the proven contract in place of this body (#429): the precondition is
+/// checked at each call site, the postcondition is what the caller gets.
+#[cfg_attr(
+    kani,
+    kani::requires(
+        base.iter().all(|b| b.is_finite())
+            && delta.iter().all(|d| d.is_finite())
+            && floor.is_finite()
+    )
+)]
+#[cfg_attr(kani, kani::ensures(|s: &f32| s.is_finite() && *s >= 0.0 && *s <= 1.0))]
 fn scale_to_fit(base: &[f32; 4], delta: &[f32; 4], floor: f32) -> f32 {
     const EPS: f32 = 1.0e-6;
     let mut s = 1.0_f32;
@@ -521,10 +542,14 @@ fn scale_to_fit(base: &[f32; 4], delta: &[f32; 4], floor: f32) -> f32 {
         let b = base[i];
         if di > EPS {
             let lim = (1.0 - b) / di;
-            if lim < s { s = lim; }
+            if lim < s {
+                s = lim;
+            }
         } else if di < -EPS {
             let lim = (b - floor) / (-di);
-            if lim < s { s = lim; }
+            if lim < s {
+                s = lim;
+            }
         }
     }
     if s < 0.0 || !s.is_finite() { 0.0 } else { s }
@@ -609,7 +634,11 @@ impl MixerN {
     /// so the peak |·| over rotors is 1 — matching the hand-tuned `MIXER_X`
     /// scale, so `from_geometry(quad-X angles)` reproduces it.
     pub fn from_geometry(rotors: &[(f32, bool)]) -> Self {
-        let n = if rotors.len() > MAX_ROTORS { MAX_ROTORS } else { rotors.len() };
+        let n = if rotors.len() > MAX_ROTORS {
+            MAX_ROTORS
+        } else {
+            rotors.len()
+        };
         let mut mix = [[0.0_f32; 4]; MAX_ROTORS];
         // First pass: raw roll/pitch, track peaks for normalization.
         let mut peak_r = 0.0_f32;
@@ -749,9 +778,32 @@ mod kani_proofs {
         }
     }
 
+    /// `scale_to_fit`'s contract, for ALL finite `base`, `delta`, `floor`:
+    /// the scale is finite and in `[0, 1]`, and no operation in the body
+    /// produces NaN. Kani's float checks on the four divisions live here.
+    #[kani::proof_for_contract(super::scale_to_fit)]
+    fn verify_scale_to_fit_contract() {
+        let base: [f32; 4] = kani::any();
+        let delta: [f32; 4] = kani::any();
+        let floor: f32 = kani::any();
+        let _ = super::scale_to_fit(&base, &delta, floor);
+    }
+
     /// MIX-P06: the priority-desaturation mix holds the SAME bound — every
     /// motor ∈ [floor,1] and finite for ANY (incl. non-finite) input.
+    ///
+    /// Compositional (#429). Monolithic, this harness was one ~800k-clause
+    /// instance whose second solve stalled for 43–126 min on CI runners
+    /// while passing in seconds elsewhere — a solver heavy tail, seven times
+    /// in about 31 hours. `stub_verified` replaces both `scale_to_fit` calls
+    /// with its contract proven in `verify_scale_to_fit_contract`: Kani
+    /// ASSERTS the precondition (finite arguments) at each call site and
+    /// assumes only the proven postcondition. The bound is therefore shown
+    /// for every scale in `[0, 1]`, a superset of what `scale_to_fit` returns,
+    /// in about half the clauses. Needs Kani's unstable `function-contracts`
+    /// and `stubbing` features, enabled for this crate in its Cargo.toml.
     #[kani::proof]
+    #[kani::stub_verified(super::scale_to_fit)]
     fn verify_mix_priority_bound() {
         let floor: f32 = kani::any();
         kani::assume(floor.is_finite() && floor >= 0.0 && floor <= 1.0);
@@ -878,8 +930,10 @@ mod tests {
         }
         let roll_prio = motors_to_torque_signs(prio)[0].abs();
         let roll_uni = motors_to_torque_signs(uni)[0].abs();
-        assert!(roll_prio >= roll_uni - 1e-6,
-            "priority should preserve >= roll than uniform: {roll_prio} vs {roll_uni}");
+        assert!(
+            roll_prio >= roll_uni - 1e-6,
+            "priority should preserve >= roll than uniform: {roll_prio} vs {roll_uni}"
+        );
     }
 
     /// Without saturation, the priority mix passes the full torque through
@@ -890,7 +944,11 @@ mod tests {
         let out = QuadMixer::new().mix_priority(torque, 0.6, 0.3);
         let tq = motors_to_torque_signs(out);
         // all three axes retain their commanded sign (non-zero).
-        assert!(tq[2].abs() > 1e-3, "yaw preserved when unsaturated: {:?}", tq);
+        assert!(
+            tq[2].abs() > 1e-3,
+            "yaw preserved when unsaturated: {:?}",
+            tq
+        );
     }
 
     /// MIX-P07: airmode preserves the YAW differential where the priority
@@ -907,9 +965,14 @@ mod tests {
         }
         let yaw_air = motors_to_torque_signs(air)[2].abs();
         let yaw_prio = motors_to_torque_signs(prio)[2].abs();
-        assert!(yaw_air >= yaw_prio - 1e-6,
-            "airmode should preserve >= yaw than priority: {yaw_air} vs {yaw_prio}");
-        assert!(yaw_air > 1e-3, "airmode keeps real yaw authority: {yaw_air}");
+        assert!(
+            yaw_air >= yaw_prio - 1e-6,
+            "airmode should preserve >= yaw than priority: {yaw_air} vs {yaw_prio}"
+        );
+        assert!(
+            yaw_air > 1e-3,
+            "airmode keeps real yaw authority: {yaw_air}"
+        );
     }
 
     /// MIX-P08 (v0.26): single-rotor-out allocator pins the failed rotor to
@@ -920,17 +983,27 @@ mod tests {
         let (thrust, floor) = (0.6_f32, 0.15_f32);
         for failed in 0..4 {
             let out = QuadMixer::new().mix_rotor_out(failed, [0.1, -0.1, 0.5], thrust, floor);
-            assert_eq!(out[failed], 0.0, "failed rotor {failed} must be OFF: {out:?}");
+            assert_eq!(
+                out[failed], 0.0,
+                "failed rotor {failed} must be OFF: {out:?}"
+            );
             for (i, &v) in out.iter().enumerate() {
                 if i != failed {
-                    assert!(v >= floor && v <= 1.0, "healthy rotor {i} out of [floor,1]: {v}");
+                    assert!(
+                        v >= floor && v <= 1.0,
+                        "healthy rotor {i} out of [floor,1]: {v}"
+                    );
                 }
             }
             // Yaw is relinquished: the same command with a different yaw must
             // produce identical healthy outputs.
-            let out_noyaw = QuadMixer::new().mix_rotor_out(failed, [0.1, -0.1, -9.0], thrust, floor);
+            let out_noyaw =
+                QuadMixer::new().mix_rotor_out(failed, [0.1, -0.1, -9.0], thrust, floor);
             for i in 0..4 {
-                assert!((out[i] - out_noyaw[i]).abs() < 1e-6, "yaw should not affect rotor {i}");
+                assert!(
+                    (out[i] - out_noyaw[i]).abs() < 1e-6,
+                    "yaw should not affect rotor {i}"
+                );
             }
         }
     }
@@ -940,8 +1013,11 @@ mod tests {
         let mut m = QuadMixer::new();
         let r = m.mix([0.0, 0.0, 0.0], 0.5);
         for v in r.iter() {
-            assert!((v - 0.5).abs() < 1.0e-6,
-                "all motors should equal thrust at zero torque, got {:?}", r);
+            assert!(
+                (v - 0.5).abs() < 1.0e-6,
+                "all motors should equal thrust at zero torque, got {:?}",
+                r
+            );
         }
     }
 
@@ -953,8 +1029,13 @@ mod tests {
             for &r in &[-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
                 let m = mixer.mix([r, r, r], t);
                 for v in m.iter() {
-                    assert!((0.0..=1.0).contains(v),
-                        "motor out of bounds: t={} r={} -> {:?}", t, r, m);
+                    assert!(
+                        (0.0..=1.0).contains(v),
+                        "motor out of bounds: t={} r={} -> {:?}",
+                        t,
+                        r,
+                        m
+                    );
                 }
             }
         }
@@ -966,8 +1047,16 @@ mod tests {
         // less thrust than left-side (M3, M4).
         let mut m = QuadMixer::new();
         let r = m.mix([0.5, 0.0, 0.0], 0.5);
-        assert!(r[0] < r[2], "M1 (right) must be less than M3 (left): {:?}", r);
-        assert!(r[1] < r[3], "M2 (right) must be less than M4 (left): {:?}", r);
+        assert!(
+            r[0] < r[2],
+            "M1 (right) must be less than M3 (left): {:?}",
+            r
+        );
+        assert!(
+            r[1] < r[3],
+            "M2 (right) must be less than M4 (left): {:?}",
+            r
+        );
     }
 
     #[test]
@@ -975,8 +1064,16 @@ mod tests {
         // +pitch (nose up) → front motors (M1, M4) more, back (M2, M3) less.
         let mut m = QuadMixer::new();
         let r = m.mix([0.0, 0.5, 0.0], 0.5);
-        assert!(r[0] > r[1], "M1 (front) must be greater than M2 (back): {:?}", r);
-        assert!(r[3] > r[2], "M4 (front) must be greater than M3 (back): {:?}", r);
+        assert!(
+            r[0] > r[1],
+            "M1 (front) must be greater than M2 (back): {:?}",
+            r
+        );
+        assert!(
+            r[3] > r[2],
+            "M4 (front) must be greater than M3 (back): {:?}",
+            r
+        );
     }
 
     #[test]
@@ -1123,8 +1220,10 @@ mod tests {
             for &tq in &[0.0_f32, 0.3, 1.0, 5.0] {
                 let out = m.mix_thrust_floor([tq, 0.0, 0.0], thr, 0.3);
                 let mean = (out[0] + out[1] + out[2] + out[3]) / 4.0;
-                assert!((mean - thr.max(0.3)).abs() < 1.0e-5,
-                    "collective drifted: thr={thr} tq={tq} mean={mean} out={out:?}");
+                assert!(
+                    (mean - thr.max(0.3)).abs() < 1.0e-5,
+                    "collective drifted: thr={thr} tq={tq} mean={mean} out={out:?}"
+                );
             }
         }
     }
@@ -1208,13 +1307,20 @@ mod tests {
         let out = h.mix([0.0, 0.0, 0.15], 0.5);
         // CCW rotors (yaw col +1) rise, CW (−1) fall; all bounded.
         for i in 0..6 {
-            assert!(out[i] >= 0.0 && out[i] <= 1.0, "rotor {i} out of range: {}", out[i]);
+            assert!(
+                out[i] >= 0.0 && out[i] <= 1.0,
+                "rotor {i} out of range: {}",
+                out[i]
+            );
         }
         // net yaw sign preserved: hexa CCW rotors are 0,2,4 (yaw col +1),
         // CW are 1,3,5 (−1); a +yaw command biases the CCW group up.
         let ccw = (out[0] + out[2] + out[4]) / 3.0;
         let cw = (out[1] + out[3] + out[5]) / 3.0;
-        assert!(ccw > cw, "positive yaw should bias CCW rotors up: ccw {ccw} cw {cw}");
+        assert!(
+            ccw > cw,
+            "positive yaw should bias CCW rotors up: ccw {ccw} cw {cw}"
+        );
     }
 
     use proptest::prelude::*;
