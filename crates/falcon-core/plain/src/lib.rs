@@ -346,12 +346,6 @@ impl EstimatorPartition {
     }
 }
 
-/// |x| without libm (bit mask), for the cascade's own gates.
-#[inline]
-fn libm_fabsf_core(x: f32) -> f32 {
-    f32::from_bits(x.to_bits() & 0x7fff_ffff)
-}
-
 /// The CASCADE partition (PART-P01, v1.124): geometric attitude, ADRC,
 /// mixer + rotor-out FDI/reconfiguration, position/altitude loops,
 /// RPM-notch gyro path and terrain-relative landing reference — the M7
@@ -763,7 +757,7 @@ impl CascadePartition {
             // a stalled hold.
             const VZ_CONVERGING_MIN: f32 = 0.05;
             let converging =
-                alt_err * est.v[2] > 0.0 && libm_fabsf_core(est.v[2]) > VZ_CONVERGING_MIN;
+                alt_err * est.v[2] > 0.0 && relay_math::fabsf(est.v[2]) > VZ_CONVERGING_MIN;
             if !converging {
                 self.alt_int += alt_err * dt;
             }

@@ -94,6 +94,12 @@ artifacts:
 
       Before the change every one of those rows was 0.000 m horizontal.
 
+      THE NIGHTLY JOB MEASURES THE SAME THING. `soak.yml`'s analytic tier runs
+      with `IMU_NOISE: '0.01'`, the sigma this table is measured at. Without it
+      the job would keep reporting a 12 h PASS at 0.000 m — the guardrail
+      passing vacuously while the requirement claims a measured hold (caught in
+      review of #456, 2026-09-18).
+
       AND IT CATCHES THE DEFECT IT USED TO HIDE. The same torque-capable,
       disturbed plant run against the PRE-#452 estimator diverges: 1 746 m
       horizontal at 120 s, and 124 km at 1 h with the altitude estimate at

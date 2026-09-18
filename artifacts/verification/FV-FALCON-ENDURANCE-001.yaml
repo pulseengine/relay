@@ -1,0 +1,54 @@
+artifacts:
+  - id: FV-FALCON-ENDURANCE-001
+    type: sw-verification
+    title: "ENDURANCE-P01 — a 12 h hold on a plant that can tilt, and a nightly job that measures it (v1.140)"
+    status: implemented
+    release: falcon-v1.140.0
+    description: >
+      Verifies SWREQ-FALCON-ENDURANCE-P01. `implemented`, not `verified`: the
+      two-commit rule puts promotion in the code-free PR that follows, and the
+      nightly job has not yet run with the noise this artifact relies on.
+
+      THE MEASUREMENT (mock plant, gyro sigma 0.01 rad/s, 250 Hz loop, 5 Hz
+      aiding), horizontal peak / horizontal final / altitude error:
+
+        120 s   0.24 / 0.11 / 0.01 m
+        1 h     0.37 / 0.13 / 0.01 m
+        12 h    0.46 / 0.16 / 0.01 m
+
+      IT CAN FAIL, and it used to be unable to. Every one of those rows was
+      0.000 m horizontal before #435, at every noise level and aiding rate
+      tried, because `MockPhysics` applied no torque: the vehicle could not
+      tilt, so it could not be pushed off station or corrected back. Two
+      changes were needed, and the first alone was not enough — with torque but
+      no disturbance the excursion is still exactly 0.000 m, because the run
+      starts level at the setpoint on a symmetric plant.
+
+      AND IT CATCHES WHAT IT HID. The same torque-capable, disturbed plant run
+      against the pre-#452 estimator diverges: 1746 m horizontal at 120 s and
+      124 km at 1 h, with the altitude estimate at 5e22 m — the fault the gz
+      plant shows as a 40 s ceiling (#403/#434).
+
+      THE GUARDRAIL MEASURES THE SAME THING. `soak.yml`'s analytic tier now
+      runs with `IMU_NOISE: '0.01'`. Without it the nightly job would keep
+      reporting a 12 h PASS at 0.000 m horizontal while this requirement claims
+      a measured hold — the gate passing vacuously. Caught in review of #456.
+
+      NOT CLAIMED: that the analytic tier says anything about the real plant.
+      It models no aerodynamics, no latency and no aiding pathology beyond the
+      divisor; gz is the tier that can satisfy a flight claim, and its ladder
+      is FV-FALCON-HOLD-001.
+    tags: [verification, falcon, endurance, soak, sensor-fidelity, v1.140]
+    fields:
+      method: simulation
+      steps:
+        # The 12 h hold, at the sigma the requirement's table is measured at.
+        - run: "IMU_NOISE=0.01 ./target/release/falcon-sitl-gz --backend=mock --scenario=flightcore --duration=43200"
+        # The plant applies the verified mixer's torque, and the knob exists.
+        - run: "grep -q 'relay_mix_quad::motors_to_torque_signs(achieved)' examples/falcon-sitl-gz/src/physics.rs"
+        - run: "grep -q 'IMU_NOISE' examples/falcon-sitl-gz/src/main.rs"
+        # The nightly job runs the tier with that noise, not at 0.0.
+        - run: "grep -q \"IMU_NOISE: '0.01'\" .github/workflows/soak.yml"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-ENDURANCE-P01
