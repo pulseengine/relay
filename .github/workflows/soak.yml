@@ -60,12 +60,18 @@ jobs:
           FAIL=0
           for D in 3600 14400 43200; do
             H=$((D / 3600))
+            # `set -euo pipefail` above does NOT stop at the assignment only
+            # by luck: the bench exits 1 on a FAIL verdict, so under -e the
+            # step DIED here and the FAIL=1/continue arm below was unreachable
+            # — the tier reported a red step with no measurement instead of
+            # walking the remaining rungs. Same trap the gz ladder had.
+            RC=0
             OUT=$(./target/release/falcon-sitl-gz \
-                    --backend=mock --scenario=flightcore --duration=$D 2>&1)
+                    --backend=mock --scenario=flightcore --duration=$D 2>&1) || RC=$?
             echo "$OUT" | grep -E 'verdict|^PASS|^FAIL' || true
 
             # The scenario's own verdict is the oracle; do not re-derive it.
-            if ! grep -q '^PASS' <<<"$OUT"; then
+            if [ "$RC" != 0 ] || ! grep -q '^PASS' <<<"$OUT"; then
               echo "::error::analytic soak FAILED at ${H} h — the control math degrades over long runs"
               FAIL=1
               continue
@@ -119,9 +125,16 @@ jobs:
 
       - name: Climb the ladder until the hold breaks
         shell: bash
+        # The dispatch input is BOUND THROUGH env, never interpolated into the
+        # script: `${{ }}` is expanded by Actions before bash sees the text, so
+        # an actor with dispatch rights could end the assignment and run their
+        # own commands with the job's ambient environment. Same rule the fleet
+        # monitor states and release.yml follows.
+        env:
+          GZ_MAX_S: ${{ github.event.inputs.gz_max_s }}
         run: |
           set -uo pipefail
-          MAX="${{ github.event.inputs.gz_max_s || '120' }}"
+          MAX="${GZ_MAX_S:-120}"
           BEST=0
           # Each rung gets a FRESH server: /world/falcon/control does not answer
           # a reset request, so a reused world starts wherever the last run left

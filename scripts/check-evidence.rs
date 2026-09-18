@@ -112,9 +112,25 @@ fn check_step(cmd: &str, tree: &Tree) -> Vec<String> {
     if cmd.contains("/path/to/") {
         out.push("placeholder path `/path/to/…`".into());
     }
+    // Variables the step ASSIGNS itself (`OUT=/tmp/x … $OUT`) are defined for
+    // the rest of that command, so they are not placeholders.
+    let assigned: Vec<String> = Regex::new(r"(?:^|[;&|(]|\s)([A-Z][A-Z0-9_]*)=")
+        .unwrap()
+        .captures_iter(&expanded)
+        .map(|c| c[1].to_string())
+        .collect();
     for c in Regex::new(r"\$\{?([A-Z][A-Z0-9_]*)").unwrap().captures_iter(&expanded) {
         let v = &c[1];
-        if !KNOWN_ENV.contains(&v) && !v.starts_with("GITHUB_") && std::env::var(v).is_err() {
+        // DELIBERATELY NOT `std::env::var(v)`. Reading the tool's OWN
+        // environment made the verdict depend on the machine: a placeholder
+        // like `$WITNESS` was refused on a laptop and silently accepted on any
+        // runner whose profile happened to export that name — the census would
+        // disagree with itself across environments. The oracle is the artifact
+        // text plus the variables the gate supplies, nothing ambient.
+        if !KNOWN_ENV.contains(&v)
+            && !v.starts_with("GITHUB_")
+            && !assigned.iter().any(|a| a == v)
+        {
             out.push(format!("unset variable `${v}`"));
         }
     }

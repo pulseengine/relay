@@ -152,7 +152,15 @@ fn component_roots() -> Result<BTreeSet<String>> {
             let text = std::fs::read_to_string(piece).with_context(|| format!("reading {piece}"))?;
             for (i, _) in text.match_indices("relay_") {
                 let rest: String = text[i..].chars().take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_').collect();
-                if rest.len() > "relay_".len() && (i == 0 || !text.as_bytes()[i - 1].is_ascii_alphanumeric()) {
+                // `_` counts as INSIDE an identifier, exactly as
+                // audit-component-deps.rs decides it: without this,
+                // `my_relay_foo` synthesises a phantom `relay-foo` root, and
+                // the two scanners disagree about the same tree.
+                let prev_ok = i == 0 || {
+                    let b = text.as_bytes()[i - 1];
+                    !(b.is_ascii_alphanumeric() || b == b'_')
+                };
+                if rest.len() > "relay_".len() && prev_ok {
                     roots.insert(rest.replace('_', "-"));
                 }
             }
