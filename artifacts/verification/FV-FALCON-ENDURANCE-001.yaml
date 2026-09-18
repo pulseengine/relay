@@ -52,7 +52,7 @@ artifacts:
         # 7 minutes of wall clock does not belong in a per-PR gate.
         - run: "IMU_NOISE=0.01 cargo run --release -q -p falcon-sitl-gz -- --backend=mock --scenario=flightcore --duration=3600"
         # The nightly tier runs the 12 h rung, and with the noise (#435).
-        - run: "grep -q 'duration=\$D' .github/workflows/soak.yml"
+        - run: "grep -q 'backend=mock --scenario=flightcore' .github/workflows/soak.yml"
         - run: "grep -q '43200' .github/workflows/soak.yml"
         # The plant applies the verified mixer's torque, and the knob exists.
         - run: "grep -q 'relay_mix_quad::motors_to_torque_signs(achieved)' examples/falcon-sitl-gz/src/physics.rs"
