@@ -28,6 +28,18 @@ artifacts:
       criterion each: FV-FALCON-OCI-001, FV-FALCON-COV-004, FV-FALCON-COV-005 —
       and SWREQ-FALCON-OCI-P01 with them, whose only verifier was OCI-001.
       After: exit 0.
+      A HOLE THIS ARTIFACT HAD, closed 2026-09-18. "Resolves to something that
+      exists" was checked against the TREE, not against the machine the gate
+      runs on. A step could exist, resolve and run on a laptop and still be
+      unrunnable where it is checked. It happened here: FV-RELAY-REVIEW-139's
+      first draft cited `gh pr view` as its evidence and the gate failed it
+      with rc=127 — gh is not installed on the self-hosted fleet (#153/#436).
+      The gate caught it, the checker did not. `check-evidence.rs` now refuses
+      a step that invokes `gh`, with a test for it and for the substring case
+      (`flight_gh_guard` must not trip). Three existing artifacts cite gh
+      (FV-FALCON-RELEASE-001, FV-RELAY-SUPPLY-002) and are reported; none is
+      `verified`, so none was resting on it.
+
     tags: [verification, relay, traceability, evidence, v1.139]
     fields:
       method: automated-test
