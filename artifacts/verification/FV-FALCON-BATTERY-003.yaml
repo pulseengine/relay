@@ -1,0 +1,40 @@
+artifacts:
+  - id: FV-FALCON-BATTERY-003
+    type: sw-verification
+    title: "BATTERY-P03 — the lost-sense failsafe fires, and the test fails without it (v1.140)"
+    status: implemented
+    release: falcon-v1.140.0
+    description: >
+      Verifies SWREQ-FALCON-BATTERY-P03 in falcon-core's supervisor loop.
+
+      THE TEST. `losing_the_battery_sense_in_flight_actuates_failsafe`: arm,
+      take off, confirm `Loiter` with a healthy pack, then make the harness
+      stop reporting voltage (`SimBackend::battery_lost`, added for this — a
+      sense that FAILS mid-flight is a different case from one absent at boot,
+      and the harness could not express it before). Within 4 s the mode must be
+      `Rtl`, `Land` or `Disarmed`.
+
+      IT FAILED BEFORE THE FIX, checked first: the mode was still `Loiter`
+      after 4 s of silence, because `batt_state`'s low/critical latches only
+      advance when the estimator is updated and `batt_present` is read only by
+      the pre-arm gate.
+
+      THE CHANGE. The supervisor accumulates `batt_missing_s` and the failsafe
+      term becomes `low || critical || silence > 1 s`. The existing
+      sustained-excursion debounce on low/critical is untouched, so a
+      throttle-punch sag still cannot false-trigger, and a single dropped
+      sample cannot either.
+
+      NOT CLAIMED: anything about a pack whose readings are WRONG rather than
+      absent. A stuck-plausible voltage is a different defect class (a
+      plausibility/sanity check on the reading itself), not covered here.
+    tags: [verification, falcon, battery, failsafe, v1.140]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-core --lib losing_the_battery_sense_in_flight_actuates_failsafe"
+        - run: "cargo test -p falcon-core --lib low_battery_actuates_failsafe"
+        - run: "grep -q 'batt_missing_s' crates/falcon-core/plain/src/lib.rs"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-BATTERY-P03

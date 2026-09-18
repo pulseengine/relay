@@ -1258,6 +1258,12 @@ pub struct FlightSupervisor {
     /// Did this backend supply a battery voltage on the last tick? `false`
     /// means ABSENT, and the BatteryOk pre-arm row fails accordingly (#413).
     batt_present: bool,
+    /// Seconds since the last battery reading ARRIVED. A pack that stops
+    /// reporting in flight is not a healthy pack: the estimator stops being
+    /// updated, so `batt_state`'s low/critical latches freeze at their last
+    /// value and the failsafe below could never fire (#413's in-flight half,
+    /// found in the v1.139 candidate review).
+    batt_missing_s: f32,
     /// Stored mission legs (NED), flown in order while in Mission mode.
     waypoints: [Vec3; MAX_WAYPOINTS],
     wp_count: usize,
@@ -1309,6 +1315,7 @@ impl FlightSupervisor {
             batt_state: relay_batt::BattState::default(),
             // Starts false: nothing has been read yet, so nothing is known.
             batt_present: false,
+            batt_missing_s: 0.0,
             waypoints: [home; MAX_WAYPOINTS],
             wp_count: 0,
             wp_index: 0,
@@ -1649,9 +1656,13 @@ impl FlightSupervisor {
         match b.read_battery_v() {
             Some(v) => {
                 self.batt_present = true;
+                self.batt_missing_s = 0.0;
                 self.batt_state = self.batt_est.update(b.dt(), v, b.read_battery_i());
             }
-            None => self.batt_present = false,
+            None => {
+                self.batt_present = false;
+                self.batt_missing_s += b.dt();
+            }
         }
         // PREARM-P03 hardware row: ESC/eRPM telemetry alive (the notch's and
         // FDI's source). DECLARE-ON-FIRST-SIGHT: a vehicle that has never
@@ -1671,7 +1682,16 @@ impl FlightSupervisor {
                 }
             }
         }
-        let batt_fail = self.batt_state.low || self.batt_state.critical;
+        // A pack that stopped REPORTING counts as a battery failsafe once the
+        // silence is longer than a dropped sample. Without this the latches
+        // above simply freeze at their last-known-healthy value and the
+        // vehicle flies until the pack is flat: `batt_present` alone is only
+        // read by the pre-arm gate, which is long past by then. One second is
+        // far longer than any sane sense interval and far shorter than the
+        // reserve an RTL needs.
+        const BATT_SILENCE_S: f32 = 1.0;
+        let batt_lost = self.batt_missing_s > BATT_SILENCE_S;
+        let batt_fail = self.batt_state.low || self.batt_state.critical || batt_lost;
         let breach = dist_home > self.fence_radius || batt_fail;
         if breach && self.fsm.is_airborne() && self.fsm.mode() != Mode::Land {
             self.fsm.on(Event::Failsafe, g);
@@ -1986,6 +2006,11 @@ where
 /// IMU/mag are synthesised from it. Swapping this for a real-hardware
 /// `FlightBackend` is the only change needed to fly the same core on a board.
 pub struct SimBackend {
+    /// The voltage sense has FAILED (harness knob): `read_battery_v` returns
+    /// `None` from here on, as an ADC or harness fault does mid-flight. Absent
+    /// from boot is the pre-arm case; LOSING it while airborne is the failsafe
+    /// case, and they are not the same test.
+    pub battery_lost: bool,
     /// SPECIFIC FORCE in NED (m/s²), what an accelerometer actually senses:
     /// the non-gravitational acceleration the plant produced last step
     /// (thrust + wind + drag, and the ground reaction while in contact).
@@ -2124,6 +2149,7 @@ impl SimBackend {
     /// Start at attitude `r0`, at rest, at altitude 0. `dt` = control period.
     pub fn new(r0: [[f32; 3]; 3], dt: f32) -> Self {
         SimBackend {
+            battery_lost: false,
             // At rest on the ground the accelerometer reads the gravity
             // reaction: −g on NED z (the vehicle is held up, not falling).
             specific_force_ned: [0.0, 0.0, -GRAVITY],
@@ -2482,6 +2508,9 @@ impl FlightBackend for SimBackend {
         self.dt
     }
     fn read_battery_v(&mut self) -> Option<f32> {
+        if self.battery_lost {
+            return None;
+        }
         Some(self.battery_v)
     }
     fn read_range(&mut self) -> Option<f32> {
@@ -3491,6 +3520,38 @@ mod tests {
         assert!(
             matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
             "low battery must trigger a failsafe recovery, mode {:?}",
+            sup.mode()
+        );
+    }
+
+    /// **Losing the voltage sense in flight must raise the failsafe** — the
+    /// in-flight half of "absence is not health" (#413 closed the pre-arm
+    /// half). A pack that stops reporting is not a healthy pack: the estimator
+    /// stops being updated, so its low/critical latches freeze at whatever
+    /// they last saw, and without this the vehicle flies on until the pack is
+    /// flat with no failsafe ever raised. Found in the v1.139 candidate review.
+    #[test]
+    fn losing_the_battery_sense_in_flight_actuates_failsafe() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut backend);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "airborne with a healthy pack");
+
+        // The ADC/harness fails: no reading at all from here on.
+        backend.battery_lost = true;
+        for _ in 0..2000 {
+            sup.step(&mut backend); // 4 s
+        }
+        assert!(
+            matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
+            "a lost voltage sense must trigger a failsafe recovery, mode {:?}",
             sup.mode()
         );
     }
