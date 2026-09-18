@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-REVIEW-139
     type: sw-verification
     title: "REVIEW — independent multi-agent review of falcon-v1.139.0 before tag (v1.139)"
-    status: proposed
+    status: verified
     release: falcon-v1.139.0
     description: >
       The review checkpoint for falcon-v1.139.0, the INTEGRITY release — honest gates and honest claims.
@@ -16,9 +16,87 @@ artifacts:
       While this artifact is `proposed`, scripts/release-readiness.rs
       reports falcon-v1.139.0 as not ready. That is the point: the review cannot
       be forgotten, only done or explicitly de-scoped by the maintainer.
+
+      THE REVIEW RAN, 2026-09-18, on the candidate falcon-v1.138.0..9f1df80.
+      It could not be reviewed as ONE diff — 186 files / 21 420 lines is
+      beyond the tool, and roughly 9.5 k of those lines are Bazel lockfile
+      churn — so it was split against a base branch pinned at the previous
+      tag: PR #458 (gate tooling + CI workflows, 19 files) and PR #459 (the
+      28 source files with 50+ changed lines). The findings are posted on
+      those PRs; both are closed, and neither was ever merged.
+
+      NINE FINDINGS, every one dispositioned.
+
+      FIXED IN #460 (merged as f9ea446, before any tag):
+        1. `soak.yml` interpolated a workflow_dispatch input into a `run:`
+           block. Actions expands `${{ }}` before bash sees it, so an actor
+           with dispatch rights could end the assignment and run commands with
+           the job's environment. Inputs are bound through `env:` now, the
+           convention fleet-status.yml states and release.yml follows.
+        2. The ANALYTIC soak tier lost its rungs to `shell: bash`'s `-e` — the
+           bench exits 1 on a FAIL verdict, so the step died before the
+           `FAIL=1; continue` arm could walk the remaining durations. A job
+           whose purpose is to publish a number produced a red step and no
+           number. (The gz ladder had the same trap; it was fixed the day
+           before on the v1.140 branch.)
+        3. `check-evidence.rs` decided whether a `$VAR` in an artifact step
+           was an unfilled placeholder by reading the TOOL'S OWN environment,
+           so the census disagreed with itself across machines: `$WITNESS`
+           refused on a laptop, accepted on a runner exporting that name. It
+           now resolves only what the step assigns itself plus gate-supplied
+           names; measured identical with and without `WITNESS` exported.
+        4. The two `relay_` scanners disagreed on an identifier boundary, so
+           `my_relay_foo` synthesised a phantom `relay-foo` root in one.
+        5. `setup-gh` cached under `$RUNNER_TEMP`, which Actions empties at
+           both ends of every job, so `gh` was re-downloaded, checksummed and
+           untarred twice per fleet-status tick.
+        6. `release.yml`'s `--generate-notes` fallback could not fire. It is
+           now a loud failure: deleting the dead branch outright would have
+           left a silent no-op if the notes body were ever empty.
+
+      FILED INTO A NAMED RELEASE (maintainer decision, 2026-09-18: v1.140):
+        7. Losing the battery sense IN FLIGHT raised no failsafe — `None`
+           froze `batt_state`'s latches at their last healthy value and
+           `batt_present` is read only by the pre-arm gate, so a vehicle that
+           armed healthy and lost its ADC flew until the pack was flat. This
+           is #413's in-flight half. Reproduced (still `Loiter` after 4 s of
+           silence), fixed on the v1.140 branch, and tracked as
+           SWREQ-FALCON-BATTERY-P03 + FV-FALCON-BATTERY-003.
+
+      DISMISSED, with the measurement (all three are artefacts of the slicing,
+      recorded so the next split does not repeat it):
+        8. "`read_battery_v` → `Option<f32>` breaks two impls and a call site."
+           On main both impls already return `Option<f32>`; their diffs are
+           under 50 lines, so the slice excluded them and the reviewer saw a
+           signature change with no updated callers.
+        9. "Three gate scripts are never invoked", and "check-component-claims
+           exits 1 for six of eight components; capability-reachability exits 2
+           on a missing doc." The scripts are cited in rivet artifact steps
+           (FV-FALCON-CLAIMS-001/003/004, FV-RELAY-EVIDENCE-001,
+           FV-FALCON-WASMEQ-002) — the slice excluded `artifacts/`. Measured on
+           main at 9f1df80: all three exit 0. The slice lacked the
+           `wasm/cm/*/Cargo.toml` rewrites and `docs/CAPABILITY-REACHABILITY.md`
+           that make them pass.
+
+      WHAT THIS DOES NOT CLAIM. The reviewed diff excluded rivet artifact
+      YAML, the `Cargo.toml` component descriptions, `wasm/`, `tests/`,
+      `examples/`, docs and lockfiles. The claims TEXT a partner reads was
+      therefore not independently reviewed; it is checked mechanically by
+      check-component-claims.rs and capability-reachability.rs, which is a
+      weaker guarantee than a reader.
     tags: [verification, relay, review, release, v1.139]
     fields:
       method: review
+      steps:
+        # The review record lives IN THE REPO. The first draft of these steps
+        # called `gh pr view` and failed the gate with rc=127: gh is not on the
+        # self-hosted runners (#153/#436), and an audit trail that depends on
+        # GitHub comments is one edit away from gone either way.
+        - run: "test -f docs/reviews/falcon-v1.139.0-review.md"
+        - run: "test \"$(grep -c '^[0-9]\\+\\. \\*\\*Disposition' docs/reviews/falcon-v1.139.0-review.md)\" -eq 9"
+        # The fixes are on main, before the tag.
+        - run: "git log --oneline falcon-v1.138.0..HEAD -- .github/workflows/soak.yml scripts/check-evidence.rs"
+        - run: "grep -q 'GZ_MAX_S' .github/workflows/soak.yml"
     links:
       - type: verifies
         target: SWREQ-RELAY-REVIEW-P01

@@ -70,12 +70,18 @@ jobs:
           FAIL=0
           for D in 3600 14400 43200; do
             H=$((D / 3600))
+            # `set -euo pipefail` above does NOT stop at the assignment only
+            # by luck: the bench exits 1 on a FAIL verdict, so under -e the
+            # step DIED here and the FAIL=1/continue arm below was unreachable
+            # — the tier reported a red step with no measurement instead of
+            # walking the remaining rungs. Same trap the gz ladder had.
+            RC=0
             OUT=$(./target/release/falcon-sitl-gz \
-                    --backend=mock --scenario=flightcore --duration=$D 2>&1)
+                    --backend=mock --scenario=flightcore --duration=$D 2>&1) || RC=$?
             echo "$OUT" | grep -E 'verdict|^PASS|^FAIL' || true
 
             # The scenario's own verdict is the oracle; do not re-derive it.
-            if ! grep -q '^PASS' <<<"$OUT"; then
+            if [ "$RC" != 0 ] || ! grep -q '^PASS' <<<"$OUT"; then
               echo "::error::analytic soak FAILED at ${H} h — the control math degrades over long runs"
               FAIL=1
               continue
@@ -129,9 +135,16 @@ jobs:
 
       - name: Climb the ladder until the hold breaks
         shell: bash
+        # The dispatch input is BOUND THROUGH env, never interpolated into the
+        # script: `${{ }}` is expanded by Actions before bash sees the text, so
+        # an actor with dispatch rights could end the assignment and run their
+        # own commands with the job's ambient environment. Same rule the fleet
+        # monitor states and release.yml follows.
+        env:
+          GZ_MAX_S: ${{ github.event.inputs.gz_max_s }}
         run: |
           set -uo pipefail
-          MAX="${{ github.event.inputs.gz_max_s || '120' }}"
+          MAX="${GZ_MAX_S:-120}"
           BEST=0
           # Each rung gets a FRESH server: /world/falcon/control does not answer
           # a reset request, so a reused world starts wherever the last run left
@@ -148,12 +161,14 @@ jobs:
               sleep 2
             done
 
-            # `shell: bash` runs with -e, so a FAILING rung used to kill this
-            # step before it could print the rung or the ladder's result: both
-            # soak runs on main (2026-09-17 08:41 and 21:08) died right after
-            # the 40 s rung with exit 1 and never published a longest-holding
-            # number — the measurement was lost exactly where it matters. Same
-            # trap as the wedge detector's (#432). Capture the code instead.
+            # Same trap the analytic tier had (fixed in #460): `shell: bash`
+            # runs with -e and the bench exits 1 on a FAIL verdict, so this
+            # assignment ended the STEP at the first breaking rung — before it
+            # could print the rung, the reason, or the longest-holding number
+            # this job exists to publish. Every soak run on main died that way
+            # and the release notes recorded the track as DARK, which reads as
+            # "the hold is broken" when it actually means "the measurement was
+            # lost".
             RC=0
             OUT=$(timeout $((D + 300)) ./target/release/falcon-sitl-gz \
                     --backend=gazebo --scenario=flightcore --duration=$D 2>&1) || RC=$?
@@ -162,8 +177,7 @@ jobs:
             if [ "$RC" = 0 ] && grep -q '^PASS' <<<"$OUT"; then
               BEST=$D
             else
-              # rc 124 is `timeout`; anything else non-zero with no PASS is the
-              # bench's own FAIL. Say which, so a crash is never read as a hold
+              # Say WHICH failure it was, so a crash is never read as a hold
               # that merely broke.
               if [ "$RC" = 124 ]; then
                 echo "  hold breaks at ${D}s (the bench TIMED OUT)"
