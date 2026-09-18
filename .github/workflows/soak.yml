@@ -151,14 +151,31 @@ jobs:
               sleep 2
             done
 
+            # Same trap the analytic tier had (fixed in #460): `shell: bash`
+            # runs with -e and the bench exits 1 on a FAIL verdict, so this
+            # assignment ended the STEP at the first breaking rung — before it
+            # could print the rung, the reason, or the longest-holding number
+            # this job exists to publish. Every soak run on main died that way
+            # and the release notes recorded the track as DARK, which reads as
+            # "the hold is broken" when it actually means "the measurement was
+            # lost".
+            RC=0
             OUT=$(timeout $((D + 300)) ./target/release/falcon-sitl-gz \
-                    --backend=gazebo --scenario=flightcore --duration=$D 2>&1)
+                    --backend=gazebo --scenario=flightcore --duration=$D 2>&1) || RC=$?
             echo "── ${D}s ──"; grep -E 'verdict|^PASS|^FAIL' <<<"$OUT" || true
 
-            if grep -q '^PASS' <<<"$OUT"; then
+            if [ "$RC" = 0 ] && grep -q '^PASS' <<<"$OUT"; then
               BEST=$D
             else
-              echo "  hold breaks at ${D}s"
+              # Say WHICH failure it was, so a crash is never read as a hold
+              # that merely broke.
+              if [ "$RC" = 124 ]; then
+                echo "  hold breaks at ${D}s (the bench TIMED OUT)"
+              elif grep -q '^FAIL' <<<"$OUT"; then
+                echo "  hold breaks at ${D}s (verdict FAIL)"
+              else
+                echo "  hold breaks at ${D}s (bench exited $RC without a verdict)"
+              fi
               break
             fi
           done
