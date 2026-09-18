@@ -1,0 +1,41 @@
+artifacts:
+  - id: SWREQ-FALCON-BATTERY-P03
+    type: sw-req
+    title: "BATTERY-P03 — a pack that stops REPORTING in flight shall raise the battery failsafe, not fly on"
+    status: implemented
+    release: falcon-v1.140.0
+    description: >
+      While airborne, if no battery reading arrives for longer than one
+      second, the vehicle shall raise the battery failsafe (the same path a
+      low or critical pack takes), rather than continue on the last reading it
+      happened to see.
+
+      WHY IT EXISTS. #413 established that absence is not health and narrowed
+      the reader to `Option<f32>`, so a backend with no battery sense returns
+      `None` instead of a fabricated voltage. That closed the PRE-ARM half: the
+      pre-arm gate refuses to arm without a pack. The IN-FLIGHT half stayed
+      open, and the v1.139 candidate review (#458/#459) found it: on `None` the
+      supervisor recorded `batt_present = false` and did nothing else.
+      `batt_present` is read only by `update_preflight`, which is long past by
+      then, and the failsafe evaluates `batt_state.low || batt_state.critical`
+      — latches that only advance when the estimator is UPDATED. So a vehicle
+      that armed with a healthy pack and then lost its ADC, harness or driver
+      mid-flight kept a frozen last-known-healthy snapshot and no failsafe
+      could ever fire while the pack drained to depletion.
+
+      REPRODUCED before it was fixed: armed, took off, reached Loiter, then the
+      voltage sense stopped reporting. After 4 s the mode was still `Loiter`
+      (`losing_the_battery_sense_in_flight_actuates_failsafe`).
+
+      THE THRESHOLD. One second of silence — far longer than any sane sense
+      interval (a dropped sample must not trip it) and far shorter than the
+      reserve an RTL needs. The pre-existing low/critical debounce is
+      unchanged; this is an additional term, not a replacement.
+
+      FALSIFICATION: wrong if an airborne vehicle whose `read_battery_v`
+      returns `None` for more than a second stays in a flying mode, or if a
+      single dropped reading raises the failsafe.
+    tags: [requirement, falcon, battery, failsafe, fail-safe, v1.140]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

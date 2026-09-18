@@ -23,6 +23,11 @@ artifacts:
                The 60-min cap makes the stall visible. Making the harness
                robust moved to SWREQ-RELAY-MIXPROOF-P01 (v1.140) by
                maintainer decision on 2026-09-17.
+        #449 — the starvation check keyed on RUN status and was wrong three
+               times out of three (#447, #455, #462). Moved to v1.140 by
+               maintainer decision on 2026-09-18 and fixed there
+               (FV-RELAY-FLEET-002): it measures queued JOBS, holds hosted
+               runners to their own threshold, and names the labels.
         #436 — the fleet monitor's */15 schedule actually ran every 2.4–5.5 h,
                so unattended detection latency is hours.
 

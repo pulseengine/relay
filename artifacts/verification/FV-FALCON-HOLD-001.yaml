@@ -1,0 +1,128 @@
+artifacts:
+  - id: FV-FALCON-HOLD-001
+    type: sw-verification
+    title: "HOLD-P01 — the 5 Hz hold converges, on SimBackend and on the gz plant: 40 s → 300 s (v1.140)"
+    status: implemented
+    release: falcon-v1.140.0
+    description: >
+      Verifies SWREQ-FALCON-HOLD-P01 on `SimBackend` AND on the reference
+      Gazebo plant. It stays `implemented` only because the two-commit rule
+      puts promotion in the code-free PR that follows the change.
+
+      THE GZ MEASUREMENT, the one the requirement is stated on (2026-09-17,
+      the `Soak` workflow's gz ladder, `--scenario=flightcore` at the default
+      GNSS_DIV=50 = 5 Hz aiding at 250 Hz, each rung on a fresh server):
+
+      | rung | main (run 35276573490) | with this change (run 35274954189) |
+      |---|---|---|
+      | 25 s | PASS, alt err 0.01 m | PASS, alt 0.12 m, horiz peak 0.02 m |
+      | 40 s | PASS, alt err 0.24 m (degrading) | PASS, alt 0.02 m, horiz peak 0.03 m |
+      | 60 s | **FAIL, alt err 1.46 m, rms 1.87 m, est_z −0.53 m** | PASS, alt 0.00 m, horiz peak 0.03 m |
+      | 90 s | — | PASS, horiz peak 0.04 m |
+      | 120 s | — | PASS, horiz peak 0.04 m |
+      | 300 s | — | PASS, alt 0.00 m, horiz peak 0.04 m |
+
+      Longest holding duration: **40 s on main, 300 s with this change** — and
+      300 s is the ladder's ceiling as dispatched, not an observed limit. The
+      vehicle on main does not drift away; it SAGS (est_z −0.53 m at the 60 s
+      rung: it is down at half a metre while commanded to 2 m), which is the
+      altitude half of #403 following the horizontal loss.
+
+      THE HARNESS NOW REPORTS SPECIFIC FORCE (#452). `SimBackend` carries the
+      non-gravitational acceleration its own physics produced — thrust, wind,
+      drag, and the ground reaction while in contact — and `read_imu` rotates
+      that into the body frame. It is exact for this Euler plant, taken after
+      the ground clamp, so a vehicle at rest on the surface senses the gravity
+      reaction rather than a free fall, and no finite differencing is involved.
+
+      THE ESTIMATOR USES THE ACCELEROMETER ONLY WHERE IT IS A GRAVITY
+      REFERENCE. `EstimatorPartition` skips `update_gravity` while the vehicle
+      is flying AND a position fix has been accepted within the last second.
+      `FlightCore::step` supplies "flying" from the cascade's own previous
+      collective (mean motor command above 70% of hover), so a standalone
+      estimator keeps the old behaviour and pre-arm on the ground is unchanged.
+
+      THE MEASUREMENT THAT MATTERS, and it can fail:
+        - `hold_converges_with_5hz_position_aiding` — #434's case, 1 m off the
+          setpoint with fixes at 5 Hz, at both 500 Hz and 100 Hz loop rates:
+          h@60 s < 0.5 m, peak after 5 s < 2.0 m, altitude within 0.3 m. The
+          same case before this change: 75 m at 20 s, 3.4 km at 60 s.
+        - MUTATION, run before this artifact was written: restoring the
+          unconditional gravity update makes that test fail at **5134 m**.
+        - `gnss_outage_restores_the_gravity_update_and_stays_bounded` — 20 s of
+          aided hold then 15 s with no fixes at all: peak horizontal excursion
+          under 5 m and altitude within 1 m, which is the case the policy's
+          "stale aiding" branch exists for.
+
+      THREE HARNESSES WERE IDEALIZED IN THE SAME DIRECTION and were fixed with
+      it, because a test that conveys attitude only through the accelerometer
+      cannot survive an estimator that stops reading attitude from it — and no
+      vehicle conveys attitude that way:
+        - `TiltBackend` (wind→RTL and runaway campaigns) reported a leaning
+          gravity vector with a ZERO gyro: tilted without ever rotating. It now
+          rotates at 1 rad/s to the commanded tilt and reports that rate, with
+          the accelerometer reading the thrust axis.
+        - `TumbleBackend` (`attitude_runaway_terminates_in_flight`) reported
+          gravity along body-x with a zero gyro; it now rolls at 2 rad/s.
+        - Both campaigns and the point test pass on the physical versions, so
+          the failsafes still fire on the evidence that a real tumble produces.
+
+      A DEPENDENCY THE ANTI-WINDUP GATE HAD ON THE OLD ESTIMATOR. #404's
+      altitude anti-windup ("integrate only when not converging") read a
+      vehicle stopped 2.15 m short under thrust lapse as still converging: its
+      residual climb, 0.0005 m/s, shares its sign with the error. It charged
+      before only because the old vertical-velocity estimate lagged and
+      dithered in sign. The gate now also requires |v_z| > 0.05 m/s, below the
+      0.1-0.29 m/s climb #404 measured and above a stalled hold's creep;
+      `holds_altitude_under_thrust_lapse` passes on the merit of the integral
+      rather than on estimator noise.
+
+      RE-MEASURED, NOT ASSUMED: `optimistic_variance_diverges_under_noisy_gps`
+      asserted that over-trusting the fix variance DIVERGES (> 10 m, ~2400 m at
+      v1.19). It no longer does: 0.40 m peak against the matched 0.18 m. The
+      test is renamed to what it now measures and FV-FALCON-GNSS-001 is dropped
+      to `implemented` for re-verification, since its claim 2 was that
+      divergence.
+
+      GOLDEN FIXTURES REGENERATED DELIBERATELY (LOG-P03): the estimator's
+      behaviour changed, so `golden-v1118.bblog` and `f100-passthrough-v1.csv`
+      were regenerated with their own ignored regen tests and the diffs
+      committed.
+
+      THE GZ VERDICT CAN NOW SEE THE HORIZONTAL HALF. `final_dist` was the
+      ALTITUDE error alone, so every gz hold verdict to date reported
+      horizontal drift as zero by construction (SWREQ-FALCON-HOLD-P01 names
+      closing this as part of the requirement). The verdict now carries
+      `final_horiz`, `peak_horiz` and `rms_horiz_steady`, and PASS requires
+      HOLD-P01's 1.0 m horizontal alongside the 0.5 m vertical. Every branch
+      rung above is measured against that stricter verdict; main's rungs are
+      the altitude-only one, so main's 40 s "PASS" is the weaker claim.
+
+      AND THE LADDER NOW PUBLISHES ITS NUMBER. Under `shell: bash`'s -e, the
+      failing rung killed the step before printing the rung or the
+      longest-holding notice: both soak runs on main that day (08:41 and
+      21:08) ended at `exit 1` with no number. The rung's exit code is now
+      captured, and the break message says whether it was a timeout, a verdict
+      FAIL, or a bench that exited without a verdict.
+
+      NOT CLAIMED HERE: the integrator's rig; magnetometer disturbance or vibration, which is what tilt
+      observability leans on once the accelerometer is out of the loop; wind
+      and turbulence beyond the existing suite; and runs longer than 180 s.
+    tags: [verification, falcon, hold, estimator, sensor-fidelity, v1.140]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-core --lib hold_converges_with_5hz_position_aiding"
+        - run: "cargo test -p falcon-core --lib gnss_outage_restores_the_gravity_update_and_stays_bounded"
+        - run: "cargo test -p falcon-core --lib failsafe_campaign"
+        - run: "cargo test -p falcon-core --lib holds_altitude_under_thrust_lapse"
+        - run: "cargo test -p falcon-core"
+        # The harness reports specific force, and the estimator gates the update.
+        - run: "grep -q 'specific_force_ned' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q '!self.in_flight || self.ticks_since_aiding > self.gravity_hold_ticks' crates/falcon-core/plain/src/lib.rs"
+        # The gz verdict measures the horizontal half, and the ladder keeps its number.
+        - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 2.0' examples/falcon-sitl-gz/src/main.rs"
+        - run: "grep -qF -- '|| RC=$?' .github/workflows/soak.yml"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-HOLD-P01

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-HOLD-P01
     type: sw-req
     title: "HOLD-P01 — a stationary position hold shall stay bounded for at least 60 s, horizontally as well as vertically"
-    status: proposed
+    status: implemented
     release: falcon-v1.140.0
     description: >
       Commanded to hold a fixed NED position, the vehicle shall remain within
@@ -51,6 +51,45 @@ artifacts:
       more than 1.0 m horizontally or 0.5 m vertically from the setpoint.
 
       RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.140, the HOLD release. v1.139 is a short integrity and promotion round; this is flight work with its own oracle now. #403's likely mechanism reproduces deterministically in under a second on SimBackend (#434: the hold loop is unstable at <=10 Hz position aiding, zero noise), and the fix must make that reproduction converge.
+
+      MECHANISM FOUND (2026-09-17, #434/#452). Two faults, measured separately
+      on `SimBackend` and each with its own discriminating run:
+
+        1. THE HARNESS. `SimBackend::read_imu` returned the gravity reaction
+           whatever the motors did, so tilt could be read off the accelerometer
+           exactly and dead-reckoning between fixes was free. #434's own table
+           is dominated by this: give the cascade the true VERTICAL state and
+           the 5 Hz hold converges (0.007 m at 60 s); give it the true
+           HORIZONTAL state and it still diverges (846 m).
+
+        2. THE ESTIMATOR, on a real accelerometer. `EstimatorPartition::step`
+           fused the accelerometer as gravity every tick. A multirotor's
+           accelerometer senses SPECIFIC FORCE along the thrust axis and shows
+           almost none of the vehicle's tilt, so the tilt estimate was pulled
+           level exactly while the vehicle tilted to accelerate. With a
+           specific-force accelerometer the pre-fix core diverges at EVERY fix
+           rate, including a fix on every tick (120-250 m at 50 s).
+
+      Confirmed on an integrator's own Gazebo rig, which is where this started:
+      over 28-40 s its gyro integrates 2.24 deg of pitch oscillation and its
+      GNSS needs ~1.52 deg of tilt, while its accelerometer shows 0.3 deg; its
+      |accel| tracks the throttle (corr +0.73, 13.68 m/s2 during the climb).
+
+      THE FIX TAKEN. The gravity update runs only when the accelerometer really
+      is a gravity reference: on the ground, or when position aiding has been
+      stale for more than a second. The alternative — compensating the update
+      with the controller's commanded acceleration, as the gz example does —
+      was measured and REJECTED: it computes the correction from the attitude
+      estimate it corrects, and at 10x gyro-bias drift it diverges to 1-13 km
+      on three seeds, where the chosen policy stays under 2.5 m.
+
+      MEASURED ON THE GZ PLANT (2026-09-17, the Soak ladder at 5 Hz aiding):
+      main holds 40 s and FAILS the 60 s rung (altitude error 1.46 m, rms
+      1.87 m, est_z −0.53 m); with the fix every rung to 300 s passes with
+      altitude error 0.00 m and horizontal peak 0.04 m. 300 s was the ceiling
+      dispatched, not an observed limit. The requirement's own 60 s bar is
+      therefore met on the plant it is stated on, with 0.5 m vertical and
+      1.0 m horizontal now both CHECKED by the verdict.
 
     tags: [requirement, falcon, control, gazebo, hold, v1.140]
     links:

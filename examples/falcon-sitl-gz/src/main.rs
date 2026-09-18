@@ -1623,6 +1623,10 @@ fn run_flightcore(
     let mut steady_count = 0usize;
     let steady_start_t = (duration_s - 5.0).max(0.0);
     let mut last_true = [0.0_f32; 3];
+    // Horizontal hold, the half the verdict could not see (#403).
+    let mut peak_horiz = 0.0_f32;
+    let mut sum_sq_horiz_steady = 0.0_f32;
+    let mut horiz_steady_count = 0usize;
 
     let started_at = Instant::now();
     // The adapter owns the plant for the whole run (its 5 Hz GNSS-divisor tick
@@ -1635,7 +1639,17 @@ fn run_flightcore(
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(50);
-        let mut backend = SitlBackend::new(physics, dt, 0.0, gnss_div);
+        // IMU_NOISE: gyro/accel noise sigma fed to the plant's `measure` (#435).
+        // The analytic plant is otherwise PERFECTLY symmetric and starts level
+        // at the setpoint, so its horizontal loop is never excited and the hold
+        // it reports is vacuous — 0.000 m by construction, whatever the
+        // duration. gz bakes noise into its own sensors, so this is a no-op
+        // there. Default 0.0 keeps every existing scenario byte-identical.
+        let imu_noise: f32 = std::env::var("IMU_NOISE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        let mut backend = SitlBackend::new(physics, dt, imu_noise, gnss_div);
         for step in 0..n {
             let tick_start = Instant::now();
             let t = step as f32 * dt;
@@ -1708,6 +1722,19 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
 
             let alt_err = -target_alt_m - last_true[2]; // NED z error
             let dist = alt_err.abs();
+            // HORIZONTAL, measured (#403/HOLD-P01). The verdict below used to be
+            // the ALTITUDE error alone, so every gz hold verdict to date reported
+            // horizontal drift as zero by construction — the shape where a gate
+            // passes having checked less than it claims. The hold setpoint is the
+            // launch point, so the horizontal error is the distance from it.
+            let horiz = (last_true[0] * last_true[0] + last_true[1] * last_true[1]).sqrt();
+            if horiz > peak_horiz {
+                peak_horiz = horiz;
+            }
+            if t >= steady_start_t {
+                sum_sq_horiz_steady += horiz * horiz;
+                horiz_steady_count += 1;
+            }
             if dist > peak_dist_err {
                 peak_dist_err = dist;
             }
@@ -1733,6 +1760,12 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
 
     let wall = started_at.elapsed();
     let final_dist = (-target_alt_m - last_true[2]).abs();
+    let final_horiz = (last_true[0] * last_true[0] + last_true[1] * last_true[1]).sqrt();
+    let rms_horiz_steady = if horiz_steady_count > 0 {
+        (sum_sq_horiz_steady / horiz_steady_count as f32).sqrt()
+    } else {
+        f32::NAN
+    };
     let rms_steady = if steady_count > 0 {
         (sum_sq_steady / steady_count as f32).sqrt()
     } else {
@@ -1749,7 +1782,7 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
         "flightcore"
     };
     println!(
-        "  verdict: backend={} scenario={} steps={} target={:.1}m final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m est_z={:.2}m isolated={:?} wall={:.2}s",
+        "  verdict: backend={} scenario={} steps={} target={:.1}m final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m final_horiz={:.2}m peak_horiz={:.2}m rms_horiz_steady={:.2}m est_z={:.2}m isolated={:?} wall={:.2}s",
         name,
         scen,
         n,
@@ -1757,6 +1790,9 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
         final_dist,
         peak_dist_err,
         rms_steady,
+        final_horiz,
+        peak_horiz,
+        rms_horiz_steady,
         est.p[2],
         isolated,
         wall.as_secs_f32(),
@@ -1793,7 +1829,10 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
             isolated == Some(rotor) && finite
         }
         // Nominal hover: the tight altitude bar.
-        None => final_dist < 0.5 && rms_steady < 1.0,
+        // HOLD-P01: 0.5 m vertically and 1.0 m horizontally. The horizontal
+        // half is new (#403) — before it, this verdict was blind to the very
+        // divergence the issue reports.
+        None => final_dist < 0.5 && rms_steady < 1.0 && final_horiz < 1.0 && peak_horiz < 2.0,
     }
 }
 

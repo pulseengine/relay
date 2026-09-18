@@ -55,6 +55,16 @@ jobs:
 
       - name: Hold for 1 h, 4 h and 12 h
         shell: bash
+        # WITH NOISE, or this tier measures nothing (#435). The analytic plant
+        # is perfectly symmetric and starts level at the setpoint, so with
+        # IMU_NOISE unset (0.0) its horizontal loop is never excited and the
+        # hold is 0.000 m by construction at any duration — including the 12 h
+        # rung. sigma 0.01 rad/s is the value SWREQ-FALCON-ENDURANCE-P01's
+        # table is measured at; at it the 12 h hold peaks at 0.46 m and ends at
+        # 0.16 m, so the verdict's 1.0 m horizontal bar is met on merit rather
+        # than vacuously.
+        env:
+          IMU_NOISE: '0.01'
         run: |
           set -euo pipefail
           FAIL=0

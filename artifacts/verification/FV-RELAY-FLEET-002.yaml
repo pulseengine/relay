@@ -1,0 +1,56 @@
+artifacts:
+  - id: FV-RELAY-FLEET-002
+    type: sw-verification
+    title: "FLEET-P01 — starvation is measured from JOBS, and hosted contention is not reported as a dead fleet (v1.140)"
+    status: implemented
+    release: falcon-v1.140.0
+    description: >
+      Extends FV-RELAY-FLEET-001. The wedge half of the monitor was right the
+      one time it fired (#450). The starvation half was wrong three times out
+      of three (#447, #455, #462), because it measured RUN status: a matrix run
+      stays `queued` while its legs are served one after another, so #462's CI
+      run was reported "queued 54 min" when its first job had started four
+      seconds after creation.
+
+      THE RULE NOW. A run is starving only if a JOB has been queued past its
+      threshold AND nothing else in that run has started since. Hosted runners
+      get their own threshold (120 min against 30), because org-shared hosted
+      concurrency was measured at 60–120 min on 2026-09-16: a hosted job
+      waiting an hour is contention, not a dead fleet, and the two need
+      different operator actions — "wait" versus "go restart a box". The alarm
+      now names the runner labels and says which kind it is.
+
+      REPLAYED AGAINST ALL THREE ALARMS, with a stub `gh` feeding the shapes
+      they had, under the flags GitHub uses for `shell: bash`
+      (`--noprofile --norc -eo pipefail`):
+        - #462's CI run (a leg queued 54 min, another leg started 4 s in) —
+          NOT flagged.
+        - #462's Gazebo run (hosted, genuinely waiting 67 min) — NOT flagged;
+          it is under the hosted threshold and is contention.
+        - a self-hosted Kani leg queued 45 min with nothing in its run started —
+          FLAGGED, with its labels and the reason.
+      The block also runs clean against the live API (exit 0, `api_ok=true`).
+
+      A BUG THAT EXECUTION FOUND. The first draft emitted an empty field for a
+      job with no `started_at`. Tab is an IFS **whitespace** character, so
+      consecutive tabs collapse and every later field shifted by one: the
+      timestamp being parsed was a job NAME, `age` came out −1, and every case
+      was silently skipped — the check would have reported a healthy fleet
+      always. The absent marker is `-` now. Reading the block would not have
+      shown this; running it did.
+
+      NOT CLAIMED: detection latency. The schedule still runs every few hours
+      rather than on its cron (#436), so an unattended starvation is found late
+      whatever this rule says.
+    tags: [verification, relay, ci, fleet, starvation, v1.140]
+    fields:
+      method: automated-test
+      steps:
+        # Jobs, not run status; both thresholds; the absent marker.
+        - run: "grep -q 'actions/runs/${id}/jobs' .github/workflows/fleet-status.yml"
+        - run: "grep -q 'HOSTED_THRESHOLD_MIN' .github/workflows/fleet-status.yml"
+        - run: "grep -q 'started_at // \\\"-\\\"' .github/workflows/fleet-status.yml"
+        - run: "grep -q 'nothing in its run has started since' .github/workflows/fleet-status.yml"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-FLEET-P01
