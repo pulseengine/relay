@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-VGATE-005
     type: sw-verification
     title: "VGATE-P04 — every release's notes record, from observed CI, which verification tracks were dark on the released commit (v1.139)"
-    status: implemented
+    status: verified
     release: falcon-v1.139.0
     description: >
       Verification of SWREQ-RELAY-VGATE-P04 in its v1.139 scope: a release that
@@ -45,6 +45,38 @@ artifacts:
       other change, those 18 fail (#434 has the mechanism and the surviving fix).
       The fix is v1.140 work; this release states the gap rather than implying
       the hold evidence is plant-realistic.
+      RENDERED, IN THE SHIPPED RELEASE (falcon-v1.139.0, 2026-09-18). This
+      artifact's evidence is the release body itself, which is why it stayed
+      `implemented` until the tag existed. The published notes at
+      `97ee07e1d3a1` carry:
+
+        - the generated header, naming the tool and the requirement:
+          "Generated from the observed CI conclusions on the released commit
+          by scripts/verification-tracks.rs (SWREQ-RELAY-VGATE-P04) — not
+          written by hand";
+        - the count, up front: "1 track(s) DARK and 0 per-commit track(s) not
+          run or unfinished on this commit. A dark track verified nothing for
+          this release; treat its claims accordingly";
+        - the per-track table, each row linking the run it was read from:
+          ci ✅, kani ✅, lean ✅, rocq ✅, gazebo ✅, bazel ✅, coverage ✅,
+          spar ✅, soak ✅, verification-gate "runs on pull requests only",
+          and **Verus 🔴 DARK — failure** (#405);
+        - the seven named structural gaps (#405 #418 #410 #407 #417 #436
+          #452).
+
+      THE DARK TRACK SHIPPED AS DARK. That is the requirement working: v1.138.0
+      went out with two dark tracks and said nothing. This release says which
+      one verified nothing, in the notes a partner reads, with the run link.
+
+      ALSO PROVEN BY THIS RELEASE, not only by the fixture tests: the soak row
+      reads "✅ passed" with a real number behind it (longest holding duration
+      40 s, breaking at 60 s). Two days earlier the same row would have read
+      DARK — not because the hold was broken, but because the ladder lost its
+      measurement to `shell: bash`'s -e (#463). A track that reports "dark"
+      when it means "I dropped the result" is exactly the failure this
+      requirement exists to prevent, and it was caught by reading the rendered
+      body before tagging.
+
     tags: [verification, relay, verification-gate, release, v1.139]
     fields:
       method: automated-test
