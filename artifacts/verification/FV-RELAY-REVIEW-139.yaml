@@ -88,10 +88,12 @@ artifacts:
     fields:
       method: review
       steps:
-        # The findings and their dispositions are the evidence; both review PRs
-        # stay closed-not-merged as the audit trail.
-        - run: "gh pr view 458 --repo pulseengine/relay --json state,comments"
-        - run: "gh pr view 459 --repo pulseengine/relay --json state,comments"
+        # The review record lives IN THE REPO. The first draft of these steps
+        # called `gh pr view` and failed the gate with rc=127: gh is not on the
+        # self-hosted runners (#153/#436), and an audit trail that depends on
+        # GitHub comments is one edit away from gone either way.
+        - run: "test -f docs/reviews/falcon-v1.139.0-review.md"
+        - run: "test \"$(grep -c '^[0-9]\\+\\. \\*\\*Disposition' docs/reviews/falcon-v1.139.0-review.md)\" -eq 9"
         # The fixes are on main, before the tag.
         - run: "git log --oneline falcon-v1.138.0..HEAD -- .github/workflows/soak.yml scripts/check-evidence.rs"
         - run: "grep -q 'GZ_MAX_S' .github/workflows/soak.yml"
