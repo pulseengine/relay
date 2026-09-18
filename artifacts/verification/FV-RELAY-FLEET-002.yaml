@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-FLEET-002
     type: sw-verification
     title: "FLEET-P01 — starvation is measured from JOBS, and hosted contention is not reported as a dead fleet (v1.140)"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       Extends FV-RELAY-FLEET-001. The wedge half of the monitor was right the

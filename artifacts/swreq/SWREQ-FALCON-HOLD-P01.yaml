@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-HOLD-P01
     type: sw-req
     title: "HOLD-P01 — a stationary position hold shall stay bounded for at least 60 s, horizontally as well as vertically"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       Commanded to hold a fixed NED position, the vehicle shall remain within

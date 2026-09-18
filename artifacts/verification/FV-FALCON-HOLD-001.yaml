@@ -2,12 +2,16 @@ artifacts:
   - id: FV-FALCON-HOLD-001
     type: sw-verification
     title: "HOLD-P01 — the 5 Hz hold converges, on SimBackend and on the gz plant: 40 s → 300 s (v1.140)"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       Verifies SWREQ-FALCON-HOLD-P01 on `SimBackend` AND on the reference
-      Gazebo plant. It stays `implemented` only because the two-commit rule
-      puts promotion in the code-free PR that follows the change.
+      Gazebo plant.
+
+      PROMOTED 2026-09-18, after #456 merged as 0185e8a: every step re-run on
+      main, not on the branch. The 5 Hz oracle passes at both loop rates, the
+      GNSS-outage case stays bounded, and the gz ladder's 40 s -> 300 s is the
+      run recorded below.
 
       THE GZ MEASUREMENT, the one the requirement is stated on (2026-09-17,
       the `Soak` workflow's gz ladder, `--scenario=flightcore` at the default
