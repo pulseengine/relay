@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-BATTERY-003
     type: sw-verification
     title: "BATTERY-P03 — the lost-sense failsafe fires, and the test fails without it (v1.140)"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       Verifies SWREQ-FALCON-BATTERY-P03 in falcon-core's supervisor loop.

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-ENDURANCE-001
     type: sw-verification
     title: "ENDURANCE-P01 — a 12 h hold on a plant that can tilt, and a nightly job that measures it (v1.140)"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       Verifies SWREQ-FALCON-ENDURANCE-P01. `implemented`, not `verified`: the

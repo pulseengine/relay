@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-BATTERY-P03
     type: sw-req
     title: "BATTERY-P03 — a pack that stops REPORTING in flight shall raise the battery failsafe, not fly on"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       While airborne, if no battery reading arrives for longer than one

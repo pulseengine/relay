@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ENDURANCE-P01
     type: sw-req
     title: "ENDURANCE-P01 — a position hold shall stay bounded for HOURS, not seconds, and be watched nightly"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       Commanded to hold a fixed NED position, the vehicle shall remain within

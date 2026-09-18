@@ -1,0 +1,82 @@
+artifacts:
+  - id: SWREQ-FALCON-TRANSPORT-P01
+    type: sw-req
+    title: "TRANSPORT-P01 — the cascade seam shall have ONE supported transport binding, so an integrator does not invent a fifth"
+    status: proposed
+    release: falcon-v1.141.0
+    description: >
+      Driving the shipped flight core from another process or another board
+      shall require no invented framing: the project shall publish a transport
+      binding for `pulseengine:falcon-cascade` — framing, sequence, the
+      configuration handshake, and the behaviour when a tick is late, dropped
+      or duplicated — with a reference host implementation.
+
+      WHY IT EXISTS. An integrator drove the published component over UDP
+      against Gazebo and had to invent the wire themselves, because we ship a
+      component and no way to talk to it. Measured from their capture (4 000
+      exchanges, 40.8 s): a 6-byte header — magic `1c fa`, version, message
+      type (config / ack / sensor / motors), little-endian `u32` sequence —
+      then the seam's own records. It is NOT MAVLink (0 of 8 002 payloads
+      carry `0xFD`/`0xFE`), NOT CCSDS (0 of 8 002 have a plausible primary
+      header), and NOT `falcon-hitl`'s frame (83/24-byte payloads against its
+      54/16). It works: reply latency 0.48 ms median, 3.17 ms worst, no timing
+      anomaly anywhere in the run.
+
+      MEANWHILE WE HAVE FOUR WIRE PROTOCOLS AND THREE HAVE NO CONSUMER.
+      `relay-ccsds` is wohl's. `relay-mavlink` reaches only falcon-hello.
+      `relay-dronecan`, `falcon-mavlink` and `falcon-hitl` have none. They are
+      not the same question: MAVLink is the ground-station boundary and
+      DroneCAN the ESC bus — unwired capabilities awaiting a consumer. The
+      HITL link is different: it is SUPERSEDED. Its 54-byte frame cannot carry
+      heading, rotor RPM, or a battery that says ABSENT (#466), which are
+      exactly the lessons the seam learned at v0.8 and v0.10 by being driven.
+      Maintaining a second remote protocol means relearning them there.
+
+      WHAT THE BINDING SHALL STATE, each because something measured says so:
+        - FRAMING and versioning, so a host can detect a mismatched component.
+        - The CONFIGURATION handshake. `vehicle-config` is load-bearing:
+          measured on gz, a wrong hover thrust alone put the altitude estimate
+          58.8 m out, and with default tuning the vehicle never left the ground.
+        - The TICK CONTRACT: `dt-s` is the host's actual period (v0.8 exists
+          because stages disagreed by up to 20x and the hold error went from
+          0.00 m to 27.17 m with no error signal), and what a late, dropped or
+          duplicated tick means.
+        - The AIDING-RATE OBLIGATION. Position fixes at <= 10 Hz made the hold
+          diverge (#434/#403); the integrator's rig ran 5 Hz and oscillated.
+          v1.140 fixes the estimator, and the binding must still say what the
+          host owes: which fields are optional, and what degrades when they
+          are absent.
+        - The REFERENCE HOST: `falcon-hitl`'s `SimServer`, re-pointed from its
+          own frame to this binding, keeping the no_std/no-alloc framing that
+          is the crate's genuinely reusable half.
+
+      AND IT NEEDS A RETURN PATH, which is why MAVLink is not connected.
+      `step: func(sensors: sensor-frame, target: waypoint) -> motor-pwm` gives
+      a host MOTOR COMMANDS AND NOTHING ELSE. The estimate, the mode, the
+      failsafe state and the battery view never leave the component. So a host
+      driving the published flight core cannot show a vehicle in
+      QGroundControl, cannot stream ATTITUDE or GLOBAL_POSITION_INT, and
+      cannot report a failsafe as STATUSTEXT — not because the telemetry stack
+      is missing (MAVLINK-P06 is `verified` at v1.119.0: rate budgeting to the
+      SiK link, in-flight PARAM_SET, wire conformance) but because there is
+      nothing for it to read. The integrator's capture shows the same shape:
+      motor commands back, no state. This binding therefore covers the RETURN
+      direction too, and the seam needs a state output for it — a version bump
+      of `pulseengine:falcon-cascade`, not a host-side workaround.
+
+      SPECIFIED FROM THE SEAM AND THE CAPTURE, deliberately: the maintainer
+      chose on 2026-09-18 to write it without asking the integrator first. The
+      risk is on record — the HITL frame went wrong exactly by being designed
+      without a driver — and the mitigation is that the capture is real
+      evidence of a working binding, not a guess.
+
+      FALSIFICATION: wrong if an integrator can drive the published component
+      over the documented binding only by writing framing of their own; if a
+      host that satisfies the binding cannot tell a dropped tick from a late
+      one; or if a host holding the binding still cannot stream the vehicle's
+      attitude, position and failsafe state to a GCS with the verified
+      MAVLink stack.
+    tags: [requirement, falcon, transport, seam, hitl, v1.141]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
