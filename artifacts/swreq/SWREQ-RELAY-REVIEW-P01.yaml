@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-REVIEW-P01
     type: sw-req
     title: "REVIEW-P01 — each release in the v1.139–v1.141 arc shall pass an independent multi-agent review before it is tagged"
-    status: proposed
+    status: verified
     release: falcon-v1.139.0
     description: >
       Before v1.139, v1.140 and v1.141 are tagged, the release's full change
