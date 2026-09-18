@@ -1639,7 +1639,17 @@ fn run_flightcore(
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(50);
-        let mut backend = SitlBackend::new(physics, dt, 0.0, gnss_div);
+        // IMU_NOISE: gyro/accel noise sigma fed to the plant's `measure` (#435).
+        // The analytic plant is otherwise PERFECTLY symmetric and starts level
+        // at the setpoint, so its horizontal loop is never excited and the hold
+        // it reports is vacuous — 0.000 m by construction, whatever the
+        // duration. gz bakes noise into its own sensors, so this is a no-op
+        // there. Default 0.0 keeps every existing scenario byte-identical.
+        let imu_noise: f32 = std::env::var("IMU_NOISE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        let mut backend = SitlBackend::new(physics, dt, imu_noise, gnss_div);
         for step in 0..n {
             let tick_start = Instant::now();
             let t = step as f32 * dt;

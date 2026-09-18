@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ENDURANCE-P01
     type: sw-req
     title: "ENDURANCE-P01 — a position hold shall stay bounded for HOURS, not seconds, and be watched nightly"
-    status: proposed
+    status: implemented
     release: falcon-v1.140.0
     description: >
       Commanded to hold a fixed NED position, the vehicle shall remain within
@@ -64,6 +64,42 @@ artifacts:
       RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.140, alongside HOLD-P01. An hours-long hold is meaningless while a 60 s hold diverges, so the two land together and HOLD-P01 comes first.
 
       CORRECTION (2026-09-17, #435), kept rather than rewritten above. The analytic plant this requirement cites (`MockPhysics`) applies NO torque: the vehicle cannot tilt, so its 12 h PASS is a one-dimensional altitude hold. It does support "no altitude-loop windup and no f32 drift over ~10^7 ticks". It does NOT support "the hours problem is NOT the controller": a plant that cannot tilt never exercises the attitude or horizontal-position loops, which is exactly where #403 fails, and #434 then showed that loop is unstable under sparse aiding. The Tier-1 soak must move to a plant that can tilt (SimBackend) and check horizontal hold.
+
+      THE ANALYTIC TIER WAS VACUOUS FOR TWO REASONS (#435, measured
+      2026-09-18), not the one the issue names:
+
+        1. NO TORQUE. `MockPhysics::step` summed the motor commands into a
+           collective and applied no moment at all ("the mixer's torque is
+           approximated as zero in this scaffold"), so the vehicle could not
+           tilt whatever the attitude loop commanded. It now applies the
+           verified mixer's own allocation (`motors_to_torque_signs` scaled by
+           0.25, matching `SimBackend`, so the two analytic plants respond to a
+           motor command alike).
+
+        2. NOTHING DISTURBED IT. Even with torque, the scenario starts level at
+           the setpoint on a perfectly symmetric plant, so the horizontal loop
+           is never excited and the hold is 0.000 m by construction at any
+           duration. The bench gained an `IMU_NOISE` knob (the one #435 used
+           locally and never committed); gz bakes noise into its own sensors so
+           it is a no-op there, and the default 0.0 leaves every existing
+           scenario byte-identical.
+
+      WHAT THE TIER MEASURES NOW (mock, gyro sigma 0.01, 250 Hz, 5 Hz aiding):
+
+        | flight | horizontal peak | horizontal final | altitude |
+        |---|---|---|---|
+        | 120 s | 0.24 m | 0.11 m | 0.01 m |
+        | 1 h | 0.37 m | 0.13 m | 0.01 m |
+        | 12 h | 0.46 m | 0.16 m | 0.01 m |
+
+      Before the change every one of those rows was 0.000 m horizontal.
+
+      AND IT CATCHES THE DEFECT IT USED TO HIDE. The same torque-capable,
+      disturbed plant run against the PRE-#452 estimator diverges: 1 746 m
+      horizontal at 120 s, and 124 km at 1 h with the altitude estimate at
+      5e22 m. The vacuous plant concealed exactly the fault the gz plant
+      showed as a 40 s ceiling (#403/#434) — which is why a 12 h PASS on it
+      was worth nothing.
 
     tags: [requirement, falcon, endurance, soak, gazebo, nightly, v1.140]
     links:

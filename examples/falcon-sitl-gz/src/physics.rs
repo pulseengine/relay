@@ -20,6 +20,10 @@ pub const FRICTION: f32 = 0.005;
 pub const THRUST_SCALE: f32 = 20.0; // N at full PWM
 pub const GRAVITY: f32 = 9.81;
 pub const DRAG_COEFFICIENT: f32 = 0.05;
+/// Body torque per unit of mixer allocation (N·m), matching
+/// `SimBackend::torque_scale` in falcon-core so both analytic plants respond
+/// to a motor command the same way (#435).
+pub const TORQUE_SCALE: f32 = 0.25;
 
 /// What the verified cascade needs from "the world".
 ///
@@ -181,9 +185,24 @@ impl Physics for MockPhysics {
         let thrust_normalised =
             ((achieved[0] + achieved[1] + achieved[2] + achieved[3]) / 4.0).clamp(0.0, 1.0);
 
-        // Rotational dynamics under (zero) torque + friction.
+        // Rotational dynamics under the MIXER'S OWN torque + friction (#435).
+        //
+        // This used to apply NO torque — "the mixer's torque is approximated as
+        // zero in this scaffold" — so the vehicle could not tilt whatever the
+        // attitude loop commanded, and could therefore neither be pushed off
+        // its horizontal position nor corrected back. Every closed-loop
+        // attitude or horizontal result measured on this plant was vacuous by
+        // construction: 0.000 m horizontal excursion at every noise level and
+        // aiding rate #435 tried, including 0.2 rad/s of gyro noise.
+        //
+        // The torque is the same sign matrix the verified mixer allocates
+        // against (`motors_to_torque_signs`, relay-mix-quad), scaled the way
+        // falcon-core's SimBackend scales it (0.25) so the two analytic plants
+        // agree on what a given motor command does to the airframe.
+        let tq = relay_mix_quad::motors_to_torque_signs(achieved);
         for i in 0..3 {
-            self.omega[i] += ((-FRICTION * self.omega[i]) / INERTIA) * dt;
+            let torque = tq[i] * TORQUE_SCALE;
+            self.omega[i] += ((torque - FRICTION * self.omega[i]) / INERTIA) * dt;
         }
         // Integrate quaternion from angular velocity.
         let qdot = quat_mul(self.q, [0.0, self.omega[0], self.omega[1], self.omega[2]]);
