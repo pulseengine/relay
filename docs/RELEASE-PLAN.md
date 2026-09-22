@@ -96,6 +96,10 @@ Independent of the flight releases; must not hold them up.
 - #350 — Verification gate has grown to meet its own 90-minute timeout — required check now fails ~half the time
 - #345 — Verification gate: 'rivet validate' failed once, unreproducible — intermittent failure in a REQUIRED check
 
+**Re-baselining the reference plant (recorded 2026-09-22)**
+
+- gz 0.11 (`gz-msgs`/`gz-transport`) is a BREAKING API change: the message types moved behind a `GzMessage` trait and `falcon-sitl-gz` fails with 13 errors. Dependabot's #469/#470 were closed with the measurement. Every published gz number — the 2 m hold at 0.12 m, the 40 s → 300 s ladder, the wasm/native bit-identical equivalence over 6 250 ticks — was produced on 0.10, so the port is a deliberate re-baselining with its own re-measurement, not a dependency merge.
+
 **SWREQ-FALCON-OCI-P03 / SWREQ-FALCON-MATHF32-P06 / SWREQ-FALCON-OPSHELL-P01**
 
 - #330 — Consume pulseengine/wit-bindgen (cabi-realloc-extern): gale-owned arena instead of a per-component one — *wit-bindgen fork (OCI-P03)*
