@@ -59,12 +59,30 @@ artifacts:
       real release train before the failure path is provoked on it. Until that
       runs, this artifact evidences "publishes only after the guard", not
       "provably never publishes when the guard fails".
+      A COUNT IS NOT A PROPERTY (2026-09-22). The first step here counted
+      `--draft` occurrences and expected 2. That number described the file's
+      shape at v1.133, not the requirement: one of the two was in a create
+      path that could never execute. Removing the dead branch left the
+      behaviour identical and the count wrong, so this artifact failed every
+      subsequent PR while the release itself was demonstrably correct —
+      falcon-v1.139.0 was created as a draft and published by the flip, with
+      20 assets. The steps now assert the two facts REL-P01 needs.
+
     tags: [verification, falcon, release, oci, ordering, v1.133]
     fields:
       method: test
       steps:
         # (a) CONFIGURATION — both create paths are drafts.
-        - run: "test \"$(grep -cE '^[[:space:]]+--draft' .github/workflows/release.yml)\" -eq 2"
+        # ASSERT THE PROPERTY, NOT A COUNT. This step demanded exactly TWO
+        # `--draft` lines, which was only true while release.yml had a second,
+        # DEAD create path (the `--generate-notes` fallback that could never
+        # fire, removed on 2026-09-18 after the v1.139 review). The count then
+        # read 1 and this step failed every PR for four days — and nobody saw
+        # it on main, because the verification gate does not run there (#410).
+        # What REL-P01 actually requires is: the release is CREATED as a draft,
+        # and PUBLISHED by a later flip. Both are asserted below.
+        - run: "test \"$(grep -cE '^[[:space:]]+--draft [\\\\]$' .github/workflows/release.yml)\" -eq 1"
+        - run: "grep -q -- '--draft=false --latest' .github/workflows/release.yml"
         # A single terminal step is what publishes it.
         - run: "grep -q 'Publish the release (flip the draft)' .github/workflows/release.yml"
         # The guard refuses a malformed tag rather than publishing it.
