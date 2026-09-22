@@ -133,6 +133,17 @@ artifacts:
 
       RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.141, with the demo that exercises what it wires: FlightSupervisor's failsafes, mode machine and pre-arm checks (#414), and the undrivable falcon-flight component (#385). It parks crates against configuration axes, which CONFIG-P01 defines in the same release.
 
+      A FIRST DISPOSITION, decided 2026-09-18: `falcon-hitl`'s 54-byte link
+      frame is RETIRED rather than patched. It has no consumer (the capability
+      table lists the crate as NOT SHIPPED), no Kani, no workflow, and it
+      cannot carry heading, rotor RPM, or a battery that says ABSENT (#466) —
+      the three lessons the published seam learned at v0.8 and v0.10 by being
+      driven. Patching them into a second, unconsumed wire protocol would mean
+      relearning them there. What survives is the crate's reusable half: the
+      no_std, no-alloc framing and `SimServer`, re-pointed at the seam's own
+      record under SWREQ-FALCON-TRANSPORT-P01 (v1.141). #466 closes against
+      that requirement, not as won't-fix.
+
     tags: [requirement, falcon, orphan, architecture, v1.141]
     links:
       - type: derives-from
