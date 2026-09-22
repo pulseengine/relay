@@ -30,6 +30,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "async-channel"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -141,6 +153,15 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
+
+[[package]]
+name = "concurrent-queue"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
+dependencies = [
+ "crossbeam-utils",
+]
 
 [[package]]
 name = "criterion"
@@ -256,6 +277,26 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "event-listener"
+version = "5.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
+dependencies = [
+ "parking",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "event-listener-strategy"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
+dependencies = [
+ "event-listener",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -473,6 +514,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "futures-core"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
+
+[[package]]
 name = "geofence-subject-rs"
 version = "0.1.0"
 dependencies = [
@@ -514,13 +561,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "gz-build"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2f53487cb1356c52a304058a7994c2ffd31b310f8aee55c803d617131cf9079"
+dependencies = [
+ "pkg-config",
+]
+
+[[package]]
 name = "gz-msgs"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be49b1a7e03d88e9d3157ede6c17fc9099af257c31536dbfe66c52a117d95fa6"
 dependencies = [
- "gz-build",
- "gz-msgs-common",
+ "gz-build 0.10.0",
+ "gz-msgs-common 0.10.0",
  "protobuf",
 ]
 
@@ -530,7 +586,17 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "772dcb43c78d1e5f3f59d2bac8bd0a311015929d5c593963f6d076ea29e6dd98"
 dependencies = [
- "gz-msgs-derive",
+ "gz-msgs-derive 0.10.0",
+ "protobuf",
+]
+
+[[package]]
+name = "gz-msgs-common"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "297728026cb221c1eebd0dd8385aa7739f5c3612f61b4a3cbe302a122176c856"
+dependencies = [
+ "gz-msgs-derive 0.11.0",
  "protobuf",
 ]
 
@@ -545,26 +611,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "gz-transport"
-version = "0.10.0"
+name = "gz-msgs-derive"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7332b6e8d98b6760bd63965499a24b1f02e77e93030b3b0d8f8989ef1930af7a"
+checksum = "3fee6963d225b0a8509979ea1430e52af6c63abcc9b08841db76e4be598dd7b4"
 dependencies = [
- "crossbeam-channel",
- "gz-build",
- "gz-msgs-common",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "gz-transport"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e62ae1f2b91cfd1963922fd41b586cf47b0b0cf5661276bf33e0f7e0f1d3af7"
+dependencies = [
+ "async-channel",
+ "gz-build 0.11.0",
+ "gz-msgs-common 0.11.0",
  "gz-transport-sys",
  "log",
 ]
 
 [[package]]
 name = "gz-transport-sys"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b2501893885070692a8cdedd62691cb5a382f7259b84863910383e7f7df1d1c"
+checksum = "26cb2ad649c3a675c285ad84d67078052c111fee1a0b616988adaf5c7125f2b0"
 dependencies = [
  "cc",
- "gz-build",
+ "gz-build 0.11.0",
 ]
 
 [[package]]
@@ -688,6 +764,18 @@ name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
+
+[[package]]
+name = "parking"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
+
+[[package]]
+name = "pin-project-lite"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pkg-config"
