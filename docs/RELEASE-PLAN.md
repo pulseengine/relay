@@ -78,6 +78,11 @@ Needs v1.140's hold and rotor-out recovery.
 
 - #277 — Blackbox TickRecord schema v2: log battery samples (v, i) for replay-exact BATTERY-P02 — *blackbox TickRecord v2 with battery samples, for replay-exact battery behaviour in the demo*
 
+**SWREQ-FALCON-TRANSPORT-P01 — one supported transport binding for the cascade seam**
+
+- #466 — `falcon-hitl`'s link frame cannot carry heading, rotor RPM, or an absent battery — *superseded: the frame is retired rather than patched, and the binding carries the seam's own record. `SimServer` is re-pointed at it as the reference host, keeping the no_std framing.*
+- The binding also covers the RETURN direction: `step` gives a host motor commands and nothing else, so the verified MAVLink telemetry stack (MAVLINK-P06, v1.119) has nothing to read and a shadow flight produces no evidence. That needs a `falcon-cascade` version bump — announced, because an integrator is already flying the seam (jess#167, 2026-09-22).
+
 ## falcon-v1.142.0 — Platform
 
 Independent of the flight releases; must not hold them up.
