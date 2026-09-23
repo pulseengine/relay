@@ -83,6 +83,15 @@ Needs v1.140's hold and rotor-out recovery.
 - #466 — `falcon-hitl`'s link frame cannot carry heading, rotor RPM, or an absent battery — *superseded: the frame is retired rather than patched, and the binding carries the seam's own record. `SimServer` is re-pointed at it as the reference host, keeping the no_std framing.*
 - The binding also covers the RETURN direction: `step` gives a host motor commands and nothing else, so the verified MAVLink telemetry stack (MAVLINK-P06, v1.119) has nothing to read and a shadow flight produces no evidence. That needs a `falcon-cascade` version bump — announced, because an integrator is already flying the seam (jess#167, 2026-09-22).
 
+**SWREQ-FALCON-OCI-P07 — the published stage components shall compose into the FLOWN law (wac → meld → synth)**
+
+Raised by the bench engineer (Christof, 2026-09-23): *"falcon cascade is only a middle, and it should be built out of components."* Both halves measured and true.
+
+- The decomposition already exists in `wit/falcon-cascade/cascade.wit` (five stage worlds) — but it decomposes the **legacy PID** cascade. Per `scripts/audit-component-deps.rs`: `position`/`attitude`/`rate` wrap `relay-pos`/`relay-att`/`relay-rate`, while the flight core flies `relay-geo` + `relay-adrc` — and **both of those have no component at all**. `docs/OCI-DISTRIBUTION.md` already says the consequence: *"Fusing the per-stage components does not produce the flown control law."*
+- Composition path is **specified, not open** (maintainer, 2026-09-23): component model → `wac` → `meld` → `synth`. meld fuses at build time, so the per-stage boundary is authoring/verification structure that is **erased before deployment** — it costs no runtime seam, and `DIFFERENTIAL=1` runs against the fused artifact. OCI-P05 (relocation metadata for meld) is the groundwork.
+- First tractable step is wrapping `relay-geo` and `relay-adrc`; until they exist no composition can produce the flown law. #393 (the cascade component imports nothing, so `wac plug` has no socket) is the seam blocker after that.
+- **Ordering:** this leads, ORPHAN-P01's retirement of the legacy stage components follows — publishing something labelled legacy beats publishing nothing until a flown replacement exists.
+
 ## falcon-v1.142.0 — Platform
 
 Independent of the flight releases; must not hold them up.
