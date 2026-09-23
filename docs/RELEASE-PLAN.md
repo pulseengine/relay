@@ -78,6 +78,11 @@ Needs v1.140's hold and rotor-out recovery.
 
 - #277 — Blackbox TickRecord schema v2: log battery samples (v, i) for replay-exact BATTERY-P02 — *blackbox TickRecord v2 with battery samples, for replay-exact battery behaviour in the demo*
 
+**SWREQ-FALCON-TRANSPORT-P01 — one supported transport binding for the cascade seam**
+
+- #466 — `falcon-hitl`'s link frame cannot carry heading, rotor RPM, or an absent battery — *superseded: the frame is retired rather than patched, and the binding carries the seam's own record. `SimServer` is re-pointed at it as the reference host, keeping the no_std framing.*
+- The binding also covers the RETURN direction: `step` gives a host motor commands and nothing else, so the verified MAVLink telemetry stack (MAVLINK-P06, v1.119) has nothing to read and a shadow flight produces no evidence. That needs a `falcon-cascade` version bump — announced, because an integrator is already flying the seam (jess#167, 2026-09-22).
+
 ## falcon-v1.142.0 — Platform
 
 Independent of the flight releases; must not hold them up.
@@ -95,6 +100,10 @@ Independent of the flight releases; must not hold them up.
 - #373 — CI: three green PRs sat unmergeable for 3 weeks — strict protection + auto-merge deadlocks, and a merge queue has two known gaps
 - #350 — Verification gate has grown to meet its own 90-minute timeout — required check now fails ~half the time
 - #345 — Verification gate: 'rivet validate' failed once, unreproducible — intermittent failure in a REQUIRED check
+
+**Re-baselining the reference plant (recorded 2026-09-22)**
+
+- gz 0.11 (`gz-msgs`/`gz-transport`) is a BREAKING API change: the message types moved behind a `GzMessage` trait and `falcon-sitl-gz` fails with 13 errors. Dependabot's #469/#470 were closed with the measurement. Every published gz number — the 2 m hold at 0.12 m, the 40 s → 300 s ladder, the wasm/native bit-identical equivalence over 6 250 ticks — was produced on 0.10, so the port is a deliberate re-baselining with its own re-measurement, not a dependency merge.
 
 **SWREQ-FALCON-OCI-P03 / SWREQ-FALCON-MATHF32-P06 / SWREQ-FALCON-OPSHELL-P01**
 
