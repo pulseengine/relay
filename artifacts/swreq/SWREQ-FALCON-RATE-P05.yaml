@@ -1,0 +1,99 @@
+artifacts:
+  - id: SWREQ-FALCON-RATE-P05
+    type: sw-req
+    title: "RATE-P05 — the inner rate loop shall track its command UNDER LOAD, not limit-cycle into the rails"
+    status: proposed
+    release: falcon-v1.141.0
+    description: >
+      While the vehicle is flying, the measured body rate shall track the
+      commanded body rate, and the actuator commands shall not oscillate
+      between their limits.
+
+      WHY A NEW REQUIREMENT RATHER THAN RATE-P01..P04. Those four are about the
+      LEGACY PID rate controller (`relay-rate`), which the flight core no longer
+      flies — it flies ADRC (`relay-adrc`). They are also all properties of the
+      law in isolation: anti-windup bounds, pole placement, a Lyapunov argument,
+      a WCET bound. Not one of them is falsified by what is measured below,
+      because none of them says anything about the CLOSED loop on a plant that
+      can saturate. That gap is the requirement.
+
+      IT DOES NOT HOLD TODAY, and it is the defect underneath #270 and #398.
+      Measured on the gz falcon-quad at main e1d00be with RING_TRACE, settled
+      hover:
+
+        path                     cmd omega_d   measured gyro   motors
+        --scenario=flightcore    0.0002 rad/s  0.0019 rad/s    0.5809-0.5869
+        --scenario=supervised…   0.1443 rad/s  2.4674 rad/s    0.12 <-> 1.0000
+
+      The attitude loop asks for 0.14 rad/s; the airframe does 2.47 — 17x the
+      command, tracking error 2.5061 — at 3.5 Hz with the motors railing. This
+      is NOT a bad setpoint handed down: the inner loop oscillates on its own
+      once it is loaded.
+
+      THE PLANT IS NOT THE CAUSE. Both paths run the same world, the same
+      commit, the same estimator/altitude tuning and the same hover_thrust
+      0.585. #270 has recorded this as a plant limit cycle since 2026-07-14,
+      and that framing is what kept it unfixed. (Caveat, stated because it
+      weakens the control: `flightcore` holds altitude only and never leaves a
+      0.03-wide motor band, so it does not LOAD the rate loop. Its cleanliness
+      shows the loop is never asked to do anything, not that it is healthy.)
+
+      ONSET IS SATURATION, during takeoff, and it never recovers: clean at
+      0.0019 rad/s through t=0.5 s; motors first reach their limits at
+      0.50-0.75 s; ring established by 0.75-1.00 s; unchanged 7 s later.
+
+      WHY IT MATTERS BEYOND COMFORT. The rotor-out FDI only runs while
+      `tilt_cos > 0.90 && rp_rate2 < 4.0`. This cycle holds that gate SHUT for
+      96.8% of healthy-hover ticks, so whether a single-rotor failure is
+      detectable at all is decided by which rare open window it lands in —
+      measured 5/5 (gate open at the kill -> isolated in one tick; gate shut ->
+      never isolated, 180° inversion). FV-FALCON-FAULT-005 cannot be verified
+      until this holds. It is also a plausible match for the wobble the bench
+      engineer reported from hardware, which a position-only verdict would mask
+      on a real vehicle exactly as it does on this bench.
+
+      TWO DEFECTS ALREADY FOUND AND FIXED — NEITHER IS THE PRIMARY CAUSE.
+      Landed separately (branch phase0/rate-loop-antiwindup) because each is
+      independently wrong:
+        (a) the ESO was driven by COMMANDED torque while the thrust-priority
+            mixer delivers s*torque, with s computed inline and never exposed;
+        (b) `AdrcAxis::reset()` had ZERO call sites in the flight path, so the
+            observer ran through ground spin-up against a plant that cannot
+            answer a torque command because the gear takes the moment.
+      Measured: gyro rp rms 2.47 -> 2.02 -> 1.91; gate shut 96.8% -> 51.0% ->
+      35.8%. Real gains, and the hypothesis is still FALSIFIED against its own
+      0.1 rad/s bar.
+
+      NO UNIT TEST CAN SEE ANY OF THIS. The 23 FlightSupervisor sites in
+      falcon-core run the analytic plant, which hovers in a 0.0001-wide motor
+      band — with that headroom the mixer never scales and the loop is exact.
+      Same family as #435 and #452: the plant cannot PRODUCE the condition. A
+      verification for this requirement must therefore be measured on gz (or
+      another plant that can saturate), or it verifies nothing.
+
+      LEADING HYPOTHESIS, NOT YET TESTED: a design-vs-deployment RATE mismatch.
+      SWREQ-FALCON-RATE-P04 fixes the control period at "1 ms (1 kHz update
+      rate)" and relay-adrc's own filter comment reasons about "the 1 kHz loop".
+      This bench runs at 250 Hz (dt = 0.004), so beta1*dt = 0.32 at
+      omega_o = 40. Note `AdrcGains::eso_dt_stable` only checks
+      omega_o*dt < 2 — a forward-Euler pole bound, which passes at 0.16 — and
+      says nothing about phase margin against the actuator lag. Second lead:
+      b0 = 60 was raised from 30 by a ratio argument, never measured.
+
+      FALSIFICATION: wrong if, on the gz falcon-quad under
+      `--scenario=supervised-rotorout`, the settled-hover roll/pitch rate RMS
+      stays above 0.1 rad/s, or any motor reaches a limit during unfaulted
+      hover, or the FDI steady gate is shut for more than 5% of hover ticks.
+    tags: [requirement, falcon, rate-loop, adrc, limit-cycle, gazebo, v1.141]
+    fields:
+      priority: must
+      req-type: functional
+      verification-criteria: >
+        RING_TRACE on the gz plant, unfaulted supervised hover, 3
+        pristine-server trials: roll/pitch rate RMS < 0.1 rad/s, no motor
+        within 2% of a limit, FDI steady gate open for >= 95% of ticks.
+        Measured on a plant that CAN saturate — the analytic plant cannot
+        exhibit the defect and must not be cited as evidence here.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-022

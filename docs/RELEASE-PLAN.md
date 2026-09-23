@@ -96,6 +96,8 @@ Correction jess supplied to our premise: there is **no flattening cliff on retur
 ## Releases in flight
 
 - **falcon-v1.139.0 — SHIPPED** 2026-09-18 (`97ee07e`, signed, 20 assets; notes disclose Verus dark and 7 structural gaps).
-- **falcon-v1.140.0 — 9/11.** Blocked on `FV-FALCON-FAULT-005` (Phase 0: rotor-out cannot be verified while #270 stands) and `FV-RELAY-REVIEW-140` (maintainer review). **Not tag-ready, and the loop cannot clear either item.**
-- **falcon-v1.141.0** — Phases 1–2 (`TRANSPORT-P01`, `OCI-P07`, `ORPHAN-P01`, `SHOWCASE-P01`).
-- **falcon-v1.142.0** — platform integrity, alongside.
+- **falcon-v1.140.0 "Hold" — 9/10, one blocker: `FV-RELAY-REVIEW-140`,** the maintainer review checkpoint. The loop cannot start it and will not tag without an explicit yes.
+  - **Scope moved out, logged:** `FV-FALCON-FAULT-005` → v1.141 on 2026-09-23. It cannot be verified while #270 stands (the FDI gate is shut 96.8% of healthy-hover ticks), and the ring's primary cause is open. v1.140's own theme — the hold — is done and measured (estimator, endurance, battery, fleet, mixproof). Holding a finished release hostage to an open control investigation is the scope error, not the fix.
+- **falcon-v1.141.0 "The rate loop and the seam"** — Phases 0–1: `SWREQ-FALCON-RATE-P05` (the ring), `FV-FALCON-FAULT-005` behind it, `SWREQ-FALCON-TRANSPORT-P01` (the state return jess specified), `FV-RELAY-REVIEW-141`.
+- **falcon-v1.142.0 "Components"** — Phase 2: `OCI-P07`, `ORPHAN-P01`, `CONFIG-P01`, `SHOWCASE-P01` (all moved here from v1.141), plus the platform-integrity items already scoped here, which ride alongside and never block.
+- **Phases 3–5** (silicon/gale, the safety layer, evidence on a vehicle) are not yet numbered. They get a release when Phase 2 lands and `meld --pack-rebase` has answered whether components fit real RAM.

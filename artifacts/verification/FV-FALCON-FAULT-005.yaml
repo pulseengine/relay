@@ -1,9 +1,9 @@
 artifacts:
   - id: FV-FALCON-FAULT-005
     type: sw-verification
-    title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.140)"
+    title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.141)"
     status: proposed
-    release: falcon-v1.140.0
+    release: falcon-v1.141.0
     description: >
       Re-verification of SWREQ-FALCON-FAULT-P02 against the gz plant, opened
       by a regression rather than filed as a new requirement: the property
@@ -46,8 +46,8 @@ artifacts:
       bench-evidence finding; `steps:` assert the code properties that make
       it reproducible.
 
-      MEASURED 2026-09-23 ON main e1d00be — IT DOES NOT HOLD. Four
-      pristine-server trials, four FAILs, full numbers in
+      MEASURED 2026-09-23 ON main e1d00be — IT DOES NOT HOLD. Twelve
+      pristine-server trials: 11 FAIL / 1 PASS (first four tabled below), in
       bench-evidence/gz-sim/2026-09-23-v1.140-rotor-out-on-the-real-plant.md.
       Control first: `--scenario=flightcore` PASSES on the same rig (2 m hold,
       final 0.11 m, horizontal 0.01 m), so the bench can fly and the failure
@@ -90,7 +90,8 @@ artifacts:
       BEFORE the kill — a healthy, passing hover — rp_rate2 oscillates
       3.596..4.521, straddling the 4.0 threshold: the vehicle hovers at
       1.90-2.12 rad/s roll/pitch against a 2.0 rad/s gate, and THE GATE IS
-      SHUT 15 OF 25 HEALTHY-HOVER TICKS (60%). Whether a rotor loss is
+      SHUT 96.8% OF HEALTHY-HOVER TICKS (measured over 500 ticks; an earlier
+      60% figure came from a 25-tick sample and is superseded). Whether a loss is
       detectable at all is therefore decided by the limit-cycle phase at the
       instant of failure. The code's own comment records the gate being raised
       1 -> 2 rad/s because the gz plant limit-cycled "near 1 rad/s"; the limit
@@ -135,12 +136,21 @@ artifacts:
       decision (demote, or judge the gz clause over-reach) — not something
       this pass resolves silently.
 
-      WHY v1.140. Rotor-out recovery is a hold property under a fault; it
-      belongs with HOLD-P01, and v1.141's SHOWCASE-P01 (engine drop) depends
-      on it. STATUS STAYS `proposed`: the property does not hold on the plant
-      it claims to hold on, so v1.140 cannot reach 11/11 by measurement —
-      only by a maintainer scope decision.
-    tags: [verification, falcon, fault, rotor-out, gazebo, wasm, v1.140]
+      MOVED v1.140 -> v1.141 on 2026-09-23 (maintainer scope decision, and
+      logged here rather than applied silently). This CANNOT be verified while
+      #270 stands: the FDI gate is shut 96.8% of healthy-hover ticks because
+      the rate loop limit-cycles once it is actually loaded, so rotor-loss
+      detectability is decided by limit-cycle phase at the instant of failure.
+      The ring's PRIMARY cause is not yet identified — anti-windup was
+      hypothesised, tested and FALSIFIED: it helps (96.8% -> 35.8% shut) but
+      the cycle survives at 1.91 rad/s against a 0.1 bar.
+
+      v1.140's own theme — the hold — is done and measured. Holding a finished
+      release hostage to an open control investigation is the scope-management
+      error, not the fix. Rotor-out is a hold property under a fault, so it
+      belongs with the rate-loop work in v1.141, and v1.142's SHOWCASE-P01
+      (engine drop) depends on it. STATUS STAYS `proposed`.
+    tags: [verification, falcon, fault, rotor-out, gazebo, wasm, v1.141]
     fields:
       method: simulation
     links:

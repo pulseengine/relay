@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OCI-P07 — the published stage components shall compose into the FLOWN control law (wac → meld → synth), not a legacy one"
     status: proposed
-    release: falcon-v1.141.0
+    release: falcon-v1.142.0
     description: >
       Composing the published per-stage cascade components with `wac`, fusing
       the result with `meld` and compiling it with `synth` shall produce the
@@ -103,7 +103,7 @@ artifacts:
       DIFFERENTIAL=1 against the gz falcon-quad produces ANY non-zero
       per-motor difference from the native `FlightCore` on the same frames —
       or if the fused artifact cannot be produced at all.
-    tags: [requirement, falcon, oci, components, composition, wac, meld, synth, seam, v1.141]
+    tags: [requirement, falcon, oci, components, composition, wac, meld, synth, seam, v1.142]
     links:
       - type: derives-from
         target: SYSREQ-FALCON-002
