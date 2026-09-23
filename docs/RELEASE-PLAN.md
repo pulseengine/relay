@@ -29,8 +29,8 @@ And note what currently lowers to the M7 is the **legacy PID cascade**, not the 
 
 Everything downstream measures against the plant. Fix the plant's story first.
 
-- **#270 — the attitude limit cycle is the root defect.** Filed 2026-07-14 at ~1 rad/s; measured 2026-09-23 at **1.90–2.12 rad/s** with motor commands thrashing saturation-to-saturation. The 1→2 rad/s FDI gate widening used to work around it **has been consumed**.
-- **#398 — rotor-out does not recover on the gz plant.** Downstream of #270: the FDI gate is shut 60% of healthy-hover ticks, so detectability is decided by limit-cycle phase at the instant of failure (5/5: gate open ⇒ isolated in one tick; gate shut ⇒ 180° inversion). 12 trials: 11 FAIL / 1 PASS. `FV-FALCON-FAULT-003` was demoted `verified`→`implemented` when its own falsification clause was met (#479).
+- **#270 — the attitude limit cycle is the root defect.** Filed 2026-07-14 at ~1 rad/s; measured 2026-09-23 at **~2.5 rad/s RMS** with motor commands thrashing saturation-to-saturation. The 1→2 rad/s FDI gate widening used to work around it **has been consumed**.
+- **#398 — rotor-out does not recover on the gz plant.** Downstream of #270: the FDI gate is shut ~34% of pre-kill ticks (measured on the gate's own filtered signal), so detectability is decided by which side of the gate the failure lands on (5/5: gate open ⇒ isolated in one tick; gate shut ⇒ 180° inversion). 12 trials: 11 FAIL / 1 PASS. `FV-FALCON-FAULT-003` was demoted `verified`→`implemented` when its own falsification clause was met (#479).
 - Related plant-fidelity debt: #403, #434 (hold diverges at ≤10 Hz aiding), #435 (torque-free MockPhysics), #452 (accelerometer cannot show thrust), #290 (notch oracle non-deterministic), #477 (legacy `hover` scenario diverges).
 - **Christof is the oracle here.** The bench wobble and the gz ring are to be worked as **one** defect, not two. His capture is the only real-vehicle datum that exists.
 
@@ -97,7 +97,7 @@ Correction jess supplied to our premise: there is **no flattening cliff on retur
 
 - **falcon-v1.139.0 — SHIPPED** 2026-09-18 (`97ee07e`, signed, 20 assets; notes disclose Verus dark and 7 structural gaps).
 - **falcon-v1.140.0 "Hold" — 9/10, one blocker: `FV-RELAY-REVIEW-140`,** the maintainer review checkpoint. The loop cannot start it and will not tag without an explicit yes.
-  - **Scope moved out, logged:** `FV-FALCON-FAULT-005` → v1.141 on 2026-09-23. It cannot be verified while #270 stands (the FDI gate is shut 96.8% of healthy-hover ticks), and the ring's primary cause is open. v1.140's own theme — the hold — is done and measured (estimator, endurance, battery, fleet, mixproof). Holding a finished release hostage to an open control investigation is the scope error, not the fix.
+  - **Scope moved out, logged:** `FV-FALCON-FAULT-005` → v1.141 on 2026-09-23. It cannot be verified while #270 stands (the FDI gate is shut ~34% of pre-kill ticks), and the ring's primary cause is open. v1.140's own theme — the hold — is done and measured (estimator, endurance, battery, fleet, mixproof). Holding a finished release hostage to an open control investigation is the scope error, not the fix.
 - **falcon-v1.141.0 "The rate loop and the seam"** — Phases 0–1: `SWREQ-FALCON-RATE-P05` (the ring), `FV-FALCON-FAULT-005` behind it, `SWREQ-FALCON-TRANSPORT-P01` (the state return jess specified), `FV-RELAY-REVIEW-141`.
 - **falcon-v1.142.0 "Components"** — Phase 2: `OCI-P07`, `ORPHAN-P01`, `CONFIG-P01`, `SHOWCASE-P01` (all moved here from v1.141), plus the platform-integrity items already scoped here, which ride alongside and never block.
 - **Phases 3–5** (silicon/gale, the safety layer, evidence on a vehicle) are not yet numbered. They get a release when Phase 2 lands and `meld --pack-rebase` has answered whether components fit real RAM.

@@ -90,8 +90,8 @@ artifacts:
       BEFORE the kill — a healthy, passing hover — rp_rate2 oscillates
       3.596..4.521, straddling the 4.0 threshold: the vehicle hovers at
       1.90-2.12 rad/s roll/pitch against a 2.0 rad/s gate, and THE GATE IS
-      SHUT 96.8% OF HEALTHY-HOVER TICKS (measured over 500 ticks; an earlier
-      60% figure came from a 25-tick sample and is superseded). Whether a loss is
+      SHUT 33.8% OF PRE-KILL TICKS (corrected 2026-09-23 by clean-room review --
+      see CORRECTION below). Whether a loss is
       detectable at all is therefore decided by the limit-cycle phase at the
       instant of failure. The code's own comment records the gate being raised
       1 -> 2 rad/s because the gz plant limit-cycled "near 1 rad/s"; the limit
@@ -113,13 +113,16 @@ artifacts:
 
       THE FIX IS NOT THE GATE. Raising the threshold again would make the runs
       pass without making the vehicle safer — the vacuous-gate shape this
-      release train keeps finding. The healthy-hover limit cycle is the
-      defect: ~2 rad/s (115°/s) roll/pitch ringing during a hover the position
+      release train keeps finding. The limit cycle is the defect -- and it is NOT
+      a hover: independent reproduction measured mode=Takeoff at the kill
+      (1.49 m against a 2.0 m target, still climbing). It is a saturated climb
+      that never reaches hover: ~2 rad/s (115°/s) roll/pitch ringing during a hover the position
       loop reports as good (0.11 m). The position hold MASKS a ringing
       attitude loop. Worth checking against the wobble the bench engineer
       reported from the Wireshark capture, which had the same character.
 
-      THIS FALSIFIES FV-FALCON-FAULT-003, WHICH IS `verified`. That artifact's
+      THIS FALSIFIES FV-FALCON-FAULT-003 (which was `verified`; demoted to
+      `implemented` in this same change). That artifact's
       own falsification reads: "wrong if a single-rotor-out from a settled
       hover is observed to exceed ~45° tilt ... on the analytic plant (this
       oracle) OR THE GZ PLANT". All four trials exceed 45° (49.7, 50.8, 72.9,
@@ -138,11 +141,12 @@ artifacts:
 
       MOVED v1.140 -> v1.141 on 2026-09-23 (maintainer scope decision, and
       logged here rather than applied silently). This CANNOT be verified while
-      #270 stands: the FDI gate is shut 96.8% of healthy-hover ticks because
+      #270 stands: the FDI gate is shut ~34% of pre-kill ticks because
       the rate loop limit-cycles once it is actually loaded, so rotor-loss
       detectability is decided by limit-cycle phase at the instant of failure.
       The ring's PRIMARY cause is not yet identified — anti-windup was
-      hypothesised, tested and FALSIFIED: it helps (96.8% -> 35.8% shut) but
+      hypothesised, tested and FALSIFIED (its gate-shut gain was raw-signal
+      derived and is withdrawn) but
       the cycle survives at 1.91 rad/s against a 0.1 bar.
 
       v1.140's own theme — the hold — is done and measured. Holding a finished

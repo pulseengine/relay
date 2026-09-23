@@ -200,7 +200,17 @@ fn run_scenario(
         "flightcore-rotorout" => {
             // Hover, then lose rotor 0 at the midpoint; the production FDI must
             // isolate it (RPM residual) and the loop must keep the airframe
-            // UPRIGHT — not aloft. A three-rotor quad is rank-deficient: it
+            // UPRIGHT — not aloft.
+            //
+            // WARNING — THIS SCENARIO'S VERDICT DOES NOT CHECK THAT. Clean-room
+            // review 2026-09-23: the verdict below is `isolated == Some(rotor)
+            // && finite`. It reads no tilt, no altitude, no position, so a 180°
+            // inversion that drifts and crashes PASSES provided the FDI latched
+            // and nothing went NaN — and the gz trials in this release measured
+            // exactly that shape (isolated=Some(0) with 1.01-1.46 rad tilt).
+            // The sibling `supervised-rotorout` verdict DOES check tilt via
+            // `true_tilt_rad()`; this one was never wired to it. Do not cite
+            // this scenario as evidence for FAULT-P02 until it is. A three-rotor quad is rank-deficient: it
             // relinquishes yaw and cannot hold altitude (Mueller & D'Andrea),
             // which is what SWREQ-FALCON-FAULT-P02 actually claims ("the body
             // settles upright (no tumble)") and what the campaign code says.
@@ -1526,10 +1536,22 @@ fn run_supervised_rotorout(
                 let wd = sup.core().last_omega_d();
                 let tq = sup.core().last_torque();
                 let m = backend.last_motors();
+                // The last two columns are the quantities the FDI gate ACTUALLY
+                // reads. `g` above is the RAW gyro; the gate tests
+                // `gyro_f = gyro_lpf.filter(..)` (lib.rs:810,861). Computing a
+                // gate-shut fraction from the raw signal OVERSTATES it, because
+                // the low-pass removes exactly the high-frequency content that
+                // pushes rp_rate2 over the threshold. That error produced a
+                // "96.8% shut" figure which contradicted the observed outcomes
+                // (a gate shut 96.8% of the time that never reopens cannot
+                // yield 9 isolations in 12 trials). Emit the real ones so the
+                // fraction is computed from what the gate sees.
+                let (rp_rate2_f, tilt_cos, gate_open, _) = sup.core().fdi_diag();
                 println!(
-                    "RING {t:.4} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.4} {:.4} {:.4} {:.4}",
+                    "RING {t:.4} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.4} {:.4} {:.4} {:.4} {:.5} {:.5} {}",
                     g[0], g[1], g[2], wd[0], wd[1], wd[2], tq[0], tq[1], tq[2],
                     m[0], m[1], m[2], m[3],
+                    rp_rate2_f, tilt_cos, if gate_open { 1 } else { 0 },
                 );
             }
 

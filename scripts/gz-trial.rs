@@ -57,7 +57,7 @@ const SETTLE_EPS: f64 = 0.001;
 const KEEP: &[&str] = &[
     "verdict", "counters", "PASS", "FAIL", "datum", "calibration", "HOLD ERROR",
     "DIFFERENTIAL", "final NED", "wall/sim", "pace ", "BIT-IDENT", "LOOP CLOSES",
-    "esc telem", "rotor", "FDI ",
+    "esc telem", "rotor", "FDI ", "RING ",
 ];
 
 struct Args {
