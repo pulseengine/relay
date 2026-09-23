@@ -823,21 +823,6 @@ impl CascadePartition {
         } else {
             // NORMAL: full-attitude geometric desired-rate → ADRC torque → mix.
             let omega_d = self.geo.desired_rate(est.q, a_cmd, self.yaw_setpoint);
-            // GROUND HOLD (#270). While the airframe is still on its gear the
-            // plant CANNOT answer a torque command — the ground takes the
-            // moment. The ESO has no way to know that: it sees torque applied
-            // and no rate response, concludes a large disturbance, and
-            // integrates z2 at beta2 = omega_o^2 (1600 for roll/pitch). At
-            // liftoff that wound-up estimate is dumped into the actuators.
-            //
-            // `reset()`'s own doc says "e.g. on arming" — but it had ZERO call
-            // sites in the flight path, so the observer ran continuously from
-            // construction, straight through spin-up. Holding it at zero until
-            // the vehicle is flying leaves a pure proportional command on the
-            // ground (u = kp*omega_d/b0), which is what you want there.
-            if !self.flying() {
-                self.adrc.reset();
-            }
             let torque = self.adrc.tick(gyro_f, omega_d, dt);
             self.last_omega_d = omega_d;
             self.last_torque = torque;
@@ -848,22 +833,7 @@ impl CascadePartition {
             // this: attitude-priority `mix` collapsed collective near saturation
             // → never lifted. Zero-sum torque columns keep the mean (collective)
             // exactly `thrust` (v1.113).
-            let motors = self.mixer.mix_thrust_floor(torque, thrust, 0.0);
-            // ANTI-WINDUP (#270): tell the rate observer how much of that
-            // torque the mixer actually delivered. Thrust-priority means the
-            // torque is what gets scaled, so under saturation the vehicle
-            // receives `s * torque` while the ESO — absent this line —
-            // integrates the full `torque`. The residual then grows, the
-            // disturbance estimate winds up at beta2 = omega_o^2, and the
-            // control answers with MORE torque, which saturates harder.
-            // Measured on the gz plant: a rail-to-rail 3.5 Hz limit cycle
-            // established within 1 s of takeoff that never recovers, holding
-            // the rotor-out FDI gate shut for 96.8% of hover ticks (#398).
-            // The analytic plant cannot reproduce it — it hovers in a
-            // 0.0001-wide motor band, so `s` is always 1 there.
-            let s = self.mixer.last_torque_scale();
-            self.adrc.set_delivered_fraction([s, s, s]);
-            motors
+            self.mixer.mix_thrust_floor(torque, thrust, 0.0)
         };
 
         // ── Single-rotor-out FDI ── form the per-rotor effectiveness residual
