@@ -46,6 +46,14 @@ pub trait Physics {
     /// becomes a no-op there.
     fn measure(&mut self, noise_std: f32) -> (ImuSample, [f32; 3]);
 
+    /// TRUE tilt of the thrust axis from vertical (rad), from the PLANT —
+    /// not from the estimate, which is the thing a rotor-out verdict is
+    /// testing (#398). `None` means this plant cannot report it, and a
+    /// verdict that needs it must then fail rather than assume.
+    fn true_tilt_rad(&self) -> Option<f32> {
+        None
+    }
+
     /// Diagnostic counters — `(imu_recv, navsat_recv, motor_send)`.
     /// `None` for backends where the distinction is meaningless
     /// (MockPhysics, the stub). The real gz-transport bridge
@@ -163,6 +171,14 @@ impl MockPhysics {
 impl Physics for MockPhysics {
     fn name(&self) -> &'static str {
         "mock"
+    }
+
+    fn true_tilt_rad(&self) -> Option<f32> {
+        // cos(tilt) is the body-z component of the body→NED rotation:
+        // R[2][2] = 1 − 2(x² + y²).
+        let (x, y) = (self.q[1], self.q[2]);
+        let c = (1.0 - 2.0 * (x * x + y * y)).clamp(-1.0, 1.0);
+        Some(libm::acosf(c))
     }
 
     fn step(&mut self, motor_pwm: [f32; 4], dt: f32) {
@@ -456,6 +472,9 @@ mod gz_real {
         latest_position_ned_m: Mutex<[f32; 3]>,
         latest_velocity_ned: Mutex<Option<[f32; 3]>>,
         latest_heading_ned: Mutex<Option<f32>>,
+        /// TRUE tilt of the thrust axis from vertical (rad), from the model
+        /// pose gz publishes — the honest oracle for a rotor-out verdict.
+        latest_tilt_rad: Mutex<Option<f32>>,
         latest_mag_body_ned: Mutex<Option<[f32; 3]>>,
         imu_recv: AtomicU64,
         navsat_recv: AtomicU64,
@@ -620,6 +639,7 @@ mod gz_real {
                 latest_position_ned_m: Mutex::new([0.0; 3]),
                 latest_velocity_ned: Mutex::new(None),
                 latest_heading_ned: Mutex::new(None),
+                latest_tilt_rad: Mutex::new(None),
                 latest_mag_body_ned: Mutex::new(None),
                 imu_recv: AtomicU64::new(0),
                 navsat_recv: AtomicU64::new(0),
@@ -699,6 +719,15 @@ mod gz_real {
                             if yaw.is_finite() {
                                 last_yaw = Some(yaw);
                             }
+                            // Tilt is the angle between the body z axis and
+                            // world vertical: cos(tilt) = 1 − 2(x² + y²). That
+                            // holds in ENU and in NED alike — both measure the
+                            // same axis against the same vertical.
+                            let c = (1.0 - 2.0 * (o.x * o.x + o.y * o.y) as f32).clamp(-1.0, 1.0);
+                            let tilt = libm::acosf(c);
+                            if tilt.is_finite() {
+                                *self.latest_tilt_rad.lock().unwrap() = Some(tilt);
+                            }
                             break;
                         }
                     }
@@ -735,6 +764,10 @@ mod gz_real {
     }
 
     impl Physics for GazeboPhysics {
+        fn true_tilt_rad(&self) -> Option<f32> {
+            *self.latest_tilt_rad.lock().unwrap()
+        }
+
         fn name(&self) -> &'static str {
             "gazebo"
         }
