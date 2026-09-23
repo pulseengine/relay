@@ -1483,6 +1483,14 @@ fn run_supervised_rotorout(
     let started_at = Instant::now();
     let mut last_true = [0.0_f32; 3];
     let mut landed_at: Option<f32> = None;
+    // CONTROLLED descent, not merely arrival (#398). Reaching the ground is
+    // what a tumble does too: the old verdict was `landed && final_alt < 0.3`,
+    // which a crash satisfies. What FAULT-P02 claims is that the vehicle stays
+    // upright, isolates the dead rotor, and comes down where it was.
+    let mut peak_tilt_after = 0.0_f32;
+    let mut peak_horiz_after = 0.0_f32;
+    let mut isolated: Option<usize> = None;
+    let mut saw_true_tilt = false;
     {
         let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
         for step in 0..n {
@@ -1511,6 +1519,23 @@ fn run_supervised_rotorout(
                 let (accel, gyro) = backend.last_imu();
                 e.write_tick(step, t, last_true, accel, gyro, backend.last_motors(), None);
             }
+            if t >= fail_at_s {
+                // Tilt from the TRUE attitude the plant reports, not the
+                // estimate — the estimate is what we are testing.
+                if let Some(tilt) = backend.true_tilt_rad() {
+                    if tilt > peak_tilt_after {
+                        peak_tilt_after = tilt;
+                    }
+                    saw_true_tilt = true;
+                }
+                let h = (last_true[0] * last_true[0] + last_true[1] * last_true[1]).sqrt();
+                if h > peak_horiz_after {
+                    peak_horiz_after = h;
+                }
+                if isolated.is_none() {
+                    isolated = sup.core().failed_motor();
+                }
+            }
             if landed_at.is_none() && sup.mode() == Mode::Disarmed {
                 landed_at = Some(t);
                 eprintln!("  t={t:.1}s — TOUCHDOWN, Disarmed");
@@ -1525,10 +1550,28 @@ fn run_supervised_rotorout(
     }
     let wall = started_at.elapsed();
     let final_alt = -last_true[2];
-    let pass = landed_at.is_some() && final_alt < 0.3;
+    // FAULT-P02 on the real plant: the FDI isolates the rotor that died, the
+    // thrust axis stays upright through the descent (0.5 rad is the runaway
+    // limit the supervisor terminates on), the vehicle comes down near where
+    // it lost the rotor rather than flying away, and it ends Disarmed on the
+    // ground. "It reached the ground" is not the claim.
+    // A plant that cannot report true tilt cannot evidence this claim, so the
+    // verdict FAILS rather than passing on an unmeasured term.
+    // `final_alt < 0.3` ALONE accepts any negative number — and negative means
+    // BELOW the launch point, which is what a vehicle does when it disarms in
+    // the air and falls. Measured at 9f1df80, before this fix: the mock run
+    // ended at −358.70 m and the verdict said PASS. "On the ground" is a band,
+    // not an upper bound.
+    let pass = landed_at.is_some()
+        && (-0.3..0.3).contains(&final_alt)
+        && isolated == Some(0)
+        && saw_true_tilt
+        && peak_tilt_after < 0.5
+        && peak_horiz_after < 10.0;
     println!(
         "  verdict: backend={name} scenario=supervised-rotorout steps={n} fail_at={fail_at_s:.1}s \
-         landed_at={landed_at:?} final_alt={final_alt:.2}m mode-disarmed={} wall={:.2}s",
+         landed_at={landed_at:?} final_alt={final_alt:.2}m mode-disarmed={} isolated={isolated:?} \
+         peak_tilt_after={peak_tilt_after:.3}rad (measured={saw_true_tilt}) peak_horiz_after={peak_horiz_after:.2}m wall={:.2}s",
         landed_at.is_some(),
         wall.as_secs_f32()
     );

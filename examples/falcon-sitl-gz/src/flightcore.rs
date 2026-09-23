@@ -70,6 +70,12 @@ impl<'a> SitlBackend<'a> {
     }
 
     /// The true NED position sampled by the last `read_imu` (for evidence).
+    /// TRUE tilt from the plant (rad), or `None` if this plant cannot report
+    /// it — a rotor-out verdict must not judge the estimate by the estimate.
+    pub fn true_tilt_rad(&self) -> Option<f32> {
+        self.plant.true_tilt_rad()
+    }
+
     pub fn last_true_pos(&self) -> [f32; 3] {
         self.last_pos
     }
