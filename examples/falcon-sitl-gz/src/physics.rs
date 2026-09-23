@@ -46,6 +46,11 @@ pub trait Physics {
     /// becomes a no-op there.
     fn measure(&mut self, noise_std: f32) -> (ImuSample, [f32; 3]);
 
+    /// Turn on a launch-plane floor, for scenarios that LAND. Default is a
+    /// no-op: a plant with no ground cannot evidence a landing, and one whose
+    /// floor is always on cannot evidence a fall (#398).
+    fn set_ground_contact(&mut self, _on: bool) {}
+
     /// TRUE tilt of the thrust axis from vertical (rad), from the PLANT —
     /// not from the estimate, which is the thing a rotor-out verdict is
     /// testing (#398). `None` means this plant cannot report it, and a
@@ -112,6 +117,13 @@ pub trait Physics {
 /// `examples/falcon-sitl-hover`'s `Plant`. Kept here so the
 /// scaffold is runnable without external dependencies.
 pub struct MockPhysics {
+    /// Ground contact: the vehicle cannot descend below the launch plane.
+    /// DEFAULT OFF, as `SimBackend`'s is — this plant starts AT z = 0, so a
+    /// floor that is always on turns "released at rest" into "resting on the
+    /// ground" and a free-fall test can no longer fall. Scenarios that LAND
+    /// turn it on; without it a vehicle that disarms in the air falls for the
+    /// rest of the run and a landing verdict has nothing to measure (#398).
+    pub ground_contact: bool,
     /// Body-frame angular velocity (rad/s).
     pub omega: [f32; 3],
     /// Body-to-NED unit quaternion.
@@ -141,6 +153,7 @@ pub struct MockPhysics {
 impl MockPhysics {
     pub fn at_rest() -> Self {
         Self {
+            ground_contact: false,
             omega: [0.0; 3],
             q: [1.0, 0.0, 0.0, 0.0],
             p_ned: [0.0; 3],
@@ -171,6 +184,10 @@ impl MockPhysics {
 impl Physics for MockPhysics {
     fn name(&self) -> &'static str {
         "mock"
+    }
+
+    fn set_ground_contact(&mut self, on: bool) {
+        self.ground_contact = on;
     }
 
     fn true_tilt_rad(&self) -> Option<f32> {
@@ -253,6 +270,17 @@ impl Physics for MockPhysics {
             self.spec_force_ned[i] = thrust_ned[i] - drag;
             self.v_ned[i] += a * dt;
             self.p_ned[i] += self.v_ned[i] * dt;
+        }
+        // GROUND. Without it the plant has no floor: a vehicle that disarms in
+        // the air keeps accelerating downward for the rest of the run, and a
+        // rotor-out scenario ended 359 m below its launch point while the
+        // verdict called it landed. gz has ground; the analytic plant should
+        // not be the reason a landing verdict cannot be evaluated.
+        if self.ground_contact && self.p_ned[2] > 0.0 {
+            self.p_ned[2] = 0.0;
+            if self.v_ned[2] > 0.0 {
+                self.v_ned[2] = 0.0;
+            }
         }
     }
 

@@ -1463,6 +1463,8 @@ fn run_supervised_rotorout(
     let pace_real_time = physics.counters().is_some();
     let hover_thrust = if name == "mock" { 0.49 } else { 0.585 };
 
+    // This scenario LANDS, so the plant needs a floor to land on (#398).
+    physics.set_ground_contact(true);
     let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 200.0, cruise_alt_m, 14.0);
     sup.set_hover_thrust(hover_thrust);
     if name != "mock" {
