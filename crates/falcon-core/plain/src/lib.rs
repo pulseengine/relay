@@ -1264,6 +1264,13 @@ pub struct FlightSupervisor {
     /// value and the failsafe below could never fire (#413's in-flight half,
     /// found in the v1.139 candidate review).
     batt_missing_s: f32,
+    /// Whether a battery reading has EVER arrived. Silence only counts as a
+    /// failsafe once the vehicle has shown it has a sense to lose — the same
+    /// declare-on-first-sight rule the ESC-telemetry pre-arm row uses. A rig
+    /// that never had battery monitoring (the SITL backends report `None`)
+    /// must not be failsafed a second after takeoff; refusing to ARM without
+    /// a pack is #413's half and belongs to pre-arm, not to the air.
+    batt_seen: bool,
     /// Stored mission legs (NED), flown in order while in Mission mode.
     waypoints: [Vec3; MAX_WAYPOINTS],
     wp_count: usize,
@@ -1316,6 +1323,7 @@ impl FlightSupervisor {
             // Starts false: nothing has been read yet, so nothing is known.
             batt_present: false,
             batt_missing_s: 0.0,
+            batt_seen: false,
             waypoints: [home; MAX_WAYPOINTS],
             wp_count: 0,
             wp_index: 0,
@@ -1656,6 +1664,7 @@ impl FlightSupervisor {
         match b.read_battery_v() {
             Some(v) => {
                 self.batt_present = true;
+                self.batt_seen = true;
                 self.batt_missing_s = 0.0;
                 self.batt_state = self.batt_est.update(b.dt(), v, b.read_battery_i());
             }
@@ -1690,7 +1699,7 @@ impl FlightSupervisor {
         // far longer than any sane sense interval and far shorter than the
         // reserve an RTL needs.
         const BATT_SILENCE_S: f32 = 1.0;
-        let batt_lost = self.batt_missing_s > BATT_SILENCE_S;
+        let batt_lost = self.batt_seen && self.batt_missing_s > BATT_SILENCE_S;
         let batt_fail = self.batt_state.low || self.batt_state.critical || batt_lost;
         let breach = dist_home > self.fence_radius || batt_fail;
         if breach && self.fsm.is_airborne() && self.fsm.mode() != Mode::Land {
@@ -3520,6 +3529,34 @@ mod tests {
         assert!(
             matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
             "low battery must trigger a failsafe recovery, mode {:?}",
+            sup.mode()
+        );
+    }
+
+    /// **A rig that never had a battery sense must not be failsafed for it.**
+    /// The in-flight silence rule is declare-on-first-sight: the SITL and HITL
+    /// backends report `None` always, and the first version of that rule
+    /// grounded them one second after takeoff — measured on the gz bench's
+    /// `supervised-rotorout`, which went to `Land` at 1.0 s and `Disarmed` at
+    /// 1.6 s, long before the rotor it was testing even failed. Refusing to
+    /// ARM without a pack is the pre-arm gate's job (#413); the air is not the
+    /// place to discover it.
+    #[test]
+    fn a_vehicle_that_never_had_a_battery_sense_is_not_failsafed_in_flight() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        backend.battery_lost = true; // no reading, ever — as the SITL backends do
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut backend); // 16 s, far past the 1 s silence window
+        }
+        assert!(
+            matches!(sup.mode(), Mode::Takeoff | Mode::Loiter),
+            "a rig with no battery sense must keep flying, mode {:?}",
             sup.mode()
         );
     }

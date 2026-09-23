@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-BATTERY-003
     type: sw-verification
     title: "BATTERY-P03 — the lost-sense failsafe fires, and the test fails without it (v1.140)"
-    status: verified
+    status: implemented
     release: falcon-v1.140.0
     description: >
       Verifies SWREQ-FALCON-BATTERY-P03 in falcon-core's supervisor loop.
@@ -28,6 +28,28 @@ artifacts:
       NOT CLAIMED: anything about a pack whose readings are WRONG rather than
       absent. A stuck-plausible voltage is a different defect class (a
       plausibility/sanity check on the reading itself), not covered here.
+      A CORRECTION, AND WHY THIS IS BACK AT `implemented` (2026-09-23). The
+      first version of the silence rule did not ask whether the vehicle had
+      ever HAD a battery sense. Every SITL and HITL backend reports `None`
+      always — the gz bench's own `SitlBackend` implements no battery at all —
+      so one second after takeoff they were failsafed: measured on
+      `supervised-rotorout`, the vehicle went to `Land` at 1.0 s and
+      `Disarmed` at 1.6 s, long before the rotor it was testing failed at
+      8.0 s. That is a fail-SAFE direction but a wrong rule, and it grounded
+      harnesses that never claimed to monitor a pack.
+
+      The rule is now DECLARE-ON-FIRST-SIGHT, the same shape the ESC-telemetry
+      pre-arm row uses: silence counts only once a reading has arrived. A rig
+      that never had the sense keeps flying (refusing to ARM without a pack is
+      #413's half, and pre-arm is where it belongs); a rig that had one and
+      lost it still raises the failsafe within a second.
+
+      Both directions are tested:
+        - `losing_the_battery_sense_in_flight_actuates_failsafe` — seen, then
+          lost: the failsafe fires.
+        - `a_vehicle_that_never_had_a_battery_sense_is_not_failsafed_in_flight`
+          — never seen: 16 s of flight, still airborne.
+
     tags: [verification, falcon, battery, failsafe, v1.140]
     fields:
       method: automated-test
@@ -35,6 +57,8 @@ artifacts:
         - run: "cargo test -p falcon-core --lib losing_the_battery_sense_in_flight_actuates_failsafe"
         - run: "cargo test -p falcon-core --lib low_battery_actuates_failsafe"
         - run: "grep -q 'batt_missing_s' crates/falcon-core/plain/src/lib.rs"
+        - run: "cargo test -p falcon-core --lib a_vehicle_that_never_had_a_battery_sense_is_not_failsafed_in_flight"
+        - run: "grep -q 'self.batt_seen && self.batt_missing_s' crates/falcon-core/plain/src/lib.rs"
     links:
       - type: verifies
         target: SWREQ-FALCON-BATTERY-P03
