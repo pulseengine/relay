@@ -80,6 +80,23 @@ artifacts:
       NOT CLAIMED: a cause. No instrumented trace was taken; attributing the
       intermittency needs the fdi_diag() trace FV-FALCON-FAULT-004 used.
 
+      THIS FALSIFIES FV-FALCON-FAULT-003, WHICH IS `verified`. That artifact's
+      own falsification reads: "wrong if a single-rotor-out from a settled
+      hover is observed to exceed ~45° tilt ... on the analytic plant (this
+      oracle) OR THE GZ PLANT". All four trials exceed 45° (49.7, 50.8, 72.9,
+      180). It named the gz plant itself. Sharper still: FAULT-003 says the
+      defect it fixed was a flip "to ~180° (reproduced on the real gz plant)"
+      — which is rot1. Either that fix did not hold on gz or something since
+      regressed it. NOT claimed: that FAULT-003's own analytic oracle is
+      wrong (worst peak tilt 0.274 rad over 200 full-loop trials); it was not
+      re-run. The gap is oracle-vs-gz — the same gap FAULT-003 was written to
+      close. FV-FALCON-SIMMC-005 (1500 trials, worst 1.20 rad against a 1.4
+      bound) is also `verified` on a non-gz plant; its looser bound is not
+      directly breached here but it should be re-read in this light.
+      A `verified` artifact whose kill-criterion has been met is a MAINTAINER
+      decision (demote, or judge the gz clause over-reach) — not something
+      this pass resolves silently.
+
       WHY v1.140. Rotor-out recovery is a hold property under a fault; it
       belongs with HOLD-P01, and v1.141's SHOWCASE-P01 (engine drop) depends
       on it. STATUS STAYS `proposed`: the property does not hold on the plant
