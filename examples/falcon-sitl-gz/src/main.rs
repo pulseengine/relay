@@ -1514,6 +1514,25 @@ fn run_supervised_rotorout(
             sup.step(&mut backend);
             last_true = backend.last_true_pos();
 
+            // RING — same columns as run_flightcore's trace, so the two paths
+            // are directly comparable on one plant (#270). They are NOT the
+            // same today: flightcore's settled hover measures 0.0014 rad/s
+            // roll/pitch RMS with no motor saturation, while this path was
+            // measured at rp_rate2 ~4 (about 2 rad/s) in the ticks before the
+            // rotor kill. Same world, same commit, three orders of magnitude
+            // apart — so the ring belongs to a path, not to the plant.
+            if std::env::var_os("RING_TRACE").is_some() {
+                let (_, g) = backend.last_imu();
+                let wd = sup.core().last_omega_d();
+                let tq = sup.core().last_torque();
+                let m = backend.last_motors();
+                println!(
+                    "RING {t:.4} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.4} {:.4} {:.4} {:.4}",
+                    g[0], g[1], g[2], wd[0], wd[1], wd[2], tq[0], tq[1], tq[2],
+                    m[0], m[1], m[2], m[3],
+                );
+            }
+
             if std::env::var_os("FC_DEBUG").is_some() && step % 50 == 0 {
                 let e = sup.state();
                 eprintln!(
@@ -1753,6 +1772,26 @@ fn run_flightcore(
 
             core.step(&mut backend); // ← one PRODUCTION control tick + plant step
             last_true = backend.last_true_pos();
+
+            // RING — every tick, machine-readable, for the attitude limit cycle
+            // (#270). A limit cycle is diagnosed by its FREQUENCY and by where
+            // the loop saturates, not by an RMS: #270 reports the motors
+            // thrashing 0.1<->1.0 pair-wise, which is a RELAY oscillation whose
+            // period is set by loop phase, so an averaged number cannot tell
+            // the rate loop from the actuator lag. Columns are the whole
+            // rate-loop slice on one line: measured rate in, desired rate and
+            // commanded torque out, and the four motors that resulted.
+            if std::env::var_os("RING_TRACE").is_some() {
+                let (_, g) = backend.last_imu();
+                let wd = core.last_omega_d();
+                let tq = core.last_torque();
+                let m = backend.last_motors();
+                println!(
+                    "RING {t:.4} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.4} {:.4} {:.4} {:.4}",
+                    g[0], g[1], g[2], wd[0], wd[1], wd[2], tq[0], tq[1], tq[2],
+                    m[0], m[1], m[2], m[3],
+                );
+            }
 
             // FC_DEBUG — per-tick estimator trace to diagnose the gz divergence.
             if std::env::var_os("FC_DEBUG").is_some() && step % 25 == 0 {
