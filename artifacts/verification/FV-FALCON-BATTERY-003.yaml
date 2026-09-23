@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-BATTERY-003
     type: sw-verification
     title: "BATTERY-P03 — the lost-sense failsafe fires, and the test fails without it (v1.140)"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       Verifies SWREQ-FALCON-BATTERY-P03 in falcon-core's supervisor loop.
@@ -43,6 +43,12 @@ artifacts:
       that never had the sense keeps flying (refusing to ARM without a pack is
       #413's half, and pre-arm is where it belongs); a rig that had one and
       lost it still raises the failsafe within a second.
+
+      RE-PROMOTED 2026-09-23, after #475 merged as 854a0ac: all five steps
+      re-run on main, not on the branch. The scenario the first version broke
+      now reaches touchdown at 10.8 s and passes the strengthened rotor-out
+      verdict — FDI isolated rotor 0, peak TRUE tilt 0.048 rad, 6.83 m from
+      the failure point, ending at −0.00 m.
 
       Both directions are tested:
         - `losing_the_battery_sense_in_flight_actuates_failsafe` — seen, then
