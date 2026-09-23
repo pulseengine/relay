@@ -82,13 +82,32 @@ const MIXER_X: [[f32; 4]; 4] = [
 #[derive(Clone, Copy, Debug, Default)]
 pub struct QuadMixer {
     last_motors: [f32; 4],
+    /// Torque scale actually applied by the last saturating mix, in [0, 1].
+    /// 1.0 means the commanded torque was delivered in full.
+    ///
+    /// WHY IT IS RECORDED (#270). The mix is thrust-priority: when the
+    /// collective leaves too little headroom, the torque is scaled down and
+    /// the vehicle receives `s * torque`. A rate controller with an observer
+    /// (relay-adrc's ESO) that is not told `s` integrates a torque that was
+    /// never applied, its disturbance estimate winds up, and it answers with
+    /// MORE torque — which saturates harder. Measured on the gz plant that
+    /// latches into a rail-to-rail 3.5 Hz limit cycle within one second of
+    /// takeoff and never recovers. Reporting `s` is what makes anti-windup
+    /// possible in the layer above; this type does not act on it.
+    last_torque_scale: f32,
 }
 
 impl QuadMixer {
     pub const fn new() -> Self {
         Self {
             last_motors: [0.0; 4],
+            last_torque_scale: 1.0,
         }
+    }
+
+    /// Torque scale applied by the last mix, in [0, 1]. See the field.
+    pub fn last_torque_scale(&self) -> f32 {
+        self.last_torque_scale
     }
 
     pub fn last_motors(&self) -> [f32; 4] {
@@ -226,6 +245,7 @@ impl QuadMixer {
             m[i] = clamp_floor(base + s * d[i], floor);
         }
         self.last_motors = m;
+        self.last_torque_scale = s;
         m
     }
 

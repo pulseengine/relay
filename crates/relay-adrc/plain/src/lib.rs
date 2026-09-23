@@ -123,6 +123,14 @@ pub struct AdrcAxis {
     z2: f32, // lumped-disturbance estimate
     u_prev: f32,
     u_act: f32, // modelled delivered command (first-order actuator state)
+    /// Fraction of `u_prev` the ACTUATOR ALLOCATION actually delivered, in
+    /// [0, 1]; 1.0 until told otherwise, so an allocator that never reports
+    /// leaves behaviour bit-identical to before this field existed.
+    ///
+    /// Distinct from `u_act`, which models the actuator's LAG. Lag says the
+    /// torque arrives late; this says part of it never arrives at all,
+    /// because a saturated mixer scaled it away (#270).
+    u_delivered_frac: f32,
     g: AdrcGains,
 }
 
@@ -133,6 +141,7 @@ impl AdrcAxis {
             z2: 0.0,
             u_prev: 0.0,
             u_act: 0.0,
+            u_delivered_frac: 1.0,
             g,
         }
     }
@@ -185,10 +194,24 @@ impl AdrcAxis {
         // first-order filter matching the actuator τ; the ESO then sees
         // b0·u_act (the delivered torque) and stops mistaking the lag for
         // a disturbance. τ=0 → u_act tracks u_prev instantly (no model).
+        //
+        // ANTI-WINDUP (#270). `u_prev` is what we COMMANDED; the allocator may
+        // have delivered only `frac * u_prev`. Driving the ESO with the
+        // command under saturation makes it integrate a torque that was never
+        // applied: the residual grows, z2 winds up at beta2 = omega_o^2, the
+        // control answers with MORE torque, and the loop sustains its own
+        // saturation. Measured on the gz plant as a rail-to-rail 3.5 Hz limit
+        // cycle established within 1 s of takeoff, never recovering.
+        //
+        // `frac` is set by `set_delivered_fraction` AFTER the allocator has
+        // run, so tick N uses tick N-1's fraction. That is correct and not an
+        // off-by-one: the ESO is one tick behind by construction (it is told
+        // what was applied, which is only knowable after application).
+        let u_delivered = self.u_prev * self.u_delivered_frac;
         if self.g.tau.is_finite() && self.g.tau > 1e-4 {
-            self.u_act += dt * (self.u_prev - self.u_act) / self.g.tau;
+            self.u_act += dt * (u_delivered - self.u_act) / self.g.tau;
         } else {
-            self.u_act = self.u_prev;
+            self.u_act = u_delivered;
         }
         self.u_act = sanitise(self.u_act, 0.0);
 
@@ -212,6 +235,19 @@ impl AdrcAxis {
         self.z2 = 0.0;
         self.u_prev = 0.0;
         self.u_act = 0.0;
+        self.u_delivered_frac = 1.0;
+    }
+
+    /// Tell the observer what fraction of the last commanded control the
+    /// actuator allocation actually delivered (see `u_delivered_frac`).
+    /// Out-of-range or non-finite input is clamped to [0, 1]; 1.0 restores
+    /// the pre-#270 behaviour exactly.
+    pub fn set_delivered_fraction(&mut self, frac: f32) {
+        self.u_delivered_frac = if frac.is_finite() {
+            frac.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
     }
 }
 
@@ -365,6 +401,24 @@ impl AdrcRate {
         for a in &mut self.axes {
             a.reset();
         }
+    }
+
+    /// Report the fraction of the last commanded torque the ALLOCATOR actually
+    /// delivered, per axis, so each observer integrates what was applied rather
+    /// than what was asked for (#270).
+    ///
+    /// A saturating mixer scales the torque triple by one scalar `s`, so the
+    /// same `s` is normally passed for all three axes — but the signature is
+    /// per-axis because the axes are independent observers with different
+    /// tuning (yaw runs `omega_c=3.0, tau=0.025` against roll/pitch's `12.0`
+    /// and `0.0125`), and an allocator that desaturates in PRIORITY order
+    /// (MIX-P06: thrust ≻ roll/pitch ≻ yaw) gives up yaw before roll/pitch.
+    /// Passing one scalar to all three would then be a lie about the two axes
+    /// that kept their authority.
+    pub fn set_delivered_fraction(&mut self, frac: [f32; 3]) {
+        self.axes[0].set_delivered_fraction(frac[0]);
+        self.axes[1].set_delivered_fraction(frac[1]);
+        self.axes[2].set_delivered_fraction(frac[2]);
     }
 
     pub fn disturbance(&self) -> [f32; 3] {
