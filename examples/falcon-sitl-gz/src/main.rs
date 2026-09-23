@@ -199,7 +199,14 @@ fn run_scenario(
         "flightcore" => run_flightcore(physics, 2.0, duration_s, None, evidence),
         "flightcore-rotorout" => {
             // Hover, then lose rotor 0 at the midpoint; the production FDI must
-            // isolate it (RPM residual) and the loop keeps the vehicle aloft.
+            // isolate it (RPM residual) and the loop must keep the airframe
+            // UPRIGHT — not aloft. A three-rotor quad is rank-deficient: it
+            // relinquishes yaw and cannot hold altitude (Mueller & D'Andrea),
+            // which is what SWREQ-FALCON-FAULT-P02 actually claims ("the body
+            // settles upright (no tumble)") and what the campaign code says.
+            // This comment used to read "keeps the vehicle aloft", which
+            // contradicted the verdict two scenarios down and described a
+            // physical impossibility as the pass condition (#398).
             run_flightcore(
                 physics,
                 2.0,
@@ -1585,11 +1592,18 @@ fn run_supervised_rotorout(
 /// hand-rolled cascade every other scenario re-implements. The sim now exercises
 /// the code that SHIPS, not a parallel copy of it.
 ///
-/// Commands an altitude hold at `target_alt_m` — the closed loop the mock plant
-/// can demonstrate (it responds to collective thrust; differential-motor torque
-/// is approximated as zero, so horizontal translation and rotor-out recovery
-/// need the full-physics `--features gazebo` backend, the next slice). The same
-/// `FlightCore::step` drives both plants unchanged.
+/// Commands an altitude hold at `target_alt_m`. The same `FlightCore::step`
+/// drives both plants unchanged.
+///
+/// STALE UNTIL v1.140: this said the mock plant "approximates differential-motor
+/// torque as zero, so horizontal translation and rotor-out recovery need the
+/// gazebo backend". `MockPhysics` applies the verified mixer's real torque since
+/// #435 (`relay_mix_quad::motors_to_torque_signs`) — and the claim mattered,
+/// because while it was true every endurance row read exactly 0.000 m
+/// horizontal: the vehicle could not tilt, so it could not be pushed off
+/// station, so the gate passed vacuously (FV-FALCON-ENDURANCE-001).
+/// The mock plant is still not a physics engine — gz remains the tier that can
+/// satisfy a flight claim — but it is no longer torque-free.
 ///
 /// PASS = the true altitude settles within 0.5 m of the target with < 1.0 m
 /// steady RMS — the same bar as [`run_alt_only_hover`], but met by the *shipping*

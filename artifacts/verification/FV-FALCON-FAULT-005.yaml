@@ -20,13 +20,71 @@ artifacts:
       relay-rotor-out-parasitic-and-idealized-harness already cost once.
 
       EVIDENCE REQUIRED FOR `verified`: the same rotor-out scenario on the gz
-      plant, native AND wasm, holding altitude after the loss, run three
-      times (gz rig rule), with the command and its output recorded as
-      steps.
+      plant, native AND wasm, run three times against a PRISTINE server (gz
+      rig rule — the world does not reset), judged by CONTROLLED DESCENT:
+      the FDI isolates the failed rotor, peak tilt after the loss stays
+      bounded, the vehicle touches down and disarms.
+
+      TWO CORRECTIONS to this artifact's own earlier text, both made on
+      2026-09-23 before any measurement was accepted:
+
+      (1) IT DEMANDED MORE THAN THE REQUIREMENT DOES. It asked for "holding
+      altitude after the loss". SWREQ-FALCON-FAULT-P02's own
+      verification-criteria says "an injected rotor loss is isolated and the
+      body settles upright (no tumble)", and the requirement text names the
+      rank deficiency explicitly (Mueller & D'Andrea: the quad relinquishes
+      yaw and cannot hold altitude on three rotors). The campaign code says
+      the same. Altitude hold was never the claim; controlled descent is.
+      This is a correction toward the requirement, not a relaxation of it —
+      and it is recorded here rather than silently applied.
+
+      (2) IT ASKED FOR AN UNRUNNABLE STEP. "the command and its output
+      recorded as steps" would put `gz sim` in a `steps:` entry. gz is not on
+      the runners; this is the third instance of the rc=127 class, after
+      `gh pr view` (#461) and `./target/release/falcon-sitl-gz`
+      (FV-FALCON-ENDURANCE-001). The measurement belongs in a cited
+      bench-evidence finding; `steps:` assert the code properties that make
+      it reproducible.
+
+      MEASURED 2026-09-23 ON main e1d00be — IT DOES NOT HOLD. Four
+      pristine-server trials, four FAILs, full numbers in
+      bench-evidence/gz-sim/2026-09-23-v1.140-rotor-out-on-the-real-plant.md.
+      Control first: `--scenario=flightcore` PASSES on the same rig (2 m hold,
+      final 0.11 m, horizontal 0.01 m), so the bench can fly and the failure
+      is the rotor loss. Then, rotor 0 killed at 10.0 s of 25 s:
+
+        trial   isolated   peak tilt after   peak horiz after   landed/disarmed
+        rot1    None       3.142 rad (180°)  9.55 m             no / no
+        rot2    Some(0)    0.886 rad (50.8°) 3.94 m             11.148 s / yes
+        rot3    Some(0)    0.867 rad (49.7°) 8.38 m             10.972 s / yes
+        diag    Some(0)    1.272 rad (72.9°) 5.32 m             11.000 s / yes
+
+      Two failure modes from an unchanged binary on an unchanged world: one
+      total inversion with no isolation, and three isolate-and-come-down runs
+      whose peak tilt is 50–73° against a 0.5 rad bar. THE SPREAD IS THE
+      FINDING — whether the FDI isolates at all flips between runs, and an
+      intermittent FDI on a safety property is worse than a consistently
+      failing one, because a campaign that samples it a few times can report
+      success. (rot1's 9.55 m is inside the 10.0 m horizontal bar, so that
+      threshold is not carrying weight and is not validated by these runs.)
+
+      SCOPE: THIS IS THE NATIVE HALF ONLY. `--scenario=supervised-rotorout`
+      drives the native FlightSupervisor, and the gz branch applies tuning
+      (set_pos_var / set_process_floor / set_altitude_gains /
+      set_altitude_integral_gain) that the component does not receive —
+      main.rs says outright that "the wasm cascade flies this same FlightCore
+      with NONE of this tuning". #398 was reported against the WASM cascade,
+      so this is adjacent to that report, not a reproduction of it. The wasm
+      leg is tests/cascade-sitl-wasm (gazebo.yml), not this binary.
+
+      NOT CLAIMED: a cause. No instrumented trace was taken; attributing the
+      intermittency needs the fdi_diag() trace FV-FALCON-FAULT-004 used.
 
       WHY v1.140. Rotor-out recovery is a hold property under a fault; it
       belongs with HOLD-P01, and v1.141's SHOWCASE-P01 (engine drop) depends
-      on it.
+      on it. STATUS STAYS `proposed`: the property does not hold on the plant
+      it claims to hold on, so v1.140 cannot reach 11/11 by measurement —
+      only by a maintainer scope decision.
     tags: [verification, falcon, fault, rotor-out, gazebo, wasm, v1.140]
     fields:
       method: simulation
