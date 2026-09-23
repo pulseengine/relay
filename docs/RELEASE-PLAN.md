@@ -1,166 +1,101 @@
-# Release plan — falcon v1.139 → v1.142
+# Plan — best-in-class drone software, on gale, all in the WebAssembly component model
 
-*A view, not the source of truth.* Release scope lives in rivet (`release:` on each artifact) and readiness is computed by `scripts/release-readiness.rs`. This page maps every open issue to where it will be worked, so that nothing is invisible to the plan. Approved by the maintainer 2026-09-17.
+*A view, not the source of truth.* Scope lives in rivet (`release:` on each artifact); readiness is computed by `scripts/release-readiness.rs`. This page maps every open issue to the phase that owns it, so nothing is invisible to the plan.
 
-## How each release is closed
+**Goal set by the maintainer, 2026-09-23.** Supersedes the v1.139→v1.142 framing, which organised the work by release number. Release numbers are now an output; the phases below are the plan.
 
-1. Every artifact in the release's rivet scope reaches `verified`: implementation PR at most `implemented`, then a separate code-free promotion PR (two-commit rule, CI-enforced).
-2. **Independent review checkpoint** (v1.139, v1.140, v1.141): the maintainer runs `/code-review ultra` on the release candidate. The loop cannot start it. It stops and asks. Every finding is fixed, filed into a named release, or dismissed with a rationale, and `FV-RELAY-REVIEW-1xx` is promoted. Until then readiness reports the release **not ready**.
+## The thesis, stated so it can be falsified
+
+Four claims. Each is wrong if its test fails, and each has an owner phase.
+
+1. **Every flight capability is a component.** No monolith on the flight path. Today `crates/falcon-core` is 6,090 lines carrying the supervisor, every failsafe and the FDI — with **0 Kani harnesses**, and it is not in the `kani.yml` matrix. It is the exact opposite of the thesis and must *dissolve*, not grow.
+   *Wrong if:* a flight capability ships that is not a component, or `falcon-core` is still a monolith at the end of Phase 2.
+2. **Composition is free.** A `wac`-composed, `meld`-fused, `synth`-compiled cascade computes **bit-identical** motor outputs to the native core on the same frames, on a real physics engine (`DIFFERENTIAL=1`).
+   *Wrong if:* any non-zero per-motor difference, or the fused artifact cannot be built.
+3. **It runs on gale on real silicon**, and no oracle can hide a fault that silicon would take.
+   *Wrong if:* qemu passes something that BusFaults on a board — the exact shape of gale#398.
+4. **The flight behaviour is genuinely good.** Best-in-class is not an architecture claim. Nothing best-in-class hovers with a 115°/s attitude ring.
+   *Wrong if:* a healthy hover carries a limit cycle that a position-only verdict hides.
+
+### The constraint that shapes everything
+
+**Decomposition and memory packing are the same problem.** `synth`-dissolved objects address wasm linear memory as `[r11 + off]` with absolute wasm addresses near 1 MiB (gale#398). `fused.o` — *two* components — has data bases **1.1 MiB apart through one r11 base**, more RAM than any board here has (largest: WB55, 192 KB). gale's verdict: *"Not fixable in the embedder."*
+
+Every component added makes this worse. So **`meld --pack-rebase` working on the flight object is a precondition for the whole thesis**, not a later optimisation. It is already proven on the iso-core path, and jess measured it at 5× on the M7.
+
+And note what currently lowers to the M7 is the **legacy PID cascade**, not the law we fly. The one existing proof-point for "our stack runs as components on silicon" is about code we do not use.
+
+## Phase 0 — make the ground true *(current)*
+
+Everything downstream measures against the plant. Fix the plant's story first.
+
+- **#270 — the attitude limit cycle is the root defect.** Filed 2026-07-14 at ~1 rad/s; measured 2026-09-23 at **1.90–2.12 rad/s** with motor commands thrashing saturation-to-saturation. The 1→2 rad/s FDI gate widening used to work around it **has been consumed**.
+- **#398 — rotor-out does not recover on the gz plant.** Downstream of #270: the FDI gate is shut 60% of healthy-hover ticks, so detectability is decided by limit-cycle phase at the instant of failure (5/5: gate open ⇒ isolated in one tick; gate shut ⇒ 180° inversion). 12 trials: 11 FAIL / 1 PASS. `FV-FALCON-FAULT-003` was demoted `verified`→`implemented` when its own falsification clause was met (#479).
+- Related plant-fidelity debt: #403, #434 (hold diverges at ≤10 Hz aiding), #435 (torque-free MockPhysics), #452 (accelerometer cannot show thrust), #290 (notch oracle non-deterministic), #477 (legacy `hover` scenario diverges).
+- **Christof is the oracle here.** The bench wobble and the gz ring are to be worked as **one** defect, not two. His capture is the only real-vehicle datum that exists.
+
+## Phase 1 — the seam returns state
+
+`step(sensors, target) -> motor-pwm` returns nothing, so the verified MAVLink stack has nothing to read, no log exists, and no shadow flight can be compared.
+
+**jess specified the shape on jess#167 (2026-09-22):** second export — *not* on `step`, so the M4 can read state without executing a control tick; **seqlock** with the tick count first *and* last; **OCRAM** (DTCM is M7-private and invisible to the M4); **32-byte aligned** and padded to a multiple, so a partial cache invalidate cannot tear it; fixed layout, validity bitmask, no `option<>`/lists; monotonic tick that never resets. Cadence deliberately **unspecified** — it is to be *measured* from the tick delta on the first shadow flight, not invented.
+
+Correction jess supplied to our premise: there is **no flattening cliff on returns** (`MAX_FLAT_RESULTS` is 1; every export already returns a pointer). State-return size costs bytes, not a calling-convention change — do not design around it.
+
+`SWREQ-FALCON-TRANSPORT-P01`. A `falcon-cascade` version bump ⇒ **announced before publishing** (the v1.133 path-move lesson).
+
+## Phase 2 — the component model becomes real
+
+`SWREQ-FALCON-OCI-P07`. The decomposition already exists in `wit/falcon-cascade/cascade.wit` — but it decomposes the **legacy PID** cascade. Per `scripts/audit-component-deps.rs`, `relay-geo` and `relay-adrc` — the flown middle stages — have **no component at all**.
+
+- Componentize `relay-geo` + `relay-adrc`. Until these exist, no composition can produce the flown law.
+- Reshape the cascade world to **import** stage interfaces (#393: it imports nothing, so `wac plug` has no socket — correct behaviour, and how this was found).
+- Stop publishing the legacy stage components (#388, #411, #412, #419, #385). "Something labelled legacy beats nothing" is wrong when it is cosign-signed and an integrator has already fused it.
+- #376 — per-tick reference vectors for the full cascade (jess's differential covers 2 of 5 stages).
+
+## Phase 3 — fit on silicon
+
+- **gale#398** — rebuild the flight object with `meld --pack-rebase` so every data address fits one RAM window; add the object-to-embedder **mechanical oracle** so qemu can never again pass what silicon faults on.
+- #330 — the wit-bindgen fork: gale-owned arena instead of a per-component one. Directly reduces per-component memory, so it belongs here rather than in platform work.
+- #407 — `//:falcon-cascade-coverage` fails to fuse (duplicate `cabi_realloc$2`) and is in no workflow.
+- #214 (relay-hal seams + DroneCAN components), #177 (no_std shared-memory transport), #157 (the 7-item hardware register).
+- Exit criterion: **one *flown* stage runs on the M7** — not a legacy one.
+
+## Phase 4 — the safety layer, as components
+
+**This phase is the first-flight blocker.** `relay_fsm::Mode` is `Disarmed | Armed | Takeoff | Loiter | Mission | Land | Rtl | Terminated` — **no Manual, no Stabilized, no Acro** — and the `FlightBackend` seam has **no RC channel at all**. There is no way for a human to take the sticks. No sane first-flight protocol permits that.
+
+- `relay-rc` as a component + an RC channel in the seam + manual modes in the mode machine.
+- `relay-fsafe` — the **verified** failsafe arbiter — replacing the subset `falcon-core` hand-rolls inline. Two implementations exist; the unused one is the verified one.
+- #414 — the shipped component has no supervisor: no geofence, battery, runaway-cut or pre-arm. A host embedding it gets a stabiliser that will not stop for anything.
+- `SWREQ-FALCON-ORPHAN-P01` covers the disposition of the rest. Flight-blocking orphans are `relay-rc`, `relay-fsafe`, `relay-arm`, `relay-mavlink`/`falcon-mavlink`, `falcon-param`. **Park** (do not wire) the parity-table filler: `relay-modextra`, `relay-mix-multi`, `relay-sensvote`, `relay-avoid`, `relay-offboard`, `relay-traj` — built to tick rows in a table that was itself wrong for 82 versions (#422).
+- Kani the supervisor path, or dissolve it into proven component crates so it inherits their proofs.
+
+## Phase 5 — evidence on a real vehicle
+
+- **Shadow flight.** jess already runs a live read-only CRC-gated MAVLink feed off the FMU USB (ATTITUDE ~85 Hz) and can log PX4's estimate plus raw sensors **today** — and ours the moment Phase 1 lands.
+- Then **PX4 Offboard, one loop at a time** (rate → attitude → position), PX4 able to take back instantly. This needs **no silicon bring-up**, and was never previously written down as an option.
+- Then first supervised free flight, pilot on sticks, PX4 IO as failsafe.
+- #362 — head-to-head control-loop benchmark against PX4 on the same hardware.
+
+## Platform and integrity — runs alongside, never blocks a flight phase
+
+- **Verification tracks that are dark or vacuous:** #405 (Verus has verified nothing since 2026-09-11 — and its 16 crates are all cFS-DNA, so **no flight-path crate has ever been under Verus**), #418, #202/#145 (witness MC/DC never produced on the real flight component), #216 (sigil never wired; release is cosign-only), #253, #265, #303.
+- **Gates that can pass vacuously:** #410, #417, #415, #422.
+- **CI flow:** #436, #449, #429, #350, #345, #373, #153, #222, #260.
+- **Trace hygiene:** #261, #262. `verified` should be **computed** from a named test green on `main`, not hand-promoted.
+- #372 — feedback wanted: needs and wishes for relay.
+
+## How a release is closed
+
+1. Every artifact in the release's rivet scope reaches `verified`.
+2. **Independent review checkpoint**: the maintainer runs `/code-review ultra`. The loop cannot start it and stops to ask. `FV-RELAY-REVIEW-1xx` blocks readiness until then.
 3. Readiness reports ready → **the loop says so and asks**. It never tags on its own. A tag means a signature and a partner pulling the result.
-4. Dark or vacuous verification tracks are listed in the release notes (SWREQ-RELAY-VGATE-P04).
+4. Dark or vacuous verification tracks are named in the release notes (`SWREQ-RELAY-VGATE-P04`).
 
-## Why this order
+## Releases in flight
 
-- **v1.139 first and short**: the fixes are merged. What remains is promotion, correcting published claims that users choose components by, and evidence that resolves.
-- **v1.140 before v1.141**: the showcase flies a hold and an engine drop, so it cannot pass until the hold is bounded (#403/#434) and rotor-out recovers on the real plant (#398).
-- **v1.142 platform work runs alongside**, never blocking a flight release.
-
-## falcon-v1.139.0 — Integrity: honest gates, honest claims
-
-Cuttable in days. Mostly promotion PRs for fixes already merged.
-
-**Merged, awaiting promotion / tag**
-
-- #413 — FAIL-UNSAFE: read_battery_v defaults to 16.0 V — a healthy pack — and nothing in the flight path overrides it — *FV-FALCON-BATT-003 — fix merged in #430; this issue closes WITH the tag*
-- #429 — CI jobs wedge in_progress for 30x their normal duration, and the fleet monitor cannot see it (watches queued, not stuck) — *SWREQ-RELAY-FLEET-P01 — wedge alarm + Kani cap merged (#432); the stalling harness itself moved to SWREQ-RELAY-MIXPROOF-P01 in v1.140*
-- #436 — The fleet monitor has never measured starvation: gh isn't installed on the light runners, and every green run since 2026-08-07 was an empty result — *SWREQ-RELAY-FLEET-P01 — gh installed on light (#437, in flight); cron cadence continues under CIFLOW-P01*
-- #153 — Self-hosted runners lack `gh` (+ Node 20 deprecation): verification-gate PR comment can't post on smithy — *SWREQ-RELAY-FLEET-P01 — verification-gate PR comment gets gh (#437, in flight)*
-
-**Published claims must match what ships — SWREQ-FALCON-CLAIMS-P01**
-
-- #412 — Published OCI components advertise "Formally-verified geometric SO(3)" while wrapping the unverified legacy PID controller
-- #411 — #388 is incomplete: the legacy 5-stage cascade still lives in wasm/cm/cascade/ and ships cosign-signed in v1.138.0
-- #419 — Documentation integrity: the #388 correction never reached any document that tells someone what to DEPLOY
-- #422 — docs/PX4-PARITY-ASSESSMENT.md is 82 versions stale and credits unreachable capability as delivered — it answers the wrong way on the exact question it exists for
-
-**Evidence must resolve — SWREQ-RELAY-EVIDENCE-P01**
-
-- #415 — Verification-artifact integrity sweep: 15 of 293 cite something that does not resolve; 6 verified artifacts execute nothing in CI
-
-## falcon-v1.140.0 — Hold: a position hold that stays bounded
-
-HOLD-P01 first: an hours-long hold is meaningless while a 60 s hold diverges.
-
-**SWREQ-FALCON-HOLD-P01**
-
-- #452 — `SimBackend`'s accelerometer cannot show thrust: 18 closed-loop hold tests run on a vehicle that never accelerates — *the harness fix and the estimator fix must land together (#434); disclosed as a structural gap in the v1.139 notes by maintainer decision 2026-09-17*
-- #403 — Horizontal position loop diverges after ~26 s of hold — was hidden under the altitude limit cycle (#396) — *the blocker for flying longer than ~26 s*
-- #434 — FlightCore's hold loop is UNSTABLE when position fixes arrive at ≤10 Hz — zero noise, deterministic, reproduces on SimBackend in <1 s (likely mechanism of #403) — *mechanism measured 2026-09-17: two failures, the harness's gravity-only accelerometer (vertical) and the per-tick `update_gravity` on a specific-force reading (all fix rates). Proposed fix: gravity update on the ground only + honest harness; gz run is the confirming measurement*
-
-**SWREQ-FALCON-ENDURANCE-P01**
-
-- #435 — MockPhysics applies NO torque — the analytic soak's 12 h hold is 1-D altitude on a vehicle that cannot tilt, and ENDURANCE-P01 draws a controller conclusion from it — *move the Tier-1 soak to a plant that can tilt; check horizontal hold*
-- #257 — Verification fidelity: audit safety-behavior campaigns for idealized-harness blind spots — *same class as #435: audit campaigns for idealized-harness blind spots*
-
-**FV-FALCON-FAULT-005 (re-verifies SWREQ-FALCON-FAULT-P02 on the gz plant)**
-
-- #398 — Rotor-out recovery does not hold on the gz plant — vehicle descends with OR without ESC telemetry
-
-**SWREQ-RELAY-MIXPROOF-P01 — the MIX-P06 proof stops stalling the Kani gate** (pulled forward from CIFLOW-P01 by maintainer decision, 2026-09-17)
-
-- #429 — `verify_mix_priority_bound` stalled 13 of 42 CI executions (31%), three times on main on 2026-09-17 — *compositional proof: `scale_to_fit` contract + `stub_verified`; verified after 10 consecutive CI executions without a stall*
-
-**Candidates — scoped at the start of v1.140 if HOLD work touches them**
-
-- #270 — gz plant hovers with an attitude limit-cycle (~1 rad/s roll/pitch, motor thrash 0.1↔1.0) — *gz attitude limit-cycle*
-- #290 — Notch closed-loop hover is a non-deterministic oracle: chaotically fragile under rotor-line vibration (kernel-agnostic; mechanism unknown) — *notch closed-loop hover is a non-deterministic oracle*
-
-## falcon-v1.141.0 — Flying demo: showcase, wired supervisor, configuration
-
-Needs v1.140's hold and rotor-out recovery.
-
-**SWREQ-FALCON-ORPHAN-P01 + SWREQ-FALCON-CONFIG-P01 + SWREQ-FALCON-SHOWCASE-P01**
-
-- #414 — FlightSupervisor — every failsafe, the mode machine and all 19 pre-arm rows — is absent from the shipped component — *wire FlightSupervisor into the flown path*
-- #385 — falcon-flight embeds a simulator and cannot be driven — and it is the only loose .wasm we ship — *falcon-flight embeds a simulator and cannot be driven — wire, park or retire*
-
-**Candidate**
-
-- #277 — Blackbox TickRecord schema v2: log battery samples (v, i) for replay-exact BATTERY-P02 — *blackbox TickRecord v2 with battery samples, for replay-exact battery behaviour in the demo*
-
-**SWREQ-FALCON-TRANSPORT-P01 — one supported transport binding for the cascade seam**
-
-- #466 — `falcon-hitl`'s link frame cannot carry heading, rotor RPM, or an absent battery — *superseded: the frame is retired rather than patched, and the binding carries the seam's own record. `SimServer` is re-pointed at it as the reference host, keeping the no_std framing.*
-- The binding also covers the RETURN direction: `step` gives a host motor commands and nothing else, so the verified MAVLink telemetry stack (MAVLINK-P06, v1.119) has nothing to read and a shadow flight produces no evidence. That needs a `falcon-cascade` version bump — announced, because an integrator is already flying the seam (jess#167, 2026-09-22).
-
-**SWREQ-FALCON-OCI-P07 — the published stage components shall compose into the FLOWN law (wac → meld → synth)**
-
-Raised by the bench engineer (Christof, 2026-09-23): *"falcon cascade is only a middle, and it should be built out of components."* Both halves measured and true.
-
-- The decomposition already exists in `wit/falcon-cascade/cascade.wit` (five stage worlds) — but it decomposes the **legacy PID** cascade. Per `scripts/audit-component-deps.rs`: `position`/`attitude`/`rate` wrap `relay-pos`/`relay-att`/`relay-rate`, while the flight core flies `relay-geo` + `relay-adrc` — and **both of those have no component at all**. `docs/OCI-DISTRIBUTION.md` already says the consequence: *"Fusing the per-stage components does not produce the flown control law."*
-- Composition path is **specified, not open** (maintainer, 2026-09-23): component model → `wac` → `meld` → `synth`. meld fuses at build time, so the per-stage boundary is authoring/verification structure that is **erased before deployment** — it costs no runtime seam, and `DIFFERENTIAL=1` runs against the fused artifact. OCI-P05 (relocation metadata for meld) is the groundwork.
-- First tractable step is wrapping `relay-geo` and `relay-adrc`; until they exist no composition can produce the flown law. #393 (the cascade component imports nothing, so `wac plug` has no socket) is the seam blocker after that.
-- **Ordering:** this leads, ORPHAN-P01's retirement of the legacy stage components follows — publishing something labelled legacy beats publishing nothing until a flown replacement exists.
-
-## falcon-v1.142.0 — Platform
-
-Independent of the flight releases; must not hold them up.
-
-**SWREQ-RELAY-VGATE-P05 — every cited verification track RUNS**
-
-- #405 — Verus track has verified NOTHING since 2026-09-11 — toolchain cannot find core/std, all 19 proofs fail in 0.1s
-- #418 — verus.yml PR trigger is path-filtered on LEAN paths — the Verus gate never runs on a PR that touches a Verus proof
-- #410 — The required verification gate has no main backstop, and its scope filter is blind to wasm/ — the shipped components
-- #407 — bazel: //:falcon-cascade-coverage fails to fuse — duplicate export cabi_realloc$2 — and is in no workflow
-- #417 — All three required gates can pass vacuously for a PR that touches only the shipped wasm components
-
-**SWREQ-RELAY-CIFLOW-P01 — green PRs merge; verdicts not decided by luck**
-
-- #373 — CI: three green PRs sat unmergeable for 3 weeks — strict protection + auto-merge deadlocks, and a merge queue has two known gaps
-- #350 — Verification gate has grown to meet its own 90-minute timeout — required check now fails ~half the time
-- #345 — Verification gate: 'rivet validate' failed once, unreproducible — intermittent failure in a REQUIRED check
-
-**Re-baselining the reference plant (recorded 2026-09-22)**
-
-- gz 0.11 (`gz-msgs`/`gz-transport`) is a BREAKING API change: the message types moved behind a `GzMessage` trait and `falcon-sitl-gz` fails with 13 errors. Dependabot's #469/#470 were closed with the measurement. Every published gz number — the 2 m hold at 0.12 m, the 40 s → 300 s ladder, the wasm/native bit-identical equivalence over 6 250 ticks — was produced on 0.10, so the port is a deliberate re-baselining with its own re-measurement, not a dependency merge.
-
-**SWREQ-FALCON-OCI-P03 / SWREQ-FALCON-MATHF32-P06 / SWREQ-FALCON-OPSHELL-P01**
-
-- #330 — Consume pulseengine/wit-bindgen (cabi-realloc-extern): gale-owned arena instead of a per-component one — *wit-bindgen fork (OCI-P03)*
-- #303 — Machine-checked FP kernel proof — remaining layers (approximation + argument reduction) — *machine-checked FP kernel proof (MATHF32-P06)*
-
-## Backlog — deliberately NOT scheduled in v1.139–v1.142
-
-Real, but not on this arc's critical path. Re-evaluated when the arc closes, or pulled forward on request (e.g. by jess).
-
-**Hardware bring-up (with jess)**
-
-- #157 — Hardware bring-up round (v1.57+): the 7-item flight-readiness register
-- #214 — relay-hal: consolidate + complete the peripheral-abstraction seams (RegBus/Serial/Pwm/Adc/Can) + DroneCAN components for the i.MX RT1176 bring-up
-- #177 — Software Bus: provide a no_std shared-memory/ipc_service transport backend behind the stream<T> seam (inter-core)
-- #376 — v1.137: publish per-tick reference vectors for the full cascade — jess's on-target differential covers 2 of 5 stages
-
-**Verification depth**
-
-- #4 — End-to-end verification chain: Verus → Rocq → Lean → Kani for all five engines
-- #145 — witness MC/DC on the real flight component (falcon_flight_component.wasm)
-- #202 — witness MC/DC: harness can't invoke async-lift stream exports (composed pipeline coverage is 0/2713)
-- #222 — Release standard: promote manual witness run to a CI gate, add scry
-- #216 — Attestation chain: wire sigil (native Ed25519 endorsement) before cosign — release ships cosign-only (step-6 gap, v1.78–v1.81)
-- #265 — Prove the ~30 external_body codec/CRC bodies with ordeal (upgrade proptest → certificate)
-- #253 — approach: single-source the Verus/Kani engine (generation) + refine the Rocq model to the actual Rust
-- #260 — relay-traj Kani harnesses hang CBMC — bound and enroll in the kani.yml matrix
-
-**Traceability structure**
-
-- #261 — rivet hygiene: decompose the architecture layer (5 swarch for 219 swreq)
-- #262 — rivet hygiene: backfill release: fields + convert whole-crate verification steps to named tests
-
-**Distribution**
-
-- #289 — release.yml: flight wasm dropped out of the top-level SHA256SUMS.txt at v1.123 (bundle SHA256SUMS still covers it — consistency, not integrity)
-- #306 — Roll out signed ghcr OCI publish + wasm.directory to the org's wasm-releasing repos
-
-**Performance**
-
-- #362 — PERF-P01 second half: benchmark PX4's control loop head-to-head on the same hardware
-- #8 — Add criterion benchmarks for per-engine throughput (LC, SCH, SC, HS, CFDP)
-- #7 — Add tokio-rs/loom harnesses for stream-channel backpressure
-
-**Community**
-
-- #372 — Feedback wanted: needs and wishes for relay — *open call for feedback — informational, not a work item*
-
----
-
-Coverage check at generation: 49 of 49 open issues mapped, each exactly once. Issues closed while planning: #427 (fixed by #428), #380 and #384 (fixed in falcon-v1.138.0).
+- **falcon-v1.139.0 — SHIPPED** 2026-09-18 (`97ee07e`, signed, 20 assets; notes disclose Verus dark and 7 structural gaps).
+- **falcon-v1.140.0 — 9/11.** Blocked on `FV-FALCON-FAULT-005` (Phase 0: rotor-out cannot be verified while #270 stands) and `FV-RELAY-REVIEW-140` (maintainer review). **Not tag-ready, and the loop cannot clear either item.**
+- **falcon-v1.141.0** — Phases 1–2 (`TRANSPORT-P01`, `OCI-P07`, `ORPHAN-P01`, `SHOWCASE-P01`).
+- **falcon-v1.142.0** — platform integrity, alongside.
