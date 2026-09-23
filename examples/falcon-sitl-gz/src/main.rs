@@ -1498,6 +1498,10 @@ fn run_supervised_rotorout(
     let mut peak_horiz_after = 0.0_f32;
     let mut isolated: Option<usize> = None;
     let mut saw_true_tilt = false;
+    // Ticks after the kill to trace; unset = no trace (shipped behaviour).
+    let fdi_trace_window: Option<u32> = std::env::var("FDI_TRACE")
+        .ok()
+        .and_then(|s| s.parse().ok());
     {
         let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
         for step in 0..n {
@@ -1521,6 +1525,32 @@ fn run_supervised_rotorout(
                     e.v[2],
                     backend.last_motors(),
                 );
+            }
+            // FDI_TRACE — the gate race, per tick, in a window around the kill
+            // (#398/#479). The FDI only runs while `fdi_steady` holds
+            // (tilt_cos > 0.90 && rp_rate2 < 4.0 — roughly 26 deg and 2 rad/s).
+            // After a rotor dies the airframe departs, so there is a RACE:
+            // either the CUSUM accumulates enough to isolate before the gate
+            // slams shut, or the gate closes first and the detector never sees
+            // the residual again. That race is the candidate explanation for
+            // isolation flipping between runs of an unchanged binary. It is
+            // logged, not assumed — `isolated_at` below is the tick the latch
+            // actually set, against `gate_open` in the same row.
+            if let Some(w) = fdi_trace_window {
+                let lo = fail_step.saturating_sub(25);
+                if step >= lo && step <= fail_step + w {
+                    let (rp_rate2, tilt_cos, gate_open, resid) = sup.core().fdi_diag();
+                    eprintln!(
+                        "FDI t={:+.3} gate={} tilt_cos={:.4} rp_rate2={:.3} resid=[{:.3} {:.3} {:.3} {:.3}] failed={:?} true_tilt={:?}",
+                        t - fail_at_s,
+                        if gate_open { "OPEN" } else { "shut" },
+                        tilt_cos,
+                        rp_rate2,
+                        resid[0], resid[1], resid[2], resid[3],
+                        sup.core().failed_motor(),
+                        backend.true_tilt_rad().map(|v| (v * 1000.0).round() / 1000.0),
+                    );
+                }
             }
             if let Some(ref mut e) = evidence {
                 let (accel, gyro) = backend.last_imu();

@@ -49,10 +49,15 @@ const WORLD_SDF: &str = "examples/falcon-sitl-gz/worlds/falcon-quad.sdf";
 /// Two consecutive pose reads within this many metres means "at rest".
 const SETTLE_EPS: f64 = 0.001;
 /// Lines worth echoing from a trial. Anything else is noise at this level.
+/// Output allowlist. A line the trial prints is DROPPED unless it contains one
+/// of these — which silently swallowed the whole `FDI_TRACE` dump on 2026-09-23
+/// (the trace fired on the mock backend and appeared to produce nothing through
+/// this driver). If you add a diagnostic to a scenario, add its prefix here or
+/// the driver will hide it from you.
 const KEEP: &[&str] = &[
     "verdict", "counters", "PASS", "FAIL", "datum", "calibration", "HOLD ERROR",
     "DIFFERENTIAL", "final NED", "wall/sim", "pace ", "BIT-IDENT", "LOOP CLOSES",
-    "esc telem", "rotor",
+    "esc telem", "rotor", "FDI ",
 ];
 
 struct Args {
