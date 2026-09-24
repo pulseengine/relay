@@ -1509,9 +1509,8 @@ fn run_supervised_rotorout(
     let mut isolated: Option<usize> = None;
     let mut saw_true_tilt = false;
     // Ticks after the kill to trace; unset = no trace (shipped behaviour).
-    let fdi_trace_window: Option<u32> = std::env::var("FDI_TRACE")
-        .ok()
-        .and_then(|s| s.parse().ok());
+    let fdi_trace_window: Option<u32> =
+        std::env::var("FDI_TRACE").ok().and_then(|s| s.parse().ok());
     {
         let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
         for step in 0..n {
@@ -1549,9 +1548,22 @@ fn run_supervised_rotorout(
                 let (rp_rate2_f, tilt_cos, gate_open, _) = sup.core().fdi_diag();
                 println!(
                     "RING {t:.4} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.4} {:.4} {:.4} {:.4} {:.5} {:.5} {}",
-                    g[0], g[1], g[2], wd[0], wd[1], wd[2], tq[0], tq[1], tq[2],
-                    m[0], m[1], m[2], m[3],
-                    rp_rate2_f, tilt_cos, if gate_open { 1 } else { 0 },
+                    g[0],
+                    g[1],
+                    g[2],
+                    wd[0],
+                    wd[1],
+                    wd[2],
+                    tq[0],
+                    tq[1],
+                    tq[2],
+                    m[0],
+                    m[1],
+                    m[2],
+                    m[3],
+                    rp_rate2_f,
+                    tilt_cos,
+                    if gate_open { 1 } else { 0 },
                 );
             }
 
@@ -1587,9 +1599,14 @@ fn run_supervised_rotorout(
                         if gate_open { "OPEN" } else { "shut" },
                         tilt_cos,
                         rp_rate2,
-                        resid[0], resid[1], resid[2], resid[3],
+                        resid[0],
+                        resid[1],
+                        resid[2],
+                        resid[3],
                         sup.core().failed_motor(),
-                        backend.true_tilt_rad().map(|v| (v * 1000.0).round() / 1000.0),
+                        backend
+                            .true_tilt_rad()
+                            .map(|v| (v * 1000.0).round() / 1000.0),
                     );
                 }
             }
@@ -1810,8 +1827,19 @@ fn run_flightcore(
                 let m = backend.last_motors();
                 println!(
                     "RING {t:.4} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.4} {:.4} {:.4} {:.4}",
-                    g[0], g[1], g[2], wd[0], wd[1], wd[2], tq[0], tq[1], tq[2],
-                    m[0], m[1], m[2], m[3],
+                    g[0],
+                    g[1],
+                    g[2],
+                    wd[0],
+                    wd[1],
+                    wd[2],
+                    tq[0],
+                    tq[1],
+                    tq[2],
+                    m[0],
+                    m[1],
+                    m[2],
+                    m[3],
                 );
             }
 
