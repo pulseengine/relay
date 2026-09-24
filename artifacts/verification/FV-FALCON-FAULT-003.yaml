@@ -2,9 +2,45 @@ artifacts:
   - id: FV-FALCON-FAULT-003
     type: sw-verification
     title: "Single-rotor-out FULL-LOOP recovery — parasitic-free rank-3 allocation + production-core spin-descent oracle (v1.114)"
-    status: verified
+    status: implemented
     release: falcon-v1.114.0
     description: >
+      DEMOTED verified -> implemented on 2026-09-23 by maintainer decision
+      (#479), because THIS ARTIFACT'S OWN FALSIFICATION CONDITION IS MET.
+      Its closing line reads: "wrong if a single-rotor-out from a settled
+      hover is observed to exceed ~45° tilt, spin past ~10 rad/s, or fail to
+      reach a near-upright landing — on the analytic plant (this oracle) OR
+      THE GZ PLANT". Measured on gz at main e1d00be, rotor 0 killed at 10.0 s
+      of 25 s, four trials each on a PRISTINE server (the gz world does not
+      reset), peak tilt after the loss: 49.7°, 50.8°, 72.9° and 180°. All
+      four exceed 45°. The artifact named the gz plant itself, so this is not
+      an out-of-scope plant being held against it.
+
+      Sharper: the text below says the defect this artifact FIXED was a flip
+      "to ~180° (reproduced on the real gz plant and, now, offline)". A 180°
+      flip on the gz plant is exactly trial rot1. Either that fix never held
+      on gz, or something since regressed it.
+
+      WHAT IS NOT RETRACTED. The analytic-plant oracle below stands as
+      measured: 200 dispersed full-loop trials, worst peak tilt 0.274 rad,
+      0 failures, and the Kani/allocator results are untouched. None of it
+      was re-run and none of it is disputed. What is withdrawn is the claim
+      that this constitutes VERIFICATION of FAULT-P02's end-to-end clause,
+      because the plant the requirement ultimately answers to refutes it.
+      `implemented` is the honest status: the work exists and its own oracle
+      passes; the property is not verified where it counts.
+
+      The control run matters for reading the above: on the same rig and
+      commit, `--scenario=flightcore` PASSES (2 m hold, 0.11 m final, 0.01 m
+      horizontal). The bench can fly; the failure is the rotor loss.
+
+      Evidence:
+      bench-evidence/gz-sim/2026-09-23-v1.140-rotor-out-on-the-real-plant.md
+      NO CAUSE IS CLAIMED — no instrumented trace was taken. Re-promotion
+      requires a gz-valid oracle, not a re-run of the analytic one.
+
+      ---- original text, unchanged below ----
+
       Strengthens FV-FALCON-FAULT-002. That artifact verified the
       rotor-out chain only in an IDEALISED attitude-only harness
       (falcon-sitl-gz fault_tolerance_chain_recovers_from_rotor_loss:

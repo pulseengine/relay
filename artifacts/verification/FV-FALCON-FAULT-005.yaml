@@ -1,9 +1,9 @@
 artifacts:
   - id: FV-FALCON-FAULT-005
     type: sw-verification
-    title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.140)"
+    title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.141)"
     status: proposed
-    release: falcon-v1.140.0
+    release: falcon-v1.141.0
     description: >
       Re-verification of SWREQ-FALCON-FAULT-P02 against the gz plant, opened
       by a regression rather than filed as a new requirement: the property
@@ -46,8 +46,8 @@ artifacts:
       bench-evidence finding; `steps:` assert the code properties that make
       it reproducible.
 
-      MEASURED 2026-09-23 ON main e1d00be — IT DOES NOT HOLD. Four
-      pristine-server trials, four FAILs, full numbers in
+      MEASURED 2026-09-23 ON main e1d00be — IT DOES NOT HOLD. Twelve
+      pristine-server trials: 11 FAIL / 1 PASS (first four tabled below), in
       bench-evidence/gz-sim/2026-09-23-v1.140-rotor-out-on-the-real-plant.md.
       Control first: `--scenario=flightcore` PASSES on the same rig (2 m hold,
       final 0.11 m, horizontal 0.01 m), so the bench can fly and the failure
@@ -77,10 +77,52 @@ artifacts:
       so this is adjacent to that report, not a reproduction of it. The wasm
       leg is tests/cascade-sitl-wasm (gazebo.yml), not this binary.
 
-      NOT CLAIMED: a cause. No instrumented trace was taken; attributing the
-      intermittency needs the fdi_diag() trace FV-FALCON-FAULT-004 used.
+      CORRECTED TALLY. The four rows above were the first four trials. Tracing
+      the cause took eight more, and ONE OF THEM PASSED (T2: isolated Some(0),
+      peak tilt 0.338 rad). Twelve pristine-server trials, same binary, same
+      world: 11 FAIL / 1 PASS, with three total inversions. The property is
+      INTERMITTENT, not uniformly broken — so a campaign that samples it a few
+      times can report success. That hazard is now demonstrated, not argued.
 
-      THIS FALSIFIES FV-FALCON-FAULT-003, WHICH IS `verified`. That artifact's
+      ROOT CAUSE — FOUND (FDI_TRACE, added to the scenario in this change).
+      The detector only runs while `fdi_steady = tilt_cos > 0.90 && rp_rate2 <
+      4.0` (about 26° tilt, 2 rad/s roll+pitch). Traced over the 25 ticks
+      BEFORE the kill — a healthy, passing hover — rp_rate2 oscillates
+      3.596..4.521, straddling the 4.0 threshold: the vehicle hovers at
+      1.90-2.12 rad/s roll/pitch against a 2.0 rad/s gate, and THE GATE IS
+      SHUT 33.8% OF PRE-KILL TICKS (corrected 2026-09-23 by clean-room review --
+      see CORRECTION below). Whether a loss is
+      detectable at all is therefore decided by the limit-cycle phase at the
+      instant of failure. The code's own comment records the gate being raised
+      1 -> 2 rad/s because the gz plant limit-cycled "near 1 rad/s"; the limit
+      cycle is now ~2 rad/s and that margin is consumed.
+
+      THE PREDICTION HELD 5 OF 5. Gate state on the kill tick vs outcome:
+      G2 OPEN -> isolated in ONE tick; G3 shut -> never isolated, 3.142 rad;
+      G4/G5/G6 OPEN -> isolated. It is one-way: once the vehicle departs,
+      tilt_cos falls and rp_rate2 stays high, so a gate shut at the kill NEVER
+      reopens (G2: closes at +0.024 s, tilt_cos walks 0.99 -> 0.68 over 0.4 s).
+
+      TWO DEFECTS, NOT ONE. (1) Detection is a coin flip — but NOT a defect in
+      the residual logic: with the gate open the residual is unambiguous
+      ([1.000 0 0 0]) and isolation takes one tick. (2) Even with immediate
+      isolation the recovery is weak — G2/G4/G5/G6 all isolated within a tick
+      and still peaked at 1.01-1.46 rad (58-84°) against FAULT-003's
+      analytic-plant claim of 0.274 rad worst case. Perfect detection alone
+      would NOT make this property hold.
+
+      THE FIX IS NOT THE GATE. Raising the threshold again would make the runs
+      pass without making the vehicle safer — the vacuous-gate shape this
+      release train keeps finding. The limit cycle is the defect -- and it is NOT
+      a hover: independent reproduction measured mode=Takeoff at the kill
+      (1.49 m against a 2.0 m target, still climbing). It is a saturated climb
+      that never reaches hover: ~2 rad/s (115°/s) roll/pitch ringing during a hover the position
+      loop reports as good (0.11 m). The position hold MASKS a ringing
+      attitude loop. Worth checking against the wobble the bench engineer
+      reported from the Wireshark capture, which had the same character.
+
+      THIS FALSIFIES FV-FALCON-FAULT-003 (which was `verified`; demoted to
+      `implemented` in this same change). That artifact's
       own falsification reads: "wrong if a single-rotor-out from a settled
       hover is observed to exceed ~45° tilt ... on the analytic plant (this
       oracle) OR THE GZ PLANT". All four trials exceed 45° (49.7, 50.8, 72.9,
@@ -97,12 +139,22 @@ artifacts:
       decision (demote, or judge the gz clause over-reach) — not something
       this pass resolves silently.
 
-      WHY v1.140. Rotor-out recovery is a hold property under a fault; it
-      belongs with HOLD-P01, and v1.141's SHOWCASE-P01 (engine drop) depends
-      on it. STATUS STAYS `proposed`: the property does not hold on the plant
-      it claims to hold on, so v1.140 cannot reach 11/11 by measurement —
-      only by a maintainer scope decision.
-    tags: [verification, falcon, fault, rotor-out, gazebo, wasm, v1.140]
+      MOVED v1.140 -> v1.141 on 2026-09-23 (maintainer scope decision, and
+      logged here rather than applied silently). This CANNOT be verified while
+      #270 stands: the FDI gate is shut ~34% of pre-kill ticks because
+      the rate loop limit-cycles once it is actually loaded, so rotor-loss
+      detectability is decided by limit-cycle phase at the instant of failure.
+      The ring's PRIMARY cause is not yet identified — anti-windup was
+      hypothesised, tested and FALSIFIED (its gate-shut gain was raw-signal
+      derived and is withdrawn) but
+      the cycle survives at 1.91 rad/s against a 0.1 bar.
+
+      v1.140's own theme — the hold — is done and measured. Holding a finished
+      release hostage to an open control investigation is the scope-management
+      error, not the fix. Rotor-out is a hold property under a fault, so it
+      belongs with the rate-loop work in v1.141, and v1.142's SHOWCASE-P01
+      (engine drop) depends on it. STATUS STAYS `proposed`.
+    tags: [verification, falcon, fault, rotor-out, gazebo, wasm, v1.141]
     fields:
       method: simulation
     links:

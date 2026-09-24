@@ -1,0 +1,111 @@
+artifacts:
+  - id: SWREQ-FALCON-OCI-P07
+    type: sw-req
+    title: "OCI-P07 — the published stage components shall compose into the FLOWN control law (wac → meld → synth), not a legacy one"
+    status: proposed
+    release: falcon-v1.142.0
+    description: >
+      Composing the published per-stage cascade components with `wac`, fusing
+      the result with `meld` and compiling it with `synth` shall produce the
+      control law the vehicle actually flies — bit-identical, under the
+      existing native/wasm differential, to `falcon-core`'s `FlightCore`.
+
+      WHY IT EXISTS. It does not today, and the gap is structural rather than
+      a packaging detail. Raised by the bench engineer (Christof, 2026-09-23):
+      "falcon cascade is only a middle, and it should be built out of
+      components." Both halves are correct, and both are measurable.
+
+      THE DECOMPOSITION EXISTS BUT DECOMPOSES THE WRONG LAW.
+      `wit/falcon-cascade/cascade.wit` (@0.10.0) already declares five stage
+      interfaces with their own worlds — ekf, position, attitude, rate, mixer
+      — and the components are built and published. Measured against what the
+      flight core flies (`scripts/audit-component-deps.rs`, 2026-09-23):
+
+        stage       component wraps          flight core flies
+        estimator   relay-iekf               relay-iekf                 MATCH
+        position    relay-pos      (PID)     relay-geo                  NO
+        attitude    relay-att      (PID)     relay-geo  (geometric SE3) NO
+        rate        relay-rate     (PID)     relay-adrc (ADRC)          NO
+        mixer       relay-mix-quad           relay-mix-quad             MATCH
+
+      The audit's own output names the hole: under FLOWN BUT NOT WRAPPED BY
+      ANY COMPONENT it lists `relay-geo` and `relay-adrc`. The two middle
+      stages of the flown law have NO component at all. So the per-stage set
+      composes the LEGACY PID cascade, and `docs/OCI-DISTRIBUTION.md` already
+      states the consequence outright: "Fusing the per-stage components does
+      not produce the flown control law."
+
+      What ships instead is `falcon-cascade`: one opaque component wrapping
+      `falcon-core`, exporting a single `step`.
+
+      "ONLY A MIDDLE" IS THE SIGNATURE, LITERALLY.
+      `step: func(sensors: sensor-frame, target: waypoint) -> motor-pwm` —
+      sensors in, motors out, NO state returned. That is why the verified
+      MAVLINK-P06 telemetry stack (v1.119) has nothing to read, why a shadow
+      flight cannot be compared against PX4's EKF2, and why the host must own
+      both ends. The state return is SWREQ-FALCON-TRANSPORT-P01's RETURN
+      direction and a `falcon-cascade` version bump — announced, not silent
+      (the v1.133 path-move lesson). This requirement does not restate it;
+      it depends on it.
+
+      THE COMPOSITION PATH IS SPECIFIED, NOT OPEN. Maintainer decision
+      2026-09-23: component model, composed with `wac`, then `meld`, then
+      `synth`. This matters because it answers the obvious objection. A
+      five-component cascade looks like it should cost five runtime seams,
+      and the strongest verification claim we hold today is the single-seam
+      `DIFFERENTIAL=1` result (the wasm component and the native core, fed
+      identical frames each tick, compute bit-identical motor outputs while
+      flying a real physics engine). But meld FUSES the components at build
+      time and synth compiles the fused artifact down — so the decomposition
+      is authoring-and-verification structure that is ERASED before
+      deployment. The differential is then run against the fused artifact,
+      and the per-stage boundary costs nothing at runtime. OCI-P05
+      (relocation metadata so meld can rebase components into a shared
+      address space) is the already-verified groundwork for exactly this.
+
+      WHAT THIS BUYS, stated so it can be argued with: each stage becomes an
+      independently verifiable and independently replaceable unit; the
+      3-core partition (est→M4, cascade→M7, failsafe→F100, agreed in
+      jess#144) gains a decomposition to map onto instead of a monolith to
+      split; and the legacy/flown divergence that #388, #411 and #419 have
+      each caught separately stops being possible to express, because the
+      thing published and the thing flown are built from the same parts.
+
+      KNOWN BLOCKERS, in the order they bite:
+        1. There is no socket. Per #393 the cascade component imports
+           nothing but the records-only `types` interface, so `wac plug`
+           fails with "no matching imports for the plugs provided" — which
+           is correct behaviour and is how this was found. The cascade world
+           must IMPORT the stage interfaces rather than implement them
+           internally. That is a seam change, hence a version bump, hence an
+           announcement to the integrator.
+        2. `relay-geo` and `relay-adrc` have no component wrappers. This is
+           the tractable net-new work and the honest first step: until they
+           exist, NO composition can produce the flown law regardless of how
+           the seam is shaped.
+        3. Tuning is load-bearing and currently host-side. The gz runs of
+           2026-09-23 apply set_pos_var / set_process_floor /
+           set_altitude_gains / set_altitude_integral_gain that the
+           component never receives — `main.rs` says outright that "the wasm
+           cascade flies this same FlightCore with NONE of this tuning".
+           Split into five, that configuration must be distributed across
+           them (or carried by `vehicle-config`), or the composed stack
+           flies differently from the native one and the differential fails
+           for a reason that is not a defect in any stage.
+
+      NOT IN SCOPE HERE: retiring the legacy position/attitude/rate
+      components. That disposition is SWREQ-FALCON-ORPHAN-P01, and it should
+      follow this rather than lead it — publishing nothing is worse than
+      publishing something labelled legacy, until a flown replacement exists.
+
+      FALSIFICATION: wrong if, after the stage components exist, a
+      wac-composed + meld-fused + synth-compiled cascade run under
+      DIFFERENTIAL=1 against the gz falcon-quad produces ANY non-zero
+      per-motor difference from the native `FlightCore` on the same frames —
+      or if the fused artifact cannot be produced at all.
+    tags: [requirement, falcon, oci, components, composition, wac, meld, synth, seam, v1.142]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-OCI-P01

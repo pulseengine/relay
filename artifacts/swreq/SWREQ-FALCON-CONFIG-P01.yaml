@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "CONFIG-P01 — the stack shall express WHICH configuration it is: airframe, bus and modes, selectable like PX4"
     status: proposed
-    release: falcon-v1.141.0
+    release: falcon-v1.142.0
     description: >
       There shall be a configuration layer that names the vehicle's airframe
       geometry, its sensor/actuator bus, and its enabled modes, such that
@@ -63,7 +63,7 @@ artifacts:
 
       RELEASE PLAN (2026-09-17). Moved from v1.139 to v1.141. ORPHAN-P01 parks capabilities against the configuration axes this requirement defines, so the two land together.
 
-    tags: [requirement, falcon, configuration, airframe, dronecan, px4, v1.141]
+    tags: [requirement, falcon, configuration, airframe, dronecan, px4, v1.142]
     links:
       - type: derives-from
         target: SYSREQ-FALCON-010

@@ -200,7 +200,17 @@ fn run_scenario(
         "flightcore-rotorout" => {
             // Hover, then lose rotor 0 at the midpoint; the production FDI must
             // isolate it (RPM residual) and the loop must keep the airframe
-            // UPRIGHT — not aloft. A three-rotor quad is rank-deficient: it
+            // UPRIGHT — not aloft.
+            //
+            // WARNING — THIS SCENARIO'S VERDICT DOES NOT CHECK THAT. Clean-room
+            // review 2026-09-23: the verdict below is `isolated == Some(rotor)
+            // && finite`. It reads no tilt, no altitude, no position, so a 180°
+            // inversion that drifts and crashes PASSES provided the FDI latched
+            // and nothing went NaN — and the gz trials in this release measured
+            // exactly that shape (isolated=Some(0) with 1.01-1.46 rad tilt).
+            // The sibling `supervised-rotorout` verdict DOES check tilt via
+            // `true_tilt_rad()`; this one was never wired to it. Do not cite
+            // this scenario as evidence for FAULT-P02 until it is. A three-rotor quad is rank-deficient: it
             // relinquishes yaw and cannot hold altitude (Mueller & D'Andrea),
             // which is what SWREQ-FALCON-FAULT-P02 actually claims ("the body
             // settles upright (no tumble)") and what the campaign code says.
@@ -1498,6 +1508,9 @@ fn run_supervised_rotorout(
     let mut peak_horiz_after = 0.0_f32;
     let mut isolated: Option<usize> = None;
     let mut saw_true_tilt = false;
+    // Ticks after the kill to trace; unset = no trace (shipped behaviour).
+    let fdi_trace_window: Option<u32> =
+        std::env::var("FDI_TRACE").ok().and_then(|s| s.parse().ok());
     {
         let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
         for step in 0..n {
@@ -1510,6 +1523,50 @@ fn run_supervised_rotorout(
             sup.step(&mut backend);
             last_true = backend.last_true_pos();
 
+            // RING — same columns as run_flightcore's trace, so the two paths
+            // are directly comparable on one plant (#270). They are NOT the
+            // same today: flightcore's settled hover measures 0.0014 rad/s
+            // roll/pitch RMS with no motor saturation, while this path was
+            // measured at rp_rate2 ~4 (about 2 rad/s) in the ticks before the
+            // rotor kill. Same world, same commit, three orders of magnitude
+            // apart — so the ring belongs to a path, not to the plant.
+            if std::env::var_os("RING_TRACE").is_some() {
+                let (_, g) = backend.last_imu();
+                let wd = sup.core().last_omega_d();
+                let tq = sup.core().last_torque();
+                let m = backend.last_motors();
+                // The last two columns are the quantities the FDI gate ACTUALLY
+                // reads. `g` above is the RAW gyro; the gate tests
+                // `gyro_f = gyro_lpf.filter(..)` (lib.rs:810,861). Computing a
+                // gate-shut fraction from the raw signal OVERSTATES it, because
+                // the low-pass removes exactly the high-frequency content that
+                // pushes rp_rate2 over the threshold. That error produced a
+                // "96.8% shut" figure which contradicted the observed outcomes
+                // (a gate shut 96.8% of the time that never reopens cannot
+                // yield 9 isolations in 12 trials). Emit the real ones so the
+                // fraction is computed from what the gate sees.
+                let (rp_rate2_f, tilt_cos, gate_open, _) = sup.core().fdi_diag();
+                println!(
+                    "RING {t:.4} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.4} {:.4} {:.4} {:.4} {:.5} {:.5} {}",
+                    g[0],
+                    g[1],
+                    g[2],
+                    wd[0],
+                    wd[1],
+                    wd[2],
+                    tq[0],
+                    tq[1],
+                    tq[2],
+                    m[0],
+                    m[1],
+                    m[2],
+                    m[3],
+                    rp_rate2_f,
+                    tilt_cos,
+                    if gate_open { 1 } else { 0 },
+                );
+            }
+
             if std::env::var_os("FC_DEBUG").is_some() && step % 50 == 0 {
                 let e = sup.state();
                 eprintln!(
@@ -1521,6 +1578,37 @@ fn run_supervised_rotorout(
                     e.v[2],
                     backend.last_motors(),
                 );
+            }
+            // FDI_TRACE — the gate race, per tick, in a window around the kill
+            // (#398/#479). The FDI only runs while `fdi_steady` holds
+            // (tilt_cos > 0.90 && rp_rate2 < 4.0 — roughly 26 deg and 2 rad/s).
+            // After a rotor dies the airframe departs, so there is a RACE:
+            // either the CUSUM accumulates enough to isolate before the gate
+            // slams shut, or the gate closes first and the detector never sees
+            // the residual again. That race is the candidate explanation for
+            // isolation flipping between runs of an unchanged binary. It is
+            // logged, not assumed — `isolated_at` below is the tick the latch
+            // actually set, against `gate_open` in the same row.
+            if let Some(w) = fdi_trace_window {
+                let lo = fail_step.saturating_sub(25);
+                if step >= lo && step <= fail_step + w {
+                    let (rp_rate2, tilt_cos, gate_open, resid) = sup.core().fdi_diag();
+                    eprintln!(
+                        "FDI t={:+.3} gate={} tilt_cos={:.4} rp_rate2={:.3} resid=[{:.3} {:.3} {:.3} {:.3}] failed={:?} true_tilt={:?}",
+                        t - fail_at_s,
+                        if gate_open { "OPEN" } else { "shut" },
+                        tilt_cos,
+                        rp_rate2,
+                        resid[0],
+                        resid[1],
+                        resid[2],
+                        resid[3],
+                        sup.core().failed_motor(),
+                        backend
+                            .true_tilt_rad()
+                            .map(|v| (v * 1000.0).round() / 1000.0),
+                    );
+                }
             }
             if let Some(ref mut e) = evidence {
                 let (accel, gyro) = backend.last_imu();
@@ -1723,6 +1811,37 @@ fn run_flightcore(
 
             core.step(&mut backend); // ← one PRODUCTION control tick + plant step
             last_true = backend.last_true_pos();
+
+            // RING — every tick, machine-readable, for the attitude limit cycle
+            // (#270). A limit cycle is diagnosed by its FREQUENCY and by where
+            // the loop saturates, not by an RMS: #270 reports the motors
+            // thrashing 0.1<->1.0 pair-wise, which is a RELAY oscillation whose
+            // period is set by loop phase, so an averaged number cannot tell
+            // the rate loop from the actuator lag. Columns are the whole
+            // rate-loop slice on one line: measured rate in, desired rate and
+            // commanded torque out, and the four motors that resulted.
+            if std::env::var_os("RING_TRACE").is_some() {
+                let (_, g) = backend.last_imu();
+                let wd = core.last_omega_d();
+                let tq = core.last_torque();
+                let m = backend.last_motors();
+                println!(
+                    "RING {t:.4} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} {:.4} {:.4} {:.4} {:.4}",
+                    g[0],
+                    g[1],
+                    g[2],
+                    wd[0],
+                    wd[1],
+                    wd[2],
+                    tq[0],
+                    tq[1],
+                    tq[2],
+                    m[0],
+                    m[1],
+                    m[2],
+                    m[3],
+                );
+            }
 
             // FC_DEBUG — per-tick estimator trace to diagnose the gz divergence.
             if std::env::var_os("FC_DEBUG").is_some() && step % 25 == 0 {

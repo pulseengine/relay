@@ -1,0 +1,83 @@
+artifacts:
+  - id: SYSREQ-FALCON-022
+    type: system-req
+    title: "THESIS — best-in-class drone software, running on gale, with every flight capability a WebAssembly component"
+    status: approved
+    description: >
+      The flight stack shall be composed entirely of WebAssembly components,
+      fused and lowered onto gale on the target silicon, and shall fly at least
+      as well as the best available alternative.
+
+      Set by the maintainer on 2026-09-23 as the project's organising goal. It
+      replaces "reach PX4 parity" (docs/PX4-PARITY-ASSESSMENT.md, stale by 82
+      versions and wrong on the exact question it existed for — #422). Parity
+      is a comparison; this is a product thesis, and it is falsifiable.
+
+      FOUR CLAIMS, each wrong if its test fails.
+
+      (1) EVERY FLIGHT CAPABILITY IS A COMPONENT. No monolith on the flight
+      path. WRONG IF a flight capability ships that is not a component.
+      Baseline 2026-09-23: crates/falcon-core is 6090 lines carrying the
+      supervisor, every failsafe and the single-rotor-out FDI, with ZERO
+      kani::proof harnesses and no entry in the kani.yml matrix. The 31
+      flight-path harnesses are all on leaves (iekf, geo, adrc, mix-quad, fsm,
+      preflight, calib, batt, notch). The proofs surround the defect rather
+      than covering it. falcon-core must DISSOLVE into components, not grow.
+
+      (2) COMPOSITION IS FREE. A wac-composed, meld-fused, synth-compiled
+      cascade shall compute BIT-IDENTICAL motor outputs to the native core from
+      the same per-tick frames, against a real physics engine (DIFFERENTIAL=1).
+      WRONG IF any non-zero per-motor difference appears, or the fused artifact
+      cannot be built. This property is held today across ONE seam; the thesis
+      requires it to survive decomposition.
+
+      (3) IT RUNS ON GALE ON REAL SILICON, and no oracle hides a fault that
+      silicon would take. WRONG IF an emulator passes what a board faults on.
+      That is not hypothetical: gale#398 records synth-dissolved objects
+      addressing wasm linear memory as [r11 + off] at absolute addresses near
+      1 MiB — unmapped on qemu (reads return 0, writes dropped, GATES PASS),
+      a precise BusFault on silicon.
+
+      (4) THE FLIGHT BEHAVIOUR IS GENUINELY GOOD. Best-in-class is not an
+      architecture claim. WRONG IF a healthy hover carries a limit cycle that a
+      position-only verdict conceals. Baseline 2026-09-23: the gz hover rings
+      at 1.90-2.12 rad/s (115 deg/s) roll/pitch with motors thrashing
+      saturation-to-saturation, while the position verdict reports 0.11 m and
+      PASSES (#270, open since 2026-07-14 at ~1 rad/s — it has GROWN).
+
+      THE CONSTRAINT THAT SHAPES THE WHOLE PLAN: decomposition and memory
+      packing are the SAME problem. Each component carries its own data base;
+      gale's fused.o holds two components whose data bases are 1.1 MiB apart
+      through one r11 base — more RAM than any board on the bench has (largest
+      192 KB), and gale states it is "not fixable in the embedder". Therefore
+      `meld --pack-rebase` working on the flight object is a PRECONDITION for
+      claim (1), not a later optimisation. It is already proven on the iso-core
+      path and jess measured it at 5x on the M7.
+
+      KNOWN FALSIFIER STANDING TODAY: the artifact that currently lowers to the
+      M7 is the LEGACY PID cascade, not the flown law. The only existing
+      proof-point for "our stack runs as components on silicon" is about code
+      the vehicle does not use.
+
+      NOT CLAIMED: feature parity with PX4. Manual/RC modes, ground-station and
+      mission interop, driver breadth and per-airframe calibration are real
+      gaps (see the phase plan); several are first-flight blockers. This
+      requirement states what the stack IS, not that it already exceeds
+      alternatives on every axis.
+    tags: [system, falcon, thesis, gale, component-model, wasm, goal]
+    fields:
+      priority: must
+      req-type: product
+      verification-criteria: >
+        (1) scripts/audit-component-deps.rs reports no flight capability
+        outside a component, and falcon-core carries no flight logic that is
+        not componentised. (2) DIFFERENTIAL=1 on the gz falcon-quad against a
+        wac+meld+synth artifact shows zero per-motor difference. (3) A flown
+        stage executes on the M7 under gale, with an object-to-embedder oracle
+        that fails on an out-of-window data address rather than reading zero.
+        (4) A healthy hover shows roll/pitch rate below the FDI steady gate for
+        at least 95% of ticks, measured by FDI_TRACE, not inferred from a
+        position verdict.
+    links:
+      - type: derives-from
+        target: STKH-FALCON-001
