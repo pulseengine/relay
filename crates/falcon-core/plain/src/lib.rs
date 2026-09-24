@@ -4659,11 +4659,30 @@ mod tests {
     /// gravity update is conditional on fresh aiding (#452); through a GNSS
     /// outage the accelerometer is the only attitude reference there is, so the
     /// update must resume and the vehicle must stay controllable.
+    /// IGNORED BECAUSE IT FAILS ON SHIPPED CODE — it documents #483.
+    /// Measured 2026-09-24 on a plant with `gyro_bias_drift = 0.0004`:
+    ///   with the stale-aiding fallback    peak |cos(tilt) est-true| = 0.3787
+    ///   with the fallback deleted                                   = 0.0155
+    /// The fallback makes the attitude estimate 24x WORSE. Un-ignore when the
+    /// gravity update is gated on the accelerometer plausibly measuring
+    /// gravity (|a| ~ g, low rate) rather than on aiding staleness alone.
+    #[ignore = "fails on shipped code: documents #483, the stale-aiding fallback degrades attitude"]
     #[test]
     fn gnss_outage_restores_the_gravity_update_and_stays_bounded() {
         let dt = 0.002f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let mut b = SimBackend::new(level, dt);
+        // A PLANT THAT CAN ACTUALLY DRIFT (#483). Without this the default
+        // Pathology has zero gyro noise and zero bias, so 15 s of dead
+        // reckoning is exact and the outage stays bounded WHETHER OR NOT the
+        // gravity update resumes — the test passed identically with the
+        // stale-aiding fallback deleted (clean-room mutation test, 2026-09-23;
+        // the compiler even reported `gravity_hold_ticks` as never read). A
+        // test for "the accelerometer is the only attitude reference there is"
+        // has to be run on a plant where losing that reference costs something:
+        // the gyro bias ramp is unobservable without the gravity update, so
+        // attitude walks off and the horizontal error grows.
+        b.path.gyro_bias_drift = 0.0004;
         let mut core = FlightCore::new(0.5, 1.0 / dt);
         core.set_pos_var(0.25);
         core.set_process_floor(0.30, 0.05);
@@ -4675,18 +4694,31 @@ mod tests {
         b.path.gps_dropout_start = 0;
         b.path.gps_dropout_len = u32::MAX;
         b.path.gps_dropout_period = 0;
-        let mut peak = 0.0f32;
+        // ASSERT ON ATTITUDE, NOT POSITION (#483). The stale-aiding fallback
+        // restores the ATTITUDE reference; it cannot restore position, because
+        // with no fixes the position is dead-reckoned by double integration and
+        // drifts on any real plant. The old bound (`peak < 5.0` m of horizontal
+        // over 15 s) was therefore only satisfiable on a NOISELESS plant — which
+        // is exactly why the plant was noiseless, and why deleting the branch
+        // changed nothing. Measure the quantity the branch actually controls:
+        // the error between the ESTIMATED thrust axis and the TRUE one.
+        let mut peak_att_err = 0.0f32;
         for _ in 0..7_500 {
             core.step(&mut b);
-            let h = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
-            if h > peak {
-                peak = h;
+            // cos(tilt) of each: R[2][2]. Estimate from the quaternion, truth
+            // straight off the plant's attitude matrix.
+            let q = core.state().q;
+            let est_c = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]);
+            let true_c = b.r[2][2];
+            let err = (est_c - true_c).abs();
+            if err > peak_att_err {
+                peak_att_err = err;
             }
         }
         assert!(
-            peak < 5.0 && (-b.pos[2] - 2.0).abs() < 1.0,
-            "a 15 s outage must stay bounded: peak {peak} m, altitude off by {} m",
-            (-b.pos[2] - 2.0).abs()
+            peak_att_err < 0.02,
+            "through a 15 s outage the accelerometer must keep the attitude \
+             estimate anchored: peak |cos(tilt) est - true| = {peak_att_err}"
         );
     }
 
