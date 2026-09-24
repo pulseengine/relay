@@ -157,9 +157,11 @@ pub struct EstimatorPartition {
     /// the hold then diverges at every fix rate. Tilt stays observable through
     /// the position innovations instead. With no aiding — on the ground, or
     /// through a GNSS outage — the accelerometer is the only attitude
-    /// reference there is, so the update resumes.
+    /// Control ticks since the last ACCEPTED position fix. Kept as an aiding
+    /// freshness signal (diagnostics / future policies); it no longer gates the
+    /// gravity update, because resuming that update on staleness was measured
+    /// to make attitude 24x WORSE during an outage (#483).
     ticks_since_aiding: u32,
-    gravity_hold_ticks: u32,
     /// Set by [`FlightCore::step`] from the cascade's own collective: the
     /// gravity update is only suppressed while the vehicle is FLYING. On the
     /// ground the accelerometer is the tilt reference that lets pre-arm see a
@@ -200,7 +202,6 @@ impl EstimatorPartition {
             // fix, short enough that a real outage falls back to the
             // accelerometer within a second.
             ticks_since_aiding: u32::MAX,
-            gravity_hold_ticks: warmup.saturating_mul(5),
             in_flight: false,
             step_count: 0,
             fdi_warmup_steps: warmup,
@@ -312,10 +313,38 @@ impl EstimatorPartition {
 
         // ── Estimate ──
         self.iekf.propagate(IekfImu { gyro, accel }, dt);
-        // GRAVITY UPDATE ONLY WITHOUT FRESH POSITION AIDING (#452/#434): the
-        // reading is specific force, which points along the thrust axis and
-        // shows almost none of the vehicle's tilt while it flies.
-        if !self.in_flight || self.ticks_since_aiding > self.gravity_hold_ticks {
+        // GRAVITY UPDATE ONLY WHILE NOT FLYING (#452/#434/#483).
+        //
+        // The reading is SPECIFIC FORCE f = a_inertial - g. It equals -g, and
+        // so gives the vertical, only while the vehicle is not accelerating.
+        // Under thrust it points along the THRUST AXIS and shows almost none of
+        // the tilt. Suppressing it while position aiding is fresh was #452.
+        //
+        // v1.140 then RESUMED it on aiding staleness alone, and that is worse
+        // than no guard: during a GNSS outage the position loop chases a
+        // drifting estimate, so the vehicle is MANEUVERING — exactly when the
+        // reading is least valid. Measured (#483), peak |cos(tilt)_est - true|
+        // through a 15 s outage on a plant with a gyro-bias ramp:
+        //
+        //     staleness fallback (v1.140)                    0.3787
+        //     + |f| within 25% of g                          0.3787
+        //     + |f| within 0.5% of g                         0.3787
+        //     + |f| within 0.5% of g AND rate < 0.1 rad/s    0.3457
+        //     NO in-flight gravity update (this)             0.0155
+        //
+        // A VALIDITY GATE ON |f| DOES NOT WORK, and the 50x tolerance sweep
+        // above shows it is not a tuning problem. A quad holding altitude at
+        // tilt θ has |f| = g/cos θ — inside 0.5% of g for θ < 5.7° — while the
+        // direction is along body -z. So the update asserts "you are level"
+        // regardless of the actual tilt: it does not merely fail to inform, it
+        // ERASES tilt. Magnitude cannot distinguish the case, because the
+        // thrust axis IS what the accelerometer reports.
+        //
+        // In flight the attitude reference is the gyro (with its bias state
+        // observed through GNSS/mag/heading). On the ground, at rest, the
+        // accelerometer genuinely reads -g and is the reference that lets
+        // pre-arm see a settled, level estimate.
+        if !self.in_flight {
             self.iekf.update_gravity(accel, self.grav_var);
         }
         self.ticks_since_aiding = self.ticks_since_aiding.saturating_add(1);
@@ -4659,14 +4688,6 @@ mod tests {
     /// gravity update is conditional on fresh aiding (#452); through a GNSS
     /// outage the accelerometer is the only attitude reference there is, so the
     /// update must resume and the vehicle must stay controllable.
-    /// IGNORED BECAUSE IT FAILS ON SHIPPED CODE — it documents #483.
-    /// Measured 2026-09-24 on a plant with `gyro_bias_drift = 0.0004`:
-    ///   with the stale-aiding fallback    peak |cos(tilt) est-true| = 0.3787
-    ///   with the fallback deleted                                   = 0.0155
-    /// The fallback makes the attitude estimate 24x WORSE. Un-ignore when the
-    /// gravity update is gated on the accelerometer plausibly measuring
-    /// gravity (|a| ~ g, low rate) rather than on aiding staleness alone.
-    #[ignore = "fails on shipped code: documents #483, the stale-aiding fallback degrades attitude"]
     #[test]
     fn gnss_outage_restores_the_gravity_update_and_stays_bounded() {
         let dt = 0.002f32;
@@ -4958,21 +4979,52 @@ mod tests {
         use relay_calib::CalParams;
         struct WindBackend {
             windy: bool,
+            /// Control ticks since the wind came on, so the tilt can be
+            /// established by INTEGRATING GYRO rather than asserted through
+            /// the accelerometer.
+            windy_ticks: u32,
         }
+        /// Pitch rate during the ramp, and how long it runs: 0.61 rad/s for
+        /// 200 ticks at dt=0.004 s reaches the ~0.488 rad tilt the wind band
+        /// [0.30, 0.70] expects, gently enough not to look like a runaway.
+        const WIND_RAMP_RATE: f32 = 0.61;
+        const WIND_RAMP_TICKS: u32 = 200;
         impl FlightBackend for WindBackend {
             fn read_imu(&mut self) -> ImuSample {
-                // windy: gravity measured at ~28° off body-down → the estimate
-                // holds a ~0.49 rad tilt (inside the wind band [0.30, 0.70]) and
-                // the rate loop saturates fighting it; else level.
-                let accel = if self.windy {
-                    [GRAVITY * 0.469, 0.0, -GRAVITY * 0.883]
-                } else {
-                    [0.0, 0.0, -GRAVITY]
-                };
-                ImuSample {
-                    accel,
-                    gyro: [0.0; 3],
+                // THIS BACKEND USED TO CONVEY TILT THROUGH THE ACCELEROMETER
+                // ALONE, WITH `gyro: [0.0; 3]` (#483). That is idealized by
+                // construction: a multirotor accelerometer reads specific force
+                // along the THRUST axis, so a real vehicle cannot learn its tilt
+                // that way in flight — and once the in-flight gravity update was
+                // removed (it made attitude 24x worse through an outage) this
+                // test had no way left to express a tilt at all, and stopped
+                // firing the failsafe it names.
+                //
+                // Establish the tilt the way a vehicle actually does: rotate
+                // into it on the gyro, then hold. The accelerometer then
+                // reports the specific force consistent with that attitude,
+                // which is what a real IMU would produce.
+                if self.windy {
+                    self.windy_ticks = self.windy_ticks.saturating_add(1);
                 }
+                let (accel, gyro) = if !self.windy {
+                    ([0.0, 0.0, -GRAVITY], [0.0; 3])
+                } else if self.windy_ticks <= WIND_RAMP_TICKS {
+                    // rotating INTO the tilt about body +y
+                    let th = WIND_RAMP_RATE * (self.windy_ticks as f32) * 0.004;
+                    (
+                        [
+                            GRAVITY * relay_math::sinf(th),
+                            0.0,
+                            -GRAVITY * relay_math::cosf(th),
+                        ],
+                        [0.0, WIND_RAMP_RATE, 0.0],
+                    )
+                } else {
+                    // holding the tilt: no further rotation
+                    ([GRAVITY * 0.469, 0.0, -GRAVITY * 0.883], [0.0; 3])
+                };
+                ImuSample { accel, gyro }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 Some([100.0, 0.0, 0.0]) // away from home: an RTL flies, never lands
@@ -4995,7 +5047,10 @@ mod tests {
             gyro_bias: [0.001, 0.0, 0.0],
             ..CalParams::identity()
         });
-        let mut b = WindBackend { windy: false };
+        let mut b = WindBackend {
+            windy: false,
+            windy_ticks: 0,
+        };
         // converge level, arm, take off.
         for _ in 0..1500 {
             sup.step(&mut b);
