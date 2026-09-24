@@ -533,7 +533,39 @@ impl CascadePartition {
     pub fn flying(&self) -> bool {
         let m = self.mixer.last_motors();
         let mean = (m[0] + m[1] + m[2] + m[3]) * 0.25;
-        mean > 0.7 * self.hover_thrust
+        // THE ERRORS HERE ARE NOT SYMMETRIC (#481).
+        //
+        // This decides `in_flight`, which is now the ONLY thing admitting the
+        // gravity update (#483). Getting it wrong in the two directions costs
+        // very different amounts:
+        //
+        //   says NOT flying while airborne -> the gravity update runs IN
+        //     FLIGHT, which is the full #452 divergence: specific force points
+        //     along the thrust axis, the tilt estimate is pulled level, and the
+        //     hold diverges at every fix rate. Catastrophic, and silent.
+        //   says flying while on the ground -> no gravity update on the ground,
+        //     so pre-arm loses its tilt reference. Visible at pre-arm, and the
+        //     vehicle does not take off.
+        //
+        // So bias toward "flying". A threshold of `0.7 * hover_thrust` alone
+        // fails the dangerous way whenever hover_thrust is OVER-estimated, and
+        // it is hardcoded to 0.5 in every shipped entry point --
+        // `wasm/cm/flight`, `embedded/falcon-cortex-m`, `falcon-param`,
+        // `falcon-hitl`, `FlightSupervisor::new` -- while
+        // `wasm/cm/cascade` falls back to 0.5 when `configure` was never
+        // called. An airframe hovering at 0.35 mean would then read NOT flying
+        // in a steady hover.
+        //
+        // The absolute floor breaks that dependency: any vehicle holding a
+        // mean collective above it is flying, whatever the configuration
+        // claims. Idle-on-the-ground is well below it.
+        const AIRBORNE_FLOOR: f32 = 0.25;
+        let threshold = if 0.7 * self.hover_thrust < AIRBORNE_FLOOR {
+            0.7 * self.hover_thrust
+        } else {
+            AIRBORNE_FLOOR
+        };
+        mean > threshold
     }
     /// The isolated failed rotor (latched), or `None` — the supervisor lands the
     /// vehicle when this is set (a 3-rotor quad cannot navigate; v1.103).
@@ -4740,6 +4772,61 @@ mod tests {
             peak_att_err < 0.02,
             "through a 15 s outage the accelerometer must keep the attitude \
              estimate anchored: peak |cos(tilt) est - true| = {peak_att_err}"
+        );
+    }
+
+    /// **A misconfigured hover thrust must not silently re-enable the in-flight
+    /// gravity update (#481).** `flying()` gates `in_flight`, which is the only
+    /// thing admitting that update (#483). Every shipped entry point hardcodes
+    /// `hover_thrust = 0.5` — `wasm/cm/flight`, `embedded/falcon-cortex-m`,
+    /// `falcon-param`, `falcon-hitl`, `FlightSupervisor::new` — and
+    /// `wasm/cm/cascade` falls back to 0.5 when `configure` was never called.
+    /// An airframe that actually hovers at 0.35 mean collective then sat below
+    /// the old `0.7 * hover_thrust` = 0.35 threshold in a STEADY HOVER, read as
+    /// not-flying, and got the gravity update in flight — the full #452
+    /// divergence, silently, on the artifact an integrator runs.
+    #[test]
+    fn an_overestimated_hover_thrust_does_not_reenable_the_inflight_gravity_update() {
+        // Same excitation as `hold_converges_with_5hz_position_aiding`, which is
+        // the configuration known to expose this divergence: 5 Hz aiding, and
+        // the vehicle starts 1 m off so it must TILT to fly back. Without that
+        // tilt nothing is excited and the gravity update does no harm, so a
+        // level undisturbed plant cannot tell the two policies apart.
+        let dt = 0.002f32;
+        let hz = 1.0 / dt;
+        let period = (hz / 5.0) as u32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt).with_pathology(Pathology {
+            gps_dropout_period: period,
+            gps_dropout_len: period - 1,
+            ..Pathology::default()
+        });
+        // A LIGHT AIRFRAME: hovers at 0.35 mean collective, not 0.5.
+        b.k_thrust = GRAVITY / (4.0 * 0.35);
+        // ...flown by a core that was told 0.5, as every shipped entry point does.
+        let mut core = FlightCore::new(0.5, hz);
+        core.set_pos_var(0.25);
+        core.set_process_floor(0.30, 0.05);
+        core.set_position([0.0, 0.0, -2.0]);
+        b.pos[0] = 1.0;
+        let mut peak = 0.0f32;
+        for i in 0..(60.0 / dt) as usize {
+            core.step(&mut b);
+            let h = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
+            if i as f32 * dt > 5.0 && h > peak {
+                peak = h;
+            }
+        }
+        // HORIZONTAL only. A wrong hover feedforward also leaves a steady
+        // ALTITUDE offset (this plant settles ~3 m high) — that is a separate,
+        // already-recorded consequence of misconfiguration
+        // (SWREQ-FALCON-TRANSPORT-P01 measured 58.8 m), not the property under
+        // test. The #452 divergence signature is horizontal and unbounded.
+        assert!(
+            peak < 1.0,
+            "a 0.35-hover airframe told hover_thrust=0.5 must still be seen as \
+             FLYING, so the gravity update stays suppressed and the hold does \
+             not diverge: peak horizontal {peak} m"
         );
     }
 
