@@ -260,14 +260,11 @@ impl Physics for MockPhysics {
         let qc = [self.q[0], -self.q[1], -self.q[2], -self.q[3]];
         let t1 = quat_mul(self.q, quat_mul(qv, qc));
         let thrust_ned = [t1[1], t1[2], t1[3]];
+        let v_before = self.v_ned;
         for i in 0..3 {
             let g = if i == 2 { GRAVITY } else { 0.0 };
             let drag = DRAG_COEFFICIENT * self.v_ned[i];
             let a = thrust_ned[i] + g - drag;
-            // Specific force = kinematic accel − gravity = thrust − drag. This
-            // is what an accelerometer reads (the full IEKF integrates it, so a
-            // constant-gravity fake would starve its vertical-velocity estimate).
-            self.spec_force_ned[i] = thrust_ned[i] - drag;
             self.v_ned[i] += a * dt;
             self.p_ned[i] += self.v_ned[i] * dt;
         }
@@ -281,6 +278,27 @@ impl Physics for MockPhysics {
             if self.v_ned[2] > 0.0 {
                 self.v_ned[2] = 0.0;
             }
+        }
+        // SPECIFIC FORCE, TAKEN AFTER THE GROUND CLAMP (#485).
+        //
+        // It used to be computed inside the loop above as `thrust - drag`,
+        // which ignores the ground entirely. `SimBackend` was fixed for exactly
+        // this in the same change that gave MockPhysics a floor, and the fix
+        // was not carried across. Measured consequence at sub-hover throttle
+        // while in contact: with motors at 0 the reading was [0,0,0], so
+        // `Iekf::update_gravity` rejected it (|a| <= 1e-3) and the estimator got
+        // NO tilt reference on the ground — the exact opposite of the guarantee
+        // pre-arm relies on — while propagation integrated a 9.81 m/s² free
+        // fall on a vehicle sitting still.
+        //
+        // Deriving it from the ACHIEVED velocity change makes the ground
+        // reaction appear by construction: at rest on the floor the clamp holds
+        // velocity, so f = -g, i.e. [0,0,-GRAVITY], which is what a real
+        // accelerometer reads at rest. Near hover in the air this is identical
+        // to the old expression.
+        for i in 0..3 {
+            let g = if i == 2 { GRAVITY } else { 0.0 };
+            self.spec_force_ned[i] = (self.v_ned[i] - v_before[i]) / dt - g;
         }
     }
 
