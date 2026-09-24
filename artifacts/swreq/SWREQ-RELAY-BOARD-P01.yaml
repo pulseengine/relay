@@ -1,0 +1,97 @@
+artifacts:
+  - id: SWREQ-RELAY-BOARD-P01
+    type: sw-req
+    title: "BOARD-P01 — every open issue shall carry exactly one disposition, and the board's health shall be measured rather than felt"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      Every open issue shall have exactly one recorded disposition — CLOSED
+      with a tagged-release reference, CLOSED with a rationale, or OPEN with a
+      named "remaining:" note — and the board's decay shall be visible as a
+      number in CI rather than noticed by a human reading a long list.
+
+      MEASURED BASELINE, 2026-09-24 (57 open):
+
+        age of the oldest issue                       163 d (#4)
+        older than 6 months                             0
+        3-6 months                                     11
+        1-3 months                                     15
+        under 1 month                                  31
+        UNTOUCHED 30+ days                             24  (42%)
+        untouched 100+ days                             6  (#4 #7 #8 #145 #153 #177)
+        named in docs/RELEASE-PLAN.md                  46
+        INVISIBLE to the plan                          11  (5 of them filed today)
+
+      WHAT THE NUMBERS ACTUALLY SAY, because the instinct "57 open and old ones
+      means rot" is only partly right here:
+
+      (1) NOTHING IS ANCIENT. No issue predates 6 months; the repo is ~6 months
+      old at this cadence. The oldest three (#4, #7, #8) are relay-FRAMEWORK
+      items that predate the falcon flight arc, not forgotten flight bugs.
+
+      (2) THE PLAN IS MOSTLY DOING ITS JOB. 46 of 57 are named in
+      docs/RELEASE-PLAN.md, so most "stale" issues are PARKED BY DESIGN with a
+      phase that owns them — not lost. Staleness measured by last-comment date
+      therefore OVERSTATES the problem.
+
+      (3) BUT THE PARKED SET HAS NO EXPIRY. An issue can sit in a plan section
+      indefinitely with no re-examination, and nothing distinguishes "parked
+      deliberately" from "quietly abandoned". Six have gone 100+ days untouched.
+
+      (4) AND SOME ARE PROBABLY ALREADY FIXED. Heavy cross-reference traffic
+      without closure is the tell: #262 (16 cross-refs), #153 (11), #8 (9),
+      #350 (8). Work happened around them and nobody closed the loop. Per
+      repo-hygiene this must be re-verified against the CURRENT artifact, not
+      inferred — "probably covered by #NNN" is the anti-pattern, and a task
+      list can say done while the shipped binary disagrees.
+
+      SCOPE OF THE RELEASE:
+
+      a. EVERY open issue gets exactly one disposition. Closure as FIXED cites
+      a TAGGED RELEASE, never a merge commit — merged is not released, and the
+      tag is the evidence an outsider can check. Closure as obsolete/superseded
+      names what replaced it. Anything staying open gets a "remaining:" note
+      naming precisely what is left.
+
+      b. THE INVISIBLE SET GOES TO ZERO. Every open issue is either named in
+      the plan or explicitly labelled out of scope. An issue invisible to the
+      plan is invisible to every planning decision made after it.
+
+      c. RE-VERIFY BEFORE CLOSING. For each candidate-fixed issue, reproduce
+      against the current tree or tag and record the command and its output in
+      the closing comment.
+
+      d. AUDIT THE AUTO-CLOSE CASCADE. `closes #N` in merged PR prose has
+      already falsely closed a live bug here (#421 closed #413 fifteen hours
+      before its fix). Re-check umbrella issues closed during merge waves and
+      reopen what was not actually done.
+
+      THE DURABLE PART, without which this is a one-off sweep that decays
+      immediately: a `scripts/board-health.rs` that prints the baseline table
+      above and is run on a schedule, so "24 untouched, 11 invisible" is a
+      number someone sees rather than a feeling someone eventually has. The
+      sweep is the easy half; the measurement is what keeps it true.
+
+      NOT IN SCOPE: closing issues to make the count smaller. The count is not
+      the target — an issue closed without evidence costs a re-report and
+      teaches the board to lie. A board of 57 issues each with a live
+      disposition is healthy; a board of 20 where nobody trusts the closures is
+      not.
+
+      FALSIFICATION: wrong if, after this release, an open issue exists with no
+      disposition, or an issue was closed as fixed citing only a merge commit,
+      or the invisible-to-plan count is non-zero, or `board-health.rs` reports
+      numbers a reader can show to be wrong.
+    tags: [requirement, relay, hygiene, issue-board, process, v1.143]
+    fields:
+      priority: should
+      req-type: process
+      verification-criteria: >
+        `scripts/board-health.rs` reports: every open issue carries a
+        disposition label or a "remaining:" comment; invisible-to-plan count is
+        0; no issue closed as fixed in this release cites a merge commit
+        without a tag. Spot-check 5 closures by reproducing the original report
+        against the tagged artifact.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-022
