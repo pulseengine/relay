@@ -10,7 +10,7 @@ artifacts:
 
       PROMOTED 2026-09-18, after #456 merged as 0185e8a: every step re-run on
       main, not on the branch. The 5 Hz oracle passes at both loop rates, the
-      GNSS-outage case stays bounded, and the gz ladder's 40 s -> 300 s is the
+      GNSS-outage case keeps ATTITUDE bounded (see the correction below), and the gz ladder's 40 s -> 300 s is the
       run recorded below.
 
       THE GZ MEASUREMENT, the one the requirement is stated on (2026-09-17,
@@ -53,10 +53,34 @@ artifacts:
           same case before this change: 75 m at 20 s, 3.4 km at 60 s.
         - MUTATION, run before this artifact was written: restoring the
           unconditional gravity update makes that test fail at **5134 m**.
-        - `gnss_outage_restores_the_gravity_update_and_stays_bounded` — 20 s of
-          aided hold then 15 s with no fixes at all: peak horizontal excursion
-          under 5 m and altitude within 1 m, which is the case the policy's
-          "stale aiding" branch exists for.
+        - `gnss_outage_restores_the_gravity_update_and_stays_bounded` —
+          CORRECTED 2026-09-24 (#483). As originally written this test COULD
+          NOT FAIL for the branch it named: its plant had zero gyro noise and
+          zero bias, so 15 s of dead reckoning was exact whether or not the
+          gravity update resumed. Clean-room mutation testing deleted the
+          branch and the test still passed, with the compiler reporting
+          `gravity_hold_ticks` as never read.
+
+          Repairing it removed the branch instead. The plant now carries a
+          gyro-bias ramp (`gyro_bias_drift = 0.0004`) so dead reckoning can
+          actually drift, and the assertion moved from horizontal position to
+          ATTITUDE error — the quantity the policy controls. Position cannot be
+          the assertion: with no fixes it is dead-reckoned by double
+          integration and drifts on any real plant, which is why the old 5 m
+          bound was satisfiable only on a noiseless one.
+
+          Measured, peak |cos(tilt)_est − true| over the outage:
+            staleness fallback (as shipped in v1.140)        0.3787
+            + |f| within 0.5% of g and rate < 0.1 rad/s      0.3457
+            NO in-flight gravity update (now)                0.0155
+
+          THE "STALE AIDING" BRANCH WAS HARMFUL, not merely untested, and a
+          validity gate on |f| does not rescue it: a quad holding altitude at
+          tilt θ has |f| = g/cos θ, inside 0.5% of g for θ < 5.7°, while the
+          direction is along body −z — so the update asserts "you are level"
+          whatever the real tilt. The accelerometer is a tilt reference on the
+          ground and never in flight. The test is now potent: deleting the
+          policy it names moves the number 24×.
 
       THREE HARNESSES WERE IDEALIZED IN THE SAME DIRECTION and were fixed with
       it, because a test that conveys attitude only through the accelerometer
