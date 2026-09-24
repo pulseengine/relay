@@ -178,7 +178,7 @@ jobs:
         shell: bash
         run: command -v rust-script >/dev/null 2>&1 || cargo install rust-script --locked
 
-      - name: Install rivet v0.19.0 (pinned; skip if cached)
+      - name: Install rivet v0.38.0 (pinned; skip if cached)
         if: steps.scope.outputs.run_full == 'true'
         shell: bash
         # PINNED (was unpinned --git main): every push to rivet master forced a
@@ -187,12 +187,12 @@ jobs:
         # heavy compile happens only on a deliberate bump (mirrors the spar pin).
         # Bump this tag AND re-run `rivet validate` locally when updating.
         run: |
-          if rivet --version 2>/dev/null | grep -q "0.19.0"; then
-            echo "rivet 0.19.0 already on PATH"
+          if rivet --version 2>/dev/null | grep -q "0.38.0"; then
+            echo "rivet 0.38.0 already on PATH"
           else
             cargo install --locked \
               --git https://github.com/pulseengine/rivet \
-              --tag v0.19.0 \
+              --tag v0.38.0 \
               --bin rivet \
               rivet-cli
           fi
