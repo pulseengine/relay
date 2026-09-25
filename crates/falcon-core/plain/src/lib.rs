@@ -443,11 +443,15 @@ pub struct CascadePartition {
     /// The cascade's own copy of the sensor calibration (the M7 sees the
     /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
+    /// The loop rate `gyro_lpf` and `notch` were DESIGNED for. Re-synced from
+    /// the backend's own `dt()` on the first tick — see `resync_loop_rate`.
+    designed_hz: f32,
 }
 
 impl CascadePartition {
     fn new(hover_thrust: f32, loop_hz: f32, warmup: u32) -> Self {
         CascadePartition {
+            designed_hz: loop_hz,
             geo: GeoAtt::new(GeoGains::FALCON_QUAD),
             adrc: AdrcRate::falcon_quad(),
             gyro_lpf: GyroLpf::new(60.0, loop_hz),
@@ -623,6 +627,46 @@ impl CascadePartition {
     /// moved here from mid-fusion, a seam change active only during the
     /// ~1 s pre-freeze window on heading-equipped vehicles; the analytic
     /// plant provides no heading, so the golden replay is bit-exact).
+    /// Rebuild the rate-dependent filters if the caller's declared loop rate
+    /// disagrees with the rate the backend is ACTUALLY being stepped at.
+    ///
+    /// WHY THIS EXISTS (#270/#398). `gyro_lpf` and the harmonic `notch` are
+    /// DESIGNS: their coefficients are computed from a sample rate. Feed a
+    /// filter designed for 1 kHz at 250 Hz and its real corner lands at a
+    /// quarter of the intended frequency, with all the extra phase lag that
+    /// implies — which is how a stable inner loop becomes a limit cycle.
+    ///
+    /// `FlightSupervisor::new` hardcoded `FlightCore::new(0.5, 1000.0)` while
+    /// the gz bench steps it at 250 Hz. `run_flightcore` passes `1.0 / dt` and
+    /// was correct. That single difference is the whole of the attitude ring
+    /// that #270 has tracked since July and #398 sits downstream of. Measured
+    /// on the gz falcon-quad, supervised hover:
+    ///
+    /// ```text
+    /// declared 1000 Hz, stepped at 250      declared 250, stepped at 250
+    ///   roll/pitch rate rms  2.47 rad/s       0.0015 rad/s
+    ///   motors               0.12 <-> 1.0000  0.5815 - 0.5857
+    ///   FDI gate shut        33.8%            0.0%
+    ///   rotor-out verdict    FAIL 11/12       PASS 3/3
+    /// ```
+    ///
+    /// A setter would have been forgettable in exactly the way the hardcoded
+    /// constructor already was, so this takes the rate from the backend and
+    /// costs one comparison per tick.
+    fn resync_loop_rate(&mut self, dt: f32) {
+        if !(dt.is_finite() && dt > 0.0) {
+            return;
+        }
+        let actual = 1.0 / dt;
+        // 2% tolerance: jitter must not rebuild filters every tick.
+        let drift = relay_math::fabsf(actual - self.designed_hz);
+        if drift > 0.02 * self.designed_hz {
+            self.gyro_lpf = GyroLpf::new(60.0, actual);
+            self.notch = relay_notch::HarmonicNotchBank::new(actual);
+            self.designed_hz = actual;
+        }
+    }
+
     pub fn step<B: FlightBackend>(
         &mut self,
         b: &mut B,
@@ -631,6 +675,7 @@ impl CascadePartition {
         heading_present: bool,
         dt: f32,
     ) {
+        self.resync_loop_rate(dt);
         let gyro = self.calib.apply_gyro(raw.gyro);
         if heading_present && !self.yaw_captured {
             // Capture the launch heading as the hold setpoint — the vehicle holds
