@@ -178,7 +178,7 @@ jobs:
         shell: bash
         run: command -v rust-script >/dev/null 2>&1 || cargo install rust-script --locked
 
-      - name: Install rivet v0.19.0 (pinned; skip if cached)
+      - name: Install rivet v0.38.0 (pinned; skip if cached)
         if: steps.scope.outputs.run_full == 'true'
         shell: bash
         # PINNED (was unpinned --git main): every push to rivet master forced a
@@ -187,15 +187,38 @@ jobs:
         # heavy compile happens only on a deliberate bump (mirrors the spar pin).
         # Bump this tag AND re-run `rivet validate` locally when updating.
         run: |
-          if rivet --version 2>/dev/null | grep -q "0.19.0"; then
-            echo "rivet 0.19.0 already on PATH"
+          if rivet --version 2>/dev/null | grep -q "0.38.0"; then
+            echo "rivet 0.38.0 already on PATH"
           else
             cargo install --locked \
               --git https://github.com/pulseengine/rivet \
-              --tag v0.19.0 \
+              --tag v0.38.0 \
               --bin rivet \
               rivet-cli
           fi
+
+      # ARTIFACT INTEGRITY (#482). This gate installed rivet and then never
+      # ran `validate` — it only used `rivet list` / `rivet get` via
+      # run-falcon-verification.py, neither of which resolves link targets. So
+      # the trace's structural integrity rested entirely on the author
+      # remembering to run a local command, with a LOCAL binary that is not the
+      # pinned one (0.37.0 vs 0.19.0 here, and they disagree: 395 warnings
+      # against 123 on the same tree).
+      #
+      # Measured cost: overwriting one artifact file that happened to hold FOUR
+      # artifacts orphaned three of them and broke six verifies/satisfies
+      # links. `rivet validate` caught it immediately; this gate would not have.
+      # It is the cheapest check in the repo and the one that catches the whole
+      # class of artifact damage.
+      - name: rivet validate (artifact + link integrity)
+        if: steps.scope.outputs.run_full == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rivet --version
+          # Non-zero exit fails the gate. Warnings do not fail it — only
+          # errors (missing link targets, schema violations) do.
+          rivet validate
 
       # Untrusted: github.event.pull_request.body is attacker-
       # controllable. Bind to env, dereference via $PR_BODY in a

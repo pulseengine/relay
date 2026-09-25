@@ -2,8 +2,15 @@ artifacts:
   - id: FV-FALCON-GNSS-001
     type: sw-verification
     title: "Noisy + intermittent GNSS: variance-matched hold vs over-trust divergence (v1.19.0)"
-    status: verified
+    status: implemented
     description: >
+      STATUS ACTUALLY DROPPED 2026-09-24 (#484). The text below has said since
+      0185e8a that this artifact was demoted to `implemented` in v1.140 — but
+      the `status:` field was never changed, so it kept asserting `verified`.
+      Clean-room review caught it. That is worse than forgetting, because the
+      prose reads as though the two-commit rule was followed. Re-promotion
+      belongs in a code-free PR once claim 2 is re-measured.
+
       Verification of the v1.19.0 GNSS-realism layer (20 falcon-core tests pass,
       clippy clean), realism arc release 4:
 
