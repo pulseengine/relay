@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FAULT-005
     type: sw-verification
     title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.141)"
-    status: proposed
+    status: verified
     release: falcon-v1.141.0
     description: >
       Re-verification of SWREQ-FALCON-FAULT-P02 against the gz plant, opened
@@ -153,10 +153,71 @@ artifacts:
       release hostage to an open control investigation is the scope-management
       error, not the fix. Rotor-out is a hold property under a fault, so it
       belongs with the rate-loop work in v1.141, and v1.142's SHOWCASE-P01
-      (engine drop) depends on it. STATUS STAYS `proposed`.
+      (engine drop) depends on it.
+
+      ======================================================================
+      VERIFIED 2026-09-25. IT NOW HOLDS, AND THE CAUSE WAS ONE NUMBER.
+
+      Everything above is the record of it FAILING. What changed is not the
+      rotor-out logic: `gyro_lpf` and the harmonic `notch` are filter DESIGNS
+      built from the loop rate the caller declares, and
+      `FlightSupervisor::new` hardcoded `FlightCore::new(0.5, 1000.0)` while
+      the gz bench steps it at 250 Hz. A 60 Hz low-pass then had its real
+      corner at a quarter of the intended frequency. `run_flightcore` passed
+      `1.0 / dt` and was correct — which is the entire reason one path rang
+      and the other did not, on the same plant and commit. See
+      SWREQ-FALCON-RATE-P05; the fix (`resync_loop_rate`) takes the rate from
+      the backend's own `dt()` rather than trusting the caller.
+
+      EVIDENCE — 3 pristine-server gz trials (the rig rule), the tightened
+      #474 verdict, rotor 0 killed at 10.0 s of 25 s:
+
+        trial   isolated   peak tilt after   peak horiz after   landed/disarmed
+        P1      Some(0)    0.220 rad         0.99 m             13.400 s / yes
+        P2      Some(0)    0.212 rad         0.95 m             11.200 s / yes
+        P3      Some(0)    0.176 rad         0.82 m             11.236 s / yes
+
+      PASS 3/3, against FAIL 11/12 with three 180° inversions before. Peak
+      tilt is now 0.176-0.220 rad against the 0.5 rad bar — a 2.3x margin,
+      not a near miss. Control on the same rig: `--scenario=flightcore`
+      PASSES at final_dist 0.12 m, horizontal 0.01 m, unchanged by the fix.
+
+      STILL THE NATIVE HALF ONLY. `--scenario=supervised-rotorout` drives the
+      native FlightSupervisor. #398 was reported against the WASM cascade, and
+      the component receives none of the bench's tuning. This artifact does
+      NOT close the wasm half; that needs tests/cascade-sitl-wasm.
+
+      NOT CLAIMED: the real airframe. This is the gz plant.
+
+      WHY THE STEPS BELOW DO NOT RUN GZ: gz is not on the runners (the rc=127
+      class, twice recorded). The steps assert the code properties that make
+      the measurement reproducible plus the mock-plant test that CI can run;
+      the gz numbers live in the cited bench-evidence finding. Note the
+      NEGATIVE assertion — a step that only checks presence cannot catch a
+      regression that re-introduces a hardcoded rate.
+      ======================================================================
     tags: [verification, falcon, fault, rotor-out, gazebo, wasm, v1.141]
     fields:
       method: simulation
+      steps:
+        # The fix: the loop rate comes from the backend, not the caller.
+        - run: "grep -q 'fn resync_loop_rate' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'self.resync_loop_rate(dt);' crates/falcon-core/plain/src/lib.rs"
+        # ...and it carries the state that makes the resync possible. NOTE the
+        # hardcoded `FlightCore::new(0.5, 1000.0)` in `FlightSupervisor::new`
+        # is STILL THERE and this artifact does not claim otherwise: the
+        # constructor cannot know the rate (no backend yet), so the resync
+        # corrects it on the first tick instead. I wrote a step asserting the
+        # constant was gone, ran it, and it failed — recorded rather than
+        # quietly dropped, because a step nobody executes is not evidence.
+        - run: "grep -q 'designed_hz' crates/falcon-core/plain/src/lib.rs"
+        # The verdict still judges controlled descent, with the #474 bars.
+        - run: "grep -q 'peak_tilt_after < 0.5' examples/falcon-sitl-gz/src/main.rs"
+        - run: "grep -q 'isolated == Some(0)' examples/falcon-sitl-gz/src/main.rs"
+        # The scenario exists, and the rotor-out chain passes on a plant CI has.
+        - run: "grep -q 'supervised-rotorout' examples/falcon-sitl-gz/src/main.rs"
+        - run: "cargo test -p falcon-core survives_single_rotor_failure_without_flipping"
+        - run: "cargo test -p falcon-core fdi_isolates_dead_rotor_and_reconfigures"
     links:
       - type: verifies
         target: SWREQ-FALCON-FAULT-P02

@@ -72,16 +72,44 @@ artifacts:
       verification for this requirement must therefore be measured on gz (or
       another plant that can saturate), or it verifies nothing.
 
-      LEADING HYPOTHESIS, NOT YET TESTED: a design-vs-deployment RATE mismatch.
-      SWREQ-FALCON-RATE-P04 fixes the control period at "1 ms (1 kHz update
-      rate)" and relay-adrc's own filter comment reasons about "the 1 kHz loop".
-      This bench runs at 250 Hz (dt = 0.004), so beta1*dt = 0.32 at
-      omega_o = 40. Note `AdrcGains::eso_dt_stable` only checks
-      omega_o*dt < 2 — a forward-Euler pole bound, which passes at 0.16 — and
-      says nothing about phase margin against the actuator lag. Second lead:
-      b0 = 60 was raised from 30 by a ratio argument, never measured.
+      ROOT CAUSE FOUND AND FIXED 2026-09-25 — it was the rate mismatch, and
+      the mechanism is filter DESIGN, not solver stability.
 
-      FALSIFICATION: wrong if, on the gz falcon-quad under
+      `gyro_lpf` and the harmonic `notch` are designs: their coefficients are
+      computed from a sample rate, and `CascadePartition::new` takes that rate
+      from what the CALLER declares. `FlightSupervisor::new` hardcoded
+      `FlightCore::new(0.5, 1000.0)` while the gz bench steps it at 250 Hz, so
+      a 60 Hz low-pass had its real corner at a quarter of the intended
+      frequency, with all the phase lag that implies. `run_flightcore` passes
+      `1.0 / dt` and was correct — which is the ENTIRE reason one path rang and
+      the other did not, on the same plant, same commit. It was never the gz
+      plant, and #270 has mis-attributed it to the plant since 2026-07-14.
+
+      MEASURED, supervised hover on the gz falcon-quad:
+
+        declared 1000 Hz / stepped 250      declared 250 / stepped 250
+          roll/pitch rate rms  2.47 rad/s     0.0015 rad/s
+          motors               0.12 <-> 1.0   0.5815 - 0.5857
+          FDI gate shut        33.8%          0.0%
+
+      ROTOR-OUT, 3 pristine-server trials under the tightened verdict: peak
+      tilt 0.220 / 0.212 / 0.176 rad, peak horizontal 0.99 / 0.95 / 0.82 m,
+      isolated Some(0) every trial, landed and disarmed every trial, PASS 3/3
+      — against FAIL 11/12 with three 180° inversions before. Control
+      unchanged: flightcore holds 2 m at 0.12 m final, 0.01 m horizontal.
+
+      WHAT THIS RETIRES. Neither anti-windup defect was the cause. Both were
+      real and are fixed, but they were treating symptoms: the ESO was never
+      the problem, the filter in front of it was. The `b0 = 60` lead is also
+      dropped — b0 was never implicated once the filter rate matched.
+
+      THE FIX IS SELF-CORRECTING. `resync_loop_rate` takes the rate from the
+      backend's own `dt()` and rebuilds both filters when the declared rate
+      drifts more than 2% from it. A setter would have been forgettable in
+      exactly the way the hardcoded constructor already was — six shipped
+      entry points hardcode their rate identically.
+
+            FALSIFICATION: wrong if, on the gz falcon-quad under
       `--scenario=supervised-rotorout`, the settled-hover roll/pitch rate RMS
       stays above 0.1 rad/s, or any motor reaches a limit during unfaulted
       hover, or the FDI steady gate is shut for more than 5% of hover ticks.
