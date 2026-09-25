@@ -216,18 +216,18 @@ jobs:
       # SHA256SUMS so the snapshot's digest enters the sums file.
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install rivet v0.19.0 (pinned; skip if cached)
+      - name: Install rivet v0.38.0 (pinned; skip if cached)
         shell: bash
         # Pinned to match the verification gate (reproducible snapshots; no
         # recompile on rivet master pushes). Bump in lockstep with the gate.
         run: |
           set -euo pipefail
-          if rivet --version 2>/dev/null | grep -q "0.19.0"; then
-            echo "rivet 0.19.0 already on PATH"
+          if rivet --version 2>/dev/null | grep -q "0.38.0"; then
+            echo "rivet 0.38.0 already on PATH"
           else
             cargo install --locked \
               --git https://github.com/pulseengine/rivet \
-              --tag v0.19.0 \
+              --tag v0.38.0 \
               --bin rivet \
               rivet-cli
           fi
@@ -372,6 +372,37 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             printf '\n## Verification tracks: UNKNOWN\n\nThe CI state of this commit could not be read at release time (verification-tracks exit %s). This is recorded, not a pass.\n' "$rc" >> "$OUT"
             echo "::warning::verification-tracks could not evaluate (exit $rc); the release notes say UNKNOWN"
+          fi
+          # THE TRACE'S OWN RELEASE NOTE (ASPICE 11-03 shape), generated from
+          # the artifacts rather than written by hand: what was committed to
+          # this release, what was delivered, what was WITHHELD, and — the part
+          # a hand-written note always drops — which ASPICE elements rivet does
+          # not compute, declared rather than silently omitted.
+          #
+          # `rivet release` landed after 0.19.0, which is why the pin moved to
+          # 0.38.0 in the same change. Absence must be LOUD: a release note
+          # that quietly lacks its traceability section is the same failure
+          # shape as a skipped CI leg that reads as a pass.
+          # NON-ZERO HERE IS A VERDICT, NOT AN ERROR. Measured on 0.38.0:
+          # falcon-v1.139.0 (all verified) exits 0; falcon-v1.140.0 (one
+          # artifact withheld) exits 1 — with the full note on stdout and
+          # stderr EMPTY in both cases. So `|| rc=$?` alone would have declared
+          # the section UNAVAILABLE on every release that is not fully
+          # verified, while the note sat right above it. Decide on OUTPUT, and
+          # keep the exit code only as a signal to echo.
+          RN="$RUNNER_TEMP/rivet-release-note.md"
+          rc=0
+          rivet release notes "$TAG" > "$RN" 2>"$RUNNER_TEMP/rivet-notes.err" || rc=$?
+          if [ -s "$RN" ] && head -1 "$RN" | grep -q '^# Release note'; then
+            printf '\n' >> "$OUT"
+            cat "$RN" >> "$OUT"
+            if [ "$rc" -ne 0 ]; then
+              echo "::notice::rivet release notes exit $rc — this release has withheld artifacts; see the note's own Limitations section"
+            fi
+          else
+            printf '\n## Traceability release note: UNAVAILABLE\n\n`rivet release notes %s` produced no usable note (exit %s). The trace-derived scope/withheld/verification section is MISSING from this release note. This is recorded, not a pass.\n' "$TAG" "$rc" >> "$OUT"
+            echo "::warning::rivet release notes produced no note (exit $rc); the release notes say UNAVAILABLE"
+            sed -n '1,20p' "$RUNNER_TEMP/rivet-notes.err" || true
           fi
           printf 'notes_path=%s\n' "$OUT" >>"$GITHUB_OUTPUT"
 

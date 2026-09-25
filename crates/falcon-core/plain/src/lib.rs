@@ -157,9 +157,11 @@ pub struct EstimatorPartition {
     /// the hold then diverges at every fix rate. Tilt stays observable through
     /// the position innovations instead. With no aiding — on the ground, or
     /// through a GNSS outage — the accelerometer is the only attitude
-    /// reference there is, so the update resumes.
+    /// Control ticks since the last ACCEPTED position fix. Kept as an aiding
+    /// freshness signal (diagnostics / future policies); it no longer gates the
+    /// gravity update, because resuming that update on staleness was measured
+    /// to make attitude 24x WORSE during an outage (#483).
     ticks_since_aiding: u32,
-    gravity_hold_ticks: u32,
     /// Set by [`FlightCore::step`] from the cascade's own collective: the
     /// gravity update is only suppressed while the vehicle is FLYING. On the
     /// ground the accelerometer is the tilt reference that lets pre-arm see a
@@ -200,7 +202,6 @@ impl EstimatorPartition {
             // fix, short enough that a real outage falls back to the
             // accelerometer within a second.
             ticks_since_aiding: u32::MAX,
-            gravity_hold_ticks: warmup.saturating_mul(5),
             in_flight: false,
             step_count: 0,
             fdi_warmup_steps: warmup,
@@ -312,10 +313,38 @@ impl EstimatorPartition {
 
         // ── Estimate ──
         self.iekf.propagate(IekfImu { gyro, accel }, dt);
-        // GRAVITY UPDATE ONLY WITHOUT FRESH POSITION AIDING (#452/#434): the
-        // reading is specific force, which points along the thrust axis and
-        // shows almost none of the vehicle's tilt while it flies.
-        if !self.in_flight || self.ticks_since_aiding > self.gravity_hold_ticks {
+        // GRAVITY UPDATE ONLY WHILE NOT FLYING (#452/#434/#483).
+        //
+        // The reading is SPECIFIC FORCE f = a_inertial - g. It equals -g, and
+        // so gives the vertical, only while the vehicle is not accelerating.
+        // Under thrust it points along the THRUST AXIS and shows almost none of
+        // the tilt. Suppressing it while position aiding is fresh was #452.
+        //
+        // v1.140 then RESUMED it on aiding staleness alone, and that is worse
+        // than no guard: during a GNSS outage the position loop chases a
+        // drifting estimate, so the vehicle is MANEUVERING — exactly when the
+        // reading is least valid. Measured (#483), peak |cos(tilt)_est - true|
+        // through a 15 s outage on a plant with a gyro-bias ramp:
+        //
+        //     staleness fallback (v1.140)                    0.3787
+        //     + |f| within 25% of g                          0.3787
+        //     + |f| within 0.5% of g                         0.3787
+        //     + |f| within 0.5% of g AND rate < 0.1 rad/s    0.3457
+        //     NO in-flight gravity update (this)             0.0155
+        //
+        // A VALIDITY GATE ON |f| DOES NOT WORK, and the 50x tolerance sweep
+        // above shows it is not a tuning problem. A quad holding altitude at
+        // tilt θ has |f| = g/cos θ — inside 0.5% of g for θ < 5.7° — while the
+        // direction is along body -z. So the update asserts "you are level"
+        // regardless of the actual tilt: it does not merely fail to inform, it
+        // ERASES tilt. Magnitude cannot distinguish the case, because the
+        // thrust axis IS what the accelerometer reports.
+        //
+        // In flight the attitude reference is the gyro (with its bias state
+        // observed through GNSS/mag/heading). On the ground, at rest, the
+        // accelerometer genuinely reads -g and is the reference that lets
+        // pre-arm see a settled, level estimate.
+        if !self.in_flight {
             self.iekf.update_gravity(accel, self.grav_var);
         }
         self.ticks_since_aiding = self.ticks_since_aiding.saturating_add(1);
@@ -508,7 +537,39 @@ impl CascadePartition {
     pub fn flying(&self) -> bool {
         let m = self.mixer.last_motors();
         let mean = (m[0] + m[1] + m[2] + m[3]) * 0.25;
-        mean > 0.7 * self.hover_thrust
+        // THE ERRORS HERE ARE NOT SYMMETRIC (#481).
+        //
+        // This decides `in_flight`, which is now the ONLY thing admitting the
+        // gravity update (#483). Getting it wrong in the two directions costs
+        // very different amounts:
+        //
+        //   says NOT flying while airborne -> the gravity update runs IN
+        //     FLIGHT, which is the full #452 divergence: specific force points
+        //     along the thrust axis, the tilt estimate is pulled level, and the
+        //     hold diverges at every fix rate. Catastrophic, and silent.
+        //   says flying while on the ground -> no gravity update on the ground,
+        //     so pre-arm loses its tilt reference. Visible at pre-arm, and the
+        //     vehicle does not take off.
+        //
+        // So bias toward "flying". A threshold of `0.7 * hover_thrust` alone
+        // fails the dangerous way whenever hover_thrust is OVER-estimated, and
+        // it is hardcoded to 0.5 in every shipped entry point --
+        // `wasm/cm/flight`, `embedded/falcon-cortex-m`, `falcon-param`,
+        // `falcon-hitl`, `FlightSupervisor::new` -- while
+        // `wasm/cm/cascade` falls back to 0.5 when `configure` was never
+        // called. An airframe hovering at 0.35 mean would then read NOT flying
+        // in a steady hover.
+        //
+        // The absolute floor breaks that dependency: any vehicle holding a
+        // mean collective above it is flying, whatever the configuration
+        // claims. Idle-on-the-ground is well below it.
+        const AIRBORNE_FLOOR: f32 = 0.25;
+        let threshold = if 0.7 * self.hover_thrust < AIRBORNE_FLOOR {
+            0.7 * self.hover_thrust
+        } else {
+            AIRBORNE_FLOOR
+        };
+        mean > threshold
     }
     /// The isolated failed rotor (latched), or `None` — the supervisor lands the
     /// vehicle when this is set (a 3-rotor quad cannot navigate; v1.103).
@@ -4709,6 +4770,17 @@ mod tests {
         let dt = 0.002f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let mut b = SimBackend::new(level, dt);
+        // A PLANT THAT CAN ACTUALLY DRIFT (#483). Without this the default
+        // Pathology has zero gyro noise and zero bias, so 15 s of dead
+        // reckoning is exact and the outage stays bounded WHETHER OR NOT the
+        // gravity update resumes — the test passed identically with the
+        // stale-aiding fallback deleted (clean-room mutation test, 2026-09-23;
+        // the compiler even reported `gravity_hold_ticks` as never read). A
+        // test for "the accelerometer is the only attitude reference there is"
+        // has to be run on a plant where losing that reference costs something:
+        // the gyro bias ramp is unobservable without the gravity update, so
+        // attitude walks off and the horizontal error grows.
+        b.path.gyro_bias_drift = 0.0004;
         let mut core = FlightCore::new(0.5, 1.0 / dt);
         core.set_pos_var(0.25);
         core.set_process_floor(0.30, 0.05);
@@ -4720,18 +4792,86 @@ mod tests {
         b.path.gps_dropout_start = 0;
         b.path.gps_dropout_len = u32::MAX;
         b.path.gps_dropout_period = 0;
-        let mut peak = 0.0f32;
+        // ASSERT ON ATTITUDE, NOT POSITION (#483). The stale-aiding fallback
+        // restores the ATTITUDE reference; it cannot restore position, because
+        // with no fixes the position is dead-reckoned by double integration and
+        // drifts on any real plant. The old bound (`peak < 5.0` m of horizontal
+        // over 15 s) was therefore only satisfiable on a NOISELESS plant — which
+        // is exactly why the plant was noiseless, and why deleting the branch
+        // changed nothing. Measure the quantity the branch actually controls:
+        // the error between the ESTIMATED thrust axis and the TRUE one.
+        let mut peak_att_err = 0.0f32;
         for _ in 0..7_500 {
             core.step(&mut b);
-            let h = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
-            if h > peak {
-                peak = h;
+            // cos(tilt) of each: R[2][2]. Estimate from the quaternion, truth
+            // straight off the plant's attitude matrix.
+            let q = core.state().q;
+            let est_c = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]);
+            let true_c = b.r[2][2];
+            let err = (est_c - true_c).abs();
+            if err > peak_att_err {
+                peak_att_err = err;
             }
         }
         assert!(
-            peak < 5.0 && (-b.pos[2] - 2.0).abs() < 1.0,
-            "a 15 s outage must stay bounded: peak {peak} m, altitude off by {} m",
-            (-b.pos[2] - 2.0).abs()
+            peak_att_err < 0.02,
+            "through a 15 s outage the accelerometer must keep the attitude \
+             estimate anchored: peak |cos(tilt) est - true| = {peak_att_err}"
+        );
+    }
+
+    /// **A misconfigured hover thrust must not silently re-enable the in-flight
+    /// gravity update (#481).** `flying()` gates `in_flight`, which is the only
+    /// thing admitting that update (#483). Every shipped entry point hardcodes
+    /// `hover_thrust = 0.5` — `wasm/cm/flight`, `embedded/falcon-cortex-m`,
+    /// `falcon-param`, `falcon-hitl`, `FlightSupervisor::new` — and
+    /// `wasm/cm/cascade` falls back to 0.5 when `configure` was never called.
+    /// An airframe that actually hovers at 0.35 mean collective then sat below
+    /// the old `0.7 * hover_thrust` = 0.35 threshold in a STEADY HOVER, read as
+    /// not-flying, and got the gravity update in flight — the full #452
+    /// divergence, silently, on the artifact an integrator runs.
+    #[test]
+    fn an_overestimated_hover_thrust_does_not_reenable_the_inflight_gravity_update() {
+        // Same excitation as `hold_converges_with_5hz_position_aiding`, which is
+        // the configuration known to expose this divergence: 5 Hz aiding, and
+        // the vehicle starts 1 m off so it must TILT to fly back. Without that
+        // tilt nothing is excited and the gravity update does no harm, so a
+        // level undisturbed plant cannot tell the two policies apart.
+        let dt = 0.002f32;
+        let hz = 1.0 / dt;
+        let period = (hz / 5.0) as u32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt).with_pathology(Pathology {
+            gps_dropout_period: period,
+            gps_dropout_len: period - 1,
+            ..Pathology::default()
+        });
+        // A LIGHT AIRFRAME: hovers at 0.35 mean collective, not 0.5.
+        b.k_thrust = GRAVITY / (4.0 * 0.35);
+        // ...flown by a core that was told 0.5, as every shipped entry point does.
+        let mut core = FlightCore::new(0.5, hz);
+        core.set_pos_var(0.25);
+        core.set_process_floor(0.30, 0.05);
+        core.set_position([0.0, 0.0, -2.0]);
+        b.pos[0] = 1.0;
+        let mut peak = 0.0f32;
+        for i in 0..(60.0 / dt) as usize {
+            core.step(&mut b);
+            let h = relay_math::sqrtf(b.pos[0] * b.pos[0] + b.pos[1] * b.pos[1]);
+            if i as f32 * dt > 5.0 && h > peak {
+                peak = h;
+            }
+        }
+        // HORIZONTAL only. A wrong hover feedforward also leaves a steady
+        // ALTITUDE offset (this plant settles ~3 m high) — that is a separate,
+        // already-recorded consequence of misconfiguration
+        // (SWREQ-FALCON-TRANSPORT-P01 measured 58.8 m), not the property under
+        // test. The #452 divergence signature is horizontal and unbounded.
+        assert!(
+            peak < 1.0,
+            "a 0.35-hover airframe told hover_thrust=0.5 must still be seen as \
+             FLYING, so the gravity update stays suppressed and the hold does \
+             not diverge: peak horizontal {peak} m"
         );
     }
 
@@ -4971,21 +5111,52 @@ mod tests {
         use relay_calib::CalParams;
         struct WindBackend {
             windy: bool,
+            /// Control ticks since the wind came on, so the tilt can be
+            /// established by INTEGRATING GYRO rather than asserted through
+            /// the accelerometer.
+            windy_ticks: u32,
         }
+        /// Pitch rate during the ramp, and how long it runs: 0.61 rad/s for
+        /// 200 ticks at dt=0.004 s reaches the ~0.488 rad tilt the wind band
+        /// [0.30, 0.70] expects, gently enough not to look like a runaway.
+        const WIND_RAMP_RATE: f32 = 0.61;
+        const WIND_RAMP_TICKS: u32 = 200;
         impl FlightBackend for WindBackend {
             fn read_imu(&mut self) -> ImuSample {
-                // windy: gravity measured at ~28° off body-down → the estimate
-                // holds a ~0.49 rad tilt (inside the wind band [0.30, 0.70]) and
-                // the rate loop saturates fighting it; else level.
-                let accel = if self.windy {
-                    [GRAVITY * 0.469, 0.0, -GRAVITY * 0.883]
-                } else {
-                    [0.0, 0.0, -GRAVITY]
-                };
-                ImuSample {
-                    accel,
-                    gyro: [0.0; 3],
+                // THIS BACKEND USED TO CONVEY TILT THROUGH THE ACCELEROMETER
+                // ALONE, WITH `gyro: [0.0; 3]` (#483). That is idealized by
+                // construction: a multirotor accelerometer reads specific force
+                // along the THRUST axis, so a real vehicle cannot learn its tilt
+                // that way in flight — and once the in-flight gravity update was
+                // removed (it made attitude 24x worse through an outage) this
+                // test had no way left to express a tilt at all, and stopped
+                // firing the failsafe it names.
+                //
+                // Establish the tilt the way a vehicle actually does: rotate
+                // into it on the gyro, then hold. The accelerometer then
+                // reports the specific force consistent with that attitude,
+                // which is what a real IMU would produce.
+                if self.windy {
+                    self.windy_ticks = self.windy_ticks.saturating_add(1);
                 }
+                let (accel, gyro) = if !self.windy {
+                    ([0.0, 0.0, -GRAVITY], [0.0; 3])
+                } else if self.windy_ticks <= WIND_RAMP_TICKS {
+                    // rotating INTO the tilt about body +y
+                    let th = WIND_RAMP_RATE * (self.windy_ticks as f32) * 0.004;
+                    (
+                        [
+                            GRAVITY * relay_math::sinf(th),
+                            0.0,
+                            -GRAVITY * relay_math::cosf(th),
+                        ],
+                        [0.0, WIND_RAMP_RATE, 0.0],
+                    )
+                } else {
+                    // holding the tilt: no further rotation
+                    ([GRAVITY * 0.469, 0.0, -GRAVITY * 0.883], [0.0; 3])
+                };
+                ImuSample { accel, gyro }
             }
             fn read_position(&mut self) -> Option<Vec3> {
                 Some([100.0, 0.0, 0.0]) // away from home: an RTL flies, never lands
@@ -5008,7 +5179,10 @@ mod tests {
             gyro_bias: [0.001, 0.0, 0.0],
             ..CalParams::identity()
         });
-        let mut b = WindBackend { windy: false };
+        let mut b = WindBackend {
+            windy: false,
+            windy_ticks: 0,
+        };
         // converge level, arm, take off.
         for _ in 0..1500 {
             sup.step(&mut b);
