@@ -147,7 +147,17 @@ artifacts:
         - run: "cargo test -p falcon-core"
         # The harness reports specific force, and the estimator gates the update.
         - run: "grep -q 'specific_force_ned' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q '!self.in_flight || self.ticks_since_aiding > self.gravity_hold_ticks' crates/falcon-core/plain/src/lib.rs"
+        # THE POLICY IS NOW `!self.in_flight` ALONE. The previous step pinned
+        # `!self.in_flight || self.ticks_since_aiding > self.gravity_hold_ticks`
+        # and the gate correctly FAILED when that fallback was deleted (#483):
+        # resuming the gravity update on aiding staleness made attitude 24x
+        # worse, because the accelerometer reads specific force along the
+        # thrust axis and a maneuvering vehicle is when it is least valid.
+        # Assert the policy that exists, AND that the removed one has not
+        # crept back.
+        - run: "grep -q 'if !self.in_flight {' crates/falcon-core/plain/src/lib.rs"
+        - run: "! grep -q 'ticks_since_aiding > self.gravity_hold_ticks' crates/falcon-core/plain/src/lib.rs"
+        - run: "! grep -q 'gravity_hold_ticks:' crates/falcon-core/plain/src/lib.rs"
         # The gz verdict measures the horizontal half, and the ladder keeps its number.
         - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 2.0' examples/falcon-sitl-gz/src/main.rs"
         - run: "grep -qF -- '|| RC=$?' .github/workflows/soak.yml"
