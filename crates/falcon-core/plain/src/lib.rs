@@ -642,11 +642,13 @@ impl CascadePartition {
     /// that #270 has tracked since July and #398 sits downstream of. Measured
     /// on the gz falcon-quad, supervised hover:
     ///
-    ///     declared 1000 Hz, stepped at 250      declared 250, stepped at 250
-    ///       roll/pitch rate rms  2.47 rad/s       0.0015 rad/s
-    ///       motors               0.12 <-> 1.0000  0.5815 - 0.5857
-    ///       FDI gate shut        33.8%            0.0%
-    ///       rotor-out verdict    FAIL 11/12       PASS 3/3
+    /// ```text
+    /// declared 1000 Hz, stepped at 250      declared 250, stepped at 250
+    ///   roll/pitch rate rms  2.47 rad/s       0.0015 rad/s
+    ///   motors               0.12 <-> 1.0000  0.5815 - 0.5857
+    ///   FDI gate shut        33.8%            0.0%
+    ///   rotor-out verdict    FAIL 11/12       PASS 3/3
+    /// ```
     ///
     /// A setter would have been forgettable in exactly the way the hardcoded
     /// constructor already was, so this takes the rate from the backend and
