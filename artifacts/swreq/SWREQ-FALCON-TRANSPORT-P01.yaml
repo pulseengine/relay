@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-TRANSPORT-P01
     type: sw-req
     title: "TRANSPORT-P01 — the cascade seam shall have ONE supported transport binding, so an integrator does not invent a fifth"
-    status: proposed
+    status: implemented
     release: falcon-v1.141.0
     description: >
       Driving the shipped flight core from another process or another board
@@ -76,6 +76,63 @@ artifacts:
       one; or if a host holding the binding still cannot stream the vehicle's
       attitude, position and failsafe state to a GCS with the verified
       MAVLink stack.
+      ======================================================================
+      RETURN DIRECTION IMPLEMENTED 2026-09-30. Seam bumped
+      pulseengine:falcon-cascade@0.10.0 -> @0.11.0.
+
+      SHAPE AS THE INTEGRATOR SPECIFIED IT (jess#167, answered 4m26s after we
+      asked and then unread by us for 11.5 h — a separate defect, now fixed by
+      giving the loop a watch on that repo):
+
+        - A SECOND EXPORT (`observer.read-state`), NOT a return value on `step`.
+          On the M4 you must read state WITHOUT running a control tick, or
+          observing executes the controller and changes what it observes. It
+          also keeps `step`'s lowered symbol byte-stable, which jess's
+          byte-identity baselines depend on.
+        - SEQLOCK: `tick-head` first field, `tick-tail` last. A reader takes
+          tail, body, head and retries while they disagree.
+        - FIXED LAYOUT, no `option<>`, no lists. Absence rides a `valid`
+          BITMASK, because a discriminant whose position moves is exactly where
+          tearing bites across a cache boundary.
+        - MONOTONIC tick that never resets, so staleness is judged against the
+          reader's own clock rather than trusting freshness.
+        - CADENCE DELIBERATELY UNSPECIFIED. jess declined to invent one ("no
+          falcon code has executed on an RT1176"); the observed rate is
+          computed from the tick delta on the first shadow flight.
+
+      Also corrected a premise WE held: there is no flattening cliff on returns.
+      MAX_FLAT_RESULTS is 1, so every export already returns a pointer — state
+      size costs return-area bytes, not a calling-convention change. We were
+      designing around a constraint that does not exist.
+
+      MECHANICALLY VERIFIED on the built artifact, not the source:
+        wasm-tools component wit target/.../falcon_cascade_cm.wasm
+          export pulseengine:falcon-cascade/controller@0.11.0
+          export pulseengine:falcon-cascade/observer@0.11.0
+            read-state: func() -> flight-state
+
+      TWO DEVIATIONS, RECORDED RATHER THAN IMPLIED:
+
+      (1) THE WIT WAS HAND-EDITED, which CLAUDE.md names as an anti-pattern
+      ("spar generates them; if WIT changes, the AADL changed first"). It is
+      enforced for three lesser seams and IMPOSSIBLE for this one: spar codegen
+      on the cascade root emits 21 lines of `list<u8>` thread ports against the
+      committed 246 lines of typed records — different abstraction levels, and
+      regenerating would destroy the seam. Filed as #492 rather than worked
+      around silently. Nothing gates this file's drift from the architecture.
+
+      (2) NO MODE OR FAILSAFE IN THE STATE. The component wraps FlightCore, not
+      FlightSupervisor, so there is no mode machine or failsafe latch to
+      publish (#414). `flight-state` carries attitude, position, velocity,
+      rates, gyro bias, innovation and the isolated rotor. A telemetry consumer
+      gets the estimate but cannot see WHY the vehicle is doing something. That
+      is a real gap in this binding and it closes with #414, not here.
+
+      NOT YET DONE: announcing the bump to the integrator BEFORE anything
+      publishes (the v1.133 path-move lesson — a namespace moved, nobody told
+      jess, and they reported the publish "stalled"). No release may carry
+      @0.11.0 until that announcement is out.
+      ======================================================================
     tags: [requirement, falcon, transport, seam, hitl, v1.141]
     links:
       - type: derives-from

@@ -55,7 +55,8 @@ wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.10.0;
+            export pulseengine:falcon-cascade/controller@0.11.0;
+            export pulseengine:falcon-cascade/observer@0.11.0;
         }
     "#,
     path: "../../wit/falcon-cascade",
@@ -89,6 +90,14 @@ fn main() -> Result<()> {
     let bindings = ComposedCascade::instantiate(&mut store, &component, &linker)
         .context("instantiating the composed cascade (empty linker, no WASI)")?;
     let controller = bindings.pulseengine_falcon_cascade_controller();
+    // THE RETURN DIRECTION (SWREQ-FALCON-TRANSPORT-P01, seam @0.11.0). Exercised
+    // here rather than merely compiled against: this is the only harness that
+    // drives the PUBLISHED component through a real physics engine, so it is the
+    // only place the seqlock and the monotonic tick can be checked across the
+    // actual Component Model ABI instead of in-process.
+    let observer = bindings.pulseengine_falcon_cascade_observer();
+    let mut last_tick: u64 = 0;
+    let mut state_reads: u32 = 0;
 
     // Hold 2 m above the launch point. NED: down is negative up.
     let down: f32 = std::env::var("TARGET_DOWN").ok().and_then(|v| v.parse().ok()).unwrap_or(-2.0);
@@ -270,6 +279,35 @@ fn main() -> Result<()> {
         };
         let m = controller.call_step(&mut store, frame, target)?;
 
+        // READ THE PUBLISHED STATE, every tick, and hold it to its contract.
+        // Three properties, each of which has a real failure mode:
+        //   head == tail   -> the body corresponds to ONE tick (seqlock)
+        //   tick advances  -> `step` actually republished; a frozen tick means
+        //                     an observer would read stale numbers forever with
+        //                     no error, which is the absence-looks-like-data
+        //                     shape this project keeps finding
+        //   valid != 0     -> fields are marked measured, not silently zero
+        let st = observer.call_read_state(&mut store)?;
+        state_reads += 1;
+        if st.tick_head != st.tick_tail {
+            anyhow::bail!(
+                "seqlock torn at tick {tick}: head {} != tail {}",
+                st.tick_head,
+                st.tick_tail
+            );
+        }
+        if tick > 0 && st.tick_head != last_tick + 1 {
+            anyhow::bail!(
+                "published tick did not advance by 1 at tick {tick}: {} -> {}",
+                last_tick,
+                st.tick_head
+            );
+        }
+        if st.valid == 0 {
+            anyhow::bail!("published state at tick {tick} marks NOTHING valid");
+        }
+        last_tick = st.tick_head;
+
         // Fed the IDENTICAL frame — both sides must see one input sequence or
         // they diverge for reasons that say nothing about the boundary. The
         // plant is advanced by the WASM output, so the native side is a pure
@@ -387,6 +425,11 @@ fn main() -> Result<()> {
         );
     }
     println!("LOOP CLOSES: {ticks} ticks executed through the Component Model seam.");
+    println!(
+        "STATE RETURN: {state_reads} read-state calls, seqlock coherent every tick, \
+         final published tick {last_tick}, valid mask 0x{:x}.",
+        observer.call_read_state(&mut store)?.valid
+    );
 
     if let Some((_, worst, worst_tick)) = differential.as_ref() {
         println!("DIFFERENTIAL: worst per-motor |wasm - native| = {worst:.9} at tick {worst_tick}");

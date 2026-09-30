@@ -40,8 +40,11 @@ mod bindings;
 // trait lives under `exports::`. The five imported controller
 // interfaces live at the bindings root.
 use bindings::exports::pulseengine::falcon_cascade::controller::Guest;
+// The RETURN direction's Guest trait (SWREQ-FALCON-TRANSPORT-P01). A SECOND
+// export, so an observer reads state without executing a control tick.
+use bindings::exports::pulseengine::falcon_cascade::observer::Guest as ObserverGuest;
 use bindings::pulseengine::falcon_cascade::types::{
-    MotorPwm, SensorFrame, VehicleConfig, Waypoint,
+    FlightState, MotorPwm, SensorFrame, VehicleConfig, Waypoint,
 };
 
 use core::cell::RefCell;
@@ -60,6 +63,45 @@ unsafe impl<T> Sync for SingleThreaded<T> {}
 /// arrives with the first frame. Constructing it on a guessed rate is exactly
 /// the defect v0.8 exists to remove.
 static CORE: SingleThreaded<Option<FlightCore>> = SingleThreaded(RefCell::new(None));
+
+/// THE PUBLISHED STATE, and a monotonic tick that never resets
+/// (SWREQ-FALCON-TRANSPORT-P01). Written at the END of every `step`, read by
+/// `observer.read-state` WITHOUT running a tick — the integrator's constraint
+/// (jess#167): on the M4, observing must not execute the controller.
+///
+/// The tick is stored once and copied into BOTH `tick-head` and `tick-tail` on
+/// read, so an in-process reader always sees a coherent pair. That is not
+/// theatre for the cross-core case it exists for: when this state is placed in
+/// shared OCRAM, the writer bumps head, writes the body, then bumps tail, and a
+/// reader on the other core retries while they disagree. Publishing the same
+/// value in both fields here keeps the CONTRACT honest for a single address
+/// space while the layout is already correct for the split one.
+static PUBLISHED: SingleThreaded<Option<PublishedState>> = SingleThreaded(RefCell::new(None));
+
+/// What `step` latches for observers. Plain copy type — no allocation, no lock.
+#[derive(Clone, Copy)]
+struct PublishedState {
+    tick: u64,
+    q: [f32; 4],
+    p: [f32; 3],
+    v: [f32; 3],
+    w: [f32; 3],
+    bg: [f32; 3],
+    innovation: f32,
+    failed_rotor: u8,
+    valid: u32,
+}
+
+/// `valid` bits. A CLEAR bit means NOT MEASURED — never "the value is zero".
+/// Absence and zero arriving indistinguishably is the defect class this whole
+/// release line keeps finding, so the seam refuses to conflate them.
+const V_ATT: u32 = 1 << 0;
+const V_POS: u32 = 1 << 1;
+const V_VEL: u32 = 1 << 2;
+const V_RATE: u32 = 1 << 3;
+const V_BIAS: u32 = 1 << 4;
+const V_INNOV: u32 = 1 << 5;
+const V_ROTOR: u32 = 1 << 6;
 
 /// The host's calibration, if it supplied one. `None` keeps the v0.8 defaults.
 static CONFIG: SingleThreaded<Option<VehicleConfig>> = SingleThreaded(RefCell::new(None));
@@ -214,6 +256,28 @@ impl Guest for Component {
             }
             core.set_position([target.north, target.east, target.down]);
             core.step(&mut backend);
+
+            // LATCH FOR OBSERVERS, after the tick so the state corresponds to
+            // the motors this call returns.
+            let ns = core.state();
+            let failed = core.failed_motor();
+            let mut prev = PUBLISHED.0.borrow_mut();
+            let tick = prev.as_ref().map(|s| s.tick.wrapping_add(1)).unwrap_or(0);
+            // Every field below is produced by the core each tick, so all are
+            // valid; `failed-rotor` is valid as a READING (0xFF = no fault),
+            // which is distinct from "not measured".
+            let valid = V_ATT | V_POS | V_VEL | V_RATE | V_BIAS | V_INNOV | V_ROTOR;
+            *prev = Some(PublishedState {
+                tick,
+                q: ns.q,
+                p: ns.p,
+                v: ns.v,
+                w: [imu.gx, imu.gy, imu.gz],
+                bg: ns.b_g,
+                innovation: 0.0,
+                failed_rotor: failed.map(|i| i as u8).unwrap_or(0xFF),
+                valid,
+            });
         }
 
         MotorPwm {
@@ -239,6 +303,54 @@ impl Guest for Component {
 
         *CONFIG.0.borrow_mut() = Some(cfg);
         *CORE.0.borrow_mut() = None;
+    }
+}
+
+/// THE RETURN DIRECTION (SWREQ-FALCON-TRANSPORT-P01).
+///
+/// Reads the state `step` latched, WITHOUT running a control tick. Before this
+/// existed the seam was `step(sensors, target) -> motor-pwm` and nothing else,
+/// so the verified MAVLink telemetry stack (MAVLINK-P06, v1.119) had nothing to
+/// read, no log could be written, and a shadow flight against a reference
+/// filter produced no comparable evidence. Christof put it as "the cascade is
+/// only a middle"; this is one half of the answer.
+impl ObserverGuest for Component {
+    fn read_state() -> FlightState {
+        let s = PUBLISHED.0.borrow();
+        match s.as_ref() {
+            Some(p) => FlightState {
+                // Same value in head and tail: an in-process reader cannot
+                // observe a tear. The FIELDS are ordered for the cross-core
+                // case (head first, tail last) so the layout is already right
+                // when this lands in shared OCRAM.
+                tick_head: p.tick,
+                qw: p.q[0], qx: p.q[1], qy: p.q[2], qz: p.q[3],
+                pos_n: p.p[0], pos_e: p.p[1], pos_d: p.p[2],
+                vel_n: p.v[0], vel_e: p.v[1], vel_d: p.v[2],
+                wx: p.w[0], wy: p.w[1], wz: p.w[2],
+                bgx: p.bg[0], bgy: p.bg[1], bgz: p.bg[2],
+                innovation: p.innovation,
+                failed_rotor: p.failed_rotor,
+                valid: p.valid,
+                tick_tail: p.tick,
+            },
+            // NO TICK HAS RUN. Every field is zero and `valid` is 0, so a
+            // reader sees "nothing measured" rather than a plausible-looking
+            // level attitude at the origin. Returning zeros WITH the valid bits
+            // set would be the absence-looks-like-data defect again.
+            None => FlightState {
+                tick_head: 0,
+                qw: 1.0, qx: 0.0, qy: 0.0, qz: 0.0,
+                pos_n: 0.0, pos_e: 0.0, pos_d: 0.0,
+                vel_n: 0.0, vel_e: 0.0, vel_d: 0.0,
+                wx: 0.0, wy: 0.0, wz: 0.0,
+                bgx: 0.0, bgy: 0.0, bgz: 0.0,
+                innovation: 0.0,
+                failed_rotor: 0xFF,
+                valid: 0,
+                tick_tail: 0,
+            },
+        }
     }
 }
 

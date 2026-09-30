@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.10.0;
+package pulseengine:falcon-cascade@0.11.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -23,6 +23,55 @@ interface types {
         vel-n: f32, vel-e: f32, vel-d: f32,
         wx: f32, wy: f32, wz: f32,
         innovation: f32,
+    }
+
+    /// FLIGHT STATE PUBLISHED FOR OBSERVERS — the RETURN direction of the
+    /// seam (SWREQ-FALCON-TRANSPORT-P01). `step` hands back motor commands and
+    /// nothing else, so the verified MAVLink telemetry stack had nothing to
+    /// read, no log could be written, and a shadow flight produced no
+    /// comparable evidence. This is what an observer reads.
+    ///
+    /// SEQLOCK. `tick-head` is written FIRST and `tick-tail` LAST, so a reader
+    /// on another core reads tail, then the body, then head, and RETRIES if the
+    /// two counters disagree. Shape specified by the integrator (jess#167):
+    /// without it a second export can return a body that never corresponded to
+    /// any single tick — a torn read across the core boundary, which on a
+    /// cached OCRAM region yields stale numbers with NO fault at all.
+    ///
+    /// FIXED LAYOUT, NO `option<>`, NO LISTS. Absence is carried by `valid`,
+    /// a bitmask, not by a discriminant whose position moves. Variable-shape
+    /// data across a cache boundary is exactly where tearing bites.
+    ///
+    /// The tick is MONOTONIC and never resets, so a reader can judge staleness
+    /// against its own clock instead of trusting freshness — and the CADENCE is
+    /// deliberately unspecified here. jess declined to invent one ("no falcon
+    /// code has executed on an RT1176"), so the observed rate is computed from
+    /// the tick delta on the first shadow flight rather than agreed by two
+    /// parties who have not measured it.
+    record flight-state {
+        /// Seqlock head. Equal to `tick-tail` iff the body is coherent.
+        tick-head: u64,
+        /// Body→NED attitude (unit quaternion, Hamilton scalar-first).
+        qw: f32, qx: f32, qy: f32, qz: f32,
+        /// NED position (m); `pos-d` is negative up.
+        pos-n: f32, pos-e: f32, pos-d: f32,
+        /// NED velocity (m/s).
+        vel-n: f32, vel-e: f32, vel-d: f32,
+        /// Body rates (rad/s).
+        wx: f32, wy: f32, wz: f32,
+        /// Estimated gyro bias (rad/s) — a shadow flight compares this against
+        /// the reference filter's, and it is where a divergence shows first.
+        bgx: f32, bgy: f32, bgz: f32,
+        /// Estimator innovation magnitude — the trust signal.
+        innovation: f32,
+        /// Isolated failed rotor, 0-3; 0xFF when none. Flat, not `option<u8>`.
+        failed-rotor: u8,
+        /// Which fields above are meaningful this tick. Bit 0 attitude,
+        /// 1 position, 2 velocity, 3 rates, 4 gyro bias, 5 innovation,
+        /// 6 failed-rotor. A clear bit means NOT MEASURED, never "zero".
+        valid: u32,
+        /// Seqlock tail, written last. See `tick-head`.
+        tick-tail: u64,
     }
 
     /// Raw IMU sample — body-frame accel (m/s²) + gyro (rad/s).
@@ -241,6 +290,27 @@ interface controller {
 /// falcon-core moved to geometric SE(3) + ADRC, unnoticed for three months
 /// (#388). One component, one tick, one clock, and the same control law the
 /// vehicle flies.
+/// THE RETURN DIRECTION (SWREQ-FALCON-TRANSPORT-P01).
+///
+/// A SECOND EXPORT, deliberately not a return value on `step`. jess#167: on the
+/// M4 you must be able to read state WITHOUT running a control tick, or the act
+/// of observing executes the controller and changes what it observes. It also
+/// keeps `step`'s lowered symbol byte-stable, which matters because jess's
+/// baselines are byte-identity claims about lowered objects.
+interface observer {
+    use types.{flight-state};
+
+    /// The most recent published state. Cheap, side-effect-free, and safe to
+    /// call at a cadence unrelated to the control loop.
+    ///
+    /// Read it as a seqlock: compare `tick-tail` against `tick-head` and retry
+    /// if they differ. A single in-process caller cannot observe a tear, but a
+    /// reader on another core across shared memory can, and that is the case
+    /// this shape exists for.
+    read-state: func() -> flight-state;
+}
+
 world cascade {
     export controller;
+    export observer;
 }
