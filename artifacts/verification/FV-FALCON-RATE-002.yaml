@@ -1,0 +1,96 @@
+artifacts:
+  - id: FV-FALCON-RATE-002
+    type: sw-verification
+    title: "RATE-P05 — the inner rate loop tracks under load on the gz plant, once the filters are designed for the rate they run at (v1.141)"
+    status: verified
+    release: falcon-v1.141.0
+    description: >
+      Verifies SWREQ-FALCON-RATE-P05 on the gz falcon-quad.
+
+      THE MEASUREMENT. `--backend=gazebo --scenario=supervised-rotorout
+      --duration=25`, three trials each against a PRISTINE server (the gz rig
+      rule — the world does not reset), evaluated over the UNFAULTED hover
+      window t in [5,10) s (the rotor is killed at 10.0 s), 1250 ticks each.
+      RATE-P05's own bars are roll/pitch RMS < 0.1 rad/s, no motor within 2% of
+      a limit, and the FDI steady gate open for at least 95% of ticks:
+
+        trial   rp RMS      motor min   motor max   gate open
+        V1      0.00174     0.5813      0.5860      100.0%
+        V2      0.00174     0.5813      0.5860      100.0%
+        V3      0.00180     0.5810      0.5863      100.0%
+
+      PASS 3/3. The RMS margin is 57x, the motors sit in a 0.005-wide band
+      nowhere near either limit, and the gate never closes once.
+
+      WHAT IT MEASURES, AND WHY THAT MATTERS. `rp_rate2` and `gate_open` here
+      are read from `FlightCore::fdi_diag()` — the quantities the FDI gate
+      ACTUALLY tests, which are the LOW-PASS FILTERED gyro (`gyro_f`), not the
+      raw one. An earlier round of this measurement computed the gate-shut
+      fraction from the RAW gyro and reported 96.8% where the true figure was
+      33.8%; the clean-room reviewer caught it by arithmetic before any re-run
+      (a gate shut 96.8% of the time that never reopens cannot produce 9
+      isolations in 12 trials). RING_TRACE now emits the gate's own values so
+      that class of error cannot recur.
+
+      WHAT CHANGED, AND IT WAS ONE NUMBER. `gyro_lpf` and the harmonic `notch`
+      are filter DESIGNS: their coefficients come from a sample rate, and
+      `CascadePartition::new` took that rate from what the CALLER declared.
+      `FlightSupervisor::new` hardcoded `FlightCore::new(0.5, 1000.0)` while
+      the gz bench steps it at 250 Hz, so a 60 Hz low-pass had its real corner
+      at a quarter of the intended frequency, with all the phase lag that
+      implies. `run_flightcore` passed `1.0 / dt` and was correct — which is
+      the entire reason one path rang and the other did not, on the same plant
+      and the same commit. Before/after, same window:
+
+        declared 1000 Hz, stepped at 250      declared 250, stepped at 250
+          roll/pitch RMS  2.47 rad/s            0.0017 rad/s
+          motors          0.12 <-> 1.0000       0.5810 - 0.5863
+          gate open       66%                   100.0%
+
+      `resync_loop_rate` takes the rate from the backend's own `dt()` and
+      rebuilds both filters on a >2% mismatch. It is deliberately NOT a setter:
+      a setter is forgettable in exactly the way the hardcoded constructor
+      already was, and six shipped entry points hardcode their rate the same
+      way.
+
+      IT CAN FAIL, AND IT DID. This is not a bar chosen to be met. The same
+      scenario under the same verdict measured 11 FAIL / 1 PASS across twelve
+      trials before the fix, with three 180-degree inversions
+      (bench-evidence/gz-sim/2026-09-23-v1.140-rotor-out-on-the-real-plant.md).
+      Reverting `resync_loop_rate` restores a 2.47 rad/s RMS and a gate shut a
+      third of the time.
+
+      NOT CLAIMED. (1) The real airframe — this is the gz plant. (2) The wasm
+      cascade: the component receives none of the bench's tuning, and
+      `supervised-rotorout` drives the native FlightSupervisor. (3) That the
+      two anti-windup defects fixed alongside were the cause; they were real
+      and are fixed, but the ESO was never the problem, the filter in front of
+      it was.
+
+      WHY THE STEPS DO NOT RUN GZ: gz is not on the runners (the rc=127 class,
+      recorded twice). The steps assert the code properties that make this
+      measurement reproducible plus the loop tests CI can run; the gz numbers
+      live in the cited finding. The NEGATIVE assertion matters — a step that
+      only checks presence cannot catch a regression that re-hardcodes a rate.
+    tags: [verification, falcon, rate-loop, adrc, limit-cycle, gazebo, v1.141]
+    fields:
+      method: simulation
+      steps:
+        # The fix: the loop rate comes from the backend, not the caller.
+        - run: "grep -q 'fn resync_loop_rate' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'self.resync_loop_rate(dt);' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'designed_hz' crates/falcon-core/plain/src/lib.rs"
+        # Both rate-dependent filters are rebuilt, not just one.
+        - run: "grep -q 'self.gyro_lpf = GyroLpf::new(60.0, actual)' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'self.notch = relay_notch::HarmonicNotchBank::new(actual)' crates/falcon-core/plain/src/lib.rs"
+        # The instrument reports the gate's OWN filtered quantity, not raw gyro.
+        - run: "grep -q 'sup.core().fdi_diag()' examples/falcon-sitl-gz/src/main.rs"
+        # ...and gz-trial does not silently swallow it (it did, for FDI_TRACE).
+        - run: "grep -qF '\"RING \"' scripts/gz-trial.rs"
+        # Loop behaviour CI can actually run.
+        - run: "cargo test -p falcon-core hold_converges_with_5hz_position_aiding"
+        - run: "cargo test -p falcon-core an_overestimated_hover_thrust_does_not_reenable_the_inflight_gravity_update"
+        - run: "cargo test -p falcon-core adrc_absorbs_motor_lag"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-RATE-P05

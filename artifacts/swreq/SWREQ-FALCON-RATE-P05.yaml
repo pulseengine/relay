@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-RATE-P05
     type: sw-req
     title: "RATE-P05 — the inner rate loop shall track its command UNDER LOAD, not limit-cycle into the rails"
-    status: proposed
+    status: verified
     release: falcon-v1.141.0
     description: >
       While the vehicle is flying, the measured body rate shall track the
@@ -109,7 +109,14 @@ artifacts:
       exactly the way the hardcoded constructor already was — six shipped
       entry points hardcode their rate identically.
 
-            FALSIFICATION: wrong if, on the gz falcon-quad under
+            VERIFIED 2026-09-30 by FV-FALCON-RATE-002: 3 pristine-server gz trials,
+      unfaulted hover t in [5,10) s, 1250 ticks each -- roll/pitch RMS
+      0.00174 / 0.00174 / 0.00180 rad/s against the 0.1 bar (57x margin),
+      motors 0.5810-0.5863 (nowhere near either limit), FDI steady gate open
+      100.0% of ticks in every trial. Evidence:
+      bench-evidence/gz-sim/2026-09-30-v1.141-rate-loop-tracks-once-the-filters-match-the-rate.md
+
+      FALSIFICATION: wrong if, on the gz falcon-quad under
       `--scenario=supervised-rotorout`, the settled-hover roll/pitch rate RMS
       stays above 0.1 rad/s, or any motor reaches a limit during unfaulted
       hover, or the FDI steady gate is shut for more than 5% of hover ticks.
