@@ -99,7 +99,17 @@ artifacts:
       unchanged: flightcore holds 2 m at 0.12 m final, 0.01 m horizontal.
 
       WHAT THIS RETIRES. Neither anti-windup defect was the cause. Both were
-      real and are fixed, but they were treating symptoms: the ESO was never
+      they were real
+      defects ON INSPECTION but are NOT MERGED (stranded on branch
+      phase0/rate-loop-antiwindup; verified absent from main 2026-10-01 --
+      last_torque_scale, set_delivered_fraction, u_delivered_frac and the
+      ground-hold adrc.reset() are all absent). Their measured benefit
+      (2.47 -> 2.02 -> 1.91 rad/s) is ALSO VOID: it was measured on the
+      MIS-DESIGNED filter, a regime that no longer exists. They must be
+      re-measured against the fixed baseline before any claim is made. An
+      earlier version of this text said "are fixed"; that was wrong and is
+      corrected here rather than quietly dropped. They were also
+      treating symptoms: the ESO was never
       the problem, the filter in front of it was. The `b0 = 60` lead is also
       dropped — b0 was never implicated once the filter rate matched.
 
