@@ -58,6 +58,12 @@ const KEEP: &[&str] = &[
     "verdict", "counters", "PASS", "FAIL", "datum", "calibration", "HOLD ERROR",
     "DIFFERENTIAL", "final NED", "wall/sim", "pace ", "BIT-IDENT", "LOOP CLOSES",
     "esc telem", "rotor", "FDI ", "RING ",
+    // The wasm leg's own lines. `contains` is CASE-SENSITIVE, so the existing
+    // lowercase "rotor" does NOT match "ROTOR-OUT" and this verdict's entire
+    // summary was being dropped on the floor -- the third time this allowlist
+    // has silently swallowed a trace it was supposed to carry (FDI_TRACE, then
+    // RING_TRACE). A dropped verdict reads as a quiet pass.
+    "ROTOR-OUT", "touchdown", "STATE RETURN",
 ];
 
 struct Args {
