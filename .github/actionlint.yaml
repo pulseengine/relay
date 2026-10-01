@@ -1,0 +1,14 @@
+# actionlint config — declares this repo's self-hosted runner labels.
+#
+# Without it actionlint emits 14 `runner-label` warnings ("label rust-cpu is
+# unknown") across the workflows, which is exactly the noise that makes a lint
+# gate get ignored. The labels are the Hetzner fleet's; see
+# relay-ci-runner-fleet-and-diet.
+self-hosted-runner:
+  labels:
+    - light
+    - rust-cpu
+    - netns
+    - podman
+    - lean-mem
+    - hetzner

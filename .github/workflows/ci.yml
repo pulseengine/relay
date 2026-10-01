@@ -56,6 +56,35 @@ jobs:
       # Run it. (#409)
       - run: cargo fmt --all -- --check
 
+  workflow-lint:
+    name: Workflow lint (actionlint)
+    runs-on: [self-hosted, linux, x64, light]
+    steps:
+      - uses: actions/checkout@v7
+      # WHY THIS GATE EXISTS — it is not style, it caught a live outage.
+      #
+      # A workflow file that Actions cannot PARSE does not fail loudly: GitHub
+      # creates a run with ZERO JOBS and conclusion `failure`, which in a long
+      # run list is indistinguishable from noise. soak.yml was in exactly that
+      # state from #498 (2026-10-01 08:56) until it was caught, so THE NIGHTLY
+      # ENDURANCE SOAK COULD NOT START AT ALL — and the cause was a shell comment
+      # inside a `run:` block that spelled out the Actions expression syntax with
+      # empty braces. Actions expands expressions in `run:` scripts before bash
+      # sees them and does not care that the line is a comment, so an empty
+      # expression invalidated the file. A comment explaining an injection fix
+      # became the outage.
+      #
+      # Nothing in this repo would have noticed. `yaml.safe_load` accepts the
+      # file, the YAML is well-formed, and no job runs to report anything.
+      # actionlint reads it the way Actions does, which is the whole point.
+      #
+      # Labels live in .github/actionlint.yaml — without it this emits 14
+      # "label rust-cpu is unknown" warnings, and a noisy gate is an ignored one.
+      - uses: taiki-e/install-action@v2.87.21
+        with:
+          tool: actionlint
+      - run: actionlint -color .github/workflows/*.yml
+
   clippy:
     name: Clippy
     runs-on: [self-hosted, linux, x64, rust-cpu]
