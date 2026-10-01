@@ -41,7 +41,15 @@ artifacts:
 
       THE ESTIMATOR USES THE ACCELEROMETER ONLY WHERE IT IS A GRAVITY
       REFERENCE. `EstimatorPartition` skips `update_gravity` while the vehicle
-      is flying AND a position fix has been accepted within the last second.
+      is flying. (CORRECTED 2026-10-01, #497: this read "is flying AND a position
+      fix has been accepted within the last second". That second clause was the
+      stale-aiding fallback, and #483 REMOVED it after measuring it HARMFUL --
+      peak attitude error 0.3787 with it against 0.0155 without, because the
+      accelerometer reads specific force along the thrust axis and a maneuvering
+      vehicle is when that is least valid. The code is `if !self.in_flight {`
+      alone. Independent review found the prose still describing the deleted
+      policy, and a mutation restoring it turns the cited test red at 0.3772 --
+      so the repair genuinely bites.)
       `FlightCore::step` supplies "flying" from the cascade's own previous
       collective (mean motor command above 70% of hover), so a standalone
       estimator keeps the old behaviour and pre-arm on the ground is unchanged.
@@ -122,7 +130,12 @@ artifacts:
       horizontal drift as zero by construction (SWREQ-FALCON-HOLD-P01 names
       closing this as part of the requirement). The verdict now carries
       `final_horiz`, `peak_horiz` and `rms_horiz_steady`, and PASS requires
-      HOLD-P01's 1.0 m horizontal alongside the 0.5 m vertical. Every branch
+      HOLD-P01's 1.0 m horizontal alongside the 0.5 m vertical. NOT EXACTLY:
+      the verdict is `final_horiz < 1.0 && peak_horiz < 2.0`, so it permits a
+      2 m PEAK excursion that the requirement's 1.0 m bound forbids. The final
+      value is held to the requirement; the transient is not. Recorded by
+      independent review (#497) rather than left implied -- narrowing the peak
+      bound is a behaviour change and belongs in its own PR. Every branch
       rung above is measured against that stricter verdict; main's rungs are
       the altitude-only one, so main's 40 s "PASS" is the weaker claim.
 
@@ -136,6 +149,12 @@ artifacts:
       NOT CLAIMED HERE: the integrator's rig; magnetometer disturbance or vibration, which is what tilt
       observability leans on once the accelerometer is out of the loop; wind
       and turbulence beyond the existing suite; and runs longer than 180 s.
+      NOTE the 300 s gz headline quoted above came from a 2026-09-17 MANUAL
+      dispatch, PRE-#487, and has not been re-run since -- the nightly ladder
+      capped at 120 s until #497 fixed it. The normative 60 s claim IS
+      independently carried by four post-#487 nightlies (09-26/28/29/30), 60 s
+      rung PASS, final_horiz 0.01-0.06 m. The 300 s figure is history, not
+      current evidence.
     tags: [verification, falcon, hold, estimator, sensor-fidelity, v1.140]
     fields:
       method: automated-test

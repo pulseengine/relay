@@ -2,9 +2,29 @@ artifacts:
   - id: FV-RELAY-FLEET-002
     type: sw-verification
     title: "FLEET-P01 — starvation is measured from JOBS, and hosted contention is not reported as a dead fleet (v1.140)"
-    status: verified
+    status: implemented
     release: falcon-v1.140.0
     description: >
+      DEMOTED verified -> implemented 2026-10-01 by independent review (#497).
+      ITS EVIDENCE CANNOT FAIL. All four steps are string greps. The reviewer
+      inverted the starvation comparison in a scratch copy
+      (`[ "$age" -lt "$limit" ]` -> `-ge` in fleet-status.yml), so the alarm can
+      never fire for a genuinely old job -- and ALL FOUR STEPS STILL EXITED 0.
+
+      Worse, it never ran at all: tagged `relay` but not `falcon`, while the
+      verification gate's default filter is `(has-tag "falcon")`. 397 artifacts
+      matched; this was not among them. So even the vacuous greps were never
+      executed by CI.
+
+      And the stub-`gh` replay the whole argument rests on IS NOT COMMITTED.
+      `HOSTED_THRESHOLD_MIN` appears only in the workflow and in this artifact's
+      own prose -- there is no harness anyone else can run.
+
+      Re-promotion needs a COMMITTED replay harness that fails when the
+      comparison is inverted, plus the `falcon` tag so a gate runs it. The
+      underlying fix (measure queued JOBS, hold hosted runners to their own
+      threshold) is not disputed -- only the claim that it is verified.
+
       Extends FV-RELAY-FLEET-001. The wedge half of the monitor was right the
       one time it fired (#450). The starvation half was wrong three times out
       of three (#447, #455, #462), because it measured RUN status: a matrix run
@@ -42,7 +62,7 @@ artifacts:
       NOT CLAIMED: detection latency. The schedule still runs every few hours
       rather than on its cron (#436), so an unattended starvation is found late
       whatever this rule says.
-    tags: [verification, relay, ci, fleet, starvation, v1.140]
+    tags: [verification, relay, falcon, ci, fleet, starvation, v1.140]
     fields:
       method: automated-test
       steps:
