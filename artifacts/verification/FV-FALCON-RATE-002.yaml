@@ -63,9 +63,17 @@ artifacts:
       NOT CLAIMED. (1) The real airframe — this is the gz plant. (2) The wasm
       cascade: the component receives none of the bench's tuning, and
       `supervised-rotorout` drives the native FlightSupervisor. (3) That the
-      two anti-windup defects fixed alongside were the cause; they were real
-      and are fixed, but the ESO was never the problem, the filter in front of
-      it was.
+      two anti-windup defects explored alongside were the cause. they were real
+      defects ON INSPECTION but are NOT MERGED (stranded on branch
+      phase0/rate-loop-antiwindup; verified absent from main 2026-10-01 --
+      last_torque_scale, set_delivered_fraction, u_delivered_frac and the
+      ground-hold adrc.reset() are all absent). Their measured benefit
+      (2.47 -> 2.02 -> 1.91 rad/s) is ALSO VOID: it was measured on the
+      MIS-DESIGNED filter, a regime that no longer exists. They must be
+      re-measured against the fixed baseline before any claim is made. An
+      earlier version of this text said "are fixed"; that was wrong and is
+      corrected here rather than quietly dropped. And the ESO was
+      never the problem; the filter in front of it was.
 
       WHY THE STEPS DO NOT RUN GZ: gz is not on the runners (the rc=127 class,
       recorded twice). The steps assert the code properties that make this
