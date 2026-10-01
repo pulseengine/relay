@@ -84,14 +84,33 @@ artifacts:
       WHAT IS NOT CLAIMED, deliberately: the RT1176's actual usable RAM. No
       figure for it exists anywhere in this repo, and quoting one from memory is
       how a requirement acquires an unsourced number — see #503, where exactly
-      that is being untangled. It was NOT measured even though the host is now
-      reachable: reading the part means attaching the MCU-LINK, a probe needs a
-      claim, and no claim can be made while `with-device` is installed on none
-      of the three hosts (verified). So THE BLOCKER IS THE INTERLOCK, NOT ACCESS
-      — a distinction worth keeping, because the first is a thing to build and
-      the second was a thing to wait for. THE MEASUREMENT NEEDED is the RT1176's
-      OCRAM/TCM budget from its reference manual or read off the board, after
-      which this paragraph either stands or is rewritten.
+      that is being untangled. It was NOT measured, and the blocker was chased
+      to its actual cause rather than left as "no hardware":
+
+        access          FIXED mid-pass; all three hosts reachable over ssh.
+        the interlock    `with-device` was absent on every host. INSTALLED on
+                         fourpi.local from the RELEASED, COSIGN-VERIFIED binary
+                         (jess v0.7.2, with-device 0.2.2, aarch64) — signature
+                         verified BEFORE the checksums, as its README requires —
+                         and fourpi.local's missing per-host registry WRITTEN,
+                         with the verified port paths and the `serial: 0` hazard.
+        THE REAL BLOCKER `with-device` cannot take a claim there as user `r`:
+                         /var/tmp/pulseengine-bench is `pi:pi drwxrwxr-x` and `r`
+                         is not in group `pi`, so every device reads CLAIMED
+                         forever and --self-test fails 3 of 5. Filed as jess#280.
+                         The tool is SOUND — same binary, same registry, a
+                         writable lockdir gives --self-test PASS and correct
+                         claim/release. It mis-reports EACCES as "claimed".
+
+      NOT WORKED AROUND. A private BENCH_LOCKDIR would let the measurement
+      proceed and would exclude nobody, which is the vacuous lock the interlock
+      exists to prevent; it was used once as a CONTROL to prove the tool sound
+      and then deleted. Reading the part also needs operator consent per the
+      registry's own note on the vehicle, which relay does not have.
+
+      THE MEASUREMENT NEEDED is the RT1176's OCRAM/TCM budget from its reference
+      manual or read off the board under a claim, after which this paragraph
+      either stands or is rewritten.
 
       NOR DOES THIS WEAKEN gale#398. The [r11 + off] absolute addressing is a
       lowering defect whatever the part's size; a bigger target might make it
