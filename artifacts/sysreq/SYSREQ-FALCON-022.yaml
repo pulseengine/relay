@@ -54,6 +54,45 @@ artifacts:
       claim (1), not a later optimisation. It is already proven on the iso-core
       path and jess measured it at 5x on the M7.
 
+      THE "LARGEST 192 KB" PREMISE IS NOW IN QUESTION (2026-10-01, jess#266).
+      That figure is the STM32 bench — it matches the NUCLEO-WB55RG's 192 KB
+      SRAM1 exactly, in jess's own measured part table. But a corrected bench
+      inventory on jess#266 lists a THIRD host nobody here was reasoning over,
+      and on it the vehicle itself:
+
+        fourpi.local   3643:001d   PX4 FMU v6XRT.x   — the vehicle
+        gale.local     ST-LINK/V1, STLINK-V3
+        wohl.local     NUCLEO-WL55JC1 / WB55RG / G031K8 + an uncatalogued
+                       Nordic board sitting in Open DFU Bootloader mode
+
+      The i.MX RT1176 on that FMU is the cascade's actual target (the M7 of the
+      est->M4 / cascade->M7 / failsafe->F100 partition), and it is not a 192 KB
+      part. So the sentence above may be comparing a 1.1 MiB data-base spread
+      against the wrong board.
+
+      WHAT IS NOT CLAIMED, deliberately: the RT1176's actual usable RAM. No
+      figure for it exists anywhere in this repo, this agent could not measure
+      it (fourpi.local is reachable but refuses passwordless ssh as user `r`),
+      and quoting one from memory is how a requirement acquires an unsourced
+      number — see #503, where exactly that is being untangled. THE MEASUREMENT
+      NEEDED is the RT1176's OCRAM/TCM budget from its reference manual or read
+      off the board, after which this paragraph either stands or is rewritten.
+
+      NOR DOES THIS WEAKEN gale#398. The [r11 + off] absolute addressing is a
+      lowering defect whatever the part's size; a bigger target might make it
+      survivable rather than fatal, which is not the same as fixed, and the
+      M4/F100 partitions are still 64-192 KB parts. `meld --pack-rebase`
+      remains a precondition. What changes is only the ARGUMENT ABOVE, not the
+      conclusion it supports.
+
+      ALSO CORRECTED, because we wrote it down twice: we had recorded jess's
+      constraint as "bench empty since 2026-09-25, nothing on silicon". The
+      first half is contradicted by jess's own later measurement — the bench is
+      three hosts and the vehicle is attached. The second half STANDS: presence
+      is not execution, and nothing has executed on an RT1176. Those are two
+      different claims and conflating them turned an integration gap into an
+      apparent hardware-availability gap.
+
       KNOWN FALSIFIER STANDING TODAY: the artifact that currently lowers to the
       M7 is the LEGACY PID cascade, not the flown law. The only existing
       proof-point for "our stack runs as components on silicon" is about code
