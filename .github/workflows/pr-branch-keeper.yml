@@ -58,11 +58,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# `contents: write` is what `update-branch` needs to push the merge into the PR
-# branch; `pull-requests: read` to enumerate. Nothing here merges a PR — the
-# existing auto-merge does that once checks go green.
-# READ-ONLY, deliberately. It no longer writes anything, and the narrowed
-# permission is what makes that structural rather than a promise.
+# READ-ONLY, deliberately. `pull-requests: read` to enumerate, `contents: read`
+# for the checkout, and nothing else — it no longer writes anything, and the
+# narrowed permission is what makes that STRUCTURAL rather than a promise. The
+# previous version held `contents: write` to push the update; that is the write
+# the header explains, and it is gone.
 permissions:
   contents: read
   pull-requests: read
