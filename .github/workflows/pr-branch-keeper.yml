@@ -1,0 +1,131 @@
+# CIFLOW-P01: a green PR shall merge without a human noticing it is stuck.
+#
+# THE MEASURED DEFECT. `main` has strict protection ("require branches to be up
+# to date"), and GitHub's auto-merge NEVER updates a BEHIND branch. So every
+# merge to main leaves every other open PR BEHIND, and a BEHIND PR reports ALL
+# CHECKS GREEN AND NO FAILURES while being unmergeable forever. It is invisible
+# in every summary view — `gh pr checks` says pass, the UI shows green ticks.
+#
+# Measured on 2026-10-01 alone: eight manual `gh pr update-branch` calls across
+# four passes, on #500, #501, #502, #504, #506, #507, #510. Each one was a human
+# (or agent) noticing. That is exactly what CIFLOW-P01's falsification forbids:
+# "a PR with every required check green stays open more than 24 h without a
+# human action". #373 is the original report; it recurred on every merge of the
+# 2026-09-16/17 train and has recurred on every merge since.
+#
+# WHY A WORKFLOW AND NOT A SETTING: GitHub has no auto-update-on-base-change. The
+# repo setting people reach for ("Always suggest updating pull request branches")
+# only adds a BUTTON.
+name: PR branch keeper
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# `contents: write` is what `update-branch` needs to push the merge into the PR
+# branch; `pull-requests: read` to enumerate. Nothing here merges a PR — the
+# existing auto-merge does that once checks go green.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # One keeper at a time. Two overlapping runs would both try to update the same
+  # branch and the second would fail noisily for no reason.
+  group: pr-branch-keeper
+  cancel-in-progress: false
+
+jobs:
+  update-behind:
+    name: Update BEHIND branches
+    runs-on: [self-hosted, linux, x64, light]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # `gh` is NOT installed on the self-hosted fleet. The fleet monitor ran
+      # `gh api ... || true` on these boxes for months without it and every
+      # "no starvation" was an empty result (#436), so the pinned action is
+      # mandatory rather than convenient.
+      - uses: ./.github/actions/setup-gh
+
+      - name: Update the branches that are armed, green-blocked and BEHIND
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Cap per run so a surprise (or a bad query) cannot stampede CI with
+          # dozens of simultaneous rebuilds.
+          MAX_UPDATES: '6'
+        run: |
+          set -uo pipefail
+
+          # THE SAFETY CONTRACT: only PRs whose author ARMED AUTO-MERGE.
+          #
+          # Arming auto-merge is the author's declaration that the branch is
+          # finished. That matters because of #478: auto-merge squashed a PR at
+          # an INTERMEDIATE commit and stranded four later commits. Updating a
+          # branch someone is still pushing to invites the same class of
+          # surprise, so an unarmed PR is left alone — a human updates it when
+          # they are ready.
+          #
+          # Also excluded: DRAFT PRs, and CROSS-REPOSITORY (fork) PRs, where we
+          # cannot push to the head branch at all.
+          mapfile -t CANDIDATES < <(
+            gh pr list --state open --limit 50 \
+              --json number,isDraft,isCrossRepository,autoMergeRequest \
+              --jq '.[] | select(.isDraft == false and .isCrossRepository == false
+                                 and .autoMergeRequest != null) | .number'
+          )
+
+          if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+            echo "::notice::no armed, non-draft, same-repo PRs open — nothing to keep"
+            exit 0
+          fi
+          echo "armed candidates: ${CANDIDATES[*]}"
+
+          updated=0
+          for PR in "${CANDIDATES[@]}"; do
+            if [ "$updated" -ge "$MAX_UPDATES" ]; then
+              echo "::warning::hit MAX_UPDATES=$MAX_UPDATES; remaining PRs will be caught by the next push or a dispatch"
+              break
+            fi
+
+            # mergeStateStatus IS COMPUTED LAZILY. Straight after a push to main
+            # it is routinely UNKNOWN, and a keeper that treated UNKNOWN as
+            # "nothing to do" would do nothing on exactly the event it exists
+            # for. Poll briefly for a settled value.
+            STATE=UNKNOWN
+            for _ in 1 2 3 4 5 6; do
+              STATE=$(gh pr view "$PR" --json mergeStateStatus --jq .mergeStateStatus 2>/dev/null || echo UNKNOWN)
+              [ "$STATE" != "UNKNOWN" ] && break
+              sleep 5
+            done
+
+            case "$STATE" in
+              BEHIND)
+                echo "#$PR is BEHIND — updating"
+                if gh pr update-branch "$PR"; then
+                  updated=$((updated + 1))
+                  echo "::notice::#$PR branch updated (was BEHIND with auto-merge armed)"
+                else
+                  # Not fatal: the branch may have been updated by someone else
+                  # between the read and the write, or have a genuine conflict.
+                  echo "::warning::#$PR update-branch failed — likely raced or conflicting; left for a human"
+                fi
+                ;;
+              DIRTY)
+                # A DIRTY PR never merges and reports no failures either. It
+                # needs a human to resolve the conflict, so SAY SO rather than
+                # silently skipping — silence here is how it sits for days.
+                echo "::warning::#$PR is DIRTY (conflicts with main) — auto-merge will never fire; needs a human"
+                ;;
+              UNKNOWN)
+                echo "::warning::#$PR mergeStateStatus stayed UNKNOWN after 30 s — not touching it"
+                ;;
+              *)
+                echo "#$PR is $STATE — nothing to do"
+                ;;
+            esac
+          done
+
+          echo "::notice::branch keeper: $updated branch(es) updated of ${#CANDIDATES[@]} armed candidate(s)"
