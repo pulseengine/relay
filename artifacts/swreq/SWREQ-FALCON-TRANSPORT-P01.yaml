@@ -166,7 +166,15 @@ artifacts:
       dropped tick from a late one"). (4) The AIDING-RATE OBLIGATION, as a
       table of what degrades when each optional field is absent, with the two
       measured entries (position <= 10 Hz diverges, #434/#403; withholding
-      motor-rpm leaves the FDI inert and the airframe inverts to 3.142 rad).
+      motor-rpm leaves the FDI inert and the airframe inverts to 3.142 rad —
+      that second figure's evidence lands in #502 and its verify PR, NOT here, so
+      this text cites a measurement whose record is not yet on main).
+
+      NO PROOF ON THE DECODER, and it is a promotion blocker rather than a
+      caveat: `wire::decode_frame` parses UNTRUSTED BYTES and has no Kani
+      harness, and `falcon-hitl` is not in the kani.yml matrix at all. CLAUDE.md
+      requires proof for logic that can carry it. Named now so it does not become
+      the next orphaned leaf — the pattern this release line keeps finding.
 
       NOT SHIPPED, so this is not re-promotable: (5) THE REFERENCE HOST is only
       half done — the codec exists and is the reusable half, but `SimServer` is
@@ -175,10 +183,17 @@ artifacts:
       CONDITION REMAINS MET: the state carries no mode and no failsafe (#414),
       so a host holding this binding still cannot stream a failsafe to a GCS.
 
-      THE HEADER IS 8 BYTES, NOT THE 6 THIS REQUIREMENT STATES. The field list
-      above sums to 8 (magic 2 + version 1 + type 1 + sequence 4), and the
-      capture's own sizes settle it exactly: the motors frame was 24 B and the
-      seam's `motor-pwm` is 16 B. Derived, not chosen, and asserted by a test.
+      THE BINDING'S HEADER IS 8 BYTES WHERE THIS REQUIREMENT SAYS 6 — AND THAT
+      IS A NORMATIVE CHOICE, NOT A MEASUREMENT. The field list above sums to 8
+      (magic 2 + version 1 + type 1 + sequence 4), which is self-contained and
+      needs no captured number; the prose label contradicts it, so the fields
+      win. The captured 24 B motors frame minus `motor-pwm`'s 16 B also leaves 8
+      and is consistent — but that is CORROBORATION, NOT PROOF: the 24 comes from
+      the same unsourced sentence as the "6", and the sensor figure from that
+      sentence does NOT reconcile. Trusting the one that fits while setting aside
+      the one that does not is an inference, and it is labelled as one here. The
+      choice is pinned by a regression test, which locks it against drift rather
+      than establishing what the wire carried.
 
       AND THE CAPTURE IS NOT IN THIS REPOSITORY. Every number this requirement
       quotes from it (4 000 exchanges, 83/24-byte frames, 0 of 8 002 payloads

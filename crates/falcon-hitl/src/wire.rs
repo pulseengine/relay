@@ -22,9 +22,16 @@
 //!   difference               8 B  <- the header
 //! ```
 //!
-//! So 8 it is, derived rather than chosen. Recorded here because the next
-//! person to read the requirement will do the same arithmetic and should find
-//! the answer instead of the discrepancy.
+//! That is CORROBORATION, NOT PROOF. The 24 comes from the same unsourced
+//! sentence as the "6" (#503 — the capture is not in this repository), and the
+//! sensor figure from that same sentence does NOT reconcile. Trusting the number
+//! that fits while setting aside the one that does not is an inference.
+//!
+//! So **8 is a normative choice**, not a measurement: it is what the
+//! requirement's own field enumeration adds up to — which is self-contained and
+//! needs no captured number — and it leaves an existing host's header unchanged.
+//! Recorded here because the next person to read the requirement will do the
+//! same arithmetic and should find this note instead of the discrepancy.
 //!
 //! The sensor side does NOT reconcile as cleanly and is not claimed to: the
 //! captured sensor frame is 83 B, leaving a 75 B payload, while a flat
@@ -582,11 +589,14 @@ mod tests {
         );
     }
 
-    /// The capture's motors frame was 24 B and the seam's `motor-pwm` is 16 B.
-    /// That difference is the whole reason this binding's header is 8 and not
-    /// the 6 the requirement states, so it is asserted rather than remembered.
+    /// A REGRESSION LOCK on the frame geometry, not a derivation. The header
+    /// length is a NORMATIVE CHOICE (see the module note): the requirement's own
+    /// field list sums to 8 while its prose says 6, and the captured 24 B motors
+    /// frame is consistent with 8 but comes from a sentence whose evidence is
+    /// not in this repository (#503). This test pins the choice so it cannot
+    /// drift silently — it does not establish that 8 is what the wire carried.
     #[test]
-    fn the_header_length_is_what_the_captures_frame_sizes_imply() {
+    fn the_frame_geometry_stays_pinned() {
         assert_eq!(MOTORS_PAYLOAD_LEN, 16, "motor-pwm is four f32");
         assert_eq!(
             HEADER_LEN + MOTORS_PAYLOAD_LEN,

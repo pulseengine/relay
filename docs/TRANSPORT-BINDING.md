@@ -14,9 +14,10 @@ is the binding and the capture is prior art. What the capture contributed is the
 *header shape*, deliberately, so an existing host needs the smallest possible
 change.
 
-> **The capture this binding's header shape came from is not in the repository, and
-> two of its numbers do not reconcile with the seam — tracked in #503.** Both
-> discrepancies and how they were resolved are in §1.
+> **The capture this binding's header shape came from is not in the repository,
+> and two of its numbers do not reconcile with the seam — tracked in #503.** §1
+> states which parts of the framing are normative choices rather than
+> measurements.
 
 ## 1. Framing
 
@@ -54,12 +55,22 @@ cares about layout, not names. A host receiving an unknown version must
 
 Called out precisely so an existing host knows what to change.
 
-1. **The header is 8 bytes, not 6.** The requirement describes "a 6-byte
-   header — magic `1c fa`, version, message type, little-endian `u32`
-   sequence", but that field list sums to 8 (2+1+1+4). The capture's own frame
-   sizes settle it: the motors frame was **24 B** and the seam's `motor-pwm` is
-   **16 B**, so the header is exactly **8**. The label was wrong, not the
-   fields.
+1. **This binding's header is 8 bytes; the requirement says 6.** The
+   requirement describes "a 6-byte header — magic `1c fa`, version, message
+   type, little-endian `u32` sequence". **That field list sums to 8** (2+1+1+4),
+   and the field list is self-contained — it does not depend on any captured
+   number. So the label and the fields disagree, and we take the fields.
+
+   The captured motors frame (24 B) minus `motor-pwm` (16 B) also leaves 8,
+   which is consistent. **But that is corroboration, not proof**: the 24 comes
+   from the same unsourced sentence as the "6" (#503), and the sensor figure
+   from that same sentence does *not* reconcile (below). We are trusting the
+   number that fits and setting aside the one that does not, which is an
+   inference.
+
+   **So 8 is a normative choice**, made because it is what the requirement's own
+   field enumeration adds up to and because it keeps an existing host's header
+   unchanged. It is not a measurement.
 2. **The sensor payload is 76 bytes; the capture implies 75.** A flat
    `sensor-frame` is imu 24 + `dt-s` 4 + `position-ned` 13 + `mag-body` 13 +
    `heading-rad` 5 + `motor-rpm` 17 = 76, while the captured 83-byte frame
@@ -129,6 +140,12 @@ its rate-dependent filters when `dt-s` disagrees with its design rate by more
 than 2%, so an honest `dt-s` is what makes that correction possible. **A host
 that reports a nominal period while running a different one defeats it.**
 
+**The component clamps `dt-s` to [0.0001, 0.1] s** (10 Hz – 10 kHz) so a garbage
+frame cannot wind the filters, and **a non-finite `dt-s` falls back to 0.001 s**,
+the only rate that was ever safe to assume. Both are silent. A host running
+outside that range is therefore not told that its period was overridden — so do
+not rely on the clamp as a diagnostic.
+
 ### Late, dropped and duplicated
 
 The sequence increments by one per message in each direction. A receiver
@@ -178,7 +195,9 @@ Two of those are measured, not predicted:
 - **Withholding `motor-rpm` leaves the FDI inert.** Measured on gz: with it,
   the component isolates a dead rotor in **2 ticks** and stays upright at
   0.18–0.38 rad. Without it, the airframe **inverts to 3.142 rad** and isolates
-  nothing.
+  nothing. *(Evidence: the wasm rotor-out harness in #502 and its bench-evidence
+  finding, which land separately — this document cites a measurement whose
+  record is not yet on `main`.)*
 
 ## 5. The reference host
 
@@ -200,6 +219,11 @@ needed by being driven. New hosts use `wire`.
   This is the binding's largest gap and it closes with #414.
 - **`SimServer` is not yet re-pointed** at this binding; it still speaks the
   legacy frames.
+- **No proof coverage on the decoder.** `wire::decode_frame` parses untrusted
+  bytes and has **no Kani harness**; `falcon-hitl` is not in the `kani.yml`
+  matrix at all. CLAUDE.md requires proof for logic that can carry it, so this
+  is a promotion blocker for TRANSPORT-P01 and is named here rather than
+  discovered later.
 - **No physical-transport contract.** Latency, jitter, MTU, reconnect and
   framing-error recovery are the host's. The sequence semantics above are what
   this binding gives you to detect the symptoms.
