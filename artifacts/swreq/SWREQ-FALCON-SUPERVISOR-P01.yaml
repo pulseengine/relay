@@ -1,0 +1,108 @@
+artifacts:
+  - id: SWREQ-FALCON-SUPERVISOR-P01
+    type: sw-req
+    title: "SUPERVISOR-P01 — the published component shall be a SUPERVISED vehicle, not a stabiliser: the mode machine and every failsafe shall be reachable and observable through the seam"
+    status: proposed
+    release: falcon-v1.141.0
+    description: >
+      The component published as `pulseengine:falcon-cascade` shall run the
+      FlightSupervisor, not the FlightCore alone, and shall publish its MODE and
+      its FAILSAFE state through the observer seam — so a host embedding the
+      shipped artifact gets a vehicle that stops, and a telemetry consumer can
+      see WHY it is doing something.
+
+      WHY IT EXISTS, measured (#414). `wasm/cm/cascade/src/lib.rs` imports
+      `FlightCore` only; `grep -rn "FlightSupervisor" wasm/` returns NOTHING,
+      and the `controller` world exports exactly `step` and `configure`. So the
+      published artifact is, in the issue's words, "a stabiliser with no
+      supervisor": it will hold attitude and position and WILL NOT STOP FOR
+      ANYTHING.
+
+      WHAT IS SILENTLY EXCLUDED — all of it implemented, tested and in several
+      cases Kani-proven, none of it reachable from the shipped seam:
+
+        geofence -> RTL                      low-battery failsafe
+        attitude-runaway motor-cut (Terminated)   high-wind -> RTL
+        keep-out-zone deflection             the relay-fsm mode machine
+        waypoint sequencing                  all 19 pre-arm rows
+
+      THIS IS AN INSTANCE OF ORPHAN-P01's FOURTH STATE — implemented, verified,
+      advertised and unreachable — at the seam rather than in a crate. ORPHAN-P01
+      is v1.142 scope and `proposed`; this slice is pulled forward to v1.141 by
+      maintainer decision (2026-10-01) because two v1.141 artifacts cannot close
+      without it. Recorded as a scope decision, not derived.
+
+      WHAT IT UNBLOCKS, and this is the reason for the pull-forward:
+
+        FV-FALCON-FAULT-005 is `implemented` at THREE OF FOUR clauses. The
+        fourth is "the vehicle touches down AND DISARMS" and it is not
+        unmeasured — it CANNOT EXIST while the component wraps FlightCore, as
+        there is no mode machine to disarm. The maintainer chose to satisfy the
+        clause AS WRITTEN rather than narrow it to the native leg.
+
+        SWREQ-FALCON-TRANSPORT-P01's FALSIFICATION CONDITION IS CURRENTLY MET:
+        "a host holding the binding still cannot stream the vehicle's attitude,
+        position and failsafe state to a GCS". The verified MAVLink stack
+        (MAVLINK-P06, v1.119) is not missing — it has nothing to read. Mode and
+        failsafe in the state is what un-meets it.
+
+      SHALL, each clause because something measured says so:
+
+        (1) THE SUPERVISOR RUNS IN THE COMPONENT. `step` shall drive
+            FlightSupervisor, so the mode machine, the failsafe arbiter and the
+            pre-arm rows execute inside the published artifact.
+
+        (2) MODE AND FAILSAFE SHALL BE OBSERVABLE through the `observer` export
+            added at @0.11.0, as fixed-width fields inside the existing seqlock
+            — not a second export and not an `option<>`, for the tearing reason
+            already recorded on TRANSPORT-P01.
+
+        (3) `Terminated` AND `Disarmed` SHALL BE DISTINGUISHABLE. relay-fsm
+            draws this distinction deliberately — Disarmed is a SAFE on-ground
+            state; Terminated is a deliberate AIRBORNE thrust cut that nothing
+            recovers from without an on-ground reset. A state that collapses
+            them would report a terminated vehicle as safely disarmed, which is
+            the absence-looks-like-data shape this release line keeps finding
+            (#413 battery read as healthy, #452 accelerometer read as gravity).
+
+        (4) THE SEAM SHALL CARRY THE SUPERVISOR'S INPUTS. It consumes battery,
+            geofence configuration and RC/datalink liveness, and today the seam
+            carries none of them. A supervisor wired to defaults is worse than
+            no supervisor: #414 notes the compounding case, where even a wired
+            supervisor would read a HARDCODED HEALTHY 16.0 V.
+
+        (5) THE BUMP SHALL BE ANNOUNCED BEFORE ANYTHING PUBLISHES.
+            `pulseengine:falcon-cascade@0.11.0` -> `@0.12.0`. The v1.133 lesson
+            is explicit: a namespace moved, nobody told the integrator, and they
+            reported the publish "stalled". NO RELEASE MAY CARRY @0.12.0 until
+            that announcement is out. jess also holds byte-identity baselines on
+            the five per-stage components; measurement (not assertion) showed the
+            @0.11.0 bump left all five bodies identical, and the same check is
+            owed for @0.12.0.
+
+      NOT IN SCOPE HERE: deciding that the host owns failsafes instead. #414
+      offers that alternative — "if no, that must be stated in the WIT and the
+      OCI description" — and the maintainer chose the other branch. The decision
+      is recorded so the WIT is not later read as an accident.
+
+      FALSIFICATION: wrong if a host embedding the published component can fly it
+      past its geofence, on a flat pack, or through an attitude runaway without
+      the component acting; if a telemetry consumer holding the binding still
+      cannot distinguish Loiter from Rtl from Terminated; or if the supervisor
+      runs against default inputs the host cannot supply.
+    tags: [requirement, falcon, supervisor, failsafe, mode-machine, seam, orphan, v1.141]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        The built artifact's WIT (read with `wasm-tools component wit`, not the
+        source) exports mode and failsafe in `flight-state`; the wasm SITL
+        harness drives the component through a geofence breach, a low-battery
+        draining pack and an attitude runaway and observes the component CHANGE
+        MODE each time; Disarmed and Terminated are distinguishable in the
+        published state; FV-FALCON-FAULT-005's disarm clause is met on the wasm
+        leg on gz, three pristine-server trials; and the @0.12.0 announcement is
+        out before any tag carries it.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010
