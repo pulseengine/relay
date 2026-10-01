@@ -111,7 +111,13 @@ jobs:
       # The longest gz hold measured good on 2026-09-16 was 25 s (three runs:
       # 0.04, 0.21, 0.10 m). The floor is what must not regress; it is NOT the
       # target. ENDURANCE-P01's target is 3600.
-      GZ_FLOOR_S: '25'
+      # RATCHETED 25 -> 120 (#497). The floor is meant to be "the longest
+      # duration that has held, which may not get worse". It sat at 25 while the
+      # measured best was 120, so a 4.8x regression would have passed. A floor
+      # that trails the measurement by 5x is not a ratchet. Raise this whenever
+      # the ladder establishes a longer rung -- that is the mechanism working,
+      # not a maintenance chore.
+      GZ_FLOOR_S: '120'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -144,7 +150,27 @@ jobs:
           GZ_MAX_S: ${{ github.event.inputs.gz_max_s }}
         run: |
           set -uo pipefail
-          MAX="${GZ_MAX_S:-120}"
+          # THE SCHEDULED RUN USED TO CAP AT 120 s, SILENTLY (#497).
+          # `github.event.inputs` is empty on a `schedule` event, so GZ_MAX_S was
+          # empty and this fell back to 120 -- which meant ENDURANCE-P01's
+          # "at least ONE HOUR on the reference Gazebo plant" was NEVER RUN by
+          # the job that exists to run it. The step printed
+          # "::warning::gz hold is 120s, short of the 1 h target" and SUCCEEDED,
+          # every night, for weeks. Introduced by me when I bound GZ_MAX_S
+          # through `env:` to close a `${{ }}` injection: the injection fix was
+          # right, the default was not.
+          #
+          # A scheduled run now climbs to the REQUIREMENT'S target. A manual
+          # dispatch may still ask for less, because a human debugging the
+          # ladder should not be forced to wait an hour.
+          if [ -n "${GZ_MAX_S}" ]; then
+            MAX="${GZ_MAX_S}"
+          elif [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            MAX=3600
+          else
+            MAX=120
+          fi
+          echo "gz ladder cap: ${MAX}s (event=${GITHUB_EVENT_NAME})"
           BEST=0
           # Each rung gets a FRESH server: /world/falcon/control does not answer
           # a reset request, so a reused world starts wherever the last run left
