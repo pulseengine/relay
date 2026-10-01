@@ -96,7 +96,7 @@ fn main() -> Result<()> {
     // only place the seqlock and the monotonic tick can be checked across the
     // actual Component Model ABI instead of in-process.
     let observer = bindings.pulseengine_falcon_cascade_observer();
-    let mut last_tick: u64 = 0;
+    let mut last_tick: u32 = 0;
     let mut state_reads: u32 = 0;
 
     // Hold 2 m above the launch point. NED: down is negative up.
@@ -326,7 +326,7 @@ fn main() -> Result<()> {
                 st.tick_tail
             );
         }
-        if tick > 0 && st.tick_head != last_tick + 1 {
+        if tick > 0 && st.tick_head != last_tick.wrapping_add(1) {
             anyhow::bail!(
                 "published tick did not advance by 1 at tick {tick}: {} -> {}",
                 last_tick,
