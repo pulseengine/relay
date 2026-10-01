@@ -1,7 +1,7 @@
 artifacts:
   - id: SWREQ-RELAY-BOARD-P01
     type: sw-req
-    title: "BOARD-P01 — every open issue shall carry exactly one disposition, and the board's health shall be measured rather than felt"
+    title: "BOARD-P01 — every open issue AND every requirement shall carry a disposition that matches reality, measured rather than felt"
     status: proposed
     release: falcon-v1.143.0
     description: >
@@ -9,6 +9,68 @@ artifacts:
       with a tagged-release reference, CLOSED with a rationale, or OPEN with a
       named "remaining:" note — and the board's decay shall be visible as a
       number in CI rather than noticed by a human reading a long list.
+
+      WIDENED 2026-10-01 (maintainer decision) TO COVER THE REQUIREMENT TRACE
+      AS WELL AS THE ISSUE BOARD. Same mechanism, and the trace side is worse.
+
+      A stale issue is visible on a list someone reads. A requirement whose
+      status contradicts its own trace silently corrupts every readiness number
+      we compute from it — and readiness is what gates a tag.
+
+      MEASURED 2026-10-01, 275 sw-reqs. THE FIRST VERSION OF THIS COUNT WAS
+      TOO WEAK and is corrected here: asking only "does something point a
+      `verifies` link at it" gave 79 and called every one a status
+      contradiction. Grading the chain by how far it actually reaches gives a
+      very different, and actionable, picture:
+
+        status says NOT STARTED (draft/proposed/approved)      90
+          verifier is VERIFIED and has `steps:`               18   <- status lag
+          verifier itself NOT verified (chain incomplete)      61
+          no verifier at all (genuinely un-started)            11
+        carrying no `release:` field                           77
+
+      THE 61 ARE NOT STATUS-LAGGED. They are verified-by an `SV-RELAY-*`
+      artifact that is ITSELF `approved` — and SV-RELAY-015, checked directly,
+      carries NO `steps:` at all, only `method: automated-test`, while claiming
+      to "combine unit test evidence (UV-CCSDS-001) and formal verification
+      evidence (FV-CCSDS-001)". Their chain is incomplete two levels up.
+      Promoting them would be wrong, and the real blocker is the SV-RELAY-*
+      layer, not the requirements.
+
+      Worse for that 61: every one cites a VERUS proof as its criterion, and the
+      Verus track has verified NOTHING since 2026-09-11 (#405 — the toolchain
+      cannot find core/std and all 19 proofs fail in 0.1 s). So their evidence
+      does not merely lack promotion; it does not currently run.
+
+      SO THE RE-VERIFICATION IS 18 REQUIREMENTS, NOT 79. The decision below
+      stands and its cost is far smaller than first estimated.
+
+      So 79 requirements are invisible to the plan TWICE: their status says
+      un-started while a verification artifact points at them, and no release
+      claims them. Spot-checked one — SWREQ-FALCON-MIX-P05 reads `approved`
+      while `mix_thrust_floor` is implemented, FLOWN in the production loop
+      (falcon-core:942) and verified by FV-FALCON-MIX-002. Two lifecycle stages
+      behind reality. The pattern is systematic: every cFS-DNA engine (CCSDS,
+      CFDP, CI, CS, DS, FM, HK, HS, LC, MD, MM, SC, SCA, SCH, TBL, TO) plus
+      falcon's ATT/EKF/MIX/POS/RATE/MAVLINK got a full -P02..P0n property set
+      authored, verified, and never status-updated.
+
+      HOW THEY GET FIXED — maintainer decision 2026-10-01: RE-VERIFIED
+      INDIVIDUALLY, not bulk-promoted with `rivet verify`. The reason is
+      measured, not cautious: in one week this repo produced THREE artifacts
+      whose cited evidence did not establish what they claimed — HOLD-001's
+      outage test could not fail for the branch it named (#483, and that branch
+      turned out to be actively harmful), the high-wind test passed only
+      BECAUSE of a bug, and FAULT-005 claimed `steps:` while having none. Bulk
+      promotion would stamp 79 requirements on citations nobody re-checked, in a
+      repo with a demonstrated rate of bad citations.
+
+      THE COST, RE-ESTIMATED after grading the chain: 18 x (read the artifact,
+      run its evidence, judge whether it establishes the claim) -- tractable in
+      a few passes, not weeks. The other 61 are a SEPARATE and larger problem:
+      promote the SV-RELAY-* layer, which needs the Verus track alive first
+      (#405). They are not in this release's scope and must not be promoted
+      alongside the 18.
 
       MEASURED BASELINE, 2026-09-24 (57 open):
 
@@ -79,7 +141,7 @@ artifacts:
       not.
 
       FALSIFICATION: wrong if, after this release, an open issue exists with no
-      disposition, or an issue was closed as fixed citing only a merge commit,
+      disposition, or a requirement's status contradicts its own trace, or an issue was closed as fixed citing only a merge commit,
       or the invisible-to-plan count is non-zero, or `board-health.rs` reports
       numbers a reader can show to be wrong.
     tags: [requirement, relay, hygiene, issue-board, process, v1.143]
