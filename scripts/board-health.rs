@@ -32,7 +32,7 @@
 //! ```
 
 use anyhow::{Context, Result};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::process::Command;
 
 /// A requirement whose status claims it is un-started.
@@ -42,6 +42,42 @@ struct Req {
     id: String,
     status: String,
     release: Option<String>,
+}
+
+/// One artifact that points a `verifies` link at a requirement.
+struct Verifier {
+    verified: bool,
+    has_steps: bool,
+}
+
+/// How far an un-started requirement's evidence chain actually reaches.
+///
+/// WHY THIS IS GRADED RATHER THAN BOOLEAN. The first version of this script
+/// asked only "does something point a `verifies` link at it", counted 79, and
+/// called every one a status contradiction. Too weak, and it misled: of 90
+/// un-started requirements, 61 are verified-by an `SV-RELAY-*` artifact that is
+/// ITSELF `approved` and — in the case checked, SV-RELAY-015 — carries no
+/// `steps:` at all, only `method: automated-test`. Those are NOT status-lagged;
+/// their chain is incomplete two levels up, and promoting them would be wrong.
+/// Only a requirement whose verifier is itself `verified` AND runnable is a
+/// promotion candidate. That distinction took the count from 79 to 18.
+#[derive(PartialEq, Eq)]
+enum Chain {
+    Promotable,
+    VerifiedButStepless,
+    VerifierUnpromoted,
+    NoVerifier,
+}
+
+impl Chain {
+    fn label(&self) -> &'static str {
+        match self {
+            Chain::Promotable => "verifier VERIFIED + has steps (promotion candidate)",
+            Chain::VerifiedButStepless => "verifier verified but runs NOTHING",
+            Chain::VerifierUnpromoted => "verifier itself NOT verified (chain incomplete)",
+            Chain::NoVerifier => "no verifier at all (genuinely un-started)",
+        }
+    }
 }
 
 fn field(block: &str, name: &str) -> Option<String> {
@@ -59,9 +95,9 @@ fn field(block: &str, name: &str) -> Option<String> {
 /// Parse `artifacts/**.yaml` directly. `rivet list --format json` drops
 /// `fields`, and a census built on it reports every artifact stepless — so the
 /// YAML is the source here deliberately.
-fn scan() -> Result<(Vec<Req>, BTreeSet<String>)> {
+fn scan() -> Result<(Vec<Req>, BTreeMap<String, Vec<Verifier>>)> {
     let mut reqs = Vec::new();
-    let mut verified_targets = BTreeSet::new();
+    let mut verified_targets: BTreeMap<String, Vec<Verifier>> = BTreeMap::new();
     let mut stack = vec![std::path::PathBuf::from("artifacts")];
     while let Some(dir) = stack.pop() {
         for e in std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
@@ -89,8 +125,15 @@ fn scan() -> Result<(Vec<Req>, BTreeSet<String>)> {
                 while let Some(l) = lines.next() {
                     if l.trim() == "- type: verifies" {
                         if let Some(n) = lines.peek() {
-                            if let Some(t) = n.trim().strip_prefix("target: ") {
-                                verified_targets.insert(t.trim().to_string());
+                            if let Some(tg) = n.trim().strip_prefix("target: ") {
+                                verified_targets
+                                    .entry(tg.trim().to_string())
+                                    .or_default()
+                                    .push(Verifier {
+                                        verified: field(block, "status").as_deref()
+                                            == Some("verified"),
+                                        has_steps: block.contains("steps:"),
+                                    });
                             }
                         }
                     }
@@ -115,26 +158,40 @@ fn main() -> Result<()> {
             unstarted.push(r);
         }
     }
-    let contradicting: Vec<&&Req> = unstarted
-        .iter()
-        .filter(|r| has_verifier.contains(&r.id))
-        .collect();
-    let no_release = contradicting.iter().filter(|r| r.release.is_none()).count();
+    let mut graded: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut promotable = 0usize;
+    for r in &unstarted {
+        let vs = has_verifier.get(&r.id).map(|v| v.as_slice()).unwrap_or(&[]);
+        let c = if vs.is_empty() {
+            Chain::NoVerifier
+        } else if vs.iter().any(|v| v.verified && v.has_steps) {
+            Chain::Promotable
+        } else if vs.iter().any(|v| v.verified) {
+            Chain::VerifiedButStepless
+        } else {
+            Chain::VerifierUnpromoted
+        };
+        if c == Chain::Promotable {
+            promotable += 1;
+        }
+        *graded.entry(c.label()).or_default() += 1;
+    }
+    let no_release = unstarted.iter().filter(|r| r.release.is_none()).count();
 
     println!("REQUIREMENT TRACE  ({} sw-req)", reqs.len());
     for (s, n) in &by_status {
         println!("  {:<12} {n}", if s.is_empty() { "(none)" } else { s });
     }
     println!("  status says NOT STARTED            {}", unstarted.len());
-    println!(
-        "  ...but a verifier already points at it   {}   <-- CONTRADICTION",
-        contradicting.len()
-    );
-    println!("  ...of those, with no `release:`          {no_release}");
-    if !contradicting.is_empty() {
+    println!("  ...carrying no `release:` field          {no_release}");
+    println!("  evidence chain of those {}:", unstarted.len());
+    for (label, n) in &graded {
+        println!("    {n:3}  {label}");
+    }
+    if promotable > 0 {
         breaches.push(format!(
-            "{} requirement(s) have a status that contradicts their own trace",
-            contradicting.len()
+            "{promotable} requirement(s) say un-started while a VERIFIED, runnable verifier \
+             points at them (status lag — re-verify individually, never bulk-promote)"
         ));
     }
 

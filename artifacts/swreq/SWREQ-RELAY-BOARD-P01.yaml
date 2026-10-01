@@ -17,12 +17,33 @@ artifacts:
       status contradicts its own trace silently corrupts every readiness number
       we compute from it — and readiness is what gates a tag.
 
-      MEASURED 2026-09-30, 275 sw-reqs:
+      MEASURED 2026-10-01, 275 sw-reqs. THE FIRST VERSION OF THIS COUNT WAS
+      TOO WEAK and is corrected here: asking only "does something point a
+      `verifies` link at it" gave 79 and called every one a status
+      contradiction. Grading the chain by how far it actually reaches gives a
+      very different, and actionable, picture:
 
-        status says NOT STARTED (draft/proposed/approved)      91
-          ...but ALREADY CARRY A VERIFIER                      79
-          ...genuinely nothing                                 12
-        of the 79, how many carry a `release:` field            0
+        status says NOT STARTED (draft/proposed/approved)      90
+          verifier is VERIFIED and has `steps:`               18   <- status lag
+          verifier itself NOT verified (chain incomplete)      61
+          no verifier at all (genuinely un-started)            11
+        carrying no `release:` field                           77
+
+      THE 61 ARE NOT STATUS-LAGGED. They are verified-by an `SV-RELAY-*`
+      artifact that is ITSELF `approved` — and SV-RELAY-015, checked directly,
+      carries NO `steps:` at all, only `method: automated-test`, while claiming
+      to "combine unit test evidence (UV-CCSDS-001) and formal verification
+      evidence (FV-CCSDS-001)". Their chain is incomplete two levels up.
+      Promoting them would be wrong, and the real blocker is the SV-RELAY-*
+      layer, not the requirements.
+
+      Worse for that 61: every one cites a VERUS proof as its criterion, and the
+      Verus track has verified NOTHING since 2026-09-11 (#405 — the toolchain
+      cannot find core/std and all 19 proofs fail in 0.1 s). So their evidence
+      does not merely lack promotion; it does not currently run.
+
+      SO THE RE-VERIFICATION IS 18 REQUIREMENTS, NOT 79. The decision below
+      stands and its cost is far smaller than first estimated.
 
       So 79 requirements are invisible to the plan TWICE: their status says
       un-started while a verification artifact points at them, and no release
@@ -44,9 +65,12 @@ artifacts:
       promotion would stamp 79 requirements on citations nobody re-checked, in a
       repo with a demonstrated rate of bad citations.
 
-      THE COST IS REAL AND IS ACCEPTED: roughly 79 x (read the artifact, run its
-      evidence, judge whether it establishes the claim). That is weeks of passes
-      producing no new capability. It is the honest order.
+      THE COST, RE-ESTIMATED after grading the chain: 18 x (read the artifact,
+      run its evidence, judge whether it establishes the claim) -- tractable in
+      a few passes, not weeks. The other 61 are a SEPARATE and larger problem:
+      promote the SV-RELAY-* layer, which needs the Verus track alive first
+      (#405). They are not in this release's scope and must not be promoted
+      alongside the 18.
 
       MEASURED BASELINE, 2026-09-24 (57 open):
 
