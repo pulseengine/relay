@@ -189,8 +189,8 @@ artifacts:
       76 B while the captured frame implies 75; the likeliest reading is that the
       integrator dropped `heading-rad`'s presence byte. THE BINDING IS THEREFORE
       WRITTEN AS NORMATIVE and the one-byte difference is documented as a change
-      an existing host must make, rather than guessed at. Filed as a finding so
-      the maintainer can decide whether to obtain the capture or accept ours.
+      an existing host must make, rather than guessed at. Filed as #503 so the
+      maintainer can decide whether to obtain the capture or accept ours.
       ======================================================================
     tags: [requirement, falcon, transport, seam, hitl, v1.141]
     links:

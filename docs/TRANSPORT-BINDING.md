@@ -14,6 +14,10 @@ is the binding and the capture is prior art. What the capture contributed is the
 *header shape*, deliberately, so an existing host needs the smallest possible
 change.
 
+> **The capture this binding's header shape came from is not in the repository, and
+> two of its numbers do not reconcile with the seam — tracked in #503.** Both
+> discrepancies and how they were resolved are in §1.
+
 ## 1. Framing
 
 Every message is an 8-byte header followed by a fixed-length payload.
@@ -61,7 +65,7 @@ Called out precisely so an existing host knows what to change.
    `heading-rad` 5 + `motor-rpm` 17 = 76, while the captured 83-byte frame
    leaves 75. The likeliest cause is that the integrator sent `heading-rad` as
    a bare `f32`, dropping its presence byte, because their rig always has one.
-   **This is not established** — the capture is not in this repository. This
+   **This is not established** — the capture is not in this repository (#503). This
    binding requires the presence byte. A host built from the capture must add
    one byte at offset 54 of the payload.
 
