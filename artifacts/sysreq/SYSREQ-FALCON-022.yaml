@@ -105,12 +105,46 @@ artifacts:
       NOT WORKED AROUND. A private BENCH_LOCKDIR would let the measurement
       proceed and would exclude nobody, which is the vacuous lock the interlock
       exists to prevent; it was used once as a CONTROL to prove the tool sound
-      and then deleted. Reading the part also needs operator consent per the
-      registry's own note on the vehicle, which relay does not have.
+      and then deleted.
 
-      THE MEASUREMENT NEEDED is the RT1176's OCRAM/TCM budget from its reference
-      manual or read off the board under a claim, after which this paragraph
-      either stands or is rewritten.
+      AND OUR DESCRIPTION OF THAT BLOCKER WAS WRONG — corrected on jess#266. We
+      reported `with-device` ABSENT on all three hosts. It is INSTALLED on
+      fourpi.local at /home/pi/bench/with-device with a registry at
+      /home/pi/.config/pulseengine/bench-devices.yaml, and `pixhawk-6xrt` is in
+      jess's COMMITTED hardware-catalog.yaml. Every vehicle action jess has
+      taken ran under a claim. Our search ran as user `r` and could not see
+      /home/pi, so "absent for `r`" was reported as "absent on the host" — a
+      search's scope stated as a property of the world. The REAL gap is narrower
+      and still real: access is ACCOUNT-DEPENDENT, and under `r` (the standard
+      account on all three hosts) the tool is not on PATH and there is no
+      registry. jess#280 stands on its own evidence — the lockdir is `pi:pi` and
+      `r` cannot write it, so EACCES still reports as CLAIMED.
+
+      ======================================================================
+      MEASURED, AND THE PREMISE IS REFUTED AS STATED (jess#266, 2026-10-01).
+      jess read it over SWD on the actual i.MX RT1176, under a
+      `with-device pixhawk-6xrt` claim:
+
+        IOMUXC_GPR17 FLEXRAM_BANK_CFG = 0x0000ffaa -> 4 DTCM + 4 ITCM banks
+        DTCM   clean 0x20000000..0x2003FFFC        -> 256 KB
+        OCRAM  clean 0x20240000..0x203BFFFC        -> >= 1.5 MB
+        ITCM                                      -> 256 KB (an 84,813 B
+                                                     image loads and RUNS there)
+
+      So the largest board on this bench carries ~2 MB on-chip with 1.5 MB of
+      CONTIGUOUS OCRAM, not 192 KB, and the 1.1 MiB data-base spread FITS BY
+      SIZE with room. The sentence above compares against a NUCLEO while the
+      flight target sits on the same bench with eight times the memory.
+
+      WHAT THE MEASUREMENT DOES NOT SETTLE, in jess's own words and kept because
+      the temptation is to read it as an all-clear: that OCRAM is where PX4
+      already lives (its MSP was 0x20241db0 when jess halted it), it is SLOWER
+      than TCM, and NOTHING has been measured about cache behaviour or
+      contention across a 1.1 MiB working set. Whether the spread is still fatal
+      for those reasons is open. Only the BOARD-SIZE argument is dead.
+
+      THIS IS JESS'S MEASUREMENT, NOT OURS. Relay did not read the part: see the
+      account-dependent access note below. Cited, not reproduced here.
 
       NOR DOES THIS WEAKEN gale#398. The [r11 + off] absolute addressing is a
       lowering defect whatever the part's size; a bigger target might make it
@@ -121,11 +155,27 @@ artifacts:
 
       ALSO CORRECTED, because we wrote it down twice: we had recorded jess's
       constraint as "bench empty since 2026-09-25, nothing on silicon". The
-      first half is contradicted by jess's own later measurement — the bench is
-      three hosts and the vehicle is attached. The second half STANDS: presence
-      is not execution, and nothing has executed on an RT1176. Those are two
-      different claims and conflating them turned an integration gap into an
-      apparent hardware-availability gap.
+      first half was contradicted by jess's own later measurement — the bench is
+      three hosts and the vehicle is attached. We then said the second half
+      STOOD. IT NO LONGER DOES, as of the same day:
+
+      THE FALCON CASCADE HAS EXECUTED ON THE REAL i.MX RT1176 (jess#266,
+      2026-10-01). `rate#tick` -> `mixer#mix`, loaded to RAM over SWD with no
+      flash written, PX4 restored and verified disarmed afterwards, and
+      BIT-EXACT against our SIL reference:
+
+        in   tx=1  ty=0.472507507  tz=-0.147003502  thrust=0.5
+        out  m3=0.348992109  m4=1
+
+      with a perturbed-input control that moves and also matches emulation
+      bit-for-bit. So any premise of the form "jess has no on-target evidence"
+      has moved, and this is the FIRST on-silicon execution of verified relay
+      components.
+
+      WHAT IT IS NOT: not the whole cascade (two stages of five), not the
+      estimator, not flight, not flash-resident, and not our measurement. The
+      hardware register's remaining items are untouched by it. Recorded as the
+      milestone it is and nothing larger.
 
       KNOWN FALSIFIER STANDING TODAY: the artifact that currently lowers to the
       M7 is the LEGACY PID cascade, not the flown law. The only existing
