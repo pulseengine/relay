@@ -217,13 +217,37 @@ artifacts:
       ======================================================================
 
       ======================================================================
-      THE WASM HALF, MEASURED 2026-10-01. This artifact's own EVIDENCE
-      REQUIRED clause above asks for the gz plant "native AND wasm", three
-      pristine-server trials each. It was promoted to `verified` on 2026-09-25
-      with the NATIVE HALF ONLY -- `--scenario=supervised-rotorout` drives the
-      native FlightSupervisor, which the SCOPE paragraph states outright. So
-      the promotion ran ahead of the evidence this artifact itself demands.
-      That is recorded here, not quietly closed.
+      THE WASM HALF, MEASURED 2026-10-01 -- AND THIS ARTIFACT IS STILL NOT
+      PROMOTED. Read the clause-by-clause reckoning below before anyone
+      promotes it; the missing piece is structural, not a gap in the running.
+
+      This closes the gap #499 demoted it for. That demotion said the promotion
+      "shipped the native half only" while the EVIDENCE REQUIRED clause demands
+      "native AND wasm", and that the wasm leg was "not merely unrun, it is
+      UNJUDGEABLE today". Both are now addressed: the harness has a verdict
+      (#502, merged), and the measurement is below.
+
+      BUT THE CRITERION HAS FOUR CLAUSES AND THE WASM LEG MEETS THREE:
+
+        clause                          native      wasm
+        FDI isolates the failed rotor   yes 3/3     yes 3/3 (rotor 0, 2 ticks)
+        peak tilt stays bounded         yes 3/3     yes 3/3 (0.184-0.381 rad)
+        the vehicle touches down        yes 3/3     yes 3/3 (1.42-2.00 s)
+        ...AND DISARMS                  yes 3/3     IMPOSSIBLE
+
+      The fourth is not unmeasured, it CANNOT EXIST in this component: the
+      published cascade wraps FlightCore, not FlightSupervisor, so there is no
+      mode machine and no disarm latch to observe (#414, open). No amount of
+      running the wasm leg will satisfy that clause.
+
+      SO THIS STAYS `implemented`, and promoting it is A SCOPE DECISION FOR THE
+      MAINTAINER: either narrow the disarm clause to the native leg (defensible
+      -- disarm is a FlightSupervisor property and the wasm component is a
+      FlightCore binding), or hold the artifact until #414 puts a mode and a
+      failsafe in the published state. Promoting it on three of four clauses
+      would be the SAME ERROR #499 caught, one level finer: verified against
+      part of its own stated criterion while the text still demands all of it.
+      Recorded rather than resolved here, deliberately.
 
       The wasm leg was not merely unmeasured, it was UNJUDGEABLE. Its
       `peak_tilt` was `sqrt(ax^2 + ay^2)` -- lateral specific force, not tilt
