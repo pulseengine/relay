@@ -80,10 +80,34 @@ jobs:
       #
       # Labels live in .github/actionlint.yaml — without it this emits 14
       # "label rust-cpu is unknown" warnings, and a noisy gate is an ignored one.
-      - uses: taiki-e/install-action@v2.87.21
-        with:
-          tool: actionlint
-      - run: actionlint -color .github/workflows/*.yml
+      # INSTALLED AS A PINNED, CHECKSUM-VERIFIED DOWNLOAD.
+      #
+      # The first version of this step used `taiki-e/install-action` with
+      # `tool: actionlint`, which this gate itself caught on its own PR:
+      #   install-action does not support actionlint ... fallback to cargo-binstall
+      #   × For crate actionlint: actionlint is not found
+      # actionlint is a Go binary, not a crate, so neither path can supply it.
+      #
+      # So it comes from its own release, with the version AND the sha256 pinned
+      # here rather than trusting a checksums file fetched at the same time as
+      # the artifact. Same posture as the `wkg` pin in release.yml. Bump both
+      # numbers together; a mismatch fails the job loudly.
+      - name: Install actionlint (pinned + checksummed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER=1.7.12
+          SHA=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          TGZ="actionlint_${VER}_linux_amd64.tar.gz"
+          curl -fsSL -o "$TGZ" \
+            "https://github.com/rhysd/actionlint/releases/download/v${VER}/${TGZ}"
+          echo "${SHA}  ${TGZ}" | sha256sum -c -
+          tar xzf "$TGZ" actionlint
+          install -m755 actionlint "$HOME/.local/bin/actionlint" 2>/dev/null \
+            || { mkdir -p "$HOME/.local/bin" && install -m755 actionlint "$HOME/.local/bin/actionlint"; }
+          rm -f "$TGZ" actionlint
+          "$HOME/.local/bin/actionlint" --version
+      - run: "$HOME/.local/bin/actionlint -color .github/workflows/*.yml"
 
   clippy:
     name: Clippy
