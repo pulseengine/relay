@@ -58,12 +58,23 @@ artifacts:
       That figure is the STM32 bench — it matches the NUCLEO-WB55RG's 192 KB
       SRAM1 exactly, in jess's own measured part table. But a corrected bench
       inventory on jess#266 lists a THIRD host nobody here was reasoning over,
-      and on it the vehicle itself:
+      and on it the vehicle itself. VERIFIED INDEPENDENTLY on 2026-10-01 over
+      ssh, read-only (`lsusb` + sysfs; no probe attached, no console opened,
+      because `with-device` is absent and a probe needs a claim):
 
-        fourpi.local   3643:001d   PX4 FMU v6XRT.x   — the vehicle
-        gale.local     ST-LINK/V1, STLINK-V3
-        wohl.local     NUCLEO-WL55JC1 / WB55RG / G031K8 + an uncatalogued
-                       Nordic board sitting in Open DFU Bootloader mode
+        fourpi.local   3643:001d  PX4 FMU v6XRT.x     1-1.2  serial=0
+                       1fc9:0143  MCU-LINK CMSIS-DAP  1-1.4  ARMCR0OKTRM5Q
+                       0403:6015  FT231X USB UART     1-1.3  D30K1YZS
+        gale.local     ST-LINK/V1 + STLINK-V3
+        wohl.local     STLINK-V3 + two ST-LINK/V2.1 (1-1.5, 1-1.6) + a Nordic
+                       board in Open DFU Bootloader mode
+
+      TWO THINGS THE MEASUREMENT ADDED that jess's own corrected table did not
+      list. `fourpi.local` carries THREE relevant devices, not one, and one of
+      them is an NXP MCU-LINK CMSIS-DAP probe — the SWD path onto the RT1176's
+      M7. So the programmer this arc needs is already attached, uncatalogued and
+      under no interlock. And the FMU's USB serial is literally `0`, so it cannot
+      be selected by serial at all and needs its port path as its only identity.
 
       The i.MX RT1176 on that FMU is the cascade's actual target (the M7 of the
       est->M4 / cascade->M7 / failsafe->F100 partition), and it is not a 192 KB
@@ -71,12 +82,16 @@ artifacts:
       against the wrong board.
 
       WHAT IS NOT CLAIMED, deliberately: the RT1176's actual usable RAM. No
-      figure for it exists anywhere in this repo, this agent could not measure
-      it (fourpi.local is reachable but refuses passwordless ssh as user `r`),
-      and quoting one from memory is how a requirement acquires an unsourced
-      number — see #503, where exactly that is being untangled. THE MEASUREMENT
-      NEEDED is the RT1176's OCRAM/TCM budget from its reference manual or read
-      off the board, after which this paragraph either stands or is rewritten.
+      figure for it exists anywhere in this repo, and quoting one from memory is
+      how a requirement acquires an unsourced number — see #503, where exactly
+      that is being untangled. It was NOT measured even though the host is now
+      reachable: reading the part means attaching the MCU-LINK, a probe needs a
+      claim, and no claim can be made while `with-device` is installed on none
+      of the three hosts (verified). So THE BLOCKER IS THE INTERLOCK, NOT ACCESS
+      — a distinction worth keeping, because the first is a thing to build and
+      the second was a thing to wait for. THE MEASUREMENT NEEDED is the RT1176's
+      OCRAM/TCM budget from its reference manual or read off the board, after
+      which this paragraph either stands or is rewritten.
 
       NOR DOES THIS WEAKEN gale#398. The [r11 + off] absolute addressing is a
       lowering defect whatever the part's size; a bigger target might make it
