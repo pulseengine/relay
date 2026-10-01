@@ -53,7 +53,7 @@ artifacts:
       engineer reported from hardware, which a position-only verdict would mask
       on a real vehicle exactly as it does on this bench.
 
-      TWO DEFECTS ALREADY FOUND AND FIXED — NEITHER IS THE PRIMARY CAUSE.
+      TWO DEFECTS FOUND, NOT FIXED, NOT MERGED — NEITHER IS THE PRIMARY CAUSE.
       Landed separately (branch phase0/rate-loop-antiwindup) because each is
       independently wrong:
         (a) the ESO was driven by COMMANDED torque while the thrust-priority
