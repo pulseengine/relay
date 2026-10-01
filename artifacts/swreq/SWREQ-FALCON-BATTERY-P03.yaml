@@ -6,7 +6,19 @@ artifacts:
     release: falcon-v1.140.0
     description: >
       While airborne, if no battery reading arrives for longer than one
-      second, the vehicle shall raise the battery failsafe (the same path a
+      second, the vehicle shall raise the battery failsafe -- BUT ONLY IF IT HAS
+      EVER HAD A BATTERY READING (declare-on-first-sight, #475/#476). A vehicle
+      that never reported a pack is not failsafed in flight: the first version of
+      this rule grounded every backend returning `None` one second after
+      takeoff, which in the supervised rotor-out scenario commanded Land at 1.0 s
+      and Disarmed at 1.6 s on a flight whose fault was not injected until 8.0 s.
+      THIS TEXT DID NOT GET THAT CORRECTION WHEN THE CODE DID -- independent
+      review found the requirement's falsification clause was satisfied by a
+      PASSING cited test, `a_vehicle_that_never_had_a_battery_sense_is_not_
+      failsafed_in_flight`, which asserts 16 s airborne with `None` throughout
+      (#497). Corrected here. The code is
+      `batt_lost = self.batt_seen && self.batt_missing_s > BATT_SILENCE_S`
+      (the same path a
       low or critical pack takes), rather than continue on the last reading it
       happened to see.
 
@@ -32,7 +44,7 @@ artifacts:
       reserve an RTL needs. The pre-existing low/critical debounce is
       unchanged; this is an additional term, not a replacement.
 
-      FALSIFICATION: wrong if an airborne vehicle whose `read_battery_v`
+      FALSIFICATION: wrong if an airborne vehicle THAT HAS REPORTED A PACK and whose `read_battery_v`
       returns `None` for more than a second stays in a flying mode, or if a
       single dropped reading raises the failsafe.
     tags: [requirement, falcon, battery, failsafe, fail-safe, v1.140]

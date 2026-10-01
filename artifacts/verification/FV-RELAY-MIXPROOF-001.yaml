@@ -68,14 +68,22 @@ artifacts:
       retrievable, so the harness is unidentified) and re-run. If the heavy tail
       is a property of large float instances rather than of this one harness,
       other legs will show it; that belongs to CIFLOW-P01 (v1.142), not here.
-    tags: [verification, relay, ci, kani, mixer, v1.140]
+    # `falcon` ADDED: the verification gate's default filter is
+    # `(has-tag "falcon")`, so a relay-only tag meant CI NEVER RAN these steps
+    # at all -- 397 artifacts matched the filter and this was not among them (#497).
+    tags: [verification, relay, falcon, ci, kani, mixer, v1.140]
     fields:
       method: formal-verification
       steps:
         # The contract, for all finite inputs (CI: Kani gate, relay-mix-quad leg).
-        - run: "cargo kani -p relay-mix-quad --harness verify_scale_to_fit_contract"
+        # `cd` INTO THE CRATE. From the repo root both harnesses exit 1 with "Using
+        # the `proof_for_contract` attribute requires activating the unstable
+        # `function-contracts` feature" -- the feature lives in the crate's own
+        # [package.metadata.kani.unstable]. kani.yml uses working-directory;
+        # these steps omitted it, so they were NOT EXECUTABLE AS WRITTEN (#497).
+        - run: "cd crates/relay-mix-quad && cargo kani --harness verify_scale_to_fit_contract"
         # The MIX-P06 bound, using the proven contract.
-        - run: "cargo kani -p relay-mix-quad --harness verify_mix_priority_bound"
+        - run: "cd crates/relay-mix-quad && cargo kani --harness verify_mix_priority_bound"
         # The harness really is compositional, and the features are crate-local.
         - run: "grep -q 'kani::stub_verified(super::scale_to_fit)' crates/relay-mix-quad/plain/src/lib.rs"
         - run: "grep -q 'kani::proof_for_contract(super::scale_to_fit)' crates/relay-mix-quad/plain/src/lib.rs"
