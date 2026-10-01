@@ -233,14 +233,43 @@ jobs:
         shell: bash
         run: |
           DEFAULT='(has-tag "falcon")'
-          OVERRIDE=$(printf '%s' "$PR_BODY" \
-            | grep -m1 -E '^Verify-Filter:' \
-            | sed 's/^Verify-Filter:[[:space:]]*//' || true)
-          if [ -n "${OVERRIDE:-}" ]; then
-            printf 'filter=%s\n' "$OVERRIDE" >>"$GITHUB_OUTPUT"
-          else
+          # A PR BODY IS PROSE, AND THE STRICT PATTERN LOST BOTH WAYS.
+          #
+          # Measured on real PRs in this repo:
+          #   Verify-Filter: `(has-tag "falcon")`      -> the backticks were
+          #     passed THROUGH to rivet, which died with "invalid filter:
+          #     offset 0: unexpected atom at top level" and took the gate down
+          #     as a Python traceback (#504).
+          #   **Verify-Filter:** `FV-...` `FV-...`     -> matched `^Verify-
+          #     Filter:` NOT AT ALL, so the override was SILENTLY DISCARDED and
+          #     the gate ran the full default set (#500, #501). That is the
+          #     worse failure: the scoping mitigation this override exists for
+          #     (relay#262 — 6m59s against two 1h30m timeouts) was inoperative
+          #     and nothing said so.
+          #
+          # So: accept markdown decoration around the key, strip surrounding
+          # backticks from the value, and — the important part — a line that is
+          # PRESENT BUT UNUSABLE now FAILS LOUDLY instead of falling back to the
+          # default. Silently substituting a different filter than the author
+          # wrote is the absence-looks-like-data shape this repo keeps finding.
+          LINE=$(printf '%s\n' "$PR_BODY" \
+            | grep -m1 -iE '^[[:space:]]*\*{0,2}[[:space:]]*Verify-Filter[[:space:]]*:' || true)
+          if [ -z "$LINE" ]; then
             printf 'filter=%s\n' "$DEFAULT" >>"$GITHUB_OUTPUT"
+            exit 0
           fi
+          OVERRIDE=$(printf '%s' "$LINE" \
+            | sed -E 's/^[[:space:]]*\*{0,2}[[:space:]]*[Vv]erify-[Ff]ilter[[:space:]]*:[[:space:]]*\*{0,2}[[:space:]]*//' \
+            | sed -E 's/^`+//; s/`+[[:space:]]*$//; s/[[:space:]]+$//')
+          # rivet's filter language is S-expression, so a usable filter starts
+          # with '('. This is what catches both forms above with a message
+          # instead of a traceback or a silent swap.
+          if [ -z "$OVERRIDE" ] || [ "${OVERRIDE#\(}" = "$OVERRIDE" ]; then
+            echo "::error::Verify-Filter is present but is not a rivet S-expression filter: >>>${OVERRIDE}<<<"
+            echo "::error::Write it unformatted, e.g.  Verify-Filter: (has-tag \"falcon\")  — an artifact ID list is not a filter."
+            exit 1
+          fi
+          printf 'filter=%s\n' "$OVERRIDE" >>"$GITHUB_OUTPUT"
 
       - name: Run falcon verification gate
         id: verify

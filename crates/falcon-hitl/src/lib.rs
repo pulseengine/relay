@@ -31,6 +31,17 @@
 
 #![no_std]
 
+/// The published `pulseengine:falcon-cascade` transport binding
+/// (SWREQ-FALCON-TRANSPORT-P01) — framing, the configuration handshake, the
+/// tick contract and the sequence semantics.
+///
+/// The legacy 16/54-byte `encode_actuator`/`encode_sensor` frames below are
+/// SUPERSEDED by this module and kept only so existing callers keep building.
+/// They cannot carry heading, rotor RPM, or a battery that says ABSENT (#466) —
+/// the exact fields the seam learned it needed at v0.8 and v0.10 by being
+/// driven. New hosts use `wire`.
+pub mod wire;
+
 use falcon_core::{FlightBackend, ImuSample};
 
 /// `[f32; 3]`, matching `falcon-core`'s vector type.
