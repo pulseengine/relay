@@ -81,7 +81,7 @@ static PUBLISHED: SingleThreaded<Option<PublishedState>> = SingleThreaded(RefCel
 /// What `step` latches for observers. Plain copy type — no allocation, no lock.
 #[derive(Clone, Copy)]
 struct PublishedState {
-    tick: u64,
+    tick: u32,
     q: [f32; 4],
     p: [f32; 3],
     v: [f32; 3],
