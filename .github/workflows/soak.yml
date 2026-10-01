@@ -106,12 +106,27 @@ jobs:
   gz-endurance:
     name: gz endurance watch (the real ceiling)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # 150, NOT 90 (#497). The ladder's full rung set sums 5135 s of FLIGHT, and
+    # measured non-flight overhead on a real run was 498 s wall for 335 s flight
+    # (fresh gz server + topic wait + teardown per rung). Eight rungs therefore
+    # project ~90 min against what used to be a 90-minute cap: the job would be
+    # KILLED MID-LADDER, bypassing the loop's exit path, so BEST was never
+    # printed and the nightly went red with no measurement -- precisely the
+    # "the measurement was lost" failure the comments below say was already
+    # fixed once, reintroduced by raising the cap without raising the limit.
+    # Caught by independent review of the fix, not by the fix's author.
+    timeout-minutes: 150
     env:
       # The longest gz hold measured good on 2026-09-16 was 25 s (three runs:
       # 0.04, 0.21, 0.10 m). The floor is what must not regress; it is NOT the
       # target. ENDURANCE-P01's target is 3600.
-      GZ_FLOOR_S: '25'
+      # RATCHETED 25 -> 120 (#497). The floor is meant to be "the longest
+      # duration that has held, which may not get worse". It sat at 25 while the
+      # measured best was 120, so a 4.8x regression would have passed. A floor
+      # that trails the measurement by 5x is not a ratchet. Raise this whenever
+      # the ladder establishes a longer rung -- that is the mechanism working,
+      # not a maintenance chore.
+      GZ_FLOOR_S: '120'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -144,8 +159,36 @@ jobs:
           GZ_MAX_S: ${{ github.event.inputs.gz_max_s }}
         run: |
           set -uo pipefail
-          MAX="${GZ_MAX_S:-120}"
+          # THE SCHEDULED RUN USED TO CAP AT 120 s, SILENTLY (#497).
+          # `github.event.inputs` is empty on a `schedule` event, so GZ_MAX_S was
+          # empty and this fell back to 120 -- which meant ENDURANCE-P01's
+          # "at least ONE HOUR on the reference Gazebo plant" was NEVER RUN by
+          # the job that exists to run it. The step printed
+          # "::warning::gz hold is 120s, short of the 1 h target" and SUCCEEDED,
+          # every night, for weeks. Introduced by me when I bound GZ_MAX_S
+          # through `env:` to close a `${{ }}` injection: the injection fix was
+          # right, the default was not.
+          #
+          # A scheduled run now climbs to the REQUIREMENT'S target. A manual
+          # dispatch may still ask for less, because a human debugging the
+          # ladder should not be forced to wait an hour.
+          if [ -n "${GZ_MAX_S}" ]; then
+            MAX="${GZ_MAX_S}"
+          elif [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            MAX=3600
+          else
+            MAX=120
+          fi
+          echo "gz ladder cap: ${MAX}s (event=${GITHUB_EVENT_NAME})"
           BEST=0
+          # PUBLISH EVERY RUNG AS IT COMPLETES. A timeout is a guess about the
+          # slowest plausible run, and when it is wrong the job is killed
+          # outside this loop's control -- no exit path, no summary, no number.
+          # Appending each holding duration to a file the next step reads means
+          # the measurement survives a kill: a truncated ladder still publishes
+          # the longest rung it reached, which is exactly what the ratchet needs.
+          RUNGS=/tmp/gz-soak-rungs.txt
+          : > "$RUNGS"
           # Each rung gets a FRESH server: /world/falcon/control does not answer
           # a reset request, so a reused world starts wherever the last run left
           # the vehicle. Same reason scripts/gz-trial.rs restarts per trial.
@@ -176,6 +219,8 @@ jobs:
 
             if [ "$RC" = 0 ] && grep -q '^PASS' <<<"$OUT"; then
               BEST=$D
+              # ...and on disk immediately, so a kill cannot lose it.
+              echo "$D" >> "$RUNGS"
             else
               # Say WHICH failure it was, so a crash is never read as a hold
               # that merely broke.
@@ -192,6 +237,9 @@ jobs:
           pkill -f 'gz sim' 2>/dev/null || true
 
           echo "::notice::gz endurance: longest holding duration ${BEST}s (floor ${GZ_FLOOR_S}s, ENDURANCE-P01 target 3600s)"
+          # Prefer the on-disk record: if this shell were re-entered or BEST
+          # lost, the rung file is still the measurement.
+          if [ -s "$RUNGS" ]; then BEST=$(sort -n "$RUNGS" | tail -1); fi
           if [ "$BEST" -lt "${GZ_FLOOR_S}" ]; then
             echo "::error::gz endurance REGRESSED: ${BEST}s < floor ${GZ_FLOOR_S}s"
             exit 1
