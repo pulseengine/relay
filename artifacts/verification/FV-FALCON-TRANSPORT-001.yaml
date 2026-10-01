@@ -1,0 +1,126 @@
+artifacts:
+  - id: FV-FALCON-TRANSPORT-001
+    type: sw-verification
+    title: "TRANSPORT-P01 — the seam's RETURN direction: an observer export read through the real Component Model ABI, seqlock held every tick (v1.141)"
+    status: verified
+    release: falcon-v1.141.0
+    description: >
+      Verifies the RETURN half of SWREQ-FALCON-TRANSPORT-P01. Seam bumped
+      pulseengine:falcon-cascade@0.10.0 -> @0.11.0, additively: `controller` is
+      unchanged and `observer` is new.
+
+      WHAT WAS WRONG. `step(sensors, target) -> motor-pwm` handed back motor
+      commands and nothing else, so the verified MAVLink telemetry stack
+      (MAVLINK-P06, v1.119) had nothing to read, no log could be written, and a
+      shadow flight against a reference filter produced no comparable evidence.
+      The bench engineer put it as "the cascade is only a middle".
+
+      THE EVIDENCE IS A MECHANICAL ORACLE THROUGH THE PUBLISHED ABI, not a
+      source inspection and not an in-process call. `tests/cascade-sitl-wasm`
+      instantiates the BUILT component under wasmtime and drives it through the
+      gz falcon-quad. Every tick it reads the published state and holds it to
+      three properties, each with a real failure mode:
+
+        head == tail    the body corresponds to ONE tick (the seqlock)
+        tick advances   `step` actually republished. A FROZEN tick is the
+                        failure that matters: an observer would read stale
+                        numbers forever with no error of any kind, which is the
+                        absence-looks-like-data shape this release line keeps
+                        finding (#413 fail-unsafe battery, #452 accelerometer).
+        valid != 0      fields are marked MEASURED, not silently zero.
+
+      MEASURED IN CI ON THE GZ PLANT, main @ f8a74365, Gazebo SITL success —
+      and the line below is quoted from the CI log rather than inferred from a
+      green check, because a passing job is not evidence an assertion ran:
+
+        LOOP CLOSES: 6250 ticks executed through the Component Model seam.
+        STATE RETURN: 6250 read-state calls, seqlock coherent every tick,
+                      final published tick 6249, valid mask 0x7f.
+        HOLD ERROR : commanded 2.00 m, reached 1.96 m  (|err| = 0.04 m)
+
+      6250 reads, zero torn, tick advanced 0 -> 6249 with no gap, all seven
+      valid bits set.
+
+      IT CAN FAIL. The three assertions `bail!` rather than warn, so a torn
+      read, a stalled tick or an empty valid mask fails the Gazebo gate, which
+      is a REQUIRED context. Demonstrated accidentally during development: an
+      8 s run (2000 ticks) fails the harness's hold bar at 0.54 m, so the
+      harness is not a rubber stamp — the documented 8 s-vs-25 s behaviour in
+      gazebo.yml, not a regression.
+
+      SHAPE AS THE INTEGRATOR SPECIFIED IT (jess#167). A SECOND EXPORT rather
+      than a return value on `step`, because on the M4 state must be readable
+      WITHOUT running a control tick — otherwise observing executes the
+      controller and changes what it observes — and because it leaves `step`'s
+      lowered symbol byte-stable, which jess's byte-identity baselines depend
+      on. Seqlock tick first and last. Fixed layout, no `option<>`, no lists;
+      absence rides a bitmask, since a discriminant whose position moves is
+      where tearing bites across a cache boundary. Monotonic tick that never
+      resets. CADENCE DELIBERATELY ABSENT from the contract: jess declined to
+      invent one ("no falcon code has executed on an RT1176") and so did we —
+      it comes from the tick delta on the first shadow flight.
+
+      ANNOUNCED BEFORE ANY PUBLISH (jess#167 comment IC_kwDOSxTmQs8AAAABYNDHOA,
+      2026-09-30). The v1.133 lesson: a namespace moved, nobody told the
+      integrator, and they reported the publish "stalled at 1.131.1". No tag
+      carries @0.11.0 without that announcement being out first. It is out; no
+      reply yet.
+
+      NOT CLAIMED, and each of these is a real gap rather than a caveat:
+
+      (1) NO MODE, NO FAILSAFE. The component wraps FlightCore, not
+      FlightSupervisor, so there is no mode machine or failsafe latch to
+      publish (#414). A telemetry consumer gets the estimate but cannot see WHY
+      the vehicle is doing something. This binding does not close that.
+
+      (2) 32-BYTE ALIGNMENT IS NOT ENFORCED HERE. jess specified it and is
+      right, but it is a property of the lowered struct and its OCRAM
+      placement, which is their side of the boundary. WIT cannot express it.
+      The field ORDER is correct for it (head first, tail last, no
+      variable-shape members) so the layout is ready, but nothing in this
+      contract checks the alignment.
+
+      (3) A SINGLE ADDRESS SPACE CANNOT TEAR. The harness is in-process, so it
+      proves the CONTRACT is coherent and the tick monotonic — it does not
+      exercise a genuine cross-core race. That needs the M4/M7 split, which has
+      no silicon yet.
+
+      (4) THE WIT IS HAND-WRITTEN, which CLAUDE.md names an anti-pattern. It is
+      impossible to generate for this seam (#492): spar codegen on the cascade
+      root emits 21 lines of `list<u8>` thread ports against 246 lines of typed
+      records. Nothing gates this file's drift from the architecture.
+
+      WHY THE STEPS DO NOT RUN GZ: gz is not on the runners (the rc=127 class,
+      recorded repeatedly). The steps assert the contract's shape and that CI
+      actually executes the assertions; the measurement above is the CI log.
+    tags: [verification, falcon, seam, transport, component-model, telemetry, v1.141]
+    fields:
+      method: automated-test
+      steps:
+        # The seam declares the return direction, at the bumped version.
+        - run: "grep -q 'package pulseengine:falcon-cascade@0.11.0;' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'read-state: func() -> flight-state' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'export observer;' wit/falcon-cascade/cascade.wit"
+        # Seqlock: tick-head and tick-tail both present in the record.
+        - run: "grep -q 'tick-head: u64' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'tick-tail: u64' wit/falcon-cascade/cascade.wit"
+        # Absence is a bitmask, NOT an option<> — the layout constraint.
+        - run: "grep -q 'valid: u32' wit/falcon-cascade/cascade.wit"
+        # Scoped to the RECORD'S FIELDS, and comment lines stripped. My first
+        # version asserted no `option<` anywhere in the file and FAILED when I
+        # ran it: `sensor-frame` uses option<> legitimately for optional aiding.
+        # The second version still matched, because the record's own doc comment
+        # says "Flat, not `option<u8>`". Negative-controlled: planting
+        # `failed-rotor: option<u8>` makes this fire.
+        - run: "! (awk '/record flight-state \\{/,/^    \\}/' wit/falcon-cascade/cascade.wit | grep -v '^ *///' | grep -qE 'option<|list<')"
+        # The component implements it.
+        - run: "grep -q 'fn read_state' wasm/cm/cascade/src/lib.rs"
+        # The harness ASSERTS the three properties (not merely reads them).
+        - run: "grep -q 'seqlock torn at tick' tests/cascade-sitl-wasm/src/main.rs"
+        - run: "grep -q 'published tick did not advance by 1' tests/cascade-sitl-wasm/src/main.rs"
+        - run: "grep -q 'marks NOTHING valid' tests/cascade-sitl-wasm/src/main.rs"
+        # ...and CI actually runs that harness, so the assertions are executed.
+        - run: "grep -q 'cascade-sitl-wasm' .github/workflows/gazebo.yml"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRANSPORT-P01
