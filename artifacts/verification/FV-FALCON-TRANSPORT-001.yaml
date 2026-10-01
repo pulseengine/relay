@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TRANSPORT-001
     type: sw-verification
     title: "TRANSPORT-P01 — the seam's RETURN direction: an observer export read through the real Component Model ABI, seqlock held every tick (v1.141)"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
       Verifies the RETURN half of SWREQ-FALCON-TRANSPORT-P01. Seam bumped
@@ -101,9 +101,23 @@ artifacts:
         - run: "grep -q 'package pulseengine:falcon-cascade@0.11.0;' wit/falcon-cascade/cascade.wit"
         - run: "grep -q 'read-state: func() -> flight-state' wit/falcon-cascade/cascade.wit"
         - run: "grep -q 'export observer;' wit/falcon-cascade/cascade.wit"
-        # Seqlock: tick-head and tick-tail both present in the record.
-        - run: "grep -q 'tick-head: u64' wit/falcon-cascade/cascade.wit"
-        - run: "grep -q 'tick-tail: u64' wit/falcon-cascade/cascade.wit"
+        # Seqlock: tick-head and tick-tail both present in the record, at the
+        # width jess asked for. THESE STEPS SAID u64 AND THE GATE CAUGHT IT —
+        # this PR narrows the tick to u32 and the steps were not updated with
+        # it, so the verification gate failed 169/170 on exactly these two
+        # lines. Recorded rather than quietly corrected: the gate did its job,
+        # and a step that tracks the artifact it checks is the whole point.
+        - run: "grep -q 'tick-head: u32' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'tick-tail: u32' wit/falcon-cascade/cascade.wit"
+        # NEGATIVE, and it is the one that carries the safety argument: a u64
+        # tick must not come back. `LDRD` is NOT single-copy atomic on ARMv7-M,
+        # so a 64-bit tick can TEAR across its two halves and the torn value can
+        # coincidentally equal the tail — the seqlock then reports a coherent
+        # body that never existed. That is jess's reason for u32 (they raised it
+        # pre-publish), and a silent widening back to u64 would reintroduce it
+        # with every test still green. Negative-controlled: restoring
+        # `tick-head: u64` makes this fire.
+        - run: "! grep -qE 'tick-(head|tail): u64' wit/falcon-cascade/cascade.wit"
         # Absence is a bitmask, NOT an option<> — the layout constraint.
         - run: "grep -q 'valid: u32' wit/falcon-cascade/cascade.wit"
         # Scoped to the RECORD'S FIELDS, and comment lines stripped. My first

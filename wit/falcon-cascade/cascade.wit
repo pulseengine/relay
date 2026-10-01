@@ -31,6 +31,15 @@ interface types {
     /// read, no log could be written, and a shadow flight produced no
     /// comparable evidence. This is what an observer reads.
     ///
+    /// WHY u32 AND NOT u64 (integrator request, jess#167, taken before any
+    /// publish). `LDRD` is NOT single-copy atomic on ARMv7-M, so a 64-bit
+    /// counter can tear mid-read and the two halves can land such that head
+    /// coincidentally equals tail — the seqlock then reports coherent on a torn
+    /// body. A 32-bit load is single-copy atomic, so the comparison means what
+    /// it says. An in-process harness cannot observe this, which is exactly why
+    /// the integrator's architecture knowledge outranks our measurement here.
+    /// Wrap is handled by comparing equality, never ordering.
+    ///
     /// SEQLOCK. `tick-head` is written FIRST and `tick-tail` LAST, so a reader
     /// on another core reads tail, then the body, then head, and RETRIES if the
     /// two counters disagree. Shape specified by the integrator (jess#167):
@@ -50,7 +59,7 @@ interface types {
     /// parties who have not measured it.
     record flight-state {
         /// Seqlock head. Equal to `tick-tail` iff the body is coherent.
-        tick-head: u64,
+        tick-head: u32,
         /// Body→NED attitude (unit quaternion, Hamilton scalar-first).
         qw: f32, qx: f32, qy: f32, qz: f32,
         /// NED position (m); `pos-d` is negative up.
@@ -71,7 +80,7 @@ interface types {
         /// 6 failed-rotor. A clear bit means NOT MEASURED, never "zero".
         valid: u32,
         /// Seqlock tail, written last. See `tick-head`.
-        tick-tail: u64,
+        tick-tail: u32,
     }
 
     /// Raw IMU sample — body-frame accel (m/s²) + gyro (rad/s).

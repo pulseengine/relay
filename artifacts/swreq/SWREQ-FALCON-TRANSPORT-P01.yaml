@@ -2,9 +2,26 @@ artifacts:
   - id: SWREQ-FALCON-TRANSPORT-P01
     type: sw-req
     title: "TRANSPORT-P01 — the cascade seam shall have ONE supported transport binding, so an integrator does not invent a fifth"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
+      DEMOTED verified -> implemented 2026-10-01 (#499). IT WAS VERIFIED ON
+      HALF OF ITSELF. Its only verifier, FV-FALCON-TRANSPORT-001, says in its
+      own first line that it covers "the RETURN half". The requirement asks for
+      ONE SUPPORTED TRANSPORT BINDING, and four of its five elements are
+      unshipped: no `1c fa` framing anywhere in the tree, no binding document,
+      and `falcon-hitl` still carries ACTUATOR_FRAME_LEN=16 / SENSOR_FRAME_LEN=54.
+
+      Its FALSIFICATION CONDITION IS ALSO MET: the state carries no mode and no
+      failsafe, because the component wraps FlightCore rather than
+      FlightSupervisor (#414, open). A consumer sees the estimate and cannot see
+      why the vehicle is doing anything.
+
+      The RETURN direction itself is real and reproduces. Re-promotion needs the
+      binding, or this requirement narrowed to the return direction alone and
+      the binding split into its own requirement -- a scope decision, not a
+      wording fix.
+
       Driving the shipped flight core from another process or another board
       shall require no invented framing: the project shall publish a transport
       binding for `pulseengine:falcon-cascade` — framing, sequence, the

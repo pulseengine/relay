@@ -2,9 +2,28 @@ artifacts:
   - id: FV-FALCON-FAULT-005
     type: sw-verification
     title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.141)"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
+      DEMOTED verified -> implemented 2026-10-01 (#499). ITS OWN "EVIDENCE
+      REQUIRED" SAYS NATIVE **AND** WASM, three times each. The promotion
+      shipped the native half only and never relaxed that bar, so this was
+      verified against half its own stated criterion while the text still
+      demanded both. #398 -- the issue it answers -- was reported against the
+      WASM cascade and is still OPEN.
+
+      The wasm half is not merely unrun, it is UNJUDGEABLE today:
+      tests/cascade-sitl-wasm has a FAIL_ROTOR knob but NO rotor-out verdict --
+      no isolation check, no true tilt, no disarm -- and its `peak_tilt` is
+      actually peak |a_xy|. Run as-is it fails on an ALTITUDE-HOLD bar, which is
+      the wrong oracle for a three-rotor quad and the exact error this artifact
+      corrected for the native leg.
+
+      The native measurement stands and reproduces: the reviewer got 6/6 PASS,
+      isolated Some(0), landed and disarmed, peak tilt 0.135-0.233 rad, and the
+      revert brings the ring straight back (2.32-2.52 rad/s, one trial never
+      isolating, peak tilt 3.142).
+
       Re-verification of SWREQ-FALCON-FAULT-P02 against the gz plant, opened
       by a regression rather than filed as a new requirement: the property
       already exists and is `implemented`.
