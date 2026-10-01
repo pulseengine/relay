@@ -347,6 +347,10 @@ impl Physics for MockPhysics {
         ])
     }
 
+    fn velocity_ned(&self) -> Option<[f32; 3]> {
+        Some(self.v_ned)
+    }
+
     fn fail_rotor(&mut self, rotor: usize) {
         self.failed_rotor = Some(rotor);
     }
