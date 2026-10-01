@@ -2,9 +2,33 @@ artifacts:
   - id: SWREQ-FALCON-ENDURANCE-P01
     type: sw-req
     title: "ENDURANCE-P01 — a position hold shall stay bounded for HOURS, not seconds, and be watched nightly"
-    status: verified
+    status: implemented
     release: falcon-v1.140.0
     description: >
+      DEMOTED verified -> implemented 2026-10-01 by independent review (#497).
+      THREE OF THIS REQUIREMENT'S OWN "shall" CLAUSES ARE UNMET:
+
+      (1) "at least ONE HOUR on the reference Gazebo plant" HAS NEVER RUN. On a
+      `schedule` event `github.event.inputs` is empty, so soak.yml's
+      `MAX="${GZ_MAX_S:-120}"` fell back to 120 s. The job printed
+      "::warning::gz hold is 120s, short of the 1 h ENDURANCE-P01 target" and
+      SUCCEEDED, every night. Introduced when GZ_MAX_S was bound through `env:`
+      to close a `${{ }}` injection -- the injection fix was right, the default
+      was not. Now climbs to 3600 s on a schedule; NOT YET OBSERVED to pass.
+
+      (2) THE RATCHET COULD NOT CATCH A REGRESSION. `GZ_FLOOR_S` sat at 25 s
+      against a measured 120 s, so a 4.8x regression would have passed. Now 120.
+
+      (3) "BOTH PATHS. The soak shall run the wasm component as well as the
+      native binary" -- there is NO such step. `grep -in wasm soak.yml` exits 1.
+
+      This artifact's own text says "Only the gz number satisfies this
+      requirement; the analytic soak exists to keep the math half honest". The
+      analytic 12 h tier IS sound and nightly-green with the noise
+      (FV-FALCON-ENDURANCE-001) -- it just is not what this requirement asks
+      for. Re-promotion needs a gz hour actually observed, and the wasm path
+      built, in a code-free PR.
+
       Commanded to hold a fixed NED position, the vehicle shall remain within
       1.0 m horizontally and 0.5 m vertically of the setpoint for at least ONE
       HOUR on the reference Gazebo plant, and shall be exercised nightly at
