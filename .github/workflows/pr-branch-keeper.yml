@@ -16,6 +16,41 @@
 # WHY A WORKFLOW AND NOT A SETTING: GitHub has no auto-update-on-base-change. The
 # repo setting people reach for ("Always suggest updating pull request branches")
 # only adds a BUTTON.
+#
+# ============================================================================
+# IT USED TO UPDATE THE BRANCHES. IT MUST NOT, WITH THIS TOKEN. (found in
+# production 2026-10-01, within 2 h of merging #511)
+#
+# `gh pr update-branch` authenticated with GITHUB_TOKEN creates the merge
+# commit as `github-actions[bot]`. GitHub then raises the PR's `pull_request`
+# workflow runs but GATES THEM BEHIND MANUAL APPROVAL, because a bot is the
+# triggering actor. Measured on the first run, on #501 and #507:
+#
+#     event=pull_request  actor=github-actions[bot]
+#     conclusion=action_required  status=completed  jobs=0
+#
+# ZERO JOBS. So the PR's required contexts are never satisfied, `gh pr checks`
+# reports "no checks reported on the branch", and the PR is unmergeable in a
+# NEW way. The keeper turned "a human must press Update branch" into "a human
+# must press Approve and run" — strictly worse, because the second state looks
+# like nothing at all rather than like a stale branch, and it recurs on EVERY
+# merge to main for EVERY armed PR. The keeper reported `success` while doing
+# it. 11 gated runs had to be approved by hand to undo one keeper run.
+#
+# So this now DETECTS AND REPORTS, and changes nothing. That is a smaller tool
+# than intended and still strictly better than the silence it replaces: a
+# BEHIND PR currently shows green ticks and no failures, and nothing says it
+# cannot merge.
+#
+# THE REAL FIX, NOT TAKEN HERE: mint a GitHub App installation token
+# (ACTIONS_BOT_APP_ID / ACTIONS_BOT_PRIVATE_KEY exist at org level) via a
+# pinned actions/create-github-app-token, and update the branch with that. An
+# App token is not `github-actions[bot]`, so its pushes trigger CI normally.
+# It is NOT done in this change because no workflow in this repo mints that
+# token yet, so the app's installation scope and permissions here are unverified
+# — and introducing an unverified credential path into a gate that just caused
+# an outage is how the second mistake gets made. Tracked as the follow-up.
+# ============================================================================
 name: PR branch keeper
 
 on:
@@ -26,9 +61,11 @@ on:
 # `contents: write` is what `update-branch` needs to push the merge into the PR
 # branch; `pull-requests: read` to enumerate. Nothing here merges a PR — the
 # existing auto-merge does that once checks go green.
+# READ-ONLY, deliberately. It no longer writes anything, and the narrowed
+# permission is what makes that structural rather than a promise.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 concurrency:
   # One keeper at a time. Two overlapping runs would both try to update the same
@@ -37,8 +74,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  update-behind:
-    name: Update BEHIND branches
+  report-stuck:
+    name: Report stuck PRs
     runs-on: [self-hosted, linux, x64, light]
     timeout-minutes: 15
     steps:
@@ -49,13 +86,10 @@ jobs:
       # mandatory rather than convenient.
       - uses: ./.github/actions/setup-gh
 
-      - name: Update the branches that are armed, green-blocked and BEHIND
+      - name: Report armed PRs that cannot merge
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Cap per run so a surprise (or a bad query) cannot stampede CI with
-          # dozens of simultaneous rebuilds.
-          MAX_UPDATES: '6'
         run: |
           set -uo pipefail
 
@@ -78,17 +112,19 @@ jobs:
           )
 
           if [ "${#CANDIDATES[@]}" -eq 0 ]; then
-            echo "::notice::no armed, non-draft, same-repo PRs open — nothing to keep"
+            echo "::notice::no armed, non-draft, same-repo PRs open — nothing to report"
             exit 0
           fi
           echo "armed candidates: ${CANDIDATES[*]}"
+          {
+            echo "## PR branch keeper"
+            echo
+            echo "| PR | state | what it needs |"
+            echo "|----|-------|---------------|"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          updated=0
+          stuck=0
           for PR in "${CANDIDATES[@]}"; do
-            if [ "$updated" -ge "$MAX_UPDATES" ]; then
-              echo "::warning::hit MAX_UPDATES=$MAX_UPDATES; remaining PRs will be caught by the next push or a dispatch"
-              break
-            fi
 
             # mergeStateStatus IS COMPUTED LAZILY. Straight after a push to main
             # it is routinely UNKNOWN, and a keeper that treated UNKNOWN as
@@ -103,29 +139,33 @@ jobs:
 
             case "$STATE" in
               BEHIND)
-                echo "#$PR is BEHIND — updating"
-                if gh pr update-branch "$PR"; then
-                  updated=$((updated + 1))
-                  echo "::notice::#$PR branch updated (was BEHIND with auto-merge armed)"
-                else
-                  # Not fatal: the branch may have been updated by someone else
-                  # between the read and the write, or have a genuine conflict.
-                  echo "::warning::#$PR update-branch failed — likely raced or conflicting; left for a human"
-                fi
+                # Auto-merge NEVER updates a BEHIND branch under strict
+                # protection, so this PR is green and permanently unmergeable.
+                stuck=$((stuck + 1))
+                echo "::warning::#$PR is BEHIND — auto-merge will NOT update it; run: gh pr update-branch $PR"
+                echo "| #$PR | BEHIND | \`gh pr update-branch $PR\` — auto-merge never updates a stale branch |" >> "$GITHUB_STEP_SUMMARY"
                 ;;
               DIRTY)
-                # A DIRTY PR never merges and reports no failures either. It
-                # needs a human to resolve the conflict, so SAY SO rather than
-                # silently skipping — silence here is how it sits for days.
+                # DIRTY never merges and reports no failures either.
+                stuck=$((stuck + 1))
                 echo "::warning::#$PR is DIRTY (conflicts with main) — auto-merge will never fire; needs a human"
+                echo "| #$PR | DIRTY | resolve the conflict with main |" >> "$GITHUB_STEP_SUMMARY"
                 ;;
               UNKNOWN)
-                echo "::warning::#$PR mergeStateStatus stayed UNKNOWN after 30 s — not touching it"
+                echo "::warning::#$PR mergeStateStatus stayed UNKNOWN after 30 s — could not classify"
+                echo "| #$PR | UNKNOWN | re-check; GitHub did not settle the state |" >> "$GITHUB_STEP_SUMMARY"
                 ;;
               *)
-                echo "#$PR is $STATE — nothing to do"
+                echo "#$PR is $STATE — nothing needed"
+                echo "| #$PR | $STATE | nothing |" >> "$GITHUB_STEP_SUMMARY"
                 ;;
             esac
           done
 
-          echo "::notice::branch keeper: $updated branch(es) updated of ${#CANDIDATES[@]} armed candidate(s)"
+          # The job stays GREEN. A stuck PR is not main's fault, and a red run
+          # here would make every merge commit look broken.
+          if [ "$stuck" -gt 0 ]; then
+            echo "::warning::branch keeper: $stuck of ${#CANDIDATES[@]} armed PR(s) CANNOT MERGE without a human — see the summary"
+          else
+            echo "::notice::branch keeper: all ${#CANDIDATES[@]} armed PR(s) can proceed"
+          fi
