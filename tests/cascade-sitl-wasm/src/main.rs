@@ -222,7 +222,17 @@ fn main() -> Result<()> {
     let mut last_imu = plant.counters().map(|c| c.0).unwrap_or(0);
     let run_start = std::time::Instant::now();
 
-    let mut peak_tilt = 0.0f32;
+    // NOT TILT. This is sqrt(ax^2 + ay^2) -- lateral SPECIFIC FORCE. Independent
+    // review found it published as `peak_tilt` while FV-FALCON-FAULT-005's wasm
+    // half was being judged on it (#499). Renamed, and a real tilt measurement
+    // added below from the plant's own attitude.
+    let mut peak_lat_accel = 0.0f32;
+    // ROTOR-OUT STATE (#398 wasm half). Tracked only after the fault, because a
+    // three-rotor quad legitimately departs from its pre-fault attitude.
+    let mut peak_true_tilt_after = 0.0f32;
+    let mut peak_horiz_after = 0.0f32;
+    let mut isolated_rotor: Option<u8> = None;
+    let mut saw_true_tilt = false;
     let (mut pace_fresh, mut pace_deadline) = (0u32, 0u32);
     // v0.10 seam exercise. FAIL_ROTOR=<idx>@<seconds> kills a rotor mid-flight;
     // NO_RPM=1 withholds the ESC telemetry. Together they make the new field
@@ -234,6 +244,26 @@ fn main() -> Result<()> {
         Some((idx.parse().ok()?, (at.parse::<f32>().ok()? / dt) as u32))
     });
     let no_rpm = std::env::var("NO_RPM").is_ok();
+    // A FLOOR, for the scenario that comes down. The native rotor-out scenario
+    // does exactly this ("This scenario LANDS, so the plant needs a floor to
+    // land on", examples/falcon-sitl-gz/src/main.rs:1484) and this harness did
+    // not, so the airframe sank 1.01 m THROUGH the ground plane and kept
+    // flying -- the same defect the mock plant's own ground comment records
+    // ("a rotor-out scenario ended 359 m below its launch point while the
+    // verdict called it landed").
+    //
+    // GATED on the fault, matching native, which enables it only in the
+    // landing scenario. It is not free: the clamp feeds the specific-force
+    // derivation (#485), so switching it on unconditionally would change the
+    // nominal hold this harness is the CI oracle for.
+    if fail_rotor.is_some() {
+        plant.set_ground_contact(true);
+    }
+    let rotor_trace = std::env::var("ROTOR_TRACE").is_ok();
+    // The judged window (fault -> first touchdown) and the full-run figure.
+    let mut touchdown_tick: Option<u32> = None;
+    let mut airborne_ticks: u32 = 0;
+    let mut peak_horiz_full: f32 = 0.0;
     let mut rpm_frames = 0u32;
     for tick in 0..ticks {
         let tick_start = std::time::Instant::now();
@@ -329,8 +359,105 @@ fn main() -> Result<()> {
             ].iter().copied().fold(0.0f32, f32::max);
             if dmax > *worst { *worst = dmax; *worst_tick = tick; }
         }
-        let tilt = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
-        peak_tilt = peak_tilt.max(tilt);
+        let lat = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
+        peak_lat_accel = peak_lat_accel.max(lat);
+
+        // AFTER THE FAULT, judge the properties FAULT-P02 actually claims:
+        // the FDI isolates the dead rotor and the body stays upright. Altitude
+        // hold is NOT one of them -- a rank-deficient quad relinquishes yaw and
+        // cannot hold altitude (Mueller & D'Andrea), and judging the wasm leg on
+        // an altitude bar is the exact error the native leg already corrected.
+        if let Some((r, at)) = fail_rotor {
+            if tick >= at {
+                // `true_pos` comes from this tick's single measure() call -- calling
+                // measure() again here would draw from the noise RNG and perturb
+                // the very run being judged.
+                let p = true_pos;
+                let horiz = (p[0] * p[0] + p[1] * p[1]).sqrt();
+
+                // THE JUDGED WINDOW ENDS AT FIRST TOUCHDOWN, and that rule is
+                // written here before the number it produces was looked at.
+                //
+                // WHY A WINDOW IS NEEDED AT ALL. Nothing in this harness
+                // terminates the flight: the component wraps FlightCore, so
+                // there is no failsafe to disarm it (#414). So the run keeps
+                // flying a three-rotor airframe for as long as the tick budget
+                // lasts, and `peak_horiz` over the whole run is a function of
+                // the tick count, not of the control law.
+                //
+                // WHY TOUCHDOWN IS THE DEFENSIBLE END, and not a duration:
+                //   - It is defined by the PHYSICS, not chosen by me. A window
+                //     picked to make a number fit is the bar-fitting this
+                //     repo keeps catching.
+                //   - It is what the NATIVE leg actually measured. There the
+                //     FlightSupervisor disarms, and its 0.95-1.00 m came from
+                //     the 1.26 s between the loss at 10.000 s and landing at
+                //     11.264 s -- not from a full run.
+                //   - After touchdown the analytic floor clamps only `p_ned[2]`
+                //     and `v_ned[2]`; HORIZONTAL velocity is untouched, so a
+                //     still-powered airframe slides on a frictionless plane and
+                //     the excursion grows without bound. Measured before this
+                //     window existed: 24.91 m, of which 21.65 m was accumulated
+                //     AFTER the vehicle had already reached the ground -- and
+                //     1.01 m BELOW it, because this harness never enabled the
+                //     floor at all.
+                // The full-run figure is still printed, labelled, rather than
+                // dropped -- it is the measure of the missing failsafe.
+                if touchdown_tick.is_none() && p[2] >= 0.0 {
+                    touchdown_tick = Some(tick);
+                    println!(
+                        "  touchdown at tick {tick} ({:.2}s, {:.2}s after the loss) \
+                         -- the judged window ends here",
+                        tick as f32 * dt,
+                        (tick - at) as f32 * dt
+                    );
+                }
+                peak_horiz_full = peak_horiz_full.max(horiz);
+                if touchdown_tick.is_none() {
+                    airborne_ticks += 1;
+                    peak_horiz_after = peak_horiz_after.max(horiz);
+                    // TRUE tilt from the plant, not the estimate -- the estimate
+                    // is part of what a rotor-out verdict is testing.
+                    if let Some(tt) = plant.true_tilt_rad() {
+                        peak_true_tilt_after = peak_true_tilt_after.max(tt);
+                        saw_true_tilt = true;
+                    }
+                }
+                // ROTOR_TRACE: the excursion's SHAPE, not just its peak. A peak
+                // alone cannot distinguish a vehicle that drifts under control
+                // from one that has sunk to the floor and is sliding on a
+                // frictionless analytic ground plane — and those call for
+                // opposite verdicts.
+                if rotor_trace && tick % 250 == 0 {
+                    println!(
+                        "  ROTOR t={:.2} horiz={:.2}m down={:.2}m v=({:.2},{:.2},{:.2}) tilt={:.3}",
+                        tick as f32 * dt,
+                        (p[0] * p[0] + p[1] * p[1]).sqrt(),
+                        p[2],
+                        plant.velocity_ned().map(|v| v[0]).unwrap_or(f32::NAN),
+                        plant.velocity_ned().map(|v| v[1]).unwrap_or(f32::NAN),
+                        plant.velocity_ned().map(|v| v[2]).unwrap_or(f32::NAN),
+                        plant.true_tilt_rad().unwrap_or(f32::NAN),
+                    );
+                }
+                // ISOLATION, read through the PUBLISHED seam -- the observer
+                // export (@0.11.0) is what makes this judgeable at all. Before
+                // the state return there was no way to ask the component which
+                // rotor it had isolated, which is why this leg had no verdict.
+                if isolated_rotor.is_none() {
+                    let st = observer.call_read_state(&mut store)?;
+                    if st.failed_rotor != 0xFF {
+                        isolated_rotor = Some(st.failed_rotor);
+                        println!(
+                            "  FDI isolated rotor {} at tick {tick} ({:.2}s)",
+                            st.failed_rotor,
+                            tick as f32 * dt
+                        );
+                    }
+                }
+                let _ = r;
+            }
+        }
         if let Some((r, at)) = fail_rotor {
             if tick == at {
                 plant.fail_rotor(r);
@@ -388,7 +515,7 @@ fn main() -> Result<()> {
     let horiz = (p[0] * p[0] + p[1] * p[1]).sqrt();
     println!("final NED  : n={:.3} e={:.3} d={:.3}  (altitude {:.3} m)", p[0], p[1], p[2], alt);
     println!("horizontal : {horiz:.3} m from launch");
-    println!("peak |a_xy|: {peak_tilt:.3} m/s^2");
+    println!("peak |a_xy|: {peak_lat_accel:.3} m/s^2  (lateral specific force, NOT tilt)");
     println!();
 
     // TWO SEPARATE VERDICTS, because they have different answers and merging
@@ -476,6 +603,80 @@ fn main() -> Result<()> {
     //     vary the parameter and watch the number move.
     let want = -down;
     let err = (alt - want).abs();
+    // ── ROTOR-OUT VERDICT (#398 wasm half, FV-FALCON-FAULT-005) ──────────
+    // Judged ONLY when a rotor was actually killed, and judged on what
+    // SWREQ-FALCON-FAULT-P02 claims: "an injected rotor loss is isolated and the
+    // body settles upright (no tumble)". NOT on altitude -- a three-rotor quad
+    // is rank-deficient, relinquishes yaw and CANNOT hold altitude, so an
+    // altitude bar is the wrong oracle. Judging this leg on the hold bar was
+    // what made it unjudgeable, and it is the same error the native leg already
+    // corrected (#474).
+    //
+    // Before the @0.11.0 observer export there was no way to ask the component
+    // which rotor it had isolated, so this verdict could not exist at all.
+    // There is deliberately NO disarm term: the published component wraps
+    // FlightCore, not FlightSupervisor, so it has no mode machine to disarm
+    // (#414). That absence is stated, not silently dropped.
+    if let Some((want_rotor, _)) = fail_rotor {
+        println!();
+        println!(
+            "ROTOR-OUT  : isolated={:?} peak_true_tilt={:.3}rad (measured={}) \
+             peak_horiz={:.2}m  [judged window: {} ticks, {:.2}s, ends {}]",
+            isolated_rotor, peak_true_tilt_after, saw_true_tilt, peak_horiz_after,
+            airborne_ticks, airborne_ticks as f32 * dt,
+            match touchdown_tick {
+                Some(t) => format!("at touchdown, tick {t}"),
+                None => "AT THE TICK BUDGET -- never touched down".into(),
+            }
+        );
+        println!(
+            "ROTOR-OUT  : full-run peak_horiz={peak_horiz_full:.2}m -- NOT judged: past \
+             touchdown the airframe is still powered (no failsafe, #414) on a floor \
+             that clamps only vertical velocity, so this figure measures the missing \
+             failsafe and the tick budget, not the control law."
+        );
+        // AN EMPTY WINDOW MUST FAIL, NOT PASS. If the vehicle is already on the
+        // ground when the rotor is killed there is no airborne behaviour to
+        // judge, and every bar below would be vacuously met at 0.0 -- the
+        // empty-scope-equals-pass shape this repo keeps finding.
+        if airborne_ticks < 25 {
+            bail!(
+                "FAIL: only {airborne_ticks} airborne tick(s) after the loss -- too \
+                 short a window to judge an isolate-and-stay-upright claim. Was the \
+                 vehicle airborne when the rotor was killed?"
+            );
+        }
+        if !saw_true_tilt {
+            bail!(
+                "FAIL: the plant reported no TRUE tilt, so an upright-vs-tumbled \
+                 verdict cannot be rendered. A verdict that cannot see tilt must \
+                 fail rather than assume."
+            );
+        }
+        if isolated_rotor != Some(want_rotor as u8) {
+            bail!(
+                "FAIL: the FDI did not isolate the dead rotor through the published \
+                 seam. wanted Some({want_rotor}), got {isolated_rotor:?}."
+            );
+        }
+        if peak_true_tilt_after >= 0.5 {
+            bail!(
+                "FAIL: the airframe did not stay upright after the loss. peak true \
+                 tilt {peak_true_tilt_after:.3} rad >= 0.5 rad. The native leg holds \
+                 0.176-0.220 rad on the same bar."
+            );
+        }
+        if peak_horiz_after >= 10.0 {
+            bail!(
+                "FAIL: the airframe travelled {peak_horiz_after:.2} m between the loss \
+                 and touchdown (bar 10.0 m)."
+            );
+        }
+        println!("ROTOR-OUT  : PASS (isolated, stayed upright, bounded excursion)");
+        // A rotor-out run is NOT judged on the hold, so stop here.
+        return Ok(());
+    }
+
     println!("HOLD ERROR : commanded {want:.2} m, reached {alt:.2} m  (|err| = {err:.2} m)");
     if err > 0.5 {
         bail!(
