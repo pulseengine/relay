@@ -150,6 +150,48 @@ artifacts:
       jess, and they reported the publish "stalled"). No release may carry
       @0.11.0 until that announcement is out.
       ======================================================================
+
+      ======================================================================
+      THE BINDING IS NOW PUBLISHED (2026-10-01). docs/TRANSPORT-BINDING.md +
+      crates/falcon-hitl/src/wire.rs — no_std, no-alloc, fixed buffers, so the
+      same codec runs on the MCU and on a host PC. STATUS DELIBERATELY STAYS
+      `implemented`: this closes 3 of the 5 elements and NOT the requirement.
+
+      SHIPPED: (1) FRAMING + versioning — 8-byte header, magic 1c fa, four
+      message types, LE u32 sequence. (2) The CONFIGURATION handshake —
+      config -> ack -> sensor ordering, and the re-configure-resets-the-core
+      rule. (3) The TICK CONTRACT — dt-s is the host's ACTUAL period, and
+      late / dropped / duplicated are distinguished WITH COUNTS, which is what
+      the falsification condition demands ("wrong if a host cannot tell a
+      dropped tick from a late one"). (4) The AIDING-RATE OBLIGATION, as a
+      table of what degrades when each optional field is absent, with the two
+      measured entries (position <= 10 Hz diverges, #434/#403; withholding
+      motor-rpm leaves the FDI inert and the airframe inverts to 3.142 rad).
+
+      NOT SHIPPED, so this is not re-promotable: (5) THE REFERENCE HOST is only
+      half done — the codec exists and is the reusable half, but `SimServer` is
+      NOT re-pointed and `falcon-hitl` still carries ACTUATOR_FRAME_LEN=16 /
+      SENSOR_FRAME_LEN=54 for its superseded frames. And the FALSIFICATION
+      CONDITION REMAINS MET: the state carries no mode and no failsafe (#414),
+      so a host holding this binding still cannot stream a failsafe to a GCS.
+
+      THE HEADER IS 8 BYTES, NOT THE 6 THIS REQUIREMENT STATES. The field list
+      above sums to 8 (magic 2 + version 1 + type 1 + sequence 4), and the
+      capture's own sizes settle it exactly: the motors frame was 24 B and the
+      seam's `motor-pwm` is 16 B. Derived, not chosen, and asserted by a test.
+
+      AND THE CAPTURE IS NOT IN THIS REPOSITORY. Every number this requirement
+      quotes from it (4 000 exchanges, 83/24-byte frames, 0 of 8 002 payloads
+      carrying 0xFD/0xFE, 0.48 ms median latency) is unverifiable here — searched
+      both pulseengine/relay and pulseengine/jess; jess#167's "magic bytes" hits
+      are all the WASM component header, a different subject. Consequence: the
+      SENSOR payload layout is NOT uniquely determined. A flat `sensor-frame` is
+      76 B while the captured frame implies 75; the likeliest reading is that the
+      integrator dropped `heading-rad`'s presence byte. THE BINDING IS THEREFORE
+      WRITTEN AS NORMATIVE and the one-byte difference is documented as a change
+      an existing host must make, rather than guessed at. Filed as a finding so
+      the maintainer can decide whether to obtain the capture or accept ours.
+      ======================================================================
     tags: [requirement, falcon, transport, seam, hitl, v1.141]
     links:
       - type: derives-from
