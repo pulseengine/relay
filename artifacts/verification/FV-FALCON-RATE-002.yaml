@@ -84,6 +84,17 @@ artifacts:
     fields:
       method: simulation
       steps:
+        # THE PRIMARY ORACLE IS THE TEST BELOW, not the greps.
+        # Independent review (#499) reverted `resync_loop_rate` to an early
+        # `return` -- the tree where the cycle measures 2.4 rad/s and rotor-out
+        # fails -- and EVERY grep step here still passed rc=0, because the
+        # grepped tokens are all still present. Demonstrated side by side:
+        #   mutation applied -> this test FAILS ("got 1000 Hz")
+        #   mutation applied -> all three greps STILL PASS
+        # The greps are kept as cheap structural assertions; they are NOT the
+        # evidence, and this artifact no longer claims they can catch a
+        # regression.
+        - run: "cargo test -p falcon-core the_filters_follow_the_backend_rate_not_the_declared_one"
         # The fix: the loop rate comes from the backend, not the caller.
         - run: "grep -q 'fn resync_loop_rate' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'self.resync_loop_rate(dt);' crates/falcon-core/plain/src/lib.rs"
