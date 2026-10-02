@@ -56,6 +56,59 @@ jobs:
       # Run it. (#409)
       - run: cargo fmt --all -- --check
 
+  workflow-lint:
+    name: Workflow lint (actionlint)
+    runs-on: [self-hosted, linux, x64, light]
+    steps:
+      - uses: actions/checkout@v7
+      # WHY THIS GATE EXISTS — it is not style, it caught a live outage.
+      #
+      # A workflow file that Actions cannot PARSE does not fail loudly: GitHub
+      # creates a run with ZERO JOBS and conclusion `failure`, which in a long
+      # run list is indistinguishable from noise. soak.yml was in exactly that
+      # state from #498 (2026-10-01 08:56) until it was caught, so THE NIGHTLY
+      # ENDURANCE SOAK COULD NOT START AT ALL — and the cause was a shell comment
+      # inside a `run:` block that spelled out the Actions expression syntax with
+      # empty braces. Actions expands expressions in `run:` scripts before bash
+      # sees them and does not care that the line is a comment, so an empty
+      # expression invalidated the file. A comment explaining an injection fix
+      # became the outage.
+      #
+      # Nothing in this repo would have noticed. `yaml.safe_load` accepts the
+      # file, the YAML is well-formed, and no job runs to report anything.
+      # actionlint reads it the way Actions does, which is the whole point.
+      #
+      # Labels live in .github/actionlint.yaml — without it this emits 14
+      # "label rust-cpu is unknown" warnings, and a noisy gate is an ignored one.
+      # INSTALLED AS A PINNED, CHECKSUM-VERIFIED DOWNLOAD.
+      #
+      # The first version of this step used `taiki-e/install-action` with
+      # `tool: actionlint`, which this gate itself caught on its own PR:
+      #   install-action does not support actionlint ... fallback to cargo-binstall
+      #   × For crate actionlint: actionlint is not found
+      # actionlint is a Go binary, not a crate, so neither path can supply it.
+      #
+      # So it comes from its own release, with the version AND the sha256 pinned
+      # here rather than trusting a checksums file fetched at the same time as
+      # the artifact. Same posture as the `wkg` pin in release.yml. Bump both
+      # numbers together; a mismatch fails the job loudly.
+      - name: Install actionlint (pinned + checksummed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER=1.7.12
+          SHA=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          TGZ="actionlint_${VER}_linux_amd64.tar.gz"
+          curl -fsSL -o "$TGZ" \
+            "https://github.com/rhysd/actionlint/releases/download/v${VER}/${TGZ}"
+          echo "${SHA}  ${TGZ}" | sha256sum -c -
+          tar xzf "$TGZ" actionlint
+          install -m755 actionlint "$HOME/.local/bin/actionlint" 2>/dev/null \
+            || { mkdir -p "$HOME/.local/bin" && install -m755 actionlint "$HOME/.local/bin/actionlint"; }
+          rm -f "$TGZ" actionlint
+          "$HOME/.local/bin/actionlint" --version
+      - run: "$HOME/.local/bin/actionlint -color .github/workflows/*.yml"
+
   clippy:
     name: Clippy
     runs-on: [self-hosted, linux, x64, rust-cpu]
