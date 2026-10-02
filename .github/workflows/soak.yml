@@ -166,8 +166,21 @@ jobs:
           # the job that exists to run it. The step printed
           # "::warning::gz hold is 120s, short of the 1 h target" and SUCCEEDED,
           # every night, for weeks. Introduced by me when I bound GZ_MAX_S
-          # through `env:` to close a `${{ }}` injection: the injection fix was
+          # through `env:` to close an ACTIONS-EXPRESSION injection: that fix was
           # right, the default was not.
+          #
+          # AND DO NOT WRITE THAT TOKEN LITERALLY IN HERE. An earlier version of
+          # this very comment spelled the expression syntax out, inside this
+          # `run:` block, with empty braces. Actions expands expressions in a
+          # `run:` script BEFORE bash sees the text, and it does not care that
+          # the line is a shell comment -- so an empty expression made the whole
+          # file invalid and GitHub REFUSED TO START THE WORKFLOW. Every event
+          # produced a run with ZERO JOBS and conclusion `failure`, which reads
+          # as noise rather than as "the endurance soak cannot run", and the
+          # nightly was dark from the moment that comment landed (#498, 08:56)
+          # until it was caught. A comment explaining an injection fix became the
+          # outage -- the same "the measurement was lost" shape this file already
+          # documents twice above, one layer further out.
           #
           # A scheduled run now climbs to the REQUIREMENT'S target. A manual
           # dispatch may still ask for less, because a human debugging the

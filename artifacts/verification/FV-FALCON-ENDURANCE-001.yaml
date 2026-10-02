@@ -40,6 +40,31 @@ artifacts:
       It models no aerodynamics, no latency and no aiding pathology beyond the
       divisor; gz is the tier that can satisfy a flight claim, and its ladder
       is FV-FALCON-HOLD-001.
+
+      ITS SOAK STEPS CANNOT DETECT A SOAK THAT DOES NOT RUN (found 2026-10-01).
+      All three of this artifact's soak assertions are CONTENT GREPS:
+
+        grep -q 'backend=mock --scenario=flightcore' .github/workflows/soak.yml
+        grep -q '43200' .github/workflows/soak.yml
+        grep -q "IMU_NOISE: '0.01'" .github/workflows/soak.yml
+
+      For about 7.5 hours that day soak.yml was INVALID TO ACTIONS and the
+      nightly could not start at all — #498 put an empty `${{ }}` inside a `run:`
+      block (in a shell comment, which Actions expands anyway), so GitHub emitted
+      runs with ZERO JOBS and conclusion `failure`. Every grep above passed the
+      whole time, because the strings were still in the file. The requirement this
+      verifies says the hold shall be "watched nightly"; its evidence checks what
+      the watch SAYS, never that the watch RUNS.
+
+      Fixed at the gate rather than here: ci.yml now carries a
+      `Workflow lint (actionlint)` job that reads the workflow the way Actions
+      does (#507). A step asserting validity belongs on this artifact too, and is
+      deliberately NOT added in the same change that introduces the gate — that is
+      the independence the two-commit rule exists for. Status unchanged.
+
+      The outage does NOT falsify this artifact's measurements: the nightlies it
+      cites ran before #498 landed, and the dark window was one day. What it
+      falsifies is the idea that these steps WATCH anything.
     tags: [verification, falcon, endurance, soak, sensor-fidelity, v1.140]
     fields:
       method: simulation
