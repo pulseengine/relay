@@ -114,6 +114,13 @@ jobs:
         continue-on-error: true
         uses: actions/create-github-app-token@v3.2.0
         with:
+          # `app-id` is DEPRECATED in favour of `client-id` (the action warns on
+          # every run). NOT changed here on purpose: `client-id` wants the App's
+          # CLIENT ID, which is a DIFFERENT VALUE from the app id this secret
+          # holds. Swapping the key name without swapping the secret's value
+          # would turn a working authentication into a silent 401, and the whole
+          # point of this probe is to not guess at credentials. Change both
+          # together, or not at all.
           app-id: ${{ secrets.ACTIONS_BOT_APP_ID }}
           private-key: ${{ secrets.ACTIONS_BOT_PRIVATE_KEY }}
 
@@ -127,8 +134,25 @@ jobs:
         run: |
           set -uo pipefail
           if [ "$MINT_OUTCOME" != "success" ] || [ -z "${APP_TOKEN}" ]; then
-            echo "::warning::APP-TOKEN PROBE: could NOT mint (outcome=$MINT_OUTCOME). The org secrets ACTIONS_BOT_APP_ID / ACTIONS_BOT_PRIVATE_KEY are not usable from this repo, so the keeper CANNOT be upgraded to prevent the stall this way."
-            echo "- **App token:** could not mint (\`$MINT_OUTCOME\`)" >> "$GITHUB_STEP_SUMMARY"
+            # SAY WHAT IS ACTUALLY WRONG, which is not what this message said
+            # first time round. It blamed the secrets; the first real run proved
+            # the credentials are FINE:
+            #
+            #   Failed to create token for "pulseengine/relay": Not Found
+            #   .../apps#get-a-repository-installation-for-the-authenticated-app
+            #   status: 404
+            #
+            # A 404 on *get-a-repository-installation* means the JWT was
+            # ACCEPTED and then no installation was found for this repo. A bad
+            # app-id or private key gives 401, not 404. So the app authenticates
+            # and simply IS NOT INSTALLED HERE — a different fix, by a different
+            # person, than "the secrets are wrong".
+            echo "::warning::APP-TOKEN PROBE: could NOT mint (outcome=$MINT_OUTCOME). Read the mint step's log for the HTTP status, because the two causes need different fixes: 404 on get-a-repository-installation = the credentials AUTHENTICATED and the App is simply NOT INSTALLED on this repository (someone with org admin installs it, or adds this repo to its selection); 401 = the app-id or private key is wrong. Until then the keeper stays report-only and CANNOT prevent the stall."
+            {
+              echo "- **App token:** could not mint (\`$MINT_OUTCOME\`) — keeper stays report-only."
+              echo "  - **404** on \`get-a-repository-installation\` ⇒ credentials fine, App **not installed on this repo**."
+              echo "  - **401** ⇒ \`ACTIONS_BOT_APP_ID\` / \`ACTIONS_BOT_PRIVATE_KEY\` wrong."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           # WHO the token is. A real identity here is the whole point: it must
