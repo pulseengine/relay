@@ -86,6 +86,64 @@ jobs:
       # mandatory rather than convenient.
       - uses: ./.github/actions/setup-gh
 
+      # ── APP-TOKEN PROBE. MINTS, REPORTS, WRITES NOTHING. ────────────────
+      #
+      # The keeper can only REPORT a stuck PR, not fix it, because
+      # `gh pr update-branch` with GITHUB_TOKEN authors the merge as
+      # `github-actions[bot]` and GitHub then gates the PR's `pull_request`
+      # runs behind manual approval — `conclusion=action_required`, jobs=0. That
+      # shipped as an outage (#511) and was reverted to report-only (#512).
+      #
+      # MEASURED COST OF REPORT-ONLY, which is why this is being revisited:
+      # #501 and #515 sat open, armed and unmerged for FOUR DAYS carrying seven
+      # red checks between them, every one of which `scripts/ci-triage.rs` later
+      # classified as benign. The keeper warned correctly, on time, into an
+      # empty room.
+      #
+      # An App installation token is NOT `github-actions[bot]`, so its pushes
+      # trigger CI normally. But no workflow in this repo has ever minted one,
+      # so the app's installation scope HERE is unverified — and I committed to
+      # proving it before letting it near a gate that already caused one outage.
+      #
+      # So this step mints the token and the next one reports what it WOULD be
+      # able to do. It writes nothing. `continue-on-error` is deliberate: if the
+      # secrets are not visible to this repo, the probe must fail without taking
+      # the keeper's reporting down with it.
+      - name: Mint an App token (probe only)
+        id: apptoken
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          app-id: ${{ secrets.ACTIONS_BOT_APP_ID }}
+          private-key: ${{ secrets.ACTIONS_BOT_PRIVATE_KEY }}
+
+      - name: Report whether that token could PREVENT the stall
+        shell: bash
+        env:
+          # Bound to env and NEVER echoed. The probe reports booleans and an
+          # identity, never the credential.
+          APP_TOKEN: ${{ steps.apptoken.outputs.token }}
+          MINT_OUTCOME: ${{ steps.apptoken.outcome }}
+        run: |
+          set -uo pipefail
+          if [ "$MINT_OUTCOME" != "success" ] || [ -z "${APP_TOKEN}" ]; then
+            echo "::warning::APP-TOKEN PROBE: could NOT mint (outcome=$MINT_OUTCOME). The org secrets ACTIONS_BOT_APP_ID / ACTIONS_BOT_PRIVATE_KEY are not usable from this repo, so the keeper CANNOT be upgraded to prevent the stall this way."
+            echo "- **App token:** could not mint (\`$MINT_OUTCOME\`)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # WHO the token is. A real identity here is the whole point: it must
+          # NOT be github-actions[bot], or the approval gate recurs.
+          WHO=$(GH_TOKEN="$APP_TOKEN" gh api /installation/repositories                   --jq '"repos=\(.total_count)"' 2>/dev/null || echo "repos=?")
+          # Can it even SEE this repo's PRs? A token scoped to another repo
+          # would mint fine and then be useless, which is the failure mode worth
+          # catching before enabling the write.
+          SEEN=$(GH_TOKEN="$APP_TOKEN" gh pr list --repo "$GITHUB_REPOSITORY"                    --state open --limit 1 --json number --jq 'length' 2>/dev/null || echo "ERR")
+          echo "::notice::APP-TOKEN PROBE: minted OK, $WHO, pr-list-visible=$SEEN. Nothing was written with it."
+          {
+            echo "- **App token:** minted OK — \`$WHO\`, PR list visible: \`$SEEN\`"
+            echo "  - Nothing was written with it. Flipping the keeper to \`update-branch\` is the follow-up."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Report armed PRs that cannot merge
         shell: bash
         env:
