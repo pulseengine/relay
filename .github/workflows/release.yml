@@ -521,7 +521,7 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Install cargo-component
-        uses: taiki-e/install-action@v2.87.21
+        uses: taiki-e/install-action@v2.87.23
         with:
           tool: cargo-component
 
@@ -530,7 +530,7 @@ jobs:
       # run-position-hold < 0.6) before it ships, not just built. (Per review:
       # install, don't skip — the skip in build-components.sh is only a fallback.)
       - name: Install wasmtime
-        uses: taiki-e/install-action@v2.87.21
+        uses: taiki-e/install-action@v2.87.23
         with:
           tool: wasmtime
 
