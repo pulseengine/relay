@@ -217,7 +217,10 @@ artifacts:
       matrix entry IS the orphan (relay-rc went ~40 releases that way).
 
       6 harnesses, 251 checks, 0 failures, ~0.7 s on the pinned Kani 0.67.0.
-      Proven over arbitrary bytes of arbitrary length: a successful decode pins
+      Proven over arbitrary bytes of ANY LENGTH UP TO 25 B (the symbolic-length
+      harness bound; Config and Sensor are proven at their exact lengths only —
+      bounded model checking does not give an unbounded claim for free): a
+      successful decode pins
       the whole-frame length, the payload is exactly the tail, the version is
       the accepted one, and `seq` is the LE u32 at bytes 4..8 — that last one is
       this requirement's own falsification condition ("wrong if a host cannot

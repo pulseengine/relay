@@ -31,9 +31,9 @@
 //! on CI once already.
 
 use crate::wire::{
-    decode_ack, decode_config, decode_frame, decode_motors, decode_sensor_frame, MsgType,
-    ACK_PAYLOAD_LEN, CONFIG_PAYLOAD_LEN, HEADER_LEN, MAGIC, MOTORS_PAYLOAD_LEN,
-    SENSOR_PAYLOAD_LEN, VERSION,
+    ACK_PAYLOAD_LEN, CONFIG_PAYLOAD_LEN, HEADER_LEN, MAGIC, MOTORS_PAYLOAD_LEN, MsgType,
+    SENSOR_PAYLOAD_LEN, VERSION, decode_ack, decode_config, decode_frame, decode_motors,
+    decode_sensor_frame,
 };
 
 /// Every structural promise `decode_frame` makes, over an arbitrary byte string
@@ -115,12 +115,18 @@ fn every_branch_of_the_rejection_ladder_is_reachable() {
         "bad magic is rejected"
     );
     kani::cover!(
-        len >= HEADER_LEN && slice[0] == MAGIC[0] && slice[1] == MAGIC[1] && slice[2] != VERSION
+        len >= HEADER_LEN
+            && slice[0] == MAGIC[0]
+            && slice[1] == MAGIC[1]
+            && slice[2] != VERSION
             && r.is_err(),
         "a wrong version is rejected"
     );
     kani::cover!(
-        len >= HEADER_LEN && slice[0] == MAGIC[0] && slice[1] == MAGIC[1] && slice[2] == VERSION
+        len >= HEADER_LEN
+            && slice[0] == MAGIC[0]
+            && slice[1] == MAGIC[1]
+            && slice[2] == VERSION
             && slice[3] > 3
             && r.is_err(),
         "an unknown message type is rejected"

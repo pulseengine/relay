@@ -30,7 +30,18 @@ artifacts:
       type, so Kani never explores the rejection paths and a 19-float sensor
       decode in the same state space.
 
-      WHAT IS PROVEN, over an arbitrary byte string of arbitrary length:
+      THE EXACT SCOPE OF "ARBITRARY", because a claim is only as wide as the
+      command that produced it. The symbolic-length harness is bounded at
+      N = HEADER_LEN + MOTORS_PAYLOAD_LEN + 1 = 25 B, so the structural
+      properties below are proven for EVERY byte string of EVERY length up to
+      25 B — which is what reaches every rung of the rejection ladder and both
+      short accept paths. `Config` (44 B) and `Sensor` (84 B) are proven at
+      their EXACT frame lengths only. Nothing here is proven for a 200-byte
+      buffer; bounded model checking does not give that for free, and saying
+      "arbitrary length" unqualified would be the claim-wider-than-the-command
+      error this project has already paid for once.
+
+      WHAT IS PROVEN, over an arbitrary byte string of any length <= 25 B:
       (1) the whole-frame length is pinned on success —
       `len == HEADER_LEN + msg.payload_len()` — which is what lets a host find
       the next frame in a stream; (2) the payload handed back is exactly the
@@ -47,6 +58,15 @@ artifacts:
       (Ack, Motors) and every rung of the rejection ladder (short frame, bad
       magic, wrong version, unknown type). An unsatisfiable cover would mean a
       guard is dead code and its error variant is a lie.
+
+      AND THAT IS CI-ENFORCED, NOT A ONE-OFF LOCAL OBSERVATION — established by
+      experiment rather than assumed, because the opposite was the natural guess.
+      Injecting a deliberately impossible cover (`len > 1000`, against an assumed
+      `len <= 25`) makes Kani 0.67.0 report "5 successfully verified harnesses,
+      1 failures" and exit 1. So an unsatisfiable cover FAILS its harness, the
+      matrix leg runs `cargo kani`, and the ten covers are therefore re-checked
+      on every push. The `grep -c 'kani::cover!' -eq 10` step guards their
+      PRESENCE; `cargo kani` guards their SATISFIABILITY.
       (b) MUTATION TESTED. Relaxing `decode_frame`'s payload-length equality
       from `!=` to `<` — a plausible bug that accepts over-long frames — makes
       `decode_frame_is_total_and_never_lies_about_length` report
@@ -111,6 +131,16 @@ artifacts:
         # The finding itself: still no finiteness check in the decoder. This
         # step FLIPS when someone fixes it, which is the intended signal.
         - run: "! grep -qE 'is_finite|is_nan' crates/falcon-hitl/src/wire.rs"
+        # THE STEP VGATE-P02 REQUIRES, and the house shape for a Kani-backed
+        # artifact. Every crate the Kani matrix model-checks must be cited by a
+        # `cargo kani -p <crate>` step in some artifact, or the verification
+        # gate FAILS it as an UNTRACED PROOF — a proof that runs on every push
+        # while no artifact records it. Adding falcon-hitl to kani.yml WITHOUT
+        # this line would have broken the gate in the mirror image of the orphan
+        # this artifact exists to close. The gate does not execute it: in-matrix
+        # resolves to "enforced-by-kani-gate", because the required `Kani gate`
+        # check is what runs it.
+        - run: "cargo kani -p falcon-hitl"
         - run: "cargo test -p falcon-hitl --all-targets"
     links:
       - type: verifies
