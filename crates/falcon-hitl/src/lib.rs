@@ -79,7 +79,15 @@ pub struct LinkBackend<T> {
     cache: wire::WireSensorFrame,
     seq: u32,
     tracker: wire::SeqTracker,
-    last_verdict: wire::TickVerdict,
+    /// `None` when the last reply was NOT a decodable `Sensor` frame.
+    ///
+    /// This started as a bare `TickVerdict` defaulting to `First` on a failed
+    /// decode, which made GARBAGE look like a fresh stream start — and the
+    /// tick contract is exactly the thing TRANSPORT-P01's falsification
+    /// condition turns on, so a field that quietly reports the wrong verdict is
+    /// worse here than no field.
+    last_verdict: Option<wire::TickVerdict>,
+    rejected: u32,
     dt: f32,
 }
 
@@ -98,6 +106,7 @@ impl<T: Transport> LinkBackend<T> {
             cache: cache.unwrap_or_default(),
             seq: 0,
             tracker,
+            rejected: u32::from(last_verdict.is_none()),
             last_verdict,
             dt,
         }
@@ -111,13 +120,20 @@ impl<T: Transport> LinkBackend<T> {
     fn read_reply(
         reply: &[u8; SENSOR_WIRE_FRAME_LEN],
         tracker: &mut wire::SeqTracker,
-    ) -> (Option<wire::WireSensorFrame>, wire::TickVerdict) {
+    ) -> (Option<wire::WireSensorFrame>, Option<wire::TickVerdict>) {
         match wire::decode_frame(reply) {
             Ok((h, payload)) if h.msg == wire::MsgType::Sensor => {
                 let verdict = tracker.observe(h.seq);
-                (wire::decode_sensor_frame(payload).ok(), verdict)
+                match wire::decode_sensor_frame(payload) {
+                    // The header decoded and the sequence was classified, but
+                    // the payload did not: report the verdict and no frame.
+                    Err(_) => (None, Some(verdict)),
+                    Ok(f) => (Some(f), Some(verdict)),
+                }
             }
-            _ => (None, wire::TickVerdict::First),
+            // Not a frame, or not a Sensor frame. There is no sequence to
+            // classify, so there is no verdict — NOT `First`.
+            _ => (None, None),
         }
     }
 
@@ -132,8 +148,18 @@ impl<T: Transport> LinkBackend<T> {
     /// "cannot tell a dropped tick from a late one". A backend that silently
     /// swallowed the distinction would satisfy the codec and fail the
     /// requirement.
-    pub fn last_verdict(&self) -> wire::TickVerdict {
+    pub fn last_verdict(&self) -> Option<wire::TickVerdict> {
         self.last_verdict
+    }
+
+    /// How many replies were not decodable `Sensor` frames.
+    ///
+    /// Counted separately from the verdicts because a rejected reply is not a
+    /// tick that went wrong — it is a tick that was never classified, and
+    /// collapsing the two is how a link reports a healthy stream while
+    /// dropping every frame.
+    pub fn rejected_replies(&self) -> u32 {
+        self.rejected
     }
 }
 
@@ -163,6 +189,9 @@ impl<T: Transport> FlightBackend for LinkBackend<T> {
         let mut reply = [0u8; SENSOR_WIRE_FRAME_LEN];
         self.transport.exchange(&out, &mut reply);
         let (frame, verdict) = Self::read_reply(&reply, &mut self.tracker);
+        if verdict.is_none() {
+            self.rejected = self.rejected.saturating_add(1);
+        }
         self.last_verdict = verdict;
         if let Some(f) = frame {
             self.cache = f;
@@ -251,15 +280,33 @@ impl<B: FlightBackend> SimServer<B> {
         let motors = wire::decode_motors(payload)?;
         let verdict = self.tracker.observe(h.seq);
 
-        // A DUPLICATE MUST NOT STEP THE PLANT TWICE. The binding says so
-        // outright — "The caller must NOT step the controller twice on one
-        // tick" — and a retransmitted datagram is the ordinary way this
-        // happens on UDP. Stepping twice would advance the simulation by two
-        // control periods for one commanded tick, which reads downstream as a
-        // plant that moves faster than the loop that is flying it. The reply is
-        // still sent, re-reporting the CURRENT sensors, so the host is answered
-        // rather than left waiting.
-        let stepped = !matches!(verdict, wire::TickVerdict::Duplicate);
+        // NEITHER A DUPLICATE NOR A LATE FRAME MAY STEP THE PLANT, and the
+        // binding states both in its own table rather than leaving it to a
+        // host's judgement (docs/TRANSPORT-BINDING.md, "Late, dropped and
+        // duplicated"):
+        //
+        //   seq == last          Duplicate   accept the bytes, DO NOT step the
+        //                                    controller twice
+        //   seq < last backward  Late{by}    DISCARD; a newer frame already
+        //                                    superseded it
+        //
+        // Duplicate: a retransmitted datagram is the ordinary way this happens
+        // on UDP, and stepping twice advances the simulation by two control
+        // periods for one commanded tick — downstream that reads as a plant
+        // moving faster than the loop flying it.
+        //
+        // Late: the commands in it are ALREADY SUPERSEDED. Stepping the plant
+        // with them applies stale thrust after a newer command has been acted
+        // on, which is worse than dropping the frame. This one is easy to miss
+        // because the sequence tracker's doc only spells out the duplicate
+        // obligation; the table in the document is the authority.
+        //
+        // Both are still ANSWERED, re-reporting the CURRENT sensors, so the
+        // host is not left waiting on a frame it will never get.
+        let stepped = !matches!(
+            verdict,
+            wire::TickVerdict::Duplicate | wire::TickVerdict::Late { .. }
+        );
         if stepped {
             self.backend.write_motors(&motors); // steps the plant
         }
@@ -389,6 +436,65 @@ mod tests {
         assert!(wire::decode_frame(&reply).is_ok());
     }
 
+    /// A LATE frame must not step the plant either — the binding's table says
+    /// "discard; a newer frame already superseded it".
+    ///
+    /// Easy to miss: `SeqTracker`'s own doc spells out only the DUPLICATE
+    /// obligation, so an implementer reading the code rather than the document
+    /// gates one case and ships the other. Stepping on a late frame applies
+    /// stale thrust after a newer command has already been acted on.
+    #[test]
+    fn a_late_frame_does_not_step_the_plant_with_superseded_commands() {
+        let mut server = SimServer::new(CountingBackend::default());
+        let mut reply = [0u8; SENSOR_WIRE_FRAME_LEN];
+        let mut out = [0u8; MOTORS_FRAME_LEN];
+
+        wire::encode_motors(&mut out, 5, [0.5; 4]);
+        server.serve(&out, &mut reply).unwrap();
+        wire::encode_motors(&mut out, 9, [0.5; 4]);
+        let v = server.serve(&out, &mut reply).unwrap();
+        assert!(matches!(v, wire::TickVerdict::Dropped { lost: 3 }), "{v:?}");
+        assert_eq!(server.backend().steps, 2);
+
+        // seq 6 arrives after 9 — superseded, not lost.
+        wire::encode_motors(&mut out, 6, [0.9; 4]);
+        let v = server.serve(&out, &mut reply).unwrap();
+        assert!(matches!(v, wire::TickVerdict::Late { by: 3 }), "{v:?}");
+        assert_eq!(
+            server.backend().steps,
+            2,
+            "a late frame stepped the plant with superseded commands"
+        );
+    }
+
+    /// A reply that is not a decodable `Sensor` frame reports NO verdict —
+    /// never `First`, which would make garbage look like a fresh stream.
+    #[test]
+    fn an_undecodable_reply_reports_no_verdict_rather_than_a_fresh_stream() {
+        struct GarbageLink;
+        impl Transport for GarbageLink {
+            fn exchange(
+                &mut self,
+                _out: &[u8; MOTORS_FRAME_LEN],
+                reply: &mut [u8; SENSOR_WIRE_FRAME_LEN],
+            ) {
+                reply.fill(0xAB); // not a frame at all
+            }
+        }
+        let mut backend = LinkBackend::new(GarbageLink, 0.002);
+        assert_eq!(
+            backend.last_verdict(),
+            None,
+            "garbage must not be classified as a tick"
+        );
+        assert_eq!(backend.rejected_replies(), 1);
+        backend.write_motors(&[0.1; 4]);
+        assert_eq!(backend.last_verdict(), None);
+        assert_eq!(backend.rejected_replies(), 2);
+        // ...and the cache was NOT zeroed into a free-fall reading.
+        assert!(backend.read_imu().accel.iter().all(|v| v.is_finite()));
+    }
+
     /// Garbage is refused, not flown. The old 16/54-byte `serve` could not
     /// fail, so a desynchronised stream read as a zero-thrust command.
     #[test]
@@ -448,6 +554,10 @@ mod tests {
         );
         // Every tick was in order over a loopback, so the tick contract is
         // reporting rather than merely compiling.
-        assert!(matches!(backend.last_verdict(), wire::TickVerdict::InOrder));
+        assert!(matches!(
+            backend.last_verdict(),
+            Some(wire::TickVerdict::InOrder)
+        ));
+        assert_eq!(backend.rejected_replies(), 0);
     }
 }
