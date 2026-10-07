@@ -133,33 +133,56 @@ artifacts:
 
 
       ======================================================================
-      ALL THREE DEMOTION CLAUSES ARE NOW MEASURED (2026-10-07). The status
-      stays `implemented` because one of the three is not yet on main; the
-      measurements are recorded here so the promotion PR can be code-free.
+      CLAUSE (1) IS NOW SATISFIED BY MEASUREMENT (2026-10-07). The hour has
+      run, on the reference Gazebo plant, FOUR NIGHTS RUNNING:
 
-      (1) THE GZ HOUR HAS RUN, AND PASSED — the text above ("HAS NEVER RUN",
-      "NOT YET OBSERVED to pass") is FALSIFIED. Six consecutive `schedule`
-      nightlies each published the full hour:
+        2026-10-03  longest holding duration 3600s
+        2026-10-04  longest holding duration 3600s
+        2026-10-05  longest holding duration 3600s
+        2026-10-06  longest holding duration 3600s
 
-        36991404659  2026-10-02  3600s   37193125269  2026-10-04  3600s
-        37111951154  2026-10-03  3600s   37296182735  2026-10-05  3600s
-        37448441441  2026-10-06  3600s   37605915444  2026-10-07  3600s
+      and every rung passed on the way up — 25 / 40 / 60 / 90 / 120 / 300 /
+      900 / 3600 s, each one PASS, read from the nightly `gz endurance watch`
+      job's own ladder output. #497 was right that it "HAS NEVER RUN": a
+      `schedule` event left `github.event.inputs` empty so
+      `MAX="${GZ_MAX_S:-120}"` capped every nightly at 120 s. #507 fixed that
+      default, and the ladder has climbed the whole way ever since.
 
-      Read from each run's `gz endurance watch` job log, not inferred from the
-      run conclusion. I had twice recorded this tier as never having reached an
-      hour; both times the query window was too narrow (`gh run list --limit 4`
-      crowded out by push-event runs). The requirement was closer to met than
-      its own demotion text said.
+      CLAUSE (2) IS FIXED IN THE SAME CHANGE. `GZ_FLOOR_S` sat at 120 against a
+      measured 3600 — the SAME defect #497 caught at 25-vs-120, at a worse
+      ratio: the floor trailed the measurement by 30x, so a 30x endurance
+      regression would have passed silently. Ratcheted to 3600, which is also
+      the requirement's target, so from here any regression below an hour fails
+      the nightly.
 
-      (2) THE RATCHET NOW BITES. `GZ_FLOOR_S: '3600'` on main (#523). Those six
-      runs logged "floor 120s" because they predate that merge, so the floor was
-      trailing the measurement by 30x while every night passed; the next nightly
-      compares against 3600. A regression to the old 120 s ceiling now FAILS.
+      CLAUSE (3) REMAINS UNMET, AND IT IS WHY THIS STAYS `implemented`.
+      "BOTH PATHS. The soak shall run the wasm component as well as the native
+      binary" — `grep -in wasm .github/workflows/soak.yml` still exits 1. There
+      is no wasm leg. An endurance property that holds for only one of the two
+      paths is not the property this requirement states, and the wasm harness
+      exists (tests/cascade-sitl-wasm, which already holds 2.00 m on gz and
+      carries the rotor-out verdict), so this is wiring rather than new work.
 
-      (3) BOTH PATHS — BUILT AND MEASURED, NOT YET MERGED. `wasm-endurance`
-      ("wasm endurance watch (BOTH PATHS)") runs the published Component Model
-      artifact against the same gz plant, same ladder. Run 37621040540,
-      92 min 40 s, EVERY RUNG PASS to the 1 h target:
+      ALSO CORRECTED, because I recorded the opposite: I had written that the
+      nightly schedule was "unproven" and that the 03:17 slot "did not fire".
+      Both wrong — five consecutive successful nightlies exist, and the run I
+      called absent fired at 09:43 the same morning. My claim came from
+      `gh run list --limit 4`, where 34 broken push-event runs from the #498
+      outage had crowded every scheduled run out of the window. The real
+      schedule finding is duller: GitHub throttles this cron by ~6-7 h
+      (03:17 -> ~09:00-10:20). It fires daily and succeeds, so the "watched
+      nightly" clause is met. `scripts/soak-freshness.rs` now measures that
+      directly instead of by eye.
+
+      ======================================================================
+      CLAUSE (3) IS NOW BUILT AND MEASURED (2026-10-07) — the last of the three.
+      Status stays `implemented`: the leg is not on main yet, and promotion is a
+      separate code-free PR.
+
+      `wasm-endurance` ("wasm endurance watch (BOTH PATHS)") runs the published
+      Component Model artifact against the same gz plant on the same ladder, so
+      `grep -in wasm .github/workflows/soak.yml` no longer exits 1. Run
+      37621040540, 92 min 40 s, EVERY RUNG PASS to the 1 h target:
 
         25s   |err| 0.12 m      300s   |err| 0.00 m
         40s   |err| 0.02 m      900s   |err| 0.00 m
@@ -169,34 +192,37 @@ artifacts:
 
       The error SHRINKS down the ladder. That is a settling transient, not
       drift — the opposite shape from #403, where the excursion grew with time.
-      A longer flight is a cleaner flight here, which is the result this
-      requirement wanted and did not have.
+      A longer flight is a cleaner flight on this path, which is the result the
+      requirement wanted and did not have. Both paths now reach 3600 s.
 
-      THIS TIER CANNOT REPEAT CLAUSE (1)'s BUG, BY CONSTRUCTION. Its ladder is
+      THE NIGHT COUNT ABOVE IS SIX, NOT FOUR. The block above lists 10-03..10-06
+      because that is what the window held when it was written; 36991404659
+      (10-02) and 37605915444 (10-07) each also published 3600s, so the gz hour
+      now has six consecutive scheduled observations.
+
+      THIS LEG CANNOT REPEAT CLAUSE (1)'s BUG, BY CONSTRUCTION. Its ladder is
       hardcoded (`for D in 25 40 60 90 120 300 900 3600`) with no
-      `github.event.inputs` dependency, so there is no input to be empty on a
-      `schedule` event. The cost of that choice, stated rather than discovered
-      later: the job cannot be shortened for a smoke test and spends ~92 min
-      every run. Both gz tiers are on `ubuntu-latest` (the analytic tier is the
-      self-hosted one), so this adds hosted time, not fleet time.
+      `github.event.inputs` dependency, so there is no input to fall back from
+      when `schedule` leaves it empty — the exact mechanism that capped the
+      native tier at 120 s for weeks. The cost of that choice, stated now rather
+      than discovered later: the job cannot be shortened for a smoke test and
+      spends ~92 min per run. Both gz tiers are `ubuntu-latest` (the analytic
+      tier is the self-hosted one), so this is hosted time, not fleet time.
 
-      WHAT REMAINS BEFORE PROMOTION, and it is one night:
-        - #524 must merge (BEHIND, auto-merge armed at time of writing).
-        - ONE `schedule` run must exercise the wasm rung. The dispatch above
-          proves the job works end to end; a scheduled run proves it FIRES on
-          the trigger that matters. Clause (1) is the standing proof that
-          "the job exists" and "the job does the work nightly" are different
-          claims, and the job has no `if:` gate, so this is a confirmation
-          rather than a risk.
+      WHAT REMAINS BEFORE PROMOTION, and it is one night: #524 merges, and ONE
+      `schedule` run exercises the rung. The dispatch above proves the job works
+      end to end; a scheduled run proves it FIRES on the trigger that matters,
+      and clause (1) is the standing proof that "the job exists" and "the job
+      does the work nightly" are different claims. The job has no `if:` gate, so
+      this is a confirmation rather than a risk.
 
-      THE NATIVE TIER'S RED IN RUN 37621040540 IS NOT A REGRESSION. It logged
-      "longest holding duration 25s (floor 120s)" -> REGRESSED. That is my own
-      dispatch parameter: I passed `gz_max_s=25` from a branch cut before #523
-      raised the floor, so the job honoured the input, climbed to 25 s, and the
-      ratchet correctly rejected it. The wasm tier ignored the same dispatch
-      (hardcoded ladder) and ran the real hour. Recorded because a red check on
-      an endurance gate is exactly the thing a future reader would mistake for
-      the ceiling coming back.
+      THE NATIVE TIER'S RED IN RUN 37621040540 IS NOT THE CEILING RETURNING. It
+      logged "longest holding duration 25s (floor 120s)" -> REGRESSED, because I
+      dispatched `gz_max_s=25` from a branch cut before the floor was ratcheted:
+      the job honoured the input, climbed to 25 s, and the ratchet correctly
+      rejected it. The wasm leg ignored the same dispatch (hardcoded ladder) and
+      flew the real hour. Recorded because a red endurance gate is precisely
+      what a later reader would misread as a regression.
     tags: [requirement, falcon, endurance, soak, gazebo, nightly, v1.140]
     links:
       - type: derives-from
