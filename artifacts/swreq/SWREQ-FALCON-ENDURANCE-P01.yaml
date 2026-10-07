@@ -313,9 +313,13 @@ artifacts:
       run, on a verdict that bars horizontal on plant truth.
       CLAUSE (2): MET ON BOTH LEGS. GZ_FLOOR_S 3600 (#523) and WASM_FLOOR_S
       ratcheted 25 -> 3600 in the same change as this record. The flake worry
-      that made me revert the earlier ratchet is answered by data: the native
-      tier runs the same 8-rung fresh-server ladder on the same hosted runner
-      class at a 3600 floor and has gone six nights with no false red.
+      that made me revert the earlier ratchet is answered by data — stated
+      precisely, because I first wrote it wrong. I had said the native tier "has
+      gone six nights at a 3600 floor with no false red"; those six nightlies
+      ran at floor 120, which is what their own logs print. What the history
+      DOES establish is the load-bearing part: all EIGHT rungs COMPLETED on each
+      of the six nights, every one publishing 3600 s, so a 3600 floor would have
+      produced zero reds across it. Same ladder, same runner class, six samples.
       CLAUSE (3): MET. The leg exists, judges the horizontal half, and reaches
       the hour.
 

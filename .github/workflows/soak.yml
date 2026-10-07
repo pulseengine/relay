@@ -315,10 +315,14 @@ jobs:
       #
       # ON THE FLAKE EXPOSURE, which is why I hesitated before: BEST < 3600 iff
       # any of 8 sequential rungs fails, each with its own fresh gz server on a
-      # hosted runner. That worry is answered by data rather than argument — the
-      # NATIVE tier runs the same 8-rung fresh-server ladder on the same runner
-      # class at a 3600 floor and has gone six consecutive nights with no false
-      # red. Still: the step prints the breaking rung and which of three things
+      # hosted runner. Data rather than argument — but stated precisely, because
+      # I first wrote this as "six nights at a 3600 floor with no false red" and
+      # that is FALSE: those six nightlies ran at floor 120, which is what their
+      # own logs print. What they DO establish is the thing that matters here —
+      # all EIGHT rungs COMPLETED on each of the six nights, every one
+      # publishing 3600 s, so a 3600 floor would have produced zero reds across
+      # that history. Same ladder, same runner class, six samples.
+      # Still: the step prints the breaking rung and which of three things
       # happened (TIMED OUT / verdict FAIL / exited without a verdict =
       # infrastructure). Read the break reason before believing REGRESSED, and
       # do not lower this floor without quoting it.
