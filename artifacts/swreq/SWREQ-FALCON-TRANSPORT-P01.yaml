@@ -207,6 +207,56 @@ artifacts:
       an existing host must make, rather than guessed at. Filed as #503 so the
       maintainer can decide whether to obtain the capture or accept ours.
       ======================================================================
+      ======================================================================
+      ELEMENT 5 SHIPPED (2026-10-07, FV-FALCON-TRANSPORT-003) — ALL FIVE
+      ELEMENTS NOW SHIP, and this requirement is STILL NOT PROMOTABLE. The two
+      facts belong in one paragraph so neither is read without the other.
+
+      `Transport`, `LinkBackend` and `SimServer` exchange BINDING frames —
+      `Motors` 8+16 = 24 B, `Sensor` 8+76 = 84 B — so a host written against
+      docs/TRANSPORT-BINDING.md drives the verified `FlightCore` without
+      inventing a framing, which is what makes the document a binding rather
+      than a description. The legacy constants, `SensorFrame` and the four
+      `encode_/decode_actuator|sensor` functions are DELETED, and the lengths
+      are now DERIVED from `wire::` rather than written as literals, so they
+      cannot drift from the binding by editing a number.
+
+      The constants were RENAMED, not re-valued: `SENSOR_FRAME_LEN` meant 54
+      and the frame is 84, and re-using a name with a new value is the change
+      that compiles in a stale caller and is wrong at runtime.
+
+      WHAT THE RE-POINT BUYS, none of which the old frames could express: the
+      tick contract is live (sequence per exchange, `SeqTracker::observe`,
+      `last_verdict()` exposed) which is the field THIS REQUIREMENT'S
+      falsification condition turns on; a DUPLICATE no longer steps the plant
+      twice, which the binding demands outright and the old sequence-less
+      server could not have honoured; garbage is REFUSED rather than read as
+      zero thrust, because `serve` can now fail; and `dt` is the host's actual
+      period rather than its nominal one.
+
+      A DEPENDENCY THIS WORK DISCOVERED, which nothing had recorded: the
+      published `sensor-frame` at @0.11.0 HAS NO BATTERY FIELD, so re-pointing
+      the reference host drops the battery path. `read_battery_v` returns
+      `None` — which is honest and is `FlightBackend`'s own default, and is
+      strictly better than the retired frame's bare `battery: f32` that had no
+      validity flag and so made a host with no sense send 0.0 V as a lie (the
+      module note named this: those frames "cannot carry heading, rotor RPM, or
+      a battery that says ABSENT", #466). But a host that genuinely HAS a
+      battery cannot report it until `battery-v: option<f32>` lands in @0.12.0,
+      which is parked behind the same seam decision as mode and failsafe. So
+      element 5 trades a field that could only lie for a field that is absent,
+      and the full capability waits on @0.12.0.
+
+      STILL NOT PROMOTABLE, and the reason is unchanged and structural: the
+      FALSIFICATION CONDITION holds — the published state carries no mode and
+      no failsafe (#414), so a host holding this binding cannot stream a
+      failsafe to a GCS. That runs through #414 -> SWREQ-FALCON-SUPERVISOR-P01
+      -> the command-channel seam decision, which is awaiting jess. Element 5
+      was the last ENGINEERING item; the remaining blocker is not engineering.
+
+      MEASURED: cargo test -p falcon-hitl --all-targets = 19 passed / 0 failed
+      (debug, all targets, as CI runs it), --doc = 0, fmt clean, clippy clean.
+
     tags: [requirement, falcon, transport, seam, hitl, v1.141]
     links:
       - type: derives-from
