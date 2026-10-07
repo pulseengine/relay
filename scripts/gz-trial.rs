@@ -64,6 +64,13 @@ const KEEP: &[&str] = &[
     // has silently swallowed a trace it was supposed to carry (FDI_TRACE, then
     // RING_TRACE). A dropped verdict reads as a quiet pass.
     "ROTOR-OUT", "touchdown", "STATE RETURN",
+    // FOURTH time, 2026-10-07: the nominal hold's "horizontal : X m from launch
+    // (peak Y m over the run)" line. That number is the half ENDURANCE-P01
+    // actually turns on, and it was absent here AND from soak.yml's own
+    // allowlist, so an endurance ladder was read on its altitude line alone and
+    // recorded as closing a BOTH-PATHS clause it had not measured. If you add a
+    // number to the harness, add it to every allowlist in the same change.
+    "horizontal",
 ];
 
 struct Args {
