@@ -624,6 +624,18 @@ impl CascadePartition {
     pub fn landing_descent(&self) -> f32 {
         self.landing_descent
     }
+    /// The loop rate the rate-dependent filters are CURRENTLY designed for.
+    ///
+    /// Exposed so the resync can be OBSERVED rather than grepped. Independent
+    /// review found every `steps:` entry of FV-FALCON-RATE-002 and
+    /// FV-FALCON-FAULT-005 passing rc=0 in a tree where `resync_loop_rate` had
+    /// been reverted to an early `return` — the tokens they grep for are all
+    /// still present, so presence-greps cannot catch the regression they were
+    /// written to catch (#499). A test that reads this value can.
+    pub fn designed_loop_hz(&self) -> f32 {
+        self.designed_hz
+    }
+
     /// FDI observability (v1.115): `(rate2, tilt_cos, gate_open, resid[4])` from
     /// the last single-rotor-out detector evaluation. `gate_open` is the
     /// near-level/low-rate gate; when it stays false under sensor noise the
@@ -1131,6 +1143,10 @@ impl FlightCore {
 
     pub fn fdi_diag(&self) -> (f32, f32, bool, [f32; 4]) {
         self.casc.fdi_diag()
+    }
+    /// See [`CascadePartition::designed_loop_hz`].
+    pub fn designed_loop_hz(&self) -> f32 {
+        self.casc.designed_loop_hz()
     }
 
     pub fn last_omega_d(&self) -> Vec3 {
@@ -5037,6 +5053,40 @@ mod tests {
             "a 0.35-hover airframe told hover_thrust=0.5 must still be seen as \
              FLYING, so the gravity update stays suppressed and the hold does \
              not diverge: peak horizontal {peak} m"
+        );
+    }
+
+    /// **The filters follow the backend's rate, not the caller's claim.**
+    ///
+    /// THIS TEST EXISTS BECAUSE THE GREPS COULD NOT FAIL. Independent review
+    /// reverted `resync_loop_rate` to an early `return` and every `steps:` entry
+    /// of FV-FALCON-RATE-002 and FV-FALCON-FAULT-005 still passed rc=0 — the
+    /// grepped tokens are all still there (#499). This asserts the EFFECT.
+    ///
+    /// `gyro_lpf` and the harmonic `notch` are DESIGNS built from a sample rate.
+    /// `FlightSupervisor::new` declares 1000 Hz while the gz bench steps at
+    /// 250 Hz, which put a 60 Hz low-pass's real corner at a quarter of the
+    /// intended frequency and was the whole of the attitude limit cycle (#270).
+    #[test]
+    fn the_filters_follow_the_backend_rate_not_the_declared_one() {
+        let dt = 0.004f32; // 250 Hz, as the gz bench runs
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        // DECLARE A RATE THAT IS WRONG, exactly as FlightSupervisor::new does.
+        let mut core = FlightCore::new(0.5, 1000.0);
+        assert_eq!(
+            core.designed_loop_hz(),
+            1000.0,
+            "precondition: the core must start out believing the declared rate"
+        );
+        core.step(&mut b);
+        let got = core.designed_loop_hz();
+        assert!(
+            (got - 1.0 / dt).abs() < 1.0,
+            "after one tick the filters must be designed for the rate the \
+             backend is ACTUALLY stepped at ({} Hz), not the declared 1000 Hz; \
+             got {got} Hz",
+            1.0 / dt
         );
     }
 
