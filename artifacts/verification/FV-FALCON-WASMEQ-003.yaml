@@ -89,7 +89,11 @@ artifacts:
         # ...and the aiding fields are offered, not passed as None
         - run: "grep -q 'let heading_rad = plant.heading_ned();' tests/cascade-sitl-wasm/src/main.rs"
         # ...and the gz gate FAILS on a poor hold rather than emitting a notice
-        - run: "grep -q 'the wasm cascade flew but did NOT hold altitude in gz' .github/workflows/gazebo.yml"
+        # PREFIX, NOT THE WHOLE SENTENCE. This step pinned the gate's error
+        # message verbatim and BROKE on 2026-10-07 when the wasm verdict gained
+        # its horizontal half and the message became "did NOT hold position". A
+        # step that cites exact prose fails on a reword rather than a regression.
+        - run: "grep -q 'the wasm cascade flew but did NOT hold' .github/workflows/gazebo.yml"
         # (b) the flight itself, in the Gazebo SITL job
         - run: "DIFFERENTIAL=1 BACKEND=gazebo cascade-sitl-wasm falcon_cascade_cm.wasm 2000 0.004  # gz-job: expect |err| <= 0.5 m and BIT-IDENTICAL"
     links:

@@ -310,8 +310,16 @@ jobs:
           HOLD=$(sed -n 's/^HOLD ERROR *: .*|err| = \([0-9.]*\) m.*/\1/p' /tmp/wasm-gz.txt | tail -1)
           # The threshold lives in the harness, not here, so there is exactly
           # one definition of "held it" and this file cannot drift from it.
-          if ! grep -q 'PASS: closed the loop AND held the commanded altitude' /tmp/wasm-gz.txt; then
-            echo "::error::the wasm cascade flew but did NOT hold altitude in gz (|err| = ${HOLD:-?} m). Reference: 0.14 m."
+          #
+          # MATCH A PREFIX, NOT THE WHOLE SENTENCE. This grep used to carry the
+          # full line "PASS: closed the loop AND held the commanded altitude",
+          # and the moment the harness's verdict gained the horizontal half the
+          # wording changed and this REQUIRED gate would have failed on every PR
+          # — the file drifting from the harness in the one way its own comment
+          # above promised it could not. The prefix is stable; the harness still
+          # owns what passing means.
+          if ! grep -q '^PASS: closed the loop' /tmp/wasm-gz.txt; then
+            echo "::error::the wasm cascade flew but did NOT hold position in gz (altitude |err| = ${HOLD:-?} m; reference 0.14 m). The verdict covers altitude AND the horizontal hold, so read the 'horizontal' line too."
             tail -20 /tmp/wasm-gz.txt
             exit 1
           fi
