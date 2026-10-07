@@ -71,7 +71,44 @@ artifacts:
             no supervisor: #414 notes the compounding case, where even a wired
             supervisor would read a HARDCODED HEALTHY 16.0 V.
 
-        (5) THE BUMP SHALL BE ANNOUNCED BEFORE ANYTHING PUBLISHES.
+        (5) THE SEAM SHALL CARRY A COMMAND CHANNEL, or the switch is a
+            BREAKING CHANGE that silently stops the vehicle.
+
+            FOUND 2026-10-07 while scoping the implementation, and it is the
+            reason this requirement is not yet buildable as written.
+            `FlightSupervisor::step` contains (falcon-core, v1.117, "found on
+            the gz plant"):
+
+              if matches!(self.fsm.mode(),
+                          Mode::Disarmed | Mode::Armed | Mode::Terminated) {
+                  self.core.step_estimate_only(b); // estimator warm, motors OFF
+                  return;
+              }
+
+            The FSM starts `Disarmed`, and arming goes through
+            `FlightSupervisor::command(Event, level, throttle_low)` — which the
+            seam does not expose. So simply swapping `FlightCore` for
+            `FlightSupervisor` makes the published component COMMAND ZERO MOTORS
+            FOREVER. Every existing consumer breaks: the wasm SITL harness that
+            holds 2.00 m, the rotor-out verdict that isolates in 2 ticks, and
+            any host driving `step`.
+
+            THAT MOTORS-OFF BEHAVIOUR IS CORRECT AND MUST NOT BE WEAKENED. Its
+            own comment records why it exists: the analytic plant's ground
+            quietly held the vehicle so an always-stepping core was invisible,
+            but on gz a post-touchdown `Disarmed` kept the altitude loop live
+            and FLEW THE VEHICLE AWAY — and "Terminate = motors cut" had been an
+            FSM claim with no actuator behind it. So the fix is to give the seam
+            a way to arm, NOT to make the supervisor step while disarmed.
+
+            SHALL: the seam exposes a command entry point carrying at least
+            arm / disarm / request-takeoff / land / rtl, with the pre-arm gates
+            (`level`, `throttle-low`) the supervisor's own signature requires, so
+            a host can reach Loiter. An auto-arm inside `step` is NOT acceptable:
+            it would make arming unobservable and bypass the 19 pre-arm rows that
+            are the point of having a supervisor.
+
+        (6) THE BUMP SHALL BE ANNOUNCED BEFORE ANYTHING PUBLISHES.
             `pulseengine:falcon-cascade@0.11.0` -> `@0.12.0`. The v1.133 lesson
             is explicit: a namespace moved, nobody told the integrator, and they
             reported the publish "stalled". NO RELEASE MAY CARRY @0.12.0 until
@@ -96,7 +133,10 @@ artifacts:
       priority: must
       verification-criteria: >
         The built artifact's WIT (read with `wasm-tools component wit`, not the
-        source) exports mode and failsafe in `flight-state`; the wasm SITL
+        source) exports mode and failsafe in `flight-state` AND a command entry
+        point; a host that never commands anything still gets zero motors and
+        `mode = disarmed` (the v1.117 behaviour, asserted rather than assumed);
+        a host that arms and requests takeoff reaches `loiter`; the wasm SITL
         harness drives the component through a geofence breach, a low-battery
         draining pack and an attitude runaway and observes the component CHANGE
         MODE each time; Disarmed and Terminated are distinguishable in the
