@@ -195,6 +195,24 @@ artifacts:
       A longer flight is a cleaner flight on this path, which is the result the
       requirement wanted and did not have. Both paths now reach 3600 s.
 
+      CLAUSE (2) NOW APPLIES TO BOTH LEGS. `WASM_FLOOR_S` was 25 in the first
+      cut of this job — correct then, because 25 s was the only duration the
+      component had ever been run to, and inheriting the native 3600 would have
+      asserted an endurance it had never shown. The ladder has since earned it,
+      so the floor is ratcheted to 3600. Leaving it at 25 against a measured
+      3600 would have reproduced THIS REQUIREMENT'S OWN clause (2) — the defect
+      it was demoted for — on the very leg added to close clause (3), at a worse
+      ratio than either prior instance: 144x versus 4.8x and 30x.
+
+      THAT FLOOR RESTS ON ONE DISPATCHED OBSERVATION, which the job's comment
+      says out loud. `BEST < 3600` iff ANY of the 8 sequential rungs fails, each
+      with its own fresh gz server on a hosted runner, so a first-night red is
+      as likely to be a flaky rung as a regression. It is readable rather than
+      ambiguous: the step prints the breaking rung and which of three things
+      happened — TIMED OUT, verdict FAIL, or exited without a verdict
+      (infrastructure). The word REGRESSED is not to be believed without the
+      break reason, and the floor is not to be lowered without quoting it.
+
       THE NIGHT COUNT ABOVE IS SIX, NOT FOUR. The block above lists 10-03..10-06
       because that is what the window held when it was written; 36991404659
       (10-02) and 37605915444 (10-07) each also published 3600s, so the gz hour

@@ -288,19 +288,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
-      # THE WASM PATH'S OWN FLOOR, and it is NOT 3600.
+      # THE WASM PATH'S OWN FLOOR. Raised 25 -> 3600 once the ladder earned it.
       #
-      # The native ladder reaches an hour (ENDURANCE-P01 clause 1, measured
-      # four nights running). The ONLY duration ever established for the wasm
-      # path is 25 s — that is what gazebo.yml runs (6250 ticks at 0.004 s) and
-      # what holds 1.96 m against a 2.00 m command. Starting this floor at 3600
-      # because the native one is there would assert an endurance the component
-      # has never demonstrated, which is the opposite of what a ratchet is for.
+      # The rule this started with was: do not inherit the native tier's 3600,
+      # because asserting an endurance the component has never demonstrated is
+      # the opposite of what a ratchet is for; start at the measured 25, let the
+      # ladder climb, and raise this whenever it establishes a longer rung.
       #
-      # So: start at the measured 25, let the ladder climb, and raise this
-      # whenever it establishes a longer rung. Same mechanism as the native
-      # tier, independent number.
-      WASM_FLOOR_S: '25'
+      # THE LADDER HAS CLIMBED. Run 37621040540 flew every rung — 25 / 40 / 60 /
+      # 90 / 120 / 300 / 900 / 3600 s, each PASS, 92 min 40 s, hold error 0.12 m
+      # at 25 s SHRINKING to 0.00 m from 60 s on. So the rule fires and the
+      # number moves. Leaving it at 25 against a measured 3600 would reproduce
+      # ENDURANCE-P01 clause (2) — the defect that demoted the requirement — on
+      # the very leg added to close clause (3): a 144x regression would pass.
+      #
+      # THIS RESTS ON ONE OBSERVATION, and a dispatched one. The native floor
+      # was ratcheted on four nights. BEST < 3600 iff ANY of the 8 sequential
+      # rungs fails, each with its own fresh gz server on a hosted runner, so a
+      # first-night red is as likely to be a flaky rung as a regression. That is
+      # readable rather than ambiguous: the step prints the breaking rung and
+      # WHICH of three things happened — TIMED OUT, verdict FAIL, or exited
+      # without a verdict (infrastructure). Read the break reason before
+      # believing the word REGRESSED. Lower this only with that reason quoted.
+      WASM_FLOOR_S: '3600'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -401,10 +411,14 @@ jobs:
             echo "::error::wasm endurance REGRESSED: ${BEST}s < floor ${WASM_FLOOR_S}s"
             exit 1
           fi
-          # Deliberately NOT a failure while below the target: the wasm path has
-          # never been run past 25 s, so anything above the floor is new
-          # information rather than a defect. Raise WASM_FLOOR_S when a longer
-          # rung is established — that is the ratchet, not a chore.
+          # UNREACHABLE while WASM_FLOOR_S == 3600, and kept deliberately: the
+          # floor check above already failed anything short of the target. It
+          # goes live again the moment someone lowers the floor — which is
+          # precisely when "below the target" stops being a failure and starts
+          # being a gap worth naming. Do not delete it as dead code; it is the
+          # guard for the configuration this job used to ship with.
           if [ "$BEST" -lt 3600 ]; then
             echo "::warning::wasm hold is ${BEST}s, short of the 1 h ENDURANCE-P01 target. The NATIVE tier reaches 3600s; BOTH PATHS must, and this is the gap."
+          else
+            echo "::notice::BOTH PATHS reached the hour — wasm ${BEST}s alongside the native tier's 3600s (ENDURANCE-P01 clause 3)."
           fi
