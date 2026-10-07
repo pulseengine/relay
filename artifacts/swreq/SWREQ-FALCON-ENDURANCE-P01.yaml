@@ -279,6 +279,67 @@ artifacts:
       10-03..10-06 because that is what the window held when it was written;
       36991404659 (10-02) and 37605915444 (10-07) each also published 3600s.
 
+      ======================================================================
+      THE RESULT IS IN, AND BOTH PATHS HOLD THE HOUR — HORIZONTALLY JUDGED
+      (run 37639930795, dispatched with gz_max_s=3600 so both legs fly the same
+      ladder under the same verdict in one run). This is the measurement the
+      block above said was missing, and it answers all three demotion clauses.
+
+        rung     native final/peak      wasm final/peak
+        25s      0.01 / 0.01 m          0.023 / 0.041 m
+        40s      0.01 / 0.01 m          0.007 / 0.016 m
+        60s      0.01 / 0.02 m          0.018 / 0.032 m
+        90s      0.03 / 0.05 m          0.013 / 0.039 m
+        120s     0.03 / 0.04 m          0.033 / 0.042 m
+        300s     0.02 / 0.05 m          0.043 / 0.043 m
+        900s     0.02 / 0.06 m          0.039 / 0.058 m
+        3600s    0.01 / 0.06 m          0.026 / 0.066 m
+
+      Both legs: "longest holding duration 3600s". Altitude |err| 0.00 m from
+      the 60 s rung on, on both. The two paths agree to 0.016 m on final and
+      0.006 m on PEAK horizontal at the hour, and both sit 15-30x inside this
+      requirement's own 1.0 m horizontal and 0.5 m vertical bounds.
+
+      WHY THIS IS CITED AS MEASUREMENTS RATHER THAN "THE GATE PASSED". The
+      gates enforce `final_horiz < 1.0 && peak_horiz < 2.0` and
+      `rms_steady < 1.0`, which on the peak is LOOSER than the 1.0 m this
+      requirement states. Matching the native bars was still right — a
+      BOTH-PATHS clause needs the two legs judged alike — but it means a green
+      gate is not by itself evidence for the requirement's own words. The
+      numbers above are, and they are quoted from the job logs rather than
+      inferred from a conclusion.
+
+      CLAUSE (1): MET. Six consecutive scheduled nightlies at 3600 s plus this
+      run, on a verdict that bars horizontal on plant truth.
+      CLAUSE (2): MET ON BOTH LEGS. GZ_FLOOR_S 3600 (#523) and WASM_FLOOR_S
+      ratcheted 25 -> 3600 in the same change as this record. The flake worry
+      that made me revert the earlier ratchet is answered by data: the native
+      tier runs the same 8-rung fresh-server ladder on the same hosted runner
+      class at a 3600 floor and has gone six nights with no false red.
+      CLAUSE (3): MET. The leg exists, judges the horizontal half, and reaches
+      the hour.
+
+      FALSIFICATION, RE-EVALUATED AGAINST ITS OWN WORDS: "wrong if a 1 h
+      stationary 2 m gz hold leaves the vehicle more than 1.0 m horizontally or
+      0.5 m vertically from the setpoint, or if the analytic 12 h soak shows any
+      unbounded integrator." Measured: 0.026 m horizontal and 0.00 m vertical at
+      1 h on the component, 0.01 m / 0.00 m on native; the analytic 12 h tier is
+      nightly green with IMU_NOISE 0.01. Not falsified.
+
+      AND IT REFUTES A PREMISE WE HAD WRITTEN DOWN TWICE. gazebo.yml's wasm leg
+      carried the comment "beyond ~26 s a separate horizontal divergence takes
+      over, tracked in #403 — this leg stops short of it deliberately". That
+      ceiling is gone on this path: 0.066 m peak over a full hour. The 25 s
+      per-PR duration is now a COST choice, not a ceiling being avoided, and the
+      comment has been corrected rather than quietly dropped. #403 is therefore
+      fixed on BOTH paths, and stays open only until a tag ships the component
+      half (merged is not released).
+
+      WHAT IS STILL NOT CLAIMED: this is the gz plant, not the airframe; the
+      peak bar is looser than the requirement's words (above); and one
+      horizontally-judged ladder is one observation per path at the hour, backed
+      by six nights of native history and by the two legs agreeing.
+
     tags: [requirement, falcon, endurance, soak, gazebo, nightly, v1.140]
     links:
       - type: derives-from

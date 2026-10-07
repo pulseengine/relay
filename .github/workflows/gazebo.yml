@@ -288,9 +288,18 @@ jobs:
           #      8 s -> 0.55 m (still climbing)     25 s -> 0.02 m (settled)
           #
           # 25 s is therefore the honest duration: it measures the settled hold
-          # rather than a transient passing through the target. Beyond ~26 s a
-          # separate horizontal divergence takes over, tracked in #403 — this
-          # leg stops short of it deliberately and says so.
+          # rather than a transient passing through the target.
+          #
+          # THE OLD SECOND REASON IS REFUTED, and is corrected here rather than
+          # quietly dropped. This comment used to read "beyond ~26 s a separate
+          # horizontal divergence takes over, tracked in #403 — this leg stops
+          # short of it deliberately". That ceiling is gone on this path: the
+          # nightly wasm endurance ladder (soak.yml) flew the same component to
+          # 3600 s under a HORIZONTALLY judged verdict and held 0.026 m final /
+          # 0.066 m peak, tracking the native leg's 0.01 / 0.06 (run
+          # 37639930795). So 25 s is now a COST choice for a per-PR gate, not a
+          # ceiling we are avoiding. Length belongs in the nightly; this gate
+          # just has to catch a component that cannot hold at all.
           set +e
           DIFFERENTIAL=1 BACKEND=gazebo ./target/release/cascade-sitl-wasm \
             /tmp/composed.wasm 6250 0.004 2>&1 | tee /tmp/wasm-gz.txt

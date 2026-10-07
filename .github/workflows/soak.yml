@@ -288,32 +288,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
-      # THE WASM PATH'S OWN FLOOR. Back to 25 — my 3600 was not earned.
+      # THE WASM PATH'S OWN FLOOR: 3600, and this time the evidence is the right
+      # axis. The history is worth keeping because I got it wrong once in both
+      # directions. It started at 25 (the only duration the component had been
+      # run to). I raised it to 3600 on a ladder that flew all eight rungs — and
+      # took it straight back out, because that ladder's PASS checked ALTITUDE
+      # ONLY: the harness computed a horizontal number, printed it, and this
+      # job's own allowlist dropped it, so the component could have been leaving
+      # the area at every rung while every rung read PASS.
       #
-      # The rule this started with was: do not inherit the native tier's 3600,
-      # because asserting an endurance the component has never demonstrated is
-      # the opposite of what a ratchet is for; start at the measured 25, let the
-      # ladder climb, and raise this whenever it establishes a longer rung.
+      # THE VERDICT NOW JUDGES THE HORIZONTAL HALF on plant truth, with the
+      # native leg's bars (final < 1.0 m, peak < 2.0 m over the run). Run
+      # 37639930795 re-flew the whole ladder under that verdict and the
+      # component holds the hour:
       #
-      # I RAISED THIS TO 3600 AND THEN TOOK IT BACK, in the same session. Run
-      # 37621040540 did fly all eight rungs to 3600 s, so "the ladder earned it"
-      # looked true. It was not: the ladder's PASS checked ALTITUDE ONLY. The
-      # harness computed a horizontal number, printed it, and this job's own
-      # output allowlist dropped it — so the component could have been leaving
-      # the area at every rung and the ladder would still have read PASS. A
-      # floor of 3600 on that evidence is a 3600 s claim backed by an altitude
-      # measurement, which is the same vacuous-gate shape ENDURANCE-P01 was
-      # demoted for. Worse than leaving it at 25, because it LOOKS ratcheted.
+      #   rung     native final/peak      wasm final/peak
+      #   25s      0.01 / 0.01            0.023 / 0.041
+      #   120s     0.03 / 0.04            0.033 / 0.042
+      #   900s     0.02 / 0.06            0.039 / 0.058
+      #   3600s    0.01 / 0.06            0.026 / 0.066
       #
-      # THE VERDICT NOW JUDGES THE HORIZONTAL HALF, on plant truth, with the
-      # native leg's own bars (final < 1.0 m, peak < 2.0 m over the run). Under
-      # that verdict the only duration established for this path is 25 s — the
-      # per-PR gazebo.yml leg, measured at 0.014 m horizontal. Everything longer
-      # is unestablished until a horizontally-judged ladder runs.
+      # Both paths reach 3600 s, agreeing to 0.006 m on peak, ~15-30x inside the
+      # requirement's own 1.0 m bound. So 3600 is established for this leg too,
+      # and BOTH PATHS now ratchet at the same number — which is the point of the
+      # clause.
       #
-      # So: 25, and raise it from a run that judged the hold. Same rule as
-      # before; this time the evidence has to match the number.
-      WASM_FLOOR_S: '25'
+      # ON THE FLAKE EXPOSURE, which is why I hesitated before: BEST < 3600 iff
+      # any of 8 sequential rungs fails, each with its own fresh gz server on a
+      # hosted runner. That worry is answered by data rather than argument — the
+      # NATIVE tier runs the same 8-rung fresh-server ladder on the same runner
+      # class at a 3600 floor and has gone six consecutive nights with no false
+      # red. Still: the step prints the breaking rung and which of three things
+      # happened (TIMED OUT / verdict FAIL / exited without a verdict =
+      # infrastructure). Read the break reason before believing REGRESSED, and
+      # do not lower this floor without quoting it.
+      WASM_FLOOR_S: '3600'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
