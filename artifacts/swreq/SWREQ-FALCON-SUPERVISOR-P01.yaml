@@ -67,9 +67,29 @@ artifacts:
 
         (4) THE SEAM SHALL CARRY THE SUPERVISOR'S INPUTS. It consumes battery,
             geofence configuration and RC/datalink liveness, and today the seam
-            carries none of them. A supervisor wired to defaults is worse than
-            no supervisor: #414 notes the compounding case, where even a wired
-            supervisor would read a HARDCODED HEALTHY 16.0 V.
+            carries none of them.
+
+            THE REASON IS NOT THE ONE #414 GIVES, and this requirement said the
+            wrong thing until it was checked. #414 warns of a compounding case
+            where "even if a host wired the supervisor, the battery input it
+            reads is a hardcoded healthy 16.0 V". MEASURED ON MAIN
+            (2026-10-07): that is STALE. `FlightBackend::read_battery_v`
+            defaults to `None` (falcon-core/plain/src/lib.rs:75-77); the 16.0 V
+            default was the #413 fail-unsafe default and #475/#476 replaced it
+            with declare-on-first-sight. falcon-core's own comment records it in
+            the past tense: "`read_battery_v` DEFAULTED to 16.0 V — a healthy 4S
+            pack". The component's `FrameBackend` does not override it, so it
+            inherits `None`.
+
+            SO THE HAZARD IS THE OPPOSITE SHAPE, and still disqualifying. With
+            `None`, `batt_seen` never becomes true, `batt_lost` is therefore
+            always false, and NO BATTERY FAILSAFE CAN EVER FIRE in the published
+            component. That is FAIL-SAFE in the #413 sense — it cannot
+            false-trigger on absence — but it means BATTERY-P01 and BATTERY-P03,
+            both of which exist and are verified in the core, are UNREACHABLE
+            through the seam. A supervisor whose battery failsafe is structurally
+            dead is not a supervised vehicle; it is a stabiliser with a mode
+            machine. The clause stands; its justification is corrected.
 
         (5) THE BUMP SHALL BE ANNOUNCED BEFORE ANYTHING PUBLISHES.
             `pulseengine:falcon-cascade@0.11.0` -> `@0.12.0`. The v1.133 lesson
