@@ -120,13 +120,32 @@ jobs:
       # The longest gz hold measured good on 2026-09-16 was 25 s (three runs:
       # 0.04, 0.21, 0.10 m). The floor is what must not regress; it is NOT the
       # target. ENDURANCE-P01's target is 3600.
-      # RATCHETED 25 -> 120 (#497). The floor is meant to be "the longest
-      # duration that has held, which may not get worse". It sat at 25 while the
-      # measured best was 120, so a 4.8x regression would have passed. A floor
-      # that trails the measurement by 5x is not a ratchet. Raise this whenever
-      # the ladder establishes a longer rung -- that is the mechanism working,
-      # not a maintenance chore.
-      GZ_FLOOR_S: '120'
+      # RATCHETED 25 -> 120 (#497) -> 3600 (2026-10-07). The floor is "the
+      # longest duration that has held, which may not get worse".
+      #
+      # IT HAS NOW REACHED THE REQUIREMENT'S TARGET. #497 demoted
+      # ENDURANCE-P01 partly because "at least ONE HOUR on the reference Gazebo
+      # plant HAS NEVER RUN" — true then, because a `schedule` event left
+      # `github.event.inputs` empty and `MAX="${GZ_MAX_S:-120}"` capped every
+      # nightly at 120 s. #507 fixed that default. Since then the ladder has
+      # climbed the whole way, FOUR NIGHTS RUNNING:
+      #
+      #   2026-10-03  longest holding duration 3600s
+      #   2026-10-04  longest holding duration 3600s
+      #   2026-10-05  longest holding duration 3600s
+      #   2026-10-06  longest holding duration 3600s
+      #
+      # and every rung passed on the way up (25/40/60/90/120/300/900/3600).
+      #
+      # SO THE FLOOR AT 120 WAS THE SAME DEFECT #497 CAUGHT, at a worse ratio:
+      # it trailed the measurement by 30x, and a 30x endurance regression would
+      # have passed silently. Leaving it there because 120 was "recently raised"
+      # is how a ratchet becomes a decoration. Raise this whenever the ladder
+      # establishes a longer rung — that is the mechanism working, not a chore.
+      #
+      # 3600 is also the TARGET, so from here the ratchet and the requirement
+      # coincide: any regression below an hour now fails the nightly.
+      GZ_FLOOR_S: '3600'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
