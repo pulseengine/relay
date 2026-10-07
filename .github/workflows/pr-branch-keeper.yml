@@ -168,6 +168,17 @@ jobs:
             echo "  - Nothing was written with it. Flipping the keeper to \`update-branch\` is the follow-up."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Wired into the KEEPER rather than given its own schedule, deliberately:
+      # a freshness check that depends on cron has the same blind spot it exists
+      # to measure. The keeper runs on every push to main, which is
+      # cron-independent.
+      - name: Is the nightly soak actually running?
+        shell: bash
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/soak-freshness.rs || true
+
       - name: Report armed PRs that cannot merge
         shell: bash
         env:
