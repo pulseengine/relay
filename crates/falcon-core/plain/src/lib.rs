@@ -1424,6 +1424,45 @@ pub struct FlightSupervisor {
     preflight: relay_preflight::PreflightChecks,
 }
 
+/// How long a battery may say NOTHING before it counts as lost, in seconds.
+///
+/// HOISTED OUT OF `FlightSupervisor::step` (was a local `const` there) so
+/// `failsafe_flags` reports the SAME threshold the failsafe acts on. A second
+/// copy of `1.0` would have been a drift hazard of exactly the kind this crate
+/// keeps finding: an observer that disagrees with the thing it observes is worse
+/// than no observer, because it is believed.
+pub const BATT_SILENCE_S: f32 = 1.0;
+
+/// Bit positions for [`FlightSupervisor::failsafe_flags`].
+///
+/// WHY A BITMASK AND NOT AN ENUM: several causes are active at once — a flat pack
+/// inside a geofence breach is two, and the supervisor's own `breach` term
+/// deliberately ORs geofence with battery, so an enum would have to pick a winner
+/// and discard the rest. It is also the shape the published seam needs
+/// (SUPERVISOR-P01): fixed width, no `option<>`, safe to read through a seqlock.
+pub mod failsafe_flags {
+    /// The supervisor has latched an RTL. Absorbing until disarm.
+    pub const RTL_LATCHED: u32 = 1 << 0;
+    /// Pack voltage/SoC is below the LOW threshold.
+    pub const BATT_LOW: u32 = 1 << 1;
+    /// Pack is below the CRITICAL threshold.
+    pub const BATT_CRITICAL: u32 = 1 << 2;
+    /// A pack that HAD been reporting has gone silent for longer than
+    /// [`super::BATT_SILENCE_S`]. Distinct from "never had a battery sense",
+    /// which is NOT a failsafe (#413/#475: declare on first sight).
+    pub const BATT_SILENT: u32 = 1 << 3;
+    /// Estimated position is outside the geofence radius.
+    pub const GEOFENCE_BREACH: u32 = 1 << 4;
+    /// Tilt is over the runaway limit and the terminate counter is ARMING.
+    /// Reaching the threshold produces `Mode::Terminated`, which the mode field
+    /// reports; this bit is the approach to it.
+    pub const RUNAWAY_ARMING: u32 = 1 << 5;
+    /// Motors saturated at a sustained tilt — the high-wind counter is ARMING.
+    pub const WIND_ARMING: u32 = 1 << 6;
+    /// A pre-arm row is failing, so arming is refused.
+    pub const ARM_BLOCKED: u32 = 1 << 7;
+}
+
 impl FlightSupervisor {
     /// `home` NED, `fence_radius` m (breach ⇒ RTL), `cruise_alt` m AGL,
     /// `low_batt_v` V (below ⇒ failsafe).
@@ -1503,6 +1542,57 @@ impl FlightSupervisor {
 
     pub fn mode(&self) -> relay_fsm::Mode {
         self.fsm.mode()
+    }
+
+    /// Every failsafe cause the supervisor currently holds, as a bitmask over
+    /// [`failsafe_flags`].
+    ///
+    /// WHY THIS EXISTS (SUPERVISOR-P01, #414). The published component wraps
+    /// `FlightCore`, so a host embedding it gets no mode machine and no
+    /// failsafes at all. Wiring the supervisor in is the fix, but the supervisor
+    /// COULD NOT REPORT ITS OWN FAILSAFE STATE: `rtl_latched`, `runaway_count`
+    /// and `wind_count` were private with no accessor, so there was nothing for
+    /// a seam — or a GCS — to read. `mode()` shows the OUTCOME (Rtl, Land,
+    /// Terminated); this shows the CAUSE.
+    ///
+    /// EVERY BIT MIRRORS A CONDITION `step` ALREADY ACTS ON, deliberately. None
+    /// of these thresholds are new, and `BATT_SILENCE_S` is now shared with
+    /// `step` rather than copied. An observer that disagrees with the thing it
+    /// observes is worse than none, because it is believed.
+    pub fn failsafe_flags(&self) -> u32 {
+        use failsafe_flags as f;
+        let mut bits = 0u32;
+        if self.rtl_latched {
+            bits |= f::RTL_LATCHED;
+        }
+        if self.batt_state.low {
+            bits |= f::BATT_LOW;
+        }
+        if self.batt_state.critical {
+            bits |= f::BATT_CRITICAL;
+        }
+        // `batt_seen &&` is load-bearing: a vehicle that NEVER had a battery
+        // sense must not read as a silent pack (#413 fail-unsafe, #475
+        // declare-on-first-sight). Same guard `step` uses.
+        if self.batt_seen && self.batt_missing_s > BATT_SILENCE_S {
+            bits |= f::BATT_SILENT;
+        }
+        let est = self.core.state();
+        let dx = est.p[0] - self.home[0];
+        let dy = est.p[1] - self.home[1];
+        if relay_math::sqrtf(dx * dx + dy * dy) > self.fence_radius {
+            bits |= f::GEOFENCE_BREACH;
+        }
+        if self.runaway_count > 0 {
+            bits |= f::RUNAWAY_ARMING;
+        }
+        if self.wind_count > 0 {
+            bits |= f::WIND_ARMING;
+        }
+        if self.arm_blocked_reason().is_some() {
+            bits |= f::ARM_BLOCKED;
+        }
+        bits
     }
 
     pub fn state(&self) -> NavState {
@@ -1820,7 +1910,6 @@ impl FlightSupervisor {
         // read by the pre-arm gate, which is long past by then. One second is
         // far longer than any sane sense interval and far shorter than the
         // reserve an RTL needs.
-        const BATT_SILENCE_S: f32 = 1.0;
         let batt_lost = self.batt_seen && self.batt_missing_s > BATT_SILENCE_S;
         let batt_fail = self.batt_state.low || self.batt_state.critical || batt_lost;
         let breach = dist_home > self.fence_radius || batt_fail;
@@ -3689,6 +3778,82 @@ mod tests {
     /// stops being updated, so its low/critical latches freeze at whatever
     /// they last saw, and without this the vehicle flies on until the pack is
     /// flat with no failsafe ever raised. Found in the v1.139 candidate review.
+    #[test]
+    fn a_vehicle_that_never_had_a_battery_sense_does_not_report_a_silent_pack() {
+        use relay_fsm::Event;
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        backend.battery_lost = true; // no reading, EVER — as the SITL backends do
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut backend); // 16 s — `batt_missing_s` reaches ~16, far
+            // past the 1 s window, so ONLY `batt_seen`
+            // keeps BATT_SILENT clear.
+        }
+        // AN EARLIER VERSION OF THIS TEST USED A FRESH SUPERVISOR AND WAS
+        // VACUOUS: `batt_missing_s` is 0 before any step, so `0 > 1.0` is false
+        // whatever the guard does, and dropping `batt_seen &&` would not have
+        // moved it. Flying without a sense is what exercises the guard.
+        assert_eq!(
+            sup.failsafe_flags() & failsafe_flags::BATT_SILENT,
+            0,
+            "a vehicle that NEVER had a battery sense must not report BATT_SILENT \
+             after 16 s of silence — #413 shipped absence-as-healthy, #475 \
+             corrected it to declare-on-first-sight, and the observer must honour \
+             the same distinction. flags {:#010b}",
+            sup.failsafe_flags()
+        );
+    }
+
+    #[test]
+    fn a_pack_that_goes_silent_in_flight_is_reported_as_the_cause_not_just_the_outcome() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut backend = SimBackend::new(level, dt);
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut backend);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "airborne with a healthy pack");
+        assert_eq!(
+            sup.failsafe_flags() & failsafe_flags::BATT_SILENT,
+            0,
+            "a reporting pack is not silent"
+        );
+
+        backend.battery_lost = true;
+        for _ in 0..2000 {
+            sup.step(&mut backend); // 4 s, well past BATT_SILENCE_S
+        }
+
+        let bits = sup.failsafe_flags();
+        // The CAUSE is readable, which is the whole point: `mode()` says Rtl or
+        // Land, but only this says WHY. Before `failsafe_flags` a telemetry
+        // consumer saw the vehicle divert and could not tell a flat pack from a
+        // geofence breach from a wind failsafe.
+        assert_ne!(
+            bits & failsafe_flags::BATT_SILENT,
+            0,
+            "a pack silent for 4 s must report BATT_SILENT, got {bits:#010b}"
+        );
+        assert_ne!(
+            bits & failsafe_flags::RTL_LATCHED,
+            0,
+            "and the supervisor latched a recovery, got {bits:#010b}"
+        );
+        assert!(
+            matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
+            "outcome and cause must agree, mode {:?}",
+            sup.mode()
+        );
+    }
+
     #[test]
     fn losing_the_battery_sense_in_flight_actuates_failsafe() {
         use relay_fsm::{Event, Mode};
