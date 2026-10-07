@@ -249,7 +249,8 @@ artifacts:
       a `NonFinite` WireError variant and reject; clamp at the seam as `dt-s`
       already does; or document it as the host's responsibility. Recorded for a
       decision, with a step in FV-FALCON-TRANSPORT-002 that FLIPS when a
-      finiteness check appears, so the finding cannot be quietly lost.
+      finiteness check appears, so the finding cannot be quietly lost. The decision
+      thread is #527.
 
       AND IT IS ROBUSTNESS, NOT CONFORMANCE. A self-referential proof cannot
       establish agreement with the binding document; wire.rs's own tests already

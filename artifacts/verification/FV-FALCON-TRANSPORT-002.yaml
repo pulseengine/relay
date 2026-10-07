@@ -65,7 +65,7 @@ artifacts:
       ("a non-finite `dt-s` falls back to 0.001 s") and says NOTHING about
       motor or sensor values. Rejecting them would change what the PUBLISHED
       binding accepts, which is a seam decision and not a proof fix, so it is
-      raised on the requirement instead of decided here.
+      raised on the requirement and on #527 instead of decided here.
 
       ROBUSTNESS, NOT CONFORMANCE — stated because the distinction has already
       cost this project a flight-critical defect. A self-referential proof
