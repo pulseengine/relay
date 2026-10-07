@@ -263,3 +263,129 @@ jobs:
           if [ "$BEST" -lt 3600 ]; then
             echo "::warning::gz hold is ${BEST}s, short of the 1 h ENDURANCE-P01 target — tracked in #403"
           fi
+
+  wasm-endurance:
+    name: wasm endurance watch (BOTH PATHS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      # THE WASM PATH'S OWN FLOOR, and it is NOT 3600.
+      #
+      # The native ladder reaches an hour (ENDURANCE-P01 clause 1, measured
+      # four nights running). The ONLY duration ever established for the wasm
+      # path is 25 s — that is what gazebo.yml runs (6250 ticks at 0.004 s) and
+      # what holds 1.96 m against a 2.00 m command. Starting this floor at 3600
+      # because the native one is there would assert an endurance the component
+      # has never demonstrated, which is the opposite of what a ratchet is for.
+      #
+      # So: start at the measured 25, let the ladder climb, and raise this
+      # whenever it establishes a longer rung. Same mechanism as the native
+      # tier, independent number.
+      WASM_FLOOR_S: '25'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2, wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-component
+        uses: taiki-e/install-action@v2.87.23
+        with:
+          tool: cargo-component
+
+      - name: Install Gazebo Harmonic
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl lsb-release gnupg
+          sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
+            -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
+          sudo apt-get update
+          sudo apt-get install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
+
+      - name: Build the published component and the wasm harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same path gazebo.yml uses: the artifact a host runs is the artifact
+          # we test. build-components.sh skips the bazel P3 artifacts here (the
+          # sibling rules_* repos are not checked out), which is fine — the
+          # cargo-component ones are what compose into the cascade.
+          bash scripts/build-components.sh 1.141
+          cp dist/falcon-components-v1.141/falcon-cascade-v1.141.wasm /tmp/composed.wasm
+          cd tests/cascade-sitl-wasm && cargo build --release --features gazebo
+
+      - name: Climb the wasm ladder until the hold breaks
+        shell: bash
+        run: |
+          set -uo pipefail
+          BEST=0
+          DT=0.004
+          # Each rung gets a FRESH SERVER: /world/falcon/control does not answer
+          # a reset request, so a reused world starts wherever the last run left
+          # the vehicle. Same reason the native tier and scripts/gz-trial.rs
+          # restart per trial.
+          for D in 25 40 60 90 120 300 900 3600; do
+            pkill -f 'gz sim' 2>/dev/null || true
+            sleep 3
+            nohup gz sim -s -r -v2 examples/falcon-sitl-gz/worlds/falcon-quad.sdf \
+              > /tmp/gz-wasm-$D.log 2>&1 &
+            IMU=/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+            for i in $(seq 1 30); do
+              gz topic -l 2>/dev/null | grep -qx "$IMU" && break
+              sleep 2
+            done
+
+            TICKS=$(awk -v d="$D" -v dt="$DT" 'BEGIN{printf "%d", d/dt}')
+            # `|| RC=$?` rather than a bare call: `shell: bash` runs with -e and
+            # the harness exits 1 on a FAIL verdict, so a bare call would END THE
+            # STEP at the first breaking rung — before it printed the rung, the
+            # reason, or the longest-holding number this job exists to publish.
+            # The native tier had exactly this bug twice (#460, then again when
+            # the cap was raised); it is not being reintroduced here.
+            RC=0
+            OUT=$(cd tests/cascade-sitl-wasm && timeout $((D + 300)) \
+                    env BACKEND=gazebo ./target/release/cascade-sitl-wasm \
+                    /tmp/composed.wasm "$TICKS" "$DT" 2>&1) || RC=$?
+            echo "── wasm ${D}s (${TICKS} ticks) ──"
+            grep -E 'LOOP CLOSES|STATE RETURN|HOLD ERROR|^PASS|^FAIL' <<<"$OUT" || true
+
+            # INFRASTRUCTURE vs FLIGHT OUTCOME, distinguished as gazebo.yml does:
+            # a component that never executed is not an endurance result at all.
+            if ! grep -q 'LOOP CLOSES' <<<"$OUT"; then
+              echo "::error::the wasm cascade did not EXECUTE at ${D}s — infrastructure failure, not a flight outcome"
+              echo "$OUT" | tail -20
+              break
+            fi
+
+            # The harness's own verdict is the oracle; do not re-derive it.
+            if [ "$RC" = 0 ] && grep -q '^PASS' <<<"$OUT"; then
+              BEST=$D
+            else
+              if [ "$RC" = 124 ]; then
+                echo "  wasm hold breaks at ${D}s (TIMED OUT)"
+              elif grep -q '^FAIL' <<<"$OUT"; then
+                echo "  wasm hold breaks at ${D}s (verdict FAIL)"
+              else
+                echo "  wasm hold breaks at ${D}s (harness exited $RC without a verdict)"
+              fi
+              break
+            fi
+          done
+          pkill -f 'gz sim' 2>/dev/null || true
+
+          echo "::notice::wasm endurance: longest holding duration ${BEST}s (floor ${WASM_FLOOR_S}s, ENDURANCE-P01 target 3600s)"
+          if [ "$BEST" -lt "${WASM_FLOOR_S}" ]; then
+            echo "::error::wasm endurance REGRESSED: ${BEST}s < floor ${WASM_FLOOR_S}s"
+            exit 1
+          fi
+          # Deliberately NOT a failure while below the target: the wasm path has
+          # never been run past 25 s, so anything above the floor is new
+          # information rather than a defect. Raise WASM_FLOOR_S when a longer
+          # rung is established — that is the ratchet, not a chore.
+          if [ "$BEST" -lt 3600 ]; then
+            echo "::warning::wasm hold is ${BEST}s, short of the 1 h ENDURANCE-P01 target. The NATIVE tier reaches 3600s; BOTH PATHS must, and this is the gap."
+          fi
