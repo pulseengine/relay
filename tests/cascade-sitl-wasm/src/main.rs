@@ -264,10 +264,28 @@ fn main() -> Result<()> {
     let mut touchdown_tick: Option<u32> = None;
     let mut airborne_ticks: u32 = 0;
     let mut peak_horiz_full: f32 = 0.0;
+    // PEAK HORIZONTAL OVER THE WHOLE RUN, tracked UNCONDITIONALLY — the nominal
+    // hold needs it and `peak_horiz_full` above cannot serve: that one is only
+    // updated inside `if let Some((r, at)) = fail_rotor`, so on a nominal flight
+    // it stays 0.0 forever. Kept as a separate variable rather than widening
+    // that one, because its rotor-out meaning is "peak SINCE THE LOSS" and the
+    // verified FAULT-005 record quotes it.
+    //
+    // This is plant TRUTH (`plant.measure` returns `(sensors, true_pos)`), not
+    // the estimate. Judging the hold on the estimate is the #403 /
+    // accelerometer-as-gravity failure mode: a diverging estimator reports its
+    // own setpoint back and the bar never fires.
+    let mut peak_horiz_all: f32 = 0.0;
     let mut rpm_frames = 0u32;
     for tick in 0..ticks {
         let tick_start = std::time::Instant::now();
         let (s, true_pos) = plant.measure(noise);
+        {
+            let h = (true_pos[0] * true_pos[0] + true_pos[1] * true_pos[1]).sqrt();
+            if h > peak_horiz_all {
+                peak_horiz_all = h;
+            }
+        }
         let imu = WitImu {
             ax: s.accel_body[0], ay: s.accel_body[1], az: s.accel_body[2],
             gx: s.gyro_body[0],  gy: s.gyro_body[1],  gz: s.gyro_body[2],
@@ -514,7 +532,7 @@ fn main() -> Result<()> {
     let alt = -p[2];
     let horiz = (p[0] * p[0] + p[1] * p[1]).sqrt();
     println!("final NED  : n={:.3} e={:.3} d={:.3}  (altitude {:.3} m)", p[0], p[1], p[2], alt);
-    println!("horizontal : {horiz:.3} m from launch");
+    println!("horizontal : {horiz:.3} m from launch  (peak {peak_horiz_all:.3} m over the run)");
     println!("peak |a_xy|: {peak_lat_accel:.3} m/s^2  (lateral specific force, NOT tilt)");
     println!();
 
@@ -697,6 +715,36 @@ fn main() -> Result<()> {
              its hover point changed under the calibration."
         );
     }
-    println!("PASS: closed the loop AND held the commanded altitude.");
+    // THE HORIZONTAL HALF, which this harness computed and printed but never
+    // judged. ENDURANCE-P01 asks for "within 1.0 m horizontally and 0.5 m
+    // vertically"; only the vertical half was barred, so a component could
+    // drift away sideways while holding 2.00 m altitude and every rung of the
+    // endurance ladder printed PASS. Found 2026-10-07 while recording the
+    // ladder's own result — the altitude number was mistaken for the hold.
+    //
+    // THE BARS AND THE WINDOW ARE THE NATIVE LEG'S, not new ones:
+    // `final_horiz < 1.0 && peak_horiz < 2.0` over the whole run
+    // (examples/falcon-sitl-gz/src/main.rs, the `None =>` nominal arm). The
+    // peak bar is deliberately looser because the window includes the climb-out,
+    // where the airframe legitimately swings wide on its way to 2 m.
+    if horiz >= 1.0 {
+        bail!(
+            "FAIL: the wasm cascade held altitude but DRIFTED. horizontal {horiz:.3} m from the setpoint >= 1.0 m (peak {peak_horiz_all:.3} m).\n\
+             \n\
+             Altitude is NOT the hold. ENDURANCE-P01 wants 1.0 m horizontally \
+             and 0.5 m vertically, and #403 is a HORIZONTAL divergence — the \
+             native leg holds 0.02 m final / 0.05 m peak for a full hour on the \
+             same plant, so this is a seam defect rather than a plant limit. \
+             Measured on plant truth, so a drifting estimator cannot hide it."
+        );
+    }
+    if peak_horiz_all >= 2.0 {
+        bail!(
+            "FAIL: the wasm cascade ended near the setpoint ({horiz:.3} m) but EXCURSIONED to {peak_horiz_all:.3} m during the run (bar 2.0 m). A \
+             hold that wanders and comes back is not a hold; the final-value \
+             check alone would have passed this."
+        );
+    }
+    println!("PASS: closed the loop, held the commanded altitude AND the horizontal hold.");
     Ok(())
 }

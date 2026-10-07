@@ -175,72 +175,110 @@ artifacts:
       directly instead of by eye.
 
       ======================================================================
-      CLAUSE (3) IS NOW BUILT AND MEASURED (2026-10-07) — the last of the three.
-      Status stays `implemented`: the leg is not on main yet, and promotion is a
-      separate code-free PR.
+      CLAUSE (3) IS NOT MET, AND I BRIEFLY RECORDED THAT IT WAS (2026-10-07).
+      The correction is kept in full because the mistake is this requirement's
+      own recurring shape: a gate that passes having checked less than it claims.
 
-      `wasm-endurance` ("wasm endurance watch (BOTH PATHS)") runs the published
-      Component Model artifact against the same gz plant on the same ladder, so
-      `grep -in wasm .github/workflows/soak.yml` no longer exits 1. Run
-      37621040540, 92 min 40 s, EVERY RUNG PASS to the 1 h target:
+      WHAT I DID. The wasm leg was built and its ladder flew all eight rungs to
+      3600 s (run 37621040540, 92 min 40 s). I read "longest holding duration
+      3600s", recorded clause (3) as measured, wrote that the error "SHRINKS
+      down the ladder ... the opposite shape from #403", and ratcheted
+      WASM_FLOOR_S 25 -> 3600 on the strength of it.
 
-        25s   |err| 0.12 m      300s   |err| 0.00 m
-        40s   |err| 0.02 m      900s   |err| 0.00 m
-        60s   |err| 0.00 m     3600s   |err| 0.00 m
-        90s   |err| 0.00 m
-        120s  |err| 0.00 m     -> "longest holding duration 3600s"
+      WHAT WAS ACTUALLY MEASURED. Altitude. The harness's nominal verdict barred
+      `|err| > 0.5 m` on `commanded {want} m, reached {alt} m` and printed "PASS:
+      closed the loop AND held the commanded altitude". Horizontal position was
+      computed (main.rs:515) and PRINTED (:517) but checked only for FINITENESS
+      (:529). The 1.0 m horizontal bar existed solely in the rotor-out branch,
+      gated on FAIL_ROTOR, which the ladder never sets; `peak_horiz_full` was
+      updated only inside `if let Some((r, at)) = fail_rotor`, so on a nominal
+      flight it stayed 0.0 forever. A component could have been leaving the area
+      at every rung and the ladder would have printed PASS at every rung.
 
-      The error SHRINKS down the ladder. That is a settling transient, not
-      drift — the opposite shape from #403, where the excursion grew with time.
-      A longer flight is a cleaner flight on this path, which is the result the
-      requirement wanted and did not have. Both paths now reach 3600 s.
+      AND THE PRINTED NUMBER NEVER REACHED THE LOG. soak.yml's own output
+      allowlist was `grep -E 'LOOP CLOSES|STATE RETURN|HOLD ERROR|^PASS|^FAIL'`
+      — no `horizontal`. FOURTH time this repo has lost a verdict line to an
+      output allowlist, after FDI_TRACE, RING_TRACE and ROTOR-OUT in
+      scripts/gz-trial.rs. So the one number that would have exposed the gap was
+      generated every rung and discarded by the same change that needed it.
 
-      CLAUSE (2) NOW APPLIES TO BOTH LEGS. `WASM_FLOOR_S` was 25 in the first
-      cut of this job — correct then, because 25 s was the only duration the
-      component had ever been run to, and inheriting the native 3600 would have
-      asserted an endurance it had never shown. The ladder has since earned it,
-      so the floor is ratcheted to 3600. Leaving it at 25 against a measured
-      3600 would have reproduced THIS REQUIREMENT'S OWN clause (2) — the defect
-      it was demoted for — on the very leg added to close clause (3), at a worse
-      ratio than either prior instance: 144x versus 4.8x and 30x.
+      "THE OPPOSITE SHAPE FROM #403" IS RETRACTED. #403 is a HORIZONTAL
+      divergence. A vertical error settling to 0.00 m says nothing about it, and
+      the analytic tier had already established that altitude is the easy axis
+      (0.01 m at 12 h). The interesting half was the one not measured.
 
-      THAT FLOOR RESTS ON ONE DISPATCHED OBSERVATION, which the job's comment
-      says out loud. `BEST < 3600` iff ANY of the 8 sequential rungs fails, each
-      with its own fresh gz server on a hosted runner, so a first-night red is
-      as likely to be a flaky rung as a regression. It is readable rather than
-      ambiguous: the step prints the breaking rung and which of three things
-      happened — TIMED OUT, verdict FAIL, or exited without a verdict
-      (infrastructure). The word REGRESSED is not to be believed without the
-      break reason, and the floor is not to be lowered without quoting it.
+      ----------------------------------------------------------------------
+      CLAUSE (1) WAS AUDITED FOR THE SAME DEFECT AND IS SOUND. This mattered
+      more than the wasm gap, because clause (1)'s evidence is already on main.
+      The native `--scenario=flightcore` verdict's nominal arm is
 
-      THE NIGHT COUNT ABOVE IS SIX, NOT FOUR. The block above lists 10-03..10-06
-      because that is what the window held when it was written; 36991404659
-      (10-02) and 37605915444 (10-07) each also published 3600s, so the gz hour
-      now has six consecutive scheduled observations.
+        final_dist < 0.5 && rms_steady < 1.0 && final_horiz < 1.0 && peak_horiz < 2.0
 
-      THIS LEG CANNOT REPEAT CLAUSE (1)'s BUG, BY CONSTRUCTION. Its ladder is
-      hardcoded (`for D in 25 40 60 90 120 300 900 3600`) with no
-      `github.event.inputs` dependency, so there is no input to fall back from
-      when `schedule` leaves it empty — the exact mechanism that capped the
-      native tier at 120 s for weeks. The cost of that choice, stated now rather
-      than discovered later: the job cannot be shortened for a smoke test and
-      spends ~92 min per run. Both gz tiers are `ubuntu-latest` (the analytic
-      tier is the self-hosted one), so this is hosted time, not fleet time.
+      on `last_true` — PLANT TRUTH, not the estimate — with the peak taken over
+      the whole run and the looser 2.0 m bar because that window includes the
+      climb-out. Its own comment records that it "used to be the ALTITUDE error
+      alone, so every gz hold verdict to date reported horizontal drift as zero
+      by construction". So the six nightly hours ARE horizontally judged, and
+      the native job's filter keeps `verdict`, so the numbers are in the logs.
+      At 3600 s (run 37605915444):
 
-      WHAT REMAINS BEFORE PROMOTION, and it is one night: #524 merges, and ONE
-      `schedule` run exercises the rung. The dispatch above proves the job works
-      end to end; a scheduled run proves it FIRES on the trigger that matters,
-      and clause (1) is the standing proof that "the job exists" and "the job
-      does the work nightly" are different claims. The job has no `if:` gate, so
-      this is a confirmation rather than a risk.
+        final_dist 0.00  rms_steady 0.00 | final_horiz 0.02  peak_horiz 0.05  rms_horiz 0.02
+
+      Five centimetres of peak horizontal over an hour, against a 2.0 m bar — a
+      40x margin, six nights running. Clause (1) stands on its own evidence.
+
+      ----------------------------------------------------------------------
+      THE FIX, AND PROOF IT CAN FAIL. The wasm harness now tracks peak
+      horizontal UNCONDITIONALLY on plant truth and bars the nominal hold with
+      the native leg's own two bars, deliberately not new ones. Measured on the
+      mock plant, 100 s, same component:
+
+        IMU_NOISE   altitude |err|   horiz final   horiz peak   old verdict   now
+        0.0         0.04 m           0.000 m       0.000 m      PASS          PASS
+        0.05        0.02 m           0.683 m       1.251 m      PASS          PASS
+        0.3         0.06 m           3.144 m       7.882 m      PASS          FAIL
+
+      The third row is the defect on demand: altitude held to 6 cm, well inside
+      its 0.5 m bar, while the vehicle sat 3.14 m off station having wandered
+      7.88 m — and the old verdict called that "held the commanded altitude".
+      The bar has never been live before, so it was proven to fire rather than
+      assumed to. Note the quiet mock plant reads 0.000 m by construction (this
+      artifact records why), so mock cannot validate this bar on its own; the
+      excitation knob is what makes the control meaningful.
+
+      WHAT IS ESTABLISHED HORIZONTALLY FOR THE WASM PATH: 25 s, at 0.014 m,
+      from the per-PR gazebo.yml leg. Nothing longer. WASM_FLOOR_S is therefore
+      back to 25 — reverting my own ratchet, because a 3600 floor backed by an
+      altitude measurement is worse than a 25 floor, it merely LOOKS ratcheted.
+
+      AND THERE IS A STANDING REASON TO EXPECT A GAP. gazebo.yml's wasm leg runs
+      25 s with the comment: "Beyond ~26 s a separate horizontal divergence takes
+      over, tracked in #403 — this leg stops short of it deliberately and says
+      so." So the component's horizontal behaviour past ~26 s is an OPEN
+      question, and the 3600 s ladder could not answer it. The honest position
+      is that clause (3) has a built, horizontally-judged leg and NO result yet.
+
+      NEXT, AND IT IS ONE RUN: dispatch the soak with gz_max_s=3600 so BOTH legs
+      produce a horizontally-judged hour in a single run. Then set WASM_FLOOR_S
+      from what the wasm leg actually holds, and only then is clause (3)
+      answerable either way.
+
+      #403 STAYS OPEN, AND MORE PRECISELY THAN BEFORE: fixed on the NATIVE path
+      (six consecutive hours at 0.05 m peak, 40x margin), UNKNOWN on the
+      component path, which is where its 25 s ceiling note still points.
 
       THE NATIVE TIER'S RED IN RUN 37621040540 IS NOT THE CEILING RETURNING. It
       logged "longest holding duration 25s (floor 120s)" -> REGRESSED, because I
       dispatched `gz_max_s=25` from a branch cut before the floor was ratcheted:
       the job honoured the input, climbed to 25 s, and the ratchet correctly
-      rejected it. The wasm leg ignored the same dispatch (hardcoded ladder) and
-      flew the real hour. Recorded because a red endurance gate is precisely
-      what a later reader would misread as a regression.
+      rejected it. The wasm leg ignored the same dispatch (its ladder is
+      hardcoded) and ran the full ladder. Recorded because a red endurance gate
+      is precisely what a later reader would misread as a regression.
+
+      THE NIGHT COUNT IN THE BLOCK ABOVE IS SIX, NOT FOUR. That block lists
+      10-03..10-06 because that is what the window held when it was written;
+      36991404659 (10-02) and 37605915444 (10-07) each also published 3600s.
+
     tags: [requirement, falcon, endurance, soak, gazebo, nightly, v1.140]
     links:
       - type: derives-from
