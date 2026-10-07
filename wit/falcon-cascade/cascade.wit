@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.11.0;
+package pulseengine:falcon-cascade@0.12.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -75,9 +75,40 @@ interface types {
         innovation: f32,
         /// Isolated failed rotor, 0-3; 0xFF when none. Flat, not `option<u8>`.
         failed-rotor: u8,
+        /// FLIGHT MODE (SUPERVISOR-P01). The `relay-fsm` discriminant:
+        ///   0 disarmed  1 armed  2 takeoff  3 loiter
+        ///   4 mission   5 land   6 rtl      7 terminated
+        ///
+        /// `disarmed` AND `terminated` ARE DISTINCT AND MUST STAY SO.
+        /// `disarmed` is a SAFE on-ground state; `terminated` is a deliberate
+        /// AIRBORNE thrust cut that nothing recovers from without an on-ground
+        /// reset. A decoder that collapses them reports a terminated vehicle as
+        /// safely disarmed — the absence-looks-like-data shape this project has
+        /// already paid for twice (a battery read as healthy, an accelerometer
+        /// read as gravity).
+        ///
+        /// Placed HERE deliberately: this byte lands in padding that already
+        /// existed between `failed-rotor` and the u32s, so MODE COSTS ZERO
+        /// BYTES. The record grows 84 -> 88 B, all of it `failsafe`.
+        mode: u8,
+        /// ACTIVE FAILSAFE CAUSES (SUPERVISOR-P01) — a bitmask, not an enum,
+        /// because several are live at once and the supervisor's own breach
+        /// term ORs geofence with battery, so an enum would have to pick a
+        /// winner and discard the rest.
+        ///   bit 0 rtl-latched     1 batt-low        2 batt-critical
+        ///   bit 3 batt-silent     4 geofence-breach 5 runaway-arming
+        ///   bit 6 wind-arming     7 arm-blocked
+        ///
+        /// `mode` is the OUTCOME; this is the CAUSE. Without it a consumer sees
+        /// the vehicle divert and cannot tell a flat pack from a geofence
+        /// breach from a wind failsafe. Mirrors
+        /// `FlightSupervisor::failsafe_flags` exactly; every bit is a condition
+        /// `step` already acts on.
+        failsafe: u32,
         /// Which fields above are meaningful this tick. Bit 0 attitude,
         /// 1 position, 2 velocity, 3 rates, 4 gyro bias, 5 innovation,
-        /// 6 failed-rotor. A clear bit means NOT MEASURED, never "zero".
+        /// 6 failed-rotor, 7 mode, 8 failsafe. A clear bit means NOT MEASURED,
+        /// never "zero".
         valid: u32,
         /// Seqlock tail, written last. See `tick-head`.
         tick-tail: u32,
@@ -165,6 +196,20 @@ interface types {
         ///
         /// `none` = no telemetry, and the FDI falls back to its RPM-free path.
         motor-rpm: option<rotor-rpm>,
+        /// Pack voltage (V), or `none` when the host has no battery sense.
+        ///
+        /// AN OPTION, NOT A SENTINEL, and that is the load-bearing part. The
+        /// supervisor declares the pack ON FIRST SIGHT: until a reading arrives
+        /// `batt_seen` is false and a silent pack CANNOT raise a failsafe,
+        /// which is what stops "no sense at all" reading as "the pack died". A
+        /// 0.0 sentinel would destroy that distinction, and a healthy default
+        /// would restore the fail-unsafe behaviour already corrected once.
+        ///
+        /// WITHOUT THIS FIELD the supervisor's battery failsafe is STRUCTURALLY
+        /// DEAD: `FlightBackend::read_battery_v` defaults to `None`, so
+        /// `batt_seen` never becomes true and BATTERY-P01 / BATTERY-P03 — both
+        /// verified in the core — are unreachable through the seam.
+        battery-v: option<f32>,
     }
 
     /// Per-rotor measured speed, in the airframe's motor order — the same order
@@ -224,6 +269,26 @@ interface types {
         altitude-ki: f32,
         /// Horizontal position-loop integral gain. 0 disables it.
         position-ki: f32,
+
+        // ── SUPERVISOR CONFIGURATION (SUPERVISOR-P01) ──────────────────────
+        //
+        // `FlightSupervisor::new(home, fence-radius, cruise-alt, low-batt-v)`.
+        // The seam carried NONE of these, so the published component could only
+        // ever run a bare FlightCore. A supervisor on defaults is worse than no
+        // supervisor, which is why these land in the SAME change that wires it
+        // in rather than in a follow-up.
+        /// Home / launch point, NED metres: the geofence centre and the RTL
+        /// destination.
+        home-n: f32,
+        home-e: f32,
+        home-d: f32,
+        /// Geofence radius in metres about `home`. Exceeding it latches an RTL.
+        fence-radius: f32,
+        /// RTL cruise altitude, NED metres (negative is up).
+        cruise-alt: f32,
+        /// Pack LOW threshold in volts for the WHOLE battery, not per cell; the
+        /// estimator derives its per-cell fallbacks from this.
+        low-batt-v: f32,
     }
 }
 
