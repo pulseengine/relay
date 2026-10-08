@@ -144,6 +144,107 @@ artifacts:
       disposition, or a requirement's status contradicts its own trace, or an issue was closed as fixed citing only a merge commit,
       or the invisible-to-plan count is non-zero, or `board-health.rs` reports
       numbers a reader can show to be wrong.
+      ======================================================================
+      A THIRD CLAUSE (2026-10-08, maintainer decision): WHEN AN ARTIFACT'S
+      DESCRIPTION NAMES A CODE SYMBOL, IT SHALL CARRY A `steps:` ENTRY GREPING
+      THAT SYMBOL.
+
+      The two clauses above cover a disposition that is STALE. This one covers a
+      disposition that is UNCHECKABLE, which the project has now found twice and
+      which neither existing gate catches:
+
+        VGATE-P01  an artifact CITES a proof that CI never runs   (orphaned)
+        VGATE-P02  CI runs a proof NO artifact cites              (untraced)
+        this       an artifact DESCRIBES a mechanism it never cites at all
+
+      THE WORKED SPECIMEN IS #529. `SWREQ-FALCON-RATE-P05` and
+      `FV-FALCON-RATE-002` were both `verified` while naming
+      `last_torque_scale`, `set_delivered_fraction` and `u_delivered_frac` as
+      the mechanism by which the ESO learns what the MIXER delivered. `git grep`
+      over `origin/main -- 'crates/**' 'examples/**'` returns NOTHING for all
+      three; they exist only on an unmerged branch. And FV-FALCON-RATE-002's
+      ELEVEN STEPS ALL PASS - they grep `fn resync_loop_rate`, the GyroLpf
+      construction, `"RING "` in scripts/gz-trial.rs, every one genuinely
+      present. The steps verify real things; they simply do not cover the
+      mechanism the description leads with. An artifact can be step-green AND
+      describing absent code.
+
+      THIS CLAUSE IS NOT CHEAP, AND THE FIRST DRAFT OF IT CLAIMED OTHERWISE.
+      I wrote "most artifacts here already comply" and then measured it, which
+      refuted it. Counting snake_case identifiers in each description against
+      the symbols its own steps grep:
+
+        artifact                     steps   named   covered
+        FV-FALCON-TRANSPORT-002       16       7        4
+        FV-FALCON-HOLD-001            11      16        7
+        FV-FALCON-FAULT-005           18      18        4
+        FV-FALCON-RATE-002            11      10        3
+
+      Not one of the artifacts I had picked as exemplars covers everything it
+      names. So a literal "every named symbol gets a step" rule is a LARGE new
+      obligation across the trace, not a formality - and adopting it on the
+      cheapness claim would have been the same unsourced-assertion mistake this
+      requirement exists to catch.
+
+      THE PREDICATE THEREFORE NEEDS NARROWING, and the exact wording is a
+      decision rather than something to infer. The uncovered names fall into
+      three kinds that do not deserve equal treatment:
+
+        (a) THE MECHANISM the artifact's claim depends on - `u_delivered_frac`,
+            `set_delivered_fraction`. These are the #529 class: if the symbol is
+            absent the claim is false. A step here is mandatory.
+        (b) NAMED TESTS - `optimistic_variance_diverges_under_noisy_gps`,
+            `attitude_runaway_terminates_in_flight`. A step is cheap and catches
+            a renamed or deleted test, which this project has also hit.
+        (c) MEASUREMENT AND LOG LABELS - `final_dist`, `est_z`, `p_ned`,
+            `a_xy`, `rp_rate2`. These name numbers in a verdict line, not code
+            the claim rests on. Requiring steps for these is noise, and noise
+            is how a rule gets suppressed with `|| true`.
+
+      So the clause should bind (a) and (b) and exempt (c). Drawing that line
+      mechanically is the open part: "appears in a code path" is checkable,
+      "is the mechanism" is a judgement. One workable approximation is to
+      require a step for any named identifier that EXISTS in the tree as a
+      definition (`fn `, `let `, a struct field) and exempt those that appear
+      only inside quoted output - but that is a proposal, measured at nothing
+      yet, and should be tried against these four artifacts before it is
+      written into a requirement.
+
+      ======================================================================
+      A PREMISE IN THIS REQUIREMENT HAS EXPIRED, and it is load-bearing for 61
+      other requirements, so it is corrected here rather than left to rot.
+
+      The analysis above says of the 61: "every one cites a VERUS proof as its
+      criterion, and the Verus track has verified NOTHING since 2026-09-11
+      (#405 - the toolchain cannot find core/std and all 19 proofs fail in
+      0.1 s). So their evidence does not merely lack promotion; it does not
+      currently run."
+
+      THAT WAS TRUE WHEN WRITTEN AND IS NOT TRUE NOW. Measured 2026-10-08 over
+      the last 40 verus.yml runs, grouped by day:
+
+        2026-09-23 .. 2026-10-02    22 runs, EVERY ONE failure
+        2026-10-06 .. 2026-10-08    15 runs, EVERY ONE success
+
+      The track recovered on 2026-10-06. NO COMMIT IN THIS REPOSITORY touched
+      verus.yml, MODULE.bazel or BUILD.bazel in that window, so the fix came
+      from upstream - the workflow checks out `rules_verus` as a sibling - which
+      means nobody here chose it, reviewed it, or verified what it changed.
+
+      WHAT THIS DOES AND DOES NOT CHANGE. It retires the sentence "it does not
+      currently run": it runs, and it passes. It does NOT yet establish that it
+      verifies anything SUBSTANTIVE - 19 SMT targets completed in 12.4 s total
+      with zero verification summary anywhere in a 107 KB log, because
+      `--test_output=errors` hides passing output (#405, and #531 makes it
+      visible). So the 61's evidence has moved from "does not run" to "runs,
+      substance unconfirmed", which is a different disposition and a much
+      shorter distance to close.
+
+      THE OTHER BLOCKER FOR THE 61 STANDS UNCHANGED and is now the only one:
+      they are verified-by `SV-RELAY-*` artifacts that are themselves
+      `approved`, with SV-RELAY-015 carrying no `steps:` at all. That is a chain
+      incomplete two levels up and has nothing to do with Verus.
+
     tags: [requirement, relay, hygiene, issue-board, process, v1.143]
     fields:
       priority: should
