@@ -26,6 +26,91 @@ artifacts:
       FALSIFICATION: wrong if any cited verification track fails to execute
       on the last main commit of a release, or a PR changing verified code
       merges with that track skipped or vacuous.
+
+      ======================================================================
+      ALL FIVE INSTANCES MEASURED (2026-10-08). Status stays `proposed`: one is
+      FIXED, one is made AUDITABLE, two are CONFIRMED STILL TRUE but their
+      fixes carry a capacity cost that is not mine to spend, and one is
+      PARTLY MEASURED. Recorded per-instance because "this requirement is open"
+      is useless to whoever picks it up.
+
+      #418 - FIXED. verus.yml's `pull_request` trigger was path-filtered on
+      `proofs/lean/**` and `.github/workflows/lean.yml` - LEAN'S PATHS, in the
+      VERUS workflow. The file is a copy of lean.yml and the filter came with
+      it, so the Verus gate never ran on a PR that changed Verus code; it ran
+      only when someone touched Lean. A path filter that excludes the very
+      thing it gates is worse than no filter, because the check reports success
+      for a PR it never examined. The same copy-paste had also left a Lean
+      comment ("//proofs/lean:all is bazel's implicit all-rules target") inside
+      the Verus step. Now filtered on `crates/**` + the bazel files that declare
+      the `verus_test` targets + the workflow itself. Verus's `push: main` was
+      already unfiltered, so the backstop existed; it was the PR path that was
+      blind.
+
+      #405 - NOT SETTLED, AND NOW AUDITABLE, which is the actual prerequisite.
+      The claim is that Verus "has verified nothing since 2026-09-11: the
+      toolchain cannot find core/std". The track LOOKS healthy - it has run on
+      every main push and every run is green. Measured on run 37717381938
+      (main, 2026-10-08):
+
+        19 verus_test targets, discovered by bazel query (not enumerated)
+        "Executed 19 out of 19 tests: 19 tests pass", not cached
+        0.5-0.8 s per target, 12.4 s total
+        ZERO occurrences of any verification summary in the 107 KB log
+
+      12.4 s for nineteen SMT verification targets is implausibly fast - this
+      repo's CBMC legs run minutes, and the Kani-0.68 breakage was caught
+      because "every leg failed in ~11 s, which is far too fast for model
+      checking". But the log CANNOT decide it, because `--test_output=errors`
+      prints a target's output only when it FAILS. So on a green run the
+      verification counts never reach the log at all, and the two hypotheses -
+      verifies everything, verifies nothing - look identical from outside.
+      THAT is the defect this requirement names, and it is fixed here: the
+      workflow now prints the per-target test logs on success too.
+
+      NO ASSERTION ON THE COUNT YET, deliberately. The exact wording
+      rules_verus emits is not established from here, and a guessed pattern is
+      either a spurious failure or a `|| true` that passes vacuously - the
+      shape this requirement exists to abolish. Visible evidence is the
+      precondition for asserting on it; the assertion lands once the format is
+      read off a real run.
+
+      #410 - CONFIRMED STILL TRUE. `.github/workflows/verification-gate.yml`
+      declares `pull_request` + `workflow_dispatch` and NO `push: branches:
+      [main]`, so the required verification gate has no main backstop: nothing
+      re-runs it on the merge result.
+
+      AND ITS FIX IS NOT FREE, which is why it is recorded rather than done.
+      That gate is a ~45 min job on the `rust-cpu` pool, and the pool is
+      measured at 7/7 busy with a 47-leg Kani matrix on it (#514: a `crates/**`
+      PR took 9.6 h open-to-merge on 2026-10-07/08). Adding `push: main` buys a
+      backstop at the cost of a full sweep per merge, and the gate's scope
+      fast-path reads `pull_request.base.sha`, which is null on a push event -
+      so it would likely take the FULL sweep every time rather than the scoped
+      one. A scheduled or pre-tag backstop would satisfy this requirement's own
+      falsification wording ("fails to execute on the LAST MAIN COMMIT of a
+      release") at a fraction of the cost. Choosing between them is a capacity
+      decision for the maintainer, not a mechanical fix.
+
+      #417 - CONFIRMED STILL TRUE, mechanically. kani.yml's change-detection
+      filter is `^(crates/|Cargo\.toml|Cargo\.lock|\.github/workflows/kani\.yml)`
+      and `grep -c 'wasm/' .github/workflows/kani.yml` is 0. So a PR touching
+      ONLY `wasm/` - the shipped components - skips the entire matrix and the
+      roll-up `Kani gate` reports pass. Same capacity caveat as #410: adding
+      `wasm/` makes every component change pay the 47-leg matrix. Worth noting
+      the opposite argument too, so the fix is not applied reflexively: the
+      Kani harnesses verify the ENGINES the components wrap, not the component
+      artifacts, so the matrix may be the wrong gate for a wasm-only change -
+      gazebo.yml already runs on every PR with NO path filter, deliberately, and
+      is the differential oracle for exactly that case.
+
+      #407 - PARTLY MEASURED, NOT CLAIMED EITHER WAY. coverage.yml runs on
+      pushes and PRs and its recent runs are green. Whether it produces the
+      `//:falcon-cascade-coverage` artifact specifically, or passes while
+      skipping the target that #407 says fails to fuse, was NOT measured. A
+      green workflow is not evidence the cited artifact exists - the same
+      distinction #405 above turns on.
+
     tags: [requirement, relay, verification-gate, verus, coverage, v1.142]
     links:
       - type: derives-from
