@@ -22,9 +22,22 @@ on:
   # merge. push:main stays UNFILTERED (backstop).
   pull_request:
     branches: [main]
+    # THESE WERE LEAN'S PATHS (#418). This workflow is a copy of lean.yml and
+    # the filter came with it, so the Verus gate never ran on a PR that changed
+    # Verus code - it ran only when someone touched `proofs/lean/**` or
+    # `lean.yml`. A path filter that excludes the very thing it gates is worse
+    # than no filter: the check reports success for a PR it never examined.
+    #
+    # Verus has no `proofs/` directory. Its targets are `verus_test` rules
+    # declared in the ROOT package and they verify the engines, so the paths
+    # that can change a Verus outcome are the crates and the bazel files that
+    # declare the targets.
     paths:
-      - 'proofs/lean/**'
-      - '.github/workflows/lean.yml'
+      - 'crates/**'
+      - 'BUILD.bazel'
+      - 'MODULE.bazel'
+      - 'MODULE.bazel.lock'
+      - '.github/workflows/verus.yml'
 
 concurrency:
   # PRs and non-main branch pushes: cancel superseded runs.
@@ -98,9 +111,8 @@ jobs:
 
       - name: Run every Verus proof
         working-directory: relay
-        # //proofs/lean:all is bazel's implicit all-rules target — every
-        # lean_library + lean_proof_test in the package, so a newly added
-        # proof file is gated the moment its BUILD target lands.
+        # (The Lean comment that used to sit here came with the copy and
+        # described //proofs/lean:all, which this workflow does not build.)
         run: |
           # QUERY, do not enumerate. This workflow exists because 19 verus_test
           # targets were defined and none was ever executed (#364) — a hand-written
@@ -117,3 +129,33 @@ jobs:
           fi
           echo "verus targets discovered:"; printf '  %s\n' $TARGETS
           bazel test $TARGETS --test_output=errors
+
+          # PRINT THE PASSING OUTPUT TOO. `--test_output=errors` shows a
+          # target's log only when it FAILS, so on a green run the Verus
+          # verification summary never reaches the log and the track cannot be
+          # audited at all. Measured on run 37717381938 (main, 2026-10-08):
+          # 19 targets, "Executed 19 out of 19 tests: 19 tests pass", 0.5-0.8 s
+          # each, 12.4 s total - and ZERO occurrences of any verification
+          # summary in the whole 107 KB log. Those facts are consistent with a
+          # track that verifies everything AND with one that verifies nothing,
+          # which is the problem: #405 says Verus "has verified nothing since
+          # 2026-09-11" and the CI log can neither confirm nor refute it.
+          #
+          # This step only PRINTS. It deliberately does NOT assert a non-zero
+          # verified count, because the exact wording rules_verus emits is not
+          # established here, and a guessed pattern is either a spurious failure
+          # or a `|| true` that passes vacuously - the shape this workflow
+          # exists to remove. Visible evidence is the precondition for asserting
+          # on it; the assertion lands once the format is read off a real run.
+          # Tracked on #405.
+          echo "::group::verus test logs (hidden on success by --test_output=errors)"
+          LOGDIR=$(bazel info bazel-testlogs 2>/dev/null || true)
+          if [ -n "$LOGDIR" ] && [ -d "$LOGDIR" ]; then
+            find "$LOGDIR" -name test.log -print | sort | while read -r L; do
+              echo "-- ${L#"$LOGDIR"/}"
+              sed -n '1,80p' "$L"
+            done
+          else
+            echo "::warning::bazel-testlogs not found - the Verus output stays unauditable"
+          fi
+          echo "::endgroup::"
