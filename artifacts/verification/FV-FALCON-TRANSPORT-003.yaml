@@ -1,0 +1,158 @@
+artifacts:
+  - id: FV-FALCON-TRANSPORT-003
+    type: sw-verification
+    title: "TRANSPORT-P01 element 5 — the reference host speaks the PUBLISHED binding, and the legacy 16/54-byte frames are retired"
+    status: implemented
+    release: falcon-v1.141.0
+    description: >
+      Closes element 5 of SWREQ-FALCON-TRANSPORT-P01, the last of its five:
+      "THE REFERENCE HOST is only half done — the codec exists and is the
+      reusable half, but `SimServer` is NOT re-pointed and `falcon-hitl` still
+      carries ACTUATOR_FRAME_LEN=16 / SENSOR_FRAME_LEN=54 for its superseded
+      frames."
+
+      `Transport`, `LinkBackend` and `SimServer` now exchange BINDING frames —
+      `Motors` (8+16 = 24 B) and `Sensor` (8+76 = 84 B) — so a host written
+      against docs/TRANSPORT-BINDING.md drives the verified `FlightCore`
+      without inventing a framing. That is what makes the document a binding
+      rather than a description. The legacy constants, `SensorFrame`, and the
+      four `encode_/decode_actuator|sensor` functions are DELETED.
+
+      THE CONSTANTS WERE RENAMED, NOT RE-VALUED, and that was deliberate.
+      `SENSOR_FRAME_LEN` meant 54 and the frame is now 84; re-using the name
+      with a new value is the change that compiles in a stale caller and is
+      wrong at runtime. `MOTORS_FRAME_LEN` / `SENSOR_WIRE_FRAME_LEN` fail
+      loudly instead. (`falcon-hitl` is its own only consumer — checked with a
+      quoted `grep -r --include='*.rs'` across the tree, after an unquoted
+      first attempt produced a false negative by letting zsh eat the glob.)
+
+      WHAT THE RE-POINT BUYS, each of which the old frames could not express:
+
+      (1) THE TICK CONTRACT IS NOW LIVE, not merely compiled. Every exchange
+      carries a sequence; `SeqTracker::observe` classifies it; and
+      `LinkBackend::last_verdict()` exposes the result. TRANSPORT-P01's
+      falsification condition is that a host "cannot tell a dropped tick from a
+      late one" — a backend that swallowed the distinction would satisfy the
+      codec and fail the requirement.
+
+      AND IT DOES NOT LIE ABOUT A REPLY IT COULD NOT READ. `last_verdict()`
+      returns `Option<TickVerdict>`, with a separate `rejected_replies()` count.
+      The first cut returned a bare verdict defaulting to `First` on a failed
+      decode, so GARBAGE read as a fresh stream start — on the very field this
+      requirement's falsification condition turns on. A rejected reply is not a
+      tick that went wrong; it is a tick that was never classified, and
+      collapsing the two is how a link reports a healthy stream while dropping
+      every frame.
+
+      (2) NEITHER A DUPLICATE NOR A LATE FRAME STEPS THE PLANT, and the binding
+      states both in its own table rather than leaving them to a host:
+      `seq == last` -> Duplicate -> "accept the bytes, do not step the
+      controller twice"; `seq < last` -> Late{by} -> "DISCARD; a newer frame
+      already superseded it". The old server had no sequence at all, so it could
+      not have honoured either.
+
+      THE LATE CASE WAS INITIALLY MISSED HERE, and the reason is worth keeping
+      because it generalises: `SeqTracker`'s own doc comment spells out only the
+      DUPLICATE obligation, so an implementer reading the code rather than the
+      document gates one case and ships the other. The table in
+      docs/TRANSPORT-BINDING.md is the authority. Stepping on a late frame
+      applies stale thrust AFTER a newer command has already been acted on,
+      which is worse than dropping the frame; stepping on a duplicate advances
+      the sim two control periods for one commanded tick, which reads
+      downstream as a plant moving faster than the loop flying it. Both are
+      still ANSWERED with current sensors, so the host is not left waiting.
+
+      (3) GARBAGE IS REFUSED RATHER THAN FLOWN. `serve` returns a `Result` where
+      the old version could not fail, so a desynchronised stream used to read as
+      a zero-thrust command. A reference host that silently treats garbage as
+      thrust is a worse example than one that refuses.
+
+      (4) `dt` IS THE HOST'S ACTUAL PERIOD. The binding says `dt-s` carries the
+      real period "not its nominal one"; the backend uses it when it falls
+      inside the binding's own [0.0001, 0.1] s range and falls back to the
+      configured value otherwise.
+
+      THAT IS SAFE AGAINST FILTER THRASH, and it was checked rather than
+      assumed, because a jittering `dt` reaching `FlightCore::step` goes
+      straight into `resync_loop_rate`, which rebuilds `GyroLpf` and the
+      harmonic notch bank. It carries an explicit guard:
+
+        // 2% tolerance: jitter must not rebuild filters every tick.
+        if drift > 0.02 * self.designed_hz { ... }
+
+      So a real host's tick-to-tick jitter does not reset filter state; only a
+      sustained rate change past 2% does, which is the resync this is for. The
+      loopback test sends a constant `dt` and therefore could NOT have caught
+      the bad case — the tolerance in the callee is what makes it sound.
+
+      (5) AN ABSENT BATTERY IS SAYABLE. The retired frame carried a bare
+      `battery: f32` with no validity flag, so a host with no battery sense had
+      to send a NUMBER; the old code sent 0.0 V and said why ("until that
+      protocol changes, the fallback is chosen to be fail-SAFE"). That is a
+      field that can only lie, and this crate's own module note named it: those
+      frames "cannot carry heading, rotor RPM, or a battery that says ABSENT
+      (#466)". `read_battery_v` now returns `None`, which is also
+      `FlightBackend`'s own default.
+
+      WHAT IS DEFERRED, so (5) is not misread as complete: a host that
+      genuinely HAS a battery cannot report it over this binding at @0.11.0 —
+      the `sensor-frame` record has no battery field. `battery-v: option<f32>`
+      is drafted for @0.12.0 and parked behind the same seam decision as the
+      supervisor's mode and failsafe fields. This was DISCOVERED during element
+      5 rather than planned: nothing had recorded that re-pointing the
+      reference host would drop the battery path.
+
+      MEASURED: `cargo test -p falcon-hitl --all-targets` = 21 passed, 0 failed
+      (debug, all targets, the way CI runs it); `--doc` = 0; `cargo fmt --check`
+      clean; `cargo clippy --all-targets` clean.
+
+      THIS DOES NOT PROMOTE TRANSPORT-P01. Its FALSIFICATION CONDITION still
+      holds: the published state carries no mode and no failsafe (#414), so a
+      host holding this binding still cannot stream a failsafe to a GCS. All
+      five elements now ship; the falsification condition is the remaining
+      blocker and it runs through #414 -> SUPERVISOR-P01 -> the seam decision.
+    tags: [verification, falcon, transport, hitl, reference-host, v1.141]
+    fields:
+      method: test
+      level: integration
+      steps:
+        # The legacy frames are GONE, not deprecated-but-compiling.
+        # Asserts the DEFINITIONS are gone, not that the names are never
+        # mentioned — the doc comments above the replacements deliberately name
+        # the retired constants to explain why they were renamed rather than
+        # re-valued. A bare name-grep failed on that prose when this step was
+        # first run, which is the argument for running every step before
+        # committing it rather than after.
+        - run: "! grep -qE '^pub const (ACTUATOR_FRAME_LEN|SENSOR_FRAME_LEN)' crates/falcon-hitl/src/lib.rs"
+        - run: "! grep -qE 'fn (encode|decode)_(actuator|sensor)\\b' crates/falcon-hitl/src/lib.rs"
+        # The new lengths are DERIVED from the binding, so they cannot drift
+        # from it by editing a literal.
+        - run: "grep -q 'pub const MOTORS_FRAME_LEN: usize = wire::HEADER_LEN + wire::MOTORS_PAYLOAD_LEN;' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'pub const SENSOR_WIRE_FRAME_LEN: usize = wire::HEADER_LEN + wire::SENSOR_PAYLOAD_LEN;' crates/falcon-hitl/src/lib.rs"
+        # The seam actually carries binding frames.
+        - run: "grep -q 'fn exchange(&mut self, out: &\\[u8; MOTORS_FRAME_LEN\\], reply: &mut \\[u8; SENSOR_WIRE_FRAME_LEN\\])' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'wire::encode_motors(&mut out, self.seq, m);' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'wire::encode_sensor_frame(reply, h.seq, &frame);' crates/falcon-hitl/src/lib.rs"
+        # The tick contract is wired, not just available.
+        - run: "grep -q 'tracker: wire::SeqTracker' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'wire::TickVerdict::Duplicate | wire::TickVerdict::Late' crates/falcon-hitl/src/lib.rs"
+        # `serve` can refuse.
+        - run: "grep -q 'Result<wire::TickVerdict, wire::WireError>' crates/falcon-hitl/src/lib.rs"
+        # Named tests, one step each, so a deleted test fails this artifact
+        # rather than silently shrinking the evidence.
+        - run: "grep -q 'fn the_loopback_carries_the_published_binding' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'fn a_duplicate_frame_does_not_step_the_plant_twice' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'fn garbage_bytes_are_refused_rather_than_flown' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'fn a_host_with_no_battery_sense_reports_absent_not_zero_volts' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'fn a_late_frame_does_not_step_the_plant_with_superseded_commands' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'fn an_undecodable_reply_reports_no_verdict_rather_than_a_fresh_stream' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'fn flight_core_stabilizes_over_the_hitl_link' crates/falcon-hitl/src/lib.rs"
+        # The verdict type cannot silently become infallible again.
+        - run: "grep -q 'pub fn last_verdict(&self) -> Option<wire::TickVerdict>' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'pub fn rejected_replies(&self) -> u32' crates/falcon-hitl/src/lib.rs"
+        # The 2% tolerance this artifact quotes must still be in the callee.
+        - run: "grep -q '0.02 \\* self.designed_hz' crates/falcon-core/plain/src/lib.rs"
+        - run: "cargo test -p falcon-hitl --all-targets"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRANSPORT-P01
