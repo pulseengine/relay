@@ -149,11 +149,24 @@ jobs:
           # (#407's title, duplicate cabi_realloc) remains UNESTABLISHED - it
           # has never been attempted in CI and is not attempted here, because a
           # documented-unbuildable target does not belong in a required step.
-          ALL=$(bazel query '
-              kind("rust_wasm_component_bindgen rule", //:*)
-            + kind("meld_fuse rule", //:*)
-            + //:cascade-orch
-          ' 2>/dev/null | tr '\n' ' ')
+          # THE KIND IS `alias`, NOT `rust_wasm_component_bindgen`, and the
+          # first version of this step got that wrong - the guard below caught
+          # it in CI (#540's first run: "the bazel query no longer covers" all
+          # 19, because the query returned nothing). MEASURED afterwards with
+          # `bazel query ... --output label_kind`:
+          #
+          #   alias rule                 //:falcon-cascade
+          #   alias rule                 //:relay-lc-stream
+          #   meld_fuse rule             //:falcon-cascade-stream-fused
+          #   rust_library rule          //:cascade-orch
+          #   wasm_module_coverage_wasi  //:falcon-cascade-coverage
+          #
+          # `rust_wasm_component_bindgen` is a MACRO; the public label it
+          # creates is an `alias`, so `kind("<macro> rule", ...)` matches
+          # nothing. Worth keeping because it is the obvious mistake to make
+          # again, and because `kind()` on a macro name fails SILENTLY-EMPTY
+          # rather than erroring.
+          ALL=$(bazel query 'kind("alias rule", //:*) + kind("meld_fuse rule", //:*) + //:cascade-orch' 2>/dev/null | tr '\n' ' ')
           # NORMALISE BEFORE MATCHING. `$WAIVED` is written multi-line for
           # readability, so used directly as a haystack its line-final entries
           # are followed by a NEWLINE and `*" $T "*` cannot match them. Caught
