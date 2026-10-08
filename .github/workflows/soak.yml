@@ -440,8 +440,26 @@ jobs:
           # precisely when "below the target" stops being a failure and starts
           # being a gap worth naming. Do not delete it as dead code; it is the
           # guard for the configuration this job used to ship with.
+          # THIS JOB CAN ONLY SPEAK FOR THE WASM LEG, and the notice it used to
+          # print claimed otherwise. It said "BOTH PATHS reached the hour" and
+          # quoted "the native tier's 3600s … 0.02 m final / 0.05 m peak" — all
+          # three HARDCODED LITERALS, inside the wasm job, with no read of the
+          # gz job's result. It would have printed identically had the gz leg
+          # FAILED. Worse, the figures were wrong: soak.yml's own table thirty
+          # lines above records the native 3600 s rung as 0.01 / 0.06.
+          #
+          # Found by an independent clean-room review of the v1.140 claims, and
+          # it matters because that notice was cited as one of three evidence
+          # rows in ENDURANCE-P01's promotion. A cross-job claim asserted from
+          # literals is the absence-looks-like-data shape this repo keeps
+          # finding, with the twist that here the data was also stale.
+          #
+          # So: this job now reports ONLY what it measured, and POINTS AT the gz
+          # job rather than speaking for it. Whoever wants the both-paths
+          # statement reads two jobs, which is the honest cost of a claim about
+          # two legs.
           if [ "$BEST" -lt 3600 ]; then
-            echo "::warning::wasm hold is ${BEST}s, short of the 1 h ENDURANCE-P01 target. The NATIVE tier reaches 3600s; BOTH PATHS must, and this is the gap."
+            echo "::warning::wasm hold is ${BEST}s, short of the 1 h ENDURANCE-P01 target. BOTH PATHS must reach it; read the 'gz endurance' job for the native leg."
           else
-            echo "::notice::BOTH PATHS reached the hour, HORIZONTALLY JUDGED — wasm ${BEST}s alongside the native tier's 3600s (ENDURANCE-P01 clause 3). The native leg holds 0.02 m final / 0.05 m peak horizontal at 3600s; compare the wasm 'horizontal' lines above rather than its altitude line."
+            echo "::notice::wasm leg reached the hour, HORIZONTALLY JUDGED: ${BEST}s (ENDURANCE-P01 clause 3). This job does NOT observe the native leg — read the 'gz endurance watch' job's own notice for that, and compare the wasm 'horizontal' lines above rather than its altitude line."
           fi
