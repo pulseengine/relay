@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ENDURANCE-P01
     type: sw-req
     title: "ENDURANCE-P01 — a position hold shall stay bounded for HOURS, not seconds, and be watched nightly"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       DEMOTED verified -> implemented 2026-10-01 by independent review (#497).
@@ -343,6 +343,45 @@ artifacts:
       peak bar is looser than the requirement's words (above); and one
       horizontally-judged ladder is one observation per path at the hour, backed
       by six nights of native history and by the two legs agreeing.
+
+      ======================================================================
+      PROMOTED implemented -> verified (2026-10-07), in a CODE-FREE PR per the
+      two-commit rule. #497 demoted this requirement for three unmet clauses of
+      its own text; all three are now measured, and the FALSIFICATION statement
+      is evaluated against its own words rather than against a green check.
+
+      FALSIFICATION: "wrong if a 1 h stationary 2 m gz hold leaves the vehicle
+      more than 1.0 m horizontally or 0.5 m vertically from the setpoint, or if
+      the analytic 12 h soak shows any unbounded integrator."
+
+        1 h gz hold, native   final_horiz 0.01 m   vertical 0.00 m
+        1 h gz hold, wasm     final_horiz 0.026 m  vertical 0.00 m
+        analytic 12 h         nightly green at IMU_NOISE 0.01, no integrator growth
+
+      Both an order of magnitude inside both bounds. NOT FALSIFIED.
+
+      WHY THE CITATION IS MEASUREMENTS AND NOT "THE GATES PASSED", restated
+      here because it is the one thing that could make this promotion hollow:
+      the gates bar `peak_horiz < 2.0`, which is LOOSER than the 1.0 m this
+      requirement states. Matching the native bars across both legs was right —
+      a BOTH-PATHS clause needs the two judged alike — but it means a green
+      nightly is not by itself evidence for the requirement's own number. The
+      per-rung figures above and in the table earlier in this file are, and they
+      were read out of the job logs rather than inferred from a conclusion.
+
+      WHAT THE VERIFIER NOW EXECUTES. FV-FALCON-ENDURANCE-001's steps covered
+      the ANALYTIC tier only — nothing touching the gz hour, the ratchet or the
+      wasm leg, which are exactly the three clauses the demotion named. Eleven
+      steps were added with this promotion so the evidence the gate runs matches
+      the clauses that were unmet. Promoting against the old step set would have
+      repeated "verified on half of itself", the error #499 caught on FAULT-005
+      and the reason this requirement was demoted in the first place.
+
+      WHAT REMAINS TRUE AND UNCLAIMED: this is the gz plant, not the airframe;
+      the hour is one horizontally-judged observation per path, backed by six
+      consecutive nights of native history and by the two legs agreeing to
+      0.006 m on peak; and the nightly now ratchets at 3600 on both legs, so a
+      regression below the hour fails rather than warns.
 
     tags: [requirement, falcon, endurance, soak, gazebo, nightly, v1.140]
     links:

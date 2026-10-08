@@ -42,6 +42,14 @@
 /// driven. New hosts use `wire`.
 pub mod wire;
 
+// Kani harnesses for the wire decoder, in a PLAIN SIBLING rather than inside
+// `wire` itself: `cargo build` and `cargo test` cannot see a break in
+// `cfg(kani)` code, so these are exercised with `cargo kani`, and the crate is
+// in .github/workflows/kani.yml so the proofs are ENFORCED rather than merely
+// authored — the orphaned-verified-leaf pattern this release line keeps finding.
+#[cfg(kani)]
+mod kani_proofs;
+
 use falcon_core::{FlightBackend, ImuSample};
 
 /// `[f32; 3]`, matching `falcon-core`'s vector type.
