@@ -235,6 +235,52 @@ artifacts:
       coverage.yml actually produce //:falcon-cascade-coverage, or pass while
       skipping the target that fails to fuse?
 
+      ======================================================================
+      #407's ENUMERATION CAUSE IS FIXED (2026-10-08), by maintainer decision to
+      make bazel.yml QUERY rather than enumerate - the same repair verus.yml
+      received after #364 ("a hand-written target list is exactly the drift that
+      produced that").
+
+      THE DEFAULT IS NOW INVERTED: the step discovers every target of the
+      relevant kinds and the exclusions are an EXPLICIT, printed waiver list,
+      the same shape as kani.yml's KANI_MATRIX_WAIVERS. A new component is built
+      automatically; anything skipped must say why where a reader sees it.
+
+      IT IS BEHAVIOUR-PRESERVING TODAY, verified by simulation because `bazel
+      query` cannot run here (nix is not on PATH). The query selects 29 targets
+      where the old list named 19, so the 10 newcomers are waived with their
+      reasons: falcon-ekf is the Mahony filter, falcon-{iekf,position,attitude,
+      rate,mixer} are the non-stream stage components, relay-runner, and three
+      meld_fuse targets in the area gale#398 describes. UNVERIFIED, not
+      known-broken - removing a name is how you find out, and CI answers it.
+
+      GUARDED, because a query that UNDER-selects fails silently - CI stays
+      green and builds less. That is exactly why this repo declined to narrow
+      the Kani matrix. The step asserts the result still covers all 19 names the
+      old list had and fails loudly naming any that vanished. Both behaviours
+      were exercised before shipping: full query -> 19 built / 10 waived,
+      identical to the old set; a query missing //:falcon-cascade-stream-fused
+      -> exit 1 naming it.
+
+      AND THE SIMULATION CAUGHT A BUG IN THE WAIVER ITSELF. `$WAIVED` is written
+      multi-line, so used directly as a `case` haystack its LINE-FINAL entries
+      are followed by a newline and `*" $T "*` cannot match them:
+      //:falcon-position and //:falcon-mixer leaked through and the step
+      selected 21 targets instead of 19. A waiver list that silently fails to
+      waive is worse than no list, because the extra builds look intentional.
+      Normalised with `tr -s '[:space:]' ' '`.
+
+      WHAT THIS DOES NOT SETTLE, and #407's title still asserts it:
+      //:falcon-cascade-coverage is excluded by KIND (wasm_module_coverage_wasi)
+      because the coverage RUN is manual - bundled witness cannot parse the
+      component-format export section (#145). That exclusion was previously by
+      OMISSION, indistinguishable from an oversight, and is now stated. Whether
+      the target ALSO fails to fuse (duplicate cabi_realloc) is UNESTABLISHED:
+      it has never been attempted in CI and is not attempted here, because a
+      documented-unbuildable target does not belong in a required build step.
+      FV-FALCON-COV-001 still cites it as a `steps:` entry, so that artifact is
+      still citing evidence CI does not produce.
+
     tags: [requirement, relay, verification-gate, verus, coverage, v1.142]
     links:
       - type: derives-from
