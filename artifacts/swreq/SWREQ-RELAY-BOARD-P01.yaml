@@ -231,14 +231,27 @@ artifacts:
       from upstream - the workflow checks out `rules_verus` as a sibling - which
       means nobody here chose it, reviewed it, or verified what it changed.
 
-      WHAT THIS DOES AND DOES NOT CHANGE. It retires the sentence "it does not
-      currently run": it runs, and it passes. It does NOT yet establish that it
-      verifies anything SUBSTANTIVE - 19 SMT targets completed in 12.4 s total
-      with zero verification summary anywhere in a 107 KB log, because
-      `--test_output=errors` hides passing output (#405, and #531 makes it
-      visible). So the 61's evidence has moved from "does not run" to "runs,
-      substance unconfirmed", which is a different disposition and a much
-      shorter distance to close.
+      AND IT VERIFIES SUBSTANTIVELY - MEASURED, NOT INFERRED. An earlier draft
+      of this block could only say "runs, substance unconfirmed", because
+      `--test_output=errors` hid the counts on a green run. #531 made them
+      visible and run 37782958781 printed them:
+
+        ccsds 29  cfdp 15  ci 11  cs 14  ds 12  fm 11  hk 14  hs 16
+        lc 22  mavlink 26  md 9  mm 7  nid 11  primitives 23  sc 20
+        sca 8  sch 11  to 11
+        ------------------------------------------------------------------
+        270 FUNCTIONS VERIFIED, 0 ERRORS, no `cannot find core/std` anywhere.
+
+      One target, relay_tbl, showed no summary and looked exactly like a
+      vacuous pass. It was not: it prints ~80 lines of Verus trigger-selection
+      notes first and the printing step's own 80-line window cut the summary
+      off. Worth keeping because it is the shape of a false positive this
+      requirement is about - the tool that makes evidence visible can itself
+      hide the line that matters.
+
+      So the 61's evidence does not merely run, it proves things, and #533 turns
+      that into an assertion that can FAIL (0 verified, no summary, any errors,
+      or a total below 200).
 
       THE OTHER BLOCKER FOR THE 61 STANDS UNCHANGED and is now the only one:
       they are verified-by `SV-RELAY-*` artifacts that are themselves
