@@ -111,6 +111,74 @@ artifacts:
       green workflow is not evidence the cited artifact exists - the same
       distinction #405 above turns on.
 
+      ======================================================================
+      #405 IS SETTLED, AND THE ANSWER IS THE GOOD ONE (2026-10-08). The
+      assertion this requirement asks for now exists, with the format READ OFF
+      A REAL RUN rather than guessed.
+
+      #531 made the passing output visible. Run 37782958781 (main, after that
+      landed) shows each target emitting
+
+        verification results:: N verified, 0 errors
+
+      Per target, read from the printed logs:
+
+        ccsds 29  cfdp 15  ci 11  cs 14  ds 12  fm 11  hk 14  hs 16
+        lc 22  mavlink 26  md 9  mm 7  nid 11  primitives 23  sc 20
+        sca 8  sch 11  to 11                       tbl: see below
+        ------------------------------------------------------------------
+        270 FUNCTIONS VERIFIED, 0 ERRORS, and no `cannot find core/std`
+        anywhere in the log.
+
+      So "Verus has verified nothing since 2026-09-11" is REFUTED as of
+      2026-10-06, when the track recovered. Measured over the last 40 runs: 22
+      consecutive failures 09-23..10-02, then 15 consecutive successes from
+      10-06. NO COMMIT IN THIS REPOSITORY touched verus.yml, MODULE.bazel or
+      BUILD.bazel in that window, so the fix came from upstream - rules_verus is
+      a checked-out sibling - and nobody here chose it, reviewed it, or verified
+      what it changed. The track being green was never evidence; the counts are.
+
+      THE 19TH TARGET IS THE INTERESTING ONE, AND THE DEFECT WAS MINE.
+      relay_tbl showed NO verification line, which looked exactly like a
+      vacuous pass. It was not: relay_tbl prints ~80 lines of Verus
+      trigger-selection notes before its summary, and #531's `sed -n '1,80p'`
+      window CUT THE SUMMARY OFF. A fixed head window can hide the very line
+      the step exists to show. The step now greps the whole log for the summary
+      and keeps the excerpt as context only.
+
+      WHAT THE GATE NOW DOES, which is the "shall be able to fail" half of this
+      requirement: it fails if ANY target reports 0 verified (a vacuous pass),
+      if ANY target emits no summary at all, if ANY reports errors, or if the
+      TOTAL falls below a floor of 200. Before this, the track could only fail
+      by erroring - it could not fail by proving nothing.
+
+      PROVEN TO FAIL, not assumed. The step body was extracted and run against
+      a fixture built from run 37782958781's own 19 printed logs:
+
+        healthy fixture                  283 verified, 19 targets   exit 0
+        one target forced to 0 verified  "passed VACUOUSLY"         exit 1
+        one target's summary removed     "proved nothing"           exit 1
+        totals collapsed to 102          below the 200 floor        exit 1
+
+      THE FLOOR IS 200 AGAINST A MEASURED 270, deliberately not 270. This is a
+      ratchet against COLLAPSE, not a pin against the ordinary drift of adding
+      and removing proofs; pinning at the measurement would turn every proof
+      deletion into a red gate and the floor would be lowered casually. Raise it
+      when a longer run establishes a higher stable floor.
+
+      AND IT MOVES 61 OTHER REQUIREMENTS. SWREQ-RELAY-BOARD-P01 justifies not
+      promoting 61 sw-reqs partly on their Verus evidence not running. It runs,
+      and now provably verifies 270 functions. Their remaining blocker is
+      therefore ONLY the SV-RELAY-* layer being `approved` with SV-RELAY-015
+      carrying no `steps:` - a chain incomplete two levels up, unrelated to
+      Verus.
+
+      STILL OPEN IN THIS REQUIREMENT: #410 (a NIGHTLY main backstop for the
+      verification gate - decided, not yet built), #417 (kani.yml's filter
+      excludes wasm/; decided to LEAVE it and record gazebo.yml as the
+      unfiltered differential oracle), #407 (coverage.yml is green but whether
+      it produces //:falcon-cascade-coverage is still unmeasured).
+
     tags: [requirement, relay, verification-gate, verus, coverage, v1.142]
     links:
       - type: derives-from
