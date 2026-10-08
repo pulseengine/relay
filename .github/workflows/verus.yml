@@ -130,32 +130,76 @@ jobs:
           echo "verus targets discovered:"; printf '  %s\n' $TARGETS
           bazel test $TARGETS --test_output=errors
 
-          # PRINT THE PASSING OUTPUT TOO. `--test_output=errors` shows a
-          # target's log only when it FAILS, so on a green run the Verus
-          # verification summary never reaches the log and the track cannot be
-          # audited at all. Measured on run 37717381938 (main, 2026-10-08):
-          # 19 targets, "Executed 19 out of 19 tests: 19 tests pass", 0.5-0.8 s
-          # each, 12.4 s total - and ZERO occurrences of any verification
-          # summary in the whole 107 KB log. Those facts are consistent with a
-          # track that verifies everything AND with one that verifies nothing,
-          # which is the problem: #405 says Verus "has verified nothing since
-          # 2026-09-11" and the CI log can neither confirm nor refute it.
+          # ASSERT THAT VERUS ACTUALLY VERIFIED SOMETHING. The format is no
+          # longer guessed: #531 made the passing output visible, and run
+          # 37782958781 (main, 2026-10-08) showed each target emits
           #
-          # This step only PRINTS. It deliberately does NOT assert a non-zero
-          # verified count, because the exact wording rules_verus emits is not
-          # established here, and a guessed pattern is either a spurious failure
-          # or a `|| true` that passes vacuously - the shape this workflow
-          # exists to remove. Visible evidence is the precondition for asserting
-          # on it; the assertion lands once the format is read off a real run.
-          # Tracked on #405.
-          echo "::group::verus test logs (hidden on success by --test_output=errors)"
+          #   verification results:: N verified, 0 errors
+          #
+          # 18 of 19 targets reported one, totalling 270 verified functions with
+          # zero errors, and no `cannot find core/std` anywhere. So #405's claim
+          # that "Verus has verified nothing since 2026-09-11" is REFUTED as of
+          # 2026-10-06, when the track recovered via an upstream rules_verus
+          # change (no commit in this repo touched it).
+          #
+          # THE 19TH TARGET IS WHY THIS STEP CHANGED SHAPE. relay_tbl showed NO
+          # verification line - not because it verified nothing, but because it
+          # prints ~80 lines of Verus trigger-selection notes first and the
+          # previous `sed -n '1,80p'` window CUT OFF the summary. A fixed head
+          # window can hide the exact line the step exists to show. So: grep the
+          # whole log for the summary, and keep the excerpt as context only.
+          #
+          # This is the assertion VGATE-P05 asks for - the track can now FAIL by
+          # verifying nothing, where before it could only fail by erroring.
+          echo "::group::verus verification results"
           LOGDIR=$(bazel info bazel-testlogs 2>/dev/null || true)
-          if [ -n "$LOGDIR" ] && [ -d "$LOGDIR" ]; then
-            find "$LOGDIR" -name test.log -print | sort | while read -r L; do
-              echo "-- ${L#"$LOGDIR"/}"
-              sed -n '1,80p' "$L"
-            done
-          else
-            echo "::warning::bazel-testlogs not found - the Verus output stays unauditable"
+          if [ -z "$LOGDIR" ] || [ ! -d "$LOGDIR" ]; then
+            echo "::error::bazel-testlogs not found - cannot confirm Verus verified anything"
+            exit 1
           fi
+          TOTAL=0
+          BAD=0
+          while read -r L; do
+            NAME="${L#"$LOGDIR"/}"
+            # The summary can appear anywhere in the log, not in its first 80
+            # lines. Take the LAST one if a target emits several.
+            LINE=$(grep -aoE 'verification results:: [0-9]+ verified, [0-9]+ error' "$L" | tail -1)
+            if [ -z "$LINE" ]; then
+              echo "::error::${NAME}: NO verification summary - this target proved nothing"
+              BAD=$((BAD + 1))
+              sed -n '1,40p' "$L"
+              continue
+            fi
+            V=$(echo "$LINE" | sed -E 's/.*:: ([0-9]+) verified.*/\1/')
+            E=$(echo "$LINE" | sed -E 's/.*verified, ([0-9]+) error.*/\1/')
+            echo "  ${NAME%%/*}: ${V} verified, ${E} errors"
+            if [ "$V" -eq 0 ]; then
+              echo "::error::${NAME}: 0 verified - passed VACUOUSLY"
+              BAD=$((BAD + 1))
+            fi
+            if [ "$E" -ne 0 ]; then
+              echo "::error::${NAME}: ${E} verification errors"
+              BAD=$((BAD + 1))
+            fi
+            TOTAL=$((TOTAL + V))
+            # Process substitution, NOT a pipe: a pipe would run the loop in a
+            # subshell and TOTAL/BAD would come back unchanged, so the gate
+            # would always see 0 and pass. And NOT a heredoc: its terminator
+            # must sit at column 0, which breaks out of this YAML block scalar
+            # (actionlint caught exactly that).
+          done < <(find "$LOGDIR" -name test.log | sort)
           echo "::endgroup::"
+          echo "::notice::Verus verified ${TOTAL} functions, 0 errors, across $(find "$LOGDIR" -name test.log | wc -l | tr -d ' ') targets"
+          if [ "$BAD" -ne 0 ]; then
+            echo "::error::${BAD} Verus target(s) proved nothing or errored - the track is not evidence"
+            exit 1
+          fi
+          # A floor, so a silent collapse from 270 to 3 is a FAILURE and not a
+          # quieter green. Deliberately well below the measured 270 rather than
+          # at it: this is a ratchet against collapse, not a pin against the
+          # ordinary drift of adding and removing proofs. Raise it when a longer
+          # run establishes a higher stable floor.
+          if [ "$TOTAL" -lt 200 ]; then
+            echo "::error::Verus verified only ${TOTAL} functions; the floor is 200 (measured 270 on 2026-10-08)"
+            exit 1
+          fi
