@@ -147,6 +147,17 @@ jobs:
           - falcon-baromag
           - falcon-esc-dshot
           - falcon-gnss-ubx
+          # falcon-hitl (v1.141): the TRANSPORT-P01 wire binding's decoder.
+          # `wire::decode_frame` and the four `decode_*` payload readers parse
+          # UNTRUSTED BYTES off a socket or UART, and this crate carried ZERO
+          # harnesses and no matrix entry — which the requirement itself names
+          # as a promotion blocker rather than a caveat. Six harnesses, 251
+          # checks, 0 failures, ~0.7 s locally on 0.67.0; all ten `cover!`s
+          # SATISFIED (so no branch is dead), and mutation-tested by relaxing
+          # the payload-length equality to `<`, which FAILS the structural
+          # harness. Harnesses live in crates/falcon-hitl/src/kani_proofs.rs,
+          # not a `plain/` sibling, because this crate has no verus split.
+          - falcon-hitl
           - relay-log
           - relay-modextra
     steps:

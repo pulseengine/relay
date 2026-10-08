@@ -1,0 +1,147 @@
+artifacts:
+  - id: FV-FALCON-TRANSPORT-002
+    type: sw-verification
+    title: "The TRANSPORT-P01 wire decoder is proven total on untrusted bytes — and the proof found that it accepts NaN"
+    status: implemented
+    release: falcon-v1.141.0
+    description: >
+      Closes the decoder-proof blocker SWREQ-FALCON-TRANSPORT-P01 names in its
+      own text: "NO PROOF ON THE DECODER, and it is a promotion blocker rather
+      than a caveat: `wire::decode_frame` parses UNTRUSTED BYTES and has no Kani
+      harness, and `falcon-hitl` is not in the kani.yml matrix at all ... Named
+      now so it does not become the next orphaned leaf — the pattern this
+      release line keeps finding."
+
+      Both halves are closed here: six harnesses in
+      crates/falcon-hitl/src/kani_proofs.rs, AND `falcon-hitl` added to
+      .github/workflows/kani.yml so they are ENFORCED rather than merely
+      authored. Authoring without the matrix entry is precisely the orphan this
+      project has now found in relay-rc (~40 releases), relay-mix-quad
+      (MIX-P05..08) and a 36/142 workspace-wide sweep.
+
+      MEASURED, locally, Kani 0.67.0 (the version kani.yml pins):
+
+        6 harnesses, 251 checks, 0 failures, 7 unreachable, ~0.7 s
+
+      Fast enough that the SAT heavy-tail risk this repo has measured elsewhere
+      does not apply. The split is deliberate and is what keeps it fast: ONE
+      harness takes a SYMBOLIC LENGTH over a small buffer (the rejection
+      ladder), and the dispatch harnesses take EXACT-LENGTH buffers per message
+      type, so Kani never explores the rejection paths and a 19-float sensor
+      decode in the same state space.
+
+      THE EXACT SCOPE OF "ARBITRARY", because a claim is only as wide as the
+      command that produced it. The symbolic-length harness is bounded at
+      N = HEADER_LEN + MOTORS_PAYLOAD_LEN + 1 = 25 B, so the structural
+      properties below are proven for EVERY byte string of EVERY length up to
+      25 B — which is what reaches every rung of the rejection ladder and both
+      short accept paths. `Config` (44 B) and `Sensor` (84 B) are proven at
+      their EXACT frame lengths only. Nothing here is proven for a 200-byte
+      buffer; bounded model checking does not give that for free, and saying
+      "arbitrary length" unqualified would be the claim-wider-than-the-command
+      error this project has already paid for once.
+
+      WHAT IS PROVEN, over an arbitrary byte string of any length <= 25 B:
+      (1) the whole-frame length is pinned on success —
+      `len == HEADER_LEN + msg.payload_len()` — which is what lets a host find
+      the next frame in a stream; (2) the payload handed back is exactly the
+      tail, so a caller cannot be given a window running past the frame;
+      (3) the reported version is the accepted one, never the wire's byte;
+      (4) `seq` is the little-endian u32 at bytes 4..8, which is the field the
+      requirement's own falsification condition turns on ("wrong if a host
+      cannot tell a dropped tick from a late one"); (5) magic matched — proven
+      rather than trusted, because a decoder that resynchronises on bad magic is
+      how a host flies on misread bytes.
+
+      NOT VACUOUS, AND THAT WAS CHECKED TWO WAYS rather than assumed.
+      (a) All TEN `kani::cover!` properties are SATISFIED: both accept paths
+      (Ack, Motors) and every rung of the rejection ladder (short frame, bad
+      magic, wrong version, unknown type). An unsatisfiable cover would mean a
+      guard is dead code and its error variant is a lie.
+
+      AND THAT IS CI-ENFORCED, NOT A ONE-OFF LOCAL OBSERVATION — established by
+      experiment rather than assumed, because the opposite was the natural guess.
+      Injecting a deliberately impossible cover (`len > 1000`, against an assumed
+      `len <= 25`) makes Kani 0.67.0 report "5 successfully verified harnesses,
+      1 failures" and exit 1. So an unsatisfiable cover FAILS its harness, the
+      matrix leg runs `cargo kani`, and the ten covers are therefore re-checked
+      on every push. The `grep -c 'kani::cover!' -eq 10` step guards their
+      PRESENCE; `cargo kani` guards their SATISFIABILITY.
+      (b) MUTATION TESTED. Relaxing `decode_frame`'s payload-length equality
+      from `!=` to `<` — a plausible bug that accepts over-long frames — makes
+      `decode_frame_is_total_and_never_lies_about_length` report
+      VERIFICATION:- FAILED with exit 1, and the other five still pass, so the
+      failure is localised to the harness that owns the property. wire.rs was
+      restored byte-identical afterwards (`git diff` empty).
+
+      A FINDING THE PROOF PRODUCED, recorded rather than silently fixed: THE
+      DECODER ACCEPTS NON-FINITE PAYLOAD VALUES. `get_f32` is a bare
+      `f32::from_le_bytes` and there is no `is_finite` check anywhere in
+      wire.rs, so arbitrary wire bytes become NaN and infinite MOTOR COMMANDS.
+      This is not an inference — the covers "a NaN motor command is accepted"
+      and "an infinite motor command is accepted" are both SATISFIED, which is
+      a machine-checked demonstration that such a frame exists and is accepted.
+      docs/TRANSPORT-BINDING.md specifies non-finite handling for `dt-s` only
+      ("a non-finite `dt-s` falls back to 0.001 s") and says NOTHING about
+      motor or sensor values. Rejecting them would change what the PUBLISHED
+      binding accepts, which is a seam decision and not a proof fix, so it is
+      raised on the requirement and on #527 instead of decided here.
+
+      ROBUSTNESS, NOT CONFORMANCE — stated because the distinction has already
+      cost this project a flight-critical defect. A self-referential proof
+      cannot establish agreement with docs/TRANSPORT-BINDING.md; that needs
+      vectors this repo did not produce, and wire.rs's own test module already
+      says so ("vectors it did not produce ... NOT in this repo ... these
+      vectors are hand-computed"). On the DroneCAN decoder, 40 tests and 9 Kani
+      harnesses all passed over a bit-order defect that only external reference
+      vectors caught. These harnesses prove the decoder cannot panic and cannot
+      misreport a length. They do not prove it speaks the documented protocol.
+
+      WHAT THIS DOES NOT CLOSE: element 5 of TRANSPORT-P01 is still unshipped —
+      `SimServer` is not re-pointed and ACTUATOR_FRAME_LEN=16 /
+      SENSOR_FRAME_LEN=54 remain in lib.rs — and the requirement's falsification
+      condition still holds (no mode, no failsafe in the published state,
+      #414). So TRANSPORT-P01 is NOT promotable on this; one named blocker of
+      several is removed.
+    tags: [verification, falcon, transport, kani, wire, v1.141]
+    fields:
+      method: formal-proof
+      level: unit
+      steps:
+        - run: "test -f crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q '#\\[cfg(kani)\\]' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'mod kani_proofs;' crates/falcon-hitl/src/lib.rs"
+        # The matrix entry is what makes the proofs ENFORCED. Without it the
+        # harnesses are an orphaned leaf and this artifact would be citing
+        # proofs CI never runs.
+        - run: "grep -q '^          - falcon-hitl$' .github/workflows/kani.yml"
+        # One step per harness name, so a renamed or deleted harness fails this
+        # artifact instead of silently shrinking the proof set.
+        - run: "grep -q 'fn decode_frame_is_total_and_never_lies_about_length' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'fn every_branch_of_the_rejection_ladder_is_reachable' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'fn a_well_formed_motors_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'fn a_well_formed_ack_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'fn a_well_formed_config_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'fn a_well_formed_sensor_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
+        # The anti-vacuity covers, including the two that record the non-finite
+        # finding. If these disappear the artifact's central claim is gone.
+        - run: "grep -q 'a NaN motor command is accepted' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'an infinite motor command is accepted' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 10"
+        # The finding itself: still no finiteness check in the decoder. This
+        # step FLIPS when someone fixes it, which is the intended signal.
+        - run: "! grep -qE 'is_finite|is_nan' crates/falcon-hitl/src/wire.rs"
+        # THE STEP VGATE-P02 REQUIRES, and the house shape for a Kani-backed
+        # artifact. Every crate the Kani matrix model-checks must be cited by a
+        # `cargo kani -p <crate>` step in some artifact, or the verification
+        # gate FAILS it as an UNTRACED PROOF — a proof that runs on every push
+        # while no artifact records it. Adding falcon-hitl to kani.yml WITHOUT
+        # this line would have broken the gate in the mirror image of the orphan
+        # this artifact exists to close. The gate does not execute it: in-matrix
+        # resolves to "enforced-by-kani-gate", because the required `Kani gate`
+        # check is what runs it.
+        - run: "cargo kani -p falcon-hitl"
+        - run: "cargo test -p falcon-hitl --all-targets"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRANSPORT-P01

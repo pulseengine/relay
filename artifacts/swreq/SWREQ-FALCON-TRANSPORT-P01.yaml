@@ -207,6 +207,67 @@ artifacts:
       an existing host must make, rather than guessed at. Filed as #503 so the
       maintainer can decide whether to obtain the capture or accept ours.
       ======================================================================
+      ======================================================================
+      THE DECODER-PROOF BLOCKER IS CLOSED, AND THE PROOF FOUND SOMETHING
+      (2026-10-07, FV-FALCON-TRANSPORT-002). The text above named it: "NO PROOF
+      ON THE DECODER ... `falcon-hitl` is not in the kani.yml matrix at all ...
+      Named now so it does not become the next orphaned leaf." Both halves are
+      closed — six harnesses in crates/falcon-hitl/src/kani_proofs.rs AND the
+      crate added to .github/workflows/kani.yml, because authoring without the
+      matrix entry IS the orphan (relay-rc went ~40 releases that way).
+
+      6 harnesses, 251 checks, 0 failures, ~0.7 s on the pinned Kani 0.67.0.
+      Proven over arbitrary bytes of ANY LENGTH UP TO 25 B (the symbolic-length
+      harness bound; Config and Sensor are proven at their exact lengths only —
+      bounded model checking does not give an unbounded claim for free): a
+      successful decode pins
+      the whole-frame length, the payload is exactly the tail, the version is
+      the accepted one, and `seq` is the LE u32 at bytes 4..8 — that last one is
+      this requirement's own falsification condition ("wrong if a host cannot
+      tell a dropped tick from a late one"), now machine-checked. Non-vacuity
+      was checked rather than assumed: all TEN `kani::cover!`s are SATISFIED,
+      and relaxing the payload-length equality to `<` makes the structural
+      harness FAIL (mutation test; wire.rs restored byte-identical after).
+
+      *** AN OPEN SEAM DECISION FOR THE MAINTAINER, NOT A DEFECT I SHOULD
+      DECIDE: THE PUBLISHED BINDING ACCEPTS NON-FINITE PAYLOAD VALUES. ***
+      `get_f32` is a bare `f32::from_le_bytes` and there is no `is_finite` check
+      anywhere in wire.rs, so arbitrary wire bytes become NaN and infinite
+      MOTOR COMMANDS. This is machine-checked, not inferred: the covers "a NaN
+      motor command is accepted" and "an infinite motor command is accepted"
+      are both SATISFIED, so such a frame provably exists and is provably
+      accepted. docs/TRANSPORT-BINDING.md specifies non-finite handling for
+      `dt-s` ONLY ("a non-finite `dt-s` falls back to 0.001 s") and says nothing
+      about motor or sensor values.
+
+      WHY IT IS NOT JUST FIXED HERE. The decoder's own doc comment argues for
+      rejection — "Every variant is a REJECTION. Nothing here is recoverable by
+      guessing: a decoder that salvages a frame it does not understand is how a
+      host ends up flying on misread bytes" — but a NaN motor value is a
+      WELL-FORMED frame carrying a non-finite number, not a frame the decoder
+      fails to understand. Adding a rejection changes what the PUBLISHED binding
+      accepts, which is a compatibility decision about a document other people
+      are meant to implement against, and this requirement exists precisely so
+      an integrator does not have to guess at such things. The options are: add
+      a `NonFinite` WireError variant and reject; clamp at the seam as `dt-s`
+      already does; or document it as the host's responsibility. Recorded for a
+      decision, with a step in FV-FALCON-TRANSPORT-002 that FLIPS when a
+      finiteness check appears, so the finding cannot be quietly lost. The decision
+      thread is #527.
+
+      AND IT IS ROBUSTNESS, NOT CONFORMANCE. A self-referential proof cannot
+      establish agreement with the binding document; wire.rs's own tests already
+      say their vectors are hand-computed rather than externally sourced. On the
+      DroneCAN decoder, 40 tests and 9 Kani harnesses all passed over a
+      bit-order defect that only external reference vectors caught. These
+      harnesses prove the decoder cannot panic and cannot misreport a length.
+
+      STILL NOT PROMOTABLE, and this changes nothing about that: element 5
+      remains unshipped (`SimServer` not re-pointed, ACTUATOR_FRAME_LEN=16 /
+      SENSOR_FRAME_LEN=54 still in lib.rs) and the falsification condition
+      still holds (no mode, no failsafe in the published state, #414). One
+      named blocker of several is removed.
+
     tags: [requirement, falcon, transport, seam, hitl, v1.141]
     links:
       - type: derives-from
