@@ -84,6 +84,36 @@ artifacts:
         - run: "grep -q 'IMU_NOISE' examples/falcon-sitl-gz/src/main.rs"
         # The nightly job runs the tier with that noise, not at 0.0.
         - run: "grep -q \"IMU_NOISE: '0.01'\" .github/workflows/soak.yml"
+        # ── THE CLAUSES #497 DEMOTED THE REQUIREMENT FOR ────────────────────
+        # Everything above exercises the ANALYTIC tier. None of it touches the
+        # gz hour, the ratchet, or the wasm leg — exactly the three clauses the
+        # demotion named. Added 2026-10-07 with the promotion, because
+        # promoting against steps that cover one tier is how a requirement gets
+        # "verified on half of itself" (the error #499 caught on FAULT-005, and
+        # the reason this requirement was demoted at all).
+        #
+        # Clause 1 — the gz hour is HORIZONTALLY judged, on PLANT TRUTH, peak
+        # over the whole run. Without this bar the verdict reported horizontal
+        # drift as zero by construction.
+        - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 2.0' examples/falcon-sitl-gz/src/main.rs"
+        - run: "grep -q 'last_true\\[0\\] \\* last_true\\[0\\]' examples/falcon-sitl-gz/src/main.rs"
+        # Clause 2 — the ratchet bites on BOTH legs, at the requirement's own
+        # target. A floor below the measurement is the defect #497 and #523 each
+        # caught at a different ratio (4.8x, then 30x).
+        - run: "grep -q \"GZ_FLOOR_S: '3600'\" .github/workflows/soak.yml"
+        - run: "grep -q \"WASM_FLOOR_S: '3600'\" .github/workflows/soak.yml"
+        # Clause 3 — BOTH PATHS: the leg exists, climbs to the hour, and judges
+        # the horizontal half rather than only altitude.
+        - run: "grep -q '^  wasm-endurance:' .github/workflows/soak.yml"
+        - run: "grep -q 'for D in 25 40 60 90 120 300 900 3600' .github/workflows/soak.yml"
+        - run: "grep -q 'held altitude but DRIFTED' tests/cascade-sitl-wasm/src/main.rs"
+        - run: "grep -q 'EXCURSIONED to' tests/cascade-sitl-wasm/src/main.rs"
+        - run: "grep -q 'peak_horiz_all' tests/cascade-sitl-wasm/src/main.rs"
+        # And the number must REACH THE LOG. It was computed, printed, and then
+        # dropped by this very job's output allowlist — the fourth time an
+        # allowlist ate a verdict in this repo. A judged quantity nobody can
+        # read is not evidence.
+        - run: "grep -q 'HOLD ERROR|horizontal' .github/workflows/soak.yml"
     links:
       - type: verifies
         target: SWREQ-FALCON-ENDURANCE-P01
