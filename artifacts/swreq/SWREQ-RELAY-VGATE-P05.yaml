@@ -179,6 +179,62 @@ artifacts:
       unfiltered differential oracle), #407 (coverage.yml is green but whether
       it produces //:falcon-cascade-coverage is still unmeasured).
 
+      ======================================================================
+      #410 IS CLOSED (2026-10-08): the required verification gate now has a
+      NIGHTLY BACKSTOP ON MAIN, `schedule: 43 1 * * *`.
+
+      Until now it ran only on `pull_request`, so nothing ever re-ran it on the
+      merge result - a gate that passes on a PR and is never asked again about
+      what actually landed.
+
+      SCHEDULE, NOT `push: branches: [main]`, by maintainer decision, and the
+      cost is the reason. This job is ~45 min on `rust-cpu`, and that pool is
+      measured at 7/7 busy with a 47-leg Kani matrix (a crates/** PR took 9.6 h
+      open-to-merge, #514). `push: main` buys the backstop at a full sweep PER
+      MERGE - and worse, the scope fast-path is gated on
+      `github.event_name == 'pull_request'` and reads `pull_request.base.sha`,
+      which does not exist outside a PR, so a push run would take the FULL
+      sweep every time and pay the maximum price. A daily run satisfies this
+      requirement's own falsification wording ("fails to execute on the LAST
+      MAIN COMMIT of a release") for a fraction of that, and catches a
+      gate-breaking merge within 24 h rather than at release time.
+
+      TWO BEHAVIOURS WERE TESTED RATHER THAN ASSUMED, because either would have
+      made the backstop useless:
+
+      (1) ON A SCHEDULE EVENT `github.event.pull_request.body` EXPANDS TO EMPTY,
+      and the Verify-Filter extraction added in #505 FAILS LOUDLY on a
+      present-but-unusable line. If an empty body counted as "present", the
+      nightly would have failed every single night. Extracted the step and ran
+      it: empty body -> exit 0 with the DEFAULT filter; a good filter -> exit 0
+      honouring it; a bad filter -> exit 1 with the loud error. So the guard is
+      intact and the backstop takes the full default sweep, which is what a
+      backstop should do - it must not inherit a PR's narrowing.
+
+      (2) `cancel-in-progress` WAS `!= 'workflow_dispatch'`, which would have
+      made scheduled runs cancellable. The existing comment's own reasoning for
+      exempting dispatch - "a manually triggered verification run is
+      deliberate; cancelling it silently discards the result" - applies verbatim
+      to the only thing that ever checks the merge result. Inverted to an
+      ALLOW-LIST (`== 'pull_request'`) so a third trigger added later cannot
+      silently inherit cancellation. A cancelled run also reports as
+      `cancelled`, which `gh pr checks` renders as a FAILURE, so a silently
+      cancelled backstop would have read as a broken gate rather than an absent
+      one.
+
+      THE SLOT: 01:43 UTC, an off-minute and deliberately not the soak's 03:17.
+      GitHub throttles these crons by hours - the soak's 03:17 has been landing
+      ~10:31 - so separation is approximate either way; recorded so a reader
+      does not "fix" it by moving it. The two barely contend regardless, because
+      the soak's heavy endurance legs run on `ubuntu-latest` and only its
+      82-second analytic tier touches `rust-cpu`.
+
+      WHAT REMAINS IN THIS REQUIREMENT: #417 is decided (do NOT add `wasm/` to
+      kani.yml; gazebo.yml already runs unfiltered as the differential oracle
+      for wasm-only changes) and #407 is the last UNMEASURED instance - does
+      coverage.yml actually produce //:falcon-cascade-coverage, or pass while
+      skipping the target that fails to fuse?
+
     tags: [requirement, relay, verification-gate, verus, coverage, v1.142]
     links:
       - type: derives-from
