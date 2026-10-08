@@ -128,10 +128,25 @@ artifacts:
         # deliberately NOT added in the same change that introduces the gate."
         # The gate landed in #507 and the promotion in #528 came AFTER it, so
         # the deferral had already expired; a clean-room review found the
-        # promise outstanding. soak.yml being VALID YAML to Actions is not
-        # incidental here — an invalid soak.yml is exactly how this requirement
-        # lost 16 h of nightlies once.
-        - run: "actionlint .github/workflows/soak.yml"
+        # promise outstanding. soak.yml being VALID TO ACTIONS is not incidental
+        # here — an invalid soak.yml is exactly how this requirement lost 16 h
+        # of nightlies once, via an empty `${{ }}` inside a shell COMMENT, which
+        # is valid YAML and which only actionlint catches.
+        #
+        # IT ASSERTS THE ENFORCEMENT, IT DOES NOT RE-RUN THE LINTER, and the
+        # first version of this step got that wrong. `actionlint
+        # .github/workflows/soak.yml` passed locally and FAILED IN THE GATE with
+        # rc=127, `/bin/sh: 1: actionlint: not found` — the gate's runner has no
+        # actionlint, the same way it has no `gh`. Running a step locally is
+        # necessary and NOT sufficient: a development machine is richer than the
+        # runner, so "I ran every step" has to mean "where the gate runs them".
+        #
+        # So this asserts that ci.yml's lint job still globs EVERY workflow,
+        # which covers soak.yml by construction and covers the next workflow
+        # too. Same shape as `cargo kani -p <crate>`, which the gate resolves to
+        # "enforced-by-kani-gate" rather than executing: the artifact cites the
+        # enforcement and the enforcing job runs it.
+        - run: "grep -q 'actionlint -color .github/workflows/\\*\\.yml' .github/workflows/ci.yml"
     links:
       - type: verifies
         target: SWREQ-FALCON-ENDURANCE-P01
