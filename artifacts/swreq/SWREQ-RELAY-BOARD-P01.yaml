@@ -242,6 +242,17 @@ artifacts:
         ------------------------------------------------------------------
         270 FUNCTIONS VERIFIED, 0 ERRORS, no `cannot find core/std` anywhere.
 
+      AND THE LIVE FIGURE IS 281, because that 270 was taken while one target
+      was still invisible. #533's gate now reports, on main:
+
+        ##[notice]Verus verified 281 functions, 0 errors, across 19 targets
+
+      281 = 270 + relay_tbl's 11. The target that looked exactly like a vacuous
+      pass was never vacuous; the printing step's own window was hiding it. The
+      gate now also FAILS on 0 verified, on a missing summary, on any errors, or
+      on a total below 200 - so this evidence cannot quietly become vacuous
+      again, which is what makes it usable as a premise at all.
+
       One target, relay_tbl, showed no summary and looked exactly like a
       vacuous pass. It was not: it prints ~80 lines of Verus trigger-selection
       notes first and the printing step's own 80-line window cut the summary
