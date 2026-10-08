@@ -17,13 +17,55 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  # A NIGHTLY BACKSTOP ON MAIN (VGATE-P05 / #410). Until now this required
+  # gate ran ONLY on pull_request, so nothing ever re-ran it on the merge
+  # result - a gate that passes on a PR and is never asked again about what
+  # actually landed.
+  #
+  # WHY SCHEDULE AND NOT `push: branches: [main]`, which is the obvious fix:
+  # this job is ~45 min on the `rust-cpu` pool, and that pool is measured at
+  # 7/7 busy with a 47-leg Kani matrix on it (a crates/** PR took 9.6 h
+  # open-to-merge on 2026-10-07/08, #514). `push: main` buys the backstop at
+  # the cost of a full sweep PER MERGE. Worse, the scope fast-path below is
+  # gated on `github.event_name == 'pull_request'` and reads
+  # `pull_request.base.sha`, which does not exist outside a PR - so a push run
+  # would take the FULL sweep every time rather than the scoped one, paying the
+  # maximum price for the backstop.
+  #
+  # A daily run satisfies this requirement's own falsification wording - "fails
+  # to execute on the LAST MAIN COMMIT of a release" - for a fraction of that,
+  # and catches a gate-breaking merge within 24 h instead of at release time,
+  # which is the worst moment to discover one.
+  #
+  # ON A SCHEDULE EVENT the scope step is skipped (it is PR-gated), so the run
+  # takes the DEFAULT full filter. That is intentional here: a backstop should
+  # not inherit a PR's narrowing. And `github.event.pull_request.body` expands
+  # to empty, which the Verify-Filter extraction below handles correctly - no
+  # match means fall back to the default and exit 0, not the loud failure that
+  # a present-but-unusable line triggers.
+  #
+  # 01:43 UTC: an off-minute, and deliberately not the soak's 03:17. GitHub
+  # throttles these crons by hours (the soak's 03:17 has been landing ~10:31),
+  # so separation is approximate either way - but the two barely contend
+  # regardless, because the soak's heavy endurance legs run on `ubuntu-latest`
+  # and only its 82-second analytic tier touches `rust-cpu`.
+  schedule:
+    - cron: '43 1 * * *'
 
 concurrency:
   # PRs: cancel superseded runs when a new push arrives on the branch.
-  # workflow_dispatch: never cancel — a manually triggered verification
-  # run is deliberate; cancelling it silently discards the result.
+  # workflow_dispatch AND schedule: never cancel. The existing reason for
+  # dispatch — "a manually triggered verification run is deliberate;
+  # cancelling it silently discards the result" — applies verbatim to the
+  # nightly backstop, which is the only thing that ever checks the merge
+  # result. Inverted to an allow-list so a THIRD trigger added later does not
+  # silently inherit cancellation: only pull_request cancels.
+  #
+  # A cancelled run also reports as `cancelled`, which `gh pr checks` renders
+  # as a failure — so a silently cancelled backstop would read as a broken
+  # gate rather than an absent one.
   group: verify-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

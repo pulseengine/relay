@@ -103,6 +103,69 @@ artifacts:
       DIFFERENTIAL=1 against the gz falcon-quad produces ANY non-zero
       per-motor difference from the native `FlightCore` on the same frames —
       or if the fused artifact cannot be produced at all.
+      ======================================================================
+      RE-MEASURED 2026-10-08 (`scripts/audit-component-deps.rs`). The table
+      above is from 2026-09-23 and is still accurate on the two stages it
+      names, but it UNDERSTATES the gap and misses the structural reason the
+      gap stayed quiet.
+
+      THE UNWRAPPED SET IS TEN CRATES, NOT TWO. The audit's own
+      "FLOWN BUT NOT WRAPPED BY ANY COMPONENT" list:
+
+        relay-adrc      relay-batt      relay-calib     relay-flowrange
+        relay-fsm       relay-geo       relay-log       relay-notch
+        relay-param     relay-preflight
+
+      `relay-geo` and `relay-adrc` are the two this requirement turns on - the
+      middle of the flown law - but the other eight are the same condition and
+      bear on ORPHAN-P01 and OPSHELL-P01 in the same release.
+
+      AND THE FOUR LEGACY WRAPPERS ARE EXPLICITLY WAIVED, which is better than
+      undocumented but is exactly the debt this requirement exists to clear.
+      The audit prints them every run so they cannot go quiet:
+
+        relay-att   #388  wraps the legacy PID attitude controller; falcon-core
+                          flies geometric SE(3)
+        relay-pos   #388  wraps the legacy PID position controller
+        relay-rate  #388  wraps the legacy PID rate controller; falcon-core
+                          flies ADRC
+        relay-ekf   #388  is the Mahony filter; falcon-core flies the IEKF
+
+      THE STRUCTURAL REASON, and it is a shape this repository has now found
+      three times in one week. The audit's verdict line is:
+
+        PASS: every crate wrapped by a component is one the flight core uses.
+
+      That gates ONE DIRECTION - no component wraps a crate the core does not
+      fly. The reverse direction, every crate the core flies has a component,
+      is printed as "informational" and gates NOTHING. So a stack can pass this
+      audit while the two middle stages of its flown law have no component at
+      all, which is precisely the state it is in.
+
+      The same asymmetry, in three places:
+
+        VGATE-P01   an artifact CITES a proof CI never runs      (gated)
+        VGATE-P02   CI RUNS a proof no artifact cites            (gated later)
+        BOARD-P01   an artifact DESCRIBES a mechanism it never cites
+                    (ungated until #529 surfaced it)
+        this audit  a component wraps an unflown crate           (gated)
+                    a flown crate has no component               (INFORMATIONAL)
+
+      Naming it because the fix for OCI-P07 is not only "write two components":
+      it is also to make the reverse direction FAIL, or the next flown crate
+      added without a component will be just as invisible. Whether that
+      enforcement belongs here, in ORPHAN-P01 (which already covers
+      wired/parked/retired), or in the audit tool itself is a scope question
+      and is not decided here.
+
+      WHAT IS STILL TRUE AND UNCHANGED: the per-stage set composes the LEGACY
+      PID cascade, `docs/OCI-DISTRIBUTION.md` says so outright, and the one
+      artifact that does fly the real law - `falcon-cascade` - is a single
+      opaque component exporting one `step`. SYSREQ-FALCON-022 names this as a
+      standing falsifier of its claim that the stack runs as components on
+      silicon, because the only on-silicon proof-point is code the vehicle does
+      not use.
+
     tags: [requirement, falcon, oci, components, composition, wac, meld, synth, seam, v1.142]
     links:
       - type: derives-from
