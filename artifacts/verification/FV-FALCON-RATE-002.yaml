@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-RATE-002
     type: sw-verification
     title: "RATE-P05 — the inner rate loop tracks under load on the gz plant, once the filters are designed for the rate they run at (v1.141)"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
       Verifies SWREQ-FALCON-RATE-P05 on the gz falcon-quad.
@@ -80,6 +80,30 @@ artifacts:
       measurement reproducible plus the loop tests CI can run; the gz numbers
       live in the cited finding. The NEGATIVE assertion matters — a step that
       only checks presence cannot catch a regression that re-hardcodes a rate.
+      ======================================================================
+      DEMOTED verified -> implemented (2026-10-08, #529), by maintainer
+      decision. This artifact cites a mechanism that is not in the code it
+      verifies.
+
+      Its description names `last_torque_scale`, `set_delivered_fraction` and
+      `u_delivered_frac`. `git grep` over `origin/main -- 'crates/**'
+      'examples/**'` returns NOTHING for all three; they live only on
+      `phase0/rate-loop-antiwindup`, unmerged since 2026-09-23.
+
+      ITS OWN STEPS ALL PASS, which is exactly why this went unnoticed. They
+      grep `fn resync_loop_rate`, `self.gyro_lpf = GyroLpf::new(60.0, actual)`,
+      `"RING "` in scripts/gz-trial.rs and others — every one of which is
+      genuinely on main. The steps verify real things; they simply do not cover
+      the mechanism the description leads with. An artifact can be
+      simultaneously step-green and describing absent code, and this is the
+      specimen.
+
+      NO FAILING STEP WAS ADDED HERE, deliberately and per the same decision.
+      Adding `grep -q 'u_delivered_frac'` now would redden a required check
+      until the branch lands, which is a forcing function the maintainer
+      explicitly did not choose. The step gets added WITH the code, as the
+      precondition for re-promotion.
+
     tags: [verification, falcon, rate-loop, adrc, limit-cycle, gazebo, v1.141]
     fields:
       method: simulation
