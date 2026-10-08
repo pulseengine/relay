@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-RATE-P05
     type: sw-req
     title: "RATE-P05 — the inner rate loop shall track its command UNDER LOAD, not limit-cycle into the rails"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
       While the vehicle is flying, the measured body rate shall track the
@@ -130,6 +130,44 @@ artifacts:
       `--scenario=supervised-rotorout`, the settled-hover roll/pitch rate RMS
       stays above 0.1 rad/s, or any motor reaches a limit during unfaulted
       hover, or the FDI steady gate is shut for more than 5% of hover ticks.
+      ======================================================================
+      DEMOTED verified -> implemented (2026-10-08, #529), by maintainer
+      decision. THIS REQUIREMENT DESCRIBES CODE THAT IS NOT ON MAIN.
+
+      The text above names `last_torque_scale`, `set_delivered_fraction` and
+      `u_delivered_frac` as the mechanism by which the ESO is told what the
+      MIXER actually delivered. None of those symbols exists in any code on
+      main:
+
+        git grep -n 'u_delivered_frac|set_delivered_fraction|last_torque_scale' \
+          origin/main -- 'crates/**' 'examples/**'
+        (no output)
+
+      They exist only on `phase0/rate-loop-antiwindup`, 8 commits, no PR,
+      unmerged since 2026-09-23. Main's `relay-adrc` DOES drive the ESO with
+      `u_act`, a first-order ACTUATOR-LAG state — a different mechanism. Lag is
+      modelled; mixer saturation is not.
+
+      WHY THE GATE DID NOT CATCH IT, which is the part worth fixing: the
+      citation is PROSE, not a `steps:` entry. No step greps those symbols, so
+      the verification gate ran green while a `verified` artifact's central
+      described mechanism was absent. VGATE-P01 catches a cited proof that never
+      runs; VGATE-P02 catches a running proof nobody cites; NEITHER catches a
+      described mechanism with no citation at all.
+
+      THE OTHER PATH WAS AVAILABLE AND NOT TAKEN. Landing the branch's code
+      would have made this description true instead of retracting it. The
+      maintainer chose demotion because it is code-free and reversible, and
+      because that code is 8 commits of flight-control change that needs a gz
+      campaign against #270's own criterion first — roll/pitch rate below the
+      FDI steady gate for >=95% of ticks, measured by FDI_TRACE rather than
+      inferred from a position verdict. That fix is scoped to v1.142.
+
+      RE-PROMOTION REQUIRES, and this is deliberately a higher bar than before:
+      the symbols present in shipped code AND a `steps:` entry greping them, so
+      the same drift cannot recur silently. A status is not re-earned by the
+      prose being restored.
+
     tags: [requirement, falcon, rate-loop, adrc, limit-cycle, gazebo, v1.141]
     fields:
       priority: must
