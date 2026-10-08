@@ -383,6 +383,41 @@ artifacts:
       0.006 m on peak; and the nightly now ratchets at 3600 on both legs, so a
       regression below the hour fails rather than warns.
 
+      ======================================================================
+      THE RATCHET IS NOW PROVEN ON A SCHEDULED RUN, not just a dispatched one
+      (2026-10-08). This requirement was promoted on run 37639930795, which was
+      a `workflow_dispatch`. The distinction mattered: clause (1) of its own
+      demotion was caused precisely by a SCHEDULE event behaving differently
+      from a dispatch - `github.event.inputs` is empty on a schedule, so
+      `MAX="${GZ_MAX_S:-120}"` capped every nightly at 120 s while the job
+      printed a warning and SUCCEEDED.
+
+      The first scheduled nightly at the ratcheted floor, run 37764076289
+      (event=schedule, 2026-10-08T10:31Z), all three jobs success:
+
+        gz endurance    longest holding duration 3600s (floor 3600s, target 3600s)
+                        10:47 -> 12:18, 1h31m
+        wasm endurance  longest holding duration 3600s (floor 3600s, target 3600s)
+                        10:56 -> 12:30, 1h34m
+        notice          "BOTH PATHS reached the hour, HORIZONTALLY JUDGED -
+                        wasm 3600s alongside the native tier"
+
+      So both legs hold the hour UNPROMPTED, at a floor equal to the target,
+      which means a regression below the hour now FAILS the nightly rather than
+      warning. That is the ratchet clause (2) asks for, observed rather than
+      configured.
+
+      A LOG-READING TRAP, recorded because it would have produced a confident
+      wrong reading: the same job logs also contain
+
+        REGRESSED: ${BEST}s < floor ${GZ_FLOOR_S}s
+
+      with the variables UNEXPANDED. That is Actions echoing the step's source,
+      including the `if` branch NOT taken - not an error. The same shape appears
+      in verus.yml's log, where `run=true` and `run=false` both match a naive
+      grep. Before concluding from an error string in a step log, check whether
+      its variables are expanded.
+
     tags: [requirement, falcon, endurance, soak, gazebo, nightly, v1.140]
     links:
       - type: derives-from
