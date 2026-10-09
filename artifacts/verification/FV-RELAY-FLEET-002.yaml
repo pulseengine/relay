@@ -62,6 +62,57 @@ artifacts:
       NOT CLAIMED: detection latency. The schedule still runs every few hours
       rather than on its cron (#436), so an unattended starvation is found late
       whatever this rule says.
+      ======================================================================
+      THE INSUFFICIENCY IS CLOSED (2026-10-09), and it was PROVEN before it was
+      fixed. An independent clean-room review inverted the starvation
+      comparison at .github/workflows/fleet-status.yml:142 -
+
+          [ "$age" -lt "$limit" ] && continue        ->  -ge
+
+      which makes the loop `continue` on exactly the jobs that are TOO OLD, so
+      the alarm can NEVER fire. All four of this artifact's steps still exited
+      0. Its own cause, in its own words: every step greps for a path, a
+      variable name or a prose string, and none mentions an operator.
+
+      scripts/fleet-replay.rs now replays the detector against five fixtures.
+      It extracts the REAL step body AND its env from the workflow and stubs
+      ONLY the two `gh api` calls, so what runs is the workflow's own code. The
+      thresholds are READ from the step's `env:` and then ASSERTED to be 30 and
+      120 - hardcoding them would let a threshold change silently re-interpret
+      every fixture, and reading without asserting would let it quietly make
+      them meaningless, since "60 minutes is too old" only means anything
+      relative to a 30-minute limit.
+
+      BOTH DIRECTIONS ARE ASSERTED, deliberately. "Old job => alarm" alone would
+      still pass if the comparison were replaced by `true`; "young job => no
+      alarm" alone would pass if it were `false`. The five cases are: 60 min
+      self-hosted with nothing started (must alarm), 5 min self-hosted (must
+      not), 60 min hosted under the 120 limit (must not - hosted contention is
+      not fleet death, #514), 180 min hosted (must), and 60 min self-hosted with
+      something started 2 min ago (must not - the #449 fix that stopped three
+      false alarms, #447/#455/#462).
+
+      MEASURED AGAINST THE SAME INVERSION, side by side:
+
+        the four grep steps     4 pass, 0 fail      blind
+        scripts/fleet-replay.rs 4 of 5 FAIL, exit 1 caught
+
+      The workflow was restored byte-identical afterwards (sha256 match, empty
+      git diff).
+
+      TWO STALE BLOCKERS IN THE TEXT ABOVE, corrected rather than left. The same
+      review found that this artifact's stated re-promotion blockers had moved
+      without its text being updated: its tags now include `falcon`, and gate
+      run 37849855680 matched 207 artifacts INCLUDING this one with all four
+      steps PASS - so "tagged relay but not falcon ... this was not among them"
+      is no longer true. The blocker that DID stand was the missing harness,
+      and that is what this change adds.
+
+      STATUS STAYS `implemented`. Promotion is a separate code-free PR
+      (two-commit rule), and it should cite the side-by-side measurement above
+      rather than the fact that the steps pass - which is the distinction this
+      artifact exists to make.
+
     tags: [verification, relay, falcon, ci, fleet, starvation, v1.140]
     fields:
       method: automated-test
@@ -71,6 +122,32 @@ artifacts:
         - run: "grep -q 'HOSTED_THRESHOLD_MIN' .github/workflows/fleet-status.yml"
         - run: "grep -q 'started_at // \\\"-\\\"' .github/workflows/fleet-status.yml"
         - run: "grep -q 'nothing in its run has started since' .github/workflows/fleet-status.yml"
+        # THE STEP THAT CLOSES THIS ARTIFACT'S OWN DEFECT. The four greps above
+        # assert that the detector's INGREDIENTS are present; none of them can
+        # notice the comparison between them being wrong. An independent
+        # clean-room review proved it: inverting
+        #   [ "$age" -lt "$limit" ] && continue   (fleet-status.yml:142)
+        # to `-ge` makes the loop `continue` on exactly the jobs that are TOO
+        # OLD, so the alarm can never fire — and all four greps still exited 0.
+        #
+        # scripts/fleet-replay.rs extracts the REAL step body and its env from
+        # fleet-status.yml, stubs ONLY the two `gh api` calls, and runs it
+        # against five fixtures with known job ages. It does not re-implement
+        # the comparison — re-implementing it would test the harness's copy
+        # rather than the workflow's, which is how a harness comes to agree with
+        # itself forever.
+        #
+        # MEASURED, same inversion, side by side:
+        #   the four greps  4 pass, 0 fail   (blind)
+        #   this harness    4 of 5 cases FAIL, exit 1
+        # The workflow was restored byte-identical afterwards (sha256 match).
+        #
+        # It runs in the gate because verification-gate.yml already installs
+        # rust-script (:218). That was CHECKED, not assumed: an `actionlint`
+        # step added to another artifact the same day failed in the gate with
+        # rc=127 because that runner has no actionlint. A step invoking a TOOL
+        # is runner-dependent until shown otherwise.
+        - run: "./scripts/fleet-replay.rs"
     links:
       - type: verifies
         target: SWREQ-RELAY-FLEET-P01
