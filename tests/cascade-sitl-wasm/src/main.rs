@@ -723,10 +723,18 @@ fn main() -> Result<()> {
     // ladder's own result — the altitude number was mistaken for the hold.
     //
     // THE BARS AND THE WINDOW ARE THE NATIVE LEG'S, not new ones:
-    // `final_horiz < 1.0 && peak_horiz < 2.0` over the whole run
-    // (examples/falcon-sitl-gz/src/main.rs, the `None =>` nominal arm). The
-    // peak bar is deliberately looser because the window includes the climb-out,
-    // where the airframe legitimately swings wide on its way to 2 m.
+    // `final_horiz < 1.0 && peak_horiz < 1.0` over the whole run
+    // (examples/falcon-sitl-gz/src/main.rs, the `None =>` nominal arm).
+    //
+    // THIS COMMENT USED TO SAY the peak bar was "deliberately looser because the
+    // window includes the climb-out, where the airframe legitimately swings wide
+    // on its way to 2 m". THE MEASUREMENT REFUTES THAT (#546). On the gz gate for
+    // the released commit `peak_horiz` is 0.02 m, and across eight soak legs it
+    // spans 0.016-0.071 m. Nothing swings wide: the hold setpoint IS the launch
+    // point and the vehicle climbs VERTICALLY above it, so there is no legitimate
+    // horizontal transient for a 2.0 m allowance to cover. The loose bar was
+    // precautionary and the precaution was never measured; 1.0 m still leaves a
+    // ~14x margin over the observed worst case and now equals HOLD-P01's figure.
     if horiz >= 1.0 {
         bail!(
             "FAIL: the wasm cascade held altitude but DRIFTED. horizontal {horiz:.3} m from the setpoint >= 1.0 m (peak {peak_horiz_all:.3} m).\n\
@@ -738,9 +746,12 @@ fn main() -> Result<()> {
              Measured on plant truth, so a drifting estimator cannot hide it."
         );
     }
-    if peak_horiz_all >= 2.0 {
+    // 2.0 -> 1.0 (#546): HOLD-P01 bounds the horizontal at 1.0 m, and the bar
+    // mirrored the native one, which was twice the requirement. The native and
+    // wasm bars must move together or the paths stop being comparable.
+    if peak_horiz_all >= 1.0 {
         bail!(
-            "FAIL: the wasm cascade ended near the setpoint ({horiz:.3} m) but EXCURSIONED to {peak_horiz_all:.3} m during the run (bar 2.0 m). A \
+            "FAIL: the wasm cascade ended near the setpoint ({horiz:.3} m) but EXCURSIONED to {peak_horiz_all:.3} m during the run (bar 1.0 m). A \
              hold that wanders and comes back is not a hold; the final-value \
              check alone would have passed this."
         );

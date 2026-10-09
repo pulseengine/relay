@@ -2010,7 +2010,21 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
         // HOLD-P01: 0.5 m vertically and 1.0 m horizontally. The horizontal
         // half is new (#403) — before it, this verdict was blind to the very
         // divergence the issue reports.
-        None => final_dist < 0.5 && rms_steady < 1.0 && final_horiz < 1.0 && peak_horiz < 2.0,
+        // BARS NOW EQUAL HOLD-P01's FIGURES (#546). They were final-sample-at-the
+        // requirement plus both mid-run aggregates at TWICE it, so a hold that
+        // excursioned to 1.9 m at t=30 s and settled by t=60 s violated HOLD-P01
+        // and passed its own verification. `rms_steady` is the steady-window
+        // vertical measure and now bars at the requirement's 0.5 m; `peak_horiz`
+        // is whole-run and bars at 1.0 m, which is sound BECAUSE THE HOLD SETPOINT
+        // IS THE LAUNCH POINT — the vehicle climbs vertically above it, so no
+        // legitimate horizontal transient exists. Deliberately NOT barring
+        // `peak_dist`: it reads 2.00 m by construction, since the target is 2 m
+        // altitude from a ground start, so a whole-run 0.5 m vertical bound is
+        // unsatisfiable and the requirement's vertical bound means the hold window.
+        // Only THIS verdict changes; the four other `rms_steady < 1.0` bars belong
+        // to run_geo_cascade / run_alt_rate_hover / run_alt_only_hover /
+        // run_closed_loop_hover, whose margins are unmeasured.
+        None => final_dist < 0.5 && rms_steady < 0.5 && final_horiz < 1.0 && peak_horiz < 1.0,
     }
 }
 
