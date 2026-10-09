@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-VGATE-006
     type: sw-verification
     title: "VGATE-P06 — the Kani scope check decides correctly in both directions and sweeps on every unusable base, replayed not grepped"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
       `scripts/kani-scope-replay.rs` extracts the REAL `Scope check` step body
@@ -56,6 +56,48 @@ artifacts:
       that the predicate still names `crates/`, `Cargo\.toml`, `Cargo\.lock` and
       `kani\.yml`, so a rename or a silently-narrowed predicate fails loudly
       instead of turning every case into a test of an empty string.
+
+      PROMOTED ON OBSERVED BEHAVIOUR IN CI, 2026-10-09, not on the fixtures
+      alone. Three independent classes of evidence, listed with what each does
+      and does not establish.
+
+      1. THE PUSH PATH RESOLVES A REAL BASE — the thing the fix exists for, and
+      the thing no fixture can show, because Actions evaluates `${{ }}` and bash
+      does not. On #549's own merge to main (kani run 37951188122, Detect job
+      113890076984, event=push) the step printed:
+
+        scoping against base efc0dbf0ff040228324372a59dca201173a2de9b (event: push)
+        Kani-relevant files changed — run the matrix
+
+      `efc0dbf` is exactly the previous main HEAD, so `github.event.before`
+      resolved. Before this change that line read "no base sha (push/manual) —
+      run the full matrix (backstop)". The decision is RUN and is correct: #549's
+      diff contains `.github/workflows/kani.yml`.
+
+      2. THE PR PATH IS UNREGRESSED. Adding a `||` fallback can silently change
+      which operand wins. On #549 itself (kani run 37933856036, event=pull_request)
+      the step scoped against `efc0dbf` via `pull_request.base.sha`, so the left
+      operand still takes precedence when present.
+
+      3. THE PREDICATE DECIDES CORRECTLY ON REAL HISTORY, not only on fixtures.
+      Replaying the predicate EXTRACTED from the workflow against eight real main
+      PushEvents, each using its own recorded `payload.before` from the Events
+      API: SEVEN would SKIP and ONE would RUN — `1b4dc1b3 -> 3cce0801`, which
+      genuinely touched `kani.yml`. That is 7 x 47 = 329 Kani jobs avoided, with
+      the one that mattered still run, so #417's "can only skip" shape is ruled
+      out on real data. It also measured the fix's core assumption rather than
+      reasoning about it: `payload.before` IS the previous main HEAD for these
+      squash merges (`46904f4c` is #542's merge and is `before` for #543's;
+      `81fb954b` is #541's and is `before` for #542's).
+
+      WHAT IS STILL NOT OBSERVED, stated plainly: a SKIP decision taken by CI on
+      a real event. Every skip above is a replay or a fixture. THIS PULL REQUEST
+      IS THAT TEST CASE — it is artifact-only, so its own `pull_request` scope
+      check must take the skip branch and the `kani-gate` roll-up must still
+      report pass via the `skipped) echo "Kani matrix: skipped … — OK"` arm. If
+      the matrix runs on this PR, the skip branch is unreachable in practice and
+      this promotion is wrong. Issue #548 therefore stays OPEN until the skip is
+      seen, and closes on the v1.141 tag rather than on a merge.
 
       AND IT WAS NOT RIGHT FIRST TIME. The harness's first run reported three
       FAILs — all three backstop cases — each having printed the correct
