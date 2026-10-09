@@ -1,22 +1,76 @@
 artifacts:
   - id: FV-RELAY-REVIEW-140
     type: sw-verification
-    title: "REVIEW — independent multi-agent review of falcon-v1.140.0 before tag (v1.140)"
+    title: "REVIEW — independent multi-agent review of the falcon-v1.140.0 diff, de-scoped from the v1.140 tag gate to v1.141"
     status: proposed
-    release: falcon-v1.140.0
+    release: falcon-v1.141.0
     description: >
-      The review checkpoint for falcon-v1.140.0, the HOLD release — a position hold that stays bounded, and rotor-out on the gz plant.
+      The review checkpoint for the falcon-v1.140.0 content — the HOLD release:
+      a position hold that stays bounded, and rotor-out on the gz plant.
 
-      EVIDENCE REQUIRED FOR `verified`: `/code-review ultra` run on the
-      release candidate (previous tag..HEAD), the run identified, and every
-      finding listed with its disposition — fixed (PR), filed (issue +
-      release), or dismissed (rationale). Promotion is a separate, code-free
-      PR under the two-commit rule.
+      *** DE-SCOPED FROM THE v1.140 TAG GATE BY MAINTAINER DECISION,
+      2026-10-09. *** This artifact's own prior text named that as the only
+      alternative to doing the review: "it cannot be forgotten, only done or
+      explicitly de-scoped by the maintainer." It was de-scoped.
+      falcon-v1.140.0 therefore ships WITHOUT an independent review.
 
-      While this artifact is `proposed`, scripts/release-readiness.rs
-      reports falcon-v1.140.0 as not ready. That is the point: the review cannot
-      be forgotten, only done or explicitly de-scoped by the maintainer.
-    tags: [verification, relay, review, release, v1.140]
+      WHAT THE MAINTAINER WAS TOLD WHEN THEY DECIDED, stated exactly, because
+      an artifact must not manufacture a consent that was not given. The three
+      options put to them were: run `/code-review ultra`; hold v1.140 and
+      build ahead; or re-scope the review out. The third option's text said it
+      "ships v1.140 with no independent review, which contradicts the plan you
+      approved on 2026-09-17" and asked for it on the record as their call.
+      They chose it. That is the whole of what they had.
+
+      WHAT THEY DID NOT HAVE, surfaced AFTER the answer came back and recorded
+      here as new information rather than as part of the decision: the
+      equivalent gate on the previous release (FV-RELAY-REVIEW-139, verified)
+      returned NINE findings, among them a `workflow_dispatch` input
+      interpolated into a `run:` block on a self-hosted runner — anyone with
+      dispatch rights could have ended the assignment and run commands — and
+      an analytic soak tier that had silently lost its rungs to `shell:
+      bash`'s `-e`. That precedent was found while implementing the de-scope,
+      not before it was chosen, so it did not inform the choice. It is written
+      down because a later reader needs the real cost of a skipped review and
+      because the maintainer may revise the call now that they have it.
+
+      THE RANGE IS PINNED, NOT INHERITED — and this is the substantive reason
+      the artifact was re-scoped instead of deleted. Every other review
+      artifact in this family reads "previous tag..HEAD". Had this one simply
+      been dropped, FV-RELAY-REVIEW-141's "previous tag" would resolve to
+      falcon-v1.140.0, so the v1.140 diff would sit in a permanent blind spot
+      between two reviews and be covered by neither. Instead this review is
+      bound to the explicit range `falcon-v1.139.0..falcon-v1.140.0`, and
+      FV-RELAY-REVIEW-141 continues to cover `falcon-v1.140.0..HEAD`. Together
+      the two still tile the history with no gap. The review moves later; it
+      does not disappear.
+
+      EVIDENCE REQUIRED FOR `verified`: `/code-review ultra` run over
+      `falcon-v1.139.0..falcon-v1.140.0`, the run identified, and every finding
+      listed with its disposition — fixed (PR), filed (issue + release), or
+      dismissed (rationale). Promotion is a separate, code-free PR under the
+      two-commit rule. A finding that lands a fix in v1.141 or later is still
+      a finding against v1.140 and is dispositioned here.
+
+      CONSEQUENCE FOR READINESS, MEASURED WITH THE SCRIPT AND NOT ONLY THE
+      QUERY (`rivet query` and the gate's own tool have disagreed before, so
+      asserting what a tool "will" say is not evidence): on this tree
+      `./scripts/release-readiness.rs` reports falcon-v1.140.0 at **8/9, the
+      sole blocker `[implemented] FV-RELAY-FLEET-002`**, which PR #542
+      verifies; and falcon-v1.141.0 at 0/8 with FV-RELAY-REVIEW-140 now listed
+      among its blockers. The script carries no special rule for review
+      artifacts, so moving this one neither trips nor silences a hidden check.
+
+      THE RELEASE NOTES MUST DISCLOSE THIS. Release-plan rule 4 requires dark
+      or vacuous verification to be named in the notes — v1.139 disclosed its
+      Verus track that way. falcon-v1.140.0's notes must state that it shipped
+      with no independent review and point at this artifact. It is now
+      falcon-v1.141.0 that cannot be tagged until this review is done — so the
+      gate has been deferred by one release, not removed. If v1.141's own
+      review (FV-RELAY-REVIEW-141) is run with `/code-review ultra` over the
+      full `falcon-v1.139.0..HEAD` span, that single run can discharge both
+      artifacts; say so in each.
+    tags: [verification, relay, review, release, v1.140, v1.141, descoped]
     fields:
       method: review
     links:
