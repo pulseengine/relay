@@ -2,9 +2,25 @@ artifacts:
   - id: SWREQ-FALCON-TRANSPORT-P01
     type: sw-req
     title: "TRANSPORT-P01 — the cascade seam shall have ONE supported transport binding, so an integrator does not invent a fifth"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
+      *** PROMOTED implemented -> verified 2026-10-09 ON A FULL RE-RUN OF ITS
+      EVIDENCE, NOT ON A STATUS SWEEP. *** This requirement carries NO steps of
+      its own; it is verified by FV-FALCON-TRANSPORT-001/002/003, each of which
+      declares `verifies: SWREQ-FALCON-TRANSPORT-P01`. All three were sitting at
+      `implemented` with their evidence already satisfied — an ORPHANED
+      PROMOTION, the pattern where an implementation PR lands the work (the
+      two-commit rule caps it at `implemented`) and nobody cuts the code-free
+      promotion. It was found by querying what v1.141 was actually blocked on
+      rather than by assuming the blockers were unfinished.
+
+      MEASURED on main b7e517e2, all 50 steps across the three FVs:
+        47 of 47 non-cargo steps pass, 0 FAIL (each run from a file under /bin/sh)
+        cargo test -p falcon-hitl --all-targets  -> 21 passed, 0 failed
+        cargo kani -p falcon-hitl               -> 6 harnesses verified, 0 failures
+
+
       DEMOTED verified -> implemented 2026-10-01 (#499). IT WAS VERIFIED ON
       HALF OF ITSELF. Its only verifier, FV-FALCON-TRANSPORT-001, says in its
       own first line that it covers "the RETURN half". The requirement asks for
