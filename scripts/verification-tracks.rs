@@ -43,6 +43,10 @@ struct Track {
 enum Trigger {
     EveryMainCommit,
     PullRequestOnly,
+    /// Per-PR AND a nightly cron over main. Absence from a given commit is
+    /// expected rather than a miss, same as PullRequestOnly, but the rendered
+    /// text must not claim PR-only coverage.
+    PullRequestAndNightly,
     Scheduled,
 }
 
@@ -56,7 +60,11 @@ const TRACKS: &[Track] = &[
     Track { workflow: "bazel.yml", name: "Bazel build", trigger: Trigger::EveryMainCommit },
     Track { workflow: "coverage.yml", name: "Coverage", trigger: Trigger::EveryMainCommit },
     Track { workflow: "spar.yml", name: "spar AADL analysis + WIT drift", trigger: Trigger::EveryMainCommit },
-    Track { workflow: "verification-gate.yml", name: "rivet verification gate", trigger: Trigger::PullRequestOnly },
+    // NOT PullRequestOnly since #410 gave this workflow `schedule: 43 1 * * *`,
+    // a nightly backstop on main whose first scheduled run swept 207 artifacts.
+    // The stale label shipped in falcon-v1.140.0's notes as "runs on pull
+    // requests only", understating the coverage that release actually had.
+    Track { workflow: "verification-gate.yml", name: "rivet verification gate", trigger: Trigger::PullRequestAndNightly },
     Track { workflow: "soak.yml", name: "Nightly endurance soak", trigger: Trigger::Scheduled },
 ];
 
@@ -125,6 +133,7 @@ fn cell(track: &Track, state: &State, url: &Option<String>) -> String {
         (State::Dark(c), _) => link(&format!("🔴 **DARK** — {c}")),
         (State::Unfinished(s), _) => link(&format!("⏳ not finished at release time ({s})")),
         (State::NotRun, Trigger::PullRequestOnly) => "⚪ runs on pull requests only — no run on this commit".into(),
+        (State::NotRun, Trigger::PullRequestAndNightly) => "⚪ runs per-PR + nightly on main — no run on this exact commit".into(),
         (State::NotRun, Trigger::Scheduled) => "⚪ scheduled, not per commit — see its latest run".into(),
         (State::NotRun, Trigger::EveryMainCommit) => "⚪ **did not run** for this commit".into(),
     }

@@ -1,0 +1,52 @@
+artifacts:
+  - id: SWREQ-RELAY-VGATE-P06
+    type: sw-req
+    title: "VGATE-P06 — a scope check shall scope a PUSH against the push's own base, and sweep whenever the base is unusable"
+    status: implemented
+    release: falcon-v1.141.0
+    description: >
+      Where a verification workflow narrows its work by diffing changed files,
+      it shall determine that diff on a `push` event from the push's own base
+      (`github.event.before`) and not only from `github.event.pull_request.base.sha`;
+      and where the base is absent, all-zeros, or unreachable, it shall run the
+      FULL scope rather than skip.
+
+      WHY IT EXISTS, measured rather than argued. `kani.yml` already had the
+      narrowing — a `Detect engine changes` job whose roll-up prints "Kani
+      matrix: skipped (no Kani-relevant files changed) — OK". It was INERT on
+      every push to main, because it read `github.event.pull_request.base.sha`,
+      which does not exist on a push, and the empty-base branch ran all 47 legs
+      unconditionally. Four consecutive code-free merges for falcon-v1.140.0
+      (#542 one artifact YAML, #543 one artifact YAML + one docs file, #545 one
+      release-notes file, #547 release notes + a standalone rust-script in no
+      crate) each spawned a full matrix. Because kani.yml's concurrency group is
+      serial on main — `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`
+      is FALSE for a main push — they queued behind one another, and #543's run
+      held the release candidate at `pending`/jobs=0 for 2 h 20 m before being
+      cancelled. It was re-proving a proof already green on 46904f4, a commit
+      with identical crate Rust (48 jobs, 0 non-success). The release lost most
+      of a working day of fleet time to it.
+
+      THIS IS A CLASS, NOT AN INCIDENT, and that is the reason for a requirement
+      rather than a one-line fix. `github.event.pull_request.base.sha` is empty
+      on every non-PR event, and `github.event.before` appeared in NO workflow
+      in this repository before this change. The same read exists in
+      `verification-gate.yml`, where the full sweep off-PR is DELIBERATE and
+      documented (lines 30-31) and is precisely why VGATE-P05/#410's fix was a
+      nightly schedule. So this requirement does not say "always narrow": it
+      says narrow from the right base when narrowing, and sweep when you
+      cannot tell.
+
+      BOTH DIRECTIONS ARE NORMATIVE. A scope check that can only skip is as
+      dangerous as one that can never skip — #417's shape. Narrowing must be
+      demonstrated to SKIP on an irrelevant change AND to RUN on a relevant
+      one, or the saving is indistinguishable from a gate that stopped working.
+
+      FALSIFICATION: wrong if a push to main whose diff touches no Kani-relevant
+      path still runs the matrix, or if a push that touches `crates/`,
+      `Cargo.toml`, `Cargo.lock` or `kani.yml` skips it, or if a push whose base
+      is absent, all-zeros or unreachable skips it.
+    tags: [requirement, relay, verification-gate, kani, scope, ci, v1.141]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

@@ -43,13 +43,37 @@ jobs:
       - name: Scope check (do any Kani-relevant files change?)
         id: scope
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A PULL REQUEST has `pull_request.base.sha`. A PUSH does not — it has
+          # `github.event.before`, the ref's previous tip, so for a squash merge
+          # to main `before...HEAD` is exactly the merged PR's diff. Reading only
+          # the PR field meant every push took the backstop branch below and ran
+          # all 47 legs regardless of content: four code-free merges for
+          # falcon-v1.140.0 each spawned a full matrix, and because this
+          # workflow's concurrency is serial on main, one of them held that
+          # release's candidate for 2 h 20 m re-proving an already-green proof
+          # (#548). A manual dispatch has neither field and still sweeps.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         shell: bash
         run: |
-          if [ -z "${BASE_SHA:-}" ]; then
-            echo "no base sha (push/manual) — run the full matrix (backstop)"
+          # Three ways a base can be unusable, each of which must SWEEP rather
+          # than skip. Collapsing them into one `-z` test is what made the push
+          # case silently unconditional.
+          case "${BASE_SHA:-}" in
+            "")
+              echo "no base sha (manual dispatch) — run the full matrix (backstop)"
+              echo "run=true" >>"$GITHUB_OUTPUT"; exit 0 ;;
+            0000000000000000000000000000000000000000)
+              # Branch creation, or a push whose predecessor is unknown.
+              echo "all-zeros base (branch created / no predecessor) — full matrix (backstop)"
+              echo "run=true" >>"$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          # `fetch-depth: 0` is set above, but a force-push can leave `before`
+          # pointing at a commit no longer reachable. Never diff against it.
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "base $BASE_SHA is not in this history (force-push?) — full matrix (backstop)"
             echo "run=true" >>"$GITHUB_OUTPUT"; exit 0
           fi
+          echo "scoping against base $BASE_SHA (event: ${GITHUB_EVENT_NAME:-?})"
           CHANGED=$(git diff --name-only "$BASE_SHA"...HEAD || echo "__diff_failed__")
           if [ "$CHANGED" = "__diff_failed__" ]; then
             echo "diff failed — fail-safe to run"

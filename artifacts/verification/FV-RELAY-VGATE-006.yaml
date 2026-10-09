@@ -1,0 +1,79 @@
+artifacts:
+  - id: FV-RELAY-VGATE-006
+    type: sw-verification
+    title: "VGATE-P06 — the Kani scope check decides correctly in both directions and sweeps on every unusable base, replayed not grepped"
+    status: implemented
+    release: falcon-v1.141.0
+    description: >
+      `scripts/kani-scope-replay.rs` extracts the REAL `Scope check` step body
+      from `.github/workflows/kani.yml` and runs it, unmodified, against seven
+      fixtures in a throwaway two-commit git repository — so the step's
+      `git cat-file -e` and `git diff --name-only BASE...HEAD` operate on actual
+      commits. It does not re-implement the base selection or the path
+      predicate; re-implementing them would test the harness's copy instead of
+      the workflow's, which is what makes a harness agree with itself forever.
+
+      THE SEVEN CASES, and why each exists. Push with a docs+artifact diff must
+      SKIP — that is the whole point, since the four falcon-v1.140.0 merges
+      looked exactly like this and each ran 47 legs. Push touching a crate
+      source, `Cargo.toml`, and `kani.yml` itself must each RUN, which pins the
+      predicate from the other side so replacing the grep with `false` cannot
+      pass. And three unusable-base cases — all-zeros, a well-formed sha not in
+      this history, and no base at all (`workflow_dispatch`) — must each SWEEP;
+      all three are given a DOCS-ONLY diff on purpose, so that a wrongly-skipping
+      guard would look "correct" and still be caught.
+
+      MUTATION-MEASURED, four probes, with the workflow restored byte-identical
+      (sha256 b455dc69…, empty `git diff`) after each:
+        M1  predicate -> always match        CAUGHT (the docs-only case fails)
+        M2  predicate -> never match         CAUGHT (three RUN cases fail)
+        M5  drop `|| github.event.before`    CAUGHT (the env assertion fires)
+        M3  remove the all-zeros guard       NOT caught
+        M4  remove the not-in-history guard  NOT caught
+
+      M3 AND M4 ARE RECORDED AS NOT CAUGHT RATHER THAN OMITTED. The three
+      defences overlap: delete the all-zeros guard and `git cat-file -e 000…`
+      fails into the not-in-history guard; delete that and `git diff` fails into
+      the pre-existing `__diff_failed__` fail-safe. So the backstop cases verify
+      the BEHAVIOUR — an unusable base sweeps — but pin no individual guard.
+      Defence-in-depth means no single line is load-bearing, which is a property
+      worth having; it is not evidence that each guard is tested, and three green
+      cases must not be read as three tested guards.
+
+      WHAT THE FIXTURES CANNOT COVER, and how it is covered instead. The defect
+      was in the step's `env` expression, and Actions — not bash — evaluates
+      `${{ }}`, so no fixture can exercise it: every case hands `BASE_SHA` in
+      directly. The harness therefore parses the step's `env.BASE_SHA` VALUE out
+      of the YAML and asserts it references both fields. Note this must be a
+      parse, not a grep: `kani.yml`'s own explanatory comment mentions
+      `github.event.before`, so a loose `grep -q 'github.event.before'` passes
+      with the fix reverted — measured during M5, which counted one occurrence
+      after removing the expression. Step 1 below greps the FULL expression with
+      `-F` for the same reason.
+
+      The harness also asserts the extracted body still contains
+      `GITHUB_OUTPUT`, `run=true`, `run=false` and `git diff --name-only`, and
+      that the predicate still names `crates/`, `Cargo\.toml`, `Cargo\.lock` and
+      `kani\.yml`, so a rename or a silently-narrowed predicate fails loudly
+      instead of turning every case into a test of an empty string.
+
+      AND IT WAS NOT RIGHT FIRST TIME. The harness's first run reported three
+      FAILs — all three backstop cases — each having printed the correct
+      message. The cause was in the harness, not the workflow: it read the
+      step's decision by appending `cat "$GITHUB_OUTPUT"` after the body, and
+      those three branches end in `echo … >>"$GITHUB_OUTPUT"; exit 0`, so the
+      appended command never ran. It now reads `$GITHUB_OUTPUT` as a file from
+      outside the shell, the way Actions does. A step that exits early is the
+      normal case, not the odd one.
+    tags: [verification, relay, verification-gate, kani, scope, ci, v1.141]
+    fields:
+      method: automated-test
+      steps:
+        - run: "grep -qF '${{ github.event.pull_request.base.sha || github.event.before }}' .github/workflows/kani.yml"
+        - run: "grep -q '0000000000000000000000000000000000000000' .github/workflows/kani.yml"
+        - run: "grep -q 'git cat-file -e' .github/workflows/kani.yml"
+        - run: "grep -q 'no Kani-relevant files changed' .github/workflows/kani.yml"
+        - run: "./scripts/kani-scope-replay.rs"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-VGATE-P06
