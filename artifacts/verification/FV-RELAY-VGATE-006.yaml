@@ -90,14 +90,30 @@ artifacts:
       squash merges (`46904f4c` is #542's merge and is `before` for #543's;
       `81fb954b` is #541's and is `before` for #542's).
 
-      WHAT IS STILL NOT OBSERVED, stated plainly: a SKIP decision taken by CI on
-      a real event. Every skip above is a replay or a fixture. THIS PULL REQUEST
-      IS THAT TEST CASE — it is artifact-only, so its own `pull_request` scope
-      check must take the skip branch and the `kani-gate` roll-up must still
-      report pass via the `skipped) echo "Kani matrix: skipped … — OK"` arm. If
-      the matrix runs on this PR, the skip branch is unreachable in practice and
-      this promotion is wrong. Issue #548 therefore stays OPEN until the skip is
-      seen, and closes on the v1.141 tag rather than on a merge.
+      4. AND THE SKIP WAS OBSERVED IN CI ON A REAL EVENT — by this very pull
+      request, which is artifact-only and therefore its own test case. Before it
+      was armed, its predicted outcome was written down here and then checked
+      (kani run 37951496341):
+
+        Detect job 113891138001
+          scoping against base 56ab534d3e566f1e664b9523fad460d8f85b16f9 (event: pull_request)
+          no Kani-relevant files changed — SKIP the matrix (kani-gate reports pass)
+        jobs in the run: 3, not 48
+          Detect engine changes        success
+          Kani (${{ matrix.engine }})  SKIPPED   <- the matrix never expanded
+          Kani gate                    success
+        Kani gate job 113891235595
+          Kani matrix: skipped (no Kani-relevant files changed) — OK
+
+      So all three links hold: the scope check decides SKIP, the matrix does not
+      expand (47 legs avoided), and the REQUIRED `Kani gate` context still
+      reports pass — which is the part that makes a skip merge-compatible rather
+      than a permanent block. The stated falsifier was "if the matrix runs on
+      this PR, the skip branch is unreachable in practice and this promotion is
+      wrong"; it did not run.
+
+      #548 nonetheless stays OPEN and closes on the v1.141 TAG rather than on
+      this merge. Merged is not released, and closure cites a tag.
 
       AND IT WAS NOT RIGHT FIRST TIME. The harness's first run reported three
       FAILs — all three backstop cases — each having printed the correct
