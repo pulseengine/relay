@@ -224,10 +224,12 @@ artifacts:
       more than the wasm gap, because clause (1)'s evidence is already on main.
       The native `--scenario=flightcore` verdict's nominal arm is
 
-        final_dist < 0.5 && rms_steady < 1.0 && final_horiz < 1.0 && peak_horiz < 2.0
+        final_dist < 0.5 && rms_steady < 0.5 && final_horiz < 1.0 && peak_horiz < 1.0
 
       on `last_true` — PLANT TRUTH, not the estimate — with the peak taken over
-      the whole run and the looser 2.0 m bar because that window includes the
+      the whole run. THE BARS NOW EQUAL THE REQUIREMENT'S FIGURES (#546): they read
+      `rms_steady < 1.0` and `peak_horiz < 2.0` until 2026-10-09. The old peak bar
+      was justified as covering the
       climb-out. Its own comment records that it "used to be the ALTITUDE error
       alone, so every gz hold verdict to date reported horizontal drift as zero
       by construction". So the six nightly hours ARE horizontally judged, and
@@ -313,9 +315,13 @@ artifacts:
       requirement's own 1.0 m horizontal and 0.5 m vertical bounds.
 
       WHY THIS IS CITED AS MEASUREMENTS RATHER THAN "THE GATE PASSED". The
-      gates enforce `final_horiz < 1.0 && peak_horiz < 2.0` and
-      `rms_steady < 1.0`, which on the peak is LOOSER than the 1.0 m this
-      requirement states. Matching the native bars was still right — a
+      gates USED TO enforce `peak_horiz < 2.0` and
+      `rms_steady < 1.0`, LOOSER on both aggregates than this
+      requirement states. RESOLVED BY #546 on 2026-10-09: the bars are now
+      `peak_horiz < 1.0` and `rms_steady < 0.5`, equal to the requirement's own
+      figures, so a green gate IS now evidence for its words. The discipline below
+      stands regardless — citing measurements rather than "the gate passed" is what
+      let the gap be noticed at all. Matching the native bars was still right — a
       BOTH-PATHS clause needs the two legs judged alike — but it means a green
       gate is not by itself evidence for the requirement's own words. The
       numbers above are, and they are quoted from the job logs rather than
@@ -374,8 +380,9 @@ artifacts:
 
       WHY THE CITATION IS MEASUREMENTS AND NOT "THE GATES PASSED", restated
       here because it is the one thing that could make this promotion hollow:
-      the gates bar `peak_horiz < 2.0`, which is LOOSER than the 1.0 m this
-      requirement states. Matching the native bars across both legs was right —
+      the gates barred `peak_horiz < 2.0`, LOOSER than the 1.0 m this requirement
+      states — closed by #546 on 2026-10-09, with three gz runs measuring
+      peak_horiz at 0.01 / 0.02 / 0.03 m against the new 1.0 m bar. Matching the native bars across both legs was right —
       a BOTH-PATHS clause needs the two judged alike — but it means a green
       nightly is not by itself evidence for the requirement's own number. The
       per-rung figures above and in the table earlier in this file are, and they
