@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-VGATE-P06
     type: sw-req
     title: "VGATE-P06 — a scope check shall scope a PUSH against the push's own base, and sweep whenever the base is unusable"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
       Where a verification workflow narrows its work by diffing changed files,

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-VGATE-006
     type: sw-verification
     title: "VGATE-P06 — the Kani scope check decides correctly in both directions and sweeps on every unusable base, replayed not grepped"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
       `scripts/kani-scope-replay.rs` extracts the REAL `Scope check` step body
@@ -56,6 +56,64 @@ artifacts:
       that the predicate still names `crates/`, `Cargo\.toml`, `Cargo\.lock` and
       `kani\.yml`, so a rename or a silently-narrowed predicate fails loudly
       instead of turning every case into a test of an empty string.
+
+      PROMOTED ON OBSERVED BEHAVIOUR IN CI, 2026-10-09, not on the fixtures
+      alone. Three independent classes of evidence, listed with what each does
+      and does not establish.
+
+      1. THE PUSH PATH RESOLVES A REAL BASE — the thing the fix exists for, and
+      the thing no fixture can show, because Actions evaluates `${{ }}` and bash
+      does not. On #549's own merge to main (kani run 37951188122, Detect job
+      113890076984, event=push) the step printed:
+
+        scoping against base efc0dbf0ff040228324372a59dca201173a2de9b (event: push)
+        Kani-relevant files changed — run the matrix
+
+      `efc0dbf` is exactly the previous main HEAD, so `github.event.before`
+      resolved. Before this change that line read "no base sha (push/manual) —
+      run the full matrix (backstop)". The decision is RUN and is correct: #549's
+      diff contains `.github/workflows/kani.yml`.
+
+      2. THE PR PATH IS UNREGRESSED. Adding a `||` fallback can silently change
+      which operand wins. On #549 itself (kani run 37933856036, event=pull_request)
+      the step scoped against `efc0dbf` via `pull_request.base.sha`, so the left
+      operand still takes precedence when present.
+
+      3. THE PREDICATE DECIDES CORRECTLY ON REAL HISTORY, not only on fixtures.
+      Replaying the predicate EXTRACTED from the workflow against eight real main
+      PushEvents, each using its own recorded `payload.before` from the Events
+      API: SEVEN would SKIP and ONE would RUN — `1b4dc1b3 -> 3cce0801`, which
+      genuinely touched `kani.yml`. That is 7 x 47 = 329 Kani jobs avoided, with
+      the one that mattered still run, so #417's "can only skip" shape is ruled
+      out on real data. It also measured the fix's core assumption rather than
+      reasoning about it: `payload.before` IS the previous main HEAD for these
+      squash merges (`46904f4c` is #542's merge and is `before` for #543's;
+      `81fb954b` is #541's and is `before` for #542's).
+
+      4. AND THE SKIP WAS OBSERVED IN CI ON A REAL EVENT — by this very pull
+      request, which is artifact-only and therefore its own test case. Before it
+      was armed, its predicted outcome was written down here and then checked
+      (kani run 37951496341):
+
+        Detect job 113891138001
+          scoping against base 56ab534d3e566f1e664b9523fad460d8f85b16f9 (event: pull_request)
+          no Kani-relevant files changed — SKIP the matrix (kani-gate reports pass)
+        jobs in the run: 3, not 48
+          Detect engine changes        success
+          Kani (${{ matrix.engine }})  SKIPPED   <- the matrix never expanded
+          Kani gate                    success
+        Kani gate job 113891235595
+          Kani matrix: skipped (no Kani-relevant files changed) — OK
+
+      So all three links hold: the scope check decides SKIP, the matrix does not
+      expand (47 legs avoided), and the REQUIRED `Kani gate` context still
+      reports pass — which is the part that makes a skip merge-compatible rather
+      than a permanent block. The stated falsifier was "if the matrix runs on
+      this PR, the skip branch is unreachable in practice and this promotion is
+      wrong"; it did not run.
+
+      #548 nonetheless stays OPEN and closes on the v1.141 TAG rather than on
+      this merge. Merged is not released, and closure cites a tag.
 
       AND IT WAS NOT RIGHT FIRST TIME. The harness's first run reported three
       FAILs — all three backstop cases — each having printed the correct
