@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "RATE-P05 — the inner rate loop shall track its command UNDER LOAD, not limit-cycle into the rails"
     status: implemented
-    release: falcon-v1.141.0
+    release: falcon-v1.142.0
     description: >
       While the vehicle is flying, the measured body rate shall track the
       commanded body rate, and the actuator commands shall not oscillate
@@ -167,6 +167,33 @@ artifacts:
       the symbols present in shipped code AND a `steps:` entry greping them, so
       the same drift cannot recur silently. A status is not re-earned by the
       prose being restored.
+
+      ======================================================================
+      RE-SCOPED falcon-v1.141.0 -> falcon-v1.142.0 (2026-10-08, maintainer
+      decision). THIS ARTIFACT FOLLOWS ITS FIX.
+
+      It was demoted verified -> implemented on 2026-10-08 (#529) because it
+      describes `last_torque_scale`, `set_delivered_fraction` and
+      `u_delivered_frac`, none of which exist in any code on main - they live
+      only on `phase0/rate-loop-antiwindup`, 8 commits, no PR, unmerged since
+      2026-09-23.
+
+      THAT FIX IS SCOPED TO v1.142, by the same decision that scoped #270's
+      rate-loop remedy there. So leaving this artifact in v1.141 made that
+      release structurally unable to reach all-verified: its scope contained
+      two artifacts whose mechanism ships in a LATER release. A readiness query
+      is supposed to answer "can we cut this?", and it cannot do that while the
+      answer is "no, for a reason the plan does not record".
+
+      Surfaced by `rivet query '(and (= release "falcon-v1.141.0")
+      (!= status "verified"))'` rather than noticed, and moved deliberately:
+      the release-planning rule is that deferring scope is a decision to be
+      logged, not a silent drift.
+
+      RE-PROMOTION BAR IS UNCHANGED AND HIGHER THAN BEFORE: the symbols present
+      in shipped code AND a `steps:` entry greping them, so the same
+      prose-only-citation drift cannot recur. See also the symbol-grep clause
+      added to SWREQ-RELAY-BOARD-P01 (#534).
 
     tags: [requirement, falcon, rate-loop, adrc, limit-cycle, gazebo, v1.141]
     fields:
