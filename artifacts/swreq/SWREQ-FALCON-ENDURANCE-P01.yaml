@@ -5,6 +5,18 @@ artifacts:
     status: verified
     release: falcon-v1.140.0
     description: >
+      READ THE STATUS FIELD, NOT THIS PARAGRAPH. This requirement is `verified`
+      as of 2026-10-08 (#528). The demotion text immediately below is HISTORY,
+      kept because the three clauses it names are what the promotion had to
+      answer and deleting it would erase the reason the evidence looks as it
+      does. The resolution is ~340 lines down. An independent clean-room review
+      flagged that a reader meets "THREE CLAUSES ARE UNMET" and "NOT YET
+      OBSERVED to pass" at the top of a `verified` artifact and reasonably
+      concludes the status is wrong; this header exists so that first paragraph
+      cannot be read as current.
+
+      ---- HISTORY FROM HERE ----
+
       DEMOTED verified -> implemented 2026-10-01 by independent review (#497).
       THREE OF THIS REQUIREMENT'S OWN "shall" CLAUSES ARE UNMET:
 
@@ -371,8 +383,10 @@ artifacts:
 
       WHAT THE VERIFIER NOW EXECUTES. FV-FALCON-ENDURANCE-001's steps covered
       the ANALYTIC tier only — nothing touching the gz hour, the ratchet or the
-      wasm leg, which are exactly the three clauses the demotion named. Eleven
-      steps were added with this promotion so the evidence the gate runs matches
+      wasm leg, which are exactly the three clauses the demotion named. TEN
+      steps were added with this promotion (the text said "eleven"; `git show
+      1b4dc1b | grep -c "^+        - run:"` is 10 — corrected rather than left,
+      because a miscounted evidence claim is the same class as an unsourced one) so the evidence the gate runs matches
       the clauses that were unmet. Promoting against the old step set would have
       repeated "verified on half of itself", the error #499 caught on FAULT-005
       and the reason this requirement was demoted in the first place.
