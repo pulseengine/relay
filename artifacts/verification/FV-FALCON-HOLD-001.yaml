@@ -2,9 +2,28 @@ artifacts:
   - id: FV-FALCON-HOLD-001
     type: sw-verification
     title: "HOLD-P01 — the 5 Hz hold converges, on SimBackend and on the gz plant: 40 s → 300 s (v1.140)"
-    status: verified
+    status: implemented
     release: falcon-v1.140.0
     description: >
+      *** DEMOTED verified -> implemented ON 2026-10-09, IN PLACE, RELEASE
+      UNCHANGED. *** #546 tightened the bars this artifact pins: the gz verdict's
+      `rms_steady` went 1.0 -> 0.5 and `peak_horiz` went 2.0 -> 1.0, so step 10's
+      exact-string grep no longer matches what shipped. Re-promotion is a
+      separate code-free PR once the tightened bars pass THREE green CI runs.
+
+      WHY DEMOTED IN PLACE RATHER THAN RE-SCOPED TO v1.141. Moving the `release`
+      field would remove this artifact from falcon-v1.140.0's scope, and
+      release-readiness then reports v1.140 as 8/8 = 100% — silently shrinking
+      what the shipped release claims to have verified, instead of showing the
+      gap. Demoting in place reports 8/9, which is the visible error rather than
+      the invisible one. The hold capability DID ship in v1.140; only the
+      strictness of its verification changed, so the release keeps the artifact.
+
+      MAINTAINER DECISION, asked and answered 2026-10-09: of (demote and
+      re-promote after evidence | freeze this artifact and add a HOLD-002 at
+      v1.141 | leave the bar at 2.0 and close #546), the first was chosen.
+
+
       Verifies SWREQ-FALCON-HOLD-P01 on `SimBackend` AND on the reference
       Gazebo plant.
 
@@ -131,7 +150,7 @@ artifacts:
       closing this as part of the requirement). The verdict now carries
       `final_horiz`, `peak_horiz` and `rms_horiz_steady`, and PASS requires
       HOLD-P01's 1.0 m horizontal alongside the 0.5 m vertical. NOT EXACTLY:
-      the verdict is `final_horiz < 1.0 && peak_horiz < 2.0`, so it permits a
+      the verdict WAS `final_horiz < 1.0 && peak_horiz < 2.0` (now `< 1.0`, #546), so it permitted a
       2 m PEAK excursion that the requirement's 1.0 m bound forbids. The final
       value is held to the requirement; the transient is not. Recorded by
       independent review (#497) rather than left implied -- narrowing the peak
@@ -178,7 +197,7 @@ artifacts:
         - run: "! grep -q 'ticks_since_aiding > self.gravity_hold_ticks' crates/falcon-core/plain/src/lib.rs"
         - run: "! grep -q 'gravity_hold_ticks:' crates/falcon-core/plain/src/lib.rs"
         # The gz verdict measures the horizontal half, and the ladder keeps its number.
-        - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 2.0' examples/falcon-sitl-gz/src/main.rs"
+        - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 1.0' examples/falcon-sitl-gz/src/main.rs"
         - run: "grep -qF -- '|| RC=$?' .github/workflows/soak.yml"
     links:
       - type: verifies
