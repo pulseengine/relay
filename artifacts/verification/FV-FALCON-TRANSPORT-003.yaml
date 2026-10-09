@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TRANSPORT-003
     type: sw-verification
     title: "TRANSPORT-P01 element 5 — the reference host speaks the PUBLISHED binding, and the legacy 16/54-byte frames are retired"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
       Closes element 5 of SWREQ-FALCON-TRANSPORT-P01, the last of its five:

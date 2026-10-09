@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TRANSPORT-002
     type: sw-verification
     title: "The TRANSPORT-P01 wire decoder is proven total on untrusted bytes — and the proof found that it accepts NaN"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
       Closes the decoder-proof blocker SWREQ-FALCON-TRANSPORT-P01 names in its
