@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-HOLD-001
     type: sw-verification
     title: "HOLD-P01 — the 5 Hz hold converges, on SimBackend and on the gz plant: 40 s → 300 s (v1.140)"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       *** DEMOTED verified -> implemented ON 2026-10-09, IN PLACE, RELEASE
