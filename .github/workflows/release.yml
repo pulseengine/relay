@@ -600,7 +600,13 @@ jobs:
       # immutable DIGEST, like the release bundle. NON-BLOCKING
       # (continue-on-error): the primary artifact is the cosign-signed GitHub
       # Release above; a registry hiccup must never fail a release. Tighten to
-      # hard-fail once proven over a few tags. Ref: ghcr.io/<owner>/falcon-flight.
+      # hard-fail once proven over a few tags. Ref: ghcr.io/<owner>/falcon/<stage>
+      # — NESTED since v1.133. This line used to name the FLAT
+      # ghcr.io/<owner>/falcon-flight, which the push loop below stopped
+      # using and which is now stale; the flat packages are not updated.
+      # The previous namespace move reached the integrator as a "publish
+      # stalled at 1.131.1" bug report, so a comment advertising the dead
+      # path is not cosmetic — it is the thing a reader copies.
       - name: Publish cascade components to ghcr.io (OCI, cosign-signed)
         continue-on-error: true
         working-directory: relay
