@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-FLEET-002
     type: sw-verification
     title: "FLEET-P01 — starvation is measured from JOBS, and hosted contention is not reported as a dead fleet (v1.140)"
-    status: implemented
+    status: verified
     release: falcon-v1.140.0
     description: >
       DEMOTED verified -> implemented 2026-10-01 by independent review (#497).
@@ -112,6 +112,58 @@ artifacts:
       (two-commit rule), and it should cite the side-by-side measurement above
       rather than the fact that the steps pass - which is the distinction this
       artifact exists to make.
+
+      ======================================================================
+      PROMOTED implemented -> verified (2026-10-09), in a CODE-FREE PR per the
+      two-commit rule. The harness landed in #541; this is the sign-off.
+
+      THE PROMOTION IS EARNED ON A MEASUREMENT, NOT ON THE STEPS PASSING, and
+      the distinction is the whole reason this artifact was demoted. Taken on
+      main at 81fb954 — the content being promoted — by inverting the
+      comparison this artifact exists to protect:
+
+          [ "$age" -lt "$limit" ] && continue   ->  -ge
+          (.github/workflows/fleet-status.yml:142)
+
+        the four grep steps        4 pass, 0 fail      BLIND
+        scripts/fleet-replay.rs    4 of 5 cases FAIL   exit 1
+
+      The workflow was restored byte-identical afterwards (sha256 match, empty
+      `git diff`). So this artifact can now detect its own subject being
+      inverted, which is exactly what it could not do when #497's review
+      demoted it.
+
+      WHY THE FIVE CASES ARE THE RIGHT FIVE. The requirement is that starvation
+      is measured FROM JOBS and that hosted contention is not reported as a dead
+      fleet, and the fixtures cover both halves plus the false-alarm fix: 60 min
+      self-hosted with nothing started must ALARM; 5 min self-hosted must not
+      (which pins the comparison from the other side, so replacing it with
+      `true` fails here); 60 min hosted must not, being under
+      HOSTED_THRESHOLD_MIN; 180 min hosted must; and 60 min self-hosted with
+      something started 2 min ago must not, which is the #449 fix that stopped
+      three false alarms (#447/#455/#462).
+
+      WHAT THIS DOES NOT COVER, named so the status is not read as wider than
+      it is. The harness stubs the two `gh api` calls, so it exercises the
+      DECISION LOGIC and not the query that feeds it: a change to the `--jq`
+      producing the tab-separated rows would not be caught here. It also does
+      not touch the wedge-detection or fleet-inventory steps, which are
+      separate concerns in the same workflow. What is verified is the
+      starvation verdict itself, which is what FLEET-P01 asks for.
+
+      AND IT WAS NOT RIGHT FIRST TIME — recorded because the artifact's
+      credibility rests on how it was built. The harness took three CI rounds:
+      it replayed the workflow's bash body under `sh` (the runner's /bin/sh is
+      dash, so `set -uo pipefail` died, while macOS's is bash in sh-mode and
+      hid it), and its `date` fallback used `.or_else`, which does not fire on a
+      non-zero exit, so every fixture timestamp would have been empty on Linux
+      and all five cases would have reported stuck=0 for a reason unrelated to
+      the detector. Both are fixed and the inversion detection was re-verified
+      after each.
+
+      v1.140's REMAINING SCOPE AFTER THIS IS ONE ARTIFACT: FV-RELAY-REVIEW-140,
+      the independent multi-agent review. That gate is maintainer-run
+      (/code-review ultra) and is now the release's critical path.
 
     tags: [verification, relay, falcon, ci, fleet, starvation, v1.140]
     fields:
