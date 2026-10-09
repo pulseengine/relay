@@ -86,11 +86,24 @@ const TRACKS: &[Track] = &[
 // Their issues may still be open here — closure cites a TAG, not a merge — so
 // they are removed by VERIFIED STATE, not by issue state. Do not re-add one
 // without re-measuring it.
+//
+// TWO MORE RETIRED 2026-10-09, same rule, each re-measured on main:
+//   452 — the mechanism AND the claim are now both verified. Zeroing the
+//         achieved-acceleration term (so specific_force_ned reverts to the
+//         pre-fix [0,0,-GRAVITY]) makes 10 of falcon-core's 69 tests FAIL,
+//         including two that FV-FALCON-HOLD-001 cites by name. Baseline 69/0,
+//         mutated 59/10, file restored byte-identical. Issue closed on
+//         falcon-v1.140.0.
+//   546 — the gap is CLOSED ON MAIN: the gz verdict now bars rms_steady < 0.5
+//         and peak_horiz < 1.0, equal to HOLD-P01's own figures, verified on
+//         THREE gz runs measuring peak_horiz at 0.01 / 0.02 / 0.03 m. The
+//         issue stays open only because closure cites a tag, so its entry's
+//         TEXT ("aggregates at twice it") is now false. Keeping it would
+//         OVERSTATE the weakness in every future release note, which is the
+//         opposite of this list's purpose.
 const STRUCTURAL: &[(u32, &str)] = &[
     (417, "the required gates can pass vacuously for a PR that touches only the shipped wasm components"),
-    (546, "FV-FALCON-HOLD-001 checks HOLD-P01's bound on the FINAL sample only, then sets both mid-run aggregates at twice it (rms_steady < 1.0 vs a 0.5 m vertical bound, peak_horiz < 2.0 vs 1.0 m horizontal)"),
     (436, "scheduled monitors run every few hours, not on their cron cadence"),
-    (452, "SimBackend's accelerometer reports gravity only, so 18 closed-loop hold and estimator tests never see the vehicle accelerate"),
 ];
 
 #[derive(Debug, Clone, serde::Deserialize)]
