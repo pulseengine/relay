@@ -52,35 +52,45 @@ struct Case {
 }
 
 fn iso(mins_ago: i64) -> String {
-    // `date -u -v-Nм` is BSD-only and -d is GNU-only; the workflow's own
-    // age_min() already handles both, so generate the timestamp here instead
-    // of shelling out, and keep the harness portable.
-    let out = Command::new("date")
-        .args(["-u", "+%s"])
-        .output()
-        .expect("date");
-    let now: i64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    // PORTABLE BY STATUS CHECK, NOT BY `or_else`. `date -d @N` is GNU and
+    // `date -r N` is BSD, so this has to try both — but `Command::output()`
+    // returns Ok for a process that RAN AND FAILED, so an `.or_else` chain
+    // never fires on a non-zero exit. The first draft had exactly that bug:
+    // on the Linux runner `date -u -r <epoch>` exits non-zero (it reads -r as
+    // a FILE reference), the fallback would not have run, every fixture
+    // timestamp would have been empty, `age_min` would have returned -1, every
+    // job would have been skipped, and all five cases would have reported
+    // stuck=0 — two of them FAILING for a reason that has nothing to do with
+    // the detector. Caught by reasoning about the runner's platform rather
+    // than by a sixth CI round.
+    //
+    // GNU is tried first because the runners are Linux; macOS takes the BSD
+    // branch. If neither works the harness says so instead of inventing a
+    // timestamp.
+    let now: i64 = String::from_utf8_lossy(
+        &Command::new("date").args(["-u", "+%s"]).output().expect("date +%s").stdout,
+    )
+    .trim()
+    .parse()
+    .expect("epoch seconds");
     let t = now - mins_ago * 60;
-    let out = Command::new("date")
-        .args(["-u", "-r", &t.to_string(), "+%Y-%m-%dT%H:%M:%SZ"])
-        .output()
-        .or_else(|_| {
-            Command::new("date")
-                .args(["-u", "-d", &format!("@{t}"), "+%Y-%m-%dT%H:%M:%SZ"])
-                .output()
-        })
-        .expect("date format");
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+    const FMT: &str = "+%Y-%m-%dT%H:%M:%SZ";
+    for args in [
+        vec!["-u".to_string(), "-d".to_string(), format!("@{t}"), FMT.to_string()],
+        vec!["-u".to_string(), "-r".to_string(), t.to_string(), FMT.to_string()],
+    ] {
+        if let Ok(o) = Command::new("date").args(&args).output() {
+            if o.status.success() {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if !s.is_empty() {
+                    return s;
+                }
+            }
+        }
+    }
+    panic!("neither `date -d @N` (GNU) nor `date -r N` (BSD) produced a timestamp; the harness cannot build fixtures on this platform");
 }
 
-/// The step's `run:` body AND its `env:`, both taken from the workflow.
-///
-/// The thresholds are READ rather than hardcoded, then ASSERTED against what
-/// the fixtures assume. Hardcoding them would let a threshold change silently
-/// re-interpret every case; reading them without asserting would let the same
-/// change quietly make the fixtures meaningless (a 60-minute job is only "too
-/// old" relative to a 30-minute limit). Read-and-assert fails loudly instead,
-/// which is the only outcome that keeps the fixtures honest.
 fn step_body_and_env() -> (String, Vec<(String, String)>) {
     let y: serde_yaml::Value =
         serde_yaml::from_str(&std::fs::read_to_string(WF).expect("read workflow")).expect("parse");
@@ -163,7 +173,19 @@ GITHUB_OUTPUT={out}
     );
     let f = std::env::temp_dir().join(format!("fleet-replay-{}.sh", std::process::id()));
     std::fs::write(&f, &script).expect("write script");
-    let out = Command::new("sh").arg(&f).output().expect("sh");
+    // BASH, NOT SH — and the distinction cost a CI round. GitHub Actions runs
+    // a `run:` block with BASH by default, and this step body opens with
+    // `set -uo pipefail`. Running it under `sh` is therefore the wrong
+    // fidelity, and it also breaks outright on the runner, whose /bin/sh is
+    // DASH: `set: Illegal option -o pipefail`. It passed locally only because
+    // macOS's /bin/sh is bash in sh-mode.
+    //
+    // Two true facts that are easy to conflate: the verification gate runs
+    // ARTIFACT STEPS under /bin/sh, so this harness is invoked by sh — but the
+    // WORKFLOW BODY it replays must run under bash, because that is what
+    // executes it in production. Replaying it under a different shell than
+    // Actions uses would be testing a different program.
+    let out = Command::new("bash").arg(&f).output().expect("bash");
     let outputs = std::fs::read_to_string(&out_file).unwrap_or_default();
     let _ = std::fs::remove_file(&f);
     let _ = std::fs::remove_file(&out_file);
