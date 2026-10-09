@@ -2,9 +2,21 @@ artifacts:
   - id: FV-FALCON-ENDURANCE-001
     type: sw-verification
     title: "ENDURANCE-P01 — a 12 h hold on a plant that can tilt, and a nightly job that measures it (v1.140)"
-    status: verified
+    status: implemented
     release: falcon-v1.140.0
     description: >
+      *** DEMOTED verified -> implemented ON 2026-10-09, IN PLACE, RELEASE
+      UNCHANGED — same treatment and same maintainer decision as
+      FV-FALCON-HOLD-001. *** #546 tightened the gz verdict's bars and this
+      artifact pins them by the SAME exact-string grep, so its step failed.
+      I MISSED THIS ONE: #546 named HOLD-001, so I grepped HOLD-001 instead of
+      grepping the whole artifact tree for the string I was changing — despite a
+      recorded rule saying a verdict line is an API and to grep
+      artifacts/.github/scripts first. The verification gate caught it
+      (173/174, this the one failure), which is the gate doing its job.
+      Re-promotion rides with HOLD-001's, after three green gz runs.
+
+
       READ THE STATUS FIELD, NOT THIS PARAGRAPH. This artifact is `verified` as
       of 2026-10-08 (#528 flipped it). The sentence below still says
       "`implemented`, not `verified`" and a later paragraph still ends "Status
@@ -104,7 +116,7 @@ artifacts:
         # Clause 1 — the gz hour is HORIZONTALLY judged, on PLANT TRUTH, peak
         # over the whole run. Without this bar the verdict reported horizontal
         # drift as zero by construction.
-        - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 2.0' examples/falcon-sitl-gz/src/main.rs"
+        - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 1.0' examples/falcon-sitl-gz/src/main.rs"
         - run: "grep -q 'last_true\\[0\\] \\* last_true\\[0\\]' examples/falcon-sitl-gz/src/main.rs"
         # Clause 2 — the ratchet bites on BOTH legs, at the requirement's own
         # target. A floor below the measurement is the defect #497 and #523 each

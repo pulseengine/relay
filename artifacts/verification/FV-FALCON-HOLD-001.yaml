@@ -150,7 +150,7 @@ artifacts:
       closing this as part of the requirement). The verdict now carries
       `final_horiz`, `peak_horiz` and `rms_horiz_steady`, and PASS requires
       HOLD-P01's 1.0 m horizontal alongside the 0.5 m vertical. NOT EXACTLY:
-      the verdict is `final_horiz < 1.0 && peak_horiz < 2.0`, so it permits a
+      the verdict WAS `final_horiz < 1.0 && peak_horiz < 2.0` (now `< 1.0`, #546), so it permitted a
       2 m PEAK excursion that the requirement's 1.0 m bound forbids. The final
       value is held to the requirement; the transient is not. Recorded by
       independent review (#497) rather than left implied -- narrowing the peak
