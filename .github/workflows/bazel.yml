@@ -106,7 +106,109 @@ jobs:
         # //:relay-hk-stream + //:relay-sc-stream (#STREAM-P01..P04), plus the
         # first control-cascade stream //:falcon-rate-stream (#STREAM-P05), so
         # their P3 async build is CI-validated, not just asserted.
-        run: bazel build //:falcon-cascade //:relay-lc-stream //:relay-sch-stream //:relay-hk-stream //:relay-sc-stream //:falcon-rate-stream //:falcon-position-stream //:falcon-attitude-stream //:falcon-iekf-stream //:falcon-mixer-stream //:falcon-cascade-stream-composed //:falcon-cascade-stream-fused //:cascade-orch //:falcon-cascade-step //:falcon-cascade-step-fused //:relay-lc //:relay-sch //:relay-hk //:relay-sc
+        run: |
+          # QUERY, DO NOT ENUMERATE (#407) - BUT BUILD-UNLESS-WAIVED, not
+          # build-everything. This step was a hand-written list of 19 targets,
+          # the exact anti-pattern verus.yml was repaired to remove after #364:
+          # "19 verus_test targets were defined and none was ever executed - a
+          # hand-written target list is exactly the drift that produced that."
+          # A target added to BUILD.bazel and not added here is never built, and
+          # nothing says so. //:falcon-cascade-coverage is the casualty: it
+          # exists, FV-FALCON-COV-001 cites it as a `steps:` entry, and no
+          # workflow builds it.
+          #
+          # SO THE DEFAULT IS INVERTED. The query discovers every target of the
+          # relevant kinds and the exclusions are an EXPLICIT, printed waiver
+          # list - the same shape as kani.yml's KANI_MATRIX_WAIVERS. A new
+          # component is now built automatically; anything skipped has to say
+          # why, where a reader can see it.
+          #
+          # THE WAIVER LIST IS DELIBERATELY CONSERVATIVE, and the reason is
+          # honest rather than tidy: the query selects 29 targets where the old
+          # list named 19, and I CANNOT RUN `bazel query` here (nix is not on
+          # PATH on this machine), so I cannot tell which of the 10 newcomers
+          # build. Waiving exactly those 10 keeps today's build identical to the
+          # list this replaces while still fixing the class. Removing a name
+          # from WAIVED is how you find out - and CI, not a guess, is what
+          # answers it.
+          WAIVED="//:relay-runner //:falcon-ekf //:falcon-iekf //:falcon-position
+                  //:falcon-attitude //:falcon-rate //:falcon-mixer
+                  //:relay-fused //:relay-all-fused //:falcon-cascade-fused"
+          # falcon-ekf is the Mahony filter and falcon-{iekf,position,attitude,
+          # rate,mixer} are the non-stream stage components - none was in the
+          # old list. //:falcon-cascade-fused and the two relay-*-fused are
+          # meld_fuse targets in the area gale#398 describes. All ten are
+          # UNVERIFIED here, not known-broken.
+          #
+          # //:falcon-cascade-coverage and its two siblings are NOT in this
+          # query at all: kind `wasm_module_coverage_wasi` is excluded because
+          # the coverage RUN is manual - bundled witness cannot parse the
+          # component-format export section (#145), as the next step records.
+          # That exclusion was previously by OMISSION, indistinguishable from an
+          # oversight; it is now stated. Whether the target ALSO fails to fuse
+          # (#407's title, duplicate cabi_realloc) remains UNESTABLISHED - it
+          # has never been attempted in CI and is not attempted here, because a
+          # documented-unbuildable target does not belong in a required step.
+          # THE KIND IS `alias`, NOT `rust_wasm_component_bindgen`, and the
+          # first version of this step got that wrong - the guard below caught
+          # it in CI (#540's first run: "the bazel query no longer covers" all
+          # 19, because the query returned nothing). MEASURED afterwards with
+          # `bazel query ... --output label_kind`:
+          #
+          #   alias rule                 //:falcon-cascade
+          #   alias rule                 //:relay-lc-stream
+          #   meld_fuse rule             //:falcon-cascade-stream-fused
+          #   rust_library rule          //:cascade-orch
+          #   wasm_module_coverage_wasi  //:falcon-cascade-coverage
+          #
+          # `rust_wasm_component_bindgen` is a MACRO; the public label it
+          # creates is an `alias`, so `kind("<macro> rule", ...)` matches
+          # nothing. Worth keeping because it is the obvious mistake to make
+          # again, and because `kind()` on a macro name fails SILENTLY-EMPTY
+          # rather than erroring.
+          ALL=$(bazel query 'kind("alias rule", //:*) + kind("meld_fuse rule", //:*) + //:cascade-orch' 2>/dev/null | tr '\n' ' ')
+          # NORMALISE BEFORE MATCHING. `$WAIVED` is written multi-line for
+          # readability, so used directly as a haystack its line-final entries
+          # are followed by a NEWLINE and `*" $T "*` cannot match them. Caught
+          # by simulating the query before shipping: //:falcon-position and
+          # //:falcon-mixer - the two names at line ends - leaked through and
+          # the step selected 21 targets instead of 19. A waiver list that
+          # silently fails to waive is worse than no list, because the extra
+          # builds look intentional.
+          WAIVED_FLAT=$(printf '%s' "$WAIVED" | tr -s '[:space:]' ' ')
+          TARGETS=""
+          for T in $ALL; do
+            case " $WAIVED_FLAT " in *" $T "*) continue ;; esac
+            TARGETS="$TARGETS $T"
+          done
+
+          # A QUERY THAT UNDER-SELECTS IS WORSE THAN THE LIST IT REPLACED,
+          # because it fails SILENTLY: CI stays green and simply builds less.
+          # This repo declined to narrow the Kani matrix for exactly that
+          # reason. So the result is GUARDED against every target the old list
+          # named, and the step fails loudly naming any that vanished.
+          MUST="//:falcon-cascade //:relay-lc-stream //:relay-sch-stream
+                //:relay-hk-stream //:relay-sc-stream //:falcon-rate-stream
+                //:falcon-position-stream //:falcon-attitude-stream
+                //:falcon-iekf-stream //:falcon-mixer-stream
+                //:falcon-cascade-stream-composed //:falcon-cascade-stream-fused
+                //:cascade-orch //:falcon-cascade-step
+                //:falcon-cascade-step-fused //:relay-lc //:relay-sch
+                //:relay-hk //:relay-sc"
+          MISSING=""
+          for T in $MUST; do
+            case " $TARGETS " in *" $T "*) ;; *) MISSING="$MISSING $T" ;; esac
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::the bazel query no longer covers:${MISSING}"
+            echo "::error::query returned: ${ALL}"
+            echo "::error::A rule kind changed, a target was renamed, or it was waived by mistake. Do NOT relax this guard to make it green - the point is that a query building LESS than the old list must FAIL, not pass quietly."
+            exit 1
+          fi
+          echo "::notice::bazel: building $(printf '%s\n' $TARGETS | grep -c .) discovered targets; $(printf '%s\n' $WAIVED | grep -c .) waived"
+          printf '  build  %s\n' $TARGETS
+          printf '  WAIVED %s\n' $WAIVED
+          bazel build $TARGETS
 
       # Exercise the witness MC/DC path end-to-end (#145): forces the
       # harness_crates crate_universe (wasmtime/tokio) to resolve, builds the
