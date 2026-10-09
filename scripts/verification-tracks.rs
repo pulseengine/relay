@@ -64,12 +64,23 @@ const TRACKS: &[Track] = &[
 /// that is green but checks less than it seems, or never runs where it
 /// should). Each is an open issue; when the issue closes, this tool says so
 /// instead of repeating a gap that may be fixed.
+// FOUR ENTRIES RETIRED AT falcon-v1.140.0, each verified fixed ON MAIN rather
+// than assumed from a merge:
+//   405 — verus.yml now asserts a floor and reports 281 functions / 0 errors /
+//         19 targets (run 37881361372). Issue closed.
+//   418 — verus.yml's PR `paths` is ['crates/**', 'BUILD.bazel', 'MODULE.bazel',
+//         'MODULE.bazel.lock', '.github/workflows/verus.yml'].
+//   410 — verification-gate.yml carries `schedule: 43 1 * * *` AND its first
+//         schedule-event run (37902164712) swept 207 artifacts on main. A cron
+//         in a file is not evidence; an observed non-empty sweep is.
+//   407 — bazel.yml queries (`kind("alias rule", //:*)` + a MUST guard) instead
+//         of enumerating.
+// Their issues may still be open here — closure cites a TAG, not a merge — so
+// they are removed by VERIFIED STATE, not by issue state. Do not re-add one
+// without re-measuring it.
 const STRUCTURAL: &[(u32, &str)] = &[
-    (405, "Verus cannot find core/std — every verus_test fails before verifying anything"),
-    (418, "verus.yml's PR trigger is path-filtered on Lean paths, so Verus does not run on the PRs that change Verus code"),
-    (410, "the required verification gate has no main backstop; its scope filter can exclude what a PR changed"),
-    (407, "//:falcon-cascade-coverage fails to fuse; cascade MC/DC coverage has never been produced in CI"),
     (417, "the required gates can pass vacuously for a PR that touches only the shipped wasm components"),
+    (546, "FV-FALCON-HOLD-001 checks HOLD-P01's bound on the FINAL sample only, then sets both mid-run aggregates at twice it (rms_steady < 1.0 vs a 0.5 m vertical bound, peak_horiz < 2.0 vs 1.0 m horizontal)"),
     (436, "scheduled monitors run every few hours, not on their cron cadence"),
     (452, "SimBackend's accelerometer reports gravity only, so 18 closed-loop hold and estimator tests never see the vehicle accelerate"),
 ];
