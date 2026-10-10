@@ -82,12 +82,40 @@ const MIXER_X: [[f32; 4]; 4] = [
 #[derive(Clone, Copy, Debug, Default)]
 pub struct QuadMixer {
     last_motors: [f32; 4],
+    /// Torque scale actually applied by the last `mix_thrust_floor`, in
+    /// [0, 1]. 1.0 means the commanded torque was delivered in full.
+    ///
+    /// WHY IT IS RECORDED (#270). The mix is thrust-priority: when the
+    /// collective leaves too little headroom the torque is scaled down and the
+    /// vehicle receives `s * torque`. A rate controller with an observer
+    /// (relay-adrc's ESO) that is not told `s` integrates a torque that was
+    /// never applied, its disturbance estimate winds up, and it answers with
+    /// MORE torque — which saturates harder. Measured on the gz plant as a
+    /// rail-to-rail 3.5 Hz limit cycle latching within one second of takeoff
+    /// and never recovering. Reporting `s` is what makes anti-windup possible
+    /// in the layer above; THIS TYPE DOES NOT ACT ON IT.
+    ///
+    /// ONLY TWO MIXES SET IT, and the omissions are deliberate.
+    /// `mix_thrust_floor` writes the uniform scale it applied — one number for
+    /// all three axes, which a scalar can represent. `mix_rotor_out` writes 1.0
+    /// to mean NOT MODELLED, because its degraded allocation is a rank-3 solve
+    /// rather than a scale. Those are the two `falcon-core` calls, so the field
+    /// is always meaningful on the flight path.
+    ///
+    /// The remaining mixes leave it untouched ON PURPOSE. `mix_priority`
+    /// (MIX-P06) gives up authority per-axis in priority order — yaw first,
+    /// then roll/pitch — so no single number describes what it delivered, and
+    /// writing one would be wrong for two axes. A caller that uses those mixes
+    /// must not read this field; it would see whatever the last
+    /// `mix_thrust_floor` or `mix_rotor_out` left.
+    last_torque_scale: f32,
 }
 
 impl QuadMixer {
     pub const fn new() -> Self {
         Self {
             last_motors: [0.0; 4],
+            last_torque_scale: 1.0,
         }
     }
 
@@ -226,7 +254,15 @@ impl QuadMixer {
             m[i] = clamp_floor(base + s * d[i], floor);
         }
         self.last_motors = m;
+        self.last_torque_scale = s;
         m
+    }
+
+    /// Torque scale applied by the last `mix_thrust_floor`, in [0, 1]. See the
+    /// field's own comment for why it exists and why `mix_priority` does not
+    /// set it.
+    pub fn last_torque_scale(&self) -> f32 {
+        self.last_torque_scale
     }
 
     /// **Priority desaturation** mix (MIX-P06): thrust ≻ roll/pitch ≻ yaw.
@@ -376,6 +412,14 @@ impl QuadMixer {
         thrust: f32,
         floor: f32,
     ) -> [f32; 4] {
+        // DECLARED AT THE TOP so every exit path is covered — this function has
+        // two returns, and a future third must not silently inherit a stale
+        // scale from an earlier `mix_thrust_floor`. The degraded allocation is
+        // a rank-3 solve, not a uniform scale, so its delivered fraction is NOT
+        // MODELLED; 1.0 is the "no information" value and preserves the
+        // pre-#270 behaviour exactly on the rotor-out path. The fix is scoped to
+        // the normal path, which is where the limit cycle was measured.
+        self.last_torque_scale = 1.0;
         let t = clamp01(sanitise(thrust));
         let floor = clamp01(sanitise(floor));
         // Bound the (normalised) torque command: real controller output is

@@ -954,6 +954,26 @@ impl CascadePartition {
             self.mixer.mix_thrust_floor(torque, thrust, 0.0)
         };
 
+        // ── ESO ANTI-WINDUP (#270) ── tell the observer what the ALLOCATOR
+        // actually delivered. The mix above is thrust-priority, so under
+        // saturation it scales the TORQUE down and the vehicle receives
+        // `s * torque`. An ESO driven by the COMMAND integrates a torque that
+        // was never applied: the residual grows, z2 winds up toward
+        // beta2 = omega_o^2, the control answers with MORE torque, and the loop
+        // sustains its own saturation. Measured on the gz plant as a
+        // rail-to-rail 3.5 Hz limit cycle latching within one second of takeoff
+        // and never recovering.
+        //
+        // Tick N uses tick N-1's fraction, and that is correct rather than an
+        // off-by-one: the observer can only be told what was APPLIED, which is
+        // not knowable until after the allocator has run.
+        //
+        // Both arms above set the scale — `mix_thrust_floor` to the uniform `s`
+        // it applied, `mix_rotor_out` to 1.0 meaning not-modelled — so this read
+        // can never pick up a stale value from an earlier tick.
+        let delivered = self.mixer.last_torque_scale();
+        self.adrc.set_delivered_fraction([delivered; 3]);
+
         // ── Single-rotor-out FDI ── form the per-rotor effectiveness residual
         // |commanded − achieved| from ESC RPM telemetry and feed the CUSUM; on
         // isolation, latch the failed rotor (next step runs the degraded path).
