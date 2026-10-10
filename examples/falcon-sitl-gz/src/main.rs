@@ -1511,6 +1511,19 @@ fn run_supervised_rotorout(
     // Ticks after the kill to trace; unset = no trace (shipped behaviour).
     let fdi_trace_window: Option<u32> =
         std::env::var("FDI_TRACE").ok().and_then(|s| s.parse().ok());
+    // PRE-KILL RING SUMMARY (#270). The ring is a PRE-KILL phenomenon: the
+    // rate loop sustains its own mixer saturation while hovering, before any
+    // rotor is lost. The RING_TRACE block below prints it per tick, which is
+    // readable but not gateable — so nothing automated could ever see the
+    // defect OR its fix. These accumulators turn it into two numbers.
+    //
+    // Measured contrast on the same plant and commit, from this file's own
+    // trace comment: flightcore's settled hover is 0.0014 rad/s roll/pitch
+    // RMS with no saturation; this path was ~2 rad/s with motors railing.
+    // Three orders of magnitude, which is what makes a bar possible at all.
+    let mut prekill_rp_sumsq = 0.0_f64;
+    let mut prekill_ticks = 0_u32;
+    let mut prekill_sat_ticks = 0_u32;
     {
         let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
         for step in 0..n {
@@ -1530,6 +1543,24 @@ fn run_supervised_rotorout(
             // measured at rp_rate2 ~4 (about 2 rad/s) in the ticks before the
             // rotor kill. Same world, same commit, three orders of magnitude
             // apart — so the ring belongs to a path, not to the plant.
+            // Accumulated on EVERY run, not behind RING_TRACE: a measurement
+            // that only exists when someone opts in is a measurement nobody
+            // takes. Pre-kill only — after the kill, large rates are the
+            // recovery doing its job rather than the ring.
+            if step < fail_step {
+                let (_, g) = backend.last_imu();
+                prekill_rp_sumsq += (g[0] as f64) * (g[0] as f64) + (g[1] as f64) * (g[1] as f64);
+                prekill_ticks += 1;
+                // "Railing" in the sense the bench evidence used when it recorded
+                // a motor range of `0.12 <-> 1.0000`: a motor pinned at either end
+                // means the allocator had no headroom on this tick, so the torque
+                // it delivered is not the torque commanded.
+                let m = backend.last_motors();
+                if m.iter().any(|&x| x >= 0.999 || x <= 0.001) {
+                    prekill_sat_ticks += 1;
+                }
+            }
+
             if std::env::var_os("RING_TRACE").is_some() {
                 let (_, g) = backend.last_imu();
                 let wd = sup.core().last_omega_d();
@@ -1663,6 +1694,27 @@ fn run_supervised_rotorout(
         && saw_true_tilt
         && peak_tilt_after < 0.5
         && peak_horiz_after < 10.0;
+    // THE RING, AS TWO NUMBERS (#270). Reported on every run and deliberately
+    // NOT part of `pass` above: that verdict answers FAULT-P02 (stayed upright,
+    // isolated the dead rotor, came down where it was), and the ring is a
+    // different claim about a different window — the hover BEFORE the kill.
+    // Barring it here would conflate the two and make a required gate fail for
+    // something FAULT-P02 never asserted. The bar lives in soak.yml, which is
+    // not a required context, until these numbers are known well enough to
+    // promote it into the gz gate.
+    let prekill_rp_rms = if prekill_ticks > 0 {
+        (prekill_rp_sumsq / prekill_ticks as f64).sqrt()
+    } else {
+        f64::NAN
+    };
+    let prekill_sat_frac = if prekill_ticks > 0 {
+        prekill_sat_ticks as f64 / prekill_ticks as f64
+    } else {
+        f64::NAN
+    };
+    println!(
+        "  ring: prekill_ticks={prekill_ticks} prekill_rp_rate_rms={prekill_rp_rms:.4}rad/s prekill_saturated_frac={prekill_sat_frac:.4}"
+    );
     println!(
         "  verdict: backend={name} scenario=supervised-rotorout steps={n} fail_at={fail_at_s:.1}s \
          landed_at={landed_at:?} final_alt={final_alt:.2}m mode-disarmed={} isolated={isolated:?} \
