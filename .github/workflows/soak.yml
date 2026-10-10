@@ -282,6 +282,61 @@ jobs:
           if [ "$BEST" -lt 3600 ]; then
             echo "::warning::gz hold is ${BEST}s, short of the 1 h ENDURANCE-P01 target — tracked in #403"
           fi
+      # ── THE RING, MEASURED (#270) ────────────────────────────────────────
+      # #270 is a rail-to-rail ~3.5 Hz attitude limit cycle in the hover BEFORE
+      # a rotor kill, caused by the ADRC observer integrating torque a saturated
+      # mixer never delivered. #556 reports the delivered fraction to the ESO so
+      # it stops. NOTHING IN CI COULD SEE EITHER THE DEFECT OR THE FIX:
+      #
+      #   gazebo.yml, soak.yml   run --scenario=flightcore only, ~0% saturation
+      #   --backend=mock         a 0.0001-wide motor band in hover, so s == 1
+      #                          and the observer is already told the truth
+      #   supervised-rotorout    appeared in NO workflow at all
+      #
+      # Measured contrast from #270's bench evidence, same plant, same commit:
+      # flightcore 0.0014 rad/s roll/pitch RMS at ~0% saturation, this path
+      # ~2 rad/s with motors railing. Three orders of magnitude, which is what
+      # makes the 0.5 bar below meaningful rather than arbitrary — it sits ~350x
+      # above quiet and ~4x below ringing.
+      #
+      # IT LIVES HERE, NOT IN gazebo.yml, ON PURPOSE. The gz gate is a REQUIRED
+      # context; adding an unproven scenario to it would block main on a bar
+      # nobody has data for yet. The soak is scheduled and not required, so this
+      # can genuinely FAIL and tell us something without stopping merges. Once
+      # the numbers are known across a few nights, promote it into the gz gate.
+      # Masking it with continue-on-error was the other option and is how #409's
+      # Format check sat green for its entire life.
+      - name: The ring — pre-kill hover must not sustain its own saturation
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=/tmp/ring-rotorout.txt
+          ./target/release/falcon-sitl-gz \
+            --backend=gazebo --scenario=supervised-rotorout --duration=10 \
+            | tee "$OUT"
+          # Parse the summary line the harness now prints on every run.
+          LINE=$(grep -m1 '^  ring: ' "$OUT" || true)
+          if [ -z "$LINE" ]; then
+            echo "::error::no 'ring:' summary line — the harness did not report the pre-kill window, so this check verified NOTHING"
+            exit 1
+          fi
+          echo "::notice::$LINE"
+          RMS=$(printf '%s' "$LINE" | sed -E 's/.*prekill_rp_rate_rms=([0-9.]+)rad\/s.*/\1/')
+          SAT=$(printf '%s' "$LINE" | sed -E 's/.*prekill_saturated_frac=([0-9.]+).*/\1/')
+          TICKS=$(printf '%s' "$LINE" | sed -E 's/.*prekill_ticks=([0-9]+).*/\1/')
+          # EMPTY SCOPE MUST NOT EQUAL PASS: zero pre-kill ticks means the window
+          # never existed, which would make any bar below vacuously true.
+          if [ "${TICKS:-0}" -lt 100 ]; then
+            echo "::error::only ${TICKS:-0} pre-kill ticks — too few to judge the hover; the bar below would pass vacuously"
+            exit 1
+          fi
+          echo "pre-kill: ticks=$TICKS  rp_rate_rms=$RMS rad/s  saturated_frac=$SAT"
+          if awk -v r="$RMS" 'BEGIN { exit !(r >= 0.5) }'; then
+            echo "::error::THE RING IS PRESENT: pre-kill roll/pitch RMS ${RMS} rad/s >= 0.5 (quiet is ~0.0014, ringing ~2). Saturated fraction ${SAT}. #270"
+            exit 1
+          fi
+          echo "::notice::ring quiet — pre-kill roll/pitch RMS ${RMS} rad/s < 0.5, saturated fraction ${SAT} (#270)"
+
 
   wasm-endurance:
     name: wasm endurance watch (BOTH PATHS)
