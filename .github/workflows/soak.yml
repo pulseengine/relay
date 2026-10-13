@@ -272,7 +272,24 @@ jobs:
           # Prefer the on-disk record: if this shell were re-entered or BEST
           # lost, the rung file is still the measurement.
           if [ -s "$RUNGS" ]; then BEST=$(sort -n "$RUNGS" | tail -1); fi
-          if [ "$BEST" -lt "${GZ_FLOOR_S}" ]; then
+          # A CAPPED SCOPE MUST NOT EQUAL FAIL. This compared BEST against the
+          # floor regardless of the cap, so ANY manual dispatch with
+          # gz_max_s < 3600 reported "REGRESSED" for a ladder it never let
+          # climb: a clean 25 s hold (final_dist 0.12 m) came back as
+          # "gz endurance REGRESSED: 25s < floor 3600s" on 2026-10-13. That
+          # made the debugging affordance the comment above promises --
+          # "a human debugging the ladder should not be forced to wait an
+          # hour" -- unusable, because debugging always ended red, and it
+          # skipped every step after this one. Same false-negative family as
+          # #559: a verdict must be about what was actually measured.
+          #
+          # A `schedule` event always sets MAX=3600, so the nightly gate is
+          # unchanged in strength -- this can only relax a run where a human
+          # explicitly asked for a shorter ladder, and it says so out loud
+          # rather than passing quietly.
+          if [ "$MAX" -lt "${GZ_FLOOR_S}" ]; then
+            echo "::notice::ladder capped at ${MAX}s, below the ${GZ_FLOOR_S}s floor — endurance was NOT JUDGED by this run (only a scheduled run judges endurance)"
+          elif [ "$BEST" -lt "${GZ_FLOOR_S}" ]; then
             echo "::error::gz endurance REGRESSED: ${BEST}s < floor ${GZ_FLOOR_S}s"
             exit 1
           fi
@@ -307,6 +324,11 @@ jobs:
       # Masking it with continue-on-error was the other option and is how #409's
       # Format check sat green for its entire life.
       - name: The ring — pre-kill hover must not sustain its own saturation
+        # The ring measures a DIFFERENT property than the ladder above, so it
+        # must not be hostage to the ladder's verdict: as a success-gated step
+        # it was SKIPPED the moment endurance went red, which means an
+        # endurance regression would permanently hide the #270 measurement.
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
