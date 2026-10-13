@@ -195,6 +195,39 @@ artifacts:
       prose-only-citation drift cannot recur. See also the symbol-grep clause
       added to SWREQ-RELAY-BOARD-P01 (#534).
 
+      ======================================================================
+      THE SYMBOLS ARE ON MAIN AS OF 2026-10-13 (#556), AND THE PASSAGES ABOVE
+      SAYING THEY ARE NOT ARE NOW FALSE. Read this before trusting them:
+
+        git grep -n 'u_delivered_frac|set_delivered_fraction|last_torque_scale' \
+          origin/main -- 'crates/**'
+        # relay-adrc, relay-mix-quad and falcon-core all match.
+
+      #556 ported them from `phase0/rate-loop-antiwindup`. It did so under the
+      title "the ring is anti-windup, not tuning", WHICH THIS ARTIFACT ALREADY
+      REFUTES: the root cause is #488's `resync_loop_rate` (filters designed for
+      1 kHz, stepped at 250 Hz; reverting it restores 2.47 rad/s), and "the ESO
+      was never the problem; the filter in front of it was".
+
+      SO THIS CHANGES EXACTLY ONE THING AND NOT THE CLAIM. The re-promotion bar
+      named above has two halves -- the symbols present in shipped code AND a
+      `steps:` entry greping them. The first half is now met, incidentally
+      rather than deliberately. The steps are added here, which is what this
+      artifact said to do when the code landed ("the step gets added WITH the
+      code, as the precondition for re-promotion") and which closes the half of
+      #529 that actually matters: the citation stops being prose-only, so the
+      gate can see this drift in EITHER direction from now on.
+
+      WHAT IS STILL NOT MET, and why this stays `implemented`: the measured
+      benefit remains VOID. 2.47 -> 2.02 -> 1.91 rad/s was measured on the
+      MIS-DESIGNED filter, a regime that no longer exists, and nothing has
+      re-measured it against the fixed baseline. A gz run on 2026-10-13
+      (dispatch 38454332223) read 0.0015 rad/s pre-kill with the mechanism
+      present, against 0.00174 recorded without it -- evidence of NO REGRESSION,
+      and of no benefit either. Maintainer decision 2026-10-13: keep the code,
+      re-measure against the fixed baseline, correct the record. This is the
+      record half; the measurement half is still owed.
+
     tags: [requirement, falcon, rate-loop, adrc, limit-cycle, gazebo, v1.141]
     fields:
       priority: must
