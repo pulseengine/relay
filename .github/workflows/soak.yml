@@ -310,10 +310,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # A gz server must be RUNNING for --backend=gazebo. The ladder step
+          # above starts its own per rung and pkills it when it is done, so by
+          # the time this step runs there is NO server. The first scheduled run
+          # of this check died 15 s in --
+          #   !! NO NavSat DATUM within 15 s
+          #   panicked: connect_with_home: gz-transport connect failed
+          # -- and the soak went red FOUR NIGHTS RUNNING (2026-10-10..13) while
+          # the endurance ladder in the same job kept passing, so the job's
+          # "failure" read as an endurance regression that had not happened.
+          # Mirror the ladder's launch rather than inventing one.
+          pkill -f 'gz sim' 2>/dev/null || true
+          sleep 3
+          nohup gz sim -s -r -v2 examples/falcon-sitl-gz/worlds/falcon-quad.sdf \
+            > /tmp/gz-ring.log 2>&1 &
+          IMU=/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+          for i in $(seq 1 30); do
+            gz topic -l 2>/dev/null | grep -qx "$IMU" && break
+            sleep 2
+          done
+          # A readiness probe that never confirms is how the mock backend gets
+          # measured by accident. Say the measurement did not happen.
+          if ! gz topic -l 2>/dev/null | grep -qx "$IMU"; then
+            pkill -f 'gz sim' 2>/dev/null || true
+            echo "::error::gz never published $IMU within 60 s -- the ring was NOT measured"
+            exit 1
+          fi
           OUT=/tmp/ring-rotorout.txt
+          # `-e` would end the step on a FAIL verdict (exit 1) BEFORE the parse
+          # below -- the same trap #460 fixed in the analytic tier. The scenario
+          # verdict is not what this check judges; the pre-kill window is.
+          RC=0
           ./target/release/falcon-sitl-gz \
             --backend=gazebo --scenario=supervised-rotorout --duration=10 \
-            | tee "$OUT"
+            2>&1 | tee "$OUT" || RC=$?
+          pkill -f 'gz sim' 2>/dev/null || true
+          echo "harness exit=$RC (not this check's verdict -- the pre-kill window is)"
           # Parse the summary line the harness now prints on every run.
           LINE=$(grep -m1 '^  ring: ' "$OUT" || true)
           if [ -z "$LINE" ]; then
