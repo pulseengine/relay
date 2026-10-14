@@ -1733,6 +1733,16 @@ impl FlightSupervisor {
             CheckId::BatteryTakeoffMargin,
             self.batt_state.degraded || self.batt_state.soc >= 0.30,
         );
+        // PREARM-P03 propulsion row. A rotor the FDI has ISOLATED stays
+        // isolated — `RotorFaultDetector::update` returns early forever once
+        // `failed` is set — so the hazard OUTLIVES the flight it appeared in,
+        // and the next arm must see it. Nothing else in the table does:
+        // `EscTelemetry` only tracks eRPM arriving, and the `rtl_latched`
+        // term below is guarded by `mode != Mode::Land`, so a fault first
+        // isolated during the landing descent never reached it (#564 — the
+        // vehicle re-armed with a dead motor and the table named no reason
+        // at all). Derived live, exactly as the battery terms are.
+        t.set(CheckId::MotorsHealthy, self.core.failed_motor().is_none());
         t.set(
             CheckId::NoFailsafeLatched,
             !self.rtl_latched && !self.batt_state.low && !self.batt_state.critical,
@@ -6006,6 +6016,94 @@ mod tests {
             -b.pos[2] < 0.25,
             "must settle on the surface (not float): {} m",
             -b.pos[2]
+        );
+    }
+
+    #[test]
+    fn a_rotor_fault_isolated_during_landing_blocks_re_arming() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.rot_drag = 0.02;
+        b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        // A calibrated airframe, so the ONLY thing that could block a re-arm
+        // is the fault under test (an uncalibrated one is refused for an
+        // unrelated reason).
+        sup.set_calibration(relay_calib::CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..relay_calib::CalParams::identity()
+        });
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter first");
+        assert!(sup.core().failed_motor().is_none(), "healthy before the fault");
+
+        // Command the landing; the fault must NOT be injected until Land.
+        sup.command(Event::RequestLand, true, false);
+        sup.step(&mut b);
+        assert_eq!(sup.mode(), Mode::Land, "must be in Land BEFORE the fault");
+        assert!(!sup.rtl_latched, "no latch before the fault");
+
+        // Rotor 1 dies during the landing descent.
+        b.fail_rotor(1);
+        let mut isolated = false;
+        for _ in 0..15000 {
+            sup.step(&mut b);
+            if sup.core().failed_motor().is_some() {
+                isolated = true;
+                break;
+            }
+            if sup.mode() == Mode::Disarmed {
+                break;
+            }
+        }
+        assert!(
+            isolated,
+            "FDI must isolate the rotor (mode {:?}, alt {} m)",
+            sup.mode(),
+            -b.pos[2]
+        );
+        assert_eq!(
+            sup.mode(),
+            Mode::Land,
+            "must still be in Land at isolation (else the scenario is void)"
+        );
+        assert!(
+            !sup.rtl_latched,
+            "the fault slipped past the failsafe latch (mode != Land guard)"
+        );
+
+        let mut disarmed = false;
+        for _ in 0..15000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Disarmed {
+                disarmed = true;
+                break;
+            }
+        }
+        assert!(disarmed, "must disarm after touchdown: mode {:?}", sup.mode());
+        assert_eq!(sup.mode(), Mode::Disarmed);
+        assert!(
+            sup.core().failed_motor().is_some(),
+            "the dead motor is still latched at the arm attempt"
+        );
+
+        // Let the pre-arm table refresh, then try to re-arm.
+        sup.step(&mut b);
+        sup.command(Event::Arm, true, true);
+        assert_eq!(
+            sup.mode(),
+            Mode::Disarmed,
+            "a vehicle with a latched dead motor must REFUSE to arm; \
+             arm_blocked_check={:?} reason={:?} failed_motor={:?}",
+            sup.arm_blocked_check(),
+            sup.arm_blocked_reason(),
+            sup.core().failed_motor()
         );
     }
 
