@@ -1484,6 +1484,31 @@ pub mod failsafe_flags {
 }
 
 impl FlightSupervisor {
+    /// Severity rank of a mode, for failsafe arbitration (#562).
+    ///
+    /// A `Failsafe` event must only ESCALATE. The FSM's `(Rtl, Failsafe) =>
+    /// Land` is right for a WORSE condition and wrong for the SAME one, and
+    /// every trigger here is LEVEL-triggered: a vehicle flying home is, by
+    /// definition, still outside the fence, so the breach re-sent `Failsafe`
+    /// every tick and RTL was demoted to land-where-you-are after a single
+    /// 4 ms tick -- landing OUTSIDE the fence it was recovering from. The
+    /// battery failsafe shares that expression and `relay-batt`'s flags latch,
+    /// so it was equally persistent.
+    ///
+    /// Ranks let each send ask "would this escalate?" instead of "is the
+    /// condition true?". This is `relay-fsafe`'s most-severe-wins + monotone
+    /// latch semantics applied at the send; that crate is not a drop-in
+    /// replacement because its `Triggers` has no runaway, wind, motor-out or
+    /// battery-silence field and its policy cannot reach `Terminate`.
+    fn mode_rank(m: relay_fsm::Mode) -> u8 {
+        match m {
+            relay_fsm::Mode::Terminated => 4,
+            relay_fsm::Mode::Land => 3,
+            relay_fsm::Mode::Rtl => 2,
+            _ => 1,
+        }
+    }
+
     /// `home` NED, `fence_radius` m (breach ⇒ RTL), `cruise_alt` m AGL,
     /// `low_batt_v` V (below ⇒ failsafe).
     pub fn new(home: Vec3, fence_radius: f32, cruise_alt: f32, low_batt_v: f32) -> Self {
@@ -1933,7 +1958,10 @@ impl FlightSupervisor {
         let batt_lost = self.batt_seen && self.batt_missing_s > BATT_SILENCE_S;
         let batt_fail = self.batt_state.low || self.batt_state.critical || batt_lost;
         let breach = dist_home > self.fence_radius || batt_fail;
-        if breach && self.fsm.is_airborne() && self.fsm.mode() != Mode::Land {
+        // A critical pack must reach Land even from Rtl; a fence breach or a
+        // low pack must not re-demote the Rtl it just commanded (#562).
+        let want = if self.batt_state.critical { 3 } else { 2 };
+        if breach && self.fsm.is_airborne() && want > Self::mode_rank(self.fsm.mode()) {
             self.fsm.on(Event::Failsafe, g);
             self.rtl_latched = true;
         }
@@ -1965,7 +1993,7 @@ impl FlightSupervisor {
             && (WIND_TILT_MIN..=WIND_TILT_CEIL).contains(&tilt)
         {
             self.wind_count = self.wind_count.saturating_add(1);
-            if self.wind_count >= WIND_CYCLES {
+            if self.wind_count >= WIND_CYCLES && 2 > Self::mode_rank(self.fsm.mode()) {
                 self.fsm.on(Event::Failsafe, g);
                 self.rtl_latched = true;
             }
@@ -2085,7 +2113,10 @@ impl FlightSupervisor {
                 have_position: false,
                 prearm_ok: true,
             };
-            self.fsm.on(Event::Failsafe, land);
+            // Land-level: this MUST still escalate out of Rtl (rank 2).
+            if 3 > Self::mode_rank(self.fsm.mode()) {
+                self.fsm.on(Event::Failsafe, land);
+            }
             self.rtl_latched = true;
         }
     }
@@ -5194,6 +5225,57 @@ mod tests {
     /// takes off and loiters while the pack depletes; the terminal voltage sags
     /// (open-circuit drop + load sag) below the threshold and the supervisor
     /// commands a recovery — fired by genuine energy use, not a set voltage.
+    /// #562: a SUSTAINED geofence breach must not demote the RTL it just
+    /// commanded. Every trigger in `step` is level-triggered, and a vehicle
+    /// flying home is by definition still outside the fence, so the breach
+    /// re-sent `Failsafe` every tick and `(Rtl, Failsafe) => Land` fired 4 ms
+    /// later -- landing OUTSIDE the fence it was recovering from.
+    ///
+    /// The geometry matters and a first attempt got it wrong: with a 1 cm
+    /// fence, "breached" and "arrived home" (`dist_home < 0.4` at the Rtl
+    /// arrival handoff) are true SIMULTANEOUSLY, so RTL ends via the arrival
+    /// path and the demotion is invisible. Home is 2 m away here: the breach
+    /// is sustained AND the arrival radius cannot fire.
+    #[test]
+    fn sustained_geofence_breach_does_not_demote_rtl() {
+        use relay_calib::CalParams;
+        use relay_fsm::Mode;
+        let dt = 0.004f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        let mut sup = FlightSupervisor::new([2.0, 0.0, 0.0], 0.5, 2.0, 14.0);
+        sup.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
+        for _ in 0..1500 {
+            sup.step(&mut b);
+        }
+        sup.command(relay_fsm::Event::Arm, true, true);
+        sup.command(relay_fsm::Event::RequestTakeoff, true, false);
+        let mut entered = false;
+        for _ in 0..200 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Rtl {
+                entered = true;
+                break;
+            }
+        }
+        assert!(entered, "a fence breach must actuate RTL at all");
+        // 50 ticks = 0.2 s. The vehicle cannot have covered 2 m home in that
+        // time, so any exit from Rtl here is the demotion, not an arrival.
+        for i in 0..50 {
+            sup.step(&mut b);
+            assert_eq!(
+                sup.mode(),
+                Mode::Rtl,
+                "RTL was demoted {} ticks in while the breach was still true \
+                 (dist_home ~ 2 m, so this is not the arrival handoff)",
+                i + 1
+            );
+        }
+    }
+
     #[test]
     fn battery_drain_actuates_endurance_failsafe() {
         use relay_fsm::Mode;
