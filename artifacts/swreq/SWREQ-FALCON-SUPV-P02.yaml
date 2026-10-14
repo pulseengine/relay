@@ -1,0 +1,59 @@
+artifacts:
+  - id: SWREQ-FALCON-SUPV-P02
+    type: sw-req
+    title: "SUPV-P02 — a failsafe latch is an IN-FLIGHT device: it clears on disarm, and re-arming is gated by LIVE hazards only"
+    status: implemented
+    release: falcon-v1.141.0
+    description: >
+      The RTL latch the supervisor raises when it actuates a failsafe
+      ([[SWREQ-FALCON-SUPV-P01]]) shall be an IN-FLIGHT monotonicity device
+      only — it exists so that a level-triggered condition cannot re-fire
+      Failsafe and demote the Rtl it just commanded — and it shall CLEAR when
+      the vehicle is disarmed. It shall NOT serve as an arming interlock.
+
+      What blocks a subsequent arm shall instead be the LIVE hazard, re-derived
+      every control cycle from real vehicle state (the [[SWREQ-FALCON-PREARM-P02]]
+      discipline): the battery terms, and the isolated-rotor row
+      [[SWREQ-FALCON-PREARM-P04]]. A hazard that is no longer present shall not
+      block arming, and a hazard that IS still present shall block it on its own
+      merit and name its own reason.
+
+      MEASURED defect this replaces (relay#564): the latch was never cleared
+      anywhere, so after ANY failsafe the airframe could never be re-armed for
+      the life of the process — the pre-arm table reported
+      "PREARM: failsafe latched" forever, even after the vehicle had flown home,
+      landed, disarmed, and the triggering condition had completely gone.
+
+      High wind is deliberately EXCLUDED from the live-hazard set: its detector
+      is an in-flight signature (control allocation saturated while leaning) and
+      its counter is zeroed whenever the vehicle is not airborne, so no
+      ground-observable wind signal exists. Permitting re-arm after a wind RTL
+      is a recorded maintainer decision (relay#564): if the wind is still beyond
+      the rate loop's authority the vehicle takes off, saturates, and is landed
+      again by the same failsafe — self-limiting — whereas a permanent block
+      would brick the airframe after a transient gust, which is the common case.
+    tags: [falcon, supervisor, failsafe, latch, arming, safety, v1.141]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        falcon-core, two directions, each falsified. (1) RECOVERY: a geofence
+        breach latches the failsafe, the vehicle flies home, lands and disarms,
+        and with the hazard provably clear (within the fence, battery neither
+        low nor critical, no isolated rotor) the next command(Arm) REACHES
+        Mode::Armed, and rtl_latched reads false after disarm
+        (tests::re_arming_is_allowed_once_the_failsafe_condition_has_cleared —
+        fails without the clear, with reason "PREARM: failsafe latched").
+        (2) RETAINED PROTECTION: a rotor fault isolated while AIRBORNE (so the
+        latch IS set, unlike the Mode::Land case PREARM-P04 covers) lands and
+        disarms; rtl_latched then reads FALSE, and the next command(Arm) is
+        still REFUSED naming CheckId::MotorsHealthy
+        (tests::a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears).
+        Direction (2) MUST be falsified by deleting PREARM-P04's MotorsHealthy
+        row while the disarm-clear stays in place — NOT by removing the clear,
+        which would prove only that the latch still blocks.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011
+      - type: derives-from
+        target: SYSREQ-FALCON-014
