@@ -6041,7 +6041,10 @@ mod tests {
             sup.step(&mut b);
         }
         assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter first");
-        assert!(sup.core().failed_motor().is_none(), "healthy before the fault");
+        assert!(
+            sup.core().failed_motor().is_none(),
+            "healthy before the fault"
+        );
 
         // Command the landing; the fault must NOT be injected until Land.
         sup.command(Event::RequestLand, true, false);
@@ -6086,7 +6089,11 @@ mod tests {
                 break;
             }
         }
-        assert!(disarmed, "must disarm after touchdown: mode {:?}", sup.mode());
+        assert!(
+            disarmed,
+            "must disarm after touchdown: mode {:?}",
+            sup.mode()
+        );
         assert_eq!(sup.mode(), Mode::Disarmed);
         assert!(
             sup.core().failed_motor().is_some(),
