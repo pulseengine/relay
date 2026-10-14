@@ -55,6 +55,9 @@ struct Component;
 
 impl Guest for Component {
     fn tick(state: VehicleState, target: Waypoint) -> AttitudeSetpoint {
+        #[cfg(not(feature = "std"))]
+        falcon_cm_rt::BumpArena::reset();
+
         let setpoint = PositionSetpoint {
             position_ned: [target.north, target.east, target.down],
             velocity_ned: [0.0, 0.0, 0.0],
