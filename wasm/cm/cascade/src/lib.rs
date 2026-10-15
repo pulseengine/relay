@@ -197,8 +197,13 @@ const SUP_FENCE_UNSET: f32 = 1.0e9;
 /// CHOICE: 14 V is a 4S threshold, which on a 6S pack fires far too late and
 /// on a 3S pack reads as permanently low.
 const SUP_LOW_BATT_UNSET: f32 = 0.0;
-/// RTL CRUISE ALTITUDE WHEN UNCONFIGURED, NED metres — the value every
+/// CRUISE ALTITUDE WHEN UNCONFIGURED, metres AGL and POSITIVE — the value every
 /// in-tree `FlightSupervisor::new` call site uses.
+///
+/// NOT NED-signed, unlike every other altitude in this seam. falcon-core
+/// documents it as "m AGL" and negates it when deriving the setpoint, so a
+/// negative value here commands a descent BELOW the ground. Hence `positive`
+/// below, not merely finite.
 const SUP_CRUISE_UNSET: f32 = 2.0;
 
 /// The supervisor's four constructor inputs, sanitised, with the unconfigured
@@ -220,7 +225,7 @@ fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
             // A non-finite or non-positive radius falls back to INACTIVE, never
             // to 0.0 — same reason as the constant.
             sane(c.fence_radius, SUP_FENCE_UNSET, true),
-            sane(c.cruise_alt, SUP_CRUISE_UNSET, false),
+            sane(c.cruise_alt, SUP_CRUISE_UNSET, true),
             sane(c.low_batt_v, SUP_LOW_BATT_UNSET, false),
         ),
     }

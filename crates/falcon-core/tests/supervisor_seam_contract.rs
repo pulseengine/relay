@@ -159,3 +159,53 @@ fn an_unconfigured_supervisor_refuses_to_arm() {
          the refusal above was not caused by FailsafeConfigured"
     );
 }
+
+/// `cruise-alt` is metres AGL and POSITIVE — the one altitude in this seam that
+/// is NOT NED-signed.
+///
+/// WHY THIS TEST EXISTS: I documented the field the other way round in the WIT
+/// and had to correct it. The surrounding convention makes the wrong answer look
+/// obvious — `pos-d`, `home.z` and every setpoint in this package are NED with
+/// negative up — but `FlightSupervisor` documents the constructor argument as
+/// "m AGL" and NEGATES it itself when deriving the setpoint
+/// (`[p0, p1, -cruise_alt]` for Takeoff, Loiter, Rtl and Land). So a consumer
+/// following the convention and passing -30.0 to mean "30 m up" would command
+/// +30.0 NED: thirty metres BELOW the ground.
+///
+/// A prose fix is not enough for a sign error on a safety seam, so this pins the
+/// BEHAVIOUR: a positive `cruise_alt` must make the vehicle climb. If the value
+/// were ever consumed as NED directly, the same positive input would command a
+/// descent and this test fails.
+#[test]
+fn a_positive_cruise_alt_commands_a_climb_not_a_descent() {
+    use falcon_core::{FlightSupervisor, SimBackend, relay_fsm::Event};
+
+    let dt = 0.002f32;
+    let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut backend = SimBackend::new(level, dt);
+    // cruise_alt = 2.0, POSITIVE, meaning 2 m above the ground.
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+
+    let start_d = backend.pos[2];
+    sup.command(Event::Arm, true, true);
+    sup.command(Event::RequestTakeoff, true, true);
+    for _ in 0..8000 {
+        sup.step(&mut backend);
+    }
+    let end_d = backend.pos[2];
+
+    // NED: down is POSITIVE, so climbing means pos[2] DECREASES.
+    assert!(
+        end_d < start_d,
+        "a positive cruise_alt must command a CLIMB: pos-d went {start_d} -> {end_d}. \
+         If pos-d increased, cruise_alt is being consumed as an NED coordinate \
+         instead of an AGL magnitude, and a consumer passing a negative value \
+         for 'up' would be commanded into the ground."
+    );
+    // And it should settle near the commanded altitude, not merely move upward —
+    // otherwise a drift would satisfy the inequality above.
+    assert!(
+        (end_d - (-2.0)).abs() < 0.5,
+        "should hold near -2.0 m NED (2 m AGL) for cruise_alt = 2.0; got {end_d}"
+    );
+}

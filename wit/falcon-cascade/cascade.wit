@@ -419,8 +419,20 @@ interface pilot {
         /// Geofence radius in metres about `home`. Exceeding it latches an RTL
         /// (bit 4 of `flight-state.failsafe`).
         fence-radius: f32,
-        /// RTL cruise altitude, NED metres — NEGATIVE IS UP, as everywhere
-        /// else in this package.
+        /// Cruise altitude in metres AGL, and it is **POSITIVE** — the one
+        /// field in this package that is NOT NED-signed.
+        ///
+        /// CHECKED, not inferred, because the surrounding convention made the
+        /// wrong answer look obvious. `falcon-core` documents the constructor
+        /// argument as "`cruise_alt` m AGL" and the supervisor NEGATES it itself
+        /// when it builds the setpoint (`[p0, p1, -cruise_alt]` for Takeoff,
+        /// Loiter, Rtl and Land). So passing -30.0 here to mean "30 m up" would
+        /// command +30.0 NED — thirty metres BELOW the ground. Every in-tree
+        /// call site passes a positive value.
+        ///
+        /// A non-positive value is therefore rejected rather than clamped: zero
+        /// or negative is not a conservative cruise altitude, it is a commanded
+        /// descent into the ground.
         cruise-alt: f32,
         /// Pack LOW threshold in volts for the WHOLE battery, not per cell;
         /// the estimator derives its per-cell fallbacks from this.

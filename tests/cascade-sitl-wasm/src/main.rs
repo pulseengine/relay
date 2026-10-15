@@ -55,16 +55,42 @@ wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.11.0;
-            export pulseengine:falcon-cascade/observer@0.11.0;
+            export pulseengine:falcon-cascade/controller@0.12.0;
+            export pulseengine:falcon-cascade/observer@0.12.0;
+            export pulseengine:falcon-cascade/pilot@0.12.0;
         }
     "#,
     path: "../../wit/falcon-cascade",
 });
 
+// Under `exports::`, not at the root like `types` — `pilot` is an EXPORTED
+// interface so wasmtime's bindgen puts its records there, whereas `types` is
+// merely `use`d by the exported interfaces and lands at the root.
+use exports::pulseengine::falcon_cascade::pilot::{PilotCommand, SupervisorConfig};
 use pulseengine::falcon_cascade::types::{
     ImuSample as WitImu, RotorRpm, SensorFrame, Vec3, VehicleConfig, Waypoint,
 };
+
+/// Pack voltage this harness reports, and the LOW threshold it configures.
+///
+/// THE HARNESS HAS TO SUPPLY A BATTERY NOW, and that is not boilerplate.
+/// `FlightBackend::read_battery_v` defaults to `None`, `update_preflight` then
+/// sets `battery_ok = batt_present && ..` with `batt_present == false`,
+/// `all_pass()` ANDs it, and `arm_check` returns `Blocked(CheckFail::Battery)`.
+/// So a frame with no battery cannot arm the supervised component at all.
+/// 16.8 V is a full 4S pack against a 14.0 V LOW threshold — comfortably clear,
+/// so the hold under test is never perturbed by a battery failsafe.
+const SITL_PACK_V: f32 = 16.8;
+const SITL_LOW_BATT_V: f32 = 14.0;
+
+/// Geofence radius the harness configures, metres about home.
+///
+/// Large but FINITE and deliberately not the 1e9 "inactive" sentinel: this
+/// harness verifies an altitude hold and a bounded horizontal excursion (< 1.0 m
+/// per HOLD-P01), so 100 m cannot interfere — while still leaving a real
+/// geofence armed, rather than quietly testing the vehicle with a failsafe
+/// switched off.
+const SITL_FENCE_M: f32 = 100.0;
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -96,6 +122,13 @@ fn main() -> Result<()> {
     // only place the seqlock and the monotonic tick can be checked across the
     // actual Component Model ABI instead of in-process.
     let observer = bindings.pulseengine_falcon_cascade_observer();
+    // THE COMMAND DIRECTION (SUPERVISOR-P01, seam @0.12.0). The published
+    // component is now a SUPERVISED vehicle: `FlightSupervisor::step` returns
+    // through `step_estimate_only` — motors commanded ZERO — while the mode is
+    // Disarmed, and the FSM starts Disarmed. So a harness that only called
+    // `step` would measure a vehicle sitting on the ground for 4000 ticks and
+    // report a hold error of 2.00 m. It has to arm, like a real host.
+    let pilot = bindings.pulseengine_falcon_cascade_pilot();
     let mut last_tick: u32 = 0;
     let mut state_reads: u32 = 0;
 
@@ -171,6 +204,32 @@ fn main() -> Result<()> {
         calib.altitude_kp, calib.altitude_kd, calib.altitude_ki
     );
     controller.call_configure(&mut store, calib)?;
+
+    // THE SUPERVISOR'S OWN INPUTS (SUPERVISOR-P01 clause 4), which the seam
+    // carried none of before @0.12.0.
+    //
+    // `cruise_alt` is metres AGL and POSITIVE — the one altitude in this seam
+    // that is NOT NED-signed (falcon-core negates it when deriving the
+    // setpoint). `down` is NED, so the commanded altitude is its negation.
+    // Getting this backwards would command a descent into the ground.
+    let supcfg = SupervisorConfig {
+        home: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+        fence_radius: SITL_FENCE_M,
+        cruise_alt: -down,
+        low_batt_v: SITL_LOW_BATT_V,
+    };
+    pilot.call_configure_supervisor(&mut store, supcfg)?;
+    println!(
+        "supervisor : home=[0,0,0] fence={:.0} m cruise={:.2} m AGL low_batt={:.1} V",
+        supcfg.fence_radius, supcfg.cruise_alt, supcfg.low_batt_v
+    );
+
+    // ARM, THEN REQUEST TAKEOFF — before the first `step`, exactly as the
+    // native supervisor tests do. The pre-arm table is judged at THIS moment:
+    // `arm_check_table` is read inside `command`, not inside `step`.
+    pilot.call_command(&mut store, PilotCommand::Arm, true, true)?;
+    pilot.call_command(&mut store, PilotCommand::RequestTakeoff, true, true)?;
+    println!("commanded  : Arm -> RequestTakeoff (supervised; Disarmed commands zero motors)");
     println!();
 
     let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|v| v.parse().ok())
@@ -324,6 +383,8 @@ fn main() -> Result<()> {
             mag_body,
             heading_rad,
             motor_rpm,
+            // @0.12.0. Without this the component cannot arm — see SITL_PACK_V.
+            battery_v: Some(SITL_PACK_V),
         };
         let m = controller.call_step(&mut store, frame, target)?;
 
