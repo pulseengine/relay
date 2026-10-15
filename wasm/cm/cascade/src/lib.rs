@@ -43,12 +43,18 @@ use bindings::exports::pulseengine::falcon_cascade::controller::Guest;
 // The RETURN direction's Guest trait (SWREQ-FALCON-TRANSPORT-P01). A SECOND
 // export, so an observer reads state without executing a control tick.
 use bindings::exports::pulseengine::falcon_cascade::observer::Guest as ObserverGuest;
+// THE COMMAND DIRECTION (SUPERVISOR-P01 clause 1) — a THIRD export, which is
+// the stakeholder's decision (pulseengine/jess#167) and the only one of the
+// three candidate shapes with a byte-identity measurement behind it.
+use bindings::exports::pulseengine::falcon_cascade::pilot::{
+    Guest as PilotGuest, PilotCommand, SupervisorConfig,
+};
 use bindings::pulseengine::falcon_cascade::types::{
     FlightState, MotorPwm, SensorFrame, VehicleConfig, Waypoint,
 };
 
 use core::cell::RefCell;
-use falcon_core::{FlightBackend, FlightCore, ImuSample as CoreImu};
+use falcon_core::{FlightBackend, FlightCore, FlightSupervisor, ImuSample as CoreImu};
 
 /// falcon-core's `Vec3` alias is private, so it is restated here. Same shape
 /// (`[f32; 3]`, NED); if that ever diverges this stops compiling, which is the
@@ -59,10 +65,32 @@ struct SingleThreaded<T>(RefCell<T>);
 // SAFETY: the component model guarantees single-threaded, non-reentrant access.
 unsafe impl<T> Sync for SingleThreaded<T> {}
 
-/// Lazily built: `FlightCore::new` needs the host's loop rate, which only
-/// arrives with the first frame. Constructing it on a guessed rate is exactly
-/// the defect v0.8 exists to remove.
-static CORE: SingleThreaded<Option<FlightCore>> = SingleThreaded(RefCell::new(None));
+/// Lazily built. SUPERVISOR-P01 clause 1: this is a `FlightSupervisor`, not a
+/// bare `FlightCore`, so the mode machine, the failsafe arbiter and the 20
+/// pre-arm rows execute INSIDE the published artifact. Before this the shipped
+/// component was, in #414's words, "a stabiliser with no supervisor" — it would
+/// hold attitude and position and WOULD NOT STOP FOR ANYTHING.
+///
+/// STILL CONSTRUCTED INTO THE SLOT, never by value, and that is load-bearing
+/// rather than stylistic: this component links an 8 KiB shadow stack and the
+/// by-value form of `FlightCore::new` already trapped as an out-of-bounds
+/// access. The supervisor is LARGER — measured 3208 B against the core's
+/// 2688 B, 1.19x — so the same mitigation applies with 19% more pressure.
+/// `crates/falcon-core/tests/shadow_stack_budget.rs` holds that number against
+/// half the stack so it cannot drift quietly.
+static CORE: SingleThreaded<Option<FlightSupervisor>> = SingleThreaded(RefCell::new(None));
+
+/// The supervisor's configuration, if the host called `pilot.configure-supervisor`.
+///
+/// `None` IS NOT A NEUTRAL STATE and must not be treated as one. A supervisor on
+/// defaults is worse than no supervisor: a 0 m geofence about a (0,0,0) home
+/// latches an RTL on the first tick. So an unconfigured component runs with the
+/// CONFIGURATION-DEPENDENT failsafes INACTIVE (see `SUP_*_UNSET` below) and
+/// declares `CheckId::FailsafeConfigured` FALSE, which blocks arming through the
+/// existing pre-arm table with a named reason. The alternative — guessing a cell
+/// count — is fail-unsafe in one direction and spurious in the other: 14 V is
+/// far too low for a 6S pack and always-low for a 3S one.
+static SUPCFG: SingleThreaded<Option<SupervisorConfig>> = SingleThreaded(RefCell::new(None));
 
 /// THE PUBLISHED STATE, and a monotonic tick that never resets
 /// (SWREQ-FALCON-TRANSPORT-P01). Written at the END of every `step`, read by
@@ -89,6 +117,10 @@ struct PublishedState {
     bg: [f32; 3],
     innovation: f32,
     failed_rotor: u8,
+    /// `relay_fsm::Mode` as its discriminant (SUPERVISOR-P01 clause 2/3).
+    mode: u8,
+    /// `FlightSupervisor::failsafe_flags()` verbatim — the CAUSE behind `mode`.
+    failsafe: u32,
     valid: u32,
 }
 
@@ -102,6 +134,14 @@ const V_RATE: u32 = 1 << 3;
 const V_BIAS: u32 = 1 << 4;
 const V_INNOV: u32 = 1 << 5;
 const V_ROTOR: u32 = 1 << 6;
+/// SUPERVISOR-P01. Both are produced every tick once the supervisor runs, so
+/// both are set whenever a tick has happened — and BOTH ARE CLEAR before the
+/// first tick, where `mode` would otherwise read 0 = `disarmed`. A pre-tick
+/// `disarmed` is indistinguishable from a measured one, and clause 3 exists
+/// precisely because confusing mode values is how a terminated vehicle gets
+/// reported as safe. "Not measured" must not look like "on the ground".
+const V_MODE: u32 = 1 << 7;
+const V_FAILSAFE: u32 = 1 << 8;
 
 /// The host's calibration, if it supplied one. `None` keeps the v0.8 defaults.
 static CONFIG: SingleThreaded<Option<VehicleConfig>> = SingleThreaded(RefCell::new(None));
@@ -116,21 +156,6 @@ fn sane(v: f32, default: f32, positive: bool) -> f32 {
         v
     } else {
         default
-    }
-}
-
-/// The two values that can only be supplied at CONSTRUCTION: hover thrust and
-/// loop rate. Split out from the tuning below because `FlightCore` must be built
-/// directly into its slot — see `apply_tuning`.
-fn core_params(cfg: Option<&VehicleConfig>, frame_hz: f32) -> (f32, f32) {
-    match cfg {
-        // Unconfigured: byte-for-byte the v0.8 behaviour, so an existing host
-        // that never calls `configure` sees no change whatsoever.
-        None => (0.5, frame_hz),
-        Some(c) => (
-            sane(c.hover_thrust, 0.5, true),
-            sane(c.loop_rate_hz, frame_hz, true),
-        ),
     }
 }
 
@@ -160,6 +185,89 @@ fn apply_tuning(core: &mut FlightCore, c: &VehicleConfig) {
     core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
 }
 
+/// GEOFENCE RADIUS WHEN UNCONFIGURED — large enough that the breach term
+/// cannot fire, i.e. the geofence is INACTIVE rather than wrong. 0.0 would
+/// latch an RTL on tick one, which is the "worse than no supervisor" case
+/// SUPERVISOR-P01 names; a finite value avoids relying on inf comparisons
+/// surviving every arithmetic path the breach term takes.
+const SUP_FENCE_UNSET: f32 = 1.0e9;
+/// LOW-BATTERY THRESHOLD WHEN UNCONFIGURED — 0.0, so both derived per-cell
+/// fallbacks (`low_batt_v / 4.0` and `- 0.15`) sit at or below zero and no
+/// measured voltage can cross them. GUESSING A CELL COUNT IS NOT THE SAFER
+/// CHOICE: 14 V is a 4S threshold, which on a 6S pack fires far too late and
+/// on a 3S pack reads as permanently low.
+const SUP_LOW_BATT_UNSET: f32 = 0.0;
+/// RTL CRUISE ALTITUDE WHEN UNCONFIGURED, NED metres — the value every
+/// in-tree `FlightSupervisor::new` call site uses.
+const SUP_CRUISE_UNSET: f32 = 2.0;
+
+/// The supervisor's four constructor inputs, sanitised, with the unconfigured
+/// case spelled out above rather than left to a zero.
+fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
+    match cfg {
+        None => (
+            [0.0, 0.0, 0.0],
+            SUP_FENCE_UNSET,
+            SUP_CRUISE_UNSET,
+            SUP_LOW_BATT_UNSET,
+        ),
+        Some(c) => (
+            [
+                sane(c.home.x, 0.0, false),
+                sane(c.home.y, 0.0, false),
+                sane(c.home.z, 0.0, false),
+            ],
+            // A non-finite or non-positive radius falls back to INACTIVE, never
+            // to 0.0 — same reason as the constant.
+            sane(c.fence_radius, SUP_FENCE_UNSET, true),
+            sane(c.cruise_alt, SUP_CRUISE_UNSET, false),
+            sane(c.low_batt_v, SUP_LOW_BATT_UNSET, false),
+        ),
+    }
+}
+
+/// Build the supervisor into its slot if absent, and DECLARE whether it is
+/// configured — on every call, not only on construction.
+///
+/// The declaration has to happen here rather than in `step` because
+/// `arm_check_table` is read inside `FlightSupervisor::command`, and the
+/// constructor defaults the first six pre-arm rows TRUE for bring-up
+/// back-compat. A host that sent `arm` before its first `step` would otherwise
+/// arm an unconfigured supervisor off that default — the gate must be correct at
+/// the moment it is READ, not merely refreshed once a tick has run.
+fn ensure_supervisor<'a>(
+    slot: &'a mut Option<FlightSupervisor>,
+    cfg: Option<&VehicleConfig>,
+    supcfg: Option<&SupervisorConfig>,
+) -> &'a mut FlightSupervisor {
+    let fresh = slot.is_none();
+    let (home, fence, cruise, low_batt) = sup_params(supcfg);
+    // Constructed straight into the slot — see `CORE`. `hover_thrust` and the
+    // tuning are then applied through `&mut`, because the by-value form of this
+    // construction is what overflowed the 8 KiB shadow stack.
+    let sup = slot.get_or_insert_with(|| FlightSupervisor::new(home, fence, cruise, low_batt));
+    if fresh {
+        // `FlightSupervisor::new` hardcodes `FlightCore::new(0.5, 1000.0)`, so
+        // hover thrust must be re-applied; the LOOP RATE needs no setter because
+        // `resync_loop_rate` re-derives it (and the gyro LPF and notch bank)
+        // from the backend's own `dt` on the first tick, past a 2% tolerance.
+        // What does NOT resync is the warm-up count, seeded as
+        // `(loop_hz * 0.2).max(10)` = 200 at the hardcoded 1000 Hz: at a real
+        // 250 Hz frame that holds the FDI off for 0.8 s instead of 0.2 s. Longer
+        // and therefore not a hazard at arming, but it is a behaviour change and
+        // belongs in falcon-core rather than patched around from here.
+        if let Some(c) = cfg {
+            sup.set_hover_thrust(sane(c.hover_thrust, 0.5, true));
+            apply_tuning(sup.core_mut(), c);
+        }
+    }
+    sup.set_check(
+        falcon_core::relay_preflight::CheckId::FailsafeConfigured,
+        supcfg.is_some(),
+    );
+    sup
+}
+
 /// One tick's sensors in, motors out.
 ///
 /// `FlightCore` pulls from a backend and pushes motors into it, which is the
@@ -178,6 +286,14 @@ struct FrameBackend {
     /// v0.10: per-rotor ESC telemetry. `None` leaves the rotor-out FDI on its
     /// RPM-free path, which is what every published component did until now.
     motor_rpm: Option<[i32; 4]>,
+    /// SUPERVISOR-P01. The two battery reads are the ONLY backend methods the
+    /// supervisor calls that `FlightCore` did not, and both DEFAULT to `None` in
+    /// the trait — so without this field the switch to a supervisor would ship a
+    /// vehicle that can never arm. Measured: `read_battery_v` defaults `None`,
+    /// `update_preflight` sets `battery_ok = batt_present && ..` with
+    /// `batt_present == false`, `all_pass()` ANDs `battery_ok`, and `arm_check`
+    /// returns `Blocked(CheckFail::Battery)` forever.
+    battery_v: Option<f32>,
     dt: f32,
     motors: [f32; 4],
 }
@@ -197,6 +313,9 @@ impl FlightBackend for FrameBackend {
     }
     fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
         self.motor_rpm
+    }
+    fn read_battery_v(&mut self) -> Option<f32> {
+        self.battery_v
     }
     fn write_motors(&mut self, motors: &[f32]) {
         for (i, m) in self.motors.iter_mut().enumerate() {
@@ -234,39 +353,46 @@ impl Guest for Component {
             mag: sensors.mag_body.map(|m| [m.x, m.y, m.z]),
             heading: sensors.heading_rad,
             motor_rpm: sensors.motor_rpm.map(|r| [r.m1, r.m2, r.m3, r.m4]),
+            battery_v: sensors.battery_v,
             dt,
             motors: [0.0; 4],
         };
 
         {
             let mut guard = CORE.0.borrow_mut();
-            // Built from the host's calibration if `configure` was called, and
-            // from the v0.8 defaults otherwise. The loop rate comes from the
-            // calibration or from the frame — never from a constant.
             let cfg = CONFIG.0.borrow();
-            let fresh = guard.is_none();
-            let (hover, hz) = core_params(cfg.as_ref(), 1.0 / dt);
-            // `get_or_insert_with` writes the core straight into the slot; the
-            // tuning is then applied through `&mut`, never by value.
-            let core = guard.get_or_insert_with(|| FlightCore::new(hover, hz));
-            if fresh {
-                if let Some(c) = cfg.as_ref() {
-                    apply_tuning(core, c);
-                }
-            }
-            core.set_position([target.north, target.east, target.down]);
-            core.step(&mut backend);
+            let supcfg = SUPCFG.0.borrow();
+            let sup = ensure_supervisor(&mut guard, cfg.as_ref(), supcfg.as_ref());
+
+            // `target` IS NOW A MISSION LEG, NOT A POSITION COMMAND — the one
+            // semantic change at @0.12.0 a host must be told about. The
+            // supervisor OWNS the position setpoint: it derives one per mode
+            // (RTL flies home at `cruise-alt`, Land descends, Mission flies the
+            // active leg) and calls `core.set_position` itself at the end of its
+            // own step. Writing the core's setpoint from here would be
+            // overwritten within the same tick, so the honest wiring is to make
+            // the frame's target the mission rather than pretend it still
+            // commands position directly. THAT IS THE POINT of SUPERVISOR-P01:
+            // a supervised vehicle sometimes declines to go where it is sent.
+            sup.set_mission([target.north, target.east, target.down]);
+            sup.step(&mut backend);
 
             // LATCH FOR OBSERVERS, after the tick so the state corresponds to
             // the motors this call returns.
-            let ns = core.state();
-            let failed = core.failed_motor();
+            let ns = sup.state();
+            let failed = sup.core().failed_motor();
+            // SUPERVISOR-P01 clause 2. `mode` is the OUTCOME, `failsafe` the
+            // CAUSE; publishing only the first would show a consumer the vehicle
+            // diverting with no way to tell a flat pack from a geofence breach.
+            let mode = sup.mode() as u8;
+            let failsafe = sup.failsafe_flags();
             let mut prev = PUBLISHED.0.borrow_mut();
             let tick = prev.as_ref().map(|s| s.tick.wrapping_add(1)).unwrap_or(0);
             // Every field below is produced by the core each tick, so all are
             // valid; `failed-rotor` is valid as a READING (0xFF = no fault),
             // which is distinct from "not measured".
-            let valid = V_ATT | V_POS | V_VEL | V_RATE | V_BIAS | V_INNOV | V_ROTOR;
+            let valid =
+                V_ATT | V_POS | V_VEL | V_RATE | V_BIAS | V_INNOV | V_ROTOR | V_MODE | V_FAILSAFE;
             *prev = Some(PublishedState {
                 tick,
                 q: ns.q,
@@ -276,6 +402,8 @@ impl Guest for Component {
                 bg: ns.b_g,
                 innovation: 0.0,
                 failed_rotor: failed.map(|i| i as u8).unwrap_or(0xFF),
+                mode,
+                failsafe,
                 valid,
             });
         }
@@ -331,6 +459,8 @@ impl ObserverGuest for Component {
                 bgx: p.bg[0], bgy: p.bg[1], bgz: p.bg[2],
                 innovation: p.innovation,
                 failed_rotor: p.failed_rotor,
+                mode: p.mode,
+                failsafe: p.failsafe,
                 valid: p.valid,
                 tick_tail: p.tick,
             },
@@ -347,10 +477,78 @@ impl ObserverGuest for Component {
                 bgx: 0.0, bgy: 0.0, bgz: 0.0,
                 innovation: 0.0,
                 failed_rotor: 0xFF,
+                // NOT `disarmed`. 0 is a MEANINGFUL mode value, so publishing it
+                // with `V_MODE` clear is the whole contract: a reader that
+                // ignores `valid` and trusts this byte would read "safely on the
+                // ground" out of "no tick has ever run". `failsafe` is 0 for the
+                // same reason — no cause has been observed, which is not the
+                // same as no cause existing.
+                mode: 0,
+                failsafe: 0,
                 valid: 0,
                 tick_tail: 0,
             },
         }
+    }
+}
+
+/// THE COMMAND DIRECTION (SUPERVISOR-P01 clause 1 + 4).
+///
+/// Before this the `cascade` world exported `step` and `configure` and nothing
+/// else, so the mode machine, the failsafe arbiter and all 20 pre-arm rows were
+/// implemented, tested, Kani-proven in places — and UNREACHABLE from the shipped
+/// seam. That is ORPHAN-P01's fourth state (implemented, verified, advertised,
+/// unreachable) occurring at the seam rather than inside a crate.
+impl PilotGuest for Component {
+    /// Install the supervisor's configuration and DROP the supervisor, so the
+    /// next call rebuilds from it.
+    ///
+    /// Dropping mirrors `controller.configure` and for the same reason: `home`
+    /// seeds `waypoints` and the keep-out zone centres at construction, and
+    /// `low-batt-v` is folded into the battery estimator's per-cell fallbacks
+    /// there too. Applying a late change in place would honour the geofence
+    /// centre and silently keep the old battery thresholds — a partially-applied
+    /// safety configuration, which is worse than an explicit re-initialisation.
+    fn configure_supervisor(cfg: SupervisorConfig) {
+        #[cfg(not(feature = "std"))]
+        falcon_cm_rt::BumpArena::reset();
+
+        *SUPCFG.0.borrow_mut() = Some(cfg);
+        *CORE.0.borrow_mut() = None;
+    }
+
+    /// Deliver one pilot command to the mode machine.
+    ///
+    /// The supervisor is built here if it does not exist yet, rather than the
+    /// command being dropped: a host whose first act is `arm` must get a real
+    /// verdict from the pre-arm table, not silence. `ensure_supervisor` declares
+    /// `FailsafeConfigured` on the way through, which is what stops that first
+    /// `arm` from passing on the constructor's bring-up defaults.
+    fn command(cmd: PilotCommand, level: bool, throttle_low: bool) {
+        #[cfg(not(feature = "std"))]
+        falcon_cm_rt::BumpArena::reset();
+
+        use falcon_core::relay_fsm::Event;
+        // EXHAUSTIVE on purpose — no `_` arm. The seam's enum is deliberately
+        // narrower than `relay_fsm::Event` (it withholds the four physical
+        // observations), and if a variant is ever added to either side this
+        // match is where it has to be considered rather than silently absorbed.
+        let ev = match cmd {
+            PilotCommand::Arm => Event::Arm,
+            PilotCommand::RequestTakeoff => Event::RequestTakeoff,
+            PilotCommand::RequestMission => Event::RequestMission,
+            PilotCommand::RequestLoiter => Event::RequestLoiter,
+            PilotCommand::RequestRtl => Event::RequestRtl,
+            PilotCommand::RequestLand => Event::RequestLand,
+            PilotCommand::RequestDisarm => Event::RequestDisarm,
+            PilotCommand::Terminate => Event::Terminate,
+        };
+
+        let mut guard = CORE.0.borrow_mut();
+        let cfg = CONFIG.0.borrow();
+        let supcfg = SUPCFG.0.borrow();
+        let sup = ensure_supervisor(&mut guard, cfg.as_ref(), supcfg.as_ref());
+        sup.command(ev, level, throttle_low);
     }
 }
 
