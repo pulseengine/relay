@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.11.0;
+package pulseengine:falcon-cascade@0.12.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -75,9 +75,48 @@ interface types {
         innovation: f32,
         /// Isolated failed rotor, 0-3; 0xFF when none. Flat, not `option<u8>`.
         failed-rotor: u8,
+        /// FLIGHT MODE (SUPERVISOR-P01 clause 2). The `relay-fsm` discriminant:
+        ///   0 disarmed  1 armed  2 takeoff  3 loiter
+        ///   4 mission   5 land   6 rtl      7 terminated
+        ///
+        /// `disarmed` AND `terminated` ARE DISTINCT AND MUST STAY SO (clause 3).
+        /// `disarmed` is a SAFE on-ground state; `terminated` is a deliberate
+        /// AIRBORNE thrust cut that nothing recovers from without an on-ground
+        /// reset. A decoder that collapses them reports a terminated vehicle as
+        /// safely disarmed — the absence-looks-like-data shape this project has
+        /// already paid for twice (#413 a battery read as healthy, #452 an
+        /// accelerometer read as gravity).
+        ///
+        /// MEASURED, NOT ASSERTED: this byte lands at offset 73, in padding that
+        /// already existed between `failed-rotor` (72) and the u32s, so MODE
+        /// COSTS ZERO BYTES. `failsafe` below then aligns to 76 and pushes
+        /// `valid` to 80 and `tick-tail` to 84 — the record grows 84 -> 88, all
+        /// of it `failsafe`. The offsets are asserted against the GENERATED
+        /// bindings in `wasm/cm/cascade/tests/`, not trusted from this comment.
+        ///
+        /// The numbering is `relay_fsm::Mode`'s IMPLICIT discriminant order and
+        /// that enum carries no `#[repr]`, so a reordering upstream would
+        /// silently change these wire values. That is why the pinning test
+        /// asserts each variant by name rather than counting.
+        mode: u8,
+        /// ACTIVE FAILSAFE CAUSES (SUPERVISOR-P01 clause 2) — a bitmask, not an
+        /// enum, because several are live at once and the supervisor's own
+        /// breach term ORs geofence with battery, so an enum would have to pick
+        /// a winner and discard the rest.
+        ///   bit 0 rtl-latched     1 batt-low        2 batt-critical
+        ///   bit 3 batt-silent     4 geofence-breach 5 runaway-arming
+        ///   bit 6 wind-arming     7 arm-blocked
+        ///
+        /// `mode` is the OUTCOME; this is the CAUSE. Without it a consumer sees
+        /// the vehicle divert and cannot tell a flat pack from a geofence
+        /// breach from a wind failsafe. Mirrors
+        /// `FlightSupervisor::failsafe_flags()` bit for bit; every bit is a
+        /// condition `step` already acts on, and each is pinned by test.
+        failsafe: u32,
         /// Which fields above are meaningful this tick. Bit 0 attitude,
         /// 1 position, 2 velocity, 3 rates, 4 gyro bias, 5 innovation,
-        /// 6 failed-rotor. A clear bit means NOT MEASURED, never "zero".
+        /// 6 failed-rotor, 7 mode, 8 failsafe. A clear bit means NOT MEASURED,
+        /// never "zero".
         valid: u32,
         /// Seqlock tail, written last. See `tick-head`.
         tick-tail: u32,
@@ -165,6 +204,44 @@ interface types {
         ///
         /// `none` = no telemetry, and the FDI falls back to its RPM-free path.
         motor-rpm: option<rotor-rpm>,
+        /// Pack voltage (V), or `none` when the host has no battery sense.
+        ///
+        /// AN OPTION, NOT A SENTINEL, and that is the load-bearing part. The
+        /// supervisor declares the pack ON FIRST SIGHT: until a reading arrives
+        /// `batt_seen` is false and a silent pack CANNOT raise a failsafe,
+        /// which is what stops "no sense at all" reading as "the pack died". A
+        /// 0.0 sentinel would destroy that distinction and a healthy default
+        /// would restore the fail-unsafe behaviour #413 already corrected.
+        ///
+        /// NECESSARY FOR ARMING BUT NOT SUFFICIENT — and the first claim here
+        /// said otherwise, so it is worth being precise about.
+        ///
+        /// `FlightBackend::read_battery_v` DEFAULTS to `None` and the cascade
+        /// backend overrides 7 of the trait's 12 methods but not that one, so
+        /// `update_preflight` sets `battery_ok = batt_present && ..` with
+        /// `batt_present == false`, `all_pass()` ANDs it, and the `BatteryOk`
+        /// row refuses. That part is real: this field is a PREREQUISITE for
+        /// clause (1), not a feature of it.
+        ///
+        /// WHAT IT DOES NOT DO is make the component armable. MEASURED: a host
+        /// that warms its estimator before arming — what a real GCS does, and
+        /// what `step_estimate_only` exists for — is refused by
+        /// `CalibrationPresent` FIRST, because `update_preflight` derives it
+        /// from `core.calibration() != identity()` and NOTHING IN THIS SEAM
+        /// CARRIES A CALIBRATION. So the published component can presently only
+        /// be armed on the arm-before-first-step path, judged against
+        /// `FlightSupervisor::new`'s deliberate bring-up defaults. That is
+        /// SUPERVISOR-P01's own falsification condition, and it means a green
+        /// SITL gate shows the DEFAULTS path works, not the pre-arm table.
+        /// Pinned by `the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused`
+        /// in `crates/falcon-core/tests/supervisor_seam_contract.rs`.
+        ///
+        /// FREE, MEASURED: `controller#step` flattens to 26 params today
+        /// (sensor-frame 22 + waypoint 4) against `MAX_FLAT_PARAMS = 16`, so it
+        /// is ALREADY INDIRECT by 10; this takes it to 28 and cannot change the
+        /// calling convention. kiln independently lowered the shipped component
+        /// at 26 (pulseengine/jess#287), agreeing with the field-by-field count.
+        battery-v: option<f32>,
     }
 
     /// Per-rotor measured speed, in the airframe's motor order — the same order
@@ -319,7 +396,112 @@ interface observer {
     read-state: func() -> flight-state;
 }
 
+/// PILOT / GCS COMMAND CHANNEL (SUPERVISOR-P01 clause 1 + 4) — a THIRD
+/// interface, deliberately, and that shape is the stakeholder's decision
+/// (pulseengine/jess#167): of the three candidates it is the only one with a
+/// byte-identity measurement behind it. Adding a new interface beside the
+/// existing ones was measured byte-free for the per-stage set at @0.11.0;
+/// adding an export to an EXISTING interface was not, and neither side was
+/// willing to hand over a baseline guarantee nobody had tested.
+///
+/// The supervisor's CONFIGURATION lives here too rather than in
+/// `vehicle-config`, and that is a measurement, not tidiness.
+/// `configure(cfg: vehicle-config)` flattens to 9 params today; the four
+/// constructor inputs below would have taken it to 15 against
+/// `MAX_FLAT_PARAMS = 16` — one field of margin, while clause (4) still wants
+/// more. Growing a parameter record across that line silently changes the
+/// calling convention from flattened scalars to a pointer, and the canonical
+/// ABI passes GARBAGE rather than erroring when a caller assumed the other
+/// form. `vehicle-config` therefore stays at 9 and keeps its byte-identity.
+interface pilot {
+    use types.{vec3};
+
+    /// The supervisor's constructor inputs:
+    /// `FlightSupervisor::new(home, fence-radius, cruise-alt, low-batt-v)`.
+    ///
+    /// The seam carried NONE of these, so the published component could only
+    /// ever run a bare `FlightCore`. A SUPERVISOR ON DEFAULTS IS WORSE THAN NO
+    /// SUPERVISOR — a 0 m geofence about a (0,0,0) home latches an RTL on the
+    /// first tick — which is why these land in the same change that wires it
+    /// in rather than in a follow-up.
+    record supervisor-config {
+        /// Home / launch point, NED metres: the geofence centre AND the RTL
+        /// destination. Both, from one field — they are the same point.
+        home: vec3,
+        /// Geofence radius in metres about `home`. Exceeding it latches an RTL
+        /// (bit 4 of `flight-state.failsafe`).
+        fence-radius: f32,
+        /// Cruise altitude in metres AGL, and it is **POSITIVE** — the one
+        /// field in this package that is NOT NED-signed.
+        ///
+        /// CHECKED, not inferred, because the surrounding convention made the
+        /// wrong answer look obvious. `falcon-core` documents the constructor
+        /// argument as "`cruise_alt` m AGL" and the supervisor NEGATES it itself
+        /// when it builds the setpoint (`[p0, p1, -cruise_alt]` for Takeoff,
+        /// Loiter, Rtl and Land). So passing -30.0 here to mean "30 m up" would
+        /// command +30.0 NED — thirty metres BELOW the ground. Every in-tree
+        /// call site passes a positive value.
+        ///
+        /// A non-positive value is therefore rejected rather than clamped: zero
+        /// or negative is not a conservative cruise altitude, it is a commanded
+        /// descent into the ground.
+        cruise-alt: f32,
+        /// Pack LOW threshold in volts for the WHOLE battery, not per cell;
+        /// the estimator derives its per-cell fallbacks from this.
+        low-batt-v: f32,
+    }
+
+    /// A command a PILOT or GCS may legitimately issue.
+    ///
+    /// DELIBERATELY NARROWER THAN `relay_fsm::Event`, which has 12 variants.
+    /// The four withheld — `reached-altitude`, `reached-home`, `touchdown` and
+    /// `failsafe` — are PHYSICAL OBSERVATIONS the supervisor derives from its
+    /// own estimated state, not requests. A host able to inject `touchdown`
+    /// could disarm a vehicle in the air; one able to inject `failsafe` could
+    /// raise a diversion with no cause recorded in `failsafe`. The seam does
+    /// not offer a host the ability to lie to the mode machine about physics.
+    enum pilot-command {
+        /// Arm. Gated by the 20-row pre-arm table; refusal is observable as
+        /// bit 7 of `flight-state.failsafe`.
+        arm,
+        request-takeoff,
+        request-mission,
+        request-loiter,
+        request-rtl,
+        request-land,
+        request-disarm,
+        /// FLIGHT TERMINATION — the last-resort motor cut. From ANY state this
+        /// forces `terminated` and overrides every other transition. Offered to
+        /// a host because a GCS kill switch is a legitimate pilot authority;
+        /// nothing recovers from it without an on-ground reset.
+        terminate,
+    }
+
+    /// Install the supervisor's configuration.
+    ///
+    /// Call before the first `step`, as with `controller.configure`. A host
+    /// that never calls it gets the built-in defaults, which are suitable for
+    /// the SITL mock plant and nothing else.
+    configure-supervisor: func(cfg: supervisor-config);
+
+    /// Deliver one pilot command to the mode machine.
+    ///
+    /// `level` and `throttle-low` are the RC arming interlocks the HOST holds
+    /// and the component cannot observe: stick position is not in the sensor
+    /// frame. They are passed per command rather than stored because they are
+    /// properties of the moment the command was issued.
+    ///
+    /// NOTE, because it ships in this component and a consumer should not have
+    /// to discover it: the core currently hardcodes `have_position: true` in
+    /// its gate construction (`falcon-core` `FlightSupervisor::command`), so
+    /// the "never RTL with position lost" clause of FSAFE-P01 is NOT reachable
+    /// through this seam yet. That is a core limitation this interface exposes
+    /// rather than introduces, and it is tracked separately.
+    command: func(cmd: pilot-command, level: bool, throttle-low: bool);
+}
+
 world cascade {
     export controller;
     export observer;
+    export pilot;
 }

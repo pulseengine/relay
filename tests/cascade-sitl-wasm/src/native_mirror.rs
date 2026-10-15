@@ -12,26 +12,52 @@
 //! would have compared two different programs and reported a difference meaning
 //! nothing — a differential is only evidence while both sides run the same code.
 //!
-//! It is now a much smaller file, which is the point: there is one flight core,
-//! and both sides call it.
+//! @0.12.0 rework, and it is the same lesson arriving a second time
+//! (SUPERVISOR-P01). The component now wraps `falcon_core::FlightSupervisor`,
+//! so this mirror does too. It was NOT updated in the first pass of that change
+//! and the gz gate caught it immediately: wasm and native disagreed by
+//! 0.069364190 at tick 6249 — a real difference reported honestly, about two
+//! different programs rather than about the boundary. That is the differential
+//! doing exactly its job, and the reason the gate is required.
+//!
+//! WHAT MIRRORING NOW REQUIRES, beyond swapping the type:
+//!   * the supervisor's own configuration (home / fence / cruise / low-batt),
+//!   * a battery reading, because `read_battery_v` defaults to `None` and the
+//!     pre-arm table ANDs `BatteryOk`,
+//!   * the arm + takeoff commands, because `FlightSupervisor::step` commands
+//!     ZERO motors while Disarmed — an unarmed mirror would sit on the ground
+//!     while the wasm side flew, and report that as a boundary failure,
+//!   * construction through `FlightSupervisor::new`, NOT `FlightCore::new`.
+//!     That one is subtle: the supervisor hardcodes `FlightCore::new(0.5,
+//!     1000.0)` internally, and the warm-up count is seeded as
+//!     `(loop_hz * 0.2).max(10)` — 200 at 1000 Hz. The old mirror built at
+//!     `1/dt` (80 at 400 Hz) and does not resync, because only the loop RATE
+//!     resyncs from the backend, not the warm-up. A mirror that kept building
+//!     the core directly would differ in FDI/innovation warm-up alone.
 
-use falcon_core::{FlightBackend, FlightCore, ImuSample as CoreImu};
+use falcon_core::relay_fsm::Event;
+use falcon_core::relay_preflight::CheckId;
+use falcon_core::{FlightBackend, FlightSupervisor, ImuSample as CoreImu};
 
 type Vec3 = [f32; 3];
 
 /// One tick's sensors in, motors out — the same shim `wasm/cm/cascade` uses.
 ///
-/// `FlightCore` pulls from a backend and pushes motors into it, which is the
-/// seam that lets the same code run against SITL, Gazebo or hardware. Mirroring
-/// the component's shim exactly (including returning `None` where the frame
-/// carried nothing, so the core skips that fusion rather than being handed a
-/// fabricated zero) is what keeps the comparison honest.
+/// `FlightSupervisor` pulls from a backend and pushes motors into it, which is
+/// the seam that lets the same code run against SITL, Gazebo or hardware.
+/// Mirroring the component's shim exactly (including returning `None` where the
+/// frame carried nothing, so the core skips that fusion rather than being handed
+/// a fabricated zero) is what keeps the comparison honest.
 struct FrameBackend {
     imu: CoreImu,
     position: Option<Vec3>,
     mag: Option<Vec3>,
     heading: Option<f32>,
     motor_rpm: Option<[i32; 4]>,
+    /// @0.12.0. The component overrides this now, so the mirror must too —
+    /// otherwise the mirror's battery failsafe and `BatteryOk` row see a
+    /// different world from the component's.
+    battery_v: Option<f32>,
     dt: f32,
     motors: [f32; 4],
 }
@@ -51,6 +77,9 @@ impl FlightBackend for FrameBackend {
     }
     fn read_position(&mut self) -> Option<Vec3> {
         self.position
+    }
+    fn read_battery_v(&mut self) -> Option<f32> {
+        self.battery_v
     }
     fn write_motors(&mut self, motors: &[f32]) {
         for (i, m) in self.motors.iter_mut().enumerate() {
@@ -78,9 +107,30 @@ pub struct Calib {
     pub position_ki: f32,
 }
 
+/// The mirror of the WIT `supervisor-config` record (@0.12.0), separate for the
+/// same reason as `Calib`.
+///
+/// `cruise_alt` is metres AGL and POSITIVE — the one altitude in the seam that
+/// is not NED-signed. The supervisor negates it itself when deriving setpoints.
+#[derive(Clone, Copy)]
+pub struct SupCalib {
+    pub home: Vec3,
+    pub fence_radius: f32,
+    pub cruise_alt: f32,
+    pub low_batt_v: f32,
+}
+
+/// Mirrors the component's unconfigured-supervisor constants. A supervisor on
+/// defaults is worse than no supervisor, so "unset" means the
+/// configuration-dependent failsafes are INACTIVE, never zero.
+const SUP_FENCE_UNSET: f32 = 1.0e9;
+const SUP_LOW_BATT_UNSET: f32 = 0.0;
+const SUP_CRUISE_UNSET: f32 = 2.0;
+
 pub struct NativeCascade {
-    core: Option<FlightCore>,
+    sup: Option<FlightSupervisor>,
     cfg: Option<Calib>,
+    supcfg: Option<SupCalib>,
 }
 
 impl Default for NativeCascade {
@@ -100,23 +150,94 @@ fn sane(v: f32, default: f32, positive: bool) -> f32 {
     }
 }
 
+/// Mirrors the component's `sup_params`.
+fn sup_params(cfg: Option<&SupCalib>) -> (Vec3, f32, f32, f32) {
+    match cfg {
+        None => (
+            [0.0, 0.0, 0.0],
+            SUP_FENCE_UNSET,
+            SUP_CRUISE_UNSET,
+            SUP_LOW_BATT_UNSET,
+        ),
+        Some(c) => (
+            [
+                sane(c.home[0], 0.0, false),
+                sane(c.home[1], 0.0, false),
+                sane(c.home[2], 0.0, false),
+            ],
+            sane(c.fence_radius, SUP_FENCE_UNSET, true),
+            // POSITIVE, not merely finite — a non-positive cruise altitude is a
+            // commanded descent into the ground, not a conservative default.
+            sane(c.cruise_alt, SUP_CRUISE_UNSET, true),
+            sane(c.low_batt_v, SUP_LOW_BATT_UNSET, false),
+        ),
+    }
+}
+
 impl NativeCascade {
     pub fn new() -> Self {
-        Self { core: None, cfg: None }
+        Self {
+            sup: None,
+            cfg: None,
+            supcfg: None,
+        }
     }
 
-    /// Mirrors `Component::configure`, INCLUDING dropping the core so the next
-    /// step rebuilds from the new calibration.
+    /// Mirrors `Component::configure`, INCLUDING dropping the supervisor so the
+    /// next call rebuilds from the new calibration.
     pub fn configure(&mut self, cfg: Calib) {
         self.cfg = Some(cfg);
-        self.core = None;
+        self.sup = None;
+    }
+
+    /// Mirrors `PilotGuest::configure_supervisor`, including the drop.
+    pub fn configure_supervisor(&mut self, cfg: SupCalib) {
+        self.supcfg = Some(cfg);
+        self.sup = None;
+    }
+
+    /// Mirrors the component's `ensure_supervisor` exactly, declaration included.
+    fn ensure(&mut self) -> &mut FlightSupervisor {
+        let fresh = self.sup.is_none();
+        let (home, fence, cruise, low_batt) = sup_params(self.supcfg.as_ref());
+        let cfg = self.cfg;
+        let sup = self
+            .sup
+            .get_or_insert_with(|| FlightSupervisor::new(home, fence, cruise, low_batt));
+        if fresh {
+            if let Some(c) = cfg {
+                sup.set_hover_thrust(sane(c.hover_thrust, 0.5, true));
+                let core = sup.core_mut();
+                core.set_pos_var(sane(c.pos_var, 0.01, true));
+                core.set_process_floor(
+                    sane(c.process_floor_vel, 0.0, false),
+                    sane(c.process_floor_pos, 0.0, false),
+                );
+                core.set_altitude_gains(
+                    sane(c.altitude_kp, 0.05, false),
+                    sane(c.altitude_kd, 0.30, false),
+                );
+                core.set_altitude_integral_gain(sane(c.altitude_ki, 0.0, false));
+                core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
+            }
+        }
+        let configured = self.supcfg.is_some();
+        let sup = self.sup.as_mut().expect("just inserted");
+        sup.set_check(CheckId::FailsafeConfigured, configured);
+        sup
+    }
+
+    /// Mirrors `PilotGuest::command`.
+    pub fn command(&mut self, ev: Event, level: bool, throttle_low: bool) {
+        let sup = self.ensure();
+        sup.command(ev, level, throttle_low);
     }
 
     /// Mirrors `wasm/cm/cascade::step` call for call, including the dt clamp and
-    /// the lazy construction on the FIRST frame's rate — the component cannot
-    /// build its core until a host states its period, and a mirror that built
-    /// eagerly on a guessed rate would diverge for a reason that says nothing
-    /// about the Component Model.
+    /// the lazy construction — the component cannot build its supervisor until a
+    /// host has configured it, and a mirror that built eagerly would diverge for
+    /// a reason that says nothing about the Component Model.
+    #[allow(clippy::too_many_arguments)]
     pub fn step(
         &mut self,
         accel: [f32; 3],
@@ -126,6 +247,7 @@ impl NativeCascade {
         mag: Option<Vec3>,
         heading: Option<f32>,
         motor_rpm: Option<[i32; 4]>,
+        battery_v: Option<f32>,
         dt_s: f32,
     ) -> [f32; 4] {
         let dt = if dt_s.is_finite() {
@@ -139,33 +261,16 @@ impl NativeCascade {
             mag,
             heading,
             motor_rpm,
+            battery_v,
             dt,
             motors: [0.0; 4],
         };
-        // Built from the calibration when the host supplied one, and from the
-        // v0.8 defaults otherwise — identical to the component's `build_core`.
-        let cfg = self.cfg;
-        let core = self.core.get_or_insert_with(|| match cfg {
-            None => FlightCore::new(0.5, 1.0 / dt),
-            Some(c) => {
-                let hz = sane(c.loop_rate_hz, 1.0 / dt, true);
-                let mut core = FlightCore::new(sane(c.hover_thrust, 0.5, true), hz);
-                core.set_pos_var(sane(c.pos_var, 0.01, true));
-                core.set_process_floor(
-                    sane(c.process_floor_vel, 0.0, false),
-                    sane(c.process_floor_pos, 0.0, false),
-                );
-                core.set_altitude_gains(
-                    sane(c.altitude_kp, 0.05, false),
-                    sane(c.altitude_kd, 0.30, false),
-                );
-                core.set_altitude_integral_gain(sane(c.altitude_ki, 0.0, false));
-                core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
-                core
-            }
-        });
-        core.set_position(target);
-        core.step(&mut b);
+        let sup = self.ensure();
+        // `target` is a MISSION LEG at @0.12.0, not a position command: the
+        // supervisor owns the setpoint and derives one per mode, so writing the
+        // core's setpoint here would be overwritten inside the same tick.
+        sup.set_mission(target);
+        sup.step(&mut b);
         b.motors
     }
 }

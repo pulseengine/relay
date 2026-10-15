@@ -3,6 +3,16 @@
 **Requirement:** SWREQ-FALCON-TRANSPORT-P01 · **Reference implementation:**
 `crates/falcon-hitl/src/wire.rs` · **Seam:** `pulseengine:falcon-cascade@0.11.0`
 
+> **This binding is deliberately one seam revision behind, and it is a known
+> limitation rather than a stale header.** The published component moved to
+> `@0.12.0` (SUPERVISOR-P01): it now runs the `FlightSupervisor`, publishes
+> `mode` and `failsafe`, and takes a pack voltage in the sensor frame. This v1
+> binding carries **no battery element** — `SENSOR_PAYLOAD_LEN` is 76 — so a
+> host driving the supervised component over this transport reports no pack,
+> and the pre-arm table correctly refuses to arm it. Tracked as #572; adding
+> the element is a wire revision with its own Kani oracle, not an edit to this
+> page.
+
 ## Why this document exists
 
 We shipped a verified flight component and no way to talk to it. An integrator
