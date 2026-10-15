@@ -55,6 +55,9 @@ struct Component;
 
 impl Guest for Component {
     fn tick(state: VehicleState, sp: AttitudeSetpoint) -> RateSetpoint {
+        #[cfg(not(feature = "std"))]
+        falcon_cm_rt::BumpArena::reset();
+
         let rate = { let a = &ATT.0;
             a.borrow_mut().tick(
                 next_timestamp(),

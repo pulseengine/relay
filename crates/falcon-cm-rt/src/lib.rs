@@ -18,16 +18,25 @@
 //!    `falcon-rate:1.129.0` shipped unusable.
 //! 3. **A panic handler**, since `no_std` has none.
 //!
-//! Sizing: the ABI allocates here only for a call's SPILLED PARAMETER AREA —
-//! when an export's flattened parameters exceed the canonical
-//! `MAX_FLAT_PARAMS` (16), the host writes the arguments into our memory and we
-//! return a pointer. That is a few hundred bytes per call. Exhaustion TRAPS
-//! rather than growing: a bounded, analyzable failure mode.
+//! Sizing: the ABI allocates here for a call's SPILLED PARAMETER AREA — when
+//! an export's flattened parameters exceed the canonical `MAX_FLAT_PARAMS`
+//! (16), the host writes the arguments into our memory through `cabi_realloc`
+//! and we return a pointer. That is tens of bytes per call: 72 B for
+//! falcon-position, 76 B for falcon-attitude, 104 B for the fused cascade.
+//!
+//! It is NOT only that, and the difference matters. `export_cm_rt!` also
+//! installs this arena as the `#[global_allocator]`, so every `Vec`, `Box` and
+//! `String` the guest builds comes out of the same 8 KiB. Anything reasoning
+//! about what `reset` may safely discard has to account for both.
+//!
+//! On exhaustion `alloc` returns NULL rather than growing — bounded and
+//! analyzable, but the trap is the CALLER's: the canonical ABI gives
+//! `cabi_realloc` no way to report failure, so a null just propagates.
 //!
 //! A component instance is never re-entered concurrently by the runtime, so
 //! single-threaded access is sound.
 
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
@@ -54,10 +63,20 @@ impl BumpArena {
     /// Reclaim the previous call's parameter area.
     ///
     /// The canonical ABI never frees what it allocates through `cabi_realloc`,
-    /// so without this a long-running component walks the cursor to
-    /// exhaustion. Call it at the top of each exported entry point: sound
-    /// because the arena only ever holds the CURRENT call's argument/result
-    /// area — nothing allocated by a previous call outlives it.
+    /// and this arena's `dealloc` is a no-op, so without this a long-running
+    /// component walks the cursor to exhaustion — 113 calls for
+    /// falcon-position's 72-byte spill (relay#566).
+    ///
+    /// Call it as the FIRST statement of each exported entry point. It is
+    /// sound only under both of the following, which hold for every current
+    /// export but which the type system does not enforce:
+    ///
+    /// 1. the entry's parameters are fixed-size records, which the generated
+    ///    bindings lift into locals BEFORE the body runs. A `list`/`string`
+    ///    parameter would still own arena memory when the body reset it.
+    /// 2. the guest keeps no heap state across calls — this arena is also the
+    ///    `#[global_allocator]`, and the cascade components hold their
+    ///    controllers in `static` cells BY VALUE, not behind a `Box`.
     #[inline]
     pub fn reset() {
         unsafe { *NEXT.0.get() = 0 };
@@ -143,4 +162,48 @@ macro_rules! export_cm_rt {
             loop {}
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deliberately ONE test: `STORE` and `NEXT` are crate-level statics, so
+    /// separate `#[test]` fns would race under the default parallel harness
+    /// and every assertion here would become order-dependent.
+    #[test]
+    fn the_cursor_only_rewinds_on_reset() {
+        // falcon-position's actual spilled-parameter block.
+        let spill = Layout::from_size_align(72, 4).unwrap();
+
+        // Reset per call is bounded: the same allocation succeeds forever.
+        for i in 0..10_000 {
+            BumpArena::reset();
+            let p = unsafe { BumpArena.alloc(spill) };
+            assert!(!p.is_null(), "reset-per-call must never exhaust (call {i})");
+        }
+
+        // WITHOUT a reset the cursor only advances — this is relay#566.
+        BumpArena::reset();
+        let mut served = 0usize;
+        while !unsafe { BumpArena.alloc(spill) }.is_null() {
+            served += 1;
+            assert!(
+                served <= 1000,
+                "the arena never exhausted: leak unmeasurable"
+            );
+        }
+        assert_eq!(
+            served,
+            ARENA_BYTES / 72,
+            "a 72-byte spill must exhaust {ARENA_BYTES} bytes in this many calls"
+        );
+
+        // Exhaustion is a sticky null, not a wrap back to the start.
+        assert!(unsafe { BumpArena.alloc(spill) }.is_null());
+
+        // And reset recovers from it.
+        BumpArena::reset();
+        assert!(!unsafe { BumpArena.alloc(spill) }.is_null());
+    }
 }
