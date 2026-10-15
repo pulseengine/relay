@@ -27,6 +27,7 @@
 // the same crates and hope the versions agree. The published wasm component is
 // the case that found this: it depends on `falcon-core` alone, deliberately, so
 // that what ships is what is verified (#388 / scripts/audit-component-deps.rs).
+pub use relay_calib;
 pub use relay_fsm;
 pub use relay_preflight;
 

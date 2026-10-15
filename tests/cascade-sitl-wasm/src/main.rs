@@ -227,6 +227,23 @@ fn main() -> Result<()> {
     // ARM, THEN REQUEST TAKEOFF — before the first `step`, exactly as the
     // native supervisor tests do. The pre-arm table is judged at THIS moment:
     // `arm_check_table` is read inside `command`, not inside `step`.
+    //
+    // AND BE HONEST ABOUT WHAT THAT MEANS THIS GATE PROVES. Arming here is
+    // judged against `FlightSupervisor::new`'s deliberate bring-up defaults
+    // (the legacy six rows forced true), NOT against refreshed signals. A host
+    // that warmed its estimator first — which is what `step_estimate_only`
+    // exists for and what a real GCS would do — is refused by
+    // `CalibrationPresent`, because nothing in this seam carries a calibration.
+    // Measured and pinned in
+    // `crates/falcon-core/tests/supervisor_seam_contract.rs`.
+    //
+    // So a GREEN RESULT FROM THIS HARNESS SHOWS THE DEFAULTS PATH WORKS end to
+    // end through the Component Model ABI. It is NOT evidence that the 20-row
+    // pre-arm table gates arming through the seam, and must not be cited as
+    // such when SUPERVISOR-P01 is promoted — the requirement's own
+    // falsification names exactly this case ("the supervisor runs against
+    // default inputs the host cannot supply"). The harness warms first and
+    // arms on the real table once the seam can carry a calibration.
     pilot.call_command(&mut store, PilotCommand::Arm, true, true)?;
     pilot.call_command(&mut store, PilotCommand::RequestTakeoff, true, true)?;
     println!("commanded  : Arm -> RequestTakeoff (supervised; Disarmed commands zero motors)");

@@ -234,12 +234,22 @@ fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
 /// Build the supervisor into its slot if absent, and DECLARE whether it is
 /// configured — on every call, not only on construction.
 ///
-/// The declaration has to happen here rather than in `step` because
+/// The declaration has to happen here rather than only in `step` because
 /// `arm_check_table` is read inside `FlightSupervisor::command`, and the
 /// constructor defaults the first six pre-arm rows TRUE for bring-up
 /// back-compat. A host that sent `arm` before its first `step` would otherwise
 /// arm an unconfigured supervisor off that default — the gate must be correct at
 /// the moment it is READ, not merely refreshed once a tick has run.
+///
+/// AND IT HAS TO BE RE-DECLARED AFTER EVERY `step`, which the first version of
+/// this missed. `update_preflight` DOES write the `FailsafeConfigured` row — as
+/// a multi-line `t.set(..)` that a single-line grep does not find — from
+/// `self.preflight.failsafe_configured`, which defaults true and is never
+/// refreshed from a real signal. So a tick CLOBBERS this declaration. Arming
+/// stayed correct (nothing steps between here and `command` reading the table)
+/// but the PUBLISHED `failsafe` bit 7 did not: an unconfigured host would have
+/// seen `arm-blocked` clear in telemetry while actually being refused, which is
+/// an observer disagreeing with the thing it observes.
 fn ensure_supervisor<'a>(
     slot: &'a mut Option<FlightSupervisor>,
     cfg: Option<&VehicleConfig>,
@@ -389,6 +399,14 @@ impl Guest for Component {
             // SUPERVISOR-P01 clause 2. `mode` is the OUTCOME, `failsafe` the
             // CAUSE; publishing only the first would show a consumer the vehicle
             // diverting with no way to tell a flat pack from a geofence breach.
+            // RE-DECLARE BEFORE READING: `update_preflight` ran inside `step`
+            // and overwrote this row from a default-true field (see
+            // `ensure_supervisor`). Without this the published `arm-blocked`
+            // bit would contradict what `command` would actually do.
+            sup.set_check(
+                falcon_core::relay_preflight::CheckId::FailsafeConfigured,
+                supcfg.is_some(),
+            );
             let mode = sup.mode() as u8;
             let failsafe = sup.failsafe_flags();
             let mut prev = PUBLISHED.0.borrow_mut();

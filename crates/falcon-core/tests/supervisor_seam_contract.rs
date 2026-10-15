@@ -209,3 +209,106 @@ fn a_positive_cruise_alt_commands_a_climb_not_a_descent() {
         "should hold near -2.0 m NED (2 m AGL) for cruise_alt = 2.0; got {end_d}"
     );
 }
+
+/// MEASURED GAP, pinned so it cannot be forgotten: the `@0.12.0` seam cannot
+/// supply a CALIBRATION, so a host that warms its estimator before arming — the
+/// way a real GCS does — is refused by `CalibrationPresent`.
+///
+/// This test asserts a LIMITATION, not a feature, and it is here because I
+/// published the wrong cause. I claimed the component "cannot arm" without
+/// `battery-v`, which is true but mis-attributed: with a warmed estimator the
+/// FIRST row to refuse is `CalibrationPresent`, and adding battery does not
+/// move it. `update_preflight` sets
+/// `calibration_present = core.calibration() != CalParams::identity()`, and
+/// nothing in `vehicle-config` or `supervisor-config` carries a calibration —
+/// the component never calls `set_calibration` because it has nothing to pass.
+///
+/// WHY IT MATTERS BEYOND THE SEAM. The published component can therefore only
+/// be armed on the *arm-before-first-step* path, where `FlightSupervisor::new`'s
+/// deliberate bring-up defaults (the legacy six rows forced true) are what the
+/// pre-arm table is judged against. That is SUPERVISOR-P01's own falsification
+/// condition — "the supervisor runs against default inputs the host cannot
+/// supply" — so a GREEN SITL GATE IS NOT EVIDENCE that the pre-arm table works
+/// through the seam. It shows the defaults path works.
+///
+/// The fix is a seam change (a calibration input) and therefore not this test's
+/// to make. Until it lands, this test is the honest record of where the V is
+/// open.
+#[test]
+fn the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused() {
+    use falcon_core::relay_calib::CalParams;
+    use falcon_core::relay_preflight::CheckId;
+    use falcon_core::{FlightBackend, FlightSupervisor, ImuSample, relay_fsm::Event};
+
+    const G: f32 = 9.80665;
+    /// Everything the @0.12.0 sensor frame CAN carry, and nothing it cannot.
+    struct SeamHost;
+    impl FlightBackend for SeamHost {
+        fn read_imu(&mut self) -> ImuSample {
+            ImuSample {
+                accel: [0.0, 0.0, -G],
+                gyro: [0.0; 3],
+            }
+        }
+        fn read_position(&mut self) -> Option<[f32; 3]> {
+            Some([0.0, 0.0, 0.0])
+        }
+        fn read_mag(&mut self) -> Option<[f32; 3]> {
+            None
+        }
+        fn read_heading(&mut self) -> Option<f32> {
+            Some(0.0)
+        }
+        fn write_motors(&mut self, _: &[f32]) {}
+        fn dt(&self) -> f32 {
+            0.0025
+        }
+        // The seam DOES carry these two at @0.12.0.
+        fn read_battery_v(&mut self) -> Option<f32> {
+            Some(16.8)
+        }
+        fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+            Some([3000; 4])
+        }
+    }
+
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, 2.0, 14.0);
+    let mut b = SeamHost;
+    // Warm the estimator first, which is what `step_estimate_only` exists for
+    // and what a real host does before arming. Motors are zero throughout.
+    for _ in 0..1500 {
+        sup.step(&mut b);
+    }
+    sup.set_check(CheckId::FailsafeConfigured, true);
+    sup.command(Event::Arm, true, true);
+
+    assert_eq!(
+        sup.arm_blocked_check(),
+        Some(CheckId::CalibrationPresent),
+        "a warmed host supplying everything the seam carries must still be \
+         refused, and the row must be CalibrationPresent — if this changes, the \
+         seam gained a calibration path (good: delete this test and verify the \
+         new one) or a DIFFERENT row now refuses first (bad: the gap moved and \
+         the published justification is stale again)"
+    );
+    assert_eq!(sup.mode(), Mode::Disarmed, "and it must not be armed");
+
+    // THE CONTROL — install a calibration, the one thing the seam cannot pass,
+    // and the identical arm succeeds. This is what attributes the refusal above
+    // to the missing calibration rather than to the host being unarmable.
+    sup.set_calibration(CalParams {
+        gyro_bias: [0.001, 0.0, 0.0],
+        ..CalParams::identity()
+    });
+    for _ in 0..10 {
+        sup.step(&mut b);
+    }
+    sup.set_check(CheckId::FailsafeConfigured, true);
+    sup.command(Event::Arm, true, true);
+    assert_eq!(
+        sup.mode(),
+        Mode::Armed,
+        "with a calibration installed the identical arm must succeed — if it \
+         does not, the refusal above was not caused by the missing calibration"
+    );
+}

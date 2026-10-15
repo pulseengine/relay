@@ -213,16 +213,28 @@ interface types {
         /// 0.0 sentinel would destroy that distinction and a healthy default
         /// would restore the fail-unsafe behaviour #413 already corrected.
         ///
-        /// WITHOUT THIS FIELD THE COMPONENT CANNOT ARM — measured, not
-        /// inferred. `FlightBackend::read_battery_v` DEFAULTS to `None`, and
-        /// the cascade backend overrides 7 of the trait's 12 methods but not
-        /// this one. `update_preflight` then sets
-        /// `battery_ok = batt_present && ...` with `batt_present == false`, and
-        /// `PreflightChecks::all_pass()` ANDs `battery_ok`, so `arm_check`
-        /// returns `Blocked(CheckFail::Battery)` forever. So this field is not
-        /// a feature of clause (1), it is a PREREQUISITE for it: wiring the
-        /// supervisor without it ships a vehicle that can never arm. The
-        /// falsifying test in `wasm/cm/cascade/tests/` asserts exactly that.
+        /// NECESSARY FOR ARMING BUT NOT SUFFICIENT — and the first claim here
+        /// said otherwise, so it is worth being precise about.
+        ///
+        /// `FlightBackend::read_battery_v` DEFAULTS to `None` and the cascade
+        /// backend overrides 7 of the trait's 12 methods but not that one, so
+        /// `update_preflight` sets `battery_ok = batt_present && ..` with
+        /// `batt_present == false`, `all_pass()` ANDs it, and the `BatteryOk`
+        /// row refuses. That part is real: this field is a PREREQUISITE for
+        /// clause (1), not a feature of it.
+        ///
+        /// WHAT IT DOES NOT DO is make the component armable. MEASURED: a host
+        /// that warms its estimator before arming — what a real GCS does, and
+        /// what `step_estimate_only` exists for — is refused by
+        /// `CalibrationPresent` FIRST, because `update_preflight` derives it
+        /// from `core.calibration() != identity()` and NOTHING IN THIS SEAM
+        /// CARRIES A CALIBRATION. So the published component can presently only
+        /// be armed on the arm-before-first-step path, judged against
+        /// `FlightSupervisor::new`'s deliberate bring-up defaults. That is
+        /// SUPERVISOR-P01's own falsification condition, and it means a green
+        /// SITL gate shows the DEFAULTS path works, not the pre-arm table.
+        /// Pinned by `the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused`
+        /// in `crates/falcon-core/tests/supervisor_seam_contract.rs`.
         ///
         /// FREE, MEASURED: `controller#step` flattens to 26 params today
         /// (sensor-frame 22 + waypoint 4) against `MAX_FLAT_PARAMS = 16`, so it
