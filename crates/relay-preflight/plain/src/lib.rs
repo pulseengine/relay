@@ -128,10 +128,15 @@ pub enum CheckId {
     RcLink = 16,
     GcsLink = 17,
     NoFailsafeLatched = 18,
+    // — propulsion health —
+    /// A rotor fault the FDI has ISOLATED. Distinct from `EscTelemetry`,
+    /// which only says eRPM is still ARRIVING: a dead rotor whose ESC keeps
+    /// reporting telemetry passes that row untouched.
+    MotorsHealthy = 19,
 }
 
 /// Number of table rows.
-pub const CHECK_COUNT: usize = 19;
+pub const CHECK_COUNT: usize = 20;
 
 impl CheckId {
     /// Every row, in gate (priority) order — coverage equals this length
@@ -150,6 +155,7 @@ impl CheckId {
         CheckId::ThresholdsOrdered,
         CheckId::SensorsFresh,
         CheckId::EscTelemetry,
+        CheckId::MotorsHealthy,
         CheckId::BatteryTakeoffMargin,
         CheckId::RangefinderPlausible,
         CheckId::CalibrationFresh,
@@ -175,6 +181,7 @@ impl CheckId {
             CheckId::ThresholdsOrdered => "PREARM: failsafe thresholds unordered",
             CheckId::SensorsFresh => "PREARM: sensor data stale",
             CheckId::EscTelemetry => "PREARM: ESC telemetry missing",
+            CheckId::MotorsHealthy => "PREARM: motor fault isolated",
             CheckId::BatteryTakeoffMargin => "PREARM: battery below takeoff margin",
             CheckId::RangefinderPlausible => "PREARM: rangefinder implausible",
             CheckId::CalibrationFresh => "PREARM: calibration stale",

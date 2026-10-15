@@ -1,0 +1,48 @@
+artifacts:
+  - id: SWREQ-FALCON-PREARM-P04
+    type: sw-req
+    title: "PREARM-P04: an ISOLATED rotor fault blocks arming with its own reason"
+    status: implemented
+    release: falcon-v1.141.0
+    description: >
+      The pre-arm table shall carry a PROPULSION-HEALTH row that blocks arming
+      while the FDI holds an isolated rotor fault, with its own
+      operator-readable reason ("PREARM: motor fault isolated"), distinct from
+      the ESC-telemetry row.
+
+      A rotor fault isolated by relay_iekf::RotorFaultDetector is LATCHED BY
+      CONTRACT — its update() returns the isolated rotor forever once set, and
+      nothing clears it in-process — so the hazard OUTLIVES the flight in which
+      it appeared, and the next arm must see it. Before this row, no table row
+      represented it. PREARM-P03's hardware clause (d) is discharged by
+      CheckId::EscTelemetry, which declares only that eRPM is still ARRIVING,
+      so a dead rotor whose ESC keeps reporting telemetry passes that row
+      untouched; and the only incidental protection, FlightSupervisor's
+      rtl_latched, is set under a "mode != Mode::Land" guard, so a fault first
+      isolated during the landing descent never reached it. MEASURED: the
+      vehicle re-armed with rotor 1 latched dead while arm_check_table named no
+      blocking row at all (relay#564).
+
+      The row shall be declared from LIVE state every control cycle (the
+      PREARM-P02 discipline) rather than latched independently, so a vehicle
+      whose FDI holds no fault is never gated on it.
+    tags: [falcon, prearm, safety, checks, fdi, propulsion, v1.141]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        falcon-core: a rotor fault injected ONLY AFTER the vehicle has entered
+        Mode::Land (so the rtl_latched path's "mode != Mode::Land" guard
+        excludes it) is isolated by the FDI; the vehicle lands and disarms with
+        rtl_latched still CLEAR; the subsequent command(Arm) is REFUSED, naming
+        CheckId::MotorsHealthy / "PREARM: motor fault isolated"
+        (tests::a_rotor_fault_isolated_during_landing_blocks_re_arming).
+        FALSIFIED BOTH WAYS: without the row's t.set the same scenario reaches
+        Mode::Armed with arm_blocked_check() == None (observed), and with it the
+        test passes (observed). relay-preflight: the table-driven per-row test
+        covers the new row BY CONSTRUCTION (coverage equals CheckId::ALL
+        length); Kani PREFLIGHT-K03/K04 re-run over the grown table
+        (CHECK_COUNT 19 -> 20), 4 of 4 harnesses SUCCESSFUL.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-011

@@ -1733,6 +1733,16 @@ impl FlightSupervisor {
             CheckId::BatteryTakeoffMargin,
             self.batt_state.degraded || self.batt_state.soc >= 0.30,
         );
+        // PREARM-P03 propulsion row. A rotor the FDI has ISOLATED stays
+        // isolated — `RotorFaultDetector::update` returns early forever once
+        // `failed` is set — so the hazard OUTLIVES the flight it appeared in,
+        // and the next arm must see it. Nothing else in the table does:
+        // `EscTelemetry` only tracks eRPM arriving, and the `rtl_latched`
+        // term below is guarded by `mode != Mode::Land`, so a fault first
+        // isolated during the landing descent never reached it (#564 — the
+        // vehicle re-armed with a dead motor and the table named no reason
+        // at all). Derived live, exactly as the battery terms are.
+        t.set(CheckId::MotorsHealthy, self.core.failed_motor().is_none());
         t.set(
             CheckId::NoFailsafeLatched,
             !self.rtl_latched && !self.batt_state.low && !self.batt_state.critical,
@@ -1892,6 +1902,29 @@ impl FlightSupervisor {
     /// One supervised control step.
     pub fn step<B: FlightBackend>(&mut self, b: &mut B) {
         use relay_fsm::{Event, Gates, Mode};
+        // The RTL latch is an IN-FLIGHT monotonicity device: it stops a
+        // level-triggered breach re-firing Failsafe and demoting the Rtl it
+        // just commanded (#562). It is NOT an arming interlock, and the field's
+        // own doc has always said "Absorbing until disarm". Clearing it here is
+        // what that contract promised — before this, ANY failsafe, including a
+        // gust long since passed, refused every later arm for the life of the
+        // process (#564).
+        //
+        // LEVEL-triggered, not edge-triggered, so there is no transition to
+        // miss; sound because all three set sites are airborne-guarded, so
+        // nothing re-sets it while Disarmed. Placed BEFORE update_preflight so
+        // the NoFailsafeLatched row refreshes on the SAME tick instead of
+        // leaving one cycle of stale refusal.
+        //
+        // What still blocks re-arming is the LIVE hazard, re-derived every
+        // cycle: the two battery terms, and MotorsHealthy for a rotor the FDI
+        // has isolated (#565). High wind is deliberately NOT blocked — it is
+        // the one trigger with no ground-observable signal (the detector needs
+        // airborne saturation and wind_count is zeroed when !is_airborne), so a
+        // transient gust must not brick the airframe (maintainer call, #564).
+        if self.fsm.mode() == Mode::Disarmed {
+            self.rtl_latched = false;
+        }
         // v1.99 — refresh the pre-arm checks from real vehicle state each cycle,
         // so a later command(Arm) gates on live signals, not all-pass defaults.
         self.update_preflight(b);
@@ -5276,6 +5309,110 @@ mod tests {
         }
     }
 
+    /// `rtl_latched` is an IN-FLIGHT monotonicity device (a sustained breach must
+    /// not re-fire and demote the Rtl it just commanded, #562) — NOT an arming
+    /// interlock. It clears on disarm, per the field's own contract, so a
+    /// failsafe whose condition has completely cleared does not brick the
+    /// airframe for the life of the process (#564: it did, and the pre-arm
+    /// table reported "PREARM: failsafe latched" forever).
+    ///
+    /// What still blocks re-arming is the LIVE hazard, re-derived every cycle:
+    /// the two battery terms, and `MotorsHealthy` for an isolated rotor (#565).
+    /// High wind is permitted deliberately — it has no ground-observable
+    /// signal, so a transient gust must not be a permanent block
+    /// (maintainer decision, #564).
+    #[test]
+    fn re_arming_is_allowed_once_the_failsafe_condition_has_cleared() {
+        use relay_calib::CalParams;
+        use relay_fsm::{Event, Mode};
+        let dt = 0.004f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.ground_contact = true;
+        // Home 2 m away, 0.5 m fence: breached at the origin, distinguishable
+        // from "arrived home".
+        let mut sup = FlightSupervisor::new([2.0, 0.0, 0.0], 0.5, 2.0, 14.0);
+        sup.set_calibration(CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..CalParams::identity()
+        });
+        for _ in 0..1500 {
+            sup.step(&mut b);
+        }
+        sup.command(Event::Arm, true, true);
+        assert_eq!(sup.mode(), Mode::Armed, "first arm must succeed");
+        sup.command(Event::RequestTakeoff, true, false);
+
+        // Step 2: fly until the geofence failsafe latches.
+        let mut latched = false;
+        for _ in 0..2000 {
+            sup.step(&mut b);
+            if sup.rtl_latched {
+                latched = true;
+                break;
+            }
+        }
+        assert!(latched, "geofence breach must latch rtl_latched");
+
+        // Step 3: let the failsafe complete to Disarmed.
+        let mut disarmed = false;
+        for _ in 0..60000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Disarmed {
+                disarmed = true;
+                break;
+            }
+        }
+        assert!(
+            disarmed && sup.mode() == Mode::Disarmed,
+            "failsafe must end Disarmed: mode {:?}, alt {} m, pos {:?}",
+            sup.mode(),
+            -b.pos[2],
+            b.pos
+        );
+        // Settle on the ground so the pre-arm table refreshes.
+        for _ in 0..10 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), Mode::Disarmed);
+
+        // Step 4: the hazard is unambiguously gone.
+        let dx = b.pos[0] - 2.0;
+        let dy = b.pos[1];
+        let dist_home = (dx * dx + dy * dy).sqrt();
+        assert!(
+            dist_home < 0.5,
+            "vehicle must be inside the fence around home: {dist_home} m"
+        );
+        assert!(-b.pos[2] < 0.3, "must be on the ground: {} m", -b.pos[2]);
+        let batt = sup.battery();
+        assert!(
+            !batt.low && !batt.critical,
+            "battery must be healthy: low {} critical {}",
+            batt.low,
+            batt.critical
+        );
+        // Was `assert!(sup.rtl_latched)` while this reproduced the defect — the
+        // latch staying set WAS the cause. Inverted now: clearing it on disarm is
+        // the property under test, so this fails if the clear regresses.
+        assert!(
+            !sup.rtl_latched,
+            "the latch must CLEAR on disarm: it is an in-flight device, not an arming interlock"
+        );
+
+        // Step 5/6: re-arm through the real path; DESIRED = it arms.
+        sup.command(Event::Arm, true, true);
+        assert_eq!(
+            sup.mode(),
+            Mode::Armed,
+            "vehicle cannot re-arm after a cleared failsafe; pre-arm reason: {:?} ({})",
+            sup.arm_blocked_check(),
+            sup.arm_blocked_check()
+                .map(|c| c.reason_text())
+                .unwrap_or("none")
+        );
+    }
+
     #[test]
     fn battery_drain_actuates_endurance_failsafe() {
         use relay_fsm::Mode;
@@ -6006,6 +6143,196 @@ mod tests {
             -b.pos[2] < 0.25,
             "must settle on the surface (not float): {} m",
             -b.pos[2]
+        );
+    }
+
+    #[test]
+    fn a_rotor_fault_isolated_during_landing_blocks_re_arming() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.rot_drag = 0.02;
+        b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        // A calibrated airframe, so the ONLY thing that could block a re-arm
+        // is the fault under test (an uncalibrated one is refused for an
+        // unrelated reason).
+        sup.set_calibration(relay_calib::CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..relay_calib::CalParams::identity()
+        });
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter first");
+        assert!(
+            sup.core().failed_motor().is_none(),
+            "healthy before the fault"
+        );
+
+        // Command the landing; the fault must NOT be injected until Land.
+        sup.command(Event::RequestLand, true, false);
+        sup.step(&mut b);
+        assert_eq!(sup.mode(), Mode::Land, "must be in Land BEFORE the fault");
+        assert!(!sup.rtl_latched, "no latch before the fault");
+
+        // Rotor 1 dies during the landing descent.
+        b.fail_rotor(1);
+        let mut isolated = false;
+        for _ in 0..15000 {
+            sup.step(&mut b);
+            if sup.core().failed_motor().is_some() {
+                isolated = true;
+                break;
+            }
+            if sup.mode() == Mode::Disarmed {
+                break;
+            }
+        }
+        assert!(
+            isolated,
+            "FDI must isolate the rotor (mode {:?}, alt {} m)",
+            sup.mode(),
+            -b.pos[2]
+        );
+        assert_eq!(
+            sup.mode(),
+            Mode::Land,
+            "must still be in Land at isolation (else the scenario is void)"
+        );
+        assert!(
+            !sup.rtl_latched,
+            "the fault slipped past the failsafe latch (mode != Land guard)"
+        );
+
+        let mut disarmed = false;
+        for _ in 0..15000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Disarmed {
+                disarmed = true;
+                break;
+            }
+        }
+        assert!(
+            disarmed,
+            "must disarm after touchdown: mode {:?}",
+            sup.mode()
+        );
+        assert_eq!(sup.mode(), Mode::Disarmed);
+        assert!(
+            sup.core().failed_motor().is_some(),
+            "the dead motor is still latched at the arm attempt"
+        );
+
+        // Let the pre-arm table refresh, then try to re-arm.
+        sup.step(&mut b);
+        sup.command(Event::Arm, true, true);
+        assert_eq!(
+            sup.mode(),
+            Mode::Disarmed,
+            "a vehicle with a latched dead motor must REFUSE to arm; \
+             arm_blocked_check={:?} reason={:?} failed_motor={:?}",
+            sup.arm_blocked_check(),
+            sup.arm_blocked_reason(),
+            sup.core().failed_motor()
+        );
+    }
+
+    /// #564/#565 — the latch CLEARS on disarm, so for a rotor that failed IN
+    /// FLIGHT (latch set) the `MotorsHealthy` row alone must keep the vehicle
+    /// from re-arming. Opposite of the during-Land test, where the latch is
+    /// never set.
+    #[test]
+    fn a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears() {
+        use relay_fsm::{Event, Mode};
+        let dt = 0.002f32;
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut b = SimBackend::new(level, dt);
+        b.rot_drag = 0.02;
+        b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        // Calibrated, so a refusal cannot be CalibrationPresent.
+        sup.set_calibration(relay_calib::CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..relay_calib::CalParams::identity()
+        });
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        for _ in 0..8000 {
+            sup.step(&mut b);
+        }
+        assert_eq!(sup.mode(), Mode::Loiter, "should reach Loiter first");
+        assert!(sup.core().failed_motor().is_none(), "healthy before fault");
+        assert!(!sup.rtl_latched, "no latch before the fault");
+
+        // Rotor 1 dies in normal flight (NOT Land).
+        b.fail_rotor(1);
+        let mut isolated = false;
+        for _ in 0..15000 {
+            sup.step(&mut b);
+            if sup.core().failed_motor().is_some() {
+                isolated = true;
+                break;
+            }
+            if sup.mode() == Mode::Disarmed {
+                break;
+            }
+        }
+        assert!(
+            isolated,
+            "FDI must isolate the rotor (mode {:?}, alt {} m)",
+            sup.mode(),
+            -b.pos[2]
+        );
+        assert!(
+            sup.core().failed_motor().is_some() && sup.rtl_latched,
+            "the in-flight fault must go through the latch path: \
+             failed_motor={:?} rtl_latched={} mode={:?} alt={} m",
+            sup.core().failed_motor(),
+            sup.rtl_latched,
+            sup.mode(),
+            -b.pos[2]
+        );
+        assert!(-b.pos[2] > 0.3, "must still be airborne at isolation");
+
+        let mut disarmed = false;
+        for _ in 0..30000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Disarmed {
+                disarmed = true;
+                break;
+            }
+        }
+        assert!(disarmed, "must disarm: mode {:?}", sup.mode());
+        for _ in 0..10 {
+            sup.step(&mut b);
+        }
+        assert!(
+            !sup.rtl_latched,
+            "the latch must have CLEARED on disarm, else the refusal below proves nothing"
+        );
+        assert!(
+            sup.core().failed_motor().is_some(),
+            "the dead motor is still latched at the arm attempt"
+        );
+
+        sup.command(Event::Arm, true, true);
+        assert_eq!(
+            sup.mode(),
+            Mode::Disarmed,
+            "a vehicle with a latched dead motor must REFUSE to arm; \
+             arm_blocked_check={:?} reason={:?} failed_motor={:?}",
+            sup.arm_blocked_check(),
+            sup.arm_blocked_reason(),
+            sup.core().failed_motor()
+        );
+        assert_eq!(
+            sup.arm_blocked_check(),
+            Some(relay_preflight::CheckId::MotorsHealthy),
+            "the refusal must be NAMED as MotorsHealthy, not some other row"
         );
     }
 
