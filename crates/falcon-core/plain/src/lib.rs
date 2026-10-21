@@ -3066,6 +3066,9 @@ impl FlightBackend for SimBackend {
 }
 
 pub mod blackbox_backend;
+/// The cascade-split forwarding (#575): `SplitCore` + what each partition
+/// component runs behind the seam.
+pub mod split;
 pub mod tuning;
 
 #[cfg(test)]
