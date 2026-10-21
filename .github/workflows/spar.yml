@@ -67,9 +67,25 @@ jobs:
             "Falcon_Param::ParamStore.Fmu" \
             "Falcon_System::Falcon.Quad"; do
             echo "== spar analyze --root $root =="
-            out=$(spar analyze --root "$root" spar/*.aadl 2>&1) || true
+            # The EXIT CODE is the verdict; the ERROR grep is a second opinion.
+            # This used to be `out=$(...) || true` and decide on the grep alone,
+            # which passed whenever spar failed WITHOUT printing the word ERROR.
+            # Measured (2026-10-21): an unreadable or missing .aadl input makes
+            # spar exit 1 and print "Cannot read <path>: No such file or
+            # directory" — no ERROR line — so the gate passed with nothing
+            # analysed. The same happens if `spar/*.aadl` stops matching (the
+            # literal glob is passed through) or the binary is absent. All five
+            # real roots exit 0 with 10-22 WARNINGs each, so honouring the exit
+            # code costs no false failures. `|| rc=$?` rather than letting it
+            # abort, because `shell: bash` runs with -e and every root should
+            # still report.
+            rc=0
+            out=$(spar analyze --root "$root" spar/*.aadl 2>&1) || rc=$?
             echo "$out"
-            if echo "$out" | grep -qE "ERROR"; then
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::spar analyze exited $rc for $root"
+              fail=1
+            elif echo "$out" | grep -qE "ERROR"; then
               echo "::error::spar analyze reported errors for $root"
               fail=1
             fi
