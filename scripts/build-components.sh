@@ -4,7 +4,7 @@
 #
 #   falcon-flight-vMM.wasm        — pulseengine:falcon-flight (standalone, wasmtime-runnable)
 #   falcon-iekf-vMM.wasm          — pulseengine:falcon-cascade ekf-component (IEKF SE₂(3))
-#   falcon-ekf-vMM.wasm           — pulseengine:falcon-cascade ekf-component (Mahony legacy)
+#   (falcon-ekf — the legacy Mahony filter — is NO LONGER PUBLISHED, #589; see BUNDLE_DIRS)
 #   falcon-attitude-vMM.wasm      — pulseengine:falcon-cascade attitude-component
 #   falcon-rate-vMM.wasm          — pulseengine:falcon-cascade rate-component
 #   falcon-position-vMM.wasm      — pulseengine:falcon-cascade position-component
@@ -34,7 +34,25 @@ MM="${1:?usage: build-components.sh <MAJOR.MINOR> [release-tag]}"
 TAG="${2:-}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLE_DIR="$HERE/dist/falcon-components-v$MM"
+# START FROM AN EMPTY BUNDLE. SHA256SUMS below globs ./*.wasm, so anything left
+# here by an earlier build — e.g. a falcon-ekf from before #589 — would be
+# checksummed and cosign-signed as if it were part of this release. The
+# manifest/SHA256SUMS agreement guard further down would catch that and fail,
+# but a release should not depend on a guard to undo a stale directory.
+rm -rf "$BUNDLE_DIR"
 mkdir -p "$BUNDLE_DIR"
+
+# THE PUBLISHED COMPONENT SET — defined ONCE. It used to be spelled out in three
+# separate loops (build listing, manifest, release upload), which is how a list
+# drifts. falcon-ekf is deliberately ABSENT (#589, maintainer decision
+# 2026-10-21): it is the legacy Mahony filter, not the estimator falcon-core
+# flies, and it exported the IDENTICAL `pulseengine:falcon-cascade/ekf@0.11.0`
+# interface as falcon-iekf — so a consumer resolving by interface could not tell
+# the flight estimator from the legacy one, and pinning the wrong one passed
+# every downstream check (measured by the integrator, pulseengine/jess#293).
+# The crate (wasm/cm/ekf) and the Bazel legacy pipeline that still fuse it are
+# #411's scope; this removes it only from what we PUBLISH.
+BUNDLE_DIRS="flight iekf attitude rate position falcon-mixer cascade"
 
 RUSTC_VER=$(rustc --version 2>/dev/null | cut -d' ' -f2)
 CC_VER=$(cargo component --version 2>/dev/null | awk '{print $NF}')
@@ -59,7 +77,7 @@ TOOLCHAIN_STR="rustc=$RUSTC_VER cargo-component=$CC_VER"
 #
 # Add a component here as it is converted to no_std (jess's per-stage lowering
 # report is the priority order). A std component still needs wasip2.
-NOSTD_COMPONENTS=" flight iekf ekf attitude rate position falcon-mixer cascade "
+NOSTD_COMPONENTS=" flight iekf attitude rate position falcon-mixer cascade "
 
 # STACK SIZE (v1.134, OCI-P06). Components shipped an UNTUNED 1 MB shadow stack
 # — the wasm-ld default, never set. `__stack_pointer` init IS the stack size:
@@ -235,7 +253,6 @@ echo "== building all 8 falcon CM components (wasm32-wasip2) =="
 
 FLIGHT_WASM=$(build_component "flight")
 build_component "iekf"         > /dev/null
-build_component "ekf"          > /dev/null
 build_component "attitude"     > /dev/null
 build_component "rate"         > /dev/null
 build_component "position"     > /dev/null
@@ -281,7 +298,7 @@ artifact_name() { local s="${1#falcon-}"; echo "falcon-$s-v$MM.wasm"; }
 # Re-list with sizes
 echo ""
 echo "artifacts:"
-for dir in flight iekf ekf attitude rate position falcon-mixer cascade; do
+for dir in $BUNDLE_DIRS; do
   fname=$(artifact_name "$dir")
   f="$BUNDLE_DIR/$fname"
   printf "  %-34s  %s bytes\n" "$fname" "$(wc -c < "$f" | tr -d ' ')"
@@ -330,12 +347,12 @@ MANIFEST="$BUNDLE_DIR/manifest.json"
     case "$1" in
       cascade)                    echo "flight-core" ;;
       iekf|falcon-mixer)          echo "flight-core-stage" ;;
-      ekf|attitude|rate|position) echo "legacy-stage" ;;
+      attitude|rate|position)     echo "legacy-stage" ;;
       flight)                     echo "demo" ;;
       *)                          echo "unclassified" ;;
     esac
   }
-  for dir in flight iekf ekf attitude rate position falcon-mixer cascade; do
+  for dir in $BUNDLE_DIRS; do
     slug="${dir#falcon-}"
     cdesc=$(sed -n 's/^description *= *"\(.*\)"$/\1/p' "$HERE/wasm/cm/$dir/Cargo.toml" 2>/dev/null | head -1)
     emit_entry "falcon-$slug" "falcon-$slug-v$MM.wasm" "flight-component" "$(role_of "$dir")" "$cdesc"
@@ -378,6 +395,28 @@ if [ -n "$missing" ]; then
 fi
 echo "  manifest/SHA256SUMS agree on every bundled artifact"
 
+# GUARD (#589): no two PUBLISHED components may target the same world. A consumer
+# resolves by INTERFACE, so two components exporting the same interface are
+# indistinguishable to it: v1.140.0 shipped falcon-ekf (legacy Mahony) and
+# falcon-iekf (the flight estimator) both as `world ekf-component`, both
+# exporting `pulseengine:falcon-cascade/ekf@0.11.0`, and pinning the wrong one
+# passed every downstream check (pulseengine/jess#293). This checks the SOURCE
+# declaration (package.metadata.component.target.world in each Cargo.toml), not
+# the built artifacts — the release job has no wasm-tools — which is enough to
+# stop the pair being re-added to BUNDLE_DIRS. The artifact-level form (every
+# `export pulseengine:falcon-cascade/<iface>` has exactly one exporter) was run
+# by hand for #589 with v1.140.0's bundle as the positive control.
+dupworld=$(for dir in $BUNDLE_DIRS; do
+    w=$(awk '/^\[package\.metadata\.component\.target\]/{t=1;next} /^\[/{t=0} t && /^world *=/{gsub(/[" ]/,"",$0); sub(/^world=/,"",$0); print; exit}' "$HERE/wasm/cm/$dir/Cargo.toml")
+    [ -n "$w" ] && printf '%s %s\n' "$w" "$dir"
+  done | sort | awk '{c[$1]++; who[$1]=who[$1]" "$2} END {for (w in c) if (c[w]>1) print w":"who[w]}')
+if [ -n "$dupworld" ]; then
+  echo "::error::two published components target the same world — a consumer cannot tell them apart (#589):"
+  echo "$dupworld"
+  exit 1
+fi
+echo "  every published component targets a distinct world"
+
 echo ""
 echo "== bundle: $BUNDLE_DIR =="
 ls -lh "$BUNDLE_DIR"
@@ -388,7 +427,7 @@ ls -lh "$BUNDLE_DIR"
 if [ -n "$TAG" ]; then
   echo "== attaching bundle to release $TAG =="
   UPLOAD_FILES=()
-  for dir in flight iekf ekf attitude rate position falcon-mixer cascade; do
+  for dir in $BUNDLE_DIRS; do
     UPLOAD_FILES+=("$BUNDLE_DIR/$(artifact_name "$dir")")
   done
   UPLOAD_FILES+=("$BUNDLE_DIR/SHA256SUMS" "$BUNDLE_DIR/manifest.json")
