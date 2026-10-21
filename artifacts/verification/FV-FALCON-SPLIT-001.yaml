@@ -1,0 +1,55 @@
+artifacts:
+  - id: FV-FALCON-SPLIT-001
+    type: sw-verification
+    title: "SPLIT-P01 — the wac-composed cascade-split is bit-exact with the monolithic cascade, supervised on both sides, through every mode"
+    status: implemented
+    description: >
+      Verification of SWREQ-FALCON-SPLIT-P01.
+
+      TWIN DIFFERENTIAL (bench-only: cargo-component + wac). Measured on
+      2026-10-21 against the published-shape `cascade` (no_std, 8 KiB stack):
+      45469 ticks @ 400 Hz, motor command and all 23 flight-state fields equal
+      by bit pattern on every tick, plus the pre-tick read. The scenario passed
+      through takeoff, loiter, a mission leg, the mission-complete RTL, land,
+      the touchdown disarm, a controller.configure reset, a low-battery failsafe
+      RTL, a refused re-arm, a silent pack, a configure-supervisor reset, a
+      termination IN THE AIR, and a rotor-out with FDI isolation and
+      land-in-place. Both sides are components exporting `pilot` — supervised
+      by construction, with no native mirror to fall out of step with.
+
+      NEGATIVE CONTROLS, each run against a deliberately broken split and each
+      RED (then reverted):
+        flying edge cut (always false)        -> MISMATCH tick 6394 (qy)
+        estimate-only ticks write Some(false) -> MISMATCH tick 20456 (qw), the
+                                                 first touchdown
+        rebuild skips the partition reset     -> MISMATCH tick 400 (m1), the
+                                                 first configure-supervisor
+      The same control on the in-crate test: edge cut -> red at tick 4;
+      estimate-only Some(false) -> red at tick 12123.
+
+      REFACTOR NEUTRALITY. The monolithic `cascade` is NOT byte-identical
+      before/after the falcon-core change (code section 35778 -> 35700 B; the
+      base build was confirmed reproducible, so the difference is real codegen,
+      not noise). Behaviourally it is: the same twin differential, base vs new
+      monolithic, agrees bit for bit over the full scenario.
+    tags: [verification, falcon, partition, split, supervisor, "575"]
+    fields:
+      method: automated-test
+      steps:
+        # In-crate, runs in CI: a supervisor over separately-owned halves is
+        # bit-exact with the fused one, through mission, RTL, land, disarm.
+        - run: "cargo test -p falcon-core --test supervised_core_split"
+        # The trait the split depends on, and the partition equivalence it
+        # builds on (PART-P01), stay green.
+        - run: "cargo test -p falcon-core --release partitioned"
+        # The feedback edge is an option, None on estimate-only ticks.
+        - run: "grep -q 'tick: func(sensors: sensor-frame, in-flight: option<bool>) -> nav-state;' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'let nav = estimator::tick(frame, Some(flying));' wasm/cm/cascade-split/src/lib.rs"
+        - run: "grep -q 'let _ = estimator::tick(frame, None);' wasm/cm/cascade-split/src/lib.rs"
+        # The split world exports what cascade exports.
+        - run: "grep -qE '^world cascade-split' wit/falcon-cascade/cascade.wit"
+        # The twin differential itself (bench-only).
+        - run: "scripts/split-differential.sh"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SPLIT-P01
