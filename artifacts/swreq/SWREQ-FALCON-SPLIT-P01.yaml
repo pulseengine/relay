@@ -74,9 +74,12 @@ artifacts:
         terminated and raise arm-blocked, batt-low, rtl-latched and batt-silent
         and isolate a rotor — or the run fails. Negative controls: cutting the
         flying edge, writing it on estimate-only ticks, and skipping the
-        partition reset on rebuild must each turn it red. In-crate:
-        a supervisor over separately-owned halves matches the fused one bit for
-        bit (falcon-core tests/supervised_core_split.rs).
+        partition reset on rebuild must each turn it red; dropping keep_warm
+        must turn it red at the 1000 Hz design rate. In CI: the PRODUCTION
+        forwarding (falcon-core `split::SplitCore`) over real partitions matches
+        the fused core bit for bit under the supervisor, and mutated seams
+        (edge, estimate-only flag, keep_warm, tilt forward, reset) must each
+        diverge (falcon-core tests/supervised_core_split.rs).
     links:
       - type: derives-from
         target: SYSREQ-FALCON-020
