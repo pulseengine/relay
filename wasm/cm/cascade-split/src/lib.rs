@@ -45,7 +45,7 @@ use bindings::exports::pulseengine::falcon_cascade::pilot::{
 };
 use bindings::pulseengine::falcon_cascade::estimator;
 use bindings::pulseengine::falcon_cascade::flight_control;
-use bindings::pulseengine::falcon_cascade::partition_types::{
+use bindings::pulseengine::falcon_cascade::types::{
     ControlConfig, EstimatorConfig, NavState as WitNav,
 };
 use bindings::pulseengine::falcon_cascade::types::{
