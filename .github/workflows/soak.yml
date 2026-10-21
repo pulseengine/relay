@@ -105,7 +105,19 @@ jobs:
 
   gz-endurance:
     name: gz endurance watch (the real ceiling)
-    runs-on: ubuntu-latest
+    # PINNED, NOT ubuntu-latest (2026-10-21). `ubuntu-latest` was re-pointed to
+    # ubuntu-26.04 "resolute" under this REQUIRED gate, and OSRF publishes only
+    # gz-jetty for resolute — `apt-get install gz-harmonic` then fails with
+    # "E: Unable to locate package gz-harmonic", exit 100, before a single tick
+    # flies. Measured from the run logs: the last green run reports
+    # `Image: ubuntu-24.04` (OSRF dist `noble`), the first red one
+    # `Image: ubuntu-26.04`. Same shape as the Kani 0.68 incident in kani.yml —
+    # the toolchain moved under a required gate — and the same fix: pin the
+    # known-good state. Moving to gz-jetty is a SIMULATOR-GENERATION change
+    # (different physics, so every gz hold/rotor-out number would shift) and is
+    # a deliberate migration with its own validation, not something a runner
+    # image roll should do to us.
+    runs-on: ubuntu-24.04
     # 150, NOT 90 (#497). The ladder's full rung set sums 5135 s of FLIGHT, and
     # measured non-flight overhead on a real run was 498 s wall for 335 s flight
     # (fresh gz server + topic wait + teardown per rung). Eight rungs therefore
@@ -394,7 +406,19 @@ jobs:
 
   wasm-endurance:
     name: wasm endurance watch (BOTH PATHS)
-    runs-on: ubuntu-latest
+    # PINNED, NOT ubuntu-latest (2026-10-21). `ubuntu-latest` was re-pointed to
+    # ubuntu-26.04 "resolute" under this REQUIRED gate, and OSRF publishes only
+    # gz-jetty for resolute — `apt-get install gz-harmonic` then fails with
+    # "E: Unable to locate package gz-harmonic", exit 100, before a single tick
+    # flies. Measured from the run logs: the last green run reports
+    # `Image: ubuntu-24.04` (OSRF dist `noble`), the first red one
+    # `Image: ubuntu-26.04`. Same shape as the Kani 0.68 incident in kani.yml —
+    # the toolchain moved under a required gate — and the same fix: pin the
+    # known-good state. Moving to gz-jetty is a SIMULATOR-GENERATION change
+    # (different physics, so every gz hold/rotor-out number would shift) and is
+    # a deliberate migration with its own validation, not something a runner
+    # image roll should do to us.
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:
       # THE WASM PATH'S OWN FLOOR: 3600, and this time the evidence is the right
