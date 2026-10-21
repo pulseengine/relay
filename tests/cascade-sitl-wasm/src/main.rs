@@ -131,7 +131,11 @@ fn main() -> Result<()> {
     // one against a native mirror. `ticks` is then a BUDGET for an event-driven
     // scenario (three flights), so its default is larger.
     if let Ok(other) = std::env::var("DIFF_AGAINST") {
-        let budget: u32 = ticks_arg.as_deref().unwrap_or("60000").parse()?;
+        // ~150 s of simulated flight, whatever the rate.
+        let budget: u32 = match ticks_arg.as_deref().filter(|t| !t.is_empty()) {
+            Some(t) => t.parse()?,
+            None => (150.0 / dt).ceil() as u32,
+        };
         return twin::run(&wasm, &other, budget, dt);
     }
     let ticks: u32 = ticks_arg.unwrap_or_else(|| "4000".into()).parse()?;

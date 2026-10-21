@@ -66,5 +66,11 @@ echo "== harness"
 ( cd "$HERE/tests/cascade-sitl-wasm" && cargo build --release )
 HARNESS="${CARGO_TARGET_DIR:-$HERE/tests/cascade-sitl-wasm/target}/release/cascade-sitl-wasm"
 
-echo "== twin: cascade (A, drives the plant) vs cascade-split (B)"
-DIFF_AGAINST="$OUT/cascade-split-composed.wasm" "$HARNESS" "$OUT/cascade.wasm"
+# TWO RATES. 400 Hz is the rate the rest of the wasm evidence flies at. 1000 Hz
+# is the supervisor's design rate, the only one at which the armed-hold stage is
+# DECISIVE for `keep_warm` (elsewhere the first control tick rebuilds the gyro
+# filter and erases what `keep_warm` kept) — see twin.rs `F1ArmedHold`.
+for DT in 0.0025 0.001; do
+  echo "== twin @ dt=$DT: cascade (A, drives the plant) vs cascade-split (B)"
+  DIFF_AGAINST="$OUT/cascade-split-composed.wasm" "$HARNESS" "$OUT/cascade.wasm" "" "$DT"
+done

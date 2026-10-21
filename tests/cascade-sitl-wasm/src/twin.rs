@@ -48,6 +48,7 @@ use wasmtime::{Engine, Store};
 
 /// Published `mode` values (relay-fsm discriminants, pinned on the seam).
 const DISARMED: u8 = 0;
+const ARMED: u8 = 1;
 const TAKEOFF: u8 = 2;
 const LOITER: u8 = 3;
 const MISSION: u8 = 4;
@@ -58,8 +59,39 @@ const TERMINATED: u8 = 7;
 /// Published `failsafe` bits (pinned on the seam).
 const FS_RTL_LATCHED: u32 = 1 << 0;
 const FS_BATT_LOW: u32 = 1 << 1;
+const FS_BATT_CRITICAL: u32 = 1 << 2;
 const FS_BATT_SILENT: u32 = 1 << 3;
 const FS_ARM_BLOCKED: u32 = 1 << 7;
+
+/// Ticks flight 1 is held ARMED before takeoff, and the gyro noise (rad/s)
+/// during the hold — see `Stage::F1ArmedHold`.
+const ARMED_HOLD_TICKS: u32 = 400;
+const ARMED_HOLD_GYRO_NOISE: f32 = 0.02;
+
+/// PENDING relay#586 — the stage that would make the ESTIMATOR-HEALTH forwards
+/// decisive at this seam. Off by default; `TWIN_PENDING_586=1` turns it on.
+///
+/// WHY IT CANNOT RUN GREEN TODAY. `tilt_uncertainty`, `nav_compromised` and
+/// `gnss_diverged` reach the outside world ONLY through the pre-arm gate (the
+/// `EstimatorConverged` / `SensorsHealthy` / `EstimatorInnovation` /
+/// `GnssAgreement` rows, and `arm-blocked` = bit 7). From the first refreshed
+/// tick on, `CalibrationPresent` fails on every tick — no seam carries a
+/// calibration (relay#586) — so arming is refused and bit 7 is set WHATEVER
+/// the estimator says. A stubbed forward therefore changes nothing a host can
+/// observe, and the only arm that succeeds is the one judged on the
+/// constructor's bring-up defaults, before any row is refreshed. (In addition,
+/// `nav_compromised` / `gnss_diverged` are constant `false` through this seam
+/// by construction: both latches are fed only on the dual-GNSS path, which the
+/// seam does not carry.)
+///
+/// WHAT THE STAGE DOES once #586 lets a calibration cross: after a reset it
+/// steps ONE tick (fresh estimator, tilt NOT converged) and arms — which must
+/// be REFUSED — then warms the estimator and arms again, which must be
+/// ACCEPTED. A split whose tilt forward were stubbed to 0 would accept the
+/// first arm and diverge in the published mode. Enabled today it stops with a
+/// `PENDING relay#586` error at the second arm. The forward IS measured
+/// directly, in CI, by crates/falcon-core/tests/supervised_core_split.rs.
+const PENDING_586_ENV: &str = "TWIN_PENDING_586";
 
 const PACK_V: f32 = 16.8;
 const SAG_V: f32 = 13.0;
@@ -195,6 +227,19 @@ fn diff_motors(a: &MotorPwm, b: &MotorPwm) -> Option<String> {
 enum Stage {
     /// Supervisor never configured: an `arm` must be refused.
     Unconfigured,
+    /// PENDING relay#586 (see `PENDING_586_ENV`): arm before and after the
+    /// estimator converges, on the refreshed pre-arm table.
+    Pending586,
+    /// Flight 1 ARMED but held on the ground: estimate-only ticks with a NOISY
+    /// gyro, so the control half's `keep_warm` has something to remember, and
+    /// then a takeoff with NO reset in between. This is the only reset-free
+    /// estimate-only -> flight path a host can reach today: re-arming from
+    /// Disarmed after the first tick is refused through this seam (relay#586,
+    /// `CalibrationPresent`). It is DECISIVE for `keep_warm` only at the
+    /// 1000 Hz design rate — at any other rate the first control tick rebuilds
+    /// the gyro filter (`resync_loop_rate`) and erases what `keep_warm` kept —
+    /// so scripts/split-differential.sh runs the twin at dt=0.001 as well.
+    F1ArmedHold,
     /// Flight 1 airborne, waiting for a settled loiter.
     F1Climb,
     /// Flight 1 on its mission leg; ends in mission-complete RTL, land, disarm.
@@ -290,6 +335,11 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
     let mut stage_ticks: u32 = 0;
     let mut loiter_ticks: u32 = 0;
     let mut modes_seen = [0u32; 8];
+    let mut armed_hold_ticks: u32 = 0;
+    // The pack goes silent at ground tick 300 and the reset comes 1.75 s later,
+    // whatever the rate: `batt-silent` needs > BATT_SILENCE_S (1 s) of silence.
+    let f2_reset_at: u32 = 300 + (1.75 / dt).ceil() as u32;
+    let pending_586 = std::env::var(PENDING_586_ENV).is_ok_and(|v| v != "0");
     let mut failsafe_seen: u32 = 0;
     let mut rotor_isolated = false;
     let mut prev_mode: u8 = DISARMED;
@@ -304,7 +354,34 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
                 // RESET PATH 1: drops the supervisor (and, in the split, both
                 // partitions), then arms on the fresh supervisor.
                 both!(configure_supervisor(supcfg));
-                both!(command(PilotCommand::Arm));
+                stages_done.push(stage);
+                stage_ticks = 0;
+                if pending_586 {
+                    stage = Stage::Pending586;
+                } else {
+                    both!(command(PilotCommand::Arm));
+                    stage = Stage::F1ArmedHold;
+                }
+            }
+            // One tick after the reset: the estimator has NOT converged.
+            Stage::Pending586 if stage_ticks == 1 => both!(command(PilotCommand::Arm)),
+            Stage::Pending586 if stage_ticks == 2 && prev_mode == ARMED => {
+                bail!("PENDING-586 stage: an UNCONVERGED estimator was allowed to arm")
+            }
+            Stage::Pending586 if stage_ticks == 800 => both!(command(PilotCommand::Arm)),
+            Stage::Pending586 if stage_ticks == 801 => {
+                if prev_mode != ARMED {
+                    bail!(
+                        "PENDING relay#586: a warmed estimator is still refused on the \
+                         refreshed pre-arm table — CalibrationPresent cannot be satisfied \
+                         through this seam, so the estimator-health rows are not decisive"
+                    );
+                }
+                stages_done.push(stage);
+                stage = Stage::F1ArmedHold;
+                stage_ticks = 0;
+            }
+            Stage::F1ArmedHold if stage_ticks == ARMED_HOLD_TICKS => {
                 both!(command(PilotCommand::RequestTakeoff));
                 stages_done.push(stage);
                 stage = Stage::F1Climb;
@@ -349,7 +426,7 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
                 both!(command(PilotCommand::Arm));
             }
             Stage::F2Ground if stage_ticks == 300 => battery = None,
-            Stage::F2Ground if stage_ticks == 1000 => {
+            Stage::F2Ground if stage_ticks == f2_reset_at => {
                 // RESET PATH 1 again, with a healthy pack.
                 battery = Some(PACK_V);
                 both!(configure_supervisor(supcfg));
@@ -388,7 +465,14 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
         }
 
         // ── one frame, offered to both ──
-        let (s, true_pos) = plant.measure(0.0);
+        // Noise ONLY while held armed (see `F1ArmedHold`); everywhere else the
+        // plant is noiseless, as in the main harness.
+        let noise = if stage == Stage::F1ArmedHold {
+            ARMED_HOLD_GYRO_NOISE
+        } else {
+            0.0
+        };
+        let (s, true_pos) = plant.measure(noise);
         let position_ned = (tick % gnss_div == 0).then(|| Vec3 {
             x: true_pos[0],
             y: true_pos[1],
@@ -435,6 +519,9 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
         // ── coverage + stage transitions, from A's published state ──
         let mode = sa.mode;
         modes_seen[(mode & 7) as usize] += 1;
+        if stage == Stage::F1ArmedHold && mode == ARMED {
+            armed_hold_ticks += 1;
+        }
         failsafe_seen |= sa.failsafe;
         if sa.failed_rotor != 0xFF {
             rotor_isolated = true;
@@ -477,6 +564,26 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
     );
     println!("failsafe bits seen  : {failsafe_seen:#010b}");
     println!("rotor isolated      : {rotor_isolated}");
+    println!("armed hold          : {armed_hold_ticks} ticks (noisy gyro, then takeoff, no reset)");
+    // `resync_loop_rate` rebuilds the gyro filter past 2% off the 1000 Hz
+    // design rate, which erases what `keep_warm` kept during the hold.
+    let keep_warm_decisive = ((1.0 / dt) - 1000.0).abs() <= 0.02 * 1000.0;
+    println!(
+        "keep_warm           : {}",
+        if keep_warm_decisive {
+            "DECISIVE (design rate: the hold's filter state reaches the motors)"
+        } else {
+            "not decisive at this rate (first control tick rebuilds the filter) — run at dt=0.001"
+        }
+    );
+    println!(
+        "estimator health    : {}",
+        if pending_586 {
+            "PENDING-586 stage RAN"
+        } else {
+            "PENDING relay#586 — masked by CalibrationPresent at this seam (see PENDING_586_ENV); measured directly in falcon-core tests/supervised_core_split.rs"
+        }
+    );
 
     // COVERAGE IS PART OF THE VERDICT. Bit-equality over a run that never left
     // the ground would be true and worthless.
@@ -499,12 +606,18 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
     for (bit, name) in [
         (FS_ARM_BLOCKED, "arm-blocked"),
         (FS_BATT_LOW, "batt-low"),
+        (FS_BATT_CRITICAL, "batt-critical"),
         (FS_RTL_LATCHED, "rtl-latched"),
         (FS_BATT_SILENT, "batt-silent"),
     ] {
         if failsafe_seen & bit == 0 {
             missing.push(format!("failsafe bit {name} never raised"));
         }
+    }
+    if armed_hold_ticks < ARMED_HOLD_TICKS {
+        missing.push(format!(
+            "flight 1 was held armed for {armed_hold_ticks} ticks, not {ARMED_HOLD_TICKS}"
+        ));
     }
     if !rotor_isolated {
         missing.push("no rotor was ever isolated".into());
