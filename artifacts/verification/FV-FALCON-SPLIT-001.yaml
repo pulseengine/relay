@@ -27,6 +27,24 @@ artifacts:
       The same control on the in-crate test: edge cut -> red at tick 4;
       estimate-only Some(false) -> red at tick 12123.
 
+      COVERAGE BOUNDARY, stated rather than implied. The failsafe word is
+      compared every tick, but the scenario RAISES only bits 0-3 and 7
+      (rtl-latched, batt-low, batt-critical, batt-silent, arm-blocked); bits 4-6
+      (geofence-breach, runaway-arming, wind-arming) are never set on either
+      side. Three forwarded queries are therefore not falsified by it:
+      `max_motor` (read only by the wind detector — a split with it stubbed to
+      0.0 was run and STAYED GREEN), and `nav_compromised` / `gnss_diverged`
+      (the mock plant never spoofs or diverges). Each is a one-line forward,
+      but its equivalence is argued, not measured.
+
+      DROP-IN CONFORMANCE. The composed split imports only `types` and exports
+      `controller`, `observer` and `pilot` — exactly the monolith's surface —
+      and `wasm-tools component targets wit/falcon-cascade <composed>
+      --world cascade` passes. (A first cut kept the seam records in a separate
+      type-only interface; it survived composition as an extra import and the
+      check FAILED. Moving them into `types` was measured byte-neutral for the
+      monolith: built with and without them, identical bytes.)
+
       REFACTOR NEUTRALITY. The monolithic `cascade` is NOT byte-identical
       before/after the falcon-core change (code section 35778 -> 35700 B; the
       base build was confirmed reproducible, so the difference is real codegen,

@@ -76,8 +76,7 @@ impl Side {
         let component =
             Component::from_file(engine, path).with_context(|| format!("loading {path}"))?;
         // Empty linker, as in the main harness: neither side may need WASI or
-        // any host function. The split additionally imports the type-only
-        // `partition-types` interface, which has nothing to supply.
+        // any host function. Both import only the records-only `types`.
         let linker: Linker<()> = Linker::new(engine);
         let mut store = Store::new(engine, ());
         let b = ComposedCascade::instantiate(&mut store, &component, &linker)

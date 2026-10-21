@@ -22,10 +22,10 @@ compile_error!(
 mod bindings;
 
 use bindings::exports::pulseengine::falcon_cascade::estimator::Guest;
-use bindings::pulseengine::falcon_cascade::partition_types::{
+use bindings::pulseengine::falcon_cascade::types::SensorFrame;
+use bindings::pulseengine::falcon_cascade::types::{
     EstimatorConfig, EstimatorHealth, NavState as WitNav,
 };
-use bindings::pulseengine::falcon_cascade::types::SensorFrame;
 
 use core::cell::RefCell;
 use falcon_core::{

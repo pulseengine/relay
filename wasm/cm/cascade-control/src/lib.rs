@@ -24,7 +24,7 @@ compile_error!(
 mod bindings;
 
 use bindings::exports::pulseengine::falcon_cascade::flight_control::Guest;
-use bindings::pulseengine::falcon_cascade::partition_types::{
+use bindings::pulseengine::falcon_cascade::types::{
     ControlConfig, ControlOutput, ControlStatus, NavState as WitNav,
 };
 use bindings::pulseengine::falcon_cascade::types::{ImuSample, SensorFrame, Vec3 as WitVec3};
