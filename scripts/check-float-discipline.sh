@@ -26,7 +26,17 @@ FLIGHT_CRATES=(
 )
 
 fail=0
+# THE DENOMINATOR. The scan used to skip a listed crate silently when neither
+# source directory existed (`[ -d "$src" ] || continue` and nothing else), so a
+# crate that was renamed, moved or deleted dropped out of the gate with no
+# signal — and an empty tree printed "float discipline: OK". Measured: run in an
+# empty directory, this script reported OK and exited 0 having read no file.
+# Every listed crate must now contribute at least one scanned file, and the
+# totals are printed, so "OK" states what it looked at.
+crates_scanned=0
+files_scanned=0
 for crate in "${FLIGHT_CRATES[@]}"; do
+  crate_files=0
   for src in "crates/$crate/plain/src" "crates/$crate/src"; do
     [ -d "$src" ] || continue
     # skip the verus twin when a plain tree exists (plain is what ships)
@@ -34,6 +44,7 @@ for crate in "${FLIGHT_CRATES[@]}"; do
       continue
     fi
     while IFS= read -r -d '' f; do
+      crate_files=$((crate_files + 1))
       case "$(basename "$f")" in kani_proofs.rs|tests.rs) continue ;; esac
       if head -5 "$f" | grep -q "float-discipline: allow-f64"; then
         continue
@@ -56,9 +67,19 @@ for crate in "${FLIGHT_CRATES[@]}"; do
       fi
     done < <(find "$src" -name '*.rs' -print0)
   done
+  if [ "$crate_files" -eq 0 ]; then
+    echo "FLOAT-DISCIPLINE CANNOT DETERMINE — listed flight crate '$crate' has no"
+    echo "source under crates/$crate/plain/src or crates/$crate/src. Renamed, moved"
+    echo "or removed? Update FLIGHT_CRATES; an unscanned crate is not a passing one."
+    fail=1
+  else
+    crates_scanned=$((crates_scanned + 1))
+    files_scanned=$((files_scanned + crate_files))
+  fi
 done
 
 if [ "$fail" = "0" ]; then
   echo "float discipline: OK (f32 flight core; f64 only at annotated boundaries)"
+  echo "  scanned ${crates_scanned}/${#FLIGHT_CRATES[@]} flight crates, ${files_scanned} .rs files"
 fi
 exit $fail
