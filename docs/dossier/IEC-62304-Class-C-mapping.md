@@ -31,7 +31,7 @@ mechanically derived from the AADL model, not hand-authored).
 | §5.6 SW integration + integration testing | `bazel build //:falcon-cascade-fused` (meld_fuse); falcon-sitl-hover (17 scenarios) |
 | §5.7 SW system testing | falcon-hitl-rfspoof (10 tests) — stub backend automated, mavlink + hackrf backends wired for bench |
 | §5.8 SW release | GitHub release per tag (falcon-v0.7.0 → v0.13.0); cosign-signed artifacts across 5 host triples + cortex-m7; rivet-snapshot uploaded with each |
-| §7 SW risk management | spar EMV2 fault tree (7 minimal cut sets) + STPA bridge (1 hazard, 2 loss scenarios) → `artifacts/spar/falcon-quad-analysis.json`; cFS-DNA RTL pattern is the system-level mitigation |
+| §7 SW risk management | spar EMV2 fault tree (9 minimal cut sets (re-measured 2026-10-21 on the re-modelled RT1176 deployment, #587)) + STPA bridge (1 hazard, 4 loss scenarios, 9 sub-hazards) → `artifacts/spar/falcon-quad-analysis.json`; cFS-DNA RTL pattern is the system-level mitigation |
 | §8 SW configuration management | git (DCO-signed tags); release.yml pins each release artifact's SHA256 + cosign signature |
 | §9 SW problem resolution | GitHub Issues; rivet artifact status field (approved / in-progress / blocked) |
 

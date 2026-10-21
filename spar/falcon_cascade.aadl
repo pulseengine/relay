@@ -1,122 +1,135 @@
--- Falcon control cascade — periodic-thread architecture.
+-- Falcon control cascade — the TWO-PARTITION architecture falcon-core flies.
 --
--- Each controller is a periodic thread on the autopilot processor.
--- The cascade runs at 200 Hz (5 ms period); each controller's WCET
--- is well under the period so schedulability is trivial for spar's
--- bin-packing analysis. The data flow is feed-forward:
+-- RE-MODELLED 2026-10-21 (#587, maintainer decision). This package used to
+-- describe five periodic threads — EKF, Position, Attitude, Rate, Mixer — at
+-- 200 Hz on one STM32H743. That was the legacy five-stage decomposition #388
+-- retired: falcon-core does NOT run five controllers. It runs ONE tick split
+-- across TWO partitions, `EstimatorPartition` and `CascadePartition`
+-- (`FlightCore { est, casc }`), and the deployment agreed for the first
+-- vehicle (Pixhawk 6X-RT, i.MX RT1176; jess#144) places the estimator on the
+-- Cortex-M4 and the cascade on the Cortex-M7.
 --
---     IMU → EKF → Position → Attitude → Rate → Mixer → motors
+-- RATE: 1 kHz on both partitions — SWREQ-FALCON-RATE-P01 / EKF-P01
+-- ("1 ms on the target Cortex-M7") and `SUPERVISOR_CORE_LOOP_HZ = 1000.0`.
+--
+-- WCET IS UNMEASURED, and the budgets below say so rather than pretend.
+-- Nobody has measured a falcon execution time on target (the WCET-leaf item of
+-- the hardware bring-up register, #157). Each tick therefore carries the only
+-- budget that is not an invention: its whole period, `0 ms .. 1 ms`. That keeps
+-- the analysis honest in both directions — each core runs one tick thread, so
+-- a full-period budget is schedulable on its own core and on nothing else, and
+-- spar's sensitivity warning ("a 10% increase would exceed 100%") is the true
+-- statement about a budget nobody has measured. When #157 provides numbers,
+-- they replace these ranges; until then a green scheduling analysis here means
+-- "the structure is schedulable if each tick fits its period", NOT "it fits".
+--
+-- The previous model's placeholder budgets (five threads x 0..1 ms at 5 ms) put
+-- the H743 at 100% utilisation, already over the 74.3% RMA bound, and at 1 kHz
+-- spar reported 500% with four missed deadlines. Those numbers were never
+-- measured either; carrying them to 1 kHz would have meant inventing smaller
+-- ones to make the analysis pass.
+--
+-- Data flow, per tick:
+--
+--     sensors -> [M4] estimator --nav state--> [M7] cascade -> motors
+--                     ^                            |
+--                     +------- in_flight ----------+   (one tick delayed)
+--
+-- The feedback edge is REAL and load-bearing: `CascadePartition::flying()`
+-- feeds `EstimatorPartition::set_in_flight()`, because a multirotor
+-- accelerometer reads specific force along the thrust axis, so fusing it as
+-- gravity while airborne diverges the hold (#452). Modelling the split as
+-- estimator -> cascade with nothing returning would describe a system that
+-- does not fly. Found independently in the review of the split proposal (#575).
+--
+-- THE SUPERVISOR runs inside the cascade tick on the M7 — that is where the
+-- published component hosts `FlightSupervisor` (SUPERVISOR-P01, #571). jess#144
+-- also agreed a separate failsafe core (F100, gale); no falcon software is bound
+-- to it today, so it is noted here rather than modelled as if it ran something.
 
 package Falcon_Cascade
 public
   with Falcon_Types;
 
+  -- The one-bit feedback from the cascade back into the estimator's gravity
+  -- gate. Local to this package so the shared Falcon_Types is untouched.
+  data InFlight
+  end InFlight;
+
   -- ══════════════════════════════════════════════════════════════
-  -- Controller threads
+  -- Estimator partition — Cortex-M4
   -- ══════════════════════════════════════════════════════════════
 
-  -- v0.8: takes a SensorFrame, not a bare ImuSample. The frame carries the
-  -- host's control period plus any aiding measurements available this tick.
-  -- Driving the published wasm components from a host showed the v0.7 port
-  -- set could express neither: the estimator hardcoded 1 kHz (27 m error at
-  -- 250 Hz) and, IMU-only, inverted to -121 m at 0.2 m/s^2 accelerometer
-  -- noise where the native cascade held 0.39 m on the same plant.
-  thread EkfThread
+  -- IEKF + every measurement update. Takes the host's sensor frame (control
+  -- period + whatever aiding the tick carries) and publishes the navigation
+  -- state — the only value that crosses to the cascade.
+  thread EstimatorTick
     features
       sensors_in: in data port Falcon_Types::SensorFrame;
-      state_out: out data port Falcon_Types::VehicleState;
+      in_flight_in: in data port InFlight;
+      nav_out: out data port Falcon_Types::VehicleState;
     properties
       Dispatch_Protocol => Periodic;
-      Period => 5 ms;
+      Period => 1 ms;
+      Deadline => 1 ms;
+      -- UNMEASURED (#157): the whole period, the only budget not invented.
       Compute_Execution_Time => 0 ms .. 1 ms;
-      Deadline => 5 ms;
       Priority => 10;
-      Stack_Size => 4096 Bytes;
-  end EkfThread;
+  end EstimatorTick;
 
-  thread PositionThread
-    features
-      state_in: in data port Falcon_Types::VehicleState;
-      waypoint_in: in data port Falcon_Types::Waypoint;
-      attitude_sp_out: out data port Falcon_Types::AttitudeSetpoint;
-    properties
-      Dispatch_Protocol => Periodic;
-      Period => 5 ms;
-      Compute_Execution_Time => 0 ms .. 1 ms;
-      Deadline => 5 ms;
-      Priority => 9;
-      Stack_Size => 4096 Bytes;
-  end PositionThread;
-
-  thread AttitudeThread
-    features
-      state_in: in data port Falcon_Types::VehicleState;
-      attitude_sp_in: in data port Falcon_Types::AttitudeSetpoint;
-      rate_sp_out: out data port Falcon_Types::RateSetpoint;
-    properties
-      Dispatch_Protocol => Periodic;
-      Period => 5 ms;
-      Compute_Execution_Time => 0 ms .. 1 ms;
-      Deadline => 5 ms;
-      Priority => 8;
-      Stack_Size => 4096 Bytes;
-  end AttitudeThread;
-
-  thread RateThread
-    features
-      state_in: in data port Falcon_Types::VehicleState;
-      rate_sp_in: in data port Falcon_Types::RateSetpoint;
-      torque_sp_out: out data port Falcon_Types::TorqueSetpoint;
-    properties
-      Dispatch_Protocol => Periodic;
-      Period => 5 ms;
-      Compute_Execution_Time => 0 ms .. 1 ms;
-      Deadline => 5 ms;
-      Priority => 7;
-      Stack_Size => 4096 Bytes;
-  end RateThread;
-
-  thread MixerThread
-    features
-      torque_sp_in: in data port Falcon_Types::TorqueSetpoint;
-      pwm_out: out data port Falcon_Types::MotorPwm;
-    properties
-      Dispatch_Protocol => Periodic;
-      Period => 5 ms;
-      Compute_Execution_Time => 0 ms .. 1 ms;
-      Deadline => 5 ms;
-      Priority => 6;
-      Stack_Size => 2048 Bytes;
-  end MixerThread;
-
-  -- ══════════════════════════════════════════════════════════════
-  -- Process — host for all cascade threads
-  -- ══════════════════════════════════════════════════════════════
-
-  process AutopilotProcess
+  process EstimatorPartition
     features
       sensors_in: in data port Falcon_Types::SensorFrame;
+      in_flight_in: in data port InFlight;
+      nav_out: out data port Falcon_Types::VehicleState;
+  end EstimatorPartition;
+
+  process implementation EstimatorPartition.Iekf
+    subcomponents
+      est: thread EstimatorTick;
+    connections
+      e0: port sensors_in -> est.sensors_in;
+      e1: port in_flight_in -> est.in_flight_in;
+      e2: port est.nav_out -> nav_out;
+  end EstimatorPartition.Iekf;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Cascade partition — Cortex-M7
+  -- ══════════════════════════════════════════════════════════════
+
+  -- Geometric SE(3) attitude + ADRC rate + mixer with rotor-out FDI + the
+  -- altitude/position loops, with the FlightSupervisor (mode machine, failsafe
+  -- arbiter, pre-arm table) wrapped around them.
+  thread CascadeTick
+    features
+      nav_in: in data port Falcon_Types::VehicleState;
       waypoint_in: in data port Falcon_Types::Waypoint;
       pwm_out: out data port Falcon_Types::MotorPwm;
-  end AutopilotProcess;
+      in_flight_out: out data port InFlight;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 1 ms;
+      Deadline => 1 ms;
+      -- UNMEASURED (#157): the whole period, the only budget not invented.
+      Compute_Execution_Time => 0 ms .. 1 ms;
+      Priority => 10;
+  end CascadeTick;
 
-  process implementation AutopilotProcess.Cascade
+  process CascadePartition
+    features
+      nav_in: in data port Falcon_Types::VehicleState;
+      waypoint_in: in data port Falcon_Types::Waypoint;
+      pwm_out: out data port Falcon_Types::MotorPwm;
+      in_flight_out: out data port InFlight;
+  end CascadePartition;
+
+  process implementation CascadePartition.Supervised
     subcomponents
-      ekf: thread EkfThread;
-      pos: thread PositionThread;
-      att: thread AttitudeThread;
-      rate: thread RateThread;
-      mix: thread MixerThread;
+      casc: thread CascadeTick;
     connections
-      c0: port sensors_in -> ekf.sensors_in;
-      c1: port ekf.state_out -> pos.state_in;
-      c2: port waypoint_in -> pos.waypoint_in;
-      c3: port pos.attitude_sp_out -> att.attitude_sp_in;
-      c4: port ekf.state_out -> att.state_in;
-      c5: port att.rate_sp_out -> rate.rate_sp_in;
-      c6: port ekf.state_out -> rate.state_in;
-      c7: port rate.torque_sp_out -> mix.torque_sp_in;
-      c8: port mix.pwm_out -> pwm_out;
-  end AutopilotProcess.Cascade;
-
+      k0: port nav_in -> casc.nav_in;
+      k1: port waypoint_in -> casc.waypoint_in;
+      k2: port casc.pwm_out -> pwm_out;
+      k3: port casc.in_flight_out -> in_flight_out;
+  end CascadePartition.Supervised;
 end Falcon_Cascade;

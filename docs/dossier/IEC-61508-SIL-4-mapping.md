@@ -20,7 +20,7 @@ Recommended) or R (Recommended). Falcon's stack covers:
 | A.4 Software design — Formal methods (HR for SIL-4) | Verus (SMT/Z3) — discharges LC-P09/P10, HS-P06/P07, NID-V01..V03 contracts |
 | A.5 Software architecture — Modelling (HR) | spar AADL (`spar/falcon_*.aadl`) → instance → analyze (EMV2 fault tree) |
 | A.5 Software architecture — Defensive programming (HR) | cFS-DNA pattern: detect (HS / LC) → relay-sc RTL → cascade; encoded in `examples/falcon-sitl-hover` scenarios |
-| A.5 Software architecture — Failure analysis (HR) | spar EMV2: 7 minimal cut sets, 7 single-point failures, STPA bridge |
+| A.5 Software architecture — Failure analysis (HR) | spar EMV2: 9 minimal cut sets, 9 single-point failures (re-measured 2026-10-21 on the re-modelled RT1176 deployment, #587), STPA bridge |
 | B.5 Software design — Suitable programming language (HR) | Rust + `#![forbid(unsafe_code)]` on all safety crates |
 | B.5 Software design — Strongly typed programming language (HR) | Rust type system enforces this at compile time |
 | B.5 Software design — Defensive programming (HR) | Verus pre/post-conditions reject pre-condition violations at compile time |

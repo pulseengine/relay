@@ -120,9 +120,39 @@ artifacts:
           SYSREQ-FALCON-011 + 014 + 016).
         - **EMV2-STPA bridge: 1 hazard, 2 loss scenarios, 7
           sub-hazards** auto-generated from the fault tree.
-        - **Bin-packing schedulability**: 5 threads × 1 ms WCET ÷
-          5 ms period = 20% utilisation on the MCU; 80% headroom
-          for the MAVLink / FM-radio / telemetry sidebands.
+        - **Bin-packing schedulability** — CORRECTED 2026-10-21. This
+          line said "5 threads × 1 ms WCET ÷ 5 ms period = 20%
+          utilisation; 80% headroom". The arithmetic was wrong: 1/5 is
+          20% PER THREAD, so five threads are 100%, and spar itself
+          reported "utilization 100.0% exceeds RMA bound 74.3% for 5
+          tasks" on that model. There was never 80% headroom.
+
+      SUPERSEDED MODEL, 2026-10-21 (#587). Everything in this artifact
+      above describes the five-thread STM32H743 model, which was the
+      legacy decomposition (#388) on a chip the first vehicle does not
+      use. The model is now the i.MX RT1176 deployment — estimator tick
+      on the Cortex-M4, cascade tick on the Cortex-M7, both at 1 kHz
+      (SWREQ-FALCON-RATE-P01), the nav-state seam and its in-flight
+      feedback bound to the shared on-chip RAM. Re-measured with
+      `spar analyze --root Falcon_System::Falcon.Quad`:
+        - 0 errors, rc 0.
+        - EMV2: 9 minimal cut sets, 9 single-point failures (m7, m4,
+          ram, estimator.est, cascade.casc, comms_mcu and the three
+          comms threads). STPA bridge: 1 hazard, 4 loss scenarios,
+          9 sub-hazards.
+        - Scheduling: 100.0% on each core, schedulable (one tick
+          thread per core) with spar's "critically thin timing
+          margins" warning — because each tick's budget is its WHOLE
+          PERIOD, the only number that is not invented: falcon WCET is
+          UNMEASURED on target (#157). A green schedulability result
+          here means the structure is schedulable IF each tick fits
+          its period, not that it does.
+        - `wrpc-binding` still warns that the cross-core connections
+          have no binding; spar does not read Actual_Connection_Binding
+          on root-system connections (pulseengine/spar#515).
+      The JSON snapshot is regenerated from the new model with the
+      current spar (`spar instance --format json`); its schema differs
+      from the May 2026 file, which had not been regenerated since.
 
       The 11 warnings are expected and intentional:
         - 5 single-point-of-failure warnings on the controllers
