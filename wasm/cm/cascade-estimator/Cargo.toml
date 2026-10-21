@@ -1,0 +1,39 @@
+# Standalone cargo-component crate — part of the cascade-split deployment (#575).
+[package]
+name = "falcon-cascade-estimator-cm"
+description = "The falcon-core ESTIMATOR partition (EstimatorPartition — IEKF propagate and every measurement update) as one WebAssembly Component, WIT pulseengine:falcon-cascade@0.12.0 estimator-component. One half of the cascade-split deployment (#575); the supervisor lives in cascade-split, not here."
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/pulseengine/relay"
+rust-version = "1.85"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+falcon-core = { path = "../../../crates/falcon-core" }
+
+[package.metadata.component]
+package = "pulseengine:falcon-cascade"
+
+[package.metadata.component.target]
+path = "../../../wit/falcon-cascade"
+world = "estimator-component"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+[workspace]
+
+[features]
+# STD ONLY FOR NOW. The no_std build of the split components waits on #574
+# (arena reclamation): every seam call between these components spills its
+# parameters through cabi_realloc, and the bump arena the no_std components use
+# cannot reclaim them. Building no_std is a compile_error!, not a silent leak.
+default = ["std"]
+std = []
