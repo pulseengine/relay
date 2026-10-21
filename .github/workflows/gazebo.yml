@@ -15,6 +15,10 @@ name: Gazebo
 # repo, and the fleet's rust-cpu boxes are for the heavy Rust gates.
 
 on:
+  # MERGE QUEUE (2026-10-21). This workflow produces a REQUIRED check, so it
+  # must also run on the queue's `merge_group` event — otherwise a queued PR
+  # waits forever for a check that is never reported.
+  merge_group:
   # NO PATH FILTER, deliberately — this is the precondition for making the job
   # a REQUIRED context, and it was learned the hard way.
   #
