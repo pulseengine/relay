@@ -1,0 +1,50 @@
+artifacts:
+  - id: FV-FALCON-PREARM-004
+    type: sw-verification
+    title: "PREARM-P04 — an isolated rotor fault blocks re-arming with its OWN reason, even when no failsafe latch was set (v1.141)"
+    status: verified
+    release: falcon-v1.141.0
+    description: >
+      Verification of SWREQ-FALCON-PREARM-P04, run independently of the
+      implementation PR (#565) per the two-commit rule, on main 985114b.
+
+      THE CASE IT EXISTS FOR (relay#564): a rotor fault isolated AFTER the
+      vehicle entered Mode::Land is excluded from the rtl_latched path by its
+      "mode != Mode::Land" guard, so before the MotorsHealthy row the vehicle
+      landed, disarmed with NO latch, and RE-ARMED with a dead motor.
+      falcon-core tests::a_rotor_fault_isolated_during_landing_blocks_re_arming
+      injects exactly that and asserts command(Arm) is REFUSED naming
+      CheckId::MotorsHealthy / "PREARM: motor fault isolated".
+
+      Coverage of the new row in relay-preflight is BY CONSTRUCTION: the
+      table-driven tests::every_row_blocks_alone_and_clears iterates
+      CheckId::ALL (CHECK_COUNT 19 -> 20), and Kani PREFLIGHT-K03/K04 are
+      re-proved over the grown table.
+
+      INDEPENDENT RE-RUN 2026-10-21 (a separate verifier agent in a clean
+      worktree, each filter confirmed to execute exactly 1 test so none passed
+      vacuously):
+        a_rotor_fault_isolated_during_landing_blocks_re_arming   1 passed
+        every_row_blocks_alone_and_clears                        1 passed
+        cargo kani -p relay-preflight                            4 of 4 SUCCESSFUL
+          (verify_table_gate_monotone, verify_table_gate_exact,
+           verify_blocked_reason_is_real, verify_arm_iff_all_pass)
+
+      FALSIFIED: deleting the single `t.set(CheckId::MotorsHealthy, ..)` row
+      (asserted to occur exactly once before mutation) makes the landing test
+      FAIL with "a vehicle with a latched dead motor must REFUSE to arm;
+      arm_blocked_check=None reason=None failed_motor=Some(1)" — the FDI still
+      knows rotor 1 is dead, and nothing stops the arm. File restored after.
+
+      FALSIFICATION: wrong if, after any isolated rotor fault, a disarmed
+      vehicle accepts command(Arm) while failed_motor() is Some.
+    tags: [verification, falcon, prearm, safety, rotor-out, v1.141]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-core --lib a_rotor_fault_isolated_during_landing_blocks_re_arming
+        - run: cargo test -p relay-preflight --lib every_row_blocks_alone_and_clears
+        - run: cargo kani -p relay-preflight
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PREARM-P04
