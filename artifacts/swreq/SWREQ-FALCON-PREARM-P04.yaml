@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-PREARM-P04
     type: sw-req
     title: "PREARM-P04: an ISOLATED rotor fault blocks arming with its own reason"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
       The pre-arm table shall carry a PROPULSION-HEALTH row that blocks arming
