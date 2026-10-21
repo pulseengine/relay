@@ -4,13 +4,12 @@
 //! One half of the `cascade-split` deployment. It wraps
 //! `falcon_core::CascadePartition` — geometric SE(3) attitude, ADRC, mixer,
 //! rotor-out FDI, position/altitude loops — and nothing else. The supervisor is
-//! NOT here: it lives in the `cascade-split` orchestrator, which drives this
-//! component through the `flight-control` interface exactly as `FlightCore`
-//! drives its `casc` field.
+//! NOT here: it lives in the `cascade-split` orchestrator.
 //!
-//! Every export is a thin forward to one falcon-core call. The equivalence
-//! claim (the composed split is tick-for-tick identical to the monolithic
-//! `cascade`) rests on there being nothing here to disagree with.
+//! A THIN WIT ADAPTER. What this partition does behind the seam is
+//! `falcon_core::split::{control_tick, control_status, ...}` — the same
+//! functions the CI-run test `crates/falcon-core/tests/supervised_core_split.rs`
+//! drives in process. This file only converts WIT records to and from them.
 
 #[cfg(not(feature = "std"))]
 compile_error!(
@@ -25,71 +24,43 @@ mod bindings;
 
 use bindings::exports::pulseengine::falcon_cascade::flight_control::Guest;
 use bindings::pulseengine::falcon_cascade::types::{
-    ControlConfig, ControlOutput, ControlStatus, NavState as WitNav,
+    ControlConfig, ControlOutput, ControlStatus, ImuSample, NavState as WitNav, SensorFrame,
+    Vec3 as WitVec3,
 };
-use bindings::pulseengine::falcon_cascade::types::{ImuSample, SensorFrame, Vec3 as WitVec3};
 
 use core::cell::RefCell;
-use falcon_core::{
-    CascadePartition, FlightBackend, FlightCore, ImuSample as CoreImu, NavState,
-    SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ,
-};
-
-type Vec3 = [f32; 3];
+use falcon_core::split::{self, ControlTuning, SeamFrame};
+use falcon_core::{CascadePartition, ImuSample as CoreImu, NavState};
 
 struct SingleThreaded<T>(RefCell<T>);
 // SAFETY: the component model guarantees single-threaded, non-reentrant access.
 unsafe impl<T> Sync for SingleThreaded<T> {}
 
-/// The partition. `None` until the first call; built from the SAME numbers the
-/// supervisor's fused core is built from, taken from falcon-core rather than
-/// restated, so the FDI warm-up and the yaw-capture freeze land on the same
-/// tick in both deployments.
+/// The partition, built lazily by `split::new_control` — from the same numbers
+/// `FlightSupervisor::new` builds its core from.
 static CASC: SingleThreaded<Option<CascadePartition>> = SingleThreaded(RefCell::new(None));
 
-fn fresh() -> CascadePartition {
-    CascadePartition::new(
-        SUPERVISOR_CORE_HOVER_THRUST,
-        SUPERVISOR_CORE_LOOP_HZ,
-        FlightCore::warmup_steps(SUPERVISOR_CORE_LOOP_HZ),
-    )
-}
-
 fn ensure(slot: &mut Option<CascadePartition>) -> &mut CascadePartition {
-    slot.get_or_insert_with(fresh)
+    slot.get_or_insert_with(split::new_control)
 }
 
-/// The frame, answering the control partition's reads (motor RPM; the
-/// rangefinder is not in the seam's `sensor-frame` and defaults to `None`, as
-/// in the monolithic component), and catching its motor command.
-struct FrameBackend {
-    imu: CoreImu,
-    motor_rpm: Option<[i32; 4]>,
-    dt: f32,
-    motors: [f32; 4],
+fn core_imu(i: ImuSample) -> CoreImu {
+    CoreImu {
+        accel: [i.ax, i.ay, i.az],
+        gyro: [i.gx, i.gy, i.gz],
+    }
 }
 
-impl FlightBackend for FrameBackend {
-    fn read_imu(&mut self) -> CoreImu {
-        self.imu
-    }
-    fn read_position(&mut self) -> Option<Vec3> {
-        None
-    }
-    fn read_mag(&mut self) -> Option<Vec3> {
-        None
-    }
-    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
-        self.motor_rpm
-    }
-    /// Same capture as the monolithic component's backend.
-    fn write_motors(&mut self, motors: &[f32]) {
-        for (i, m) in self.motors.iter_mut().enumerate() {
-            *m = motors.get(i).copied().unwrap_or(0.0);
-        }
-    }
-    fn dt(&self) -> f32 {
-        self.dt
+/// The seam frame, as falcon-core's `SeamFrame`.
+fn seam_frame(f: SensorFrame) -> SeamFrame {
+    SeamFrame {
+        imu: core_imu(f.imu),
+        dt: f.dt_s,
+        position: f.position_ned.map(|p| [p.x, p.y, p.z]),
+        mag: f.mag_body.map(|m| [m.x, m.y, m.z]),
+        heading: f.heading_rad,
+        motor_rpm: f.motor_rpm.map(|r| [r.m1, r.m2, r.m3, r.m4]),
+        battery_v: f.battery_v,
     }
 }
 
@@ -104,19 +75,12 @@ fn from_wit(n: WitNav) -> NavState {
 }
 
 fn status(c: &CascadePartition) -> ControlStatus {
+    let s = split::control_status(c);
     ControlStatus {
-        flying: c.flying(),
-        max_motor: c.max_motor(),
-        // 0-3, or 0xFF for none — a flat byte, the same encoding the published
-        // `flight-state.failed-rotor` uses.
-        failed_rotor: c.failed_motor().map(|i| i as u8).unwrap_or(0xFF),
-    }
-}
-
-fn core_imu(imu: ImuSample) -> CoreImu {
-    CoreImu {
-        accel: [imu.ax, imu.ay, imu.az],
-        gyro: [imu.gx, imu.gy, imu.gz],
+        flying: s.flying,
+        max_motor: s.max_motor,
+        // 0-3, or 0xFF for none — the `flight-state.failed-rotor` encoding.
+        failed_rotor: s.failed_rotor.map(|i| i as u8).unwrap_or(0xFF),
     }
 }
 
@@ -124,17 +88,22 @@ struct Component;
 
 impl Guest for Component {
     /// Rebuild THIS partition, dropping only its state, then apply the
-    /// (already sanitised) tuning — the control half of the monolithic
-    /// `set_hover_thrust` + `apply_tuning`.
+    /// (already sanitised) tuning.
     fn configure(cfg: Option<ControlConfig>) {
         let mut slot = CASC.0.borrow_mut();
         *slot = None;
         let casc = ensure(&mut slot);
         if let Some(c) = cfg {
-            casc.set_hover_thrust_core(c.hover_thrust);
-            casc.set_altitude_gains(c.altitude_kp, c.altitude_kd);
-            casc.set_altitude_integral_gain(c.altitude_ki);
-            casc.set_position_integral_gain(c.position_ki);
+            split::apply_control_tuning(
+                casc,
+                &ControlTuning {
+                    hover_thrust: c.hover_thrust,
+                    altitude_kp: c.altitude_kp,
+                    altitude_kd: c.altitude_kd,
+                    altitude_ki: c.altitude_ki,
+                    position_ki: c.position_ki,
+                },
+            );
         }
     }
 
@@ -148,35 +117,19 @@ impl Guest for Component {
         ensure(&mut slot).set_landing(on);
     }
 
-    /// `FlightCore::step`'s control half.
     fn tick(nav: WitNav, sensors: SensorFrame) -> ControlOutput {
         let mut slot = CASC.0.borrow_mut();
         let casc = ensure(&mut slot);
-        let raw = core_imu(sensors.imu);
-        let mut b = FrameBackend {
-            imu: raw,
-            motor_rpm: sensors.motor_rpm.map(|r| [r.m1, r.m2, r.m3, r.m4]),
-            dt: sensors.dt_s,
-            motors: [0.0; 4],
-        };
-        let ns = from_wit(nav);
-        casc.step(
-            &mut b,
-            &ns,
-            raw,
-            sensors.heading_rad.is_some(),
-            sensors.dt_s,
-        );
+        let m = split::control_tick(casc, &from_wit(nav), &seam_frame(sensors));
         ControlOutput {
-            m1: b.motors[0],
-            m2: b.motors[1],
-            m3: b.motors[2],
-            m4: b.motors[3],
+            m1: m[0],
+            m2: m[1],
+            m3: m[2],
+            m4: m[3],
             status: status(casc),
         }
     }
 
-    /// `FlightCore::step_estimate_only`'s control half.
     fn keep_warm(imu: ImuSample) {
         let mut slot = CASC.0.borrow_mut();
         ensure(&mut slot).keep_warm(core_imu(imu));

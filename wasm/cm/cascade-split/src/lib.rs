@@ -46,17 +46,15 @@ use bindings::exports::pulseengine::falcon_cascade::pilot::{
 use bindings::pulseengine::falcon_cascade::estimator;
 use bindings::pulseengine::falcon_cascade::flight_control;
 use bindings::pulseengine::falcon_cascade::types::{
-    ControlConfig, EstimatorConfig, NavState as WitNav,
-};
-use bindings::pulseengine::falcon_cascade::types::{
-    FlightState, ImuSample as WitImu, MotorPwm, RotorRpm, SensorFrame, Vec3 as WitVec3,
-    VehicleConfig, Waypoint,
+    ControlConfig, EstimatorConfig, FlightState, ImuSample as WitImu, MotorPwm, NavState as WitNav,
+    RotorRpm, SensorFrame, Vec3 as WitVec3, VehicleConfig, Waypoint,
 };
 
 use core::cell::RefCell;
-use falcon_core::{
-    FlightBackend, FlightSupervisor, ImuSample as CoreImu, NavState, SupervisedCore,
+use falcon_core::split::{
+    ControlStatus, EstimatorHealth, FrameBackend, PartitionSeam, SeamFrame, SplitCore,
 };
+use falcon_core::{FlightSupervisor, ImuSample as CoreImu, NavState, SupervisedCore};
 
 /// falcon-core's `Vec3` alias is private, so it is restated here (as in
 /// `cascade`). Same shape (`[f32; 3]`, NED).
@@ -68,15 +66,16 @@ unsafe impl<T> Sync for SingleThreaded<T> {}
 
 // ── the remote core ───────────────────────────────────────────────────────
 
-/// The flight core the supervisor drives, living in two OTHER components.
-///
-/// Zero-sized: the state is in `cascade-estimator` and `cascade-control`, and
-/// every method is one forwarded call. Nothing is cached — the supervisor reads
-/// its core BEFORE stepping it (pre-arm rows, geofence, the wind detector),
-/// including on the first tick after a reset, so a cache would need seeding
-/// from somewhere, and a hand-written default is precisely the value that
-/// drifts from the real one.
-struct RemoteCore;
+/// The flight core the supervisor drives: falcon-core's `SplitCore` — the
+/// forwarding, including the #452 edge and the estimate-only path — over the
+/// WIT imports. The forwarding itself is `falcon_core::split::SplitCore`, which
+/// `crates/falcon-core/tests/supervised_core_split.rs` drives in CI with real
+/// in-process partitions; this file adds only the WIT encoding ([`WitSeam`]).
+type RemoteCore = SplitCore<WitSeam>;
+
+/// The eight seam calls, as WIT imports. Zero-sized: the state lives in
+/// `cascade-estimator` and `cascade-control`. Pure encoding, no logic.
+struct WitSeam;
 
 fn nav_from_wit(n: WitNav) -> NavState {
     NavState {
@@ -88,6 +87,27 @@ fn nav_from_wit(n: WitNav) -> NavState {
     }
 }
 
+fn nav_to_wit(n: &NavState) -> WitNav {
+    WitNav {
+        qw: n.q[0],
+        qx: n.q[1],
+        qy: n.q[2],
+        qz: n.q[3],
+        vel_n: n.v[0],
+        vel_e: n.v[1],
+        vel_d: n.v[2],
+        pos_n: n.p[0],
+        pos_e: n.p[1],
+        pos_d: n.p[2],
+        bgx: n.b_g[0],
+        bgy: n.b_g[1],
+        bgz: n.b_g[2],
+        bax: n.b_a[0],
+        bay: n.b_a[1],
+        baz: n.b_a[2],
+    }
+}
+
 fn v3(v: Vec3) -> WitVec3 {
     WitVec3 {
         x: v[0],
@@ -96,102 +116,72 @@ fn v3(v: Vec3) -> WitVec3 {
     }
 }
 
-/// Re-read the tick's sensors from the backend into the seam's frame.
-///
-/// The backend here is always this component's [`FrameBackend`], whose reads
-/// are pure, so reading every channel up front is the same as the fused core
-/// reading them where it needs them. The frame is the one `controller.step`
-/// was given, with `dt-s` already clamped.
-fn frame_of<B: FlightBackend>(b: &mut B, raw: CoreImu, heading: Option<f32>) -> SensorFrame {
+fn imu_to_wit(i: CoreImu) -> WitImu {
+    WitImu {
+        ax: i.accel[0],
+        ay: i.accel[1],
+        az: i.accel[2],
+        gx: i.gyro[0],
+        gy: i.gyro[1],
+        gz: i.gyro[2],
+    }
+}
+
+fn frame_to_wit(f: &SeamFrame) -> SensorFrame {
     SensorFrame {
-        imu: WitImu {
-            ax: raw.accel[0],
-            ay: raw.accel[1],
-            az: raw.accel[2],
-            gx: raw.gyro[0],
-            gy: raw.gyro[1],
-            gz: raw.gyro[2],
-        },
-        dt_s: b.dt(),
-        position_ned: b.read_position().map(v3),
-        mag_body: b.read_mag().map(v3),
-        heading_rad: heading,
-        motor_rpm: b.read_motor_rpm().map(|r| RotorRpm {
+        imu: imu_to_wit(f.imu),
+        dt_s: f.dt,
+        position_ned: f.position.map(v3),
+        mag_body: f.mag.map(v3),
+        heading_rad: f.heading,
+        motor_rpm: f.motor_rpm.map(|r| RotorRpm {
             m1: r[0],
             m2: r[1],
             m3: r[2],
             m4: r[3],
         }),
-        battery_v: b.read_battery_v(),
+        battery_v: f.battery_v,
     }
 }
 
-impl SupervisedCore for RemoteCore {
-    fn state(&self) -> NavState {
+impl PartitionSeam for WitSeam {
+    fn estimator_tick(&mut self, f: &SeamFrame, in_flight: Option<bool>) -> NavState {
+        nav_from_wit(estimator::tick(frame_to_wit(f), in_flight))
+    }
+    fn estimator_nav(&self) -> NavState {
         nav_from_wit(estimator::read_nav())
     }
-    fn tilt_uncertainty(&self) -> f32 {
-        estimator::read_health().tilt_uncertainty
-    }
-    /// IDENTITY, and that is a statement about the seam rather than a default.
-    /// Neither the `cascade` seam nor the `estimator` interface carries a
-    /// calibration, so the estimator component's calibration is identity by
-    /// construction — exactly as the monolithic component's is, since nothing
-    /// there calls `set_calibration` either. When a seam gains a calibration,
-    /// this must become a query, and the `CalibrationPresent` row with it.
-    fn calibration(&self) -> falcon_core::relay_calib::CalParams {
-        falcon_core::relay_calib::CalParams::identity()
-    }
-    fn nav_compromised(&self) -> bool {
-        estimator::read_health().nav_compromised
-    }
-    fn gnss_diverged(&self) -> bool {
-        estimator::read_health().gnss_diverged
-    }
-    fn failed_motor(&self) -> Option<usize> {
-        match flight_control::read_status().failed_rotor {
-            0xFF => None,
-            i => Some(i as usize),
+    fn estimator_health(&self) -> EstimatorHealth {
+        let h = estimator::read_health();
+        EstimatorHealth {
+            tilt_uncertainty: h.tilt_uncertainty,
+            nav_compromised: h.nav_compromised,
+            gnss_diverged: h.gnss_diverged,
         }
     }
-    fn max_motor(&self) -> f32 {
-        flight_control::read_status().max_motor
+    fn control_tick(&mut self, nav: &NavState, f: &SeamFrame) -> [f32; 4] {
+        let o = flight_control::tick(nav_to_wit(nav), frame_to_wit(f));
+        [o.m1, o.m2, o.m3, o.m4]
     }
-    fn set_landing(&mut self, on: bool) {
-        flight_control::set_landing(on);
+    fn control_keep_warm(&mut self, imu: CoreImu) {
+        flight_control::keep_warm(imu_to_wit(imu));
     }
-    fn set_position(&mut self, ned: Vec3) {
+    fn control_set_position(&mut self, ned: Vec3) {
         flight_control::set_position(v3(ned));
     }
-
-    /// `FlightCore::step`, across the seam.
-    fn step<B: FlightBackend>(&mut self, b: &mut B) {
-        let raw = b.read_imu();
-        let heading = b.read_heading();
-        let frame = frame_of(b, raw, heading);
-        // THE FEEDBACK EDGE (#452). The control half's PREVIOUS command says
-        // whether the vehicle is flying, read BEFORE the estimator ticks — one
-        // tick of delay, as `FlightCore::step` does with
-        // `est.set_in_flight(casc.flying())`. Read live, not from the last
-        // `control-output`, so a partition reset cannot leave a stale value.
-        let flying = flight_control::read_status().flying;
-        let nav = estimator::tick(frame, Some(flying));
-        let out = flight_control::tick(nav, frame);
-        b.write_motors(&[out.m1, out.m2, out.m3, out.m4]);
+    fn control_set_landing(&mut self, on: bool) {
+        flight_control::set_landing(on);
     }
-
-    /// `FlightCore::step_estimate_only`, across the seam. The in-flight flag is
-    /// NOT updated (`None`): the fused core does not touch it on this path, so
-    /// the estimator keeps the flag its last control tick set — TRUE at a
-    /// touchdown and after a termination in the air. Passing `Some(false)` here
-    /// was measured to break the twin differential at the first touchdown.
-    fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
-        let raw = b.read_imu();
-        let heading = b.read_heading();
-        let frame = frame_of(b, raw, heading);
-        let _ = estimator::tick(frame, None);
-        flight_control::keep_warm(frame.imu);
-        b.write_motors(&[0.0, 0.0, 0.0, 0.0]);
+    fn control_status(&self) -> ControlStatus {
+        let s = flight_control::read_status();
+        ControlStatus {
+            flying: s.flying,
+            max_motor: s.max_motor,
+            failed_rotor: match s.failed_rotor {
+                0xFF => None,
+                i => Some(i as usize),
+            },
+        }
     }
 }
 
@@ -313,55 +303,13 @@ fn ensure_supervisor<'a>(
     let (home, fence, cruise, low_batt) = sup_params(supcfg);
     let sup = slot.get_or_insert_with(|| {
         reset_partitions(cfg);
-        FlightSupervisor::with_core(RemoteCore, home, fence, cruise, low_batt)
+        FlightSupervisor::with_core(SplitCore(WitSeam), home, fence, cruise, low_batt)
     });
     sup.set_check(
         falcon_core::relay_preflight::CheckId::FailsafeConfigured,
         supcfg.is_some(),
     );
     sup
-}
-
-/// See `cascade`'s `FrameBackend`: the sensor frame as the backend's answers,
-/// the motor command caught on the way out.
-struct FrameBackend {
-    imu: CoreImu,
-    position: Option<Vec3>,
-    mag: Option<Vec3>,
-    heading: Option<f32>,
-    motor_rpm: Option<[i32; 4]>,
-    battery_v: Option<f32>,
-    dt: f32,
-    motors: [f32; 4],
-}
-
-impl FlightBackend for FrameBackend {
-    fn read_imu(&mut self) -> CoreImu {
-        self.imu
-    }
-    fn read_position(&mut self) -> Option<Vec3> {
-        self.position
-    }
-    fn read_mag(&mut self) -> Option<Vec3> {
-        self.mag
-    }
-    fn read_heading(&mut self) -> Option<f32> {
-        self.heading
-    }
-    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
-        self.motor_rpm
-    }
-    fn read_battery_v(&mut self) -> Option<f32> {
-        self.battery_v
-    }
-    fn write_motors(&mut self, motors: &[f32]) {
-        for (i, m) in self.motors.iter_mut().enumerate() {
-            *m = motors.get(i).copied().unwrap_or(0.0);
-        }
-    }
-    fn dt(&self) -> f32 {
-        self.dt
-    }
 }
 
 struct Component;
@@ -376,19 +324,21 @@ impl Guest for Component {
         };
 
         let imu = sensors.imu;
-        let mut backend = FrameBackend {
+        // See `cascade`'s `FrameBackend`: the frame as the backend's answers,
+        // the motor command caught on the way out — falcon-core's, so the
+        // CI-run test drives the supervisor through the same type.
+        let mut backend = FrameBackend::new(SeamFrame {
             imu: CoreImu {
                 accel: [imu.ax, imu.ay, imu.az],
                 gyro: [imu.gx, imu.gy, imu.gz],
             },
+            dt,
             position: sensors.position_ned.map(|p| [p.x, p.y, p.z]),
             mag: sensors.mag_body.map(|m| [m.x, m.y, m.z]),
             heading: sensors.heading_rad,
             motor_rpm: sensors.motor_rpm.map(|r| [r.m1, r.m2, r.m3, r.m4]),
             battery_v: sensors.battery_v,
-            dt,
-            motors: [0.0; 4],
-        };
+        });
 
         {
             let mut guard = CORE.0.borrow_mut();

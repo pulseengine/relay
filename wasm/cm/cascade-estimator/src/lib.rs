@@ -3,12 +3,12 @@
 //! One half of the `cascade-split` deployment. It wraps
 //! `falcon_core::EstimatorPartition` — IEKF propagate plus every measurement
 //! update — and nothing else. The supervisor is NOT here: it lives in the
-//! `cascade-split` orchestrator, which drives this component through the
-//! `estimator` interface exactly as `FlightCore` drives its `est` field.
+//! `cascade-split` orchestrator.
 //!
-//! Every export is a thin forward to one falcon-core call. The equivalence
-//! claim (the composed split is tick-for-tick identical to the monolithic
-//! `cascade`) rests on there being nothing here to disagree with.
+//! A THIN WIT ADAPTER. What this partition does behind the seam is
+//! `falcon_core::split::{estimator_tick, estimator_health, ...}` — the same
+//! functions the CI-run test `crates/falcon-core/tests/supervised_core_split.rs`
+//! drives in process. This file only converts WIT records to and from them.
 
 #[cfg(not(feature = "std"))]
 compile_error!(
@@ -22,68 +22,40 @@ compile_error!(
 mod bindings;
 
 use bindings::exports::pulseengine::falcon_cascade::estimator::Guest;
-use bindings::pulseengine::falcon_cascade::types::SensorFrame;
 use bindings::pulseengine::falcon_cascade::types::{
-    EstimatorConfig, EstimatorHealth, NavState as WitNav,
+    EstimatorConfig, EstimatorHealth, NavState as WitNav, SensorFrame,
 };
 
 use core::cell::RefCell;
-use falcon_core::{
-    EstimatorPartition, FlightBackend, FlightCore, ImuSample as CoreImu, NavState,
-    SUPERVISOR_CORE_LOOP_HZ,
-};
-
-type Vec3 = [f32; 3];
+use falcon_core::split::{self, EstimatorTuning, SeamFrame};
+use falcon_core::{EstimatorPartition, ImuSample as CoreImu, NavState};
 
 struct SingleThreaded<T>(RefCell<T>);
 // SAFETY: the component model guarantees single-threaded, non-reentrant access.
 unsafe impl<T> Sync for SingleThreaded<T> {}
 
-/// The partition. `None` until the first call; built with the SAME warm-up the
-/// supervisor's fused core is built with (`FlightSupervisor::new` →
-/// `FlightCore::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ)`),
-/// taken from falcon-core rather than restated, so the innovation gate engages
-/// on the same tick in both deployments.
+/// The partition, built lazily by `split::new_estimator` — from the same
+/// numbers `FlightSupervisor::new` builds its core from.
 static EST: SingleThreaded<Option<EstimatorPartition>> = SingleThreaded(RefCell::new(None));
 
-fn fresh() -> EstimatorPartition {
-    EstimatorPartition::new(FlightCore::warmup_steps(SUPERVISOR_CORE_LOOP_HZ))
-}
-
 fn ensure(slot: &mut Option<EstimatorPartition>) -> &mut EstimatorPartition {
-    slot.get_or_insert_with(fresh)
+    slot.get_or_insert_with(split::new_estimator)
 }
 
-/// The frame, answering the estimator's reads. Returning `None` where the frame
-/// carried nothing is the point: the estimator then skips that update rather
-/// than fusing a fabricated zero. The channels the estimator reads through the
-/// backend are position and magnetometer; GNSS-dual and baro are not in the
-/// seam's `sensor-frame` and default to `None`, as in the monolithic component.
-struct FrameBackend {
-    imu: CoreImu,
-    position: Option<Vec3>,
-    mag: Option<Vec3>,
-    heading: Option<f32>,
-    dt: f32,
-}
-
-impl FlightBackend for FrameBackend {
-    fn read_imu(&mut self) -> CoreImu {
-        self.imu
-    }
-    fn read_position(&mut self) -> Option<Vec3> {
-        self.position
-    }
-    fn read_mag(&mut self) -> Option<Vec3> {
-        self.mag
-    }
-    fn read_heading(&mut self) -> Option<f32> {
-        self.heading
-    }
-    /// The estimator commands nothing.
-    fn write_motors(&mut self, _motors: &[f32]) {}
-    fn dt(&self) -> f32 {
-        self.dt
+/// The seam frame, as falcon-core's `SeamFrame`.
+fn seam_frame(f: SensorFrame) -> SeamFrame {
+    let i = f.imu;
+    SeamFrame {
+        imu: CoreImu {
+            accel: [i.ax, i.ay, i.az],
+            gyro: [i.gx, i.gy, i.gz],
+        },
+        dt: f.dt_s,
+        position: f.position_ned.map(|p| [p.x, p.y, p.z]),
+        mag: f.mag_body.map(|m| [m.x, m.y, m.z]),
+        heading: f.heading_rad,
+        motor_rpm: f.motor_rpm.map(|r| [r.m1, r.m2, r.m3, r.m4]),
+        battery_v: f.battery_v,
     }
 }
 
@@ -112,43 +84,30 @@ struct Component;
 
 impl Guest for Component {
     /// Rebuild THIS partition, dropping only its state, then apply the
-    /// (already sanitised) tuning — the estimator half of the monolithic
-    /// `apply_tuning`.
+    /// (already sanitised) tuning.
     fn configure(cfg: Option<EstimatorConfig>) {
         let mut slot = EST.0.borrow_mut();
         *slot = None;
         let est = ensure(&mut slot);
         if let Some(c) = cfg {
-            est.set_pos_var(c.pos_var);
-            est.set_process_floor(c.process_floor_vel, c.process_floor_pos);
+            split::apply_estimator_tuning(
+                est,
+                &EstimatorTuning {
+                    pos_var: c.pos_var,
+                    process_floor_vel: c.process_floor_vel,
+                    process_floor_pos: c.process_floor_pos,
+                },
+            );
         }
     }
 
-    /// `FlightCore::step`'s estimator half when `in_flight` is `Some`, and
-    /// `FlightCore::step_estimate_only`'s when it is `None` — the latter does
-    /// NOT touch the in-flight flag, and neither may this.
     fn tick(sensors: SensorFrame, in_flight: Option<bool>) -> WitNav {
         let mut slot = EST.0.borrow_mut();
-        let est = ensure(&mut slot);
-        if let Some(flying) = in_flight {
-            est.set_in_flight(flying);
-        }
-        let imu = sensors.imu;
-        let raw = CoreImu {
-            accel: [imu.ax, imu.ay, imu.az],
-            gyro: [imu.gx, imu.gy, imu.gz],
-        };
-        let mut b = FrameBackend {
-            imu: raw,
-            position: sensors.position_ned.map(|p| [p.x, p.y, p.z]),
-            mag: sensors.mag_body.map(|m| [m.x, m.y, m.z]),
-            heading: sensors.heading_rad,
-            dt: sensors.dt_s,
-        };
-        // The fused core reads dt, imu and heading from the backend and hands
-        // them in; the same values come from the same frame here.
-        let ns = est.step(&mut b, raw, sensors.heading_rad, sensors.dt_s);
-        to_wit(ns)
+        to_wit(split::estimator_tick(
+            ensure(&mut slot),
+            &seam_frame(sensors),
+            in_flight,
+        ))
     }
 
     fn read_nav() -> WitNav {
@@ -158,11 +117,11 @@ impl Guest for Component {
 
     fn read_health() -> EstimatorHealth {
         let mut slot = EST.0.borrow_mut();
-        let est = ensure(&mut slot);
+        let h = split::estimator_health(ensure(&mut slot));
         EstimatorHealth {
-            tilt_uncertainty: est.tilt_uncertainty(),
-            nav_compromised: est.nav_compromised(),
-            gnss_diverged: est.gnss_diverged(),
+            tilt_uncertainty: h.tilt_uncertainty,
+            nav_compromised: h.nav_compromised,
+            gnss_diverged: h.gnss_diverged,
         }
     }
 }
