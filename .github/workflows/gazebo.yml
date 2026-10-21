@@ -60,7 +60,19 @@ jobs:
   # required context or record why not. Tracked in #384.
   gazebo:
     name: Gazebo SITL (real gz bridge)
-    runs-on: ubuntu-latest
+    # PINNED, NOT ubuntu-latest (2026-10-21). `ubuntu-latest` was re-pointed to
+    # ubuntu-26.04 "resolute" under this REQUIRED gate, and OSRF publishes only
+    # gz-jetty for resolute — `apt-get install gz-harmonic` then fails with
+    # "E: Unable to locate package gz-harmonic", exit 100, before a single tick
+    # flies. Measured from the run logs: the last green run reports
+    # `Image: ubuntu-24.04` (OSRF dist `noble`), the first red one
+    # `Image: ubuntu-26.04`. Same shape as the Kani 0.68 incident in kani.yml —
+    # the toolchain moved under a required gate — and the same fix: pin the
+    # known-good state. Moving to gz-jetty is a SIMULATOR-GENERATION change
+    # (different physics, so every gz hold/rotor-out number would shift) and is
+    # a deliberate migration with its own validation, not something a runner
+    # image roll should do to us.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
