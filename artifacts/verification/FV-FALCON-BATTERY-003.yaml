@@ -65,6 +65,7 @@ artifacts:
         - run: "grep -q 'batt_missing_s' crates/falcon-core/plain/src/lib.rs"
         - run: "cargo test -p falcon-core --lib a_vehicle_that_never_had_a_battery_sense_is_not_failsafed_in_flight"
         - run: "grep -q 'self.batt_seen && self.batt_missing_s' crates/falcon-core/plain/src/lib.rs"
+        - run: "cargo test -p falcon-core --test battery_single_dropped_sample"
     links:
       - type: verifies
         target: SWREQ-FALCON-BATTERY-P03
