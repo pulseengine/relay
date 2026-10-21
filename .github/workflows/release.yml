@@ -501,7 +501,25 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # pinned (was @main) — supply-chain
 
       - name: Set up Bazel
-        uses: bazel-contrib/setup-bazel@5483a91b6e3ffac6092848f1dd7eafcfad203d80 # v0.14.0 pinned
+        # PINNED TO THE GENUINE v0.14.0 COMMIT (2026-10-21). The previous pin,
+        # 5483a91b6e3ffac6092848f1dd7eafcfad203d80, carried the comment
+        # "v0.14.0 pinned" but is NOT v0.14.0 and is NOT in this repository's
+        # history at all: the commits API, the .patch URL and commit search all
+        # return "not found", while the TARBALL endpoint still serves it (HTTP
+        # 200) — GitHub resolves owner/repo@<sha> across the whole fork
+        # network, so an object that exists only in a fork (or was orphaned)
+        # still downloads under this repo's name. Every release since v1.77
+        # (#205, 2026-06-17) downloaded and ran it on this job; v1.140.0's log
+        # records `Download action repository
+        # 'bazel-contrib/setup-bazel@5483a91…'`.
+        #
+        # It was BENIGN, and that was measured, not assumed: its extracted tree
+        # is byte-identical to the real v0.14.0 tag commit below (20 files,
+        # content tree-hash d9249affa4edfd11 for both), with a negative control
+        # (real 0.19.1: 24 files, a different hash) proving the comparison
+        # discriminates. So this repin changes NO executed code — only the
+        # provenance, from "unverifiable" to "the release tag's own commit".
+        uses: bazel-contrib/setup-bazel@e8776f58fb6a6e9055cbaf1b38c52ccc5247e9c4 # v0.14.0 (tag 0.14.0 -> e8776f5, verified)
         with:
           bazelisk-cache: true
           disk-cache: bazel
