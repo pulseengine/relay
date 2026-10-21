@@ -3,7 +3,7 @@ artifacts:
     type: sw-verification
     title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.141)"
     status: implemented
-    release: falcon-v1.141.0
+    release: falcon-v1.142.0
     description: >
       DEMOTED verified -> implemented 2026-10-01 (#499). ITS OWN "EVIDENCE
       REQUIRED" SAYS NATIVE **AND** WASM, three times each. The promotion
