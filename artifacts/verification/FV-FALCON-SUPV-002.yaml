@@ -1,0 +1,59 @@
+artifacts:
+  - id: FV-FALCON-SUPV-002
+    type: sw-verification
+    title: "SUPV-P02 — the failsafe latch clears on disarm, and re-arming is gated by LIVE hazards only, in both directions (v1.141)"
+    status: verified
+    release: falcon-v1.141.0
+    description: >
+      Verification of SWREQ-FALCON-SUPV-P02, run independently of the
+      implementation PR (#565) per the two-commit rule, on main 985114b.
+      The requirement names two directions; each is checked and each is
+      falsified by the mutation the requirement itself prescribes.
+
+      (1) RECOVERY. A geofence breach latches the failsafe; the vehicle flies
+      home, lands and disarms; with the hazard provably clear the next
+      command(Arm) reaches Mode::Armed and rtl_latched reads false
+      (falcon-core tests::re_arming_is_allowed_once_the_failsafe_condition_has_cleared).
+      Before the fix the airframe could never be re-armed for the life of the
+      process (relay#564).
+
+      (2) RETAINED PROTECTION. A rotor isolated while AIRBORNE — so the latch
+      IS set, unlike the Mode::Land case PREARM-P04 covers — lands and
+      disarms; rtl_latched then reads FALSE, and command(Arm) is still REFUSED
+      naming CheckId::MotorsHealthy
+      (tests::a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears).
+
+      INDEPENDENT RE-RUN 2026-10-21 (separate verifier agent, clean worktree,
+      each filter confirmed to execute exactly 1 test):
+        re_arming_is_allowed_once_the_failsafe_condition_has_cleared              1 passed
+        a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears 1 passed
+
+      FALSIFIED, each direction by its prescribed mutation:
+        (1) replacing the single `self.rtl_latched = false;` — confirmed to be
+            the only occurrence, inside `if self.fsm.mode() == Mode::Disarmed` —
+            makes the recovery test FAIL at its `!sup.rtl_latched` assertion
+            ("the latch must CLEAR on disarm: it is an in-flight device, not an
+            arming interlock"). Stated precisely: this shows the clear is
+            required; the test fails on the latch assertion before it reaches
+            the arm, so it does not separately exhibit the old
+            "PREARM: failsafe latched" refusal text.
+        (2) deleting the MotorsHealthy row WITH THE CLEAR LEFT IN PLACE — not by
+            removing the clear, which would only prove the latch still blocks —
+            makes the airborne test FAIL with arm_blocked_check=None while
+            failed_motor=Some(1): the vehicle arms with a dead motor.
+
+      High wind is deliberately outside the live-hazard set (maintainer
+      decision, relay#564: re-arm after a wind RTL is permitted and
+      self-limiting); not exercised here because the requirement excludes it.
+
+      FALSIFICATION: wrong if a disarmed vehicle with no live hazard is
+      refused, or a disarmed vehicle with an isolated rotor is accepted.
+    tags: [verification, falcon, supervisor, failsafe, latch, arming, safety, v1.141]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-core --lib re_arming_is_allowed_once_the_failsafe_condition_has_cleared
+        - run: cargo test -p falcon-core --lib a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SUPV-P02
