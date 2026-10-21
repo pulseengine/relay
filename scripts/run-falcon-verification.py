@@ -138,6 +138,9 @@ BENCH_PATTERNS = [
     # that cannot run is indistinguishable from one that passes.
     re.compile(r"^\s*(?:bash\s+|sh\s+|\./)?(?:scripts/)?build-(?:flight-)?components?\.sh\b"),
     re.compile(r"\bwasm-tools\b"),                   # wasm-tools not on the gate runner
+    # The cascade/cascade-split twin differential (#575) builds four components
+    # with cargo-component and composes with wac — neither is on the gate runner.
+    re.compile(r"\bsplit-differential\.sh\b"),
     re.compile(r"\bcargo\s+component\b"),             # cargo-component (wasm32-wasip2) not provisioned
     re.compile(r"\brate-loop-proof\b"),               # standalone crate; needs a pre-built .wasm argument
     re.compile(r"\bwasmtime\b"),

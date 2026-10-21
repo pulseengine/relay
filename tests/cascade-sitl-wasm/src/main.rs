@@ -23,10 +23,13 @@
 //!
 //! Usage:
 //!   cascade-sitl-wasm <composed.wasm> [ticks] [dt]
+//!   DIFF_AGAINST=<b.wasm> cascade-sitl-wasm <a.wasm> [budget] [dt]   (twin.rs)
 
 // The SITL plant itself. `gz_real` inside it is `#[cfg(feature = "gazebo")]`,
 // so without that feature this pulls exactly `Physics` + `MockPhysics`.
 mod native_mirror;
+// DIFF_AGAINST=<b.wasm>: two components, one input stream, bit-exact (#575).
+mod twin;
 #[path = "../../../examples/falcon-sitl-gz/src/physics.rs"]
 mod physics;
 // The SAME pacing logic the native bench uses, included by path rather than
@@ -98,8 +101,17 @@ fn main() -> Result<()> {
         eprintln!("usage: cascade-sitl-wasm <composed.wasm> [ticks] [dt]");
         std::process::exit(2);
     });
-    let ticks: u32 = args.next().unwrap_or_else(|| "4000".into()).parse()?;
+    let ticks_arg = args.next();
     let dt: f32 = args.next().unwrap_or_else(|| "0.0025".into()).parse()?;
+
+    // TWIN MODE (#575): compare two components bit-for-bit instead of flying
+    // one against a native mirror. `ticks` is then a BUDGET for an event-driven
+    // scenario (three flights), so its default is larger.
+    if let Ok(other) = std::env::var("DIFF_AGAINST") {
+        let budget: u32 = ticks_arg.as_deref().unwrap_or("60000").parse()?;
+        return twin::run(&wasm, &other, budget, dt);
+    }
+    let ticks: u32 = ticks_arg.unwrap_or_else(|| "4000".into()).parse()?;
 
     let mut cfg = Config::new();
     cfg.wasm_component_model(true);
