@@ -112,7 +112,7 @@ jobs:
       - name: Mint an App token (probe only)
         id: apptoken
         continue-on-error: true
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           # `app-id` is DEPRECATED in favour of `client-id` (the action warns on
           # every run). NOT changed here on purpose: `client-id` wants the App's
