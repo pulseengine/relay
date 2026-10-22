@@ -1,10 +1,19 @@
--- Falcon system — autopilot processor hosting the cascade.
+-- Falcon system — the Pixhawk 6X-RT (NXP i.MX RT1176) hosting the two
+-- flight partitions.
 --
--- Target: STM32H743 (Cortex-M7, 480 MHz, 1 MB SRAM). The cascade
--- runs at 200 Hz; the EKF is the dominant cost. Total cascade WCET
--- ≤ 5 ms per the per-thread budgets in Falcon_Cascade.aadl, so the
--- processor has roughly 4 ms/period of headroom for the FM-radio /
--- MAVLink / telemetry sidebands.
+-- RE-MODELLED 2026-10-21 (#587, maintainer decision). This used to describe an
+-- STM32H743 (Cortex-M7, 480 MHz) running five 200 Hz cascade threads. The agreed
+-- first vehicle is the Pixhawk 6X-RT, whose i.MX RT1176 is a DUAL-core part
+-- (Cortex-M7 up to 1 GHz + Cortex-M4 up to 400 MHz), and the agreed deployment
+-- (jess#144) puts the estimator on the M4 and the cascade on the M7. Timing
+-- analysis for an H743 does not describe that hardware.
+--
+-- Both partitions tick at 1 kHz (SWREQ-FALCON-RATE-P01). Their execution-time
+-- budgets are UNMEASURED and set to the whole period — see Falcon_Cascade for
+-- why that is the only honest number until the hardware register (#157)
+-- measures one.
+--
+-- The comms processor and secure channel (relay#180) are unchanged.
 
 package Falcon_System
 public
@@ -15,24 +24,34 @@ public
   with Relay_Transport;  -- the shared CCSDS-over-relay-sec secure channel (relay#180)
 
   -- ══════════════════════════════════════════════════════════════
-  -- Processor — STM32H743 Cortex-M7
+  -- Processors — i.MX RT1176, two cores
   -- ══════════════════════════════════════════════════════════════
 
-  processor AutopilotMcu
+  processor Rt1176M7
     properties
       Scheduling_Protocol => (RATE_MONOTONIC_PROTOCOL);
-      Clock_Period => 5 ms;
-  end AutopilotMcu;
+      Clock_Period => 1 ms;
+  end Rt1176M7;
 
-  -- ══════════════════════════════════════════════════════════════
-  -- Memory — on-chip SRAM
-  -- ══════════════════════════════════════════════════════════════
-
-  memory SRAM
+  processor Rt1176M4
     properties
-      Memory_Properties::Memory_Size => 1024 KByte;
+      Scheduling_Protocol => (RATE_MONOTONIC_PROTOCOL);
+      Clock_Period => 1 ms;
+  end Rt1176M4;
+
+  -- ══════════════════════════════════════════════════════════════
+  -- Memory — on-chip RAM
+  -- ══════════════════════════════════════════════════════════════
+
+  -- The RT1170 family's total on-chip RAM (TCM + OCRAM). Not partitioned here:
+  -- the per-core TCM split and the shared OCRAM window that will carry the
+  -- seqlocked nav state between the cores are layout decisions owned by the
+  -- silicon binding (jess), not by this model.
+  memory OnChipRam
+    properties
+      Memory_Properties::Memory_Size => 2048 KByte;
       Word_Size => 4 Bytes;
-  end SRAM;
+  end OnChipRam;
 
   -- ══════════════════════════════════════════════════════════════
   -- Top-level system
@@ -43,32 +62,34 @@ public
 
   system implementation Falcon.Quad
     subcomponents
-      mcu: processor AutopilotMcu;
-      sram: memory SRAM;
-      autopilot: process Falcon_Cascade::AutopilotProcess.Cascade;
-      -- The C2 uplink secure channel — the shared relay-sec transport. spar RTA
-      -- showed it CANNOT share the 200 Hz flight MCU (overload) — it deploys on
-      -- a separate comms core, the real inter-core split (the jess M4 / a comms
-      -- coprocessor). falcon is one consumer of Relay_Transport; wohl is the
-      -- mirror (wohl#49).
+      m7: processor Rt1176M7;
+      m4: processor Rt1176M4;
+      ram: memory OnChipRam;
+      estimator: process Falcon_Cascade::EstimatorPartition.Iekf;
+      cascade: process Falcon_Cascade::CascadePartition.Supervised;
       comms_mcu: processor Relay_Transport::CommsMcu;
       comms: process Relay_Transport::SecureChannel.Ascon;
+    connections
+      -- The cross-core seam: nav state M4 -> M7, and the in-flight flag back
+      -- M7 -> M4 (consumed one tick later by the estimator's gravity gate).
+      -- Carried through SHARED ON-CHIP RAM, not a bus: the cascade component
+      -- already lays its published state out as a seqlock for exactly this
+      -- cross-core case (wasm/cm/cascade, "when this state lands in shared
+      -- OCRAM"). Without the binding spar reports the crossing as unexplained.
+      nav: port estimator.nav_out -> cascade.nav_in
+        { Actual_Connection_Binding => (reference (ram)); };
+      flying: port cascade.in_flight_out -> estimator.in_flight_in
+        { Actual_Connection_Binding => (reference (ram)); };
     properties
-      -- Bind the autopilot process + every cascade thread to the
-      -- MCU + SRAM. AS5506 §10.6 requires bindings at thread level
-      -- (process binding alone is not enough for schedulability
-      -- analysis).
-      Actual_Processor_Binding => (reference (mcu)) applies to autopilot;
-      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.ekf;
-      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.pos;
-      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.att;
-      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.rate;
-      Actual_Processor_Binding => (reference (mcu)) applies to autopilot.mix;
+      Actual_Processor_Binding => (reference (m4)) applies to estimator;
+      Actual_Processor_Binding => (reference (m4)) applies to estimator.est;
+      Actual_Processor_Binding => (reference (m7)) applies to cascade;
+      Actual_Processor_Binding => (reference (m7)) applies to cascade.casc;
       Actual_Processor_Binding => (reference (comms_mcu)) applies to comms;
       Actual_Processor_Binding => (reference (comms_mcu)) applies to comms.seal;
       Actual_Processor_Binding => (reference (comms_mcu)) applies to comms.open;
       Actual_Processor_Binding => (reference (comms_mcu)) applies to comms.handshake;
-      Actual_Memory_Binding => (reference (sram)) applies to autopilot;
+      Actual_Memory_Binding => (reference (ram)) applies to estimator;
+      Actual_Memory_Binding => (reference (ram)) applies to cascade;
   end Falcon.Quad;
-
 end Falcon_System;

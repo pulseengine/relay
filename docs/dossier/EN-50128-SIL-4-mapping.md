@@ -55,4 +55,4 @@ techniques per SIL level. For SIL-4:
 2. **T1 / T2 / T3 tool classification per tool** (§6.7.4) — falcon's toolchain (rustc, cargo, bazel, Verus, Kani, miri, witness, spar, meld, loom, synth) needs an explicit T-level assignment + qualification document per tool. v1.0.
 3. **Cascade-target witness coverage** — same WASI gap as the other four domains.
 4. **Diversity / N-version programming** (D.16, R for SIL-4) — out of scope.
-5. **Failure analysis (FMEA / FTA)** (D.26, HR) — spar EMV2 fault tree covers FTA partially (7 minimal cut sets, 7 single-point failures); FMEA-shape document would be v1.0.
+5. **Failure analysis (FMEA / FTA)** (D.26, HR) — spar EMV2 fault tree covers FTA partially (9 minimal cut sets, 9 single-point failures (re-measured 2026-10-21 on the re-modelled RT1176 deployment, #587)); FMEA-shape document would be v1.0.

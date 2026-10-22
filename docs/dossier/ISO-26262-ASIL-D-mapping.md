@@ -33,7 +33,7 @@ target ASIL-D — the strictest integrity level.
 | Work product | Falcon evidence |
 |---|---|
 | §8.4.2 SW architectural design specification | `spar/falcon_system.aadl` + `spar/falcon_cascade.aadl` + `spar/falcon_types.aadl` (v0.13); spar instance + render produces `artifacts/spar/falcon-quad-architecture.svg` |
-| §8.4.3 Safety analysis (DFA) | `spar analyze` EMV2 fault tree: **7 minimal cut sets, 7 single-point failures** (each controller); STPA bridge: 1 hazard + 2 loss scenarios → `artifacts/spar/falcon-quad-analysis.json` |
+| §8.4.3 Safety analysis (DFA) | `spar analyze` EMV2 fault tree: **9 minimal cut sets, 9 single-point failures** — the M7 and M4 cores, the shared on-chip RAM, the estimator and cascade ticks, and the four secure-comms elements (re-measured 2026-10-21 on the re-modelled RT1176 deployment, #587); STPA bridge: 1 hazard, 4 loss scenarios, 9 sub-hazards → `artifacts/spar/falcon-quad-analysis.json` |
 | §8.4.5 Verification of the SW architectural design | spar bin-packing schedulability (per-thread WCET ≤ 1 ms, period 5 ms → 20% utilisation, 80% headroom) — same JSON |
 
 ### §9 Software unit design and implementation
