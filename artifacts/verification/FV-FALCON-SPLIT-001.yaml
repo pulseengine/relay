@@ -1,0 +1,107 @@
+artifacts:
+  - id: FV-FALCON-SPLIT-001
+    type: sw-verification
+    title: "SPLIT-P01 — the wac-composed cascade-split is bit-exact with the monolithic cascade, supervised on both sides, through every mode"
+    status: implemented
+    description: >
+      Verification of SWREQ-FALCON-SPLIT-P01. Revised after a cold clean-room
+      review (relay#585) found the first evidence weaker than claimed: keep_warm
+      was never measured, the estimator-health forwards were masked, and no CI
+      job exercised the production forwarding. Each gap is addressed below, and
+      what still cannot be measured is stated with the reason.
+
+      (1) THE PRODUCTION FORWARDING RUNS IN CI. `RemoteCore`'s logic now lives
+      in falcon-core as `split::SplitCore<P: PartitionSeam>`; the partition
+      components run `split::{estimator_tick, control_tick, ...}`; the three
+      wasm crates are thin WIT adapters over them. The test
+      crates/falcon-core/tests/supervised_core_split.rs drives THAT SplitCore,
+      with real partitions through those same partition-side functions, under
+      FlightSupervisor, against a fused FlightSupervisor — both sampled once per
+      tick through the production `SeamFrame::read` and served from the frame.
+      Bit-exact in motors, NavState, mode, failsafe word, failed rotor, and the
+      DIRECTLY compared forwards (tilt-uncertainty, max-motor, nav-compromised,
+      gnss-diverged), through: arm, an ARMED HOLD (estimate-only ticks, noisy
+      gyro), takeoff, loiter, mission, RTL, land, touchdown disarm, ground
+      ticks, a supervisor + partition rebuild, a second flight. Its negative
+      controls are #[test]s that REQUIRE divergence:
+        edge cut                           -> nav-state, tick 401
+        estimate-only ticks write the flag -> nav-state, tick 52806
+        keep_warm dropped                  -> motors, tick 690
+        tilt-uncertainty stubbed to 0      -> tilt-uncertainty, tick 0
+        rebuild without partition reset    -> motors, tick 53106
+      Mutating the PRODUCTION SplitCore (not the test seam) was also run and is
+      red: keep_warm call deleted -> motors tick 690; tilt forward stubbed ->
+      tick 0; edge cut -> tick 401.
+
+      (2) keep_warm, MEASURED. The only reset-free estimate-only -> flight path
+      a host can reach is arm-then-hold: re-arming from Disarmed after the first
+      tick is refused through this seam (relay#586). The twin now holds flight 1
+      ARMED for 400 ticks with a noisy gyro before takeoff. It is decisive only
+      at the 1000 Hz design rate (elsewhere `resync_loop_rate` rebuilds the gyro
+      filter on the first control tick and erases what keep_warm kept), so the
+      twin runs at dt=0.0025 AND dt=0.001. Dropping keep_warm in the WIT adapter
+      or in SplitCore: twin@0.001 RED (motor m1, tick 800 — the first control
+      tick after the hold); twin@0.0025 green, as predicted.
+
+      (3) ESTIMATOR HEALTH. Measured directly in CI (1). At the wasm seam it is
+      NOT decisive and is marked PENDING relay#586: those forwards reach a
+      host only through the pre-arm gate, and CalibrationPresent fails on every
+      refreshed tick, so a stubbed tilt forward changed nothing observable
+      (twin@both rates GREEN with it stubbed). The twin carries the decisive
+      stage behind `TWIN_PENDING_586=1` (arm before the estimator converges:
+      must be refused; after: must be accepted); enabled today it stops with
+      "PENDING relay#586: a warmed estimator is still refused". nav-compromised
+      and gnss-diverged are constant false through this seam BY CONSTRUCTION
+      (both latches are fed only on the dual-GNSS path, which the seam does not
+      carry), so a false-stub is not a different program; the CI test pins
+      that with an assertion that fails if either ever rises.
+
+      (4) TWIN DIFFERENTIAL (bench-only, scripts/split-differential.sh).
+      Published-shape `cascade` vs the wac-composed split: 45811 ticks @ 400 Hz
+      and 106230 ticks @ 1000 Hz, motors + all 23 flight-state fields bit-exact
+      every tick, plus the pre-tick read; it ASSERTS modes takeoff, loiter, mission,
+      RTL, land, terminated, the 400-tick armed hold, failsafe bits rtl-latched,
+      batt-low, batt-critical, batt-silent, arm-blocked, and a rotor isolation.
+      Earlier controls, still valid: edge cut -> red; estimate-only Some(false)
+      -> red at the first touchdown; rebuild without partition reset -> red.
+
+      STILL NOT MEASURED: failsafe bits 4-6 (geofence, runaway, wind) are never
+      raised, so `max_motor` (read only by the wind detector) is falsified only
+      by the CI test's direct comparison, not by behaviour — a split with it
+      stubbed stayed green in the twin.
+
+      DROP-IN CONFORMANCE. The composed split imports only `types`, exports
+      controller/observer/pilot, and `wasm-tools component targets
+      wit/falcon-cascade <composed> --world cascade` passes.
+
+      REFACTOR NEUTRALITY. The monolithic `cascade` is NOT byte-identical to
+      the #571 base (code section 35778 -> 35724 B, reproducible base build);
+      it is behaviourally bit-exact with it in the twin at both rates.
+    tags: [verification, falcon, partition, split, supervisor, "575"]
+    fields:
+      method: automated-test
+      steps:
+        # In-crate, runs in CI: the PRODUCTION SplitCore over real partitions
+        # is bit-exact with the fused core under the supervisor, and five
+        # negative controls each REQUIRE divergence.
+        - run: "cargo test -p falcon-core --test supervised_core_split"
+        - run: "grep -q 'fn negative_control_dropped_keep_warm_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        - run: "grep -q 'fn negative_control_stubbed_tilt_uncertainty_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        - run: "grep -q 'fn negative_control_flying_edge_cut_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        - run: "grep -q 'fn negative_control_rebuild_without_partition_reset_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        # The orchestrator's core IS the tested SplitCore.
+        - run: "grep -q 'type RemoteCore = SplitCore<WitSeam>;' wasm/cm/cascade-split/src/lib.rs"
+        # The trait the split depends on, and the partition equivalence it
+        # builds on (PART-P01), stay green.
+        - run: "cargo test -p falcon-core --release partitioned"
+        # The feedback edge is an option, None on estimate-only ticks.
+        - run: "grep -q 'tick: func(sensors: sensor-frame, in-flight: option<bool>) -> nav-state;' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'let nav = self.0.estimator_tick(&f, Some(flying));' crates/falcon-core/plain/src/split.rs"
+        - run: "grep -q 'let _ = self.0.estimator_tick(&f, None);' crates/falcon-core/plain/src/split.rs"
+        # The split world exports what cascade exports.
+        - run: "grep -qE '^world cascade-split' wit/falcon-cascade/cascade.wit"
+        # The twin differential itself (bench-only).
+        - run: "scripts/split-differential.sh"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SPLIT-P01

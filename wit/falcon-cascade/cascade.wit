@@ -302,6 +302,93 @@ interface types {
         /// Horizontal position-loop integral gain. 0 disables it.
         position-ki: f32,
     }
+
+    // ── the SPLIT deployment's seam records (#575) ─────────────────────
+    //
+    // In `types`, not in an interface of their own, so the wac-composed
+    // `cascade-split` imports exactly what `cascade` imports and is a drop-in
+    // for the `cascade` world (`wasm-tools component targets` passes). A
+    // separate type-only interface survived composition as an extra import
+    // and made it NOT conform.
+    //
+    // MEASURED BYTE-NEUTRAL for the published `cascade` component: its build is
+    // byte-identical with and without these records, because the component
+    // encodes only the types its world actually uses, and no `cascade` export
+    // uses any of them.
+
+    /// The estimator partition's SOLE output — falcon-core `NavState`, all 16
+    /// f32 of it (q, v, p, b_g, b_a). The control half consumes exactly what
+    /// the fused core's cascade partition consumes, so nothing is dropped at
+    /// the seam: a field the control law does not read today is still carried,
+    /// because the equivalence claim is "same NavState", not "same subset".
+    ///
+    /// NOT `flight-state`. That is the PUBLISHED observer record (seqlock,
+    /// `valid` mask, mode, failsafe); this is the INTERNAL partition seam.
+    /// Different jobs, and they must not be unified — but they will drift, and
+    /// the cascade/cascade-split differential is what notices when they do.
+    record nav-state {
+        /// Body→NED attitude (unit quaternion, Hamilton scalar-first).
+        qw: f32, qx: f32, qy: f32, qz: f32,
+        /// NED velocity (m/s).
+        vel-n: f32, vel-e: f32, vel-d: f32,
+        /// NED position (m).
+        pos-n: f32, pos-e: f32, pos-d: f32,
+        /// Estimated gyro bias (rad/s).
+        bgx: f32, bgy: f32, bgz: f32,
+        /// Estimated accelerometer bias (m/s²).
+        bax: f32, bay: f32, baz: f32,
+    }
+
+    /// The estimator facts the SUPERVISOR reads (pre-arm rows, nav integrity).
+    /// Read LIVE from the estimator component, never cached by the orchestrator:
+    /// the supervisor reads them BEFORE the core steps, including on the first
+    /// tick after a reset, so a cache would have to be seeded from somewhere —
+    /// and a hand-written default is exactly the value that drifts.
+    record estimator-health {
+        /// Roll+pitch attitude uncertainty (rad²) — the `EstimatorConverged` row.
+        tilt-uncertainty: f32,
+        /// Anti-spoof CUSUM latched OR dual-GNSS divergence latched.
+        nav-compromised: bool,
+        /// Dual-GNSS divergence alone.
+        gnss-diverged: bool,
+    }
+
+    /// The estimator's share of `vehicle-config`, already SANITISED by the
+    /// orchestrator (the same rules the monolithic `cascade` applies), so the
+    /// two deployments cannot disagree about what a bad value falls back to.
+    record estimator-config {
+        pos-var: f32,
+        process-floor-vel: f32,
+        process-floor-pos: f32,
+    }
+
+    /// The control partition's share of `vehicle-config`, sanitised likewise.
+    record control-config {
+        hover-thrust: f32,
+        altitude-kp: f32,
+        altitude-kd: f32,
+        altitude-ki: f32,
+        position-ki: f32,
+    }
+
+    /// The control facts the supervisor and the estimator read.
+    record control-status {
+        /// `CascadePartition::flying()` — FROM THE CASCADE'S OWN LAST COMMAND,
+        /// the FEEDBACK EDGE into the estimator (#452). Read at the START of a
+        /// tick, so the estimator sees the previous tick's value: one tick of
+        /// delay, exactly as in the fused core.
+        flying: bool,
+        /// The largest last-commanded motor output — the high-wind detector.
+        max-motor: f32,
+        /// Isolated failed rotor, 0-3; 0xFF when none.
+        failed-rotor: u8,
+    }
+
+    /// One control tick's result: the motor command, plus the status AFTER it.
+    record control-output {
+        m1: f32, m2: f32, m3: f32, m4: f32,
+        status: control-status,
+    }
 }
 
 /// State estimator — wraps relay-ekf (Mahony complementary filter).
@@ -501,6 +588,109 @@ interface pilot {
 }
 
 world cascade {
+    export controller;
+    export observer;
+    export pilot;
+}
+
+// ── the SPLIT deployment (#575) ───────────────────────────────────
+//
+// The same supervised vehicle as `cascade`, built from THREE components
+// instead of one: `cascade-estimator` (falcon-core `EstimatorPartition`),
+// `cascade-control` (falcon-core `CascadePartition`) and the `cascade-split`
+// orchestrator, which holds `FlightSupervisor` and drives the two halves
+// through the interfaces below. `wac plug` composes them; the result exports
+// exactly what `cascade` exports — `controller`, `observer` and `pilot` — and
+// must be behaviourally IDENTICAL to it, tick for tick.
+//
+// WHY THE ORCHESTRATOR HOLDS THE SUPERVISOR (decision on #575, option 1). The
+// supervisor wraps a whole core and adds the mode machine, the failsafe arbiter
+// and the pre-arm rows. A split that wrapped only the two partitions would be
+// "a stabiliser with no supervisor" again — #414 under a new name, and a new
+// world rather than an edit, so it would not read as a regression in review.
+//
+// Everything here is ADDITIVE. The seam records live in `types` (see the note
+// there): measured byte-neutral for the published `cascade` component.
+
+
+/// The ESTIMATOR partition (falcon-core `EstimatorPartition`; the M4 half of
+/// the jess#144 core mapping).
+interface estimator {
+    use types.{sensor-frame, nav-state, estimator-health, estimator-config};
+
+    /// Rebuild THIS partition and apply `cfg` (`none` = built-in defaults).
+    ///
+    /// Drops ONLY the estimator's state. The orchestrator calls it whenever the
+    /// monolithic component would have rebuilt its core — i.e. on every
+    /// `controller.configure` AND every `pilot.configure-supervisor`, because
+    /// in `cascade` both drop the whole supervisor, core included.
+    configure: func(cfg: option<estimator-config>);
+
+    /// One estimator tick.
+    ///
+    /// `in-flight` IS THE FEEDBACK EDGE (#452), and it is an `option` because
+    /// the fused core has TWO paths and they differ:
+    ///   - a control tick (`FlightCore::step`) sets the estimator's in-flight
+    ///     flag from the control half's PREVIOUS command first: `some(flying)`;
+    ///   - an estimate-only tick (`FlightCore::step_estimate_only`, the
+    ///     supervisor's Disarmed/Armed/Terminated path) does NOT touch it, so
+    ///     the flag keeps whatever the last control tick left: `none`.
+    /// The difference is observable. At a touchdown, and after a flight
+    /// termination in the air, the last control tick left the flag TRUE, and
+    /// the fused core keeps it so until the next control tick. Passing
+    /// `some(false)` on those estimate-only ticks was MEASURED to break the
+    /// equivalence at the first touchdown of the cascade/cascade-split
+    /// differential (tests/cascade-sitl-wasm, twin mode).
+    ///
+    /// Only the estimator's channels of the frame are read (IMU, dt, position,
+    /// magnetometer, heading); `dt-s` must already be the orchestrator's
+    /// clamped period.
+    tick: func(sensors: sensor-frame, in-flight: option<bool>) -> nav-state;
+
+    /// The current estimate, without ticking.
+    read-nav: func() -> nav-state;
+
+    /// The supervisor's estimator inputs, without ticking.
+    read-health: func() -> estimator-health;
+}
+
+/// The FLIGHT-CONTROL partition (falcon-core `CascadePartition`: geometric
+/// attitude, ADRC, mixer, rotor-out FDI, position/altitude loops; the M7 half).
+interface flight-control {
+    use types.{sensor-frame, imu-sample, vec3};
+    use types.{nav-state, control-config, control-status, control-output};
+
+    /// Rebuild THIS partition and apply `cfg` (`none` = built-in defaults).
+    /// Drops ONLY the control partition's state; see `estimator.configure`.
+    configure: func(cfg: option<control-config>);
+
+    /// The supervisor's position setpoint (NED m) for the next tick.
+    set-position: func(ned: vec3);
+
+    /// Engage/disengage the velocity-based touchdown law.
+    set-landing: func(on: bool);
+
+    /// One control tick on the estimator's `nav`. Only the control channels of
+    /// the frame are read (IMU, dt, heading presence, motor RPM).
+    tick: func(nav: nav-state, sensors: sensor-frame) -> control-output;
+
+    /// The control half of an estimate-only tick: keep the gyro filter warm,
+    /// command nothing. The orchestrator commands zero motors itself.
+    keep-warm: func(imu: imu-sample);
+
+    /// The supervisor's control inputs, without ticking.
+    read-status: func() -> control-status;
+}
+
+world estimator-component      { export estimator; }
+world flight-control-component { export flight-control; }
+
+/// The split orchestrator: the supervisor, driving the two partitions it
+/// imports. `wac plug` satisfies the imports from `estimator-component` and
+/// `flight-control-component`; the composition exports what `cascade` exports.
+world cascade-split {
+    import estimator;
+    import flight-control;
     export controller;
     export observer;
     export pilot;
