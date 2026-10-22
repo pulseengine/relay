@@ -1,7 +1,7 @@
 artifacts:
   - id: SWREQ-RELAY-FLEET-P01
     type: sw-req
-    title: "FLEET-P01 — a CI job wedged in_progress shall be surfaced within 5x its own median duration"
+    title: "FLEET-P01 — a CI job wedged in_progress shall be flagged at the first monitor run after it passes 5x its median duration — and the claim states the monitor's REAL sampling cadence (hours, not minutes)"
     status: verified
     release: falcon-v1.139.0
     description: >
@@ -32,10 +32,29 @@ artifacts:
       API failures (`|| true`) into an empty result, which reads as a healthy
       fleet.
 
+      RE-SCOPED 2026-10-21 (maintainer decision, #436). The title used to
+      promise a wedged job would be "surfaced within 5x its own median
+      duration" — for a 3-minute Kani leg, about 15 minutes. The detector's
+      RULE delivers that whenever it runs (FV-RELAY-FLEET-001/002 verify the
+      rule, and still do). Its CADENCE does not: the monitor is a GitHub
+      `*/15` cron, and GitHub throttles it. Measured over 40 scheduled runs,
+      2026-10-15..21: gap between runs median 3.80 h, p90 5.44 h, max 7.52 h.
+      On 2026-09-17 it caught 1 of 7 real relay-mix-quad stalls; five began
+      and ended between scheduled runs. So the honest claim is: a wedge is
+      flagged at the FIRST MONITOR RUN after it crosses the 5x threshold, and
+      the unattended detection latency is the sampling interval — typically
+      ~4 h, up to ~7.5 h measured — not minutes. It is a COARSE detector. The
+      fine-grained instruments are `scripts/ci-triage.rs` (classifies every
+      red check as REAL/LOST/DERIVED/SUPERSEDED) and the issue-hunt loop's own
+      per-pass fleet check. Moving sampling off GitHub cron was considered and
+      not chosen.
+
       FALSIFICATION: wrong if a job stuck `in_progress` past 5x its median
-      duration, with at least three successful runs in its recent history,
-      produces no wedge report from the monitor; or if the monitor reports green
-      on a run where its API queries failed.
+      duration, with at least three successful runs in its recent history, is
+      still running at a monitor run and that run produces no wedge report; or
+      if the monitor reports green on a run where its API queries failed. A
+      wedge that begins and ends BETWEEN two monitor runs does not falsify this
+      requirement — that is the stated limit of a coarse detector.
     tags: [requirement, relay, ci, fleet, verification-gate, v1.139]
     links:
       - type: derives-from
