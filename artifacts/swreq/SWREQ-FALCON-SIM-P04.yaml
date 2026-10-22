@@ -68,6 +68,14 @@ artifacts:
       v0.16.1 GazeboPhysics scaffold, v0.18 real gz-transport
       bridge: **software ships first; the bench step captures
       the evidence.**
+
+      RETIRED SCENARIO (#477, falcon-v1.141). The `--scenario=hover` flag named
+      above no longer exists. It ran the legacy five-stage cascade and diverged
+      on main: 74.63 m at 25 s and 202.22 m at 60 s on the mock plant. The
+      default is now `flightcore`, the production flight core, which holds
+      0.04 m at 25 s on the same plant. An unknown scenario exits 2 instead of
+      falling back silently. The evidence-dir, CSV and counter wiring this
+      requirement is about are unchanged.
     tags: [falcon, sim, gazebo, bench-evidence, sdf, v0.19.0]
     fields:
       req-type: documentation + bench wiring
