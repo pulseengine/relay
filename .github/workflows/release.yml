@@ -519,7 +519,7 @@ jobs:
         # (real 0.19.1: 24 files, a different hash) proving the comparison
         # discriminates. So this repin changes NO executed code — only the
         # provenance, from "unverifiable" to "the release tag's own commit".
-        uses: bazel-contrib/setup-bazel@e8776f58fb6a6e9055cbaf1b38c52ccc5247e9c4 # v0.14.0 (tag 0.14.0 -> e8776f5, verified)
+        uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # v0.14.0 (tag 0.14.0 -> e8776f5, verified)
         with:
           bazelisk-cache: true
           disk-cache: bazel
