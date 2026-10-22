@@ -1,40 +1,42 @@
 version: 2
+# GROUPED (2026-10-21). Ungrouped, one upstream release arrived as several PRs —
+# the wit-bindgen 0.62 -> 0.63 bump came twice (#576 and #578, the SAME line of
+# the root Cargo.toml: the `/fuzz` entry resolves to the workspace manifest, and
+# #576 even omitted the Cargo.lock change) — and three action bumps arrived as
+# three. main's protection is `strict`, so every merge sends every other open PR
+# back through a full CI cycle (Kani matrix included): N small PRs cost N serial
+# cycles on a shared, saturated rust-cpu pool (#514). One weekly PR per
+# ecosystem collapses that to one cycle.
+#
+# MAJOR bumps are deliberately NOT grouped: a major is an API break and gets its
+# own PR and its own review, never buried in a batch of patch bumps.
 updates:
   - package-ecosystem: cargo
-    directory: /
+    directories:
+      - /
+      - /fuzz
+      - /crates/relay-ccsds
+      - /crates/relay-cfdp
+      - /crates/relay-ci
     schedule:
       interval: weekly
     labels:
       - dependencies
-  - package-ecosystem: cargo
-    directory: /fuzz
-    schedule:
-      interval: weekly
-    labels:
-      - dependencies
-  - package-ecosystem: cargo
-    directory: /crates/relay-ccsds
-    schedule:
-      interval: weekly
-    labels:
-      - dependencies
-  - package-ecosystem: cargo
-    directory: /crates/relay-cfdp
-    schedule:
-      interval: weekly
-    labels:
-      - dependencies
-  - package-ecosystem: cargo
-    directory: /crates/relay-ci
-    schedule:
-      interval: weekly
-    labels:
-      - dependencies
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
   # Keep pinned third-party GitHub Actions SHAs fresh via reviewed PRs (the
   # supply-chain hardening companion to SHA-pinning in release.yml/bazel.yml).
+  # A grouped action PR must still pass the per-pin check: BOTH the new and the
+  # OLD SHA must exist in the action's own repository (commits API exit code,
+  # with a negative and a positive control) — release.yml ran a fork-network
+  # commit that was not in setup-bazel's history for four months (#583).
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     labels:
       - dependencies
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]

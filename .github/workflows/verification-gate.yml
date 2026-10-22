@@ -14,6 +14,10 @@ name: Verification Gate
 #     python3 scripts/run-falcon-verification.py --markdown
 
 on:
+  # MERGE QUEUE (2026-10-21). This workflow produces a REQUIRED check, so it
+  # must also run on the queue's `merge_group` event — otherwise a queued PR
+  # waits forever for a check that is never reported.
+  merge_group:
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -168,7 +172,17 @@ jobs:
       - name: Scope check (does this PR need the full sweep?)
         id: scope
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # MERGE QUEUE: on `merge_group` there is no pull_request.base.sha; the
+          # queue supplies merge_group.base_sha instead. Without it every queue
+          # entry falls into the "no base sha" branch and runs the full ~45 min
+          # sweep even for a change this gate has nothing to verify.
+          #
+          # NOTE the Verify-Filter override is NOT available in a merge_group
+          # run: there is no PR body, so a relevant change runs the DEFAULT
+          # (full) filter. That is the intended trade, the same one the nightly
+          # backstop documents above: the queue tests the COMBINED tree that
+          # will land, and must not inherit one PR's narrowing.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         shell: bash
         run: |
           if [ -z "${BASE_SHA:-}" ]; then
@@ -207,7 +221,7 @@ jobs:
       # before reaching the script).
       - name: Install cargo-llvm-cov
         if: steps.scope.outputs.run_full == 'true'
-        uses: taiki-e/install-action@v2.87.27
+        uses: taiki-e/install-action@v2.87.29
         with:
           tool: cargo-llvm-cov
 

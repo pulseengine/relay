@@ -9,6 +9,10 @@ name: CI
 # once a runner pool is wired up for this repo.
 
 on:
+  # MERGE QUEUE (2026-10-21). This workflow produces a REQUIRED check, so it
+  # must also run on the queue's `merge_group` event — otherwise a queued PR
+  # waits forever for a check that is never reported.
+  merge_group:
   push:
     branches: [main]
   pull_request:

@@ -11,6 +11,10 @@ name: Kani
 # harnesses currently verify in well under a second each locally (kani 0.67).
 
 on:
+  # MERGE QUEUE (2026-10-21). This workflow produces a REQUIRED check, so it
+  # must also run on the queue's `merge_group` event — otherwise a queued PR
+  # waits forever for a check that is never reported.
+  merge_group:
   push:
     branches: [main]
   pull_request:
@@ -52,7 +56,12 @@ jobs:
           # workflow's concurrency is serial on main, one of them held that
           # release's candidate for 2 h 20 m re-proving an already-green proof
           # (#548). A manual dispatch has neither field and still sweeps.
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          # MERGE QUEUE: a `merge_group` run has neither of the above — it has
+          # `merge_group.base_sha`, the tip the queued change is tested against.
+          # Without it the case below takes the "no base sha" branch and runs
+          # all 47 legs on every queue entry: correct, but it throws away the
+          # point of the queue.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         shell: bash
         run: |
           # Three ways a base can be unusable, each of which must SWEEP rather
