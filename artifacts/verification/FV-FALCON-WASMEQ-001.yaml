@@ -59,7 +59,12 @@ artifacts:
         # one wrapping falcon-core's FlightCore and the mirror followed it, so
         # the old assertion described a program that no longer exists — it went
         # red on the first PR that touched the mirror, which is the gate working.
-        - run: "grep -q 'falcon_core::{FlightBackend, FlightCore' tests/cascade-sitl-wasm/src/native_mirror.rs"
+        #
+        # SUPERVISOR-P01 (#571) moved it again: the component wraps
+        # `FlightSupervisor`, so the mirror must too — an unsupervised mirror
+        # diverged from the component on gz within 7 minutes (4da8170). The
+        # merge queue's full sweep caught this step still naming FlightCore.
+        - run: "grep -q 'falcon_core::{FlightBackend, FlightSupervisor' tests/cascade-sitl-wasm/src/native_mirror.rs"
         # No tolerance: the assertion is inequality with zero, not a threshold.
         - run: "grep -q 'worst != 0.0' tests/cascade-sitl-wasm/src/main.rs"
         # The mirror must MIRROR, not merely exist: a mirror that skipped the

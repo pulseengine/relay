@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SUPERVISOR-P01
     type: sw-req
     title: "SUPERVISOR-P01 — the published component shall be a SUPERVISED vehicle, not a stabiliser: the mode machine and every failsafe shall be reachable and observable through the seam"
-    status: proposed
+    status: implemented
     release: falcon-v1.141.0
     description: >
       The component published as `pulseengine:falcon-cascade` shall run the

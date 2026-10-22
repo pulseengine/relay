@@ -26,9 +26,9 @@
 
 // The SITL plant itself. `gz_real` inside it is `#[cfg(feature = "gazebo")]`,
 // so without that feature this pulls exactly `Physics` + `MockPhysics`.
+mod native_mirror;
 #[path = "../../../examples/falcon-sitl-gz/src/physics.rs"]
 mod physics;
-mod native_mirror;
 // The SAME pacing logic the native bench uses, included by path rather than
 // copied — for the same reason physics.rs is: a copy would let the two drift,
 // and the entire point is that the wasm harness and the native bench pace the
@@ -37,9 +37,9 @@ mod native_mirror;
 mod pace;
 
 use anyhow::{bail, Context, Result};
-use physics::{MockPhysics, Physics};
 #[cfg(feature = "gazebo")]
 use physics::GazeboPhysics;
+use physics::{MockPhysics, Physics};
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store};
 
@@ -55,16 +55,42 @@ wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.11.0;
-            export pulseengine:falcon-cascade/observer@0.11.0;
+            export pulseengine:falcon-cascade/controller@0.12.0;
+            export pulseengine:falcon-cascade/observer@0.12.0;
+            export pulseengine:falcon-cascade/pilot@0.12.0;
         }
     "#,
     path: "../../wit/falcon-cascade",
 });
 
+// Under `exports::`, not at the root like `types` — `pilot` is an EXPORTED
+// interface so wasmtime's bindgen puts its records there, whereas `types` is
+// merely `use`d by the exported interfaces and lands at the root.
+use exports::pulseengine::falcon_cascade::pilot::{PilotCommand, SupervisorConfig};
 use pulseengine::falcon_cascade::types::{
     ImuSample as WitImu, RotorRpm, SensorFrame, Vec3, VehicleConfig, Waypoint,
 };
+
+/// Pack voltage this harness reports, and the LOW threshold it configures.
+///
+/// THE HARNESS HAS TO SUPPLY A BATTERY NOW, and that is not boilerplate.
+/// `FlightBackend::read_battery_v` defaults to `None`, `update_preflight` then
+/// sets `battery_ok = batt_present && ..` with `batt_present == false`,
+/// `all_pass()` ANDs it, and `arm_check` returns `Blocked(CheckFail::Battery)`.
+/// So a frame with no battery cannot arm the supervised component at all.
+/// 16.8 V is a full 4S pack against a 14.0 V LOW threshold — comfortably clear,
+/// so the hold under test is never perturbed by a battery failsafe.
+const SITL_PACK_V: f32 = 16.8;
+const SITL_LOW_BATT_V: f32 = 14.0;
+
+/// Geofence radius the harness configures, metres about home.
+///
+/// Large but FINITE and deliberately not the 1e9 "inactive" sentinel: this
+/// harness verifies an altitude hold and a bounded horizontal excursion (< 1.0 m
+/// per HOLD-P01), so 100 m cannot interfere — while still leaving a real
+/// geofence armed, rather than quietly testing the vehicle with a failsafe
+/// switched off.
+const SITL_FENCE_M: f32 = 100.0;
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -78,8 +104,8 @@ fn main() -> Result<()> {
     let mut cfg = Config::new();
     cfg.wasm_component_model(true);
     let engine = Engine::new(&cfg)?;
-    let component = Component::from_file(&engine, &wasm)
-        .with_context(|| format!("loading {wasm}"))?;
+    let component =
+        Component::from_file(&engine, &wasm).with_context(|| format!("loading {wasm}"))?;
 
     // Empty linker: the composed component imports only `types`, which is
     // records-only — no functions for a host to supply, and no WASI. If this
@@ -96,13 +122,31 @@ fn main() -> Result<()> {
     // only place the seqlock and the monotonic tick can be checked across the
     // actual Component Model ABI instead of in-process.
     let observer = bindings.pulseengine_falcon_cascade_observer();
+    // THE COMMAND DIRECTION (SUPERVISOR-P01, seam @0.12.0). The published
+    // component is now a SUPERVISED vehicle: `FlightSupervisor::step` returns
+    // through `step_estimate_only` — motors commanded ZERO — while the mode is
+    // Disarmed, and the FSM starts Disarmed. So a harness that only called
+    // `step` would measure a vehicle sitting on the ground for 4000 ticks and
+    // report a hold error of 2.00 m. It has to arm, like a real host.
+    let pilot = bindings.pulseengine_falcon_cascade_pilot();
     let mut last_tick: u32 = 0;
     let mut state_reads: u32 = 0;
 
     // Hold 2 m above the launch point. NED: down is negative up.
-    let down: f32 = std::env::var("TARGET_DOWN").ok().and_then(|v| v.parse().ok()).unwrap_or(-2.0);
-    let target = Waypoint { north: 0.0, east: 0.0, down, yaw: 0.0 };
-    let noise: f32 = std::env::var("IMU_NOISE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let down: f32 = std::env::var("TARGET_DOWN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(-2.0);
+    let target = Waypoint {
+        north: 0.0,
+        east: 0.0,
+        down,
+        yaw: 0.0,
+    };
+    let noise: f32 = std::env::var("IMU_NOISE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
     // BACKEND. `mock` is the analytic plant every number in #380 came from;
     // `gazebo` is the same real bridge the native bench flies, so a wasm result
     // and a native result are comparable rather than merely adjacent.
@@ -132,7 +176,11 @@ fn main() -> Result<()> {
     println!("component : {wasm}");
     println!("plant     : {} (BACKEND={backend})", plant.name());
     println!("target    : hold N=0 E=0 D={down} m, yaw 0");
-    println!("schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)", ticks as f32 * dt, 1.0 / dt);
+    println!(
+        "schedule  : {ticks} ticks @ dt={dt}s ({:.1}s, {:.0} Hz)",
+        ticks as f32 * dt,
+        1.0 / dt
+    );
     println!();
 
     // ── VEHICLE CALIBRATION (v0.9 seam) ──────────────────────────────────
@@ -167,13 +215,66 @@ fn main() -> Result<()> {
     };
     println!(
         "calibration: hover={:.3} rate={:.0}Hz pos_var={:.2} alt=({:.2},{:.2},{:.2})",
-        calib.hover_thrust, calib.loop_rate_hz, calib.pos_var,
-        calib.altitude_kp, calib.altitude_kd, calib.altitude_ki
+        calib.hover_thrust,
+        calib.loop_rate_hz,
+        calib.pos_var,
+        calib.altitude_kp,
+        calib.altitude_kd,
+        calib.altitude_ki
     );
     controller.call_configure(&mut store, calib)?;
+
+    // THE SUPERVISOR'S OWN INPUTS (SUPERVISOR-P01 clause 4), which the seam
+    // carried none of before @0.12.0.
+    //
+    // `cruise_alt` is metres AGL and POSITIVE — the one altitude in this seam
+    // that is NOT NED-signed (falcon-core negates it when deriving the
+    // setpoint). `down` is NED, so the commanded altitude is its negation.
+    // Getting this backwards would command a descent into the ground.
+    let supcfg = SupervisorConfig {
+        home: Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        fence_radius: SITL_FENCE_M,
+        cruise_alt: -down,
+        low_batt_v: SITL_LOW_BATT_V,
+    };
+    pilot.call_configure_supervisor(&mut store, supcfg)?;
+    println!(
+        "supervisor : home=[0,0,0] fence={:.0} m cruise={:.2} m AGL low_batt={:.1} V",
+        supcfg.fence_radius, supcfg.cruise_alt, supcfg.low_batt_v
+    );
+
+    // ARM, THEN REQUEST TAKEOFF — before the first `step`, exactly as the
+    // native supervisor tests do. The pre-arm table is judged at THIS moment:
+    // `arm_check_table` is read inside `command`, not inside `step`.
+    //
+    // AND BE HONEST ABOUT WHAT THAT MEANS THIS GATE PROVES. Arming here is
+    // judged against `FlightSupervisor::new`'s deliberate bring-up defaults
+    // (the legacy six rows forced true), NOT against refreshed signals. A host
+    // that warmed its estimator first — which is what `step_estimate_only`
+    // exists for and what a real GCS would do — is refused by
+    // `CalibrationPresent`, because nothing in this seam carries a calibration.
+    // Measured and pinned in
+    // `crates/falcon-core/tests/supervisor_seam_contract.rs`.
+    //
+    // So a GREEN RESULT FROM THIS HARNESS SHOWS THE DEFAULTS PATH WORKS end to
+    // end through the Component Model ABI. It is NOT evidence that the 20-row
+    // pre-arm table gates arming through the seam, and must not be cited as
+    // such when SUPERVISOR-P01 is promoted — the requirement's own
+    // falsification names exactly this case ("the supervisor runs against
+    // default inputs the host cannot supply"). The harness warms first and
+    // arms on the real table once the seam can carry a calibration.
+    pilot.call_command(&mut store, PilotCommand::Arm, true, true)?;
+    pilot.call_command(&mut store, PilotCommand::RequestTakeoff, true, true)?;
+    println!("commanded  : Arm -> RequestTakeoff (supervised; Disarmed commands zero motors)");
     println!();
 
-    let gnss_div: u32 = std::env::var("GNSS_DIV").ok().and_then(|v| v.parse().ok())
+    let gnss_div: u32 = std::env::var("GNSS_DIV")
+        .ok()
+        .and_then(|v| v.parse().ok())
         .unwrap_or_else(|| ((1.0 / dt) / 5.0).round().max(1.0) as u32);
     let mut fixes = 0u32;
 
@@ -182,7 +283,8 @@ fn main() -> Result<()> {
     // wasm unchanged" made falsifiable: identical Rust reached two ways must
     // agree, and if it does not, the Component Model is not transparent.
     let mut differential = std::env::var("DIFFERENTIAL")
-        .ok().filter(|v| v != "0")
+        .ok()
+        .filter(|v| v != "0")
         .map(|_| {
             let mut n = native_mirror::NativeCascade::new();
             // Derived from the SAME `calib` the component was given, so the two
@@ -198,6 +300,25 @@ fn main() -> Result<()> {
                 altitude_ki: calib.altitude_ki,
                 position_ki: calib.position_ki,
             });
+            // @0.12.0: the mirror must take the SAME supervisor configuration
+            // and the SAME commands, or it is not mirroring. Omitting this is
+            // what made the gz differential report 0.069364190 at tick 6249 —
+            // a supervised wasm side compared against an unsupervised native
+            // one. Derived from the same values the component was given, for
+            // the same reason the calibration is.
+            n.configure_supervisor(native_mirror::SupCalib {
+                home: [0.0, 0.0, 0.0],
+                fence_radius: SITL_FENCE_M,
+                cruise_alt: -down,
+                low_batt_v: SITL_LOW_BATT_V,
+            });
+            // ARM AND REQUEST TAKEOFF, before the mirror's first step, exactly
+            // as the component was commanded above. `FlightSupervisor::step`
+            // commands ZERO motors while Disarmed, so an unarmed mirror would
+            // sit on the ground while the wasm side flew and report that as a
+            // Component Model failure.
+            n.command(falcon_core::relay_fsm::Event::Arm, true, true);
+            n.command(falcon_core::relay_fsm::Event::RequestTakeoff, true, true);
             (n, 0.0f32, 0u32)
         });
 
@@ -287,8 +408,12 @@ fn main() -> Result<()> {
             }
         }
         let imu = WitImu {
-            ax: s.accel_body[0], ay: s.accel_body[1], az: s.accel_body[2],
-            gx: s.gyro_body[0],  gy: s.gyro_body[1],  gz: s.gyro_body[2],
+            ax: s.accel_body[0],
+            ay: s.accel_body[1],
+            az: s.accel_body[2],
+            gx: s.gyro_body[0],
+            gy: s.gyro_body[1],
+            gz: s.gyro_body[2],
         };
         // The tick that matters: one full estimate -> position -> attitude ->
         // rate -> mixer pass, executed inside the wasm component.
@@ -296,7 +421,11 @@ fn main() -> Result<()> {
         // position fix matches the native bench's gnss_div=50 @250 Hz.
         let position_ned = if gnss_div > 0 && tick % gnss_div == 0 {
             fixes += 1;
-            Some(Vec3 { x: true_pos[0], y: true_pos[1], z: true_pos[2] })
+            Some(Vec3 {
+                x: true_pos[0],
+                y: true_pos[1],
+                z: true_pos[2],
+            })
         } else {
             None
         };
@@ -308,7 +437,11 @@ fn main() -> Result<()> {
         // thrust axis tilts off vertical and the vehicle climbs and then falls.
         // Measured with them absent: reached 1.08 m at 1.2 s, then -0.54 m by
         // 8 s, on a calibration that holds 2.00 m with them present.
-        let mag_body = plant.mag_body_ned().map(|m| Vec3 { x: m[0], y: m[1], z: m[2] });
+        let mag_body = plant.mag_body_ned().map(|m| Vec3 {
+            x: m[0],
+            y: m[1],
+            z: m[2],
+        });
         let heading_rad = plant.heading_ned();
         // v0.10: ESC telemetry, so the rotor-out FDI is live inside the
         // component rather than inert. The native backend has always fed this.
@@ -316,7 +449,12 @@ fn main() -> Result<()> {
         if rpm.is_some() {
             rpm_frames += 1;
         }
-        let motor_rpm = rpm.map(|r| RotorRpm { m1: r[0], m2: r[1], m3: r[2], m4: r[3] });
+        let motor_rpm = rpm.map(|r| RotorRpm {
+            m1: r[0],
+            m2: r[1],
+            m3: r[2],
+            m4: r[3],
+        });
         let frame = SensorFrame {
             imu,
             dt_s: dt,
@@ -324,6 +462,8 @@ fn main() -> Result<()> {
             mag_body,
             heading_rad,
             motor_rpm,
+            // @0.12.0. Without this the component cannot arm — see SITL_PACK_V.
+            battery_v: Some(SITL_PACK_V),
         };
         let m = controller.call_step(&mut store, frame, target)?;
 
@@ -369,13 +509,22 @@ fn main() -> Result<()> {
                 mag_body.map(|m| [m.x, m.y, m.z]),
                 heading_rad,
                 rpm,
+                Some(SITL_PACK_V),
                 dt,
             );
             let dmax = [
-                (n[0] - m.m1).abs(), (n[1] - m.m2).abs(),
-                (n[2] - m.m3).abs(), (n[3] - m.m4).abs(),
-            ].iter().copied().fold(0.0f32, f32::max);
-            if dmax > *worst { *worst = dmax; *worst_tick = tick; }
+                (n[0] - m.m1).abs(),
+                (n[1] - m.m2).abs(),
+                (n[2] - m.m3).abs(),
+                (n[3] - m.m4).abs(),
+            ]
+            .iter()
+            .copied()
+            .fold(0.0f32, f32::max);
+            if dmax > *worst {
+                *worst = dmax;
+                *worst_tick = tick;
+            }
         }
         let lat = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
         peak_lat_accel = peak_lat_accel.max(lat);
@@ -397,8 +546,12 @@ fn main() -> Result<()> {
                 // written here before the number it produces was looked at.
                 //
                 // WHY A WINDOW IS NEEDED AT ALL. Nothing in this harness
-                // terminates the flight: the component wraps FlightCore, so
-                // there is no failsafe to disarm it (#414). So the run keeps
+                // terminates the flight. Until @0.12.0 that was structural —
+                // the component wrapped FlightCore and had no failsafe to
+                // disarm it (#414). It now wraps FlightSupervisor, so a
+                // rotor-out CAN end in a disarm; this harness simply does not
+                // yet fly long enough, or command Land, to reach one. The
+                // window therefore stays, and stays for the same reason. So the run keeps
                 // flying a three-rotor airframe for as long as the tick budget
                 // lasts, and `peak_horiz` over the whole run is a function of
                 // the tick count, not of the control law.
@@ -479,7 +632,10 @@ fn main() -> Result<()> {
         if let Some((r, at)) = fail_rotor {
             if tick == at {
                 plant.fail_rotor(r);
-                println!("  !! rotor {r} FAILED at tick {tick} ({:.2}s)", tick as f32 * dt);
+                println!(
+                    "  !! rotor {r} FAILED at tick {tick} ({:.2}s)",
+                    tick as f32 * dt
+                );
             }
         }
         plant.step([m.m1, m.m2, m.m3, m.m4], dt);
@@ -531,7 +687,10 @@ fn main() -> Result<()> {
     let (_s, p) = plant.measure(0.0);
     let alt = -p[2];
     let horiz = (p[0] * p[0] + p[1] * p[1]).sqrt();
-    println!("final NED  : n={:.3} e={:.3} d={:.3}  (altitude {:.3} m)", p[0], p[1], p[2], alt);
+    println!(
+        "final NED  : n={:.3} e={:.3} d={:.3}  (altitude {:.3} m)",
+        p[0], p[1], p[2], alt
+    );
     println!("horizontal : {horiz:.3} m from launch  (peak {peak_horiz_all:.3} m over the run)");
     println!("peak |a_xy|: {peak_lat_accel:.3} m/s^2  (lateral specific force, NOT tilt)");
     println!();
@@ -559,7 +718,13 @@ fn main() -> Result<()> {
     println!(
         "wall/sim   : {wall:.2}s wall vs {scheduled:.2}s scheduled (RTF {:.2}, pacing: {})",
         if wall > 0.0 { scheduled / wall } else { 0.0 },
-        if sim_lock { "gyro-sync" } else if pace_real_time { "wall-clock" } else { "free-running" }
+        if sim_lock {
+            "gyro-sync"
+        } else if pace_real_time {
+            "wall-clock"
+        } else {
+            "free-running"
+        }
     );
     if sim_lock {
         // RTF alone cannot distinguish "synced to physics" from "gave up and ran
@@ -582,8 +747,10 @@ fn main() -> Result<()> {
         // inputs under shared IEEE-754 semantics, so any delta means something
         // structural differs — a different constant, call order, or lost update.
         if *worst != 0.0 {
-            bail!("FAIL: wasm and native disagree by {worst:.9} (tick {worst_tick}). The same \
-                   Rust reached two ways must compute the same answer.");
+            bail!(
+                "FAIL: wasm and native disagree by {worst:.9} (tick {worst_tick}). The same \
+                   Rust reached two ways must compute the same answer."
+            );
         }
         println!("PASS: wasm and native are BIT-IDENTICAL across {ticks} ticks.");
     }
@@ -632,16 +799,33 @@ fn main() -> Result<()> {
     //
     // Before the @0.11.0 observer export there was no way to ask the component
     // which rotor it had isolated, so this verdict could not exist at all.
-    // There is deliberately NO disarm term: the published component wraps
-    // FlightCore, not FlightSupervisor, so it has no mode machine to disarm
-    // (#414). That absence is stated, not silently dropped.
+    // There is deliberately NO disarm term, and the reason CHANGED at @0.12.0
+    // without the verdict changing — which is worth saying explicitly.
+    //
+    // It used to be structural: the published component wrapped FlightCore, so
+    // there was no mode machine to disarm (#414). That is no longer true — it
+    // wraps FlightSupervisor now, and FV-FALCON-FAULT-005's fourth clause ("the
+    // vehicle touches down AND DISARMS") becomes reachable on the wasm leg for
+    // the first time.
+    //
+    // The term is still absent because adding a BAR to a REQUIRED gate in the
+    // same change that makes it possible would be ratcheting past the evidence:
+    // nothing here has yet measured a supervised rotor-out reaching touchdown
+    // through the component, so a disarm bar would be asserted rather than
+    // demonstrated. It belongs with SUPERVISOR-P01's promotion, where the wasm
+    // SITL legs are run. The absence is stated, not silently dropped — and it
+    // is now a CHOICE rather than an impossibility.
     if let Some((want_rotor, _)) = fail_rotor {
         println!();
         println!(
             "ROTOR-OUT  : isolated={:?} peak_true_tilt={:.3}rad (measured={}) \
              peak_horiz={:.2}m  [judged window: {} ticks, {:.2}s, ends {}]",
-            isolated_rotor, peak_true_tilt_after, saw_true_tilt, peak_horiz_after,
-            airborne_ticks, airborne_ticks as f32 * dt,
+            isolated_rotor,
+            peak_true_tilt_after,
+            saw_true_tilt,
+            peak_horiz_after,
+            airborne_ticks,
+            airborne_ticks as f32 * dt,
             match touchdown_tick {
                 Some(t) => format!("at touchdown, tick {t}"),
                 None => "AT THE TICK BUDGET -- never touched down".into(),

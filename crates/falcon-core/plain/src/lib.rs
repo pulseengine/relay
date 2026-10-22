@@ -19,6 +19,18 @@
 // the bench's integ_rot uses); the iterator rewrite obscures the math.
 #![allow(clippy::needless_range_loop)]
 
+// RE-EXPORTED, because this crate's PUBLIC API already speaks these types and a
+// consumer cannot name them otherwise. `FlightSupervisor::mode()` returns
+// `relay_fsm::Mode`, `command()` takes a `relay_fsm::Event`, and `set_check()`
+// takes a `relay_preflight::CheckId` — so any caller must already have those
+// types, yet without these lines it has to declare a SECOND path dependency on
+// the same crates and hope the versions agree. The published wasm component is
+// the case that found this: it depends on `falcon-core` alone, deliberately, so
+// that what ships is what is verified (#388 / scripts/audit-component-deps.rs).
+pub use relay_calib;
+pub use relay_fsm;
+pub use relay_preflight;
+
 use relay_adrc::{AdrcRate, GyroLpf};
 use relay_geo::{GeoAtt, GeoGains, quat_to_rotmat, thrust_axis_ned};
 use relay_iekf::{Iekf, Imu as IekfImu, NavState, RotorFaultDetector, Vec3};

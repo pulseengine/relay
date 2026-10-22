@@ -1,7 +1,7 @@
 # Standalone cargo-component crate — the cascade orchestrator.
 [package]
 name = "falcon-cascade-cm"
-description = "The falcon flight core (falcon-core FlightCore) as one WebAssembly Component, WIT pulseengine:falcon-cascade@0.11.0 — a sensor frame (IMU, GNSS position, magnetometer, heading, motor RPM) in, motor commands out, and a second export publishing the flight state (attitude, position, velocity, rates, gyro bias, isolated rotor) behind a seqlock so an observer can read it without running a control tick. This is the component that flies."
+description = "The falcon flight core (falcon-core FlightSupervisor) as one WebAssembly Component, WIT pulseengine:falcon-cascade@0.12.0 — a sensor frame (IMU, GNSS position, magnetometer, heading, motor RPM, pack voltage) in, motor commands out; a second export publishing the flight state (attitude, position, velocity, rates, gyro bias, isolated rotor, MODE and active FAILSAFE causes) behind a seqlock so an observer can read it without running a control tick; and a third export carrying pilot commands and the supervisor configuration. SUPERVISED, not merely stabilised: the mode machine, the failsafe arbiter and the 20 pre-arm rows run inside this artifact. This is the component that flies."
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
