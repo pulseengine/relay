@@ -97,8 +97,11 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        # The seam declares the return direction, at the bumped version.
-        - run: "grep -q 'package pulseengine:falcon-cascade@0.11.0;' wit/falcon-cascade/cascade.wit"
+        # The seam declares the return direction, at the CURRENT version. It
+        # named @0.11.0 until SUPERVISOR-P01 (#571) bumped the seam to @0.12.0
+        # additively (`pilot` added; `controller` and `observer` unchanged), and
+        # the merge queue's full sweep failed on it — the step tracks the seam.
+        - run: "grep -q 'package pulseengine:falcon-cascade@0.12.0;' wit/falcon-cascade/cascade.wit"
         - run: "grep -q 'read-state: func() -> flight-state' wit/falcon-cascade/cascade.wit"
         - run: "grep -q 'export observer;' wit/falcon-cascade/cascade.wit"
         # Seqlock: tick-head and tick-tail both present in the record, at the
