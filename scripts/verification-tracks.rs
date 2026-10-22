@@ -266,7 +266,12 @@ mod tests {
         let md = render("9c53bff0000000", &rows, &[(405, "Verus cannot find core/std", true)]);
         assert!(md.contains("**1 track(s) DARK"), "{md}");
         assert!(md.contains("| Verus SMT proofs | `verus.yml` | 🔴 **DARK** — failure |"), "{md}");
-        assert!(md.contains("runs on pull requests only"), "PR-only is not reported as a miss: {md}");
+        // #554 reclassified verification-gate.yml PR-only -> PR + nightly
+        // (#410 retired) and left this assertion naming the old wording, so the
+        // suite failed on main from 2026-10-09 with nothing running it (VGATE-005
+        // is not tagged `falcon`). The property is unchanged: a track that is
+        // not per-commit is reported as such, never as a miss.
+        assert!(md.contains("runs per-PR + nightly on main"), "PR+nightly is not reported as a miss: {md}");
         assert!(md.contains("- #405 — Verus cannot find core/std"), "{md}");
         assert!(!md.contains("Every per-commit track ran and passed"), "{md}");
     }

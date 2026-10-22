@@ -86,8 +86,14 @@ artifacts:
         - run: "grep -q './scripts/verification-tracks.rs --sha \"$(git rev-parse HEAD)\" >> \"$OUT\" || rc=$?' .github/workflows/release.yml"
         - run: "grep -q 'Verification tracks: UNKNOWN' .github/workflows/release.yml"
         - run: "grep -q '^      actions: read$' .github/workflows/release.yml"
-        # The gap list covers harness fidelity too, not only tracks that cannot run (#452).
-        - run: "grep -q '(452, \"SimBackend' scripts/verification-tracks.rs"
+        # The gap list covers harness fidelity too, not only tracks that cannot
+        # run. #452 was its harness-fidelity entry until #554 RETIRED it on
+        # 2026-10-09, re-measured as verified (mutation 69/0 -> 59/10). This
+        # step still grepped for the live entry and stayed false on main for 13
+        # days: the artifact is not tagged `falcon`, so no gate ran it (found
+        # 2026-10-22). It now asserts that the retirement is recorded with its
+        # measurement, which is the list being kept by VERIFIED state.
+        - run: "grep -q '452 — the mechanism AND the claim are now both verified' scripts/verification-tracks.rs"
     links:
       - type: verifies
         target: SWREQ-RELAY-VGATE-P04

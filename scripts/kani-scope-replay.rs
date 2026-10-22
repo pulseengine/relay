@@ -53,6 +53,9 @@ struct Case {
     base: BaseKind,
     event: &'static str,
     want_run: bool,
+    /// The `reason=` a SKIP must record (kani-gate fails closed without one).
+    /// `None` for a run: a run must write no reason at all.
+    want_reason: Option<&'static str>,
     why: &'static str,
 }
 
@@ -146,51 +149,57 @@ fn main() {
 
     let cases = [
         Case {
-            name: "push, docs + artifact only",
+            name: "merge_group, docs + artifact only",
             changed: &["docs/RELEASE-PLAN.md", "artifacts/verification/FV-X.yaml"],
             base: BaseKind::Parent,
-            event: "push",
+            event: "merge_group",
             want_run: false,
+            want_reason: Some("out-of-scope"),
             why: "THE WHOLE POINT: the four falcon-v1.140.0 merges looked exactly like this and each ran 47 legs",
         },
         Case {
-            name: "push, a crate source file",
+            name: "merge_group, a crate source file",
             changed: &["crates/relay-mix-quad/plain/src/lib.rs"],
             base: BaseKind::Parent,
-            event: "push",
+            event: "merge_group",
             want_run: true,
+            want_reason: None,
             why: "pins the predicate from the other side: replacing the grep with `false` must fail here",
         },
         Case {
-            name: "push, workspace manifest",
+            name: "merge_group, workspace manifest",
             changed: &["Cargo.toml"],
             base: BaseKind::Parent,
-            event: "push",
+            event: "merge_group",
             want_run: true,
+            want_reason: None,
             why: "a dependency or feature change alters what the harnesses prove, without touching crates/",
         },
         Case {
-            name: "push, this workflow itself",
+            name: "merge_group, this workflow itself",
             changed: &[".github/workflows/kani.yml"],
             base: BaseKind::Parent,
-            event: "push",
+            event: "merge_group",
             want_run: true,
+            want_reason: None,
             why: "changing the matrix or the kani-version must re-run it, or the gate can be weakened invisibly",
         },
         Case {
-            name: "push, all-zeros base (branch created)",
+            name: "merge_group, all-zeros base (branch created)",
             changed: &["docs/RELEASE-PLAN.md"],
             base: BaseKind::AllZeros,
-            event: "push",
+            event: "merge_group",
             want_run: true,
+            want_reason: None,
             why: "no predecessor to diff against — must SWEEP; note the changed set is docs-only, so a skip here would look 'correct' and be wrong",
         },
         Case {
-            name: "push, base not in history (force-push)",
+            name: "merge_group, base not in history (force-push)",
             changed: &["docs/RELEASE-PLAN.md"],
             base: BaseKind::NotInHistory,
-            event: "push",
+            event: "merge_group",
             want_run: true,
+            want_reason: None,
             why: "`git diff` against an unreachable commit cannot be trusted — must SWEEP, again from a docs-only diff",
         },
         Case {
@@ -199,7 +208,31 @@ fn main() {
             base: BaseKind::Empty,
             event: "workflow_dispatch",
             want_run: true,
+            want_reason: None,
             why: "a manual run has neither field; it is the deliberate full-sweep escape hatch",
+        },
+        // QUEUE-ONLY (2026-10-22, #600): a pull request NEVER runs the matrix —
+        // the merge queue does. Asserted from both sides: a crate change on a PR
+        // must still defer (or the PR-time sweep is back), and the skip must be
+        // labelled `deferred`, never `out-of-scope` (that would claim the change
+        // cannot affect a harness, which is false for crates/).
+        Case {
+            name: "pull_request, a crate source file",
+            changed: &["crates/relay-mix-quad/plain/src/lib.rs"],
+            base: BaseKind::Parent,
+            event: "pull_request",
+            want_run: false,
+            want_reason: Some("deferred"),
+            why: "THE QUEUE-ONLY DECISION: a Kani-relevant PR change defers to merge_group instead of running 47 legs a second time",
+        },
+        Case {
+            name: "pull_request, docs only",
+            changed: &["docs/RELEASE-PLAN.md"],
+            base: BaseKind::Parent,
+            event: "pull_request",
+            want_run: false,
+            want_reason: Some("deferred"),
+            why: "the deferral is decided before any diff, so it must not depend on what changed",
         },
     ];
 
@@ -267,12 +300,21 @@ git add -A && git commit -q -m base
             .collect();
         let got = decisions.last().copied();
         let want = if c.want_run { "run=true" } else { "run=false" };
+        let reasons: Vec<&str> = written
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("reason="))
+            .collect();
+        let reason_ok = match c.want_reason {
+            None => reasons.is_empty(),
+            Some(r) => reasons == [r],
+        };
 
-        let bad = !exit_ok || got != Some(want) || decisions.len() != 1;
+        let bad = !exit_ok || got != Some(want) || decisions.len() != 1 || !reason_ok;
         if bad {
             fails += 1;
             println!("FAIL  {}", c.name);
             println!("      want {want}, got {:?} (decisions written: {})", got, decisions.len());
+            println!("      want reason {:?}, got {:?}", c.want_reason, reasons);
             println!("      why this case exists: {}", c.why);
             println!("      base supplied: {}", if base.is_empty() { "<empty>" } else { &base });
             println!("      changed: {:?}", c.changed);
