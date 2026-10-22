@@ -1,0 +1,158 @@
+artifacts:
+  - id: SWARCH-FALCON-CASCADE-001
+    type: sw-arch-component
+    title: "Cascade partition (M7) — CascadePartition.Supervised / CascadeTick on Rt1176M7"
+    status: approved
+    description: >
+      The control-and-supervision half of the RT1176 two-partition deployment
+      (#591). DERIVED FROM THE AADL (#261, AADL first, then allocate): its
+      boundary is exactly `Falcon_Cascade::CascadePartition.Supervised`, whose
+      one thread `CascadeTick` runs at 1 ms on processor `Rt1176M7`, bound to
+      `OnChipRam`.
+
+      Owns: the position / attitude / rate cascade, control allocation (the
+      mixer, including rank-3 rotor-out reallocation), and the
+      FlightSupervisor that runs INSIDE CascadeTick — the mode machine,
+      pre-arm table, arming, geofence, battery / link / estimator failsafe
+      ACTIONS, RTL and land. The supervisor is not a separate AADL component
+      (falcon_cascade.aadl models it as part of CascadeTick), so it is not a
+      separate architecture component either. The published WASM component
+      (`pilot` / `controller` / `observer`, SUPERVISOR-P01) is this partition's
+      packaging.
+
+      Consumes `nav_in` from SWARCH-FALCON-EST-001 and publishes
+      `in_flight_out` back, across SWARCH-FALCON-SEAM-001.
+
+      NOT CLAIMED: a timing budget. CascadeTick's WCET is 0..1 ms, the whole
+      period, UNMEASURED (#157).
+    tags: [architecture, falcon, aadl, rt1176, m7, cascade, supervisor, partition]
+    fields:
+      aadl:
+        - "Falcon_Cascade::CascadePartition — spar/falcon_cascade.aadl:118"
+        - "Falcon_Cascade::CascadePartition.Supervised — spar/falcon_cascade.aadl:126"
+        - "Falcon_Cascade::CascadeTick — spar/falcon_cascade.aadl:103"
+        - "Falcon_System::Rt1176M7 (m7) — spar/falcon_system.aadl:30"
+      crates: [falcon-core, relay-pos, relay-att, relay-rate, relay-mix-quad, relay-fsm, relay-preflight, relay-arm, relay-geo]
+      period: "1 ms (AADL)"
+      wcet: "0..1 ms — UNMEASURED (#157)"
+    links:
+      - type: allocated-from
+        target: SWREQ-FALCON-ADRC-P05
+      - type: allocated-from
+        target: SWREQ-FALCON-ARM-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-ATT-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-ATT-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-ATT-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-AVOID-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-BATTERY-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-BATTERY-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-CPREV-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-FAULT-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-FAULT-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-FAULT-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-FAULT-P04
+      - type: allocated-from
+        target: SWREQ-FALCON-FSAFE-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-FSM-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-GEO-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-HAL-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-HAL-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-MISSION-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-MIX-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-MIX-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-MIX-P05
+      - type: allocated-from
+        target: SWREQ-FALCON-MIX-P09
+      - type: allocated-from
+        target: SWREQ-FALCON-MIX-P10
+      - type: allocated-from
+        target: SWREQ-FALCON-MIXMULTI-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-MODE-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-MODEXTRA-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-MOTORDYN-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-NOTCH-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-PART-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-POS-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-POS-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-POS-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-PREARM-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-PREARM-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-PREARM-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-PREARM-P04
+      - type: allocated-from
+        target: SWREQ-FALCON-PREFLIGHT-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-RATE-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-RATE-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-RATE-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-RATE-P04
+      - type: allocated-from
+        target: SWREQ-FALCON-RATE-P05
+      - type: allocated-from
+        target: SWREQ-FALCON-RC-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-RUNAWAY-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-SHIELD-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-SUPERVISOR-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-SUPLAND-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-SUPV-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-SUPV-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-TOUCHDOWN-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-TRAJ-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-TRAJ-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-WIND-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-WINDFS-P01
+      - type: allocated-from
+        target: SWREQ-RELAY-STREAM-P05
+      - type: allocated-from
+        target: SWREQ-RELAY-STREAM-P06
+      - type: allocated-from
+        target: SWREQ-RELAY-STREAM-P07
+      - type: allocated-from
+        target: SWREQ-RELAY-STREAM-P09
+      - type: refines
+        target: SWARCH-FALCON-001

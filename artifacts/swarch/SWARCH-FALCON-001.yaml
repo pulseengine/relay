@@ -60,6 +60,17 @@ artifacts:
         - cFS-DNA: existing Verus + Rocq + Lean tracks unchanged
         - PX4-DNA: new components carry the full overdo chain
         - Cross-DNA: end-to-end SITL exercises the integration
+
+      DECOMPOSED 2026-10-22 (#261, AADL first, then allocate). The
+      "Control/dynamics" layer above is the RETIRED five-stage design
+      (relay-ekf -> pos -> att -> rate -> mix as separate tasks). The deployed
+      architecture is the RT1176 two-partition model (#591), and this
+      component is now the parent of three children derived from it:
+      SWARCH-FALCON-EST-001 (M4), SWARCH-FALCON-CASCADE-001 (M7, supervisor
+      inside) and SWARCH-FALCON-SEAM-001 (the shared-RAM seam). The EKF / RATE
+      / ATT / POS lead requirements moved to those children. MIX-P01 (mixer
+      derivation from the Drake model), MAVLINK-P01 and WORLD-P01 stay here
+      until the subsystems they belong to are modelled in spar.
     tags: [architecture, falcon, dual-dna, leeloo, verified, control-cascade]
     fields:
       composition: "build-time static fusion via meld; no runtime routing"
@@ -92,14 +103,6 @@ artifacts:
       # SWE.2 — a sw-arch-component is allocated from sw-requirements
       # (one lead requirement per falcon subsystem). The SYSREQ-FALCON
       # chain still holds transitively: SWREQ derives-from SYSREQ.
-      - type: allocated-from
-        target: SWREQ-FALCON-EKF-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-RATE-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-ATT-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-POS-P01
       - type: allocated-from
         target: SWREQ-FALCON-MIX-P01
       - type: allocated-from

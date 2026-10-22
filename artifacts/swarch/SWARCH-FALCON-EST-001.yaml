@@ -1,0 +1,80 @@
+artifacts:
+  - id: SWARCH-FALCON-EST-001
+    type: sw-arch-component
+    title: "Estimator partition (M4) — EstimatorPartition.Iekf / EstimatorTick on Rt1176M4"
+    status: approved
+    description: >
+      The state-estimation half of the RT1176 two-partition deployment (#591).
+      DERIVED FROM THE AADL, not invented here (#261, maintainer decision
+      2026-10-22: AADL first, then allocate): its boundary is exactly
+      `Falcon_Cascade::EstimatorPartition.Iekf`, whose one thread
+      `EstimatorTick` runs at 1 ms on processor `Rt1176M4`, bound to `OnChipRam`.
+
+      Owns: the invariant-EKF full-state estimator (relay-iekf) and the sensor
+      fusion feeding it — IMU propagation, GNSS / magnetometer / barometer
+      updates, innovation gating and estimator-health DETECTION. It publishes
+      `nav_out` (vehicle state) to the cascade and consumes `in_flight_in`
+      (the cascade's flying flag) back from it; both cross the cores through
+      the seam component SWARCH-FALCON-SEAM-001.
+
+      Does NOT own: what the vehicle DOES about an estimator fault (RTL, land,
+      disarm) — that is the supervisor inside SWARCH-FALCON-CASCADE-001.
+
+      NOT CLAIMED: a timing budget. The AADL gives EstimatorTick a WCET of
+      0..1 ms, i.e. the whole period, explicitly UNMEASURED (#157).
+
+      A REQUIREMENT THAT DISAGREES WITH THIS MODEL, recorded rather than
+      silently re-homed: SWREQ-FALCON-EKF-P04 bounds the estimator's tick "on
+      the target Cortex-M7 (480 MHz)". The agreed mapping (jess#144 / DD-023)
+      and the AADL put the estimator on the M4. EKF-P04 is allocated here
+      because that is where the estimator runs; its stated target needs
+      correcting as a requirement change, not in an allocation PR.
+    tags: [architecture, falcon, aadl, rt1176, m4, estimator, iekf, partition]
+    fields:
+      aadl:
+        - "Falcon_Cascade::EstimatorPartition — spar/falcon_cascade.aadl:80"
+        - "Falcon_Cascade::EstimatorPartition.Iekf — spar/falcon_cascade.aadl:87"
+        - "Falcon_Cascade::EstimatorTick — spar/falcon_cascade.aadl:66"
+        - "Falcon_System::Rt1176M4 (m4) — spar/falcon_system.aadl:36"
+      crates: [relay-iekf, relay-ekf, falcon-core]
+      period: "1 ms (AADL)"
+      wcet: "0..1 ms — UNMEASURED (#157)"
+    links:
+      - type: allocated-from
+        target: SWREQ-FALCON-BARO-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-CALIB-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-EKF-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-EKF-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-EKF-P03
+      - type: allocated-from
+        target: SWREQ-FALCON-EKF-P04
+      - type: allocated-from
+        target: SWREQ-FALCON-EKF-P05
+      - type: allocated-from
+        target: SWREQ-FALCON-FLOAT-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-FLOWRANGE-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-GNSS-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-GNSS-P02
+      - type: allocated-from
+        target: SWREQ-FALCON-IEKF-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-IMUBIAS-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-PART-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-SENSVOTE-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-SPOOF-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-WIT-P01
+      - type: allocated-from
+        target: SWREQ-RELAY-STREAM-P08
+      - type: refines
+        target: SWARCH-FALCON-001

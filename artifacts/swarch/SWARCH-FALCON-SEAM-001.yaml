@@ -1,0 +1,37 @@
+artifacts:
+  - id: SWARCH-FALCON-SEAM-001
+    type: sw-arch-component
+    title: "Cross-core seam — nav / flying connections bound to OnChipRam"
+    status: approved
+    description: >
+      The interface between the two partitions, as the AADL models it (#591):
+      connection `nav` (estimator.nav_out -> cascade.nav_in) and connection
+      `flying` (cascade.in_flight_out -> estimator.in_flight_in), both bound to
+      memory `OnChipRam` shared by Rt1176M7 and Rt1176M4. DERIVED FROM THE AADL
+      (#261).
+
+      Owns the transport contract across that boundary: the WIT seam record
+      layout and its seqlock (tick-head written first, tick-tail last, u32 so a
+      single-copy-atomic read cannot tear on ARMv7-M), and the software-bus
+      carrier relay owns at the stream<T> seam.
+
+      Does NOT own the producer or consumer logic on either side; those are
+      SWARCH-FALCON-EST-001 and SWARCH-FALCON-CASCADE-001.
+    tags: [architecture, falcon, aadl, rt1176, seam, shared-ram, seqlock, transport]
+    fields:
+      aadl:
+        - "Falcon_System::OnChipRam (ram) — spar/falcon_system.aadl:50"
+        - "connection nav — spar/falcon_system.aadl:79"
+        - "connection flying — spar/falcon_system.aadl:81"
+        - "Falcon_Cascade::InFlight — spar/falcon_cascade.aadl:56"
+    links:
+      - type: allocated-from
+        target: SWREQ-FALCON-MIX-P04
+      - type: allocated-from
+        target: SWREQ-FALCON-PART-P01
+      - type: allocated-from
+        target: SWREQ-FALCON-TRANSPORT-P01
+      - type: allocated-from
+        target: SWREQ-SB-P01
+      - type: refines
+        target: SWARCH-FALCON-001
