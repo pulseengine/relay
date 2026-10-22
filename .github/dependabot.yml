@@ -14,7 +14,6 @@ updates:
   - package-ecosystem: cargo
     directories:
       - /
-      - /fuzz
       - /crates/relay-ccsds
       - /crates/relay-cfdp
       - /crates/relay-ci
@@ -25,6 +24,19 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+  # fuzz/ is its own workspace with ONE direct dependency, libfuzzer-sys. Listed
+  # in the group above it also "updated" wit-bindgen, which it only reaches
+  # through path deps inheriting `workspace = true` from the ROOT manifest — so
+  # each such PR edited the root Cargo.toml and duplicated the root update (#576
+  # vs #578, then #598 vs #578 on 2026-10-22). Allow only what fuzz/ declares.
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    allow:
+      - dependency-name: libfuzzer-sys
   # Keep pinned third-party GitHub Actions SHAs fresh via reviewed PRs (the
   # supply-chain hardening companion to SHA-pinning in release.yml/bazel.yml).
   # A grouped action PR must still pass the per-pin check: BOTH the new and the

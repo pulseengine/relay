@@ -127,7 +127,13 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: "grep -qF '${{ github.event.pull_request.base.sha || github.event.before }}' .github/workflows/kani.yml"
+        # The base expression grew `merge_group.base_sha` in #588 (merge queue),
+        # and this step went false on main unnoticed: it is not tagged `falcon`,
+        # so the verification gate never ran it (found 2026-10-22). QUEUE-ONLY
+        # (#600) adds the deferral and the recorded skip reason; the replay below
+        # asserts both, and fails 3 of 9 cases against the pre-#600 workflow.
+        - run: "grep -qF '${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}' .github/workflows/kani.yml"
+        - run: "grep -q 'reason=deferred' .github/workflows/kani.yml"
         - run: "grep -q '0000000000000000000000000000000000000000' .github/workflows/kani.yml"
         - run: "grep -q 'git cat-file -e' .github/workflows/kani.yml"
         - run: "grep -q 'no Kani-relevant files changed' .github/workflows/kani.yml"

@@ -14,16 +14,31 @@ on:
   # MERGE QUEUE (2026-10-21). This workflow produces a REQUIRED check, so it
   # must also run on the queue's `merge_group` event — otherwise a queued PR
   # waits forever for a check that is never reported.
+  #
+  # QUEUE-ONLY (2026-10-22, maintainer decision). The 47-leg matrix used to run
+  # THREE times per change: on the PR, in the merge queue, and on the push to
+  # main. Measured 14:10Z that day: 222 of 328 jobs in the self-hosted queue
+  # were this workflow, and it already led the fleet ledger by waiting time
+  # (1,760 h). Now:
+  #   - merge_group: the matrix runs here, once, on the exact commit that lands.
+  #   - pull_request: the scope job reports DEFERRED and runs no legs; the
+  #     required "Kani gate" context passes so the PR can enter the queue, where
+  #     a failure ejects it. Its log says DEFERRED, never "verified".
+  #   - push to main: REMOVED. Main only receives queue-tested commits, and the
+  #     merge_group run's check runs attach to that same SHA, so a push run
+  #     re-proved an already-green commit.
+  #   - workflow_dispatch: manual full sweep of any branch (e.g. to get Kani
+  #     feedback on a PR before queueing it).
   merge_group:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
-  # PRs and non-main branch pushes: cancel superseded runs.
-  # Main pushes: never cancel — Kani is a required check on main;
-  # every commit needs a completed verdict for evidence preservation.
+  # Cancel superseded runs per ref. Each merge-queue entry has its own
+  # gh-readonly-queue/... ref, so queue entries never cancel one another. There
+  # are no push-to-main runs any more (QUEUE-ONLY above); a manual dispatch on
+  # main is still never cancelled.
   group: kani-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
@@ -40,6 +55,10 @@ jobs:
     runs-on: [self-hosted, linux, x64, light]
     outputs:
       run: ${{ steps.scope.outputs.run }}
+      # Why the matrix was skipped: `deferred` (pull_request — it runs in the
+      # merge queue) or `out-of-scope` (no Kani-relevant file changed). Empty
+      # when it runs. kani-gate fails closed on a skip without a reason.
+      reason: ${{ steps.scope.outputs.reason }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -64,6 +83,15 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         shell: bash
         run: |
+          # QUEUE-ONLY: a pull request never runs the matrix — the merge queue
+          # does, on the commit that will land. Decided before any diffing so no
+          # base-sha corner case can turn it back into a PR-time sweep.
+          if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
+            echo "pull_request — Kani DEFERRED to the merge queue (merge_group runs the matrix)"
+            echo "run=false" >>"$GITHUB_OUTPUT"
+            echo "reason=deferred" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Three ways a base can be unusable, each of which must SWEEP rather
           # than skip. Collapsing them into one `-z` test is what made the push
           # case silently unconditional.
@@ -97,6 +125,7 @@ jobs:
             echo "no Kani-relevant files changed — SKIP the matrix (kani-gate reports pass)"
             printf 'changed:\n%s\n' "$CHANGED"
             echo "run=false" >>"$GITHUB_OUTPUT"
+            echo "reason=out-of-scope" >>"$GITHUB_OUTPUT"
           fi
 
   kani:
@@ -232,16 +261,22 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           KANI_RESULT: ${{ needs.kani.result }}
+          SKIP_REASON: ${{ needs.changes.outputs.reason }}
         run: |
           # The scope job must have succeeded — otherwise we can't trust the
           # skip decision, so fail closed.
           if [ "$CHANGES_RESULT" != "success" ]; then
             echo "scope (changes) job did not succeed: $CHANGES_RESULT"; exit 1
           fi
-          # matrix skipped == no Kani-relevant files changed == pass (CI diet,
-          # tier B); the push:main backstop always runs the full matrix.
+          # A skip passes ONLY with a stated reason, and the log says which one —
+          # a deferred PR must never read as "verified".
           case "$KANI_RESULT" in
             success) echo "Kani matrix: all engines verified" ;;
-            skipped) echo "Kani matrix: skipped (no Kani-relevant files changed) — OK" ;;
+            skipped)
+              case "$SKIP_REASON" in
+                deferred) echo "Kani matrix: DEFERRED — not run on the PR; the merge queue runs it before this lands" ;;
+                out-of-scope) echo "Kani matrix: skipped (no Kani-relevant files changed) — OK" ;;
+                *) echo "Kani matrix skipped with no recorded reason ('$SKIP_REASON') — failing closed"; exit 1 ;;
+              esac ;;
             *) echo "Kani matrix result: $KANI_RESULT"; exit 1 ;;
           esac
