@@ -13,9 +13,9 @@
 //!           (relay-ekf → relay-pos → relay-att → relay-rate →
 //!           relay-mix-quad) closes against gz IMU + NavSat. Mirrors
 //!           `examples/falcon-sitl-hover`'s `run_mission` pattern.
-//!           Default `--scenario=hover` is now closed-loop; the v0.19.3
-//!           open-loop 70 % PWM smoke test is reachable via
-//!           `--scenario=open-loop-climb`.
+//!           (That `hover` scenario was RETIRED in #477: it diverged to
+//!           74.6 m at 25 s. The default is now `flightcore`, and an
+//!           unknown `--scenario` exits 2 instead of falling back.)
 
 mod campaign;
 mod flightcore;
@@ -28,11 +28,11 @@ use flightcore::SitlBackend;
 use physics::{GazeboPhysics, MockPhysics, Physics};
 use relay_arm::{ARMED, ArmingConfig, ArmingSequencer};
 use relay_att::{AttController, Timestamp as AttTimestamp};
-use relay_ekf::{Ekf, ImuSample, Timestamp as EkfTimestamp};
+use relay_ekf::{Ekf, Timestamp as EkfTimestamp};
 use relay_geo::GeoAtt;
 use relay_iekf::{Iekf, Imu as IekfImu, NavState};
 use relay_mix_quad::QuadMixer;
-use relay_pos::{PosController, PosGains, PositionSetpoint, Timestamp as PosTimestamp};
+use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTimestamp};
 use relay_rate::{RatePid, Timestamp as RateTimestamp};
 use relay_traj::{RefGovernor, Segment3};
 use std::fs;
@@ -49,7 +49,18 @@ fn main() {
         return;
     }
     let backend = arg(&args, "--backend").unwrap_or_else(|| "mock".into());
-    let scenario = arg(&args, "--scenario").unwrap_or_else(|| "hover".into());
+    let scenario = arg(&args, "--scenario").unwrap_or_else(|| DEFAULT_SCENARIO.into());
+    // Refuse an unknown scenario BEFORE opening evidence or connecting to gz.
+    // It used to fall back silently to the legacy `hover` cascade, so a typo
+    // measured a path that diverges (74.6 m at 25 s, #477) under the name the
+    // operator asked for.
+    if !SCENARIOS.contains(&scenario.as_str()) {
+        eprintln!(
+            "unknown scenario: {scenario}  (expected one of: {})",
+            SCENARIOS.join(" | ")
+        );
+        std::process::exit(2);
+    }
     let duration_s: f32 = arg(&args, "--duration")
         .and_then(|s| s.parse().ok())
         .unwrap_or(5.0);
@@ -104,13 +115,35 @@ fn main() {
     }
 }
 
+/// The scenario run when `--scenario` is absent: the production flight core
+/// (`FlightCore`, the stack that flies), not a bench-local cascade (#477).
+const DEFAULT_SCENARIO: &str = "flightcore";
+
+/// Every scenario `run_scenario` dispatches. `main` refuses anything else with
+/// exit 2. `hover` is deliberately absent: it was the legacy five-stage cascade
+/// and diverged on every plant (#477).
+const SCENARIOS: &[&str] = &[
+    "open-loop-climb",
+    "alt-only",
+    "alt-rate",
+    "frame-roll",
+    "frame-pitch",
+    "frame-yaw",
+    "yaw-probe",
+    "arming",
+    "arming-ungated",
+    "geo-hover",
+    "mission",
+    "flightcore",
+    "flightcore-rotorout",
+    "supervised-rotorout",
+];
+
 /// Runs the named scenario against the chosen physics backend.
 ///
-/// v0.19.4 wires two scenarios:
-///   - `hover`           — closed-loop cascade (EKF + POS + ATT + RATE
-///                         + MIX) holding NED setpoint (0, 0, -2 m).
-///                         PASS = within 0.5 m at end + RMS over last
-///                         5 s under 1.0 m.
+/// v0.19.4 wired `hover` (the legacy EKF + POS + ATT + RATE + MIX cascade)
+/// and `open-loop-climb`; `hover` was retired in #477. `SCENARIOS` is the
+/// current list.
 ///   - `open-loop-climb` — v0.19.3's constant 70 % PWM scaffolding,
 ///                         kept as a wire-level smoke test that
 ///                         doesn't depend on cascade tuning. PASS =
@@ -184,7 +217,6 @@ fn run_scenario(
     evidence: Option<&mut EvidenceSink>,
 ) -> bool {
     match scenario {
-        "hover" => run_closed_loop_hover(physics, duration_s, evidence),
         "open-loop-climb" => run_open_loop_climb(physics, duration_s, evidence),
         "alt-only" => run_alt_only_hover(physics, duration_s, evidence),
         "alt-rate" => run_alt_rate_hover(physics, duration_s, evidence),
@@ -233,8 +265,7 @@ fn run_scenario(
             run_supervised_rotorout(physics, 2.0, duration_s, duration_s * 0.4, evidence)
         }
         other => {
-            eprintln!("  scenario {other} not yet wired; falling back to closed-loop hover",);
-            run_closed_loop_hover(physics, duration_s, evidence)
+            unreachable!("scenario {other} passed main's SCENARIOS check but is not dispatched")
         }
     }
 }
@@ -2075,304 +2106,10 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
         // unsatisfiable and the requirement's vertical bound means the hold window.
         // Only THIS verdict changes; the four other `rms_steady < 1.0` bars belong
         // to run_geo_cascade / run_alt_rate_hover / run_alt_only_hover /
-        // run_closed_loop_hover, whose margins are unmeasured.
+        // the since-retired run_closed_loop_hover (#477), whose margins are
+        // unmeasured.
         None => final_dist < 0.5 && rms_steady < 0.5 && final_horiz < 1.0 && peak_horiz < 1.0,
     }
-}
-
-/// v0.19.4 — closed-loop hover. Mirrors `falcon-sitl-hover`'s
-/// `run_mission` cascade pattern, but inputs come from the bridge
-/// (gz IMU + NavSat) and outputs feed the bridge's motor publish.
-///
-/// Setpoint: NED (0, 0, -2) — hover at 2 m altitude. v_ned is finite-
-/// differenced from p_ned (gz NavSat doesn't expose velocity directly
-/// in v0.18.1's subscriber; the math is identical to a 1st-order
-/// derivative the POS controller would compute internally anyway).
-///
-/// All loops run at the harness rate (100 Hz). Canonical rates from
-/// falcon-sitl-hover are 1 kHz IMU / 250 Hz ATT / 50 Hz POS — running
-/// at 100 Hz universally produces a stable hover under gz; tighter
-/// loop bandwidth is a v0.19.x tuning lever, not a v0.19.4 prerequisite.
-fn run_closed_loop_hover(
-    physics: &mut dyn Physics,
-    duration_s: f32,
-    mut evidence: Option<&mut EvidenceSink>,
-) -> bool {
-    let mut ekf = Ekf::new();
-    // v0.21 — the Invariant EKF runs in PARALLEL with the Mahony filter
-    // for the diagnostic: POS_DEBUG prints iekf_tilt vs the Mahony
-    // est_tilt vs true_tilt. If the IEKF tracks truth where Mahony
-    // diverges to 51° (v0.20 RC#3), the keystone works.
-    let mut iekf = Iekf::level();
-    let mut iekf_heading_init = false;
-    // v0.22 — hold a FIXED heading (the spawn heading, NED yaw ≈ 90° =
-    // body facing East). "Hold current estimate yaw" feeds estimate noise
-    // back through the Euler setpoint and spins the body once yaw ≠ 0.
-    let yaw_hold = core::f32::consts::FRAC_PI_2;
-    let mut rate_pid = RatePid::new();
-    let mut att = AttController::new();
-    // v0.20 — calibrate the position controller's hover thrust for the gz
-    // 2 kg falcon-quad. The relay-pos DEFAULT (0.5, a 500 g 10-inch quad)
-    // sits AT the mixer floor, so the body could not climb. 0.72 is the
-    // measured hover collective for this airframe (matches alt-rate).
-    // v0.21 — gentler position gains for the gz 2 kg body on a still-
-    // imperfect estimate: a soft kp_pos + tighter tilt limit keep the
-    // body near-stationary (in the observable regime) so the IEKF
-    // attitude estimate is not destabilised by aggressive translation.
-    let mut pos = PosController::with_gains(PosGains {
-        hover_thrust: 0.72,
-        kp_pos: 0.4,
-        tilt_max: 0.20,
-        ..PosGains::DEFAULT
-    });
-    let mut mixer = QuadMixer::new();
-    // v0.19.9 — arming sequencer gates the rate loop here too. The full
-    // cascade had no spawn-hold at all (torque from t=0), so it was the
-    // clearest RC#1 victim.
-    let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
-
-    let setpoint_ned = [0.0_f32, 0.0, -2.0];
-    let setpoint = if std::env::var("USE_IEKF").is_ok() {
-        PositionSetpoint {
-            position_ned: setpoint_ned,
-            velocity_ned: [0.0; 3],
-            yaw_setpoint: yaw_hold,
-        }
-    } else {
-        PositionSetpoint::hover_at(setpoint_ned)
-    };
-
-    let dt = 0.01_f32;
-    let n = (duration_s / dt) as u32;
-    let tick_period = Duration::from_secs_f32(dt);
-    let pace_real_time = physics.counters().is_some();
-
-    let mut current_att_sp = [1.0_f32, 0.0, 0.0, 0.0];
-    let mut current_thrust = 0.5_f32;
-
-    let mut last_pos_ned: Option<[f32; 3]> = None;
-    let mut peak_dist_err = 0.0_f32;
-    let mut min_dist_seen = f32::INFINITY;
-    let mut nan_seen = false;
-    let mut sum_sq_steady = 0.0_f32;
-    let mut steady_count = 0_usize;
-    // Last 5 s of the run define "steady" — same shape as
-    // `falcon-sitl-hover::run_mission`'s 2 s tail. Looser here
-    // because gz step granularity + finite-diff velocity make
-    // settling slower than the pure-Rust SITL.
-    let steady_start_t = (duration_s - 5.0).max(0.0);
-
-    let started_at = Instant::now();
-    for step in 0..n {
-        let tick_start = Instant::now();
-        let t = step as f32 * dt;
-
-        // 1. Read state from the bridge.
-        let (mut imu_sample, pos_ned) = physics.measure(0.0);
-        imu_sample.time = ekf_ts_of(t);
-
-        // 2. EKF — attitude estimate.
-        let est = ekf.tick(imu_sample);
-        if !est.quaternion[0].is_finite() {
-            nan_seen = true;
-        }
-
-        // 2b. IEKF — propagate on IMU, correct on gz position (the
-        //     "GPS"), and on heading (v0.22 "compass") which makes yaw
-        //     observable (the v0.21 ±130° wander). The measured accel is
-        //     body-frame specific force, exactly the IEKF's dynamics input.
-        iekf.propagate(
-            IekfImu {
-                gyro: imu_sample.gyro_body,
-                accel: imu_sample.accel_body,
-            },
-            dt,
-        );
-        // Adaptive gravity/tilt fusion (variance inflates under accel) +
-        // position. Gives the roll/pitch observability the IMU+GPS-only
-        // filter lacked (3° error → tip-over).
-        iekf.update_gravity(imu_sample.accel_body, 0.5);
-        iekf.update_position(pos_ned, 0.04); // ~0.2 m 1σ NavSat
-        if let Some(hdg) = physics.heading_ned() {
-            // One-time alignment: start the estimate at the body's true
-            // heading so the controller doesn't see a 90° startup yaw
-            // error (which kicked it into a spin).
-            if !iekf_heading_init {
-                iekf.init_heading(hdg);
-                iekf_heading_init = true;
-            }
-            iekf.update_yaw(hdg, 0.01); // ~6° 1σ compass
-        }
-
-        // 3. POS — position + velocity → attitude setpoint.
-        let v_fd = match last_pos_ned {
-            Some(p) => [
-                (pos_ned[0] - p[0]) / dt,
-                (pos_ned[1] - p[1]) / dt,
-                (pos_ned[2] - p[2]) / dt,
-            ],
-            None => [0.0; 3],
-        };
-        last_pos_ned = Some(pos_ned);
-        // v0.21 — control attitude source: the IEKF (USE_IEKF) vs the
-        // legacy Mahony filter. Closing the loop on the IEKF is the test
-        // of whether the keystone fixes RC#3 → position-hold. When on the
-        // IEKF, also feed its SMOOTH velocity estimate (the finite-diff
-        // v_fd from NavSat is noisy and was destabilising the vel loop).
-        let use_iekf = std::env::var("USE_IEKF").is_ok();
-        let est_q = if use_iekf {
-            iekf.state().q
-        } else {
-            est.quaternion
-        };
-        let v_ned = if use_iekf { iekf.state().v } else { v_fd };
-        let att_sp = pos.tick(pos_ts_of(t), pos_ned, v_ned, est_q, setpoint);
-        current_att_sp = att_sp.quaternion;
-        current_thrust = att_sp.thrust;
-
-        // 4. ATT — quaternion error → rate setpoint.
-        let current_rate_sp = att.tick(att_ts_of(t), est_q, current_att_sp);
-
-        // 5. RATE — gyro + rate setpoint → torque (frame-corrected),
-        //    gated by the arming sequencer (RC#1). Torque authority
-        //    engages only after spin-up + confirmed level.
-        let tilt = body_tilt_rad(imu_sample.accel_body);
-        let arm = seq.tick(tilt, true);
-        let torque_raw = if arm.torque_authority {
-            rate_pid.tick(rate_ts_of(t), imu_sample.gyro_body, current_rate_sp)
-        } else {
-            [0.0_f32; 3]
-        };
-        let torque = frame_correct_torque(torque_raw);
-        for k in 0..3 {
-            if !torque[k].is_finite() {
-                nan_seen = true;
-            }
-        }
-
-        // 6. MIX — torque + thrust → 4× motor PWM. v0.19.9 carries the
-        //    v0.19.8 verified thrust-floor into the full cascade and
-        //    ramps collective + floor during spin-up.
-        let motors = mixer.mix_thrust_floor(
-            torque,
-            current_thrust * arm.thrust_scale,
-            0.5 * arm.thrust_scale,
-        );
-        if motors.iter().any(|v| !v.is_finite()) {
-            nan_seen = true;
-        }
-
-        // 7. Publish to the bridge.
-        physics.step(motors, dt);
-
-        if std::env::var("POS_DEBUG").is_ok() && step % 50 == 0 {
-            // est_tilt: body-down axis rotated by the EKF quaternion vs NED-down.
-            let q = est.quaternion;
-            let bz_d = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]); // R[2][2]
-            let est_tilt = libm::acosf(bz_d.clamp(-1.0, 1.0));
-            let is = iekf.state();
-            let iq = is.q;
-            let iyaw = libm::atan2f(
-                2.0 * (iq[0] * iq[3] + iq[1] * iq[2]),
-                1.0 - 2.0 * (iq[2] * iq[2] + iq[3] * iq[3]),
-            );
-            let chdg = physics.heading_ned().unwrap_or(f32::NAN).to_degrees();
-            eprintln!(
-                "    [dbg] t={t:.1} pos=[{:.1},{:.1},{:.1}] true_tilt={:.1}° IEKF_tilt={:.1}° IEKF_yaw={:.1}° compass={:.1}° ipos=[{:.1},{:.1},{:.1}]",
-                pos_ned[0],
-                pos_ned[1],
-                pos_ned[2],
-                tilt.to_degrees(),
-                is.tilt_rad().to_degrees(),
-                iyaw.to_degrees(),
-                chdg,
-                is.p[0],
-                is.p[1],
-                is.p[2],
-            );
-        }
-
-        // 8. Bookkeeping — distance to setpoint.
-        let dn = pos_ned[0] - setpoint_ned[0];
-        let de = pos_ned[1] - setpoint_ned[1];
-        let dd = pos_ned[2] - setpoint_ned[2];
-        let dist = (dn * dn + de * de + dd * dd).sqrt();
-        if dist > peak_dist_err {
-            peak_dist_err = dist;
-        }
-        if dist < min_dist_seen {
-            min_dist_seen = dist;
-        }
-        if t >= steady_start_t {
-            sum_sq_steady += dist * dist;
-            steady_count += 1;
-        }
-
-        if let Some(ref mut e) = evidence {
-            e.write_tick(
-                step,
-                t,
-                pos_ned,
-                imu_sample.accel_body,
-                imu_sample.gyro_body,
-                motors,
-                physics.counters(),
-            );
-        }
-
-        if pace_real_time {
-            let used = tick_start.elapsed();
-            if used < tick_period {
-                std::thread::sleep(tick_period - used);
-            }
-        }
-    }
-    let wall = started_at.elapsed();
-
-    let final_dist = match last_pos_ned {
-        Some(p) => {
-            let dn = p[0] - setpoint_ned[0];
-            let de = p[1] - setpoint_ned[1];
-            let dd = p[2] - setpoint_ned[2];
-            (dn * dn + de * de + dd * dd).sqrt()
-        }
-        None => f32::NAN,
-    };
-    let rms_steady = if steady_count > 0 {
-        (sum_sq_steady / steady_count as f32).sqrt()
-    } else {
-        f32::NAN
-    };
-    let counters = physics.counters();
-
-    println!(
-        "  verdict: backend={} scenario=hover steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
-        physics.name(),
-        n,
-        final_dist,
-        peak_dist_err,
-        rms_steady,
-        wall.as_secs_f32(),
-    );
-    if let Some((imu_recv, navsat_recv, motor_send)) = counters {
-        println!(
-            "  counters: imu_recv={imu_recv} navsat_recv={navsat_recv} motor_send={motor_send}",
-        );
-    }
-    if let Some(ref mut e) = evidence {
-        e.write_summary_hover(
-            n,
-            final_dist,
-            peak_dist_err,
-            rms_steady,
-            min_dist_seen,
-            wall.as_secs_f32(),
-            counters,
-        );
-    }
-
-    // PASS = within 0.5 m at end + RMS over last 5 s under 1.0 m + no NaN.
-    !nan_seen && final_dist < 0.5 && rms_steady < 1.0
 }
 
 fn ekf_ts_of(secs: f32) -> EkfTimestamp {
@@ -2727,21 +2464,23 @@ mod tests {
         assert_eq!(frame_correct_torque([0.0, 0.0, 1.0]), [0.0, 0.0, 1.0]);
     }
 
-    /// v0.19.4 — closed-loop cascade against MockPhysics. Smoke test
-    /// that the cascade wires + ticks without panic, no NaN escape.
-    /// MockPhysics ignores per-rotor differential (applies only
-    /// collective thrust to vertical axis), so attitude control
-    /// is a no-op; the test confirms the loop runs at all, not that
-    /// hover is achieved here. Real hover lands under gz.
+    /// #477: the legacy `hover` scenario (relay-ekf → pos → att → rate, the
+    /// v0.19.4 path) diverged to 74.6 m at 25 s and 202 m at 60 s on main and
+    /// was retired. It must stay unreachable, the default must be a scenario
+    /// that flies the current stack, and every listed scenario must dispatch.
     #[test]
-    fn closed_loop_hover_compiles_and_ticks_on_mock() {
+    fn legacy_hover_is_retired_and_the_default_flies_the_flight_core() {
+        assert!(
+            !SCENARIOS.contains(&"hover"),
+            "legacy hover is back in the list"
+        );
+        assert_eq!(DEFAULT_SCENARIO, "flightcore");
+        assert!(SCENARIOS.contains(&DEFAULT_SCENARIO));
         let mut p = MockPhysics::at_rest();
-        let _ = run_closed_loop_hover(&mut p, 0.5, None);
-        // Pass criterion: no panic, no NaN escape into omega/v_ned.
-        for i in 0..3 {
-            assert!(p.omega[i].is_finite(), "omega[{i}] = {}", p.omega[i]);
-            assert!(p.v_ned[i].is_finite(), "v_ned[{i}] = {}", p.v_ned[i]);
-        }
+        assert!(
+            run_scenario(&mut p, DEFAULT_SCENARIO, 25.0, None),
+            "the default scenario must hold station on the mock plant"
+        );
     }
 
     /// v1.113 — the PRODUCTION `falcon_core::FlightCore` (the verified
@@ -2805,7 +2544,7 @@ mod tests {
     fn evidence_sink_produces_log_and_csv() {
         let tmp = std::env::temp_dir().join(format!("fsg-bench-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
-        let mut sink = EvidenceSink::open(&tmp, "mock", "hover").expect("open");
+        let mut sink = EvidenceSink::open(&tmp, "mock", "flightcore").expect("open");
         sink.write_tick(
             0,
             0.0,

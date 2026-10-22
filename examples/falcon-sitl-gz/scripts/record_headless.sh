@@ -33,7 +33,7 @@
 #
 # Usage:
 #   record_headless.sh [chase|static|markers] [scenario] [duration_s]
-#     scenario : mission (default) | alt-only | hover | geo-hover
+#     scenario : mission (default) | alt-only | flightcore | geo-hover  (`hover` retired, #477)
 #     duration : flight seconds (default 55)
 #   env: FLIGHT=wasm  film the WASM component (tests/cascade-sitl-wasm) instead
 #        of the native binary, with WASM_PATH pointing at the .wasm. The gz gate

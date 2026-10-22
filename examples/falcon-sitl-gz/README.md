@@ -10,7 +10,7 @@ drop in without touching the verified cascade or its assertions.
 | File             | What it is                                              |
 |------------------|---------------------------------------------------------|
 | `src/physics.rs` | `Physics` trait + `MockPhysics` reference impl + `GazeboPhysics` stub |
-| `src/main.rs`    | CLI runner with one demonstration scenario (hover)      |
+| `src/main.rs`    | CLI runner; default scenario `flightcore` (see `SCENARIOS`) |
 | `Cargo.toml`     | Reuses the verified cascade crates (relay-ekf, relay-pos, relay-att, relay-rate, relay-mix-quad, relay-lc, relay-sc) |
 
 The `Physics` trait is **two methods**: `step(motor_pwm, dt)` and
@@ -66,7 +66,7 @@ gz sim -r -v3 examples/falcon-sitl-gz/worlds/falcon-quad.sdf
 cargo run -p falcon-sitl-gz --features gazebo --release -- \
   --backend=gazebo --world=falcon --model=quad \
   --home=47.3977,8.5456,488 --duration=30 \
-  --scenario=hover \
+  --scenario=flightcore \
   --evidence-dir=bench-evidence/gz-sim
 ```
 

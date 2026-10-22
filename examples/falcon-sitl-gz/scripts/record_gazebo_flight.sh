@@ -11,8 +11,8 @@
 # Usage:
 #   examples/falcon-sitl-gz/scripts/record_gazebo_flight.sh [scenario] [duration_s]
 #
-#   scenario : alt-only (default, stable hover) | hover (full cascade,
-#              still tuning as of v0.19.5) | open-loop-climb
+#   scenario : alt-only (default, stable hover) | flightcore (the production
+#              flight core) | open-loop-climb  (the legacy `hover` was retired, #477)
 #   duration : flight seconds (default 10)
 #
 # Output: bench-evidence/gz-sim/recordings/<ts>-gazebo-<scenario>.mp4
