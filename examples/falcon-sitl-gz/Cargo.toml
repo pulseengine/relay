@@ -49,5 +49,5 @@ libm = "0.2"
 # links the installed gz-transport13 (Harmonic); gz-msgs supplies the protobuf
 # message types (IMU/NavSat/Actuators/Pose_V/Magnetometer/Odometry).
 gz-transport = { version = "0.10", features = ["harmonic"], optional = true }
-gz-msgs = { version = "0.10", features = ["harmonic"], optional = true }
+gz-msgs = { version = "0.11", features = ["harmonic"], optional = true }
 crossbeam-channel = { version = "0.5", optional = true }
