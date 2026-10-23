@@ -45,6 +45,12 @@ artifacts:
         parse OK; spar analyze 0 errors.
     links:
       - type: allocated-from
+        target: SWREQ-SEC-P05
+      - type: allocated-from
+        target: SWREQ-SEC-P06
+      - type: allocated-from
+        target: SWREQ-SEC-P07
+      - type: allocated-from
         target: SWREQ-TRANSPORT-P01
       - type: refines
         target: SWARCH-RELAY-SEC-001

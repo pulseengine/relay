@@ -1,0 +1,52 @@
+artifacts:
+  - id: FV-FALCON-ARCH-003
+    type: sw-verification
+    title: "ARCH — the sw-arch components and the RT1176 AADL name the same partitions (#261, both directions)"
+    status: implemented
+    release: falcon-v1.142.0
+    description: >
+      #261 decomposes the architecture layer FROM the AADL (maintainer
+      decision 2026-10-22: AADL first, then allocate). Three sw-arch
+      components are derived from the RT1176 model #591 merged, each naming
+      the AADL elements it is:
+        - SWARCH-FALCON-EST-001     = EstimatorPartition.Iekf / EstimatorTick on Rt1176M4
+        - SWARCH-FALCON-CASCADE-001 = CascadePartition.Supervised / CascadeTick on Rt1176M7
+        - SWARCH-FALCON-SEAM-001    = connections nav + flying bound to OnChipRam
+      Comms stays on the existing SWARCH-RELAY-TRANSPORT-001, which already
+      is spar/relay_transport.aadl's SecureChannel.
+
+      This artifact makes "the spar model and the swarch artifacts agree"
+      mechanical rather than a sentence: every AADL element a component
+      claims must exist in spar/, and the retired five-thread decomposition
+      the old SWARCH-FALCON-001 text still describes must NOT come back into
+      the model. Tagged `falcon` so the verification gate executes it (#601:
+      untagged artifacts are never run).
+
+      NOT CLAIMED: that every sw-req is allocated. About 100 of 279 are, to
+      the AADL-derived components; the rest belong to subsystems the AADL does
+      not model yet (mission engines, drivers, ground link, packaging,
+      tooling) and are allocated as each is modelled in spar. Nor a timing
+      claim: both ticks' WCET is the whole period, UNMEASURED (#157).
+    tags: [verification, falcon, architecture, aadl, spar, rt1176, v1.142]
+    fields:
+      method: inspection
+      steps:
+        # Each component's AADL anchors exist in spar/.
+        - run: "grep -qE '^\\s*process implementation EstimatorPartition\\.Iekf\\b' spar/falcon_cascade.aadl"
+        - run: "grep -qE '^\\s*thread EstimatorTick\\b' spar/falcon_cascade.aadl"
+        - run: "grep -qE '^\\s*process implementation CascadePartition\\.Supervised\\b' spar/falcon_cascade.aadl"
+        - run: "grep -qE '^\\s*thread CascadeTick\\b' spar/falcon_cascade.aadl"
+        - run: "grep -qE '^\\s*processor Rt1176M4\\b' spar/falcon_system.aadl"
+        - run: "grep -qE '^\\s*processor Rt1176M7\\b' spar/falcon_system.aadl"
+        - run: "grep -qE '^\\s*memory OnChipRam\\b' spar/falcon_system.aadl"
+        - run: "grep -qE '^\\s*nav: port estimator\\.nav_out -> cascade\\.nav_in' spar/falcon_system.aadl"
+        - run: "grep -qE '^\\s*flying: port cascade\\.in_flight_out -> estimator\\.in_flight_in' spar/falcon_system.aadl"
+        # And the components say so, by the same names.
+        - run: "grep -q 'EstimatorPartition.Iekf' artifacts/swarch/SWARCH-FALCON-EST-001.yaml"
+        - run: "grep -q 'CascadePartition.Supervised' artifacts/swarch/SWARCH-FALCON-CASCADE-001.yaml"
+        - run: "grep -q 'OnChipRam' artifacts/swarch/SWARCH-FALCON-SEAM-001.yaml"
+        # NEGATIVE: the retired five-thread model must not return to spar.
+        - run: "! grep -qE '^\\s*thread (EkfThread|PositionThread|AttitudeThread|RateThread|MixerThread)\\b' spar/falcon_cascade.aadl"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-PART-P01
