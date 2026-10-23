@@ -501,25 +501,23 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # pinned (was @main) — supply-chain
 
       - name: Set up Bazel
-        # PINNED TO THE GENUINE v0.14.0 COMMIT (2026-10-21). The previous pin,
-        # 5483a91b6e3ffac6092848f1dd7eafcfad203d80, carried the comment
-        # "v0.14.0 pinned" but is NOT v0.14.0 and is NOT in this repository's
-        # history at all: the commits API, the .patch URL and commit search all
-        # return "not found", while the TARBALL endpoint still serves it (HTTP
-        # 200) — GitHub resolves owner/repo@<sha> across the whole fork
-        # network, so an object that exists only in a fork (or was orphaned)
-        # still downloads under this repo's name. Every release since v1.77
-        # (#205, 2026-06-17) downloaded and ran it on this job; v1.140.0's log
-        # records `Download action repository
-        # 'bazel-contrib/setup-bazel@5483a91…'`.
+        # PINNED TO THE v0.19.1 TAG'S COMMIT (2026-10-22, Dependabot #599).
+        # Verified with the commits API exit code: 104e3eea is a commit in
+        # bazel-contrib/setup-bazel, and the annotated tag 0.19.1 (object
+        # 9f075053) dereferences to it; a fabricated SHA is refused (rc=1).
+        # Unlike the 2026-10-21 repin, this bump DOES change executed code on
+        # the signing job: v0.19.1's tree differs from v0.14.0's (24 vs 20
+        # files). That is why it waits for maintainer review.
         #
-        # It was BENIGN, and that was measured, not assumed: its extracted tree
-        # is byte-identical to the real v0.14.0 tag commit below (20 files,
-        # content tree-hash d9249affa4edfd11 for both), with a negative control
-        # (real 0.19.1: 24 files, a different hash) proving the comparison
-        # discriminates. So this repin changes NO executed code — only the
-        # provenance, from "unverifiable" to "the release tag's own commit".
-        uses: bazel-contrib/setup-bazel@e8776f58fb6a6e9055cbaf1b38c52ccc5247e9c4 # v0.14.0 (tag 0.14.0 -> e8776f5, verified)
+        # CORRECTION of the 2026-10-21 note (#583). The old pin 5483a91b… was
+        # called a fork-network commit "not in this repository's history". It
+        # is the ANNOTATED TAG OBJECT of v0.14.0: `git/ref/tags/0.14.0` returns
+        # a tag object 5483a91b, and that object points at commit e8776f5. The
+        # commits API refused it because a tag is not a commit, and the tarball
+        # served v0.14.0's exact tree because it WAS v0.14.0. So it was the
+        # common slip of pinning `git rev-parse <tag>` instead of `<tag>^{}`.
+        # Pin the COMMIT the tag points at, never the tag object.
+        uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # v0.19.1 (tag object 9f075053 -> commit 104e3eea, verified)
         with:
           bazelisk-cache: true
           disk-cache: bazel
