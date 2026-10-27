@@ -17,12 +17,14 @@
 use crate::native_mirror::{Calib, NativeCascade, SupCalib};
 use crate::physics::{MockPhysics, Physics};
 use falcon_core::relay_fsm::Event;
+use falcon_core::relay_preflight::CheckId;
 
 const DT: f32 = 0.0025;
 const PACK_V: f32 = 16.8;
 const LOW_BATT_V: f32 = 14.0;
 
 const DISARMED: u8 = 0;
+const ARMED: u8 = 1;
 const TAKEOFF: u8 = 2;
 const LOITER: u8 = 3;
 const TERMINATED: u8 = 7;
@@ -409,6 +411,127 @@ fn isolated_rotor_survives_configure<S: Seam>(s: &mut S) {
     );
 }
 
+// ── #609 finding 3 ─────────────────────────────────────────────────────────
+
+/// Every invalid safety configuration, each of which `sup_params` used to map
+/// to a PERMISSIVE value (geofence off, battery failsafe unreachable, 2 m
+/// cruise). Units/signs read from the WIT: fence-radius m (> 0), cruise-alt m
+/// AGL POSITIVE, low-batt-v whole-pack V (> 0), home NED m (finite).
+fn invalid_sup_configs() -> Vec<(&'static str, SupCalib)> {
+    let g = good_sup();
+    vec![
+        (
+            "fence NaN",
+            SupCalib {
+                fence_radius: f32::NAN,
+                ..g
+            },
+        ),
+        (
+            "fence 0",
+            SupCalib {
+                fence_radius: 0.0,
+                ..g
+            },
+        ),
+        (
+            "fence -5",
+            SupCalib {
+                fence_radius: -5.0,
+                ..g
+            },
+        ),
+        (
+            "fence +inf",
+            SupCalib {
+                fence_radius: f32::INFINITY,
+                ..g
+            },
+        ),
+        (
+            "low-batt NaN",
+            SupCalib {
+                low_batt_v: f32::NAN,
+                ..g
+            },
+        ),
+        (
+            "low-batt -14",
+            SupCalib {
+                low_batt_v: -14.0,
+                ..g
+            },
+        ),
+        (
+            "low-batt 0",
+            SupCalib {
+                low_batt_v: 0.0,
+                ..g
+            },
+        ),
+        (
+            "low-batt +inf",
+            SupCalib {
+                low_batt_v: f32::INFINITY,
+                ..g
+            },
+        ),
+        (
+            "cruise -30",
+            SupCalib {
+                cruise_alt: -30.0,
+                ..g
+            },
+        ),
+        (
+            "cruise 0",
+            SupCalib {
+                cruise_alt: 0.0,
+                ..g
+            },
+        ),
+        (
+            "cruise NaN",
+            SupCalib {
+                cruise_alt: f32::NAN,
+                ..g
+            },
+        ),
+        (
+            "home.x NaN",
+            SupCalib {
+                home: [f32::NAN, 0.0, 0.0],
+                ..g
+            },
+        ),
+    ]
+}
+
+/// An invalid safety configuration must leave the vehicle unarmable, not
+/// armable with a failsafe silently switched off.
+fn invalid_supervisor_config_refuses_arm<S: Seam>(mk: impl Fn() -> S) {
+    // Every case is run and the offenders reported together, so one failure
+    // does not hide the others.
+    let mut armed = Vec::new();
+    for (name, bad) in invalid_sup_configs() {
+        let mut s = mk();
+        let mut rig = Rig::new();
+        s.configure(mock_calib());
+        s.configure_supervisor(bad);
+        s.command(Event::Arm);
+        s.command(Event::RequestTakeoff);
+        rig.fly(&mut s, 5);
+        let m = s.mode();
+        if m != Some(DISARMED) {
+            armed.push(format!("{name} -> mode {m:?}"));
+        }
+    }
+    assert!(
+        armed.is_empty(),
+        "invalid supervisor configs were ARMED: {armed:?}"
+    );
+}
+
 // ── native mirror: every `cargo test` ─────────────────────────────────────
 
 #[test]
@@ -424,6 +547,38 @@ fn mirror_terminated_is_absorbing_through_configure() {
 #[test]
 fn mirror_isolated_rotor_survives_configure() {
     isolated_rotor_survives_configure(&mut NativeCascade::new());
+}
+
+#[test]
+fn mirror_invalid_supervisor_config_refuses_arm() {
+    invalid_supervisor_config_refuses_arm(NativeCascade::new);
+}
+
+/// The mirror can NAME the refusing row, which the seam cannot: the refusal
+/// must be `FailsafeConfigured` (not some unrelated row), and the valid
+/// control must not be refused by it.
+#[test]
+fn mirror_invalid_supervisor_config_is_refused_by_failsafe_configured() {
+    for (name, bad) in invalid_sup_configs() {
+        let mut n = NativeCascade::new();
+        n.configure(mock_calib());
+        n.configure_supervisor(bad);
+        n.command(Event::Arm, true, true);
+        assert_eq!(
+            n.arm_blocked_check(),
+            Some(CheckId::FailsafeConfigured),
+            "{name}: must be refused by FailsafeConfigured"
+        );
+    }
+    let mut n = NativeCascade::new();
+    n.configure(mock_calib());
+    n.configure_supervisor(good_sup());
+    n.command(Event::Arm, true, true);
+    assert_ne!(
+        n.arm_blocked_check(),
+        Some(CheckId::FailsafeConfigured),
+        "control: a VALID configuration must not be refused by FailsafeConfigured"
+    );
 }
 
 // ── the shipped component: `CASCADE_WASM=... cargo test -- --ignored` ────
@@ -444,4 +599,24 @@ fn wasm_terminated_is_absorbing_through_configure() {
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
 fn wasm_isolated_rotor_survives_configure() {
     isolated_rotor_survives_configure(&mut WasmSeam::load());
+}
+
+#[test]
+#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
+fn wasm_invalid_supervisor_config_refuses_arm() {
+    invalid_supervisor_config_refuses_arm(WasmSeam::load);
+}
+
+/// Control for the wasm half: a VALID configuration still arms through the
+/// seam, so the refusals above are attributable to the invalid field.
+#[test]
+#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
+fn wasm_valid_supervisor_config_arms() {
+    let mut s = WasmSeam::load();
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_supervisor(good_sup());
+    s.command(Event::Arm);
+    rig.fly(&mut s, 1);
+    assert_eq!(s.mode(), Some(ARMED));
 }

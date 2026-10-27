@@ -445,12 +445,24 @@ interface pilot {
     /// SUPERVISOR — a 0 m geofence about a (0,0,0) home latches an RTL on the
     /// first tick — which is why these land in the same change that wires it
     /// in rather than in a follow-up.
+    ///
+    /// VALIDATED AS A WHOLE, NEVER CLAMPED (#609). If ANY field is outside its
+    /// own definition below — `home` non-finite; `fence-radius`, `cruise-alt`
+    /// or `low-batt-v` non-finite or not > 0 — the configuration is treated
+    /// exactly as if `configure-supervisor` had never been called: the
+    /// configuration-dependent failsafes stay inactive and the
+    /// `FailsafeConfigured` pre-arm row is FALSE, so `arm` is REFUSED: the
+    /// mode stays `disarmed`, and from the next `step` bit 7 (`arm-blocked`)
+    /// of `flight-state.failsafe` is set. Earlier builds instead mapped such
+    /// values to permissive ones (a NaN fence to "no geofence", a NaN or
+    /// negative low-batt-v to "no battery failsafe") and still armed.
     record supervisor-config {
         /// Home / launch point, NED metres: the geofence centre AND the RTL
         /// destination. Both, from one field — they are the same point.
+        /// Must be finite.
         home: vec3,
-        /// Geofence radius in metres about `home`. Exceeding it latches an RTL
-        /// (bit 4 of `flight-state.failsafe`).
+        /// Geofence radius in metres about `home`, finite and > 0. Exceeding
+        /// it latches an RTL (bit 4 of `flight-state.failsafe`).
         fence-radius: f32,
         /// Cruise altitude in metres AGL, and it is **POSITIVE** — the one
         /// field in this package that is NOT NED-signed.
@@ -463,12 +475,15 @@ interface pilot {
         /// command +30.0 NED — thirty metres BELOW the ground. Every in-tree
         /// call site passes a positive value.
         ///
-        /// A non-positive value is therefore rejected rather than clamped: zero
-        /// or negative is not a conservative cruise altitude, it is a commanded
-        /// descent into the ground.
+        /// A non-positive (or non-finite) value is therefore rejected rather
+        /// than clamped — the whole configuration is refused and arming with
+        /// it is impossible: zero or negative is not a conservative cruise
+        /// altitude, it is a commanded descent into the ground.
         cruise-alt: f32,
         /// Pack LOW threshold in volts for the WHOLE battery, not per cell;
-        /// the estimator derives its per-cell fallbacks from this.
+        /// the estimator derives its per-cell fallbacks from this. Finite and
+        /// > 0: a zero or negative threshold could never be crossed, so the
+        /// battery failsafe would be silently off.
         low-batt-v: f32,
     }
 
