@@ -269,6 +269,45 @@ fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
     }
 }
 
+/// The pre-arm rows `FlightSupervisor::update_preflight` (re)writes from real
+/// input on EVERY `step`. A freshly built supervisor has measured none of
+/// them, so the component declares every one FALSE at construction (#609
+/// finding 2).
+///
+/// WHY. `FlightSupervisor::new` forces the legacy six rows TRUE for bring-up
+/// back-compat and leaves the breadth rows undeclared, i.e. not required. A
+/// host whose first act was `arm` — the first call, or any call after a
+/// configure rebuilt the supervisor — was judged against that, and armed past
+/// battery, estimator convergence, calibration and `MotorsHealthy` without any
+/// of them ever having been measured. Declared false here, they stay false
+/// until the first `step` refreshes them from the frame, so "never measured"
+/// refuses exactly as "measured bad" does.
+///
+/// EXACTLY the rows `update_preflight` refreshes, and no others. Declaring an
+/// integration-fed row (RC/GCS link, params-from-NVM, sensor freshness, ...)
+/// would block arming forever, because nothing in this component ever writes
+/// it again. `EscTelemetry` is excluded for the same reason: `step` declares it
+/// only on first sight of eRPM, so a rig without ESC telemetry never feeds it.
+/// `FailsafeConfigured` is in the list for completeness; `ensure_supervisor`
+/// re-declares it from the configuration straight afterwards.
+const ROWS_FED_BY_STEP: [falcon_core::relay_preflight::CheckId; 12] = {
+    use falcon_core::relay_preflight::CheckId as C;
+    [
+        C::SensorsHealthy,
+        C::EstimatorConverged,
+        C::CalibrationPresent,
+        C::GeofenceLoaded,
+        C::BatteryOk,
+        C::FailsafeConfigured,
+        C::EstimatorInnovation,
+        C::GnssAgreement,
+        C::GeofenceSane,
+        C::BatteryTakeoffMargin,
+        C::MotorsHealthy,
+        C::NoFailsafeLatched,
+    ]
+};
+
 /// Build the supervisor into its slot if absent, and DECLARE whether it is
 /// configured — on every call, not only on construction.
 ///
@@ -276,8 +315,9 @@ fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
 /// `arm_check_table` is read inside `FlightSupervisor::command`, and the
 /// constructor defaults the first six pre-arm rows TRUE for bring-up
 /// back-compat. A host that sent `arm` before its first `step` would otherwise
-/// arm an unconfigured supervisor off that default — the gate must be correct at
-/// the moment it is READ, not merely refreshed once a tick has run.
+/// arm off that default — the gate must be correct at the moment it is READ,
+/// not merely refreshed once a tick has run. That applies to EVERY row a step
+/// feeds, not only this one, which is what `ROWS_FED_BY_STEP` closes.
 ///
 /// AND IT HAS TO BE RE-DECLARED AFTER EVERY `step`, which the first version of
 /// this missed. `update_preflight` DOES write the `FailsafeConfigured` row — as
@@ -312,6 +352,11 @@ fn ensure_supervisor<'a>(
         if let Some(c) = cfg {
             sup.set_hover_thrust(sane(c.hover_thrust, 0.5, true));
             apply_tuning(sup.core_mut(), c);
+        }
+        // UNDECLARED IS FAIL, NOT PASS (#609 finding 2). See
+        // `ROWS_FED_BY_STEP`: until a `step` has run, nothing has been measured.
+        for id in ROWS_FED_BY_STEP {
+            sup.set_check(id, false);
         }
     }
     sup.set_check(
@@ -639,9 +684,11 @@ impl PilotGuest for Component {
     ///
     /// The supervisor is built here if it does not exist yet, rather than the
     /// command being dropped: a host whose first act is `arm` must get a real
-    /// verdict from the pre-arm table, not silence. `ensure_supervisor` declares
-    /// `FailsafeConfigured` on the way through, which is what stops that first
-    /// `arm` from passing on the constructor's bring-up defaults.
+    /// verdict from the pre-arm table, not silence. That verdict is a REFUSAL
+    /// until a `step` has run: `ensure_supervisor` declares every row a step
+    /// feeds FALSE on construction (`ROWS_FED_BY_STEP`) and `FailsafeConfigured`
+    /// from the configuration, so a first `arm` can no longer pass on the
+    /// constructor's bring-up defaults (#609 finding 2).
     fn command(cmd: PilotCommand, level: bool, throttle_low: bool) {
         #[cfg(not(feature = "std"))]
         let _call = falcon_cm_rt::CallScope::enter();

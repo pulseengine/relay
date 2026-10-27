@@ -228,11 +228,12 @@ interface types {
         /// what `step_estimate_only` exists for — is refused by
         /// `CalibrationPresent` FIRST, because `update_preflight` derives it
         /// from `core.calibration() != identity()` and NOTHING IN THIS SEAM
-        /// CARRIES A CALIBRATION. So the published component can presently only
-        /// be armed on the arm-before-first-step path, judged against
-        /// `FlightSupervisor::new`'s deliberate bring-up defaults. That is
-        /// SUPERVISOR-P01's own falsification condition, and it means a green
-        /// SITL gate shows the DEFAULTS path works, not the pre-arm table.
+        /// CARRIES A CALIBRATION. The only other path — `arm` before the first
+        /// `step`, judged against `FlightSupervisor::new`'s bring-up defaults —
+        /// is CLOSED (#609 finding 2: a never-stepped supervisor declares every
+        /// row a step feeds as failing). So at this revision the published
+        /// component CANNOT BE ARMED through this seam at all, which is the
+        /// honest consequence until the seam carries a calibration.
         /// Pinned by `the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused`
         /// in `crates/falcon-core/tests/supervisor_seam_contract.rs`.
         ///

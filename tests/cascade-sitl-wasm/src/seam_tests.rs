@@ -532,7 +532,67 @@ fn invalid_supervisor_config_refuses_arm<S: Seam>(mk: impl Fn() -> S) {
     );
 }
 
+// ── #609 finding 2 ─────────────────────────────────────────────────────────
+
+/// `arm` on a supervisor that has never been stepped is judged against
+/// nothing measured, so it must be REFUSED — not passed on the constructor's
+/// forced-true legacy rows with every breadth row undeclared.
+fn fresh_supervisor_refuses_arm_before_first_step<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_supervisor(good_sup());
+    s.command(Event::Arm);
+    s.command(Event::RequestTakeoff);
+    rig.fly(s, 5);
+    assert_eq!(
+        s.mode(),
+        Some(DISARMED),
+        "a never-stepped supervisor ARMED on its bring-up defaults"
+    );
+}
+
+/// The same through the REBUILD path: a configure on the ground (permitted)
+/// rebuilds the supervisor, and the next `arm` must not be judged against the
+/// rebuilt supervisor's defaults.
+fn rebuilt_supervisor_refuses_arm_before_first_step<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_supervisor(good_sup());
+    rig.fly(s, 20);
+    assert_eq!(s.mode(), Some(DISARMED), "precondition: on the ground");
+    s.configure_supervisor(good_sup());
+    s.command(Event::Arm);
+    s.command(Event::RequestTakeoff);
+    rig.fly(s, 5);
+    assert_eq!(
+        s.mode(),
+        Some(DISARMED),
+        "a configure-rebuilt supervisor ARMED on its bring-up defaults"
+    );
+}
+
 // ── native mirror: every `cargo test` ─────────────────────────────────────
+
+#[test]
+fn mirror_fresh_supervisor_refuses_arm_before_first_step() {
+    fresh_supervisor_refuses_arm_before_first_step(&mut NativeCascade::new());
+}
+
+#[test]
+fn mirror_rebuilt_supervisor_refuses_arm_before_first_step() {
+    rebuilt_supervisor_refuses_arm_before_first_step(&mut NativeCascade::new());
+}
+
+/// Names the row: with nothing measured, the FIRST row in gate order
+/// (`SensorsHealthy`) refuses — i.e. the legacy rows are no longer forced true.
+#[test]
+fn mirror_fresh_supervisor_is_refused_by_an_unmeasured_row() {
+    let mut n = NativeCascade::new();
+    n.configure(mock_calib());
+    n.configure_supervisor(good_sup());
+    n.command(Event::Arm, true, true);
+    assert_eq!(n.arm_blocked_check(), Some(CheckId::SensorsHealthy));
+}
 
 #[test]
 fn mirror_reconfigure_in_flight_keeps_flying() {
@@ -619,4 +679,16 @@ fn wasm_valid_supervisor_config_arms() {
     s.command(Event::Arm);
     rig.fly(&mut s, 1);
     assert_eq!(s.mode(), Some(ARMED));
+}
+
+#[test]
+#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
+fn wasm_fresh_supervisor_refuses_arm_before_first_step() {
+    fresh_supervisor_refuses_arm_before_first_step(&mut WasmSeam::load());
+}
+
+#[test]
+#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
+fn wasm_rebuilt_supervisor_refuses_arm_before_first_step() {
+    rebuilt_supervisor_refuses_arm_before_first_step(&mut WasmSeam::load());
 }

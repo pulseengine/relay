@@ -179,6 +179,23 @@ fn sup_params(cfg: Option<&SupCalib>) -> (Vec3, f32, f32, f32) {
     }
 }
 
+/// Mirrors the component's `ROWS_FED_BY_STEP`: exactly the rows
+/// `update_preflight` refreshes every step, declared FALSE on construction.
+const ROWS_FED_BY_STEP: [CheckId; 12] = [
+    CheckId::SensorsHealthy,
+    CheckId::EstimatorConverged,
+    CheckId::CalibrationPresent,
+    CheckId::GeofenceLoaded,
+    CheckId::BatteryOk,
+    CheckId::FailsafeConfigured,
+    CheckId::EstimatorInnovation,
+    CheckId::GnssAgreement,
+    CheckId::GeofenceSane,
+    CheckId::BatteryTakeoffMargin,
+    CheckId::MotorsHealthy,
+    CheckId::NoFailsafeLatched,
+];
+
 /// Mirrors the component's `rebuild_permitted` (#609 finding 1): a configure
 /// may drop the supervisor only if none exists, or it is Disarmed and holds no
 /// latch a rebuild would reset (isolated rotor, nav-integrity, battery).
@@ -270,6 +287,11 @@ impl NativeCascade {
                 );
                 core.set_altitude_integral_gain(sane(c.altitude_ki, 0.0, false));
                 core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
+            }
+            // Mirrors the component's `ROWS_FED_BY_STEP` (#609 finding 2):
+            // nothing a step feeds has been measured yet, so all of it fails.
+            for id in ROWS_FED_BY_STEP {
+                sup.set_check(id, false);
             }
         }
         let configured = usable_supcfg(self.supcfg.as_ref()).is_some();
