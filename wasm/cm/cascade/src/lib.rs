@@ -81,6 +81,8 @@ unsafe impl<T> Sync for SingleThreaded<T> {}
 static CORE: SingleThreaded<Option<FlightSupervisor>> = SingleThreaded(RefCell::new(None));
 
 /// The supervisor's configuration, if the host called `pilot.configure-supervisor`.
+/// Stored as sent; an INVALID one (see `supcfg_valid`) counts as `None` for
+/// every purpose below.
 ///
 /// `None` IS NOT A NEUTRAL STATE and must not be treated as one. A supervisor on
 /// defaults is worse than no supervisor: a 0 m geofence about a (0,0,0) home
@@ -202,14 +204,56 @@ const SUP_LOW_BATT_UNSET: f32 = 0.0;
 ///
 /// NOT NED-signed, unlike every other altitude in this seam. falcon-core
 /// documents it as "m AGL" and negates it when deriving the setpoint, so a
-/// negative value here commands a descent BELOW the ground. Hence `positive`
-/// below, not merely finite.
+/// negative value here commands a descent BELOW the ground — which is why
+/// `supcfg_valid` requires a host's value to be positive, not merely finite.
+///
+/// These three constants are reached ONLY while arming is refused
+/// (`FailsafeConfigured` false): they keep a never-armed, unconfigured or
+/// mis-configured supervisor from latching spurious failsafes on the ground.
+/// They are never what an ARMED vehicle flies on.
 const SUP_CRUISE_UNSET: f32 = 2.0;
 
-/// The supervisor's four constructor inputs, sanitised, with the unconfigured
-/// case spelled out above rather than left to a zero.
+/// Is this supervisor configuration usable AS GIVEN? (#609 finding 3)
+///
+/// Each bound is the field's OWN definition (cascade.wit `supervisor-config`
+/// and `FlightSupervisor::new`), not an invented range:
+///   * `home` — NED metres, any finite point;
+///   * `fence-radius` — metres about home, finite and > 0 (0 or negative is no
+///     fence; +inf is no fence);
+///   * `cruise-alt` — metres AGL, POSITIVE (the supervisor negates it; 0 or
+///     negative commands a descent into the ground), finite;
+///   * `low-batt-v` — whole-pack volts, finite and > 0 (0 or negative puts both
+///     derived per-cell thresholds at or below zero, so the battery failsafe
+///     could never fire).
+///
+/// This used to be done field-by-field with `sane()`, which mapped every
+/// invalid value to something PERMISSIVE — a NaN fence to 1e9 (geofence off),
+/// a NaN low-batt to 0 V (battery failsafe off), a -30 cruise to 2 m — while
+/// `FailsafeConfigured` was still declared TRUE. Now an invalid configuration
+/// is treated exactly like no configuration: nothing is clamped, the
+/// configuration-dependent failsafes stay at their inactive constants, and
+/// `FailsafeConfigured` is declared FALSE, so arming is refused.
+fn supcfg_valid(c: &SupervisorConfig) -> bool {
+    let pos = |v: f32| v.is_finite() && v > 0.0;
+    c.home.x.is_finite()
+        && c.home.y.is_finite()
+        && c.home.z.is_finite()
+        && pos(c.fence_radius)
+        && pos(c.cruise_alt)
+        && pos(c.low_batt_v)
+}
+
+/// The configuration the supervisor may actually be built from: `Some` only if
+/// the host sent one AND it is valid.
+fn usable_supcfg(cfg: Option<&SupervisorConfig>) -> Option<&SupervisorConfig> {
+    cfg.filter(|c| supcfg_valid(c))
+}
+
+/// The supervisor's four constructor inputs. A usable configuration is passed
+/// through VERBATIM; anything else (absent or invalid) gets the inactive
+/// constants above — never a clamped variant of what the host sent.
 fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
-    match cfg {
+    match usable_supcfg(cfg) {
         None => (
             [0.0, 0.0, 0.0],
             SUP_FENCE_UNSET,
@@ -217,16 +261,10 @@ fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
             SUP_LOW_BATT_UNSET,
         ),
         Some(c) => (
-            [
-                sane(c.home.x, 0.0, false),
-                sane(c.home.y, 0.0, false),
-                sane(c.home.z, 0.0, false),
-            ],
-            // A non-finite or non-positive radius falls back to INACTIVE, never
-            // to 0.0 — same reason as the constant.
-            sane(c.fence_radius, SUP_FENCE_UNSET, true),
-            sane(c.cruise_alt, SUP_CRUISE_UNSET, true),
-            sane(c.low_batt_v, SUP_LOW_BATT_UNSET, false),
+            [c.home.x, c.home.y, c.home.z],
+            c.fence_radius,
+            c.cruise_alt,
+            c.low_batt_v,
         ),
     }
 }
@@ -278,7 +316,7 @@ fn ensure_supervisor<'a>(
     }
     sup.set_check(
         falcon_core::relay_preflight::CheckId::FailsafeConfigured,
-        supcfg.is_some(),
+        usable_supcfg(supcfg).is_some(),
     );
     sup
 }
@@ -446,7 +484,7 @@ impl Guest for Component {
             // bit would contradict what `command` would actually do.
             sup.set_check(
                 falcon_core::relay_preflight::CheckId::FailsafeConfigured,
-                supcfg.is_some(),
+                usable_supcfg(supcfg.as_ref()).is_some(),
             );
             let mode = sup.mode() as u8;
             let failsafe = sup.failsafe_flags();

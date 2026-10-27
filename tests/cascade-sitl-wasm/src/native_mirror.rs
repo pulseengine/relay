@@ -150,27 +150,32 @@ fn sane(v: f32, default: f32, positive: bool) -> f32 {
     }
 }
 
+/// Mirrors the component's `supcfg_valid` (#609 finding 3): home finite;
+/// fence-radius, cruise-alt (m AGL, POSITIVE) and low-batt-v finite and > 0.
+fn supcfg_valid(c: &SupCalib) -> bool {
+    let pos = |v: f32| v.is_finite() && v > 0.0;
+    c.home.iter().all(|v| v.is_finite())
+        && pos(c.fence_radius)
+        && pos(c.cruise_alt)
+        && pos(c.low_batt_v)
+}
+
+/// Mirrors the component's `usable_supcfg`: an invalid configuration counts
+/// as none — never clamped into a permissive one.
+fn usable_supcfg(cfg: Option<&SupCalib>) -> Option<&SupCalib> {
+    cfg.filter(|c| supcfg_valid(c))
+}
+
 /// Mirrors the component's `sup_params`.
 fn sup_params(cfg: Option<&SupCalib>) -> (Vec3, f32, f32, f32) {
-    match cfg {
+    match usable_supcfg(cfg) {
         None => (
             [0.0, 0.0, 0.0],
             SUP_FENCE_UNSET,
             SUP_CRUISE_UNSET,
             SUP_LOW_BATT_UNSET,
         ),
-        Some(c) => (
-            [
-                sane(c.home[0], 0.0, false),
-                sane(c.home[1], 0.0, false),
-                sane(c.home[2], 0.0, false),
-            ],
-            sane(c.fence_radius, SUP_FENCE_UNSET, true),
-            // POSITIVE, not merely finite — a non-positive cruise altitude is a
-            // commanded descent into the ground, not a conservative default.
-            sane(c.cruise_alt, SUP_CRUISE_UNSET, true),
-            sane(c.low_batt_v, SUP_LOW_BATT_UNSET, false),
-        ),
+        Some(c) => (c.home, c.fence_radius, c.cruise_alt, c.low_batt_v),
     }
 }
 
@@ -234,6 +239,13 @@ impl NativeCascade {
             .map(|s| s.core().failed_motor().map(|i| i as u8).unwrap_or(0xFF))
     }
 
+    /// The first pre-arm row refusing an arm right now. Visible natively but not
+    /// through the seam, which is why the mirror tests can NAME the row.
+    #[cfg(test)]
+    pub fn arm_blocked_check(&self) -> Option<CheckId> {
+        self.sup.as_ref().and_then(|s| s.arm_blocked_check())
+    }
+
     /// Mirrors the component's `ensure_supervisor` exactly, declaration included.
     fn ensure(&mut self) -> &mut FlightSupervisor {
         let fresh = self.sup.is_none();
@@ -259,7 +271,7 @@ impl NativeCascade {
                 core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
             }
         }
-        let configured = self.supcfg.is_some();
+        let configured = usable_supcfg(self.supcfg.as_ref()).is_some();
         let sup = self.sup.as_mut().expect("just inserted");
         sup.set_check(CheckId::FailsafeConfigured, configured);
         sup
