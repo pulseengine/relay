@@ -283,6 +283,47 @@ fn ensure_supervisor<'a>(
     sup
 }
 
+/// May a `configure` / `configure-supervisor` DROP the live supervisor?
+///
+/// #609 finding 1. Both calls used to drop it unconditionally, and the next
+/// `step` rebuilt a `FlightSupervisor` in `Mode::Disarmed`, which commands
+/// ZERO motors — a re-configure in Loiter cut the motors in flight, and a
+/// configure after `terminate` escaped the absorbing `Terminated` state.
+///
+/// A rebuild is therefore permitted ONLY when nothing is lost by it:
+///   * no supervisor exists yet, or
+///   * it is `Disarmed` (on the ground, by the FSM's own never-disarm-airborne
+///     invariant) AND it holds none of the latches a rebuild would silently
+///     reset:
+///       - an ISOLATED ROTOR (`failed_motor`, the #565 dead-motor interlock —
+///         the FDI never un-isolates, and a fresh core starts with `None`),
+///       - a NAVIGATION-INTEGRITY latch (`nav_compromised`, GNSS-P02: "only
+///         clears via a ground reset" — a configure is not that reset),
+///       - a LATCHED low/critical BATTERY flag (relay-batt latches these; a
+///         fresh estimator would start clear).
+///
+/// Every other state — Armed, any airborne mode, `Terminated` — and every
+/// latched Disarmed supervisor REJECTS the call: the new configuration is
+/// discarded, not queued. Rejecting rather than holding it as pending is a
+/// deliberate choice: a pending configuration would be applied at a moment the
+/// host did not pick (the next touchdown), and applying it is itself a rebuild,
+/// so it would reset exactly the latches listed above. The WIT return type is
+/// unit, so the rejection is SILENT at the call; a host that needs to know
+/// re-reads `observer.read-state` and re-sends once `mode` is `disarmed`.
+fn rebuild_permitted(slot: &Option<FlightSupervisor>) -> bool {
+    match slot {
+        None => true,
+        Some(sup) => {
+            let batt = sup.battery();
+            sup.mode() == falcon_core::relay_fsm::Mode::Disarmed
+                && sup.core().failed_motor().is_none()
+                && !sup.core().nav_compromised()
+                && !batt.low
+                && !batt.critical
+        }
+    }
+}
+
 /// One tick's sensors in, motors out.
 ///
 /// `FlightCore` pulls from a backend and pushes motors into it, which is the
@@ -439,21 +480,25 @@ impl Guest for Component {
         }
     }
 
-    /// Install the calibration and DROP the existing core, so the next `step`
-    /// rebuilds from it.
+    /// Install the vehicle configuration and rebuild the supervisor from it —
+    /// ONLY while a rebuild loses nothing (see `rebuild_permitted`). Otherwise
+    /// the call is REJECTED and `cfg` discarded (#609 finding 1).
     ///
-    /// Dropping is deliberate. `loop_rate_hz` is fixed at construction while
-    /// every other knob is live-settable, so applying a late `configure` in
-    /// place would silently honour eight fields and ignore the ninth. A host
-    /// would then be flying a rate it did not ask for with no error of any
-    /// kind — the same shape of defect as the hardcoded `dt` this seam was
-    /// built to remove. An explicit re-initialisation is louder and cheaper.
+    /// The rebuild is still how a configuration is applied: the tuning is
+    /// installed on construction (`ensure_supervisor`), and applying a late
+    /// change in place would honour some fields and not others. But a rebuild
+    /// yields a Disarmed supervisor that commands zero motors, so it may only
+    /// happen on the ground — never in flight, never out of `Terminated`.
     fn configure(cfg: VehicleConfig) {
         #[cfg(not(feature = "std"))]
         falcon_cm_rt::BumpArena::reset();
 
+        let mut core = CORE.0.borrow_mut();
+        if !rebuild_permitted(&core) {
+            return;
+        }
         *CONFIG.0.borrow_mut() = Some(cfg);
-        *CORE.0.borrow_mut() = None;
+        *core = None;
     }
 }
 
@@ -523,21 +568,27 @@ impl ObserverGuest for Component {
 /// seam. That is ORPHAN-P01's fourth state (implemented, verified, advertised,
 /// unreachable) occurring at the seam rather than inside a crate.
 impl PilotGuest for Component {
-    /// Install the supervisor's configuration and DROP the supervisor, so the
-    /// next call rebuilds from it.
+    /// Install the supervisor's configuration and rebuild the supervisor from
+    /// it — ONLY while a rebuild loses nothing (see `rebuild_permitted`).
+    /// Otherwise the call is REJECTED and `cfg` discarded (#609 finding 1).
     ///
-    /// Dropping mirrors `controller.configure` and for the same reason: `home`
-    /// seeds `waypoints` and the keep-out zone centres at construction, and
+    /// A rebuild rather than an in-place update because `home` seeds
+    /// `waypoints` and the keep-out zone centres at construction, and
     /// `low-batt-v` is folded into the battery estimator's per-cell fallbacks
-    /// there too. Applying a late change in place would honour the geofence
-    /// centre and silently keep the old battery thresholds — a partially-applied
-    /// safety configuration, which is worse than an explicit re-initialisation.
+    /// there too: an in-place change would honour the geofence centre and keep
+    /// the old battery thresholds, a partially-applied safety configuration.
+    /// And because a rebuild yields a Disarmed, zero-motor supervisor, it is
+    /// refused in flight and in `Terminated`.
     fn configure_supervisor(cfg: SupervisorConfig) {
         #[cfg(not(feature = "std"))]
         falcon_cm_rt::BumpArena::reset();
 
+        let mut core = CORE.0.borrow_mut();
+        if !rebuild_permitted(&core) {
+            return;
+        }
         *SUPCFG.0.borrow_mut() = Some(cfg);
-        *CORE.0.borrow_mut() = None;
+        *core = None;
     }
 
     /// Deliver one pilot command to the mode machine.

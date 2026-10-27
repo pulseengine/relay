@@ -174,6 +174,23 @@ fn sup_params(cfg: Option<&SupCalib>) -> (Vec3, f32, f32, f32) {
     }
 }
 
+/// Mirrors the component's `rebuild_permitted` (#609 finding 1): a configure
+/// may drop the supervisor only if none exists, or it is Disarmed and holds no
+/// latch a rebuild would reset (isolated rotor, nav-integrity, battery).
+fn rebuild_permitted(slot: &Option<FlightSupervisor>) -> bool {
+    match slot {
+        None => true,
+        Some(sup) => {
+            let batt = sup.battery();
+            sup.mode() == falcon_core::relay_fsm::Mode::Disarmed
+                && sup.core().failed_motor().is_none()
+                && !sup.core().nav_compromised()
+                && !batt.low
+                && !batt.critical
+        }
+    }
+}
+
 impl NativeCascade {
     pub fn new() -> Self {
         Self {
@@ -183,17 +200,38 @@ impl NativeCascade {
         }
     }
 
-    /// Mirrors `Component::configure`, INCLUDING dropping the supervisor so the
-    /// next call rebuilds from the new calibration.
+    /// Mirrors `Component::configure`: rebuild from the new configuration only
+    /// while `rebuild_permitted`, otherwise discard it (#609 finding 1).
     pub fn configure(&mut self, cfg: Calib) {
+        if !rebuild_permitted(&self.sup) {
+            return;
+        }
         self.cfg = Some(cfg);
         self.sup = None;
     }
 
-    /// Mirrors `PilotGuest::configure_supervisor`, including the drop.
+    /// Mirrors `PilotGuest::configure_supervisor`, same guard.
     pub fn configure_supervisor(&mut self, cfg: SupCalib) {
+        if !rebuild_permitted(&self.sup) {
+            return;
+        }
         self.supcfg = Some(cfg);
         self.sup = None;
+    }
+
+    /// The published `mode` byte, or `None` before any supervisor exists.
+    /// (Test-only readers: the differential compares motors, not these.)
+    #[cfg(test)]
+    pub fn mode(&self) -> Option<u8> {
+        self.sup.as_ref().map(|s| s.mode() as u8)
+    }
+
+    /// The published `failed-rotor` byte (0xFF = none).
+    #[cfg(test)]
+    pub fn failed_rotor(&self) -> Option<u8> {
+        self.sup
+            .as_ref()
+            .map(|s| s.core().failed_motor().map(|i| i as u8).unwrap_or(0xFF))
     }
 
     /// Mirrors the component's `ensure_supervisor` exactly, declaration included.
