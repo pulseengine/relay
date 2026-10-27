@@ -120,6 +120,39 @@ pub struct SupCalib {
     pub low_batt_v: f32,
 }
 
+/// The mirror of the WIT `sensor-calibration` record — `relay_calib::CalParams`
+/// field for field. Separate type for the same reason as `Calib`.
+#[derive(Clone, Copy)]
+pub struct SensorCal {
+    pub gyro_bias: Vec3,
+    pub accel_bias: Vec3,
+    pub accel_scale: Vec3,
+    pub mag_offset: Vec3,
+    pub mag_scale: Vec3,
+}
+
+impl SensorCal {
+    /// Mirrors the component's `cal_params`: `None` if any component is
+    /// non-finite or any scale is not > 0. Never clamped.
+    fn to_core(self) -> Option<falcon_core::relay_calib::CalParams> {
+        let pos = |v: f32| v.is_finite() && v > 0.0;
+        let finite3 = |v: &Vec3| v.iter().all(|x| x.is_finite());
+        let pos3 = |v: &Vec3| v.iter().all(|x| pos(*x));
+        let ok = finite3(&self.gyro_bias)
+            && finite3(&self.accel_bias)
+            && pos3(&self.accel_scale)
+            && finite3(&self.mag_offset)
+            && pos3(&self.mag_scale);
+        ok.then_some(falcon_core::relay_calib::CalParams {
+            gyro_bias: self.gyro_bias,
+            accel_bias: self.accel_bias,
+            accel_scale: self.accel_scale,
+            mag_offset: self.mag_offset,
+            mag_scale: self.mag_scale,
+        })
+    }
+}
+
 /// Mirrors the component's unconfigured-supervisor constants. A supervisor on
 /// defaults is worse than no supervisor, so "unset" means the
 /// configuration-dependent failsafes are INACTIVE, never zero.
@@ -131,6 +164,8 @@ pub struct NativeCascade {
     sup: Option<FlightSupervisor>,
     cfg: Option<Calib>,
     supcfg: Option<SupCalib>,
+    /// Mirrors the component's `CALIB`: last valid calibration, else identity.
+    calib: falcon_core::relay_calib::CalParams,
 }
 
 impl Default for NativeCascade {
@@ -219,6 +254,7 @@ impl NativeCascade {
             sup: None,
             cfg: None,
             supcfg: None,
+            calib: falcon_core::relay_calib::CalParams::identity(),
         }
     }
 
@@ -239,6 +275,23 @@ impl NativeCascade {
         }
         self.supcfg = Some(cfg);
         self.sup = None;
+    }
+
+    /// Mirrors `PilotGuest::configure_calibration`: installed IN PLACE, only
+    /// while Disarmed (or not yet built); otherwise rejected and discarded. An
+    /// invalid one replaces any earlier calibration with the identity.
+    pub fn configure_calibration(&mut self, cal: SensorCal) {
+        if let Some(sup) = self.sup.as_ref() {
+            if sup.mode() != falcon_core::relay_fsm::Mode::Disarmed {
+                return;
+            }
+        }
+        self.calib = cal
+            .to_core()
+            .unwrap_or(falcon_core::relay_calib::CalParams::identity());
+        if let Some(sup) = self.sup.as_mut() {
+            sup.set_calibration(self.calib);
+        }
     }
 
     /// The published `mode` byte, or `None` before any supervisor exists.
@@ -287,6 +340,8 @@ impl NativeCascade {
                 core.set_altitude_integral_gain(sane(c.altitude_ki, 0.0, false));
                 core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
             }
+            // Mirrors the component: the stored calibration survives a rebuild.
+            sup.set_calibration(self.calib);
             // Mirrors the component's `ROWS_FED_BY_STEP` (#609 finding 2):
             // nothing a step feeds has been measured yet, so all of it fails.
             for id in ROWS_FED_BY_STEP {
@@ -337,12 +392,18 @@ impl NativeCascade {
             dt,
             motors: [0.0; 4],
         };
+        let configured = usable_supcfg(self.supcfg.as_ref()).is_some();
         let sup = self.ensure();
         // `target` is a MISSION LEG at @0.12.0, not a position command: the
         // supervisor owns the setpoint and derives one per mode, so writing the
         // core's setpoint here would be overwritten inside the same tick.
         sup.set_mission(target);
         sup.step(&mut b);
+        // Mirrors the component's RE-DECLARATION after the step:
+        // `update_preflight` rewrites `FailsafeConfigured` from a default-true
+        // field, so without this the mirror's table would disagree with what
+        // the component's `command` (and `read-state`) sees.
+        sup.set_check(CheckId::FailsafeConfigured, configured);
         b.motors
     }
 }

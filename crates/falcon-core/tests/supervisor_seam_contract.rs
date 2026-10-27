@@ -210,32 +210,26 @@ fn a_positive_cruise_alt_commands_a_climb_not_a_descent() {
     );
 }
 
-/// MEASURED GAP, pinned so it cannot be forgotten: the `@0.12.0` seam cannot
-/// supply a CALIBRATION, so a host that warms its estimator before arming — the
-/// way a real GCS does — is refused by `CalibrationPresent`.
+/// A host that warms its estimator before arming — the way a real GCS does, and
+/// since #609 finding 2 the ONLY way the published component arms — is refused
+/// by `CalibrationPresent` with the IDENTITY calibration, and arms once a
+/// non-identity calibration is installed.
 ///
-/// This test asserts a LIMITATION, not a feature, and it is here because I
-/// published the wrong cause. I claimed the component "cannot arm" without
-/// `battery-v`, which is true but mis-attributed: with a warmed estimator the
-/// FIRST row to refuse is `CalibrationPresent`, and adding battery does not
-/// move it. `update_preflight` sets
-/// `calibration_present = core.calibration() != CalParams::identity()`, and
-/// nothing in `vehicle-config` or `supervisor-config` carries a calibration —
-/// the component never calls `set_calibration` because it has nothing to pass.
+/// HISTORY, kept because it is the reason the seam changed. This test used to
+/// be `the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused` and
+/// pinned a LIMITATION: nothing in `vehicle-config` or `supervisor-config`
+/// carried a calibration, so `update_preflight`'s
+/// `calibration_present = core.calibration() != CalParams::identity()` was
+/// false forever and the component could only be armed BEFORE its first step,
+/// on `FlightSupervisor::new`'s bring-up defaults. #609 closed that path, which
+/// left the component unarmable; `pilot.configure-calibration` is the fix,
+/// and the component installs it with `set_calibration` — the call this test's
+/// control makes.
 ///
-/// WHY IT MATTERS BEYOND THE SEAM. The published component can therefore only
-/// be armed on the *arm-before-first-step* path, where `FlightSupervisor::new`'s
-/// deliberate bring-up defaults (the legacy six rows forced true) are what the
-/// pre-arm table is judged against. That is SUPERVISOR-P01's own falsification
-/// condition — "the supervisor runs against default inputs the host cannot
-/// supply" — so a GREEN SITL GATE IS NOT EVIDENCE that the pre-arm table works
-/// through the seam. It shows the defaults path works.
-///
-/// The fix is a seam change (a calibration input) and therefore not this test's
-/// to make. Until it lands, this test is the honest record of where the V is
-/// open.
+/// What it still pins, natively, is the falcon-core semantics the seam relies
+/// on and documents in cascade.wit: identity means NOT CALIBRATED.
 #[test]
-fn the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused() {
+fn a_warmed_host_arms_only_with_a_non_identity_calibration() {
     use falcon_core::relay_calib::CalParams;
     use falcon_core::relay_preflight::CheckId;
     use falcon_core::{FlightBackend, FlightSupervisor, ImuSample, relay_fsm::Event};
@@ -285,17 +279,16 @@ fn the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused() {
     assert_eq!(
         sup.arm_blocked_check(),
         Some(CheckId::CalibrationPresent),
-        "a warmed host supplying everything the seam carries must still be \
-         refused, and the row must be CalibrationPresent — if this changes, the \
-         seam gained a calibration path (good: delete this test and verify the \
-         new one) or a DIFFERENT row now refuses first (bad: the gap moved and \
-         the published justification is stale again)"
+        "a warmed host with the IDENTITY calibration must be refused, and the \
+         row must be CalibrationPresent — if a DIFFERENT row now refuses first, \
+         the cascade.wit account of what a host must send is stale"
     );
     assert_eq!(sup.mode(), Mode::Disarmed, "and it must not be armed");
 
-    // THE CONTROL — install a calibration, the one thing the seam cannot pass,
-    // and the identical arm succeeds. This is what attributes the refusal above
-    // to the missing calibration rather than to the host being unarmable.
+    // THE CONTROL — install a non-identity calibration (what the seam's
+    // `pilot.configure-calibration` now carries) and the identical arm
+    // succeeds. This attributes the refusal above to the calibration rather
+    // than to the host being unarmable.
     sup.set_calibration(CalParams {
         gyro_bias: [0.001, 0.0, 0.0],
         ..CalParams::identity()

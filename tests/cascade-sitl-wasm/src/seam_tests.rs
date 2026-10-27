@@ -14,7 +14,7 @@
 //! Every scenario is written ONCE, generically over [`Seam`], so the two sides
 //! are held to the same assertions by construction.
 
-use crate::native_mirror::{Calib, NativeCascade, SupCalib};
+use crate::native_mirror::{Calib, NativeCascade, SensorCal, SupCalib};
 use crate::physics::{MockPhysics, Physics};
 use falcon_core::relay_fsm::Event;
 use falcon_core::relay_preflight::CheckId;
@@ -45,6 +45,27 @@ fn mock_calib() -> Calib {
     }
 }
 
+/// The simulated gyro bias the rig adds to every sample, and the calibration
+/// that cancels it — same rationale as main.rs's `SITL_GYRO_BIAS`.
+const GYRO_BIAS: [f32; 3] = [0.002, -0.0015, 0.001];
+
+fn identity_cal() -> SensorCal {
+    SensorCal {
+        gyro_bias: [0.0; 3],
+        accel_bias: [0.0; 3],
+        accel_scale: [1.0; 3],
+        mag_offset: [0.0; 3],
+        mag_scale: [1.0; 3],
+    }
+}
+
+fn good_cal() -> SensorCal {
+    SensorCal {
+        gyro_bias: GYRO_BIAS,
+        ..identity_cal()
+    }
+}
+
 fn good_sup() -> SupCalib {
     SupCalib {
         home: [0.0, 0.0, 0.0],
@@ -69,6 +90,7 @@ struct Frame {
 trait Seam {
     fn configure(&mut self, c: Calib);
     fn configure_supervisor(&mut self, c: SupCalib);
+    fn configure_calibration(&mut self, c: SensorCal);
     fn command(&mut self, ev: Event);
     fn step(&mut self, f: &Frame, target: [f32; 3]) -> [f32; 4];
     /// Published `mode`, `None` while not measured.
@@ -83,6 +105,9 @@ impl Seam for NativeCascade {
     }
     fn configure_supervisor(&mut self, c: SupCalib) {
         NativeCascade::configure_supervisor(self, c)
+    }
+    fn configure_calibration(&mut self, c: SensorCal) {
+        NativeCascade::configure_calibration(self, c)
     }
     fn command(&mut self, ev: Event) {
         NativeCascade::command(self, ev, true, true)
@@ -182,6 +207,28 @@ impl Seam for WasmSeam {
             )
             .unwrap();
     }
+    fn configure_calibration(&mut self, k: SensorCal) {
+        use crate::exports::pulseengine::falcon_cascade::pilot::SensorCalibration;
+        use crate::pulseengine::falcon_cascade::types::Vec3;
+        let v = |a: [f32; 3]| Vec3 {
+            x: a[0],
+            y: a[1],
+            z: a[2],
+        };
+        self.b
+            .pulseengine_falcon_cascade_pilot()
+            .call_configure_calibration(
+                &mut self.store,
+                SensorCalibration {
+                    gyro_bias: v(k.gyro_bias),
+                    accel_bias: v(k.accel_bias),
+                    accel_scale: v(k.accel_scale),
+                    mag_offset: v(k.mag_offset),
+                    mag_scale: v(k.mag_scale),
+                },
+            )
+            .unwrap();
+    }
     fn command(&mut self, ev: Event) {
         use crate::exports::pulseengine::falcon_cascade::pilot::PilotCommand as P;
         let cmd = match ev {
@@ -260,6 +307,9 @@ struct Rig {
     tick: u32,
     motors: [f32; 4],
     battery_v: Option<f32>,
+    /// When set, the accelerometer the FRAME reports instead of the plant's —
+    /// a dead / free-falling sensor for the estimator-health scenarios.
+    accel_override: Option<[f32; 3]>,
 }
 
 impl Rig {
@@ -272,15 +322,22 @@ impl Rig {
             tick: 0,
             motors: [0.0; 4],
             battery_v: Some(PACK_V),
+            accel_override: None,
         }
     }
     /// Advance `n` ticks; returns the last motor command.
     fn fly<S: Seam>(&mut self, s: &mut S, n: u32) -> [f32; 4] {
         for _ in 0..n {
             let (imu, p) = self.plant.measure(0.0);
+            let g = imu.gyro_body;
             let f = Frame {
-                accel: imu.accel_body,
-                gyro: imu.gyro_body,
+                accel: self.accel_override.unwrap_or(imu.accel_body),
+                // The SENSOR's gyro: plant rate + the bias `good_cal` removes.
+                gyro: [
+                    g[0] + GYRO_BIAS[0],
+                    g[1] + GYRO_BIAS[1],
+                    g[2] + GYRO_BIAS[2],
+                ],
                 position: self.tick.is_multiple_of(80).then_some(p),
                 mag: self.plant.mag_body_ned(),
                 heading: self.plant.heading_ned(),
@@ -298,12 +355,32 @@ impl Rig {
     }
 }
 
-/// Configure, arm and request takeoff the way a host does today, then fly
-/// until airborne in Takeoff/Loiter. Panics (with the mode) if it cannot.
+/// Step on the ground and send `arm` every tick until the MEASURED pre-arm
+/// table allows it — the only way the component arms since #609 finding 2.
+/// Returns the tick count it took, or `None` if it never armed within `max`.
+fn arm_on_measured_table<S: Seam>(s: &mut S, rig: &mut Rig, max: u32) -> Option<u32> {
+    for i in 0..max {
+        rig.fly(s, 1);
+        if s.mode() == Some(ARMED) {
+            return Some(i);
+        }
+        s.command(Event::Arm);
+    }
+    None
+}
+
+/// Configure, arm on the measured table and request takeoff the way a host
+/// does, then fly until airborne in Takeoff/Loiter. Panics if it cannot.
 fn launch<S: Seam>(s: &mut S, rig: &mut Rig) {
     s.configure(mock_calib());
+    s.configure_calibration(good_cal());
     s.configure_supervisor(good_sup());
-    s.command(Event::Arm);
+    let armed = arm_on_measured_table(s, rig, 4000);
+    assert!(
+        armed.is_some(),
+        "precondition: arms on the measured table; mode {:?}",
+        s.mode()
+    );
     s.command(Event::RequestTakeoff);
     rig.fly(s, 2000);
     let m = s.mode();
@@ -324,6 +401,7 @@ fn reconfigure_in_flight_keeps_flying<S: Seam>(s: &mut S) {
     launch(s, &mut rig);
     let before = s.mode();
     s.configure(mock_calib());
+    s.configure_calibration(good_cal());
     s.configure_supervisor(SupCalib {
         home: [5.0, 0.0, 0.0],
         ..good_sup()
@@ -352,6 +430,7 @@ fn reconfigure_in_flight_keeps_flying<S: Seam>(s: &mut S) {
 fn terminated_is_absorbing_through_configure<S: Seam>(s: &mut S) {
     let mut rig = Rig::new();
     s.configure(mock_calib());
+    s.configure_calibration(good_cal());
     s.configure_supervisor(good_sup());
     rig.fly(s, 1);
     s.command(Event::Terminate);
@@ -359,6 +438,7 @@ fn terminated_is_absorbing_through_configure<S: Seam>(s: &mut S) {
     assert_eq!(s.mode(), Some(TERMINATED), "precondition: terminated");
     s.configure_supervisor(good_sup());
     s.configure(mock_calib());
+    s.configure_calibration(good_cal());
     s.command(Event::Arm);
     rig.fly(s, 5);
     assert_eq!(
@@ -396,6 +476,7 @@ fn isolated_rotor_survives_configure<S: Seam>(s: &mut S) {
 
     s.configure_supervisor(good_sup());
     s.configure(mock_calib());
+    s.configure_calibration(good_cal());
     s.command(Event::Arm);
     s.command(Event::RequestTakeoff);
     rig.fly(s, 5);
@@ -507,28 +588,222 @@ fn invalid_sup_configs() -> Vec<(&'static str, SupCalib)> {
     ]
 }
 
+/// Every invalid CALIBRATION (`relay_calib::CalParams` semantics: finite, every
+/// scale > 0), plus the valid-but-IDENTITY one falcon-core reads as "not
+/// calibrated".
+fn bad_calibrations() -> Vec<(&'static str, SensorCal)> {
+    let c = good_cal();
+    vec![
+        (
+            "gyro-bias NaN",
+            SensorCal {
+                gyro_bias: [f32::NAN, 0.0, 0.0],
+                ..c
+            },
+        ),
+        (
+            "accel-bias +inf",
+            SensorCal {
+                accel_bias: [0.0, f32::INFINITY, 0.0],
+                ..c
+            },
+        ),
+        (
+            "accel-scale 0",
+            SensorCal {
+                accel_scale: [1.0, 1.0, 0.0],
+                ..c
+            },
+        ),
+        (
+            "mag-scale -1",
+            SensorCal {
+                mag_scale: [-1.0, 1.0, 1.0],
+                ..c
+            },
+        ),
+        (
+            "mag-offset NaN",
+            SensorCal {
+                mag_offset: [0.0, 0.0, f32::NAN],
+                ..c
+            },
+        ),
+        ("identity", identity_cal()),
+    ]
+}
+
+/// Ticks a VALID configuration is given on the mock rig before the measured
+/// table must allow `arm` (measured: 2), with a wide margin; every refusal
+/// case below is given the same window.
+const ARM_WINDOW: u32 = 4000;
+
+/// Configure (with whatever supervisor config / calibration the case wants),
+/// then try BOTH arm paths: before the first step, and on the measured table
+/// for `ARM_WINDOW` ticks. Returns how it armed, if it did.
+fn try_arm<S: Seam>(s: &mut S, sup: SupCalib, cal: SensorCal) -> Option<String> {
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_calibration(cal);
+    s.configure_supervisor(sup);
+    s.command(Event::Arm);
+    s.command(Event::RequestTakeoff);
+    rig.fly(s, 5);
+    let m = s.mode();
+    if m != Some(DISARMED) {
+        return Some(format!("pre-step -> mode {m:?}"));
+    }
+    arm_on_measured_table(s, &mut rig, ARM_WINDOW)
+        .map(|t| format!("measured -> armed after {t} ticks"))
+}
+
 /// An invalid safety configuration must leave the vehicle unarmable, not
-/// armable with a failsafe silently switched off.
+/// armable with a failsafe silently switched off — WITH A VALID CALIBRATION, so
+/// `CalibrationPresent` passes and the refusal can only come from
+/// `FailsafeConfigured` (the mirror test below names the row).
 fn invalid_supervisor_config_refuses_arm<S: Seam>(mk: impl Fn() -> S) {
-    // Every case is run and the offenders reported together, so one failure
-    // does not hide the others.
+    // Every case is run and the offenders reported together.
     let mut armed = Vec::new();
     for (name, bad) in invalid_sup_configs() {
-        let mut s = mk();
-        let mut rig = Rig::new();
-        s.configure(mock_calib());
-        s.configure_supervisor(bad);
-        s.command(Event::Arm);
-        s.command(Event::RequestTakeoff);
-        rig.fly(&mut s, 5);
-        let m = s.mode();
-        if m != Some(DISARMED) {
-            armed.push(format!("{name} -> mode {m:?}"));
+        if let Some(how) = try_arm(&mut mk(), bad, good_cal()) {
+            armed.push(format!("{name}: {how}"));
         }
     }
     assert!(
         armed.is_empty(),
         "invalid supervisor configs were ARMED: {armed:?}"
+    );
+}
+
+/// A bad calibration (invalid, or the identity) must leave the vehicle
+/// unarmable even with a VALID supervisor config.
+fn bad_calibration_refuses_arm<S: Seam>(mk: impl Fn() -> S) {
+    let mut armed = Vec::new();
+    for (name, bad) in bad_calibrations() {
+        if let Some(how) = try_arm(&mut mk(), good_sup(), bad) {
+            armed.push(format!("{name}: {how}"));
+        }
+    }
+    assert!(armed.is_empty(), "bad calibrations were ARMED: {armed:?}");
+}
+
+/// THE CONTROL for every refusal in this file: the SAME rig with a valid
+/// configuration AND a valid calibration arms on the measured table.
+fn valid_config_arms_on_the_measured_table<S: Seam>(s: &mut S) -> u32 {
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_calibration(good_cal());
+    s.configure_supervisor(good_sup());
+    let t = arm_on_measured_table(s, &mut rig, ARM_WINDOW);
+    assert!(
+        t.is_some(),
+        "a VALID configuration did not arm on the measured table within \
+         {ARM_WINDOW} ticks; mode {:?}",
+        s.mode()
+    );
+    t.unwrap()
+}
+
+// ── configure-calibration lifecycle (relay#586) ─────────────────────────────
+
+/// Accepted only while Disarmed: an IDENTITY calibration sent in flight must be
+/// discarded, so after landing the vehicle is still calibrated. Observable
+/// through the seam as: land, disarm, and the next arm still succeeds.
+fn calibration_is_rejected_while_not_disarmed<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    launch(s, &mut rig);
+    s.configure_calibration(identity_cal());
+    let mut disarmed = false;
+    for _ in 0..80 {
+        // RequestLand is only honoured from Loiter/Mission/Rtl, and `launch`
+        // may still be in Takeoff — so it is re-sent until it takes.
+        s.command(Event::RequestLand);
+        rig.fly(s, 100);
+        if s.mode() == Some(DISARMED) {
+            disarmed = true;
+            break;
+        }
+    }
+    assert!(
+        disarmed,
+        "precondition: landed and disarmed; mode {:?}",
+        s.mode()
+    );
+    assert!(
+        arm_on_measured_table(s, &mut rig, ARM_WINDOW).is_some(),
+        "the in-flight identity calibration was APPLIED (re-arm refused) — it \
+         must have been rejected because the vehicle was not disarmed"
+    );
+}
+
+/// On the ground it IS applied, in place: an identity calibration sent while
+/// Disarmed makes the next arm fail, and a valid one restores it.
+fn calibration_applies_in_place_on_the_ground<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_calibration(good_cal());
+    s.configure_supervisor(good_sup());
+    rig.fly(s, 10);
+    s.configure_calibration(identity_cal());
+    assert!(
+        arm_on_measured_table(s, &mut rig, ARM_WINDOW).is_none(),
+        "an identity calibration sent while Disarmed was not applied"
+    );
+    s.configure_calibration(good_cal());
+    assert!(
+        arm_on_measured_table(s, &mut rig, 10).is_some(),
+        "a valid calibration sent while Disarmed was not applied in place"
+    );
+}
+
+/// An INVALID calibration replaces an earlier valid one with the identity — the
+/// vehicle must not fly on a calibration the host has just tried to replace.
+fn invalid_calibration_clears_a_previous_valid_one<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_calibration(good_cal());
+    s.configure_supervisor(good_sup());
+    s.configure_calibration(SensorCal {
+        accel_scale: [0.0, 1.0, 1.0],
+        ..good_cal()
+    });
+    assert!(
+        arm_on_measured_table(s, &mut rig, ARM_WINDOW).is_none(),
+        "an invalid calibration left the earlier valid one in force"
+    );
+}
+
+/// A rebuild by configure-supervisor keeps the calibration (sent first).
+fn calibration_survives_a_rebuild<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    s.configure_calibration(good_cal());
+    s.configure(mock_calib());
+    s.configure_supervisor(good_sup());
+    rig.fly(s, 10);
+    s.configure_supervisor(good_sup()); // Disarmed, unlatched -> rebuild
+    assert!(
+        arm_on_measured_table(s, &mut rig, ARM_WINDOW).is_some(),
+        "the calibration was lost in a configure-supervisor rebuild"
+    );
+}
+
+// ── relay#586 acceptance: estimator-health rows as the DECIDING row ────────
+
+/// `EstimatorConverged` decides. With calibration flowing and everything else
+/// valid, an accelerometer that reports NOTHING (|a| < 1e-3 — dead sensor or
+/// free fall) starves the IEKF gravity update, the tilt covariance grows past
+/// `PREARM_TILT_UNCERT_MAX` (it STARTS exactly at it: p0 = 0.1 rad per axis,
+/// 0.01 + 0.01 = 0.02, and the row is `< 0.02`), and arming is refused — while
+/// the same rig with the plant's accelerometer arms.
+fn dead_accelerometer_refuses_arm<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    rig.accel_override = Some([0.0, 0.0, 0.0]);
+    s.configure(mock_calib());
+    s.configure_calibration(good_cal());
+    s.configure_supervisor(good_sup());
+    assert!(
+        arm_on_measured_table(s, &mut rig, ARM_WINDOW).is_none(),
+        "armed with a dead accelerometer (EstimatorConverged should refuse)"
     );
 }
 
@@ -540,6 +815,7 @@ fn invalid_supervisor_config_refuses_arm<S: Seam>(mk: impl Fn() -> S) {
 fn fresh_supervisor_refuses_arm_before_first_step<S: Seam>(s: &mut S) {
     let mut rig = Rig::new();
     s.configure(mock_calib());
+    s.configure_calibration(good_cal());
     s.configure_supervisor(good_sup());
     s.command(Event::Arm);
     s.command(Event::RequestTakeoff);
@@ -557,6 +833,7 @@ fn fresh_supervisor_refuses_arm_before_first_step<S: Seam>(s: &mut S) {
 fn rebuilt_supervisor_refuses_arm_before_first_step<S: Seam>(s: &mut S) {
     let mut rig = Rig::new();
     s.configure(mock_calib());
+    s.configure_calibration(good_cal());
     s.configure_supervisor(good_sup());
     rig.fly(s, 20);
     assert_eq!(s.mode(), Some(DISARMED), "precondition: on the ground");
@@ -573,122 +850,154 @@ fn rebuilt_supervisor_refuses_arm_before_first_step<S: Seam>(s: &mut S) {
 
 // ── native mirror: every `cargo test` ─────────────────────────────────────
 
-#[test]
-fn mirror_fresh_supervisor_refuses_arm_before_first_step() {
-    fresh_supervisor_refuses_arm_before_first_step(&mut NativeCascade::new());
+/// One `#[test]` per scenario on the mirror, and an `#[ignore]`d twin on the
+/// shipped component — written once here so the two lists cannot drift.
+macro_rules! both {
+    ($mirror:ident, $wasm:ident, $body:expr) => {
+        #[test]
+        fn $mirror() {
+            let f: fn(&mut NativeCascade) = $body;
+            f(&mut NativeCascade::new());
+        }
+        #[test]
+        #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
+        fn $wasm() {
+            let f: fn(&mut WasmSeam) = $body;
+            f(&mut WasmSeam::load());
+        }
+    };
 }
 
-#[test]
-fn mirror_rebuilt_supervisor_refuses_arm_before_first_step() {
-    rebuilt_supervisor_refuses_arm_before_first_step(&mut NativeCascade::new());
-}
-
-/// Names the row: with nothing measured, the FIRST row in gate order
-/// (`SensorsHealthy`) refuses — i.e. the legacy rows are no longer forced true.
-#[test]
-fn mirror_fresh_supervisor_is_refused_by_an_unmeasured_row() {
-    let mut n = NativeCascade::new();
-    n.configure(mock_calib());
-    n.configure_supervisor(good_sup());
-    n.command(Event::Arm, true, true);
-    assert_eq!(n.arm_blocked_check(), Some(CheckId::SensorsHealthy));
-}
-
-#[test]
-fn mirror_reconfigure_in_flight_keeps_flying() {
-    reconfigure_in_flight_keeps_flying(&mut NativeCascade::new());
-}
-
-#[test]
-fn mirror_terminated_is_absorbing_through_configure() {
-    terminated_is_absorbing_through_configure(&mut NativeCascade::new());
-}
-
-#[test]
-fn mirror_isolated_rotor_survives_configure() {
-    isolated_rotor_survives_configure(&mut NativeCascade::new());
-}
+both!(
+    mirror_reconfigure_in_flight_keeps_flying,
+    wasm_reconfigure_in_flight_keeps_flying,
+    |s| reconfigure_in_flight_keeps_flying(s)
+);
+both!(
+    mirror_terminated_is_absorbing_through_configure,
+    wasm_terminated_is_absorbing_through_configure,
+    |s| terminated_is_absorbing_through_configure(s)
+);
+both!(
+    mirror_isolated_rotor_survives_configure,
+    wasm_isolated_rotor_survives_configure,
+    |s| isolated_rotor_survives_configure(s)
+);
+both!(
+    mirror_fresh_supervisor_refuses_arm_before_first_step,
+    wasm_fresh_supervisor_refuses_arm_before_first_step,
+    |s| fresh_supervisor_refuses_arm_before_first_step(s)
+);
+both!(
+    mirror_rebuilt_supervisor_refuses_arm_before_first_step,
+    wasm_rebuilt_supervisor_refuses_arm_before_first_step,
+    |s| rebuilt_supervisor_refuses_arm_before_first_step(s)
+);
+both!(
+    mirror_valid_config_arms_on_the_measured_table,
+    wasm_valid_config_arms_on_the_measured_table,
+    |s| {
+        valid_config_arms_on_the_measured_table(s);
+    }
+);
+both!(
+    mirror_calibration_is_rejected_while_not_disarmed,
+    wasm_calibration_is_rejected_while_not_disarmed,
+    |s| calibration_is_rejected_while_not_disarmed(s)
+);
+both!(
+    mirror_calibration_applies_in_place_on_the_ground,
+    wasm_calibration_applies_in_place_on_the_ground,
+    |s| calibration_applies_in_place_on_the_ground(s)
+);
+both!(
+    mirror_invalid_calibration_clears_a_previous_valid_one,
+    wasm_invalid_calibration_clears_a_previous_valid_one,
+    |s| invalid_calibration_clears_a_previous_valid_one(s)
+);
+both!(
+    mirror_calibration_survives_a_rebuild,
+    wasm_calibration_survives_a_rebuild,
+    |s| calibration_survives_a_rebuild(s)
+);
+both!(
+    mirror_dead_accelerometer_refuses_arm,
+    wasm_dead_accelerometer_refuses_arm,
+    |s| dead_accelerometer_refuses_arm(s)
+);
 
 #[test]
 fn mirror_invalid_supervisor_config_refuses_arm() {
     invalid_supervisor_config_refuses_arm(NativeCascade::new);
 }
-
-/// The mirror can NAME the refusing row, which the seam cannot: the refusal
-/// must be `FailsafeConfigured` (not some unrelated row), and the valid
-/// control must not be refused by it.
-#[test]
-fn mirror_invalid_supervisor_config_is_refused_by_failsafe_configured() {
-    for (name, bad) in invalid_sup_configs() {
-        let mut n = NativeCascade::new();
-        n.configure(mock_calib());
-        n.configure_supervisor(bad);
-        n.command(Event::Arm, true, true);
-        assert_eq!(
-            n.arm_blocked_check(),
-            Some(CheckId::FailsafeConfigured),
-            "{name}: must be refused by FailsafeConfigured"
-        );
-    }
-    let mut n = NativeCascade::new();
-    n.configure(mock_calib());
-    n.configure_supervisor(good_sup());
-    n.command(Event::Arm, true, true);
-    assert_ne!(
-        n.arm_blocked_check(),
-        Some(CheckId::FailsafeConfigured),
-        "control: a VALID configuration must not be refused by FailsafeConfigured"
-    );
-}
-
-// ── the shipped component: `CASCADE_WASM=... cargo test -- --ignored` ────
-
-#[test]
-#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
-fn wasm_reconfigure_in_flight_keeps_flying() {
-    reconfigure_in_flight_keeps_flying(&mut WasmSeam::load());
-}
-
-#[test]
-#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
-fn wasm_terminated_is_absorbing_through_configure() {
-    terminated_is_absorbing_through_configure(&mut WasmSeam::load());
-}
-
-#[test]
-#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
-fn wasm_isolated_rotor_survives_configure() {
-    isolated_rotor_survives_configure(&mut WasmSeam::load());
-}
-
 #[test]
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
 fn wasm_invalid_supervisor_config_refuses_arm() {
     invalid_supervisor_config_refuses_arm(WasmSeam::load);
 }
-
-/// Control for the wasm half: a VALID configuration still arms through the
-/// seam, so the refusals above are attributable to the invalid field.
+#[test]
+fn mirror_bad_calibration_refuses_arm() {
+    bad_calibration_refuses_arm(NativeCascade::new);
+}
 #[test]
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
-fn wasm_valid_supervisor_config_arms() {
-    let mut s = WasmSeam::load();
+fn wasm_bad_calibration_refuses_arm() {
+    bad_calibration_refuses_arm(WasmSeam::load);
+}
+
+/// Names the row: with nothing measured, the FIRST row in gate order
+/// (`SensorsHealthy`) refuses — the legacy rows are no longer forced true.
+#[test]
+fn mirror_fresh_supervisor_is_refused_by_an_unmeasured_row() {
+    let mut n = NativeCascade::new();
+    n.configure(mock_calib());
+    n.configure_calibration(good_cal());
+    n.configure_supervisor(good_sup());
+    n.command(Event::Arm, true, true);
+    assert_eq!(n.arm_blocked_check(), Some(CheckId::SensorsHealthy));
+}
+
+/// Warm a mirror on the rig for as long as a valid config needs (+ margin) and
+/// return the row refusing `arm` (None = allowed).
+fn deciding_row(sup: SupCalib, cal: SensorCal, accel: Option<[f32; 3]>) -> Option<CheckId> {
+    let warm = valid_config_arms_on_the_measured_table(&mut NativeCascade::new());
+    let mut n = NativeCascade::new();
     let mut rig = Rig::new();
-    s.configure(mock_calib());
-    s.configure_supervisor(good_sup());
-    s.command(Event::Arm);
-    rig.fly(&mut s, 1);
-    assert_eq!(s.mode(), Some(ARMED));
+    rig.accel_override = accel;
+    n.configure(mock_calib());
+    n.configure_calibration(cal);
+    n.configure_supervisor(sup);
+    rig.fly(&mut n, warm + 50);
+    n.arm_blocked_check()
 }
 
+/// THE DECIDING ROW, NAMED, for every refusal scenario the seam can produce —
+/// the relay#586 acceptance criterion, and the reason `FailsafeConfigured` is
+/// now independently tested: with a VALID calibration flowing,
+/// `CalibrationPresent` passes, so an invalid supervisor config is refused BY
+/// `FailsafeConfigured` and nothing earlier in gate order.
 #[test]
-#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
-fn wasm_fresh_supervisor_refuses_arm_before_first_step() {
-    fresh_supervisor_refuses_arm_before_first_step(&mut WasmSeam::load());
-}
-
-#[test]
-#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
-fn wasm_rebuilt_supervisor_refuses_arm_before_first_step() {
-    rebuilt_supervisor_refuses_arm_before_first_step(&mut WasmSeam::load());
+fn mirror_each_refusal_is_decided_by_the_expected_row() {
+    // The control: nothing refuses.
+    assert_eq!(deciding_row(good_sup(), good_cal(), None), None, "control");
+    for (name, bad) in invalid_sup_configs() {
+        assert_eq!(
+            deciding_row(bad, good_cal(), None),
+            Some(CheckId::FailsafeConfigured),
+            "invalid supervisor config {name}"
+        );
+    }
+    for (name, bad) in bad_calibrations() {
+        assert_eq!(
+            deciding_row(good_sup(), bad, None),
+            Some(CheckId::CalibrationPresent),
+            "bad calibration {name}"
+        );
+    }
+    // Estimator health: a dead accelerometer -> EstimatorConverged decides.
+    assert_eq!(
+        deciding_row(good_sup(), good_cal(), Some([0.0, 0.0, 0.0])),
+        Some(CheckId::EstimatorConverged),
+        "dead accelerometer"
+    );
 }

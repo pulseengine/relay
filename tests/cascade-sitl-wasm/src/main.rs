@@ -68,7 +68,9 @@ wasmtime::component::bindgen!({
 // Under `exports::`, not at the root like `types` — `pilot` is an EXPORTED
 // interface so wasmtime's bindgen puts its records there, whereas `types` is
 // merely `use`d by the exported interfaces and lands at the root.
-use exports::pulseengine::falcon_cascade::pilot::{PilotCommand, SupervisorConfig};
+use exports::pulseengine::falcon_cascade::pilot::{
+    PilotCommand, SensorCalibration, SupervisorConfig,
+};
 use pulseengine::falcon_cascade::types::{
     ImuSample as WitImu, RotorRpm, SensorFrame, Vec3, VehicleConfig, Waypoint,
 };
@@ -93,6 +95,25 @@ const SITL_LOW_BATT_V: f32 = 14.0;
 /// geofence armed, rather than quietly testing the vehicle with a failsafe
 /// switched off.
 const SITL_FENCE_M: f32 = 100.0;
+
+/// A KNOWN gyro zero-rate bias (rad/s) the harness adds to every gyro sample it
+/// hands the component (and the mirror), and the calibration it configures to
+/// cancel it.
+///
+/// WHY THE HARNESS SIMULATES A BIAS AT ALL (#609). The component now arms only
+/// on the measured pre-arm table, and falcon-core reads the IDENTITY
+/// calibration as "not calibrated" (`CalibrationPresent` =
+/// `calibration != identity`). Neither plant here has an IMU bias to solve, so
+/// the only identity-free calibration that is not a fabrication is one that
+/// corrects a bias the harness itself put on the sensor: what reaches the
+/// estimator after `apply_gyro` is the plant's gyro again. Small (≈0.1 °/s),
+/// typical of a MEMS gyro after warm-up.
+const SITL_GYRO_BIAS: [f32; 3] = [0.002, -0.0015, 0.001];
+
+/// How long the vehicle may sit on the ground, stepping, before the measured
+/// pre-arm table must allow the arm. Exceeding it FAILS the run: a component
+/// that cannot be armed through its own seam is the defect this exists to catch.
+const ARM_DEADLINE_S: f32 = 10.0;
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -243,35 +264,55 @@ fn main() -> Result<()> {
         cruise_alt: -down,
         low_batt_v: SITL_LOW_BATT_V,
     };
+    // THE CALIBRATION (relay#586): its own entry point, sent BEFORE
+    // configure-supervisor so the order a host is most likely to use is the
+    // one gated here. It cancels the harness's simulated gyro bias
+    // (`SITL_GYRO_BIAS`) — what a gyro-null would solve for this IMU.
+    let v3 = |x: f32, y: f32, z: f32| Vec3 { x, y, z };
+    pilot.call_configure_calibration(
+        &mut store,
+        SensorCalibration {
+            gyro_bias: v3(SITL_GYRO_BIAS[0], SITL_GYRO_BIAS[1], SITL_GYRO_BIAS[2]),
+            accel_bias: v3(0.0, 0.0, 0.0),
+            accel_scale: v3(1.0, 1.0, 1.0),
+            mag_offset: v3(0.0, 0.0, 0.0),
+            mag_scale: v3(1.0, 1.0, 1.0),
+        },
+    )?;
     pilot.call_configure_supervisor(&mut store, supcfg)?;
     println!(
-        "supervisor : home=[0,0,0] fence={:.0} m cruise={:.2} m AGL low_batt={:.1} V",
-        supcfg.fence_radius, supcfg.cruise_alt, supcfg.low_batt_v
+        "supervisor : home=[0,0,0] fence={:.0} m cruise={:.2} m AGL low_batt={:.1} V gyro_bias={:?}",
+        supcfg.fence_radius, supcfg.cruise_alt, supcfg.low_batt_v, SITL_GYRO_BIAS
     );
 
-    // ARM, THEN REQUEST TAKEOFF — before the first `step`, exactly as the
-    // native supervisor tests do. The pre-arm table is judged at THIS moment:
-    // `arm_check_table` is read inside `command`, not inside `step`.
+    // NO ARM HERE. Until #609 this harness armed BEFORE the first `step`, and
+    // that was judged against `FlightSupervisor::new`'s bring-up defaults (the
+    // legacy six rows forced true, the breadth rows undeclared) — so a green run
+    // showed only that the DEFAULTS path worked. That path is closed: a
+    // never-stepped supervisor now declares every row a step feeds as failing.
     //
-    // AND BE HONEST ABOUT WHAT THAT MEANS THIS GATE PROVES. Arming here is
-    // judged against `FlightSupervisor::new`'s deliberate bring-up defaults
-    // (the legacy six rows forced true), NOT against refreshed signals. A host
-    // that warmed its estimator first — which is what `step_estimate_only`
-    // exists for and what a real GCS would do — is refused by
-    // `CalibrationPresent`, because nothing in this seam carries a calibration.
-    // Measured and pinned in
-    // `crates/falcon-core/tests/supervisor_seam_contract.rs`.
+    // The harness therefore arms the way a real GCS does, inside the loop:
+    // step on the ground (Disarmed, zero motors) and send `arm` every tick until
+    // the pre-arm table, as refreshed by `step`, allows it, then
+    // `request-takeoff`. A component that never allows the arm within
+    // `ARM_DEADLINE_S` FAILS the run.
     //
-    // So a GREEN RESULT FROM THIS HARNESS SHOWS THE DEFAULTS PATH WORKS end to
-    // end through the Component Model ABI. It is NOT evidence that the 20-row
-    // pre-arm table gates arming through the seam, and must not be cited as
-    // such when SUPERVISOR-P01 is promoted — the requirement's own
-    // falsification names exactly this case ("the supervisor runs against
-    // default inputs the host cannot supply"). The harness warms first and
-    // arms on the real table once the seam can carry a calibration.
-    pilot.call_command(&mut store, PilotCommand::Arm, true, true)?;
-    pilot.call_command(&mut store, PilotCommand::RequestTakeoff, true, true)?;
-    println!("commanded  : Arm -> RequestTakeoff (supervised; Disarmed commands zero motors)");
+    // WHAT THAT DOES AND DOES NOT PROVE — keep this when citing the gate.
+    // Derived from this run's frames/config: BatteryOk + BatteryTakeoffMargin
+    // (battery-v), CalibrationPresent (configure-calibration),
+    // GeofenceSane, EstimatorInnovation, GnssAgreement, MotorsHealthy,
+    // NoFailsafeLatched, EscTelemetry (eRPM) and FailsafeConfigured. NOT
+    // derived: SensorsHealthy is overwritten on the first step from
+    // `preflight.sensors_healthy`, a default-true field nothing refreshes
+    // (except to false on a nav-integrity latch); GeofenceLoaded is written
+    // from the default-true field one step BEFORE it is refreshed from the
+    // fence radius. EstimatorConverged is real but WEAK: it clears
+    // within ~2 ticks of a fresh filter (measured: this harness arms at tick 2),
+    // contrary to falcon-core's "starts well above it". So a green run shows
+    // the component arms through the seam on refreshed rows, not that every
+    // one of the 20 rows is a live signal; it must not be cited for
+    // SUPERVISOR-P01 promotion beyond that.
+    println!("commanded  : Arm on the measured pre-arm table, then RequestTakeoff");
     println!();
 
     let gnss_div: u32 = std::env::var("GNSS_DIV")
@@ -308,19 +349,24 @@ fn main() -> Result<()> {
             // a supervised wasm side compared against an unsupervised native
             // one. Derived from the same values the component was given, for
             // the same reason the calibration is.
+            // Same order as the component: calibration, then supervisor config.
+            n.configure_calibration(native_mirror::SensorCal {
+                gyro_bias: SITL_GYRO_BIAS,
+                accel_bias: [0.0; 3],
+                accel_scale: [1.0; 3],
+                mag_offset: [0.0; 3],
+                mag_scale: [1.0; 3],
+            });
             n.configure_supervisor(native_mirror::SupCalib {
                 home: [0.0, 0.0, 0.0],
                 fence_radius: SITL_FENCE_M,
                 cruise_alt: -down,
                 low_batt_v: SITL_LOW_BATT_V,
             });
-            // ARM AND REQUEST TAKEOFF, before the mirror's first step, exactly
-            // as the component was commanded above. `FlightSupervisor::step`
-            // commands ZERO motors while Disarmed, so an unarmed mirror would
-            // sit on the ground while the wasm side flew and report that as a
-            // Component Model failure.
-            n.command(falcon_core::relay_fsm::Event::Arm, true, true);
-            n.command(falcon_core::relay_fsm::Event::RequestTakeoff, true, true);
+            // NO ARM HERE either: the mirror receives the SAME `arm` /
+            // `request-takeoff` at the SAME tick as the component, inside the
+            // loop. An unarmed mirror would sit on the ground while the wasm
+            // side flew and report that as a Component Model failure.
             (n, 0.0f32, 0u32)
         });
 
@@ -382,6 +428,21 @@ fn main() -> Result<()> {
     if fail_rotor.is_some() {
         plant.set_ground_contact(true);
     }
+    let floor_in_flight = fail_rotor.is_some();
+    // PRE-ARM FLOOR (#609). The vehicle now spends its first ticks Disarmed —
+    // zero motors — while the measured pre-arm table converges, and the mock
+    // plant without a floor would free-fall through that, feeding the
+    // estimator a 0 g accelerometer it can never converge on. So the floor is
+    // ON until takeoff is commanded and then restored to exactly the in-flight
+    // setting above, which keeps the nominal hold's specific-force derivation
+    // what it was. (gz has a real ground plane; `set_ground_contact` is a no-op
+    // there.)
+    plant.set_ground_contact(true);
+    // Tick at which the measured table first allowed `arm`, and whether
+    // `request-takeoff` has been sent.
+    let mut armed_tick: Option<u32> = None;
+    let mut takeoff_sent = false;
+    let arm_deadline_ticks = (ARM_DEADLINE_S / dt) as u32;
     let rotor_trace = std::env::var("ROTOR_TRACE").is_ok();
     // The judged window (fault -> first touchdown) and the full-run figure.
     let mut touchdown_tick: Option<u32> = None;
@@ -409,13 +470,21 @@ fn main() -> Result<()> {
                 peak_horiz_all = h;
             }
         }
+        // The SENSOR's gyro: the plant's rate plus the simulated bias the
+        // configured calibration removes (see `SITL_GYRO_BIAS`). Both sides of
+        // the differential receive this same biased sample.
+        let gyro_meas = [
+            s.gyro_body[0] + SITL_GYRO_BIAS[0],
+            s.gyro_body[1] + SITL_GYRO_BIAS[1],
+            s.gyro_body[2] + SITL_GYRO_BIAS[2],
+        ];
         let imu = WitImu {
             ax: s.accel_body[0],
             ay: s.accel_body[1],
             az: s.accel_body[2],
-            gx: s.gyro_body[0],
-            gy: s.gyro_body[1],
-            gz: s.gyro_body[2],
+            gx: gyro_meas[0],
+            gy: gyro_meas[1],
+            gz: gyro_meas[2],
         };
         // The tick that matters: one full estimate -> position -> attitude ->
         // rate -> mixer pass, executed inside the wasm component.
@@ -505,7 +574,7 @@ fn main() -> Result<()> {
         if let Some((nat, worst, worst_tick)) = differential.as_mut() {
             let n = nat.step(
                 s.accel_body,
-                s.gyro_body,
+                gyro_meas,
                 [target.north, target.east, target.down],
                 position_ned.map(|p| [p.x, p.y, p.z]),
                 mag_body.map(|m| [m.x, m.y, m.z]),
@@ -526,6 +595,49 @@ fn main() -> Result<()> {
             if dmax > *worst {
                 *worst = dmax;
                 *worst_tick = tick;
+            }
+        }
+
+        // ARM ON THE MEASURED TABLE (#609). After this tick's step, both sides
+        // receive the SAME command at the SAME tick, so the differential stays
+        // a comparison of one input sequence. `arm` is re-sent every tick while
+        // the component reports `disarmed` (a refused `arm` is a no-op); once
+        // it reports `armed`, `request-takeoff` follows on the next tick.
+        // MODE_DISARMED / MODE_ARMED are the published wire values (pinned in
+        // crates/falcon-core/tests/supervisor_seam_contract.rs).
+        const MODE_DISARMED: u8 = 0;
+        const MODE_ARMED: u8 = 1;
+        if !takeoff_sent {
+            let cmd = if st.mode == MODE_ARMED {
+                armed_tick.get_or_insert(tick);
+                Some((
+                    PilotCommand::RequestTakeoff,
+                    falcon_core::relay_fsm::Event::RequestTakeoff,
+                ))
+            } else if st.mode == MODE_DISARMED && tick < arm_deadline_ticks {
+                Some((PilotCommand::Arm, falcon_core::relay_fsm::Event::Arm))
+            } else {
+                // Past the deadline (or in a mode no arm can leave): stop asking.
+                // NOT a bail — the loop still runs so that "LOOP CLOSES" keeps
+                // meaning "the component executed", and the refusal is judged
+                // as a FLIGHT outcome after it, not misreported by the gate as
+                // an infrastructure failure.
+                None
+            };
+            if let Some((wit, ev)) = cmd {
+                pilot.call_command(&mut store, wit, true, true)?;
+                if let Some((nat, _, _)) = differential.as_mut() {
+                    nat.command(ev, true, true);
+                }
+                if wit == PilotCommand::RequestTakeoff {
+                    takeoff_sent = true;
+                    plant.set_ground_contact(floor_in_flight);
+                    println!(
+                        "armed      : tick {} ({:.2} s) on the measured table; takeoff requested",
+                        tick,
+                        tick as f32 * dt
+                    );
+                }
             }
         }
         let lat = (s.accel_body[0].powi(2) + s.accel_body[1].powi(2)).sqrt();
@@ -755,6 +867,23 @@ fn main() -> Result<()> {
             );
         }
         println!("PASS: wasm and native are BIT-IDENTICAL across {ticks} ticks.");
+    }
+
+    // (1b) Did it ARM through the seam on the measured pre-arm table (#609)?
+    // Judged before the hold, because a vehicle that never armed "fails" the
+    // hold for a reason the hold message would misattribute.
+    match armed_tick {
+        Some(t) => println!(
+            "ARMED      : on the measured pre-arm table at tick {t} ({:.2} s)",
+            t as f32 * dt
+        ),
+        None => bail!(
+            "FAIL: the component never ARMED through the seam — the measured pre-arm \
+             table refused `arm` for {ARM_DEADLINE_S} s of ground ticks (or the run \
+             was shorter). Since #609 a never-stepped supervisor refuses by design; a \
+             stepped one needs battery-v, a converged estimator and a NON-IDENTITY \
+             calibration via pilot.configure-calibration."
+        ),
     }
 
     // (2) Does it HOLD the commanded altitude? The answer depends on the tick

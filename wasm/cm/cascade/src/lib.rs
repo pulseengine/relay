@@ -47,10 +47,10 @@ use bindings::exports::pulseengine::falcon_cascade::observer::Guest as ObserverG
 // the stakeholder's decision (pulseengine/jess#167) and the only one of the
 // three candidate shapes with a byte-identity measurement behind it.
 use bindings::exports::pulseengine::falcon_cascade::pilot::{
-    Guest as PilotGuest, PilotCommand, SupervisorConfig,
+    Guest as PilotGuest, PilotCommand, SensorCalibration, SupervisorConfig,
 };
 use bindings::pulseengine::falcon_cascade::types::{
-    FlightState, MotorPwm, SensorFrame, VehicleConfig, Waypoint,
+    FlightState, MotorPwm, SensorFrame, Vec3 as Vec3Wit, VehicleConfig, Waypoint,
 };
 
 use core::cell::RefCell;
@@ -243,6 +243,37 @@ fn supcfg_valid(c: &SupervisorConfig) -> bool {
         && pos(c.low_batt_v)
 }
 
+/// `pilot.configure-calibration`'s record as falcon-core's `CalParams` — a
+/// field-for-field copy, no conversion of units or meaning — or `None` if it
+/// is INVALID: any component non-finite, or any SCALE not > 0 (zero erases an
+/// axis, negative mirrors it). Never clamped.
+fn cal_params(c: &SensorCalibration) -> Option<falcon_core::relay_calib::CalParams> {
+    let pos = |v: f32| v.is_finite() && v > 0.0;
+    let finite3 = |v: &Vec3Wit| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    let pos3 = |v: &Vec3Wit| pos(v.x) && pos(v.y) && pos(v.z);
+    let ok = finite3(&c.gyro_bias)
+        && finite3(&c.accel_bias)
+        && pos3(&c.accel_scale)
+        && finite3(&c.mag_offset)
+        && pos3(&c.mag_scale);
+    let v = |a: &Vec3Wit| [a.x, a.y, a.z];
+    ok.then(|| falcon_core::relay_calib::CalParams {
+        gyro_bias: v(&c.gyro_bias),
+        accel_bias: v(&c.accel_bias),
+        accel_scale: v(&c.accel_scale),
+        mag_offset: v(&c.mag_offset),
+        mag_scale: v(&c.mag_scale),
+    })
+}
+
+/// The calibration the supervisor runs on: the last VALID one the host sent
+/// through `pilot.configure-calibration`, or the identity. falcon-core reads the
+/// identity as "not calibrated" (`CalibrationPresent` false), so the identity
+/// is the fail-safe value. Kept here as well as in the core so a rebuild by
+/// `configure` / `configure-supervisor` does not silently drop it.
+static CALIB: SingleThreaded<falcon_core::relay_calib::CalParams> =
+    SingleThreaded(RefCell::new(falcon_core::relay_calib::CalParams::identity()));
+
 /// The configuration the supervisor may actually be built from: `Some` only if
 /// the host sent one AND it is valid.
 fn usable_supcfg(cfg: Option<&SupervisorConfig>) -> Option<&SupervisorConfig> {
@@ -280,8 +311,12 @@ fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
 /// configure rebuilt the supervisor — was judged against that, and armed past
 /// battery, estimator convergence, calibration and `MotorsHealthy` without any
 /// of them ever having been measured. Declared false here, they stay false
-/// until the first `step` refreshes them from the frame, so "never measured"
-/// refuses exactly as "measured bad" does.
+/// until the first `step` refreshes them, so "never measured" refuses exactly
+/// as "measured bad" does. (What a step refreshes them FROM is falcon-core's
+/// business and not uniformly a live signal: `SensorsHealthy` is rewritten
+/// from a default-true field nothing refreshes, and `GeofenceLoaded` lags the
+/// fence radius by one step. This closes the never-stepped bypass; it does
+/// not make those two rows measurements.)
 ///
 /// EXACTLY the rows `update_preflight` refreshes, and no others. Declaring an
 /// integration-fed row (RC/GCS link, params-from-NVM, sensor freshness, ...)
@@ -353,6 +388,10 @@ fn ensure_supervisor<'a>(
             sup.set_hover_thrust(sane(c.hover_thrust, 0.5, true));
             apply_tuning(sup.core_mut(), c);
         }
+        // The host's calibration (`CALIB`: last valid one, else identity), so a
+        // rebuild keeps it. The identity is what falcon-core reads as "not
+        // calibrated": `CalibrationPresent` then fails and `arm` is refused.
+        sup.set_calibration(*CALIB.0.borrow());
         // UNDECLARED IS FAIL, NOT PASS (#609 finding 2). See
         // `ROWS_FED_BY_STEP`: until a `step` has run, nothing has been measured.
         for id in ROWS_FED_BY_STEP {
@@ -672,6 +711,39 @@ impl PilotGuest for Component {
         }
         *SUPCFG.0.borrow_mut() = Some(cfg);
         *core = None;
+    }
+
+    /// Install the IMU / magnetometer calibration (relay#586, #609).
+    ///
+    /// IN PLACE, NOT BY REBUILD — chosen because `set_calibration` is a pure
+    /// setter on what the estimator subtracts from the raw sample: installing it
+    /// resets nothing, so the latches `rebuild_permitted` protects are not at
+    /// stake and a rebuild (which would also throw away a warmed estimator)
+    /// buys nothing. What IS at stake is the attitude estimate stepping under
+    /// the controller, so it is accepted ONLY while the supervisor is
+    /// `Disarmed` (or not yet built). Every other mode REJECTS the call and
+    /// discards `cal` — the same reject-not-queue rule as the two configure
+    /// calls, for the same reason.
+    ///
+    /// An INVALID calibration is not installed: it REPLACES any earlier one with
+    /// the identity, so `CalibrationPresent` fails and `arm` is refused. The
+    /// latest thing the host sent was broken; flying on an older calibration it
+    /// has just tried to replace is not the fail-safe reading of that.
+    fn configure_calibration(cal: SensorCalibration) {
+        #[cfg(not(feature = "std"))]
+        falcon_cm_rt::BumpArena::reset();
+
+        let mut core = CORE.0.borrow_mut();
+        if let Some(sup) = core.as_ref() {
+            if sup.mode() != falcon_core::relay_fsm::Mode::Disarmed {
+                return;
+            }
+        }
+        let params = cal_params(&cal).unwrap_or(falcon_core::relay_calib::CalParams::identity());
+        *CALIB.0.borrow_mut() = params;
+        if let Some(sup) = core.as_mut() {
+            sup.set_calibration(params);
+        }
     }
 
     /// Deliver one pilot command to the mode machine.
