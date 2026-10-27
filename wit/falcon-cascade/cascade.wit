@@ -223,19 +223,21 @@ interface types {
         /// row refuses. That part is real: this field is a PREREQUISITE for
         /// clause (1), not a feature of it.
         ///
-        /// WHAT IT DOES NOT DO is make the component armable. MEASURED: a host
-        /// that warms its estimator before arming — what a real GCS does, and
-        /// what `step_estimate_only` exists for — is refused by
-        /// `CalibrationPresent` FIRST, because `update_preflight` derives it
-        /// from `core.calibration() != identity()` and NOTHING IN THIS SEAM
-        /// CARRIES A CALIBRATION. The only other path — `arm` before the first
-        /// `step`, judged against `FlightSupervisor::new`'s bring-up defaults —
-        /// is CLOSED (#609 finding 2: a never-stepped supervisor declares every
-        /// row a step feeds as failing). So at this revision the published
-        /// component CANNOT BE ARMED through this seam at all, which is the
-        /// honest consequence until the seam carries a calibration.
-        /// Pinned by `the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused`
-        /// in `crates/falcon-core/tests/supervisor_seam_contract.rs`.
+        /// WHAT IT DOES NOT DO ALONE is make the component armable. A host that
+        /// warms its estimator before arming — what a real GCS does, and what
+        /// `step_estimate_only` exists for — is refused by `CalibrationPresent`
+        /// unless it also sent `pilot.configure-calibration`, because
+        /// `update_preflight` derives that row from
+        /// `core.calibration() != identity()`. Until that field existed the
+        /// component could only be armed BEFORE its first `step`, judged
+        /// against `FlightSupervisor::new`'s bring-up defaults; that path is
+        /// now CLOSED (#609 finding 2: a never-stepped supervisor declares
+        /// every row a step feeds as failing). So a host arms the way a real
+        /// GCS does: configure (with a calibration), step with a battery
+        /// reading until the estimator converges, then `arm` against the
+        /// measured table. Pinned natively by
+        /// `a_warmed_host_arms_only_with_a_non_identity_calibration` in
+        /// `crates/falcon-core/tests/supervisor_seam_contract.rs`.
         ///
         /// FREE, MEASURED: `controller#step` flattens to 26 params today
         /// (sensor-frame 22 + waypoint 4) against `MAX_FLAT_PARAMS = 16`, so it
@@ -435,6 +437,14 @@ interface observer {
 /// calling convention from flattened scalars to a pointer, and the canonical
 /// ABI passes GARBAGE rather than erroring when a caller assumed the other
 /// form. `vehicle-config` therefore stays at 9 and keeps its byte-identity.
+///
+/// THE CALIBRATION HAS ITS OWN ENTRY POINT, `configure-calibration`, rather
+/// than a field of `supervisor-config` — the maintainer's decision of
+/// 2026-10-21 (relay#586), announced on jess#167. Measured reason: folded in,
+/// `supervisor-config` would grow from 6 flat params to 21 and cross
+/// `MAX_FLAT_PARAMS`, changing `configure-supervisor` from scalars to a
+/// pointer. As its own function the record is 15 flat params, under 16, and
+/// `configure-supervisor` keeps its 6-scalar lowering.
 interface pilot {
     use types.{vec3};
 
@@ -488,6 +498,37 @@ interface pilot {
         low-batt-v: f32,
     }
 
+    /// `relay_calib::CalParams`, field for field and with its semantics —
+    /// nothing added. Applied to the RAW frame before the estimator:
+    ///   gyro  = raw − gyro-bias
+    ///   accel = accel-scale ∘ (raw − accel-bias)      (∘ = per-axis product)
+    ///   mag   = mag-scale ∘ (raw − mag-offset)
+    ///
+    /// THE IDENTITY CALIBRATION (all biases/offsets 0, all scales 1) MEANS "NOT
+    /// CALIBRATED", not "perfectly calibrated": falcon-core derives
+    /// `CalibrationPresent` as `calibration != identity`, so sending the
+    /// identity leaves that row FALSE and `arm` refused. A host sends what its
+    /// calibration procedure (relay-calib gyro-null / accel 6-point / mag iron)
+    /// actually solved.
+    ///
+    /// VALIDATED, NEVER CLAMPED: every component must be finite and every
+    /// SCALE must be > 0 (a zero scale erases an axis, a negative one mirrors
+    /// it). See `configure-calibration` for what an invalid one does.
+    record sensor-calibration {
+        /// Gyro zero-rate bias, rad/s (subtracted).
+        gyro-bias: vec3,
+        /// Accelerometer zero-g bias, m/s² (subtracted).
+        accel-bias: vec3,
+        /// Accelerometer per-axis scale factor, unitless (multiplied after
+        /// de-biasing). > 0.
+        accel-scale: vec3,
+        /// Magnetometer hard-iron offset, in the SAME unit the host sends
+        /// `sensor-frame.mag-body` in (subtracted before normalisation).
+        mag-offset: vec3,
+        /// Magnetometer soft-iron diagonal scale, unitless. > 0.
+        mag-scale: vec3,
+    }
+
     /// A command a PILOT or GCS may legitimately issue.
     ///
     /// DELIBERATELY NARROWER THAN `relay_fsm::Event`, which has 12 variants.
@@ -527,6 +568,32 @@ interface pilot {
     /// configuration-dependent failsafes stay inactive and arming is refused
     /// (`FailsafeConfigured`).
     configure-supervisor: func(cfg: supervisor-config);
+
+    /// Install the IMU / magnetometer calibration (relay#586, #609).
+    ///
+    /// WHY IT EXISTS. falcon-core derives the `CalibrationPresent` pre-arm row
+    /// as `calibration != identity`, and before this nothing in the seam
+    /// carried a calibration, so a supervisor that had been stepped was refused
+    /// on that row for ever. Since #609 a never-stepped supervisor refuses
+    /// every arm, so without this the component could not be armed at all.
+    ///
+    /// INSTALLED IN PLACE, no rebuild: estimator state, the published tick and
+    /// every latch are kept. It is ACCEPTED ONLY WHILE `disarmed` — in any other
+    /// mode (`armed`, airborne, `terminated`) the call is REJECTED and `cal`
+    /// discarded, because changing what the estimator subtracts from the raw
+    /// IMU mid-flight would step the attitude estimate under the controller.
+    /// A calibration sent before the supervisor exists is kept and installed
+    /// when it is built, and it survives a later `configure` /
+    /// `configure-supervisor` rebuild.
+    ///
+    /// An INVALID calibration (non-finite, or a scale not > 0) is not
+    /// installed; it REPLACES any earlier one with the identity, so
+    /// `CalibrationPresent` is false and `arm` refused — the latest thing the
+    /// host sent was broken, and the vehicle must not fly on an older one.
+    ///
+    /// FLATTENING: 15 f32, under `MAX_FLAT_PARAMS = 16`, so this lowers to 15
+    /// scalars, not a pointer.
+    configure-calibration: func(cal: sensor-calibration);
 
     /// Deliver one pilot command to the mode machine.
     ///
