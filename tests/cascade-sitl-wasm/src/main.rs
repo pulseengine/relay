@@ -32,6 +32,8 @@ mod native_mirror;
 mod arena_soak;
 #[path = "../../../examples/falcon-sitl-gz/src/physics.rs"]
 mod physics;
+#[cfg(test)]
+mod seam_tests;
 // The SAME pacing logic the native bench uses, included by path rather than
 // copied — for the same reason physics.rs is: a copy would let the two drift,
 // and the entire point is that the wasm harness and the native bench pace the

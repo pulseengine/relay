@@ -365,12 +365,24 @@ interface controller {
 
     /// Install this vehicle's calibration.
     ///
-    /// Call ONCE before the first `step`. Calling it later is legal and
-    /// RE-INITIALISES the control core — estimator state included — because
-    /// `loop-rate-hz` is fixed at construction and a partially-applied
-    /// configuration is worse than an explicit reset. A host that never calls
-    /// this keeps the built-in defaults, which fly the SITL mock plant and
-    /// nothing else.
+    /// Call ONCE before the first `step`. A later call RE-INITIALISES the
+    /// supervisor and control core — estimator state included — because a
+    /// partially-applied configuration is worse than an explicit reset.
+    ///
+    /// THAT RE-INITIALISATION IS ONLY PERFORMED ON THE GROUND (#609). It is
+    /// applied only while the supervisor is `disarmed` and holds no latch a
+    /// rebuild would reset (an isolated rotor, a navigation-integrity latch, a
+    /// latched low/critical battery). In every other mode — `armed`, any
+    /// airborne mode, `terminated` — and on a latched `disarmed` vehicle, the
+    /// call is REJECTED: `cfg` is discarded, not queued, and the running
+    /// supervisor is untouched. A rebuild produces a `disarmed` supervisor that
+    /// commands zero motors, so accepting it in flight would cut the motors,
+    /// and accepting it in `terminated` would leave the absorbing state. The
+    /// rejection is silent (this function returns nothing); a host re-sends
+    /// once `flight-state.mode` reads `disarmed`.
+    ///
+    /// A host that never calls this keeps the built-in defaults, which fly the
+    /// SITL mock plant and nothing else.
     configure: func(cfg: vehicle-config);
 }
 
@@ -488,9 +500,16 @@ interface pilot {
 
     /// Install the supervisor's configuration.
     ///
-    /// Call before the first `step`, as with `controller.configure`. A host
-    /// that never calls it gets the built-in defaults, which are suitable for
-    /// the SITL mock plant and nothing else.
+    /// Call before the first `step`, as with `controller.configure`. A later
+    /// call rebuilds the supervisor under EXACTLY the same rule: only while it
+    /// is `disarmed` and unlatched; otherwise it is silently REJECTED and `cfg`
+    /// discarded (#609 — see `controller.configure`). It can therefore never
+    /// cut the motors in flight, never leave `terminated`, and never clear an
+    /// isolated-rotor latch.
+    ///
+    /// A host that never calls it gets NO supervisor configuration: the
+    /// configuration-dependent failsafes stay inactive and arming is refused
+    /// (`FailsafeConfigured`).
     configure-supervisor: func(cfg: supervisor-config);
 
     /// Deliver one pilot command to the mode machine.
