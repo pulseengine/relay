@@ -83,7 +83,10 @@ env:
 jobs:
   gate:
     name: Verification gate (rivet-driven)
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    # Routes fork PRs to GitHub-hosted runners by default. This is NOT a security
+    # boundary: a fork PR can edit this file. Isolation is enforced by the org's
+    # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
     # 60 (was 45, was 30): the gate executes every artifact's non-bench-only
     # cargo step serially. When a PR touches a CENTRAL crate (e.g. falcon-core),
     # the shared build cache is invalidated and many artifact steps rebuild
@@ -128,7 +131,7 @@ jobs:
       # cFS cfg(kani) lints would block rivet install + cargo test on
       # the wider workspace. Falcon crates compile clean.
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The two-commit-rule check diffs against the PR base; a shallow
           # single-commit checkout has no base to diff.
@@ -208,10 +211,10 @@ jobs:
             echo "run_full=false" >>"$GITHUB_OUTPUT"
           fi
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # Provision the tools FV-FALCON-COV-002 expects. The dedicated
       # Coverage workflow uses the same install; mirror it here so
@@ -221,7 +224,7 @@ jobs:
       # before reaching the script).
       - name: Install cargo-llvm-cov
         if: steps.scope.outputs.run_full == 'true'
-        uses: taiki-e/install-action@v2.87.31
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-llvm-cov
 
@@ -371,7 +374,7 @@ jobs:
 
       - name: Upload verification output
         if: always() && steps.scope.outputs.run_full == 'true' 
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verification-output
           path: verification-output.md
