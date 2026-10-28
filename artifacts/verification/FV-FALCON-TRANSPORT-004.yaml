@@ -73,7 +73,12 @@ artifacts:
         - run: "grep -q 'pub const VERSION: u8 = 2;' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'pub const SENSOR_PAYLOAD_LEN: usize = 81;' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'pub const SUPERVISOR_CONFIG_PAYLOAD_LEN: usize = 24;' crates/falcon-hitl/src/wire.rs"
-        - run: "grep -q 'pub const CALIBRATION_PAYLOAD_LEN: usize = 60;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const CALIBRATION_PAYLOAD_LEN: usize = 72;' crates/falcon-hitl/src/wire.rs"
+        # 60 -> 72 (#614 amendment): mag-offdiag APPENDED at 60/64/68, every
+        # earlier offset unchanged; the doc table is parsed and checked by
+        # the_binding_document_offset_tables_match_the_encoder.
+        - run: "grep -q '<!-- wire-layout: calibration 72 -->' docs/TRANSPORT-BINDING.md"
+        - run: "grep -q 'pub mag_offdiag: \\[f32; 3\\],' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'pub const COMMAND_PAYLOAD_LEN: usize = 3;' crates/falcon-hitl/src/wire.rs"
         # The doc bumped with the code.
         - run: "grep -q 'transport binding, v2' docs/TRANSPORT-BINDING.md"

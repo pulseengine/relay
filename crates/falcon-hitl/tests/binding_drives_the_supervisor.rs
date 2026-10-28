@@ -40,6 +40,15 @@ use falcon_hitl::{BindingHost, HostReply, sample_sensor_frame};
 
 // ── the component side: a native supervisor behind the binding ──────────────
 
+/// The calibration frame -> the native `CalParams` on THIS base.
+///
+/// WHAT WAITS ON relay#611's AMENDMENT: the frame carries `mag_offdiag`
+/// (payload 60/64/68), but `relay_calib::CalParams` has no off-diagonal field
+/// yet, so it is NOT forwarded here — the five diagonal-model fields are. Until
+/// `CalParams` gains it, this endpoint (a) does not apply soft-iron
+/// off-diagonal correction, and (b) judges "calibrated" without it: a
+/// calibration that differs from the identity ONLY in `mag_offdiag` reads as
+/// not calibrated (`CalibrationPresent` refuses arming).
 fn cal_params(c: &WireCalibration) -> CalParams {
     CalParams {
         gyro_bias: c.gyro_bias,
@@ -380,6 +389,7 @@ fn fly(r: Run) -> Outcome {
                 accel_scale: [1.0; 3],
                 mag_offset: [0.0; 3],
                 mag_scale: [1.0; 3],
+                mag_offdiag: [0.0; 3],
             })
             .unwrap();
         control(&mut host, &mut ep, &f);
@@ -521,6 +531,7 @@ fn a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration() {
         accel_scale: [1.0; 3],
         mag_offset: [0.0; 3],
         mag_scale: [1.0; 3],
+        mag_offdiag: [0.0; 3],
     };
     let f = host.configure_calibration(&good).unwrap();
     control(&mut host, &mut ep, &f);

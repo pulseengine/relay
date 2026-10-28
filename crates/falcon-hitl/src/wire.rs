@@ -87,9 +87,11 @@ pub const MOTORS_PAYLOAD_LEN: usize = 16;
 /// `pilot.supervisor-config`: `home` (vec3) + `fence-radius` + `cruise-alt` +
 /// `low-batt-v` — six `f32`s in WIT declaration order.
 pub const SUPERVISOR_CONFIG_PAYLOAD_LEN: usize = 24;
-/// `pilot.sensor-calibration` (relay#611): five `vec3`s — fifteen `f32`s in
-/// WIT declaration order.
-pub const CALIBRATION_PAYLOAD_LEN: usize = 60;
+/// `pilot.sensor-calibration` (relay#611): six `vec3`s — eighteen `f32`s in
+/// WIT declaration order. 60 -> 72 B within the unreleased binding v2:
+/// `mag-offdiag` (symmetric soft-iron off-diagonal terms) is APPENDED at
+/// payload 60/64/68, so every earlier offset is unchanged.
+pub const CALIBRATION_PAYLOAD_LEN: usize = 72;
 /// `pilot.command(cmd, level, throttle-low)`: the `pilot-command` discriminant
 /// and the two RC interlocks, one byte each.
 pub const COMMAND_PAYLOAD_LEN: usize = 3;
@@ -175,7 +177,9 @@ impl MsgType {
 const CONFIG_F32: [usize; 9] = [0, 4, 8, 12, 16, 20, 24, 28, 32];
 const MOTORS_F32: [usize; 4] = [0, 4, 8, 12];
 const SUPERVISOR_CONFIG_F32: [usize; 6] = [0, 4, 8, 12, 16, 20];
-const CALIBRATION_F32: [usize; 15] = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56];
+const CALIBRATION_F32: [usize; 18] = [
+    0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
+];
 /// imu 0..24, dt-s 24, position-ned 29/33/37, mag-body 42/46/50, heading-rad
 /// 55, battery-v 77. The presence bytes (28, 41, 54, 59, 76) and the motor-rpm
 /// `s32`s (60..76) are not float slots.
@@ -550,10 +554,14 @@ pub struct WireSupervisorConfig {
     pub low_batt_v: f32,
 }
 
-/// `pilot.sensor-calibration` (relay#611), in WIT declaration order — and
-/// field for field `relay_calib::CalParams`. Units per the WIT: gyro-bias
-/// rad/s, accel-bias m/s², the two scales unitless, mag-offset in the host's
-/// own `mag-body` unit.
+/// `pilot.sensor-calibration` (relay#611), in WIT declaration order. Units
+/// per the WIT: gyro-bias rad/s, accel-bias m/s², the scales and the
+/// off-diagonal terms unitless, mag-offset in the host's own `mag-body` unit.
+///
+/// The first five fields map field for field onto `relay_calib::CalParams`.
+/// `mag_offdiag` does NOT yet have a `CalParams` counterpart: it rides on the
+/// wire now so the frame does not change again when relay#611's amendment
+/// adds `mag-offdiag: vec3` to the WIT record.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WireCalibration {
     pub gyro_bias: [f32; 3],
@@ -561,6 +569,11 @@ pub struct WireCalibration {
     pub accel_scale: [f32; 3],
     pub mag_offset: [f32; 3],
     pub mag_scale: [f32; 3],
+    /// Symmetric soft-iron OFF-DIAGONAL terms (unitless): with `mag_scale` as
+    /// the diagonal, the whole symmetric 3x3 soft-iron matrix (the shape PX4
+    /// calibrates as `CAL_MAGn_ODIAG`). PROVISIONAL ORDER `[xy, xz, yz]` —
+    /// must match #611's relay-calib ordering; confirm at integration.
+    pub mag_offdiag: [f32; 3],
 }
 
 /// `pilot.pilot-command`. The wire value is the WIT DECLARATION ORDER, pinned
@@ -830,6 +843,8 @@ pub fn encode_calibration(
         c.accel_scale,
         c.mag_offset,
         c.mag_scale,
+        // appended at payload 60 — provisional [xy, xz, yz], see the struct
+        c.mag_offdiag,
     ];
     for (g, v3) in groups.iter().enumerate() {
         for (i, v) in v3.iter().enumerate() {
@@ -854,6 +869,7 @@ pub fn decode_calibration(payload: &[u8]) -> Result<WireCalibration, WireError> 
         accel_scale: v3(2),
         mag_offset: v3(3),
         mag_scale: v3(4),
+        mag_offdiag: v3(5),
     })
 }
 
@@ -1163,8 +1179,9 @@ mod tests {
 
     /// `Calibration` (type 5), seq 3, in #611's `sensor-calibration` order:
     /// gyro-bias (0.125, 0, -0.5), accel-bias (0.25, 0, 0), accel-scale
-    /// (1.0, 1.5, 0.75), mag-offset (4.0, 0, -1.0), mag-scale (1.0, 2.0, 0.5).
-    const CAL_VECTOR: [u8; 68] = [
+    /// (1.0, 1.5, 0.75), mag-offset (4.0, 0, -1.0), mag-scale (1.0, 2.0, 0.5),
+    /// mag-offdiag (0.25, -0.5, 0.125) in the PROVISIONAL [xy, xz, yz] order.
+    const CAL_VECTOR: [u8; 80] = [
         0x1c, 0xfa, 0x02, 0x05, 0x03, 0x00, 0x00, 0x00, // magic, v2, type 5, seq 3
         0x00, 0x00, 0x00, 0x3e, // 0  gyro-bias.x    0.125
         0x00, 0x00, 0x00, 0x00, // 4  gyro-bias.y    0.0
@@ -1181,6 +1198,9 @@ mod tests {
         0x00, 0x00, 0x80, 0x3f, // 48 mag-scale.x    1.0
         0x00, 0x00, 0x00, 0x40, // 52 mag-scale.y    2.0
         0x00, 0x00, 0x00, 0x3f, // 56 mag-scale.z    0.5
+        0x00, 0x00, 0x80, 0x3e, // 60 mag-offdiag.xy  0.25
+        0x00, 0x00, 0x00, 0xbf, // 64 mag-offdiag.xz -0.5
+        0x00, 0x00, 0x00, 0x3e, // 68 mag-offdiag.yz  0.125
     ];
 
     #[test]
@@ -1191,6 +1211,7 @@ mod tests {
             accel_scale: [1.0, 1.5, 0.75],
             mag_offset: [4.0, 0.0, -1.0],
             mag_scale: [1.0, 2.0, 0.5],
+            mag_offdiag: [0.25, -0.5, 0.125],
         };
         let mut out = [0u8; HEADER_LEN + CALIBRATION_PAYLOAD_LEN];
         encode_calibration(&mut out, 3, &c);
@@ -1316,12 +1337,12 @@ mod tests {
         assert_eq!(MsgType::Sensor.payload_len(), 81);
         assert_eq!(MsgType::Motors.payload_len(), 16);
         assert_eq!(MsgType::SupervisorConfig.payload_len(), 24);
-        assert_eq!(MsgType::Calibration.payload_len(), 60);
+        assert_eq!(MsgType::Calibration.payload_len(), 72);
         assert_eq!(MsgType::Command.payload_len(), 3);
         assert_eq!(VERSION, 2, "binding v2");
         // ...and decode_frame enforces each one: one byte short and one byte
         // long are both BadLength.
-        for (t, n) in [(4u8, 24usize), (5, 60), (6, 3), (2, 81)] {
+        for (t, n) in [(4u8, 24usize), (5, 72), (6, 3), (2, 81)] {
             let msg = MsgType::from_u8(t).unwrap();
             let mut buf = [0u8; HEADER_LEN + 82];
             encode_header(&mut buf, msg, 1).unwrap();
@@ -1370,6 +1391,7 @@ mod tests {
             accel_scale: [1.01, 0.99, 1.002],
             mag_offset: [12.0, -7.5, 3.0],
             mag_scale: [0.98, 1.03, 1.0],
+            mag_offdiag: [0.01, -0.02, 0.003],
         };
         let mut b = [0u8; HEADER_LEN + CALIBRATION_PAYLOAD_LEN];
         encode_calibration(&mut b, 10, &c);
@@ -1497,13 +1519,15 @@ mod tests {
             accel_scale: [1.0; 3],
             mag_offset: [0.0; 3],
             mag_scale: [1.0; 3],
+            mag_offdiag: [0.0; 3],
         };
         let g = match i / 3 {
             0 => &mut c.gyro_bias,
             1 => &mut c.accel_bias,
             2 => &mut c.accel_scale,
             3 => &mut c.mag_offset,
-            _ => &mut c.mag_scale,
+            4 => &mut c.mag_scale,
+            _ => &mut c.mag_offdiag,
         };
         g[i % 3] = v;
         let mut b = [0u8; HEADER_LEN + CALIBRATION_PAYLOAD_LEN];
@@ -1569,7 +1593,7 @@ mod tests {
             field!("cruise-alt", 16, sup_with, 4),
             field!("low-batt-v", 20, sup_with, 5),
         ];
-        const CAL: [FloatField; 15] = [
+        const CAL: [FloatField; 18] = [
             field!("gyro-bias.x", 0, cal_with, 0),
             field!("gyro-bias.y", 4, cal_with, 1),
             field!("gyro-bias.z", 8, cal_with, 2),
@@ -1585,6 +1609,9 @@ mod tests {
             field!("mag-scale.x", 48, cal_with, 12),
             field!("mag-scale.y", 52, cal_with, 13),
             field!("mag-scale.z", 56, cal_with, 14),
+            field!("mag-offdiag.xy", 60, cal_with, 15),
+            field!("mag-offdiag.xz", 64, cal_with, 16),
+            field!("mag-offdiag.yz", 68, cal_with, 17),
         ];
         const SENSOR: [FloatField; 15] = [
             field!("imu.ax", 0, sensor_with, 0),
@@ -1635,7 +1662,7 @@ mod tests {
             // COMPLETENESS: the test's field list and the decoder's slot list
             // agree in count and position — a slot the decoder forgot, or one
             // it checks that is not a float field, fails here.
-            let mut want: [usize; 15] = [usize::MAX; 15];
+            let mut want: [usize; 18] = [usize::MAX; 18];
             for (i, f) in fields.iter().enumerate() {
                 want[i] = f.offset;
             }
@@ -1685,10 +1712,10 @@ mod tests {
                 }
             }
         }
-        // 9 + 15 + 4 + 6 + 15 = 49 float fields x 6 patterns
+        // 9 + 15 + 4 + 6 + 18 = 52 float fields x 6 patterns
         assert_eq!(
             checked,
-            49 * 6,
+            52 * 6,
             "every float field of every frame type was exercised"
         );
     }
@@ -2068,6 +2095,7 @@ mod tests {
             accel_scale: [7.0, 8.0, 9.0],
             mag_offset: [10.0, 11.0, 12.0],
             mag_scale: [13.0, 14.0, 15.0],
+            mag_offdiag: [16.0, 17.0, 18.0],
         };
         let mut b = [0u8; HEADER_LEN + CALIBRATION_PAYLOAD_LEN];
         encode_calibration(&mut b, 1, &c);
@@ -2090,6 +2118,9 @@ mod tests {
                 ("mag-scale.x", F32(13.0)),
                 ("mag-scale.y", F32(14.0)),
                 ("mag-scale.z", F32(15.0)),
+                ("mag-offdiag.xy", F32(16.0)),
+                ("mag-offdiag.xz", F32(17.0)),
+                ("mag-offdiag.yz", F32(18.0)),
             ],
         );
 

@@ -173,7 +173,10 @@ artifacts:
         # cover for "presence byte above 1 is rejected" and one for the
         # measured presence-2 case; it now proves presence is strictly 0/1.
         - run: "grep -q 'a sensor frame with a presence byte above 1 is rejected' crates/falcon-hitl/src/kani_proofs.rs"
-        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 28"
+        # 28 -> 29 (#614 amendment): the calibration harness covers a
+        # non-finite value in the last appended mag-offdiag slot (68).
+        - run: "grep -q 'a non-finite mag-offdiag.yz (the last appended slot) is rejected' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 29"
         # The finding is FIXED: the decoder rejects non-finite (this step
         # inverted the old `! grep -qE 'is_finite|is_nan'`, which flipped as
         # intended when the fix landed).

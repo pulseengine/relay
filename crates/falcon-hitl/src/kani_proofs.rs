@@ -57,7 +57,10 @@ use crate::wire::{
 const CONFIG_SLOTS: [usize; 9] = [0, 4, 8, 12, 16, 20, 24, 28, 32];
 const MOTORS_SLOTS: [usize; 4] = [0, 4, 8, 12];
 const SUPCFG_SLOTS: [usize; 6] = [0, 4, 8, 12, 16, 20];
-const CAL_SLOTS: [usize; 15] = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56];
+/// Calibration: five vec3s, then `mag-offdiag` appended at 60/64/68.
+const CAL_SLOTS: [usize; 18] = [
+    0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
+];
 /// imu 6, dt-s, position-ned 3 (after its presence byte at 28), mag-body 3
 /// (presence 41), heading-rad (presence 54), battery-v (presence 76). The four
 /// motor-rpm s32s at 60..76 are NOT float slots.
@@ -459,9 +462,13 @@ fn a_well_formed_supervisor_config_frame_dispatches_without_panicking() {
     );
 }
 
-/// `Calibration` (v2) — 60 bytes, `pilot.configure-calibration` (relay#611).
+/// `Calibration` (v2) — 72 bytes, `pilot.configure-calibration` (relay#611):
+/// five vec3s, then `mag-offdiag` appended at 60/64/68 (provisional
+/// `[xy, xz, yz]` order — must match #611's relay-calib ordering). Every one
+/// of the 18 slots is NonFinite-checked; the unwind bound covers the 18-slot
+/// loops.
 #[kani::proof]
-#[kani::unwind(16)]
+#[kani::unwind(20)]
 fn a_well_formed_calibration_frame_dispatches_without_panicking() {
     const N: usize = HEADER_LEN + CALIBRATION_PAYLOAD_LEN;
     let buf: [u8; N] = well_formed(MsgType::Calibration);
@@ -476,11 +483,18 @@ fn a_well_formed_calibration_frame_dispatches_without_panicking() {
         assert!(c.accel_scale[0].to_bits() == bits_at(payload, 24));
         assert!(c.mag_offset[0].to_bits() == bits_at(payload, 36));
         assert!(c.mag_scale[2].to_bits() == bits_at(payload, 56));
+        assert!(c.mag_offdiag[0].to_bits() == bits_at(payload, 60));
+        assert!(c.mag_offdiag[1].to_bits() == bits_at(payload, 64));
+        assert!(c.mag_offdiag[2].to_bits() == bits_at(payload, 68));
     } else {
         assert!(decode_calibration(payload).is_err());
     }
     kani::cover!(ok, "a finite calibration is accepted");
     kani::cover!(!ok, "a calibration with a non-finite field is rejected");
+    kani::cover!(
+        first_non_finite(&buf[HEADER_LEN..], &CAL_SLOTS) == Some(68),
+        "a non-finite mag-offdiag.yz (the last appended slot) is rejected"
+    );
 }
 
 /// `Command` (v2) — 3 bytes, `pilot.command`. Accepted EXACTLY when the

@@ -76,7 +76,7 @@ are **payload** offsets; add 8 for the frame offset.
 | `sensor` | 2 | host → component | 81 B (`sensor-frame`) | 89 B |
 | `motors` | 3 | component → host | 16 B (`motor-pwm`, 4×f32) | 24 B |
 | `supervisor-config` | 4 | host → component | 24 B (`supervisor-config`, 6×f32) | 32 B |
-| `calibration` | 5 | host → component | 60 B (`sensor-calibration`, 15×f32) | 68 B |
+| `calibration` | 5 | host → component | 72 B (`sensor-calibration`, 18×f32) | 80 B |
 | `command` | 6 | host → component | 3 B (`pilot-command` + 2 interlocks) | 11 B |
 
 **All integers and floats are little-endian.** Every field is byte-aligned;
@@ -274,7 +274,7 @@ supervisor negates it itself. Sending −30.0 to mean "30 m up" commands 30 m
 
 #### `calibration` (type 5) — `pilot.sensor-calibration` (relay#611)
 
-<!-- wire-layout: calibration 60 -->
+<!-- wire-layout: calibration 72 -->
 ```text
  off  size  type  field
    0     4  f32   gyro-bias.x      rad/s, subtracted
@@ -292,11 +292,30 @@ supervisor negates it itself. Sending −30.0 to mean "30 m up" commands 30 m
   48     4  f32   mag-scale.x      unitless, > 0
   52     4  f32   mag-scale.y
   56     4  f32   mag-scale.z
+  60     4  f32   mag-offdiag.xy   unitless, symmetric soft-iron off-diagonal
+  64     4  f32   mag-offdiag.xz
+  68     4  f32   mag-offdiag.yz
 ```
 <!-- /wire-layout -->
 
-The identity calibration (biases 0, scales 1) means **not calibrated**: the
-component's `CalibrationPresent` pre-arm row is `calibration != identity`.
+The identity calibration (biases 0, scales 1, off-diagonals 0) means **not
+calibrated**: the component's `CalibrationPresent` pre-arm row is
+`calibration != identity`.
+
+**`mag-offdiag` (payload 60/64/68) is appended**, so every earlier offset is
+unchanged and the frame grew 60 → 72 B. With `mag-scale` as the diagonal it
+completes a **symmetric 3×3 soft-iron matrix** — the shape common autopilot
+calibrations produce (PX4 calls the off-diagonal `CAL_MAGn_ODIAG`) — which a
+diagonal-only `mag-scale` cannot express. Every slot is checked by the
+non-finite rule like any other `f32`.
+
+> **Provisional:** the component order is `[xy, xz, yz]`, and it **must match
+> the `mag-offdiag` ordering of relay#611's `sensor-calibration` record —
+> confirm at integration.** Until #611's amendment lands, the WIT record and
+> `relay_calib::CalParams` have no off-diagonal field: the native test
+> endpoint decodes these three values and does **not** forward them, so it
+> applies no off-diagonal correction and a calibration that differs from the
+> identity *only* in `mag-offdiag` reads there as not calibrated.
 
 #### `command` (type 6) — `pilot.command(cmd, level, throttle-low)`
 
