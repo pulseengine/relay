@@ -34,11 +34,11 @@ artifacts:
         - relay-calib: tests::identity_is_a_no_op, gyro_null_recovers_known_bias,
           accel_6point_recovers_bias_and_scale, mag_hardiron_recovers_offset,
           mag_softiron_equalises_axis_ranges, degenerate_axis_keeps_unit_scale,
-          to_named_has_15_cal_params; proptests::accel_solve_recovers_synthetic;
+          to_named_has_18_cal_params; proptests::accel_solve_recovers_synthetic;
           kani_proofs::verify_identity_is_noop / verify_gyro_null_total_and_finite /
           verify_mag_hardiron_bounded.
         - falcon-core: tests::estimator_consumes_calibration.
-      ORACLE: `cargo test -p relay-calib` + `cargo kani -p relay-calib` (3/3) +
+      ORACLE: `cargo test -p relay-calib` + `cargo kani -p relay-calib` (6/6 since jess#167; 3/3 at v1.98) +
       `cargo test -p falcon-core estimator_consumes_calibration` green.
     tags: [verification, falcon, calibration, sensors, relay-calib, falcon-core, kani, v1.98]
     fields:

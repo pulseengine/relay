@@ -56,6 +56,7 @@ fn identity_cal() -> SensorCal {
         accel_scale: [1.0; 3],
         mag_offset: [0.0; 3],
         mag_scale: [1.0; 3],
+        mag_offdiag: [0.0; 3],
     }
 }
 
@@ -225,6 +226,7 @@ impl Seam for WasmSeam {
                     accel_scale: v(k.accel_scale),
                     mag_offset: v(k.mag_offset),
                     mag_scale: v(k.mag_scale),
+                    mag_offdiag: v(k.mag_offdiag),
                 },
             )
             .unwrap();
@@ -310,6 +312,10 @@ struct Rig {
     /// When set, the accelerometer the FRAME reports instead of the plant's —
     /// a dead / free-falling sensor for the estimator-health scenarios.
     accel_override: Option<[f32; 3]>,
+    /// When set, a fixed magnetometer reading the frame carries (the mock
+    /// plant has no magnetometer) — so a mag calibration has something to act
+    /// on.
+    mag_override: Option<[f32; 3]>,
 }
 
 impl Rig {
@@ -323,6 +329,7 @@ impl Rig {
             motors: [0.0; 4],
             battery_v: Some(PACK_V),
             accel_override: None,
+            mag_override: None,
         }
     }
     /// Advance `n` ticks; returns the last motor command.
@@ -339,7 +346,7 @@ impl Rig {
                     g[2] + GYRO_BIAS[2],
                 ],
                 position: self.tick.is_multiple_of(80).then_some(p),
-                mag: self.plant.mag_body_ned(),
+                mag: self.mag_override.or(self.plant.mag_body_ned()),
                 heading: self.plant.heading_ned(),
                 rpm: self.plant.motor_rpm(),
                 battery_v: self.battery_v,
@@ -588,9 +595,9 @@ fn invalid_sup_configs() -> Vec<(&'static str, SupCalib)> {
     ]
 }
 
-/// Every invalid CALIBRATION (`relay_calib::CalParams` semantics: finite, every
-/// scale > 0), plus the valid-but-IDENTITY one falcon-core reads as "not
-/// calibrated".
+/// Every invalid CALIBRATION (`relay_calib::CalParams::is_valid`: finite, accel
+/// scale > 0, soft-iron positive definite), plus the valid-but-IDENTITY one
+/// falcon-core reads as "not calibrated".
 fn bad_calibrations() -> Vec<(&'static str, SensorCal)> {
     let c = good_cal();
     vec![
@@ -626,6 +633,22 @@ fn bad_calibrations() -> Vec<(&'static str, SensorCal)> {
             "mag-offset NaN",
             SensorCal {
                 mag_offset: [0.0, 0.0, f32::NAN],
+                ..c
+            },
+        ),
+        (
+            "mag-offdiag NaN",
+            SensorCal {
+                mag_offdiag: [0.0, f32::NAN, 0.0],
+                ..c
+            },
+        ),
+        (
+            // Finite, every scale > 0, but S = [[1,2,0],[2,1,0],[0,0,1]] is
+            // indefinite (eigenvalues 3, -1, 1): it MIRRORS a field direction.
+            "soft-iron not positive definite",
+            SensorCal {
+                mag_offdiag: [2.0, 0.0, 0.0],
                 ..c
             },
         ),
@@ -845,6 +868,201 @@ fn rebuilt_supervisor_refuses_arm_before_first_step<S: Seam>(s: &mut S) {
         s.mode(),
         Some(DISARMED),
         "a configure-rebuilt supervisor ARMED on its bring-up defaults"
+    );
+}
+
+// ── mag-offdiag (jess#167) ──────────────────────────────────────────────────
+
+/// A valid calibration WITH a soft-iron off-diagonal: positive definite
+/// (diagonally dominant), every term distinct.
+fn offdiag_cal() -> SensorCal {
+    SensorCal {
+        mag_offset: [0.01, -0.02, 0.015],
+        mag_scale: [1.05, 0.95, 1.1],
+        mag_offdiag: [0.04, -0.03, 0.02],
+        ..good_cal()
+    }
+}
+
+/// Launch on `cal` and return the bit pattern of every motor command over a
+/// fixed flight.
+fn motor_trace<S: Seam>(s: &mut S, cal: SensorCal) -> Vec<u32> {
+    let mut rig = Rig::new();
+    // A body-frame field with all three components non-zero, so every
+    // off-diagonal term multiplies something.
+    rig.mag_override = Some([0.21, 0.07, 0.43]);
+    s.configure(mock_calib());
+    s.configure_calibration(cal);
+    s.configure_supervisor(good_sup());
+    let armed = arm_on_measured_table(s, &mut rig, ARM_WINDOW);
+    assert!(armed.is_some(), "precondition: arms; mode {:?}", s.mode());
+    s.command(Event::RequestTakeoff);
+    let mut out = Vec::new();
+    for _ in 0..1500 {
+        out.extend(rig.fly(s, 1).iter().map(|m| m.to_bits()));
+    }
+    out
+}
+
+/// The off-diagonal CROSSES THE SEAM and is applied identically on both
+/// sides: the shipped component and the native mirror, given the same
+/// off-diagonal calibration, command bit-identical motors — AND the channel is
+/// LIVE: the same flight with the off-diagonal zeroed commands different
+/// motors. (Without the second half this would be the equivalence test that
+/// is blind to a channel neither side receives.)
+#[test]
+#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
+fn wasm_mag_offdiag_crosses_the_seam_bit_identically() {
+    let wasm = motor_trace(&mut WasmSeam::load(), offdiag_cal());
+    let native = motor_trace(&mut NativeCascade::new(), offdiag_cal());
+    assert_eq!(wasm.len(), native.len());
+    let first = wasm.iter().zip(&native).position(|(a, b)| a != b);
+    assert!(
+        first.is_none(),
+        "wasm and native disagree with a non-zero mag-offdiag, first at motor word {first:?}"
+    );
+    let zeroed = motor_trace(
+        &mut NativeCascade::new(),
+        SensorCal {
+            mag_offdiag: [0.0; 3],
+            ..offdiag_cal()
+        },
+    );
+    assert_ne!(
+        native, zeroed,
+        "zeroing mag-offdiag changed NOTHING — the comparison above is blind to the field"
+    );
+}
+
+/// Mirror-side: a positive-definite off-diagonal calibration is VALID (arms).
+#[test]
+fn mirror_offdiag_calibration_is_accepted() {
+    let mut n = NativeCascade::new();
+    let _ = motor_trace(&mut n, offdiag_cal());
+}
+
+// ── configure-calibration soak: the SPILLED argument area (#574) ────────────
+
+const SOAK_CALLS: u32 = 10_000;
+
+/// `configure-calibration` is 18 flat f32 > MAX_FLAT_PARAMS, so EVERY call
+/// makes the host `cabi_realloc` a 72 B argument area in the component's 8 KiB
+/// bump arena; without per-call reclamation the arena is exhausted after
+/// ~113 calls. 10 000 calls through the Component Model API — cycling a
+/// valid, an invalid and an off-diagonal calibration — must neither trap nor
+/// leave the component unable to arm and fly on the LAST (valid) one.
+///
+/// Named outside the `arena_soak` filter on purpose: FV-FALCON-OCI-006 runs
+/// `--ignored arena_soak` with only the five leaf `FALCON_*_WASM` variables.
+#[test]
+#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
+fn wasm_configure_calibration_soak_10k_calls() {
+    let mut s = WasmSeam::load();
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_supervisor(good_sup());
+    let invalid = SensorCal {
+        mag_offdiag: [2.0, 0.0, 0.0],
+        ..good_cal()
+    };
+    for i in 0..SOAK_CALLS {
+        let c = match i % 3 {
+            0 => good_cal(),
+            1 => invalid,
+            _ => offdiag_cal(),
+        };
+        s.configure_calibration(c);
+        if i % 1000 == 0 {
+            rig.fly(&mut s, 1); // interleave a spilled `controller#step` too
+        }
+    }
+    s.configure_calibration(offdiag_cal());
+    assert!(
+        arm_on_measured_table(&mut s, &mut rig, ARM_WINDOW).is_some(),
+        "after {SOAK_CALLS} configure-calibration calls the component no longer arms"
+    );
+    s.command(Event::RequestTakeoff);
+    rig.fly(&mut s, 2000);
+    assert!(
+        rig.altitude() > 1.0,
+        "after the soak the vehicle did not take off; altitude {:.2} m",
+        rig.altitude()
+    );
+}
+
+/// The same at the CORE level, emulating the host exactly as the canonical
+/// ABI does it (`cabi_realloc(0, 0, 4, 72)`, write the record, call the core
+/// export with the pointer) — the oracle that sees exhaustion the component
+/// API hides (see arena_soak.rs: wasmtime would accept a NULL as address 0).
+/// Asserts the core export takes ONE i32 (the indirect lowering) and the
+/// argument area never moves and is never NULL across 10 000 calls.
+#[test]
+#[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
+fn wasm_configure_calibration_core_area_is_pinned() {
+    use wasmtime::{Engine, Instance, Module, Store, ValType};
+    let path = std::env::var("CASCADE_WASM").expect("CASCADE_WASM must name the component");
+    let bytes = std::fs::read(path).unwrap();
+    let engine = Engine::default();
+    let module = Module::new(&engine, crate::arena_soak::core_module(&bytes)).unwrap();
+    assert_eq!(
+        module.imports().len(),
+        0,
+        "cascade core module imports nothing"
+    );
+    let name = module
+        .exports()
+        .map(|e| e.name().to_string())
+        .find(|n| n.ends_with("#configure-calibration"))
+        .expect("no configure-calibration core export");
+    let ty = module.get_export(&name).unwrap().func().unwrap().clone();
+    let params: Vec<ValType> = ty.params().collect();
+    assert!(
+        params.len() == 1 && matches!(params[0], ValType::I32) && ty.results().len() == 0,
+        "configure-calibration is expected to lower INDIRECTLY to (param i32); \
+         measured {} params",
+        params.len()
+    );
+    let mut store = Store::new(&engine, ());
+    let inst = Instance::new(&mut store, &module, &[]).unwrap();
+    let memory = inst.get_memory(&mut store, "memory").unwrap();
+    let realloc = inst
+        .get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "cabi_realloc")
+        .unwrap();
+    let call = inst.get_typed_func::<i32, ()>(&mut store, &name).unwrap();
+    let mut first = None;
+    for i in 0..SOAK_CALLS {
+        let p = realloc
+            .call(&mut store, (0, 0, 4, 72))
+            .unwrap_or_else(|e| panic!("call {i}: cabi_realloc trapped: {e}"));
+        assert_ne!(p, 0, "call {i}: cabi_realloc returned NULL");
+        assert_eq!(
+            p,
+            *first.get_or_insert(p),
+            "call {i}: the 72 B area moved (leak)"
+        );
+        let c = if i % 2 == 0 {
+            good_cal()
+        } else {
+            offdiag_cal()
+        };
+        let vals: Vec<f32> = [
+            c.gyro_bias,
+            c.accel_bias,
+            c.accel_scale,
+            c.mag_offset,
+            c.mag_scale,
+            c.mag_offdiag,
+        ]
+        .concat();
+        let raw: Vec<u8> = vals.iter().flat_map(|v| v.to_le_bytes()).collect();
+        assert_eq!(raw.len(), 72);
+        memory.write(&mut store, p as usize, &raw).unwrap();
+        call.call(&mut store, p)
+            .unwrap_or_else(|e| panic!("call {i}: configure-calibration trapped: {e}"));
+    }
+    println!(
+        "configure-calibration: {SOAK_CALLS} core calls, 72 B area pinned at {:#x}",
+        first.unwrap()
     );
 }
 

@@ -441,10 +441,12 @@ interface observer {
 /// THE CALIBRATION HAS ITS OWN ENTRY POINT, `configure-calibration`, rather
 /// than a field of `supervisor-config` — the maintainer's decision of
 /// 2026-10-21 (relay#586), announced on jess#167. Measured reason: folded in,
-/// `supervisor-config` would grow from 6 flat params to 21 and cross
+/// `supervisor-config` would grow from 6 flat params to 24 and cross
 /// `MAX_FLAT_PARAMS`, changing `configure-supervisor` from scalars to a
-/// pointer. As its own function the record is 15 flat params, under 16, and
-/// `configure-supervisor` keeps its 6-scalar lowering.
+/// pointer. As its own function `configure-supervisor` keeps its 6-scalar
+/// lowering. `configure-calibration` itself is 18 flat params since the
+/// soft-iron off-diagonal (jess#167, 2026-10-28) and is therefore passed
+/// INDIRECTLY — see that function.
 interface pilot {
     use types.{vec3};
 
@@ -502,7 +504,15 @@ interface pilot {
     /// nothing added. Applied to the RAW frame before the estimator:
     ///   gyro  = raw − gyro-bias
     ///   accel = accel-scale ∘ (raw − accel-bias)      (∘ = per-axis product)
-    ///   mag   = mag-scale ∘ (raw − mag-offset)
+    ///   mag   = S · (raw − mag-offset)
+    /// where S is the SYMMETRIC soft-iron matrix
+    ///         | sx  xy  xz |    [sx, sy, sz] = mag-scale
+    ///     S = | xy  sy  yz |    [xy, xz, yz] = mag-offdiag
+    ///         | xz  yz  sz |
+    /// — PX4's `Magnetometer::Correct` without its rotation and power
+    /// compensation, `_scale * (data - _offset)`, with `_scale` built from
+    /// `CAL_MAGn_{X,Y,Z}SCALE` (diagonal) and `CAL_MAGn_{X,Y,Z}ODIAG`
+    /// (off-diagonal) in the same order.
     ///
     /// THE IDENTITY CALIBRATION (all biases/offsets 0, all scales 1) MEANS "NOT
     /// CALIBRATED", not "perfectly calibrated": falcon-core derives
@@ -511,9 +521,15 @@ interface pilot {
     /// calibration procedure (relay-calib gyro-null / accel 6-point / mag iron)
     /// actually solved.
     ///
-    /// VALIDATED, NEVER CLAMPED: every component must be finite and every
-    /// SCALE must be > 0 (a zero scale erases an axis, a negative one mirrors
-    /// it). See `configure-calibration` for what an invalid one does.
+    /// VALIDATED, NEVER CLAMPED (`relay_calib::CalParams::is_valid`): every
+    /// component must be finite, every `accel-scale` > 0, and the soft-iron
+    /// matrix S POSITIVE DEFINITE — its leading minors sx, sx·sy − xy² and
+    /// det S all > 0 and finite; with `mag-offdiag` zero that is exactly
+    /// "every `mag-scale` > 0", the rule before the off-diagonal existed. A
+    /// zero or negative scale erases or mirrors an axis; a singular or
+    /// indefinite S does the same to a field direction, so heading would be
+    /// lost or turn the wrong way. See `configure-calibration` for what an
+    /// invalid one does.
     record sensor-calibration {
         /// Gyro zero-rate bias, rad/s (subtracted).
         gyro-bias: vec3,
@@ -525,8 +541,16 @@ interface pilot {
         /// Magnetometer hard-iron offset, in the SAME unit the host sends
         /// `sensor-frame.mag-body` in (subtracted before normalisation).
         mag-offset: vec3,
-        /// Magnetometer soft-iron diagonal scale, unitless. > 0.
+        /// Magnetometer soft-iron matrix DIAGONAL [sx, sy, sz], unitless.
+        /// > 0 (and see the positive-definiteness rule above).
         mag-scale: vec3,
+        /// Magnetometer soft-iron matrix OFF-DIAGONAL, symmetric, unitless,
+        /// ORDERED `x = xy` (S01 = S10), `y = xz` (S02 = S20), `z = yz`
+        /// (S12 = S21) — PX4's `CAL_MAGn_XODIAG`, `YODIAG`, `ZODIAG`, in the
+        /// order of PX4's `Magnetometer::set_offdiagonal`. `{0, 0, 0}` is the
+        /// diagonal soft-iron, and reproduces the pre-off-diagonal output bit
+        /// for bit.
+        mag-offdiag: vec3,
     }
 
     /// A command a PILOT or GCS may legitimately issue.
@@ -586,13 +610,19 @@ interface pilot {
     /// when it is built, and it survives a later `configure` /
     /// `configure-supervisor` rebuild.
     ///
-    /// An INVALID calibration (non-finite, or a scale not > 0) is not
-    /// installed; it REPLACES any earlier one with the identity, so
+    /// An INVALID calibration (any component non-finite, an `accel-scale` not
+    /// > 0, or a soft-iron matrix that is not positive definite — see
+    /// `sensor-calibration`) is not installed; it REPLACES any earlier one with the identity, so
     /// `CalibrationPresent` is false and `arm` refused — the latest thing the
     /// host sent was broken, and the vehicle must not fly on an older one.
     ///
-    /// FLATTENING: 15 f32, under `MAX_FLAT_PARAMS = 16`, so this lowers to 15
-    /// scalars, not a pointer.
+    /// FLATTENING: 18 f32 (six vec3), OVER `MAX_FLAT_PARAMS = 16`, so this
+    /// export is lowered INDIRECTLY: the core function takes one `i32`
+    /// pointer and the host writes the 72-byte record into the component's
+    /// memory through `cabi_realloc` before the call (measured on the built
+    /// component; it was 15 scalars before the off-diagonal). That spilled
+    /// argument area is reclaimed per call by falcon-cm-rt's `CallScope`
+    /// (#574), so repeated calls do not exhaust the component's arena.
     configure-calibration: func(cal: sensor-calibration);
 
     /// Deliver one pilot command to the mode machine.

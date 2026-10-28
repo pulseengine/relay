@@ -417,16 +417,17 @@ impl MagSweepFlow {
 // ── Persistence round-trip ───────────────────────────────────────────────────
 
 impl CalParams {
-    /// Rebuild from the 15 values in [`CalParams::to_named`] ORDER — the
+    /// Rebuild from the 18 values in [`CalParams::to_named`] ORDER — the
     /// param-store load path (PARAM-P03). `to_named` → `from_values` is a
     /// bit-exact round trip (tested).
-    pub fn from_values(v: [f32; 15]) -> Self {
+    pub fn from_values(v: [f32; 18]) -> Self {
         CalParams {
             gyro_bias: [v[0], v[1], v[2]],
             accel_bias: [v[3], v[4], v[5]],
             accel_scale: [v[6], v[7], v[8]],
             mag_offset: [v[9], v[10], v[11]],
             mag_scale: [v[12], v[13], v[14]],
+            mag_offdiag: [v[15], v[16], v[17]],
         }
     }
 }

@@ -48,8 +48,15 @@ pub struct CalParams {
     pub accel_scale: Vec3,
     /// Mag hard-iron offset (gauss), subtracted from raw.
     pub mag_offset: Vec3,
-    /// Mag soft-iron diagonal scale (unitless), multiplied after de-offsetting.
+    /// Mag soft-iron diagonal scale (unitless): the DIAGONAL of the symmetric
+    /// soft-iron matrix `S` applied after de-offsetting.
     pub mag_scale: Vec3,
+    /// Mag soft-iron OFF-DIAGONAL terms of the same symmetric matrix, ordered
+    /// `[xy, xz, yz]` — PX4's `CAL_MAGn_XODIAG / YODIAG / ZODIAG`
+    /// (`Magnetometer::set_offdiagonal`: `[0]` -> `S(0,1)=S(1,0)`, `[1]` ->
+    /// `S(0,2)=S(2,0)`, `[2]` -> `S(1,2)=S(2,1)`). `[0; 3]` is the diagonal
+    /// soft-iron of earlier releases, bit for bit.
+    pub mag_offdiag: Vec3,
 }
 
 impl Default for CalParams {
@@ -69,6 +76,7 @@ impl CalParams {
             accel_scale: [1.0; 3],
             mag_offset: [0.0; 3],
             mag_scale: [1.0; 3],
+            mag_offdiag: [0.0; 3],
         }
     }
 
@@ -82,14 +90,102 @@ impl CalParams {
         hadamard(self.accel_scale, sub(raw, self.accel_bias))
     }
 
-    /// Calibrated mag = scale · (raw − offset).
+    /// Calibrated mag = S · (raw − offset), where `S` is the SYMMETRIC
+    /// soft-iron matrix
+    ///
+    /// ```text
+    ///     | sx  xy  xz |      sx, sy, sz  = mag_scale
+    /// S = | xy  sy  yz |      xy, xz, yz  = mag_offdiag  ([xy, xz, yz])
+    ///     | xz  yz  sz |
+    /// ```
+    ///
+    /// — PX4's `Magnetometer::Correct` minus its rotation and power
+    /// compensation: `_scale * (data - _offset)`, `_scale` built from
+    /// `CAL_MAGn_{X,Y,Z}SCALE` + `CAL_MAGn_{X,Y,Z}ODIAG`.
+    ///
+    /// With all three off-diagonal terms zero (`+0.0` or `-0.0`) the diagonal
+    /// product is returned EXACTLY as before the off-diagonal existed: the full
+    /// product would differ in f32 (`sx·d0 + 0·d1` turns a `-0.0` into `+0.0`,
+    /// and `0·inf` would poison the other axes with NaN), so the zero case is
+    /// not routed through it.
     pub fn apply_mag(&self, raw: Vec3) -> Vec3 {
-        hadamard(self.mag_scale, sub(raw, self.mag_offset))
+        let d = sub(raw, self.mag_offset);
+        let s = self.mag_scale;
+        if self.mag_softiron_is_diagonal() {
+            return hadamard(s, d);
+        }
+        let [xy, xz, yz] = self.mag_offdiag;
+        [
+            s[0] * d[0] + xy * d[1] + xz * d[2],
+            xy * d[0] + s[1] * d[1] + yz * d[2],
+            xz * d[0] + yz * d[1] + s[2] * d[2],
+        ]
     }
 
-    /// The 15 (param-id, value) pairs for the relay-param store. PX4-style
-    /// CAL_* naming; the caller registers/loads them against a `ParamStore`.
-    pub fn to_named(&self) -> [(&'static str, f32); 15] {
+    /// True when every soft-iron off-diagonal term is zero (`+0.0` or `-0.0`):
+    /// `S` is then diagonal and [`apply_mag`](Self::apply_mag) takes the
+    /// diagonal path, bit-identical to the soft-iron before the off-diagonal
+    /// existed (CALIB-K04). Any non-zero or NaN term selects the full matrix.
+    pub fn mag_softiron_is_diagonal(&self) -> bool {
+        let [xy, xz, yz] = self.mag_offdiag;
+        xy == 0.0 && xz == 0.0 && yz == 0.0
+    }
+
+    /// Is this a VALID calibration — one that may be installed and counted as
+    /// `CalibrationPresent`?
+    ///
+    ///   * every component of every field is FINITE;
+    ///   * every accel scale is `> 0` (zero erases an axis, negative mirrors it);
+    ///   * the mag soft-iron matrix `S` (see [`apply_mag`](Self::apply_mag)) is
+    ///     POSITIVE DEFINITE.
+    ///
+    /// Positive definiteness is the matrix form of "scale > 0", and the reason
+    /// it is required rather than just finiteness: a symmetric `S` with an
+    /// eigenvalue `<= 0` either COLLAPSES a field direction (singular: two
+    /// different headings map to the same vector, and heading is lost) or
+    /// MIRRORS it (negative: the heading turns the wrong way). Neither is a
+    /// calibration; a soft-iron ellipsoid fit produces a positive-definite `S`
+    /// by construction. Checked by Sylvester's criterion — the three leading
+    /// principal minors `sx`, `sx·sy − xy²`, `det S` all `> 0` and FINITE (an
+    /// overflowed `inf` determinant is refused, not trusted). Configure-time
+    /// only, never in the sample loop. In f32, as the crate's float discipline
+    /// requires: a matrix whose minors underflow is refused, which is the safe
+    /// direction.
+    ///
+    /// With `mag_offdiag == [0; 3]` `S` is diagonal and positive definite
+    /// exactly when every `mag_scale > 0`, so the check is that — no products,
+    /// hence no under/overflow, and the same answer as the diagonal-only rule
+    /// of earlier releases (Kani: CALIB-K05).
+    pub fn is_valid(&self) -> bool {
+        let fin = |v: &Vec3| v[0].is_finite() && v[1].is_finite() && v[2].is_finite();
+        let pos = |v: &Vec3| v[0] > 0.0 && v[1] > 0.0 && v[2] > 0.0;
+        if !(fin(&self.gyro_bias)
+            && fin(&self.accel_bias)
+            && fin(&self.accel_scale)
+            && fin(&self.mag_offset)
+            && fin(&self.mag_scale)
+            && fin(&self.mag_offdiag))
+        {
+            return false;
+        }
+        if !(pos(&self.accel_scale) && pos(&self.mag_scale)) {
+            return false;
+        }
+        if self.mag_softiron_is_diagonal() {
+            return true;
+        }
+        let [sx, sy, sz] = self.mag_scale;
+        let [xy, xz, yz] = self.mag_offdiag;
+        let m2 = sx * sy - xy * xy;
+        let det = sx * (sy * sz - yz * yz) - xy * (xy * sz - yz * xz) + xz * (xy * yz - sy * xz);
+        m2.is_finite() && m2 > 0.0 && det.is_finite() && det > 0.0
+    }
+
+    /// The 18 (param-id, value) pairs for the relay-param store. PX4-style
+    /// CAL_* naming (the soft-iron off-diagonal as PX4's `CAL_MAG0_{X,Y,Z}ODIAG`
+    /// = `[xy, xz, yz]`); the caller registers/loads them against a
+    /// `ParamStore`.
+    pub fn to_named(&self) -> [(&'static str, f32); 18] {
         [
             ("CAL_GYRO0_XOFF", self.gyro_bias[0]),
             ("CAL_GYRO0_YOFF", self.gyro_bias[1]),
@@ -106,6 +202,9 @@ impl CalParams {
             ("CAL_MAG0_XSCALE", self.mag_scale[0]),
             ("CAL_MAG0_YSCALE", self.mag_scale[1]),
             ("CAL_MAG0_ZSCALE", self.mag_scale[2]),
+            ("CAL_MAG0_XODIAG", self.mag_offdiag[0]),
+            ("CAL_MAG0_YODIAG", self.mag_offdiag[1]),
+            ("CAL_MAG0_ZODIAG", self.mag_offdiag[2]),
         ]
     }
 }
@@ -224,6 +323,9 @@ pub fn solve(
         accel_scale,
         mag_offset: mag_hardiron(mag_sweep),
         mag_scale: mag_softiron_diag(mag_sweep),
+        // The min/max sweep fits a DIAGONAL soft-iron only; an ellipsoid fit
+        // that solves the off-diagonal is a follow-up.
+        mag_offdiag: [0.0; 3],
     }
 }
 
@@ -456,12 +558,13 @@ mod flow_tests {
             accel_scale,
             mag_offset: [0.1, -0.2, 0.05],
             mag_scale: [1.1, 0.9, 1.0],
+            mag_offdiag: [0.02, -0.01, 0.005],
         };
 
-        // 2. Persist: 15 CAL_* params + CAL_VALID, via the PARAM-P03 codec.
-        const LAYOUT: Layout = Layout::new(16);
+        // 2. Persist: 18 CAL_* params + CAL_VALID, via the PARAM-P03 codec.
+        const LAYOUT: Layout = Layout::new(19);
         const CAP: usize = LAYOUT.required_capacity();
-        fn schema() -> ParamStore<16> {
+        fn schema() -> ParamStore<19> {
             let mut s = ParamStore::new();
             for (name, _) in CalParams::identity().to_named() {
                 // Generous physical bounds; defaults = identity calibration.
@@ -498,7 +601,7 @@ mod flow_tests {
         let r = load(&mut store2, &nvm, LAYOUT, 1);
         assert_eq!(r.outcome, LoadOutcome::Loaded);
         assert_eq!(store2.get(&param_id("CAL_VALID")), Some(1.0));
-        let mut vals = [0.0f32; 15];
+        let mut vals = [0.0f32; 18];
         for (i, (name, _)) in CalParams::identity().to_named().iter().enumerate() {
             vals[i] = store2.get(&param_id(name)).unwrap();
         }
@@ -527,9 +630,10 @@ mod flow_tests {
             accel_scale: [1.01, 0.99, 1.002],
             mag_offset: [0.12, -0.08, 0.03],
             mag_scale: [1.05, 0.95, 1.0],
+            mag_offdiag: [0.03, -0.02, 0.01],
         };
         let named = cal.to_named();
-        let mut vals = [0.0f32; 15];
+        let mut vals = [0.0f32; 18];
         for (i, (_, v)) in named.iter().enumerate() {
             vals[i] = *v;
         }
@@ -622,6 +726,186 @@ mod tests {
         assert!(close(s, [1.0, 2.0, 2.0 / 3.0], 1e-4));
     }
 
+    /// The full symmetric soft-iron, against a HAND-COMPUTED reference (not the
+    /// code under test). offdiag = [xy, xz, yz] = [0.05, -0.03, 0.02]:
+    ///   S = [[ 1.10, 0.05, -0.03],
+    ///        [ 0.05, 0.90,  0.02],
+    ///        [-0.03, 0.02,  1.20]]
+    ///   d = raw - offset = [0.5, 0.3, -0.4] - [0.1, -0.2, 0.05] = [0.4, 0.5, -0.45]
+    ///   S·d = [0.44 + 0.025 + 0.0135, 0.02 + 0.45 - 0.009, -0.012 + 0.01 - 0.54]
+    ///       = [0.4785, 0.461, -0.542]
+    /// Every term distinct, so swapping xz/yz, transposing the order, or applying
+    /// only one triangle changes at least one component by >= 0.002.
+    #[test]
+    fn mag_offdiag_matches_hand_computed_reference() {
+        let cal = CalParams {
+            mag_offset: [0.1, -0.2, 0.05],
+            mag_scale: [1.1, 0.9, 1.2],
+            mag_offdiag: [0.05, -0.03, 0.02],
+            ..CalParams::identity()
+        };
+        let got = cal.apply_mag([0.5, 0.3, -0.4]);
+        assert!(
+            close(got, [0.4785, 0.461, -0.542], 1e-5),
+            "soft-iron S·(raw − offset) = {got:?}"
+        );
+    }
+
+    /// offdiag = 0 reproduces the diagonal soft-iron BIT FOR BIT — including
+    /// the signed zero (a naive `sx·d0 + 0·d1 + 0·d2` turns −0 into +0) and a
+    /// non-finite axis (`0·inf` would poison the OTHER two axes with NaN).
+    #[test]
+    fn zero_offdiag_is_bit_identical_to_the_diagonal_path() {
+        let raws: [Vec3; 5] = [
+            [1.5, -2.0, 3.25],
+            [-0.0, 0.3, -0.7],
+            [0.2, f32::INFINITY, -0.1],
+            [f32::NAN, 0.4, 0.5],
+            [-1.0e30, 1.0e-30, 0.0],
+        ];
+        let cal = CalParams {
+            mag_offset: [0.0, -0.1, 0.25],
+            mag_scale: [1.1, 0.9, 1.0],
+            ..CalParams::identity()
+        };
+        for raw in raws {
+            let want = hadamard(cal.mag_scale, sub(raw, cal.mag_offset));
+            let got = cal.apply_mag(raw);
+            for a in 0..3 {
+                assert_eq!(got[a].to_bits(), want[a].to_bits(), "raw {raw:?} axis {a}");
+            }
+        }
+        // ...and -0.0 off-diagonal terms count as zero too.
+        let neg = CalParams {
+            mag_offdiag: [-0.0, -0.0, -0.0],
+            ..cal
+        };
+        let raw = [-0.0, 0.3, f32::INFINITY];
+        let want = hadamard(cal.mag_scale, sub(raw, cal.mag_offset));
+        let got = neg.apply_mag(raw);
+        for (g, w) in got.iter().zip(want.iter()) {
+            assert_eq!(g.to_bits(), w.to_bits());
+        }
+    }
+
+    /// The validity rule: finite everywhere, scales > 0, soft-iron positive
+    /// definite. Each refusal is a DIFFERENT clause, so a mutation that drops
+    /// any one of them fails here.
+    #[test]
+    fn is_valid_rule() {
+        let id = CalParams::identity();
+        assert!(id.is_valid(), "the identity is a VALID calibration");
+        let pd = CalParams {
+            mag_scale: [1.1, 0.9, 1.2],
+            mag_offdiag: [0.05, -0.03, 0.02],
+            ..id
+        };
+        assert!(pd.is_valid(), "a positive-definite soft-iron is valid");
+        let bad: [(&str, CalParams); 10] = [
+            (
+                "gyro NaN",
+                CalParams {
+                    gyro_bias: [f32::NAN, 0.0, 0.0],
+                    ..id
+                },
+            ),
+            (
+                "accel bias inf",
+                CalParams {
+                    accel_bias: [0.0, f32::INFINITY, 0.0],
+                    ..id
+                },
+            ),
+            (
+                "accel scale 0",
+                CalParams {
+                    accel_scale: [1.0, 0.0, 1.0],
+                    ..id
+                },
+            ),
+            (
+                "accel scale inf",
+                CalParams {
+                    accel_scale: [1.0, 1.0, f32::INFINITY],
+                    ..id
+                },
+            ),
+            (
+                "mag offset NaN",
+                CalParams {
+                    mag_offset: [0.0, 0.0, f32::NAN],
+                    ..id
+                },
+            ),
+            (
+                "mag scale -1",
+                CalParams {
+                    mag_scale: [-1.0, 1.0, 1.0],
+                    ..id
+                },
+            ),
+            (
+                "offdiag NaN",
+                CalParams {
+                    mag_offdiag: [0.0, f32::NAN, 0.0],
+                    ..id
+                },
+            ),
+            // 2x2 leading minor 1 - 4 < 0 (indefinite).
+            (
+                "minor2 < 0",
+                CalParams {
+                    mag_offdiag: [2.0, 0.0, 0.0],
+                    ..id
+                },
+            ),
+            // 2x2 minor 0.19 > 0 but det = 0.19 - 1.539 - 1.539 < 0.
+            (
+                "det < 0",
+                CalParams {
+                    mag_offdiag: [0.9, 0.9, -0.9],
+                    ..id
+                },
+            ),
+            // Singular: xy = 1 with unit diagonal collapses x+y onto one axis.
+            (
+                "singular",
+                CalParams {
+                    mag_offdiag: [1.0, 0.0, 0.0],
+                    ..id
+                },
+            ),
+        ];
+        for (name, c) in bad {
+            assert!(!c.is_valid(), "{name} was accepted");
+        }
+        // An overflowed determinant is refused, not trusted as +inf > 0.
+        let huge = CalParams {
+            mag_scale: [3.0e38, 3.0e38, 3.0e38],
+            mag_offdiag: [1.0, 0.0, 0.0],
+            ..id
+        };
+        assert!(!huge.is_valid(), "an overflowed minor was trusted");
+        // Positive determinant, NEGATIVE 2x2 minor: S = [[1,2,2],[2,1,2],[2,2,1]]
+        // has eigenvalues 5, -1, -1 (det = +5), so a det-only check passes it.
+        let two_neg = CalParams {
+            mag_offdiag: [2.0, 2.0, 2.0],
+            ..id
+        };
+        assert!(
+            !two_neg.is_valid(),
+            "an indefinite S with det > 0 was accepted"
+        );
+        // Finite 2x2 minor (1e26) but a determinant that overflows to +inf: it
+        // must be refused by the FINITENESS of det, not trusted as > 0.
+        let det_inf = CalParams {
+            mag_scale: [1.0e13, 1.0e13, 1.0e13],
+            mag_offdiag: [1.0, 0.0, 0.0],
+            ..id
+        };
+        assert!(!det_inf.is_valid(), "an overflowed determinant was trusted");
+    }
+
     #[test]
     fn empty_inputs_are_total() {
         assert_eq!(gyro_null(&[]), [0.0; 3]);
@@ -637,9 +921,14 @@ mod tests {
     }
 
     #[test]
-    fn to_named_has_15_cal_params() {
+    fn to_named_has_18_cal_params() {
         let named = CalParams::identity().to_named();
-        assert_eq!(named.len(), 15);
+        assert_eq!(named.len(), 18);
+        // PX4's CAL_MAGn_ODIAG triple, in PX4's [xy, xz, yz] order, last.
+        assert_eq!(named[15].0, "CAL_MAG0_XODIAG");
+        assert_eq!(named[16].0, "CAL_MAG0_YODIAG");
+        assert_eq!(named[17].0, "CAL_MAG0_ZODIAG");
+        assert_eq!(named[15].1, 0.0);
         assert_eq!(named[0].0, "CAL_GYRO0_XOFF");
         assert_eq!(named[6].0, "CAL_ACC0_XSCALE");
         // identity scales are 1.0, offsets 0.0.
@@ -677,6 +966,34 @@ mod proptests {
             prop_assert!((c[0] - G).abs() < 1e-2);
             prop_assert!((c[1] - G).abs() < 1e-2);
             prop_assert!((c[2] - G).abs() < 1e-2);
+        }
+
+        /// The full soft-iron product agrees with an f64 reference matrix
+        /// product (the test oracle may be f64) for any in-range inputs.
+        #[test]
+        fn mag_softiron_matches_f64_reference(
+            r0 in -1.0f32..1.0, r1 in -1.0f32..1.0, r2 in -1.0f32..1.0,
+            o0 in -0.5f32..0.5, o1 in -0.5f32..0.5, o2 in -0.5f32..0.5,
+            sx in 0.5f32..1.5, sy in 0.5f32..1.5, sz in 0.5f32..1.5,
+            xy in -0.2f32..0.2, xz in -0.2f32..0.2, yz in -0.2f32..0.2,
+        ) {
+            let cal = CalParams {
+                mag_offset: [o0, o1, o2],
+                mag_scale: [sx, sy, sz],
+                mag_offdiag: [xy, xz, yz],
+                ..CalParams::identity()
+            };
+            let d = [(r0 - o0) as f64, (r1 - o1) as f64, (r2 - o2) as f64];
+            let m = [
+                [sx as f64, xy as f64, xz as f64],
+                [xy as f64, sy as f64, yz as f64],
+                [xz as f64, yz as f64, sz as f64],
+            ];
+            let got = cal.apply_mag([r0, r1, r2]);
+            for i in 0..3 {
+                let want = m[i][0] * d[0] + m[i][1] * d[1] + m[i][2] * d[2];
+                prop_assert!((got[i] as f64 - want).abs() < 1e-5, "axis {}", i);
+            }
         }
 
         /// gyro_null on a constant-bias buffer (any length ≥ 1) returns that bias.

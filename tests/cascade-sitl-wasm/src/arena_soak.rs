@@ -45,7 +45,7 @@ fn wasm_path(var: &str) -> String {
 }
 
 /// The first core module embedded in a component's encoding (section id 1).
-fn core_module(component: &[u8]) -> &[u8] {
+pub(crate) fn core_module(component: &[u8]) -> &[u8] {
     assert_eq!(&component[..8], b"\0asm\x0d\x00\x01\x00", "not a component");
     let mut i = 8;
     while i < component.len() {

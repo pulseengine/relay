@@ -280,6 +280,7 @@ fn main() -> Result<()> {
             accel_scale: v3(1.0, 1.0, 1.0),
             mag_offset: v3(0.0, 0.0, 0.0),
             mag_scale: v3(1.0, 1.0, 1.0),
+            mag_offdiag: v3(0.0, 0.0, 0.0),
         },
     )?;
     pilot.call_configure_supervisor(&mut store, supcfg)?;
@@ -359,6 +360,7 @@ fn main() -> Result<()> {
                 accel_scale: [1.0; 3],
                 mag_offset: [0.0; 3],
                 mag_scale: [1.0; 3],
+                mag_offdiag: [0.0; 3],
             });
             n.configure_supervisor(native_mirror::SupCalib {
                 home: [0.0, 0.0, 0.0],

@@ -244,26 +244,23 @@ fn supcfg_valid(c: &SupervisorConfig) -> bool {
 }
 
 /// `pilot.configure-calibration`'s record as falcon-core's `CalParams` — a
-/// field-for-field copy, no conversion of units or meaning — or `None` if it
-/// is INVALID: any component non-finite, or any SCALE not > 0 (zero erases an
-/// axis, negative mirrors it). Never clamped.
+/// field-for-field copy, no conversion of units or meaning (`mag-offdiag`
+/// keeps its `[xy, xz, yz]` order) — or `None` if it is INVALID by
+/// `CalParams::is_valid`: any component non-finite, an accel scale not > 0, or
+/// a soft-iron matrix that is not positive definite. Never clamped. The rule
+/// lives in relay-calib, once, so the component and the native mirror cannot
+/// drift from it.
 fn cal_params(c: &SensorCalibration) -> Option<falcon_core::relay_calib::CalParams> {
-    let pos = |v: f32| v.is_finite() && v > 0.0;
-    let finite3 = |v: &Vec3Wit| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
-    let pos3 = |v: &Vec3Wit| pos(v.x) && pos(v.y) && pos(v.z);
-    let ok = finite3(&c.gyro_bias)
-        && finite3(&c.accel_bias)
-        && pos3(&c.accel_scale)
-        && finite3(&c.mag_offset)
-        && pos3(&c.mag_scale);
     let v = |a: &Vec3Wit| [a.x, a.y, a.z];
-    ok.then(|| falcon_core::relay_calib::CalParams {
+    let p = falcon_core::relay_calib::CalParams {
         gyro_bias: v(&c.gyro_bias),
         accel_bias: v(&c.accel_bias),
         accel_scale: v(&c.accel_scale),
         mag_offset: v(&c.mag_offset),
         mag_scale: v(&c.mag_scale),
-    })
+        mag_offdiag: v(&c.mag_offdiag),
+    };
+    p.is_valid().then_some(p)
 }
 
 /// The calibration the supervisor runs on: the last VALID one the host sent
@@ -648,11 +645,22 @@ impl ObserverGuest for Component {
                 // case (head first, tail last) so the layout is already right
                 // when this lands in shared OCRAM.
                 tick_head: p.tick,
-                qw: p.q[0], qx: p.q[1], qy: p.q[2], qz: p.q[3],
-                pos_n: p.p[0], pos_e: p.p[1], pos_d: p.p[2],
-                vel_n: p.v[0], vel_e: p.v[1], vel_d: p.v[2],
-                wx: p.w[0], wy: p.w[1], wz: p.w[2],
-                bgx: p.bg[0], bgy: p.bg[1], bgz: p.bg[2],
+                qw: p.q[0],
+                qx: p.q[1],
+                qy: p.q[2],
+                qz: p.q[3],
+                pos_n: p.p[0],
+                pos_e: p.p[1],
+                pos_d: p.p[2],
+                vel_n: p.v[0],
+                vel_e: p.v[1],
+                vel_d: p.v[2],
+                wx: p.w[0],
+                wy: p.w[1],
+                wz: p.w[2],
+                bgx: p.bg[0],
+                bgy: p.bg[1],
+                bgz: p.bg[2],
                 innovation: p.innovation,
                 failed_rotor: p.failed_rotor,
                 mode: p.mode,
@@ -666,11 +674,22 @@ impl ObserverGuest for Component {
             // set would be the absence-looks-like-data defect again.
             None => FlightState {
                 tick_head: 0,
-                qw: 1.0, qx: 0.0, qy: 0.0, qz: 0.0,
-                pos_n: 0.0, pos_e: 0.0, pos_d: 0.0,
-                vel_n: 0.0, vel_e: 0.0, vel_d: 0.0,
-                wx: 0.0, wy: 0.0, wz: 0.0,
-                bgx: 0.0, bgy: 0.0, bgz: 0.0,
+                qw: 1.0,
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                pos_n: 0.0,
+                pos_e: 0.0,
+                pos_d: 0.0,
+                vel_n: 0.0,
+                vel_e: 0.0,
+                vel_d: 0.0,
+                wx: 0.0,
+                wy: 0.0,
+                wz: 0.0,
+                bgx: 0.0,
+                bgy: 0.0,
+                bgz: 0.0,
                 innovation: 0.0,
                 failed_rotor: 0xFF,
                 // NOT `disarmed`. 0 is a MEANINGFUL mode value, so publishing it

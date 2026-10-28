@@ -129,27 +129,23 @@ pub struct SensorCal {
     pub accel_scale: Vec3,
     pub mag_offset: Vec3,
     pub mag_scale: Vec3,
+    /// `[xy, xz, yz]`, as the WIT field.
+    pub mag_offdiag: Vec3,
 }
 
 impl SensorCal {
-    /// Mirrors the component's `cal_params`: `None` if any component is
-    /// non-finite or any scale is not > 0. Never clamped.
+    /// Mirrors the component's `cal_params`: `None` unless
+    /// `CalParams::is_valid`. Never clamped.
     fn to_core(self) -> Option<falcon_core::relay_calib::CalParams> {
-        let pos = |v: f32| v.is_finite() && v > 0.0;
-        let finite3 = |v: &Vec3| v.iter().all(|x| x.is_finite());
-        let pos3 = |v: &Vec3| v.iter().all(|x| pos(*x));
-        let ok = finite3(&self.gyro_bias)
-            && finite3(&self.accel_bias)
-            && pos3(&self.accel_scale)
-            && finite3(&self.mag_offset)
-            && pos3(&self.mag_scale);
-        ok.then_some(falcon_core::relay_calib::CalParams {
+        let p = falcon_core::relay_calib::CalParams {
             gyro_bias: self.gyro_bias,
             accel_bias: self.accel_bias,
             accel_scale: self.accel_scale,
             mag_offset: self.mag_offset,
             mag_scale: self.mag_scale,
-        })
+            mag_offdiag: self.mag_offdiag,
+        };
+        p.is_valid().then_some(p)
     }
 }
 
