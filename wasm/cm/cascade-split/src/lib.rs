@@ -23,7 +23,7 @@
 //! bits, the pilot command mapping — is the monolithic component's, line for
 //! line, and the rationale for each piece is written down THERE rather than
 //! restated here. What differs is only where the core lives. The DRIFT GATE is
-//! the differential in `tests/cascade-sitl-wasm` (`SPLIT=<composed.wasm>`): the
+//! the differential in `tests/cascade-sitl-wasm` (`DIFF_AGAINST=<composed.wasm>`): the
 //! two components must agree bit for bit on every motor command and every
 //! published field, every tick, or it fails — and the #609 lifecycle tests in
 //! `tests/cascade-sitl-wasm/src/seam_tests.rs` run against this component as

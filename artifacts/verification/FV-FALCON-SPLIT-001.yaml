@@ -128,10 +128,15 @@ artifacts:
       in the orchestrator.
 
       REFACTOR NEUTRALITY. The monolithic `cascade` is NOT byte-identical to
-      the #611 base (67511 -> 67274 B, code section 37099 -> 37034 B, both
-      built from equal-length paths): falcon-core's generic supervisor. Its
-      embedded WIT is identical and it is behaviourally bit-exact with the base
-      in the twin (50402 ticks @ 400 Hz).
+      the #611 base (67511 -> 67274 B; code section 37099 -> 37034 B, data
+      12478 -> 12458 B; all builds from equal-length paths). ATTRIBUTED by a
+      third build at the last #585 commit carried over (b85a2b1): its code and
+      data sections are byte-identical to this branch's head and only the
+      path-hashed `linking`/`name` custom sections differ, so the whole delta
+      comes from #585's generic-supervisor refactor and the calibration
+      forwarding added after it costs the monolith zero code bytes. Its
+      embedded WIT is identical to the base's and it is behaviourally
+      bit-exact with the base in the twin (50402 ticks @ 400 Hz).
     tags: [verification, falcon, partition, split, supervisor, "575"]
     fields:
       method: automated-test

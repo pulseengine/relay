@@ -21,8 +21,11 @@
 // is sound for the same reason it is in `cascade`: the canonical ABI allocates
 // here only for a call's spilled parameter area, which wit-bindgen's export
 // glue has already LIFTED into locals before the body runs, so nothing in the
-// arena outlives the call that allocated it. (#574 replaces this pattern with
-// a scoped `CallScope`; every reset below is one of its migration points.)
+// arena outlives the call that allocated it. THAT HOLDS ONLY BECAUSE NO EXPORT
+// OF THE SPLIT SEAM TAKES A `list` OR `string`: wit-bindgen lifts those as a
+// `Vec`/`String` that ALIASES the arena, and resetting first would let the
+// body's own allocations overwrite its arguments. (#574 replaces this pattern
+// with a scoped `CallScope`; every reset below is one of its migration points.)
 #[cfg(not(feature = "std"))]
 falcon_cm_rt::export_cm_rt!();
 

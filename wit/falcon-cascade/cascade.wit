@@ -742,9 +742,11 @@ interface estimator {
     /// Rebuild THIS partition and apply `cfg` (`none` = built-in defaults).
     ///
     /// Drops ONLY the estimator's state. The orchestrator calls it whenever the
-    /// monolithic component would have rebuilt its core — i.e. on every
-    /// `controller.configure` AND every `pilot.configure-supervisor`, because
-    /// in `cascade` both drop the whole supervisor, core included.
+    /// monolithic component would have rebuilt its core: when it first builds
+    /// the supervisor, and when it rebuilds it after an ACCEPTED
+    /// `controller.configure` or `pilot.configure-supervisor` — both are
+    /// rejected unless a rebuild loses nothing (#609 finding 1), exactly as in
+    /// `cascade`, where both drop the whole supervisor, core included.
     configure: func(cfg: option<estimator-config>);
 
     /// One estimator tick.
