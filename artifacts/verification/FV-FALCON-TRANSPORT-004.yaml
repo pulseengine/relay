@@ -89,6 +89,11 @@ artifacts:
         # jess#167 / #614 amendment: presence bytes are strictly 0 or 1.
         - run: "grep -q 'fn every_sensor_presence_byte_is_strictly_zero_or_one' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'pub const SENSOR_PRESENCE: \\[usize; 5\\] = \\[28, 41, 54, 59, 76\\];' crates/falcon-hitl/src/wire.rs"
+        # The echo rule (jess#167, #614 amendment): every reply's seq is the
+        # seq of the frame it answers; the endpoint keeps no counter of its own.
+        - run: "grep -q 'fn every_reply_echoes_the_seq_of_the_frame_it_answers_across_a_dropped_sensor_frame' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'wire::encode_motors(&mut out, h.seq, b.motors);' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'The echo rule: a reply' docs/TRANSPORT-BINDING.md"
         - run: "cargo test -p falcon-hitl --test binding_drives_the_supervisor"
         - run: "cargo test -p falcon-hitl --lib wire::tests"
         - run: "cargo test -p falcon-hitl --all-targets"

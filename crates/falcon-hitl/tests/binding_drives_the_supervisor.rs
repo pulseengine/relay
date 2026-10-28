@@ -110,7 +110,8 @@ struct Endpoint {
     scfg: Option<WireSupervisorConfig>,
     cal: CalParams,
     inbound: SeqTracker,
-    out_seq: u32,
+    // No outbound counter: every reply echoes the seq of the frame it
+    // answers (docs/TRANSPORT-BINDING.md §3, the echo rule).
 }
 
 impl Endpoint {
@@ -121,7 +122,6 @@ impl Endpoint {
             scfg: None,
             cal: CalParams::identity(),
             inbound: SeqTracker::new(),
-            out_seq: 0,
         }
     }
 
@@ -158,10 +158,13 @@ impl Endpoint {
         s
     }
 
+    /// THE ECHO RULE for acks: the header seq IS the acknowledged control
+    /// frame's seq, and the payload repeats it (layout unchanged). A counter
+    /// of the endpoint's own here would interleave a second sequence space
+    /// into the host's reply stream and make the next motors read as drops.
     fn reply_ack(&mut self, acked: u32) -> Vec<u8> {
-        self.out_seq = self.out_seq.wrapping_add(1);
         let mut b = [0u8; falcon_hitl::ACK_FRAME_LEN];
-        wire::encode_ack(&mut b, self.out_seq, acked);
+        wire::encode_ack(&mut b, acked, acked);
         b.to_vec()
     }
 
@@ -243,9 +246,10 @@ impl Endpoint {
                 // `update_preflight` inside `step` clobbers this row from a
                 // default-true field; re-declare it, as the component does.
                 s.set_check(CheckId::FailsafeConfigured, configured);
-                self.out_seq = self.out_seq.wrapping_add(1);
+                // THE ECHO RULE: the reply carries the seq of the sensor
+                // frame it answers, never a counter of the endpoint's own.
                 let mut out = [0u8; falcon_hitl::MOTORS_FRAME_LEN];
-                wire::encode_motors(&mut out, self.out_seq, b.motors);
+                wire::encode_motors(&mut out, h.seq, b.motors);
                 Some(out.to_vec())
             }
             MsgType::Ack | MsgType::Motors => None,
@@ -540,4 +544,95 @@ fn a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration() {
         CalParams::identity(),
         "the earlier calibration must not survive an invalid one"
     );
+}
+
+/// THE ECHO RULE (jess#167, #614): every component -> host reply's header
+/// sequence is the sequence of the host frame it answers — a `motors` reply
+/// carries its `sensor` frame's seq, an `ack` carries its control frame's seq
+/// (in the header AND, unchanged, in the payload). So a host can index a reply
+/// to its tick under loss instead of guessing by arrival order.
+///
+/// The run DROPS one `sensor` frame mid-stream (the host sent it; the
+/// component never saw it) and interleaves a control frame later. On every
+/// reply: the header seq equals the request's seq, and the host's reply-stream
+/// verdicts are `InOrder` everywhere except exactly one `Dropped { lost: 1 }`
+/// on the first reply after the drop — still `InOrder` after the interleaved
+/// control frame, which is what catches an endpoint that echoes motors but
+/// numbers its acks from a counter of its own.
+#[test]
+fn every_reply_echoes_the_seq_of_the_frame_it_answers_across_a_dropped_sensor_frame() {
+    let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut plant = Plant {
+        sim: SimBackend::new(level, DT),
+        battery_v: Some(16.4),
+        on_ground: true,
+    };
+    let mut host = BindingHost::new();
+    let mut ep = Endpoint::new();
+
+    // A control frame, checked for the echo in the ack's HEADER and payload.
+    let send_control = |host: &mut BindingHost, ep: &mut Endpoint, frame: &[u8]| {
+        let (req, _) = wire::decode_frame(frame).unwrap();
+        let reply = ep.handle(frame).expect("a control frame is acked");
+        let (h, p) = wire::decode_frame(&reply).unwrap();
+        assert_eq!(h.msg, MsgType::Ack);
+        assert_eq!(h.seq, req.seq, "the ack's header echoes the control seq");
+        assert_eq!(wire::decode_ack(p).unwrap(), req.seq, "and its payload");
+        assert_eq!(host.on_reply(&reply), Ok(HostReply::Acked { seq: req.seq }));
+    };
+
+    let f = host
+        .configure_supervisor(&WireSupervisorConfig {
+            home: [0.0; 3],
+            fence_radius: 50.0,
+            cruise_alt: 2.0,
+            low_batt_v: 14.0,
+        })
+        .unwrap();
+    send_control(&mut host, &mut ep, &f);
+
+    const DROP_AT: usize = 7;
+    const CONTROL_AT: usize = 12;
+    let mut dropped_seen = 0;
+    let mut answered = 0;
+    for i in 0..20 {
+        if i == CONTROL_AT {
+            let f = host
+                .command(&WireCommand {
+                    cmd: WirePilotCommand::RequestDisarm,
+                    level: true,
+                    throttle_low: true,
+                })
+                .unwrap();
+            send_control(&mut host, &mut ep, &f);
+        }
+        let sensors = sample_sensor_frame(&mut plant);
+        let bytes = host.sensor(&sensors).unwrap();
+        let (req, _) = wire::decode_frame(&bytes).unwrap();
+        if i == DROP_AT {
+            continue; // lost on the way to the component
+        }
+        let reply = ep.handle(&bytes).expect("a fresh sensor frame is answered");
+        let (h, _) = wire::decode_frame(&reply).unwrap();
+        assert_eq!(h.msg, MsgType::Motors);
+        assert_eq!(
+            h.seq, req.seq,
+            "tick {i}: the motors reply must carry the seq of the sensor frame it answers"
+        );
+        match host.on_reply(&reply) {
+            Ok(HostReply::Motors { seq, verdict, .. }) => {
+                assert_eq!(seq, req.seq, "tick {i}: HostReply names the answered tick");
+                if i == DROP_AT + 1 {
+                    assert_eq!(verdict, TickVerdict::Dropped { lost: 1 }, "tick {i}");
+                    dropped_seen += 1;
+                } else {
+                    assert_eq!(verdict, TickVerdict::InOrder, "tick {i}");
+                }
+            }
+            other => panic!("tick {i}: expected motors, got {other:?}"),
+        }
+        answered += 1;
+    }
+    assert_eq!(dropped_seen, 1, "exactly one drop reported");
+    assert_eq!(answered, 19, "every delivered sensor frame was answered");
 }

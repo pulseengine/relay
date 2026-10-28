@@ -322,6 +322,12 @@ impl<B: FlightBackend> SimServer<B> {
             self.backend.write_motors(&motors); // steps the plant
         }
 
+        // THE ECHO RULE, in this pair's INVERTED topology: here the flight
+        // computer ([`LinkBackend`]) leads with `Motors` and the plant
+        // answers with `Sensor`, so it is the `Sensor` reply that carries the
+        // seq of the frame it answers. Same rule as §3 — a reply echoes its
+        // request — with the roles swapped; `LinkBackend` numbers its own
+        // requests because it is the side that asks.
         let frame = sample_sensor_frame(&mut self.backend);
         wire::encode_sensor_frame(reply, h.seq, &frame);
         Ok(verdict)
@@ -399,6 +405,12 @@ pub enum HostReply {
     /// reply's sequence.
     Motors {
         motors: [f32; 4],
+        /// The reply's header sequence — by the binding's ECHO RULE
+        /// (docs/TRANSPORT-BINDING.md §3), the sequence of the `sensor` frame
+        /// these motors answer. A host indexes its per-tick record by this,
+        /// not by arrival order, so a lost frame cannot shift every later
+        /// reply onto the wrong tick (jess#167).
+        seq: u32,
         verdict: wire::TickVerdict,
     },
 }
@@ -409,7 +421,11 @@ pub enum HostReply {
 ///
 /// It owns the host's outbound sequence (one counter for EVERY message it
 /// sends, per §3) and the stop-and-wait configuration handshake, and it
-/// classifies the component's replies with the same [`wire::SeqTracker`]. It
+/// classifies the component's replies with the same [`wire::SeqTracker`].
+/// Because every reply ECHOES the seq of the frame it answers (§3, the echo
+/// rule), the reply stream is the host's own sequence space: a gap there is a
+/// request or a reply that was lost, and [`HostReply::Motors`] names the
+/// `sensor` tick it answers. It
 /// does not own a socket: each method returns the exact bytes to send, and
 /// [`on_reply`](Self::on_reply) takes the bytes that came back.
 ///
@@ -544,7 +560,11 @@ impl BindingHost {
             wire::MsgType::Motors => {
                 let motors = wire::decode_motors(payload)?;
                 let verdict = self.tracker.observe(h.seq);
-                Ok(HostReply::Motors { motors, verdict })
+                Ok(HostReply::Motors {
+                    motors,
+                    seq: h.seq,
+                    verdict,
+                })
             }
             other => Err(HostError::UnexpectedType { msg: other }),
         }

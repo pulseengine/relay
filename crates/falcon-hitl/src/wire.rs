@@ -101,11 +101,14 @@ pub const COMMAND_PAYLOAD_LEN: usize = 3;
 pub enum MsgType {
     /// Host -> component: install `vehicle-config`. See the handshake note.
     Config = 0,
-    /// Component -> host: the config was applied, echoing its sequence.
+    /// Component -> host: the control frame was RECEIVED. Its header seq
+    /// echoes the acknowledged frame's seq (the echo rule), and the payload
+    /// repeats it.
     Ack = 1,
     /// Host -> component: one `sensor-frame` for this tick.
     Sensor = 2,
-    /// Component -> host: the resulting `motor-pwm`.
+    /// Component -> host: the resulting `motor-pwm`. Its header seq is the
+    /// seq of the `Sensor` frame it answers (the echo rule, jess#167).
     Motors = 3,
     /// Host -> component (v2): `pilot.configure-supervisor`. Acked like
     /// `Config`.
@@ -645,6 +648,10 @@ impl WireVehicleConfig {
 }
 
 /// Encode a whole `Motors` frame (header + payload) into `out`.
+///
+/// THE ECHO RULE (docs/TRANSPORT-BINDING.md §3): a component answering a
+/// `Sensor` frame passes THAT frame's seq here, never a counter of its own, so
+/// a host can index the reply to its tick under loss.
 pub fn encode_motors(out: &mut [u8; HEADER_LEN + MOTORS_PAYLOAD_LEN], seq: u32, m: [f32; 4]) {
     encode_header(out, MsgType::Motors, seq).expect("buffer is exactly one frame");
     for (i, v) in m.iter().enumerate() {
@@ -684,8 +691,12 @@ pub fn decode_config(payload: &[u8]) -> Result<WireVehicleConfig, WireError> {
     Ok(WireVehicleConfig::from_array(a))
 }
 
-/// Encode a whole `Ack` frame. `acked` is the sequence being acknowledged,
-/// which is NOT necessarily this frame's own `seq`.
+/// Encode a whole `Ack` frame. `acked` is the sequence being acknowledged.
+///
+/// Under the echo rule a component passes the acknowledged seq as BOTH `seq`
+/// (the header) and `acked` (the payload). They are separate parameters
+/// because the payload predates the rule and the layout is unchanged; a
+/// receiver correlates on the payload and classifies on the header.
 pub fn encode_ack(out: &mut [u8; HEADER_LEN + ACK_PAYLOAD_LEN], seq: u32, acked: u32) {
     encode_header(out, MsgType::Ack, seq).expect("buffer is exactly one frame");
     out[HEADER_LEN..HEADER_LEN + 4].copy_from_slice(&acked.to_le_bytes());

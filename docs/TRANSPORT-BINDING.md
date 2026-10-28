@@ -390,18 +390,41 @@ of the WIT interface that do not go through this binding.)
 
 ### Late, dropped and duplicated
 
-The sequence increments by one per message in each direction. A receiver
-classifies each frame against the last it accepted — `SeqTracker` in the
-reference implementation.
+**The host owns the sequence.** The host's `seq` increments by one for every
+frame it sends — `sensor` and control frames alike, one counter. The
+component does not number anything of its own.
 
-> **Not yet pinned: what sequence a REPLY carries.** An `ack` correlates
-> through its payload (`acked-seq`). For a `motors` reply the reference code
-> does both things: `SimServer` echoes the sequence of the frame it answers,
-> while the host-driven test endpoint numbers its replies with its own
-> outbound counter (so a host correlates by order). `BindingHost` accepts
-> either. Only an echo lets a host correlate a `motors` reply to its `sensor`
-> tick under loss; this is an open question for the integrator and will be
-> pinned before v2 ships.
+**The echo rule: a reply's `seq` is the `seq` of the frame it answers.**
+
+- A **`motors`** reply carries the `seq` of the **`sensor` frame it answers**.
+  No layout change: it is the header `seq`.
+- An **`ack`** carries the `seq` of the **control frame it acknowledges** — in
+  its header, and (unchanged from earlier revisions) in its `acked-seq`
+  payload, so both say the same thing.
+
+So the component → host stream is the host's own sequence space, echoed. A
+host indexes each reply to its tick by `seq`, not by arrival order — which is
+the only correlation that survives loss: once one frame is lost, matching
+replies to ticks by order is guesswork. A gap in the reply stream is a request
+or a reply that was lost (`Dropped`); a host that sent `sensor` 41, 42, 43 and
+gets `motors` 41 and 43 back knows tick 42 has no answer. (This rule was an
+open point in an earlier draft of v2; it is pinned here. The integrator review
+on jess#167 asked for exactly this.)
+
+**What a component does with a frame it will not act on.** A `Duplicate` or
+`Late` `sensor` frame never steps the controller. The component may leave it
+unanswered (the native test endpoint does) or answer it with the same `seq`
+(which the host then classifies as `Duplicate`); it must never answer it with a
+`seq` of its own. A `Duplicate` control frame is re-acked with its own `seq`
+and **not re-applied**.
+
+**The same rule, other polarity.** In `falcon-hitl`'s `LinkBackend` /
+`SimServer` pair the flight computer leads with `motors` and the plant answers
+with `sensor`; there the `sensor` reply echoes the `motors` frame's `seq`. A
+reply echoes its request, whichever side asks.
+
+Each receiver classifies the frames it receives against the last it accepted —
+`SeqTracker` in the reference implementation:
 
 | condition | verdict | what the receiver must do |
 |---|---|---|
@@ -411,8 +434,7 @@ reference implementation.
 | `seq > last` (forward) | `Dropped { lost }` | accept, and treat `lost` ticks as missing |
 | `seq < last` (backward) | `Late { by }` | **discard**; a newer frame already superseded it |
 
-A `Duplicate` control frame is re-acked and **not re-applied** — a repeated
-`command` must not deliver its command twice.
+A repeated `command` must not deliver its command twice.
 
 **`Late` and `Dropped` are distinct, with counts.** The requirement's
 falsification condition says so explicitly: it is wrong "if a host that
