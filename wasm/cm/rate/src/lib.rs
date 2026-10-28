@@ -68,13 +68,14 @@ struct Component;
 
 impl Guest for Component {
     fn tick(state: VehicleState, sp: RateSetpoint) -> TorqueSetpoint {
-        // Reclaim the previous call's spilled-parameter area. The canonical ABI
-        // never frees what it allocates through cabi_realloc, so without this a
-        // long-running component would walk the bump cursor to exhaustion.
-        // Sound here because the arena only ever holds the CURRENT call's
-        // argument/result area — nothing allocated by a previous tick outlives it.
+        // Arena reclamation (#574). The canonical ABI never frees what it
+        // allocates through cabi_realloc, so without per-call reclamation a
+        // long-running component walks the bump cursor to exhaustion. The
+        // scope reclaims only once the PREVIOUS call has returned, so this
+        // call's spilled arguments (18 flat params, 72 B) stay intact. First
+        // statement, bound to a name so it lives until the body returns.
         #[cfg(not(feature = "std"))]
-        falcon_cm_rt::BumpArena::reset();
+        let _call = falcon_cm_rt::CallScope::enter();
 
         let torque = PID.0.borrow_mut().tick(
             next_timestamp(),

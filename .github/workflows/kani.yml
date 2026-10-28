@@ -222,6 +222,14 @@ jobs:
           - falcon-hitl
           - relay-log
           - relay-modextra
+          # falcon-cm-rt (#574): the bump arena behind every published
+          # component's `cabi_realloc`, and the CallScope protocol that
+          # reclaims it per call. Previously ZERO harnesses and no entry here.
+          # The harnesses (src/kani_proofs.rs) prove, over the same ArenaState
+          # the allocator runs: no allocation overlaps one still live for the
+          # call (P1), exhaustion is None and the cursor never wraps (P2),
+          # enter reclaims iff the previous call returned (P3), alignment (P4).
+          - falcon-cm-rt
     steps:
       - uses: actions/checkout@v7
       # KANI VERSION IS PINNED. The action's `kani-version` input defaults to

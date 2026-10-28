@@ -49,6 +49,10 @@ struct Component;
 
 impl Guest for Component {
     fn estimate(imu: ImuSample) -> VehicleState {
+        // Arena reclamation (#574): see falcon_cm_rt::CallScope. First statement,
+        // bound to a name so it lives until the body returns.
+        #[cfg(not(feature = "std"))]
+        let _call = falcon_cm_rt::CallScope::enter();
         let accel = [imu.ax, imu.ay, imu.az];
         let gyro = [imu.gx, imu.gy, imu.gz];
         let st = {
