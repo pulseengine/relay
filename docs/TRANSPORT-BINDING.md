@@ -329,7 +329,11 @@ sent was invalid. Per relay#611's semantics for those two calls, a component
 must then behave as if the host had sent an invalid configuration — the
 supervisor configuration is dropped (arming refused on `FailsafeConfigured`)
 and the calibration is replaced by the identity (arming refused on
-`CalibrationPresent`) — rather than keep flying on the previous one.
+`CalibrationPresent`) — rather than keep flying on the previous one. Through
+#611's API that is: forward a `configure-calibration` with the identity (or
+any invalid) calibration, or a `configure-supervisor` with an invalid
+configuration. *(This rule reconciles #527 with #611 and is pending
+maintainer confirmation; the native test endpoint implements it.)*
 
 The order a host follows to fly the supervised component:
 
@@ -369,7 +373,16 @@ of the WIT interface that do not go through this binding.)
 
 The sequence increments by one per message in each direction. A receiver
 classifies each frame against the last it accepted — `SeqTracker` in the
-reference implementation:
+reference implementation.
+
+> **Not yet pinned: what sequence a REPLY carries.** An `ack` correlates
+> through its payload (`acked-seq`). For a `motors` reply the reference code
+> does both things: `SimServer` echoes the sequence of the frame it answers,
+> while the host-driven test endpoint numbers its replies with its own
+> outbound counter (so a host correlates by order). `BindingHost` accepts
+> either. Only an echo lets a host correlate a `motors` reply to its `sensor`
+> tick under loss; this is an open question for the integrator and will be
+> pinned before v2 ships.
 
 | condition | verdict | what the receiver must do |
 |---|---|---|

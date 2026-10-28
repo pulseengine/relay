@@ -1,7 +1,7 @@
 artifacts:
   - id: FV-FALCON-TRANSPORT-002
     type: sw-verification
-    title: "The TRANSPORT-P01 wire decoder is proven total on untrusted bytes — and the proof found that it accepts NaN"
+    title: "The TRANSPORT-P01 wire decoder is proven total on untrusted bytes, and (binding v2) proven to REJECT every non-finite float — the v1 proof found it accepted NaN"
     status: implemented
     release: falcon-v1.141.0
     description: >

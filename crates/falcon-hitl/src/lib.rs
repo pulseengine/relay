@@ -391,6 +391,10 @@ pub enum HostReply {
     /// (e.g. relay#611 discards `configure-*` while armed), and the binding has
     /// no state frame to report that — see the binding document's gaps.
     Acked { seq: u32 },
+    /// A repeat of the ack for the control frame acknowledged last — a
+    /// duplicated datagram. Nothing changed; in particular it does NOT close a
+    /// later handshake.
+    DuplicateAck { seq: u32 },
     /// One tick's motor commands, and what the tick contract says about the
     /// reply's sequence.
     Motors {
@@ -418,6 +422,7 @@ pub enum HostReply {
 pub struct BindingHost {
     seq: u32,
     awaiting: Option<u32>,
+    last_acked: Option<u32>,
     tracker: wire::SeqTracker,
 }
 
@@ -426,6 +431,7 @@ impl BindingHost {
         BindingHost {
             seq: 0,
             awaiting: None,
+            last_acked: None,
             tracker: wire::SeqTracker::new(),
         }
     }
@@ -520,12 +526,20 @@ impl BindingHost {
         match h.msg {
             wire::MsgType::Ack => {
                 let acked = wire::decode_ack(payload)?;
-                if self.awaiting != Some(acked) {
-                    return Err(HostError::UnexpectedAck { acked });
+                if self.awaiting == Some(acked) {
+                    self.tracker.observe(h.seq);
+                    self.awaiting = None;
+                    self.last_acked = Some(acked);
+                    return Ok(HostReply::Acked { seq: acked });
                 }
-                self.tracker.observe(h.seq);
-                self.awaiting = None;
-                Ok(HostReply::Acked { seq: acked })
+                // A network-duplicated ack of the frame ALREADY acknowledged:
+                // accept the bytes and change nothing (§3, `Duplicate`). It
+                // must not close a LATER handshake, and it is not an error.
+                if self.last_acked == Some(acked) {
+                    self.tracker.observe(h.seq);
+                    return Ok(HostReply::DuplicateAck { seq: acked });
+                }
+                Err(HostError::UnexpectedAck { acked })
             }
             wire::MsgType::Motors => {
                 let motors = wire::decode_motors(payload)?;
@@ -813,6 +827,26 @@ mod tests {
         wire::encode_ack(&mut ack, 1, h.seq);
         assert_eq!(host.on_reply(&ack), Ok(HostReply::Acked { seq: h.seq }));
         assert!(host.sensor(&wire::WireSensorFrame::default()).is_ok());
+
+        // A duplicated datagram of that same ack is accepted and changes
+        // nothing — even while a LATER control frame is outstanding.
+        let f2 = host
+            .command(&wire::WireCommand {
+                cmd: wire::WirePilotCommand::Arm,
+                level: true,
+                throttle_low: true,
+            })
+            .unwrap();
+        let (h2, _) = wire::decode_frame(&f2).unwrap();
+        assert_eq!(
+            host.on_reply(&ack),
+            Ok(HostReply::DuplicateAck { seq: h.seq })
+        );
+        assert_eq!(
+            host.awaiting_ack(),
+            Some(h2.seq),
+            "a duplicate of an old ack must not close the new handshake"
+        );
     }
 
     /// A `Motors` reply carrying a NaN command is an ERROR at the host, never

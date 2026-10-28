@@ -47,11 +47,24 @@ artifacts:
       tables are PARSED and checked against encoder output in which every field
       holds a distinct value, so a doc row cannot drift from the code.
 
-      FAILS ON main 038f6e2: the new tests do not compile there (no v2 API);
-      at the assertion level, removing the non-finite check fails the
-      table-driven NonFinite test and the Kani dispatch harnesses, and
-      deciding battery presence from the value fails the 0.0-V-present test
-      and the sensor harness — recorded in the PR.
+      FAILS ON main 038f6e2, MEASURED 2026-10-28. (a) Compile level: the new
+      wire.rs test module spliced onto main's codec gives 91 compile errors
+      (no v2 API). (b) Assertion level, against main's codec with only the v1
+      API: four tests — a NaN motor command is rejected, an infinite dt-s is
+      rejected, SENSOR_PAYLOAD_LEN == 81, type 4 decodes — FAIL 4/4 on main
+      (v1 ACCEPTS the NaN and the inf, 76 B, `UnknownType { got: 4 }`) and
+      PASS 4/4 on this branch. That probe lived in a scratch crate and is not
+      committed. (c) Mutations on this branch, each applied by exact match and
+      restored: M1 non-finite check disabled -> 2 unit tests FAIL
+      (`a_non_finite_value_in_any_float_field_of_any_frame_is_rejected`,
+      `..._in_an_absent_slot_is_still_rejected`) and the Motors and
+      SupervisorConfig Kani harnesses FAIL (the other dispatch harnesses were
+      not run under M1); M2 battery presence from the value -> 2 unit tests
+      FAIL and the Sensor harness FAILS; M3 decoder forgets the battery-v slot
+      -> 2 unit tests and the Sensor harness FAIL; M4 interlock bytes > 1
+      accepted -> `a_malformed_command_is_refused` and the Command harness
+      FAIL; M5 the host's sample_sensor_frame drops battery-v ->
+      `a_binding_only_host_configures_calibrates_arms_and_takes_off` FAILS.
     tags: [verification, falcon, transport, hitl, wire, binding-v2, v1.141]
     fields:
       method: test
