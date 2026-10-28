@@ -514,13 +514,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "gz-msgs"
-version = "0.10.0"
+name = "gz-build"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be49b1a7e03d88e9d3157ede6c17fc9099af257c31536dbfe66c52a117d95fa6"
+checksum = "f2f53487cb1356c52a304058a7994c2ffd31b310f8aee55c803d617131cf9079"
 dependencies = [
- "gz-build",
- "gz-msgs-common",
+ "pkg-config",
+]
+
+[[package]]
+name = "gz-msgs"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36819c12e2593dff9f3e998234a2ae57d72c6064d6e9f0eeb33b2e6fdc1c26e1"
+dependencies = [
+ "gz-build 0.11.0",
+ "gz-msgs-common 0.11.0",
  "protobuf",
 ]
 
@@ -530,7 +539,17 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "772dcb43c78d1e5f3f59d2bac8bd0a311015929d5c593963f6d076ea29e6dd98"
 dependencies = [
- "gz-msgs-derive",
+ "gz-msgs-derive 0.10.0",
+ "protobuf",
+]
+
+[[package]]
+name = "gz-msgs-common"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "297728026cb221c1eebd0dd8385aa7739f5c3612f61b4a3cbe302a122176c856"
+dependencies = [
+ "gz-msgs-derive 0.11.0",
  "protobuf",
 ]
 
@@ -545,14 +564,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "gz-msgs-derive"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fee6963d225b0a8509979ea1430e52af6c63abcc9b08841db76e4be598dd7b4"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "gz-transport"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7332b6e8d98b6760bd63965499a24b1f02e77e93030b3b0d8f8989ef1930af7a"
 dependencies = [
  "crossbeam-channel",
- "gz-build",
- "gz-msgs-common",
+ "gz-build 0.10.0",
+ "gz-msgs-common 0.10.0",
  "gz-transport-sys",
  "log",
 ]
@@ -564,7 +593,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b2501893885070692a8cdedd62691cb5a382f7259b84863910383e7f7df1d1c"
 dependencies = [
  "cc",
- "gz-build",
+ "gz-build 0.10.0",
 ]
 
 [[package]]
