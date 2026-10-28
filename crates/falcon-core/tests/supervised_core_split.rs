@@ -110,6 +110,9 @@ impl PartitionSeam for InProcess {
     fn control_set_landing(&mut self, on: bool) {
         self.casc.set_landing(on);
     }
+    fn control_rearm_fdi(&mut self) {
+        split::control_rearm_fdi(&mut self.casc);
+    }
     fn control_status(&self) -> ControlStatus {
         split::control_status(&self.casc)
     }
@@ -188,6 +191,9 @@ impl PartitionSeam for Mutant {
     }
     fn control_set_landing(&mut self, on: bool) {
         self.inner.control_set_landing(on);
+    }
+    fn control_rearm_fdi(&mut self) {
+        self.inner.control_rearm_fdi();
     }
     fn control_status(&self) -> ControlStatus {
         self.inner.control_status()
@@ -541,6 +547,9 @@ impl<const TUNE: bool> PartitionSeam for HostSeam<TUNE> {
     }
     fn control_set_landing(&mut self, on: bool) {
         self.0.control_set_landing(on)
+    }
+    fn control_rearm_fdi(&mut self) {
+        self.0.control_rearm_fdi()
     }
     fn control_status(&self) -> ControlStatus {
         self.0.control_status()

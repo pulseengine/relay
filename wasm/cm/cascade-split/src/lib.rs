@@ -243,6 +243,9 @@ impl PartitionSeam for WitSeam {
     fn control_set_landing(&mut self, on: bool) {
         flight_control::set_landing(on);
     }
+    fn control_rearm_fdi(&mut self) {
+        flight_control::rearm_fdi();
+    }
     fn control_status(&self) -> ControlStatus {
         let s = flight_control::read_status();
         ControlStatus {

@@ -941,6 +941,14 @@ interface flight-control {
     /// Engage/disengage the velocity-based touchdown law.
     set-landing: func(on: bool);
 
+    /// RE-ARM the rotor-out FDI for a new spin-up (#609 finding 16): restart
+    /// its spin-up guard, forget the previous flight's last motor command and
+    /// clear the CUSUM accumulators, UNLESS a rotor is already isolated (an
+    /// isolated rotor stays isolated). The orchestrator's supervisor calls it
+    /// on its first flying tick after motors-off, exactly where the fused
+    /// `cascade` re-arms its own core.
+    rearm-fdi: func();
+
     /// One control tick on the estimator's `nav`. Only the control channels of
     /// the frame are read (IMU, dt, heading presence, motor RPM).
     tick: func(nav: nav-state, sensors: sensor-frame) -> control-output;

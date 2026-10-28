@@ -55,9 +55,9 @@ artifacts:
       0.38 m, as before. Flight demo: 0.033705384 rad / 0.2090846 m, as
       before. All eight components: zero `memory.grow`, zero `wasi:*`.
 
-      (d) THE CASCADE-SPLIT CRATES (#575). Their 19 exports open a CallScope
+      (d) THE CASCADE-SPLIT CRATES (#575). Their 20 exports open a CallScope
       too (they called the deprecated entry reset before), so the count above
-      is 33. Their soaks are in tests/cascade-sitl-wasm/src/seam_tests.rs
+      is 34 (the 20th is flight-control's `rearm-fdi`, #609 finding 16). Their soaks are in tests/cascade-sitl-wasm/src/seam_tests.rs
       (`split_configure_calibration_core_area_is_pinned`,
       `split_partition_ticks_core_area_is_pinned`,
       `split_configure_calibration_soak_10k_calls`; FV-FALCON-SPLIT-001), not
@@ -70,9 +70,10 @@ artifacts:
       method: formal-verification
       steps:
         # every export is scoped, and the old entry reset is gone
-        # 14 in the eight published components + 19 in the three cascade-split
-        # crates (#575: 6 estimator, 7 flight-control, 6 orchestrator).
-        - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _call = falcon_cm_rt::CallScope::enter();')\" -eq 33"
+        # 14 in the eight published components + 20 in the three cascade-split
+        # crates (#575: 6 estimator, 8 flight-control incl. #609's rearm-fdi,
+        # 6 orchestrator).
+        - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _call = falcon_cm_rt::CallScope::enter();')\" -eq 34"
         - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'BumpArena::reset')\" -eq 0"
         - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _ = falcon_cm_rt::CallScope')\" -eq 0"
         # the harnesses exist (the step below is enforced by the Kani gate)

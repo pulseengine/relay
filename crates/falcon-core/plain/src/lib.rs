@@ -490,6 +490,13 @@ pub struct CascadePartition {
     /// production core against the gz plant, where achieved starts at 0).
     step_count: u32,
     fdi_warmup_steps: u32,
+    /// Control steps since the FDI was last (re-)armed: the spin-up guard's
+    /// OWN counter (#609 finding 16). `step_count` above counted from
+    /// construction only, so a second flight in the same process spun up with
+    /// no guard at all. This one restarts at every spin-up
+    /// ([`Self::rearm_fdi`]); `step_count` keeps its other job (the one-time
+    /// launch-heading capture) unchanged.
+    fdi_spinup: u32,
     /// The cascade's own copy of the sensor calibration (the M7 sees the
     /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
@@ -531,7 +538,7 @@ impl CascadePartition {
             range_agl: None,
             notch: relay_notch::HarmonicNotchBank::new(loop_hz),
             // CUSUM thresholds matching the SITL-verified fault-tolerance chain.
-            fdi: RotorFaultDetector::new(0.5, 0.1),
+            fdi: RotorFaultDetector::new(FDI_CUSUM_THRESHOLD, FDI_CUSUM_DRIFT),
             failed_motor: None,
             yaw_setpoint: 0.0,
             yaw_captured: false,
@@ -541,6 +548,7 @@ impl CascadePartition {
             dbg_fdi: (0.0, 1.0, false, [0.0; 4]),
             step_count: 0,
             fdi_warmup_steps: warmup,
+            fdi_spinup: 0,
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -701,6 +709,21 @@ impl CascadePartition {
     pub fn set_altitude_integral_gain(&mut self, ki: f32) {
         self.ki_alt = ki.clamp(0.0, 0.2);
         self.alt_int = 0.0;
+    }
+    /// RE-ARM the rotor-out FDI for a new spin-up (#609 finding 16): restart the
+    /// spin-up guard, forget the previous flight's last motor command (the
+    /// residual's reference, which nothing else resets on the ground) and clear
+    /// the CUSUM accumulators. ONLY while no rotor is isolated: a rotor the FDI
+    /// HAS isolated stays isolated, so the `MotorsHealthy` pre-arm row keeps
+    /// refusing to arm a vehicle with a dead motor (#565) and the degraded law
+    /// stays engaged. Called by the supervisor on every motors-off -> flying
+    /// edge.
+    pub fn rearm_fdi(&mut self) {
+        if self.failed_motor.is_none() {
+            self.fdi_spinup = 0;
+            self.last_motor_cmd = [0.0; 4];
+            self.fdi = RotorFaultDetector::new(FDI_CUSUM_THRESHOLD, FDI_CUSUM_DRIFT);
+        }
     }
     /// Set the altitude P and D gains (v1.113). The defaults (0.05, 0.30) are
     /// gentle, tuned for the analytic plant; a stiffer plant (real gz) wants a
@@ -1006,6 +1029,7 @@ impl CascadePartition {
         // isolation, latch the failed rotor (next step runs the degraded path).
         // Held off for `fdi_warmup_steps` (spin-up guard) — see the field docs.
         self.step_count = self.step_count.saturating_add(1);
+        self.fdi_spinup = self.fdi_spinup.saturating_add(1);
         // ATTITUDE/RATE GATE: a rotor-out residual is only DISTINGUISHABLE in
         // near-level, low-rate flight. During an attitude transient the
         // controller commands large asymmetric motors, so |commanded − achieved|
@@ -1034,7 +1058,7 @@ impl CascadePartition {
         // command-ALIGNED residual, not this gate.
         let fdi_steady = tilt_cos > 0.90 && rp_rate2 < 4.0; // ≲26° tilt, ≲2 rad/s roll+pitch
         let mut dbg_resid = [0.0f32; 4];
-        if self.failed_motor.is_none() && self.step_count >= self.fdi_warmup_steps && fdi_steady {
+        if self.failed_motor.is_none() && self.fdi_spinup >= self.fdi_warmup_steps && fdi_steady {
             if let Some(rpm) = rpm_now {
                 let mut resid = [0.0f32; 4];
                 let mut i = 0;
@@ -1229,6 +1253,11 @@ impl FlightCore {
 
     pub fn set_position_integral_gain(&mut self, ki: f32) {
         self.casc.set_position_integral_gain(ki)
+    }
+
+    /// Forwards `CascadePartition::rearm_fdi` (#609 finding 16).
+    pub fn rearm_fdi(&mut self) {
+        self.casc.rearm_fdi()
     }
 
     pub fn set_altitude_integral_gain(&mut self, ki: f32) {
@@ -1431,6 +1460,12 @@ pub enum MissionSource {
 /// residual (v1.103). Only the ratio matters; a per-airframe value scales it.
 const ESC_RPM_FULL: f32 = 8000.0;
 
+/// Rotor-out FDI CUSUM level and per-step drift, matching the SITL-verified
+/// fault-tolerance chain. Named so a re-armed detector is built identically
+/// to the original (#609 finding 16).
+const FDI_CUSUM_THRESHOLD: f32 = 0.5;
+const FDI_CUSUM_DRIFT: f32 = 0.1;
+
 /// Thrust floor for the reconfigured (single-rotor-out) allocator. With the
 /// rank-3 allocation (v1.114) the diagonal-opposite of the failed rotor
 /// legitimately rests at 0 — that couple-cancelling zero is what gives the
@@ -1593,6 +1628,10 @@ pub trait SupervisedCore {
     fn set_landing(&mut self, on: bool);
     /// See [`CascadePartition::set_position`].
     fn set_position(&mut self, ned: Vec3);
+    /// See [`CascadePartition::rearm_fdi`] (#609 finding 16). No default body
+    /// on purpose: a core that silently did not re-arm would fly its second
+    /// spin-up with no FDI guard, the defect this hook fixes.
+    fn rearm_fdi(&mut self);
     /// One control tick — the semantics of [`FlightCore::step`].
     fn step<B: FlightBackend>(&mut self, b: &mut B);
     /// One estimate-only tick, motors commanded zero — the semantics of
@@ -1632,6 +1671,9 @@ impl SupervisedCore for FlightCore {
     }
     fn set_position(&mut self, ned: Vec3) {
         FlightCore::set_position(self, ned)
+    }
+    fn rearm_fdi(&mut self) {
+        FlightCore::rearm_fdi(self)
     }
     fn step<B: FlightBackend>(&mut self, b: &mut B) {
         FlightCore::step(self, b)
@@ -1706,6 +1748,9 @@ pub struct FlightSupervisor<C = FlightCore> {
     /// BRAKE, THEN LATCH: true while a moving Loiter entry is still braking and
     /// `hold_xy` is the brake point, not yet the latched hold point.
     hold_braking: bool,
+    /// The previous tick commanded motors OFF (Disarmed / Armed / Terminated).
+    /// The next flying tick is a spin-up and re-arms the FDI (#609 finding 16).
+    motors_were_off: bool,
     /// Time spent braking, and time continuously at rest within it (s).
     brake_s: f32,
     brake_rest_s: f32,
@@ -1891,6 +1936,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             hold_xy: [home[0], home[1]],
             hold_regime: HoldRegime::None,
             hold_braking: false,
+            motors_were_off: true,
             brake_s: 0.0,
             brake_rest_s: 0.0,
             mission_source: MissionSource::Waypoints,
@@ -2673,7 +2719,16 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             Mode::Disarmed | Mode::Armed | Mode::Terminated
         ) {
             self.core.step_estimate_only(b); // estimator warm, motors OFF
+            self.motors_were_off = true;
             return;
+        }
+        // SPIN-UP (#609 finding 16): the first flying tick after motors-off
+        // re-arms the rotor-out FDI, so every flight gets its spin-up guard
+        // and a residual reference from THIS flight. A rotor already isolated
+        // stays isolated (see `CascadePartition::rearm_fdi`).
+        if self.motors_were_off {
+            self.core.rearm_fdi();
+            self.motors_were_off = false;
         }
         self.core.set_position(sp);
         self.core.step(b);
