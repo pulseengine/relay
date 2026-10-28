@@ -1354,6 +1354,44 @@ const WAYPOINT_RADIUS: f32 = 1.2;
 /// Kani OFFB-K02: strictly past the timeout the stream is ALWAYS stale).
 pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;
 
+/// BRAKE, THEN LATCH (#609 finding 4, Decision B as re-decided by the maintainer
+/// 2026-10-28; the position integral is left untouched).
+///
+/// A Loiter entered while the vehicle is moving faster than
+/// [`HOLD_BRAKE_ENTRY_MS`] (Mission -> Loiter mid-leg, or the stale-follow HOLD)
+/// does not latch on its first tick. It BRAKES: the horizontal setpoint each
+/// tick is `p - v * HOLD_BRAKE_LEAD_S`, a point behind the vehicle along its own
+/// velocity, so the position term adds `kp * LEAD * v` of braking to the
+/// damping term (0.08 * 8 = 0.64 on top of kd 0.6: roughly double), and the
+/// NEGATIVE error that point presents unwinds, through the loop's own integral
+/// law, the integral the leg charged toward its waypoint. The hold point is
+/// latched only once the estimated horizontal speed has stayed under
+/// [`HOLD_REST_MS`] for [`HOLD_REST_S`]: at sustained rest there is neither
+/// error nor damping force, so whatever integral remains is the steady-wind
+/// compensation (WIND-P01), and latching there leaves nothing to overshoot with.
+/// [`HOLD_BRAKE_MAX_S`] bounds the braking phase: past it the point is latched
+/// wherever the vehicle is.
+///
+/// WHY THIS AND NOT A PREDICTED STOPPING POINT, measured on `SimBackend`
+/// (#616's (3c) leg, 3.4 m/s at the command, 2 and 5 m/s wind): latching at
+/// the kinematic stop `p + v|v| / (2 a_cmd_max)` still overshot 11.6-11.9 m and
+/// left 2.5-2.7 m in HOLD-P01's window, because the leg-charged integral (up to
+/// ~1.4 m/s^2 of push against a 1.0 m/s^2 command limit) keeps driving the
+/// vehicle on past ANY point latched while it is charged. A pure-damping brake
+/// (setpoint = the current estimate) never stops for the same reason, and
+/// drifted into the 50 m fence in 17 s. The rest criterion is what makes this
+/// robust: a lead of 6-16 s all passed HOLD-P01 with it, while a 0.5 s rest
+/// window latched at oscillation turning points and failed at some leads.
+pub const HOLD_BRAKE_LEAD_S: f32 = 8.0;
+/// Entering Loiter faster than this (m/s, estimated, horizontal) brakes first.
+pub const HOLD_BRAKE_ENTRY_MS: f32 = 0.3;
+/// "At rest" for the brake-then-latch rule (m/s, estimated, horizontal).
+pub const HOLD_REST_MS: f32 = 0.1;
+/// How long the vehicle must stay at rest before the hold point is latched (s).
+pub const HOLD_REST_S: f32 = 3.0;
+/// Longest braking phase before the hold point is latched regardless (s).
+pub const HOLD_BRAKE_MAX_S: f32 = 30.0;
+
 /// Where Mission mode takes its setpoint from (#609 finding 4).
 ///
 /// The two are DIFFERENT CONTRACTS and deliberately do not share a code path:
@@ -1476,8 +1514,12 @@ pub struct KeepoutZone {
 ///     so the climb is flown over it. Takeoff -> Loiter is the SAME regime and
 ///     keeps that point: re-latching at the top of the climb would bake in
 ///     whatever the wind did during it. Mission -> Loiter (RequestLoiter, or
-///     ReachedHome) enters the regime afresh and captures where the vehicle is
-///     ("pause here"), not the waypoint and not the takeoff point.
+///     ReachedHome) enters the regime afresh: BRAKE, THEN LATCH (maintainer
+///     re-decision 2026-10-28) -- see [`HOLD_BRAKE_LEAD_S`]. A vehicle entering
+///     Loiter while moving brakes first and latches where it actually comes to
+///     rest ("stop here"), not the point it was passing when the command
+///     arrived, not the waypoint and not the takeoff point. One already at rest
+///     latches at once.
 ///     Rtl -> Loiter and Land -> Loiter do not exist in `relay_fsm`; every
 ///     failsafe goes to Rtl / Land / Terminated, which leave only through
 ///     Touchdown -> Disarmed, so Loiter after a failsafe is always reached
@@ -1661,6 +1703,12 @@ pub struct FlightSupervisor<C = FlightCore> {
     /// mode changed by (a `command` between ticks, or a failsafe / milestone
     /// inside `step`).
     hold_regime: HoldRegime,
+    /// BRAKE, THEN LATCH: true while a moving Loiter entry is still braking and
+    /// `hold_xy` is the brake point, not yet the latched hold point.
+    hold_braking: bool,
+    /// Time spent braking, and time continuously at rest within it (s).
+    brake_s: f32,
+    brake_rest_s: f32,
     /// Where Mission takes its setpoint from. See [`MissionSource`].
     mission_source: MissionSource,
     /// Freshness of the FOLLOW target stream (OFFB-P01's verified receiver).
@@ -1842,6 +1890,9 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             rtl_latched: false,
             hold_xy: [home[0], home[1]],
             hold_regime: HoldRegime::None,
+            hold_braking: false,
+            brake_s: 0.0,
+            brake_rest_s: 0.0,
             mission_source: MissionSource::Waypoints,
             follow: relay_offboard::OffboardReceiver::new(FOLLOW_TARGET_TIMEOUT_US),
             follow_counter: 0,
@@ -2166,6 +2217,21 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
     /// mission that RTLs on arrival, nor the reverse.
     pub fn set_mission_source(&mut self, src: MissionSource) {
         self.mission_source = src;
+    }
+
+    /// The latched Takeoff/Loiter hold point (NED north, east), or `None` when
+    /// not in Takeoff/Loiter or while a moving Loiter entry is still braking
+    /// (see [`HOLD_BRAKE_LEAD_S`]). Telemetry / tests.
+    pub fn hold_point(&self) -> Option<[f32; 2]> {
+        let holding = matches!(
+            self.fsm.mode(),
+            relay_fsm::Mode::Takeoff | relay_fsm::Mode::Loiter
+        );
+        if holding && self.hold_regime == HoldRegime::Hold && !self.hold_braking {
+            Some(self.hold_xy)
+        } else {
+            None
+        }
     }
 
     /// The active [`MissionSource`].
@@ -2525,6 +2591,35 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         };
         if regime == HoldRegime::Hold && self.hold_regime != HoldRegime::Hold {
             self.hold_xy = [est.p[0], est.p[1]];
+            // BRAKE, THEN LATCH: a Loiter entered while moving brakes first.
+            // Takeoff is entered only from Armed, on the ground and at rest, so
+            // it always latches here, exactly as #616 defines it.
+            self.hold_braking =
+                self.fsm.mode() == Mode::Loiter && horiz_speed > HOLD_BRAKE_ENTRY_MS;
+            self.brake_s = 0.0;
+            self.brake_rest_s = 0.0;
+        }
+        if regime != HoldRegime::Hold {
+            self.hold_braking = false;
+        }
+        if self.hold_braking {
+            self.brake_s += dt_s;
+            if horiz_speed < HOLD_REST_MS {
+                self.brake_rest_s += dt_s;
+            } else {
+                self.brake_rest_s = 0.0;
+            }
+            if self.brake_rest_s >= HOLD_REST_S || self.brake_s >= HOLD_BRAKE_MAX_S {
+                // At rest (or out of time): latch where it is.
+                self.hold_braking = false;
+                self.hold_xy = [est.p[0], est.p[1]];
+            } else {
+                // The brake point: behind the vehicle along its own velocity.
+                self.hold_xy = [
+                    est.p[0] - est.v[0] * HOLD_BRAKE_LEAD_S,
+                    est.p[1] - est.v[1] * HOLD_BRAKE_LEAD_S,
+                ];
+            }
         }
         self.hold_regime = regime;
 

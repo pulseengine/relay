@@ -265,8 +265,10 @@ fn takeoff_under_wind_does_not_walk_away() {
 ///   a. Armed -> Takeoff latches the launch point (not home);
 ///   b. Takeoff -> Loiter KEEPS it (holds the launch point, not where the
 ///      wind-blown climb ended);
-///   c. Mission -> Loiter re-latches where the vehicle is when Loiter is
-///      entered (not the waypoint, not the takeoff point);
+///   c. Mission -> Loiter re-latches afresh: entered at transit speed it
+///      BRAKES, THEN LATCHES where the vehicle comes to rest (Decision B as
+///      re-decided 2026-10-28; #616 latched the point it was passing), and that
+///      is neither the waypoint nor the takeoff point;
 ///   d. after the flight ends (RTL -> Land -> Disarmed), a new Takeoff latches
 ///      afresh at its own launch point (not the stale Mission-pause point).
 ///
@@ -298,8 +300,12 @@ fn hold_point_latch_rules_across_mode_transitions() {
         "Loiter must hold the takeoff point: {ph:.3} m"
     );
 
-    // c: start a mission leg 20 m east, pause it 5 s in with RequestLoiter.
-    let wp = [launch[0], launch[1] + 20.0, -CRUISE];
+    // c: start a mission leg east, pause it 5 s in with RequestLoiter. 40 m,
+    // not #616's 20 m: braking carries the vehicle ~10 m past the command
+    // point, which on a 20 m leg is coincidentally within 1 m of the waypoint
+    // and could not tell "stopped" from "kept flying to the waypoint". The
+    // first 5 s are command-limited (a_cmd_max) either way.
+    let wp = [launch[0], launch[1] + 40.0, -CRUISE];
     sup.set_mission(wp);
     sup.command(Event::RequestMission, true, true);
     assert_eq!(sup.mode(), Mode::Mission);
@@ -313,33 +319,55 @@ fn hold_point_latch_rules_across_mode_transitions() {
     }
     sup.command(Event::RequestLoiter, true, true);
     assert_eq!(sup.mode(), Mode::Loiter);
-    let e = sup.state().p; // the estimate the next step latches
-    let pause = [e[0], e[1]];
+    let cmd_at = [b.pos[0], b.pos[1]];
     let off_launch = horiz(&b, launch);
     assert!(
         off_launch > 3.0,
         "the mission leg must have carried the vehicle clear of the launch point \
          for (c) to discriminate: only {off_launch:.2} m"
     );
-    // Brake from transit speed, then judge. The transit leaves the position
-    // integral charged TOWARD the waypoint (17 m of error against a clamped
-    // integral), so the pause overshoots by several metres before the integral
-    // unwinds: a core property, like the wind-step transient, and not what (c)
-    // pins. (c) pins WHERE it settles.
+    // Brake, then latch: no hold point while braking, then one where it stopped.
+    sup.step(&mut b);
+    assert_eq!(
+        sup.hold_point(),
+        None,
+        "entered at transit speed: must brake first"
+    );
+    let mut brake_ticks = 1u32;
+    let pause = loop {
+        sup.step(&mut b);
+        assert_eq!(sup.mode(), Mode::Loiter);
+        brake_ticks += 1;
+        if let Some(h) = sup.hold_point() {
+            break h;
+        }
+        assert!(brake_ticks < (31.0 / DT) as u32, "never latched");
+    };
+    let v = sup.state().v;
+    let v_latch = (v[0] * v[0] + v[1] * v[1]).sqrt();
+    assert!(
+        v_latch < 0.1,
+        "latched while still moving: {v_latch:.3} m/s"
+    );
     let (brake, _) = hold_window(&mut sup, &mut b, Mode::Loiter, pause, CRUISE, BRAKE_S);
-    eprintln!("c: braking-window peak {brake:.3} m from the pause point");
+    eprintln!(
+        "c: braked {:.1} s, latched {:.2} m on from the command point at {v_latch:.3} m/s; \
+         peak {brake:.3} m from the latched point over the next {BRAKE_S} s",
+        brake_ticks as f32 * DT,
+        ((pause[0] - cmd_at[0]).powi(2) + (pause[1] - cmd_at[1]).powi(2)).sqrt()
+    );
     let (ph, _) = hold_window(&mut sup, &mut b, Mode::Loiter, pause, CRUISE, 20.0);
     let to_launch = horiz(&b, launch);
     let to_wp = horiz(&b, [wp[0], wp[1]]);
     eprintln!(
-        "c: Mission->Loiter at {:.2},{:.2} ({off_launch:.2} m from launch): peak \
-         {ph:.3} m from the pause point; ends {to_launch:.2} m from launch, \
-         {to_wp:.2} m from the waypoint",
+        "c: Mission->Loiter latched at {:.2},{:.2} ({off_launch:.2} m from launch at the \
+         command): peak {ph:.3} m from the latched point; ends {to_launch:.2} m from \
+         launch, {to_wp:.2} m from the waypoint",
         pause[0], pause[1]
     );
     assert!(
-        ph < HOLD_HORIZ_M,
-        "Mission->Loiter must hold where it paused: {ph:.3} m"
+        brake < HOLD_HORIZ_M && ph < HOLD_HORIZ_M,
+        "Mission->Loiter must hold where it stopped: {brake:.3} / {ph:.3} m"
     );
     assert!(
         to_launch > 2.0,
