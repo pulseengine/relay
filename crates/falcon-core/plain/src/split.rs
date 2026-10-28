@@ -9,7 +9,8 @@
 //! now, and the components are thin WIT adapters over it:
 //!
 //! - [`SplitCore`] is the orchestrator's core: `FlightSupervisor<SplitCore<_>>`.
-//!   It is generic over [`PartitionSeam`], the eight calls that cross the seam.
+//!   It is generic over [`PartitionSeam`], the eleven calls that cross the
+//!   seam.
 //!   The orchestrator implements `PartitionSeam` with WIT imports; a native
 //!   test implements it with real in-process partitions, and so exercises THIS
 //!   forwarding code, not a copy of it.
@@ -128,7 +129,7 @@ pub struct ControlStatus {
     pub failed_rotor: Option<usize>,
 }
 
-/// The eight calls that cross the estimator/control seam.
+/// The eleven calls that cross the estimator/control seam.
 pub trait PartitionSeam {
     /// See [`estimator_tick`].
     fn estimator_tick(&mut self, f: &SeamFrame, in_flight: Option<bool>) -> NavState;
@@ -140,6 +141,15 @@ pub trait PartitionSeam {
     fn control_set_position(&mut self, ned: Vec3);
     fn control_set_landing(&mut self, on: bool);
     fn control_status(&self) -> ControlStatus;
+    /// THE CALIBRATION (#586). Installed on BOTH halves — the fused core's
+    /// `set_calibration` writes `est.calib` and `casc.calib`, and the control
+    /// half de-biases its own copy of the gyro stream with it — and read back
+    /// from the ESTIMATOR, so the supervisor's `CalibrationPresent` row is
+    /// derived from what the estimator actually applies, not from a copy the
+    /// orchestrator keeps.
+    fn estimator_set_calibration(&mut self, c: relay_calib::CalParams);
+    fn estimator_calibration(&self) -> relay_calib::CalParams;
+    fn control_set_calibration(&mut self, c: relay_calib::CalParams);
 }
 
 /// The core `cascade-split`'s supervisor drives: the two partitions, through
@@ -155,12 +165,17 @@ impl<P: PartitionSeam> SupervisedCore for SplitCore<P> {
     fn tilt_uncertainty(&self) -> f32 {
         self.0.estimator_health().tilt_uncertainty
     }
-    /// IDENTITY — a statement about the seam, not a default. No seam carries a
-    /// calibration, so the estimator partition's is identity by construction,
-    /// as the monolithic component's is. When one does (#586), this becomes a
-    /// forward and the `CalibrationPresent` row with it.
+    /// The ESTIMATOR's live calibration, read across the seam (#586). Not a
+    /// cached copy: `FlightSupervisor::update_preflight` derives
+    /// `CalibrationPresent` from this, so the row and what the estimator
+    /// subtracts from the raw samples cannot drift apart.
     fn calibration(&self) -> relay_calib::CalParams {
-        relay_calib::CalParams::identity()
+        self.0.estimator_calibration()
+    }
+    /// Both halves, as `FlightCore::set_calibration` does.
+    fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        self.0.estimator_set_calibration(calib);
+        self.0.control_set_calibration(calib);
     }
     fn nav_compromised(&self) -> bool {
         self.0.estimator_health().nav_compromised
@@ -282,6 +297,21 @@ pub fn control_tick(casc: &mut CascadePartition, nav: &NavState, f: &SeamFrame) 
     let mut b = FrameBackend::new(*f);
     casc.step(&mut b, nav, f.imu, f.heading.is_some(), f.dt);
     b.motors
+}
+
+/// The estimator half of `FlightCore::set_calibration`.
+pub fn estimator_set_calibration(est: &mut EstimatorPartition, c: relay_calib::CalParams) {
+    est.calib = c;
+}
+
+/// What the estimator applies to raw samples — `FlightCore::calibration`.
+pub fn estimator_calibration(est: &EstimatorPartition) -> relay_calib::CalParams {
+    est.calib
+}
+
+/// The control half of `FlightCore::set_calibration`.
+pub fn control_set_calibration(casc: &mut CascadePartition, c: relay_calib::CalParams) {
+    casc.calib = c;
 }
 
 pub fn control_status(casc: &CascadePartition) -> ControlStatus {

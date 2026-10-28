@@ -20,18 +20,21 @@
 //!   for a while — estimate-only ticks, `keep_warm` feeding the control half's
 //!   gyro low-pass with a NOISY gyro — and only then takes off, with no reset in
 //!   between. At the 1000 Hz design rate the first control tick does not
-//!   rebuild that filter, so its history reaches the motors. (Every other
-//!   estimate-only stretch in a supervised run ends in a reset: after the first
-//!   tick, re-arming from Disarmed is refused through this seam — relay#586.)
+//!   rebuild that filter, so its history reaches the motors.
 //! - estimator health: compared DIRECTLY, every tick, through
-//!   `core().tilt_uncertainty()` etc. on both supervisors. Through the
-//!   supervisor's outputs these rows are masked: `CalibrationPresent` fails on
-//!   every refreshed tick (relay#586), so `arm-blocked` is set whatever the
-//!   estimator says. The direct comparison measures the forward itself.
+//!   `core().tilt_uncertainty()` etc. on both supervisors, so the forward itself
+//!   is measured whatever the pre-arm table makes of it.
+//! - THE CALIBRATION (#586): a non-identity calibration is installed through
+//!   `FlightSupervisor::set_calibration` on both supervisors — and re-installed
+//!   after the rebuild, as the components do — so it must reach BOTH split
+//!   halves (the control half de-biases its own copy of the gyro) and be READ
+//!   BACK from the estimator for the `CalibrationPresent` row. Two mutants drop
+//!   one of those each, and must diverge.
 //!
 //! Every negative control below is a `#[test]` that requires the mutated
 //! seam to DIVERGE: a comparison that cannot fail proves nothing.
 
+use falcon_core::relay_calib::CalParams;
 use falcon_core::relay_fsm::{Event, Mode};
 use falcon_core::split::{
     self, ControlStatus, EstimatorHealth, FrameBackend, PartitionSeam, SeamFrame, SplitCore,
@@ -89,6 +92,15 @@ impl PartitionSeam for InProcess {
     fn control_status(&self) -> ControlStatus {
         split::control_status(&self.casc)
     }
+    fn estimator_set_calibration(&mut self, c: CalParams) {
+        split::estimator_set_calibration(&mut self.est, c);
+    }
+    fn estimator_calibration(&self) -> CalParams {
+        split::estimator_calibration(&self.est)
+    }
+    fn control_set_calibration(&mut self, c: CalParams) {
+        split::control_set_calibration(&mut self.casc, c);
+    }
 }
 
 /// A deliberately broken seam, for the negative controls.
@@ -105,6 +117,12 @@ enum Mutation {
     TiltStub,
     /// The supervisor is rebuilt WITHOUT rebuilding the partitions.
     NoReset,
+    /// The calibration reaches the estimator but NOT the control half.
+    CalibEstimatorOnly,
+    /// The calibration read-back is stubbed to the identity (the pre-#586
+    /// `SplitCore::calibration`), so `CalibrationPresent` reads a copy that is
+    /// not what the estimator applies.
+    CalibReadIdentity,
 }
 
 struct Mutant {
@@ -148,6 +166,44 @@ impl PartitionSeam for Mutant {
     fn control_status(&self) -> ControlStatus {
         self.inner.control_status()
     }
+    fn estimator_set_calibration(&mut self, c: CalParams) {
+        self.inner.estimator_set_calibration(c);
+    }
+    fn estimator_calibration(&self) -> CalParams {
+        if self.m == Mutation::CalibReadIdentity {
+            return CalParams::identity();
+        }
+        self.inner.estimator_calibration()
+    }
+    fn control_set_calibration(&mut self, c: CalParams) {
+        if self.m != Mutation::CalibEstimatorOnly {
+            self.inner.control_set_calibration(c);
+        }
+    }
+}
+
+/// A non-identity calibration (a gyro zero-rate bias of about 0.1 deg/s, as
+/// the wasm harness injects) — what `pilot.configure-calibration` installs.
+const CAL: CalParams = CalParams {
+    gyro_bias: [0.002, -0.0015, 0.001],
+    accel_bias: [0.0; 3],
+    accel_scale: [1.0; 3],
+    mag_offset: [0.0; 3],
+    mag_scale: [1.0; 3],
+};
+
+fn cal_bits(c: &CalParams) -> Vec<u32> {
+    let mut v = Vec::new();
+    for a in [
+        &c.gyro_bias,
+        &c.accel_bias,
+        &c.accel_scale,
+        &c.mag_offset,
+        &c.mag_scale,
+    ] {
+        v.extend(bits(a));
+    }
+    v
 }
 
 fn plant() -> SimBackend {
@@ -199,6 +255,9 @@ fn run(m: Mutation) -> Result<Seen, String> {
         LOW_BATT,
     );
 
+    fused.set_calibration(CAL);
+    split.set_calibration(CAL);
+
     // FLIGHT 1: arm before the first step, HOLD ARMED, then take off — the
     // estimate-only stretch `keep_warm` must survive into a flight.
     fused.command(Event::Arm, true, true);
@@ -243,6 +302,10 @@ fn run(m: Mutation) -> Result<Seen, String> {
                     CRUISE,
                     LOW_BATT,
                 );
+                // The components re-install the host's calibration on every
+                // rebuild (`ensure_supervisor`); so does this.
+                fused.set_calibration(CAL);
+                split.set_calibration(CAL);
                 for s in [Event::Arm, Event::RequestTakeoff] {
                     fused.command(s, true, true);
                     split.command(s, true, true);
@@ -263,7 +326,12 @@ fn run(m: Mutation) -> Result<Seen, String> {
 
         let fc = fused.core();
         let sc = split.core();
-        let checks: [(&str, Vec<u32>, Vec<u32>); 6] = [
+        let checks: [(&str, Vec<u32>, Vec<u32>); 7] = [
+            (
+                "calibration",
+                cal_bits(&fused.calibration()),
+                cal_bits(&split.calibration()),
+            ),
             ("motors", bits(&bf.motors), bits(&bs.motors)),
             (
                 "nav-state",
@@ -400,4 +468,14 @@ fn negative_control_stubbed_tilt_uncertainty_diverges() {
 #[test]
 fn negative_control_rebuild_without_partition_reset_diverges() {
     must_diverge(Mutation::NoReset);
+}
+
+#[test]
+fn negative_control_calibration_not_forwarded_to_control_diverges() {
+    must_diverge(Mutation::CalibEstimatorOnly);
+}
+
+#[test]
+fn negative_control_calibration_read_back_stubbed_diverges() {
+    must_diverge(Mutation::CalibReadIdentity);
 }

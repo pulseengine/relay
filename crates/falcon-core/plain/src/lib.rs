@@ -1449,6 +1449,11 @@ pub trait SupervisedCore {
     fn tilt_uncertainty(&self) -> f32;
     /// The calibration the estimator applies to raw samples.
     fn calibration(&self) -> relay_calib::CalParams;
+    /// Install a calibration on EVERY half that applies one — the estimator
+    /// AND the control partition, which de-biases its own copy of the gyro
+    /// stream (see [`FlightCore::set_calibration`]). Forwarding it to only one
+    /// half makes the two disagree about what the gyro read.
+    fn set_calibration(&mut self, calib: relay_calib::CalParams);
     /// See [`EstimatorPartition::nav_compromised`].
     fn nav_compromised(&self) -> bool;
     /// See [`EstimatorPartition::gnss_diverged`].
@@ -1479,6 +1484,9 @@ impl SupervisedCore for FlightCore {
     }
     fn calibration(&self) -> relay_calib::CalParams {
         FlightCore::calibration(self)
+    }
+    fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        FlightCore::set_calibration(self, calib)
     }
     fn nav_compromised(&self) -> bool {
         FlightCore::nav_compromised(self)
@@ -1641,17 +1649,22 @@ impl FlightSupervisor<FlightCore> {
             0.5
         };
     }
-
-    /// Install the sensor calibration applied to raw IMU/mag samples each cycle.
-    /// Solved by relay-calib (gyro null / accel 6-point / mag iron) and typically
-    /// loaded from the relay-param store; identity until then. Delegates to the
-    /// FlightCore, where the estimator applies it.
-    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
-        self.core.set_calibration(calib);
-    }
 }
 
 impl<C: SupervisedCore> FlightSupervisor<C> {
+    /// Install the sensor calibration applied to raw IMU/mag samples each cycle.
+    /// Solved by relay-calib (gyro null / accel 6-point / mag iron) and typically
+    /// loaded from the relay-param store; identity until then. Delegates to the
+    /// core, where the estimator (and the control half's gyro path) apply it.
+    ///
+    /// Generic over the core (#575, #586) so a split deployment installs the
+    /// calibration through the SAME call as the fused one; the
+    /// `CalibrationPresent` row then reads it back from the core
+    /// ([`SupervisedCore::calibration`]), never from a copy.
+    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        self.core.set_calibration(calib);
+    }
+
     /// Severity rank of a mode, for failsafe arbitration (#562).
     ///
     /// A `Failsafe` event must only ESCALATE. The FSM's `(Rtl, Failsafe) =>
