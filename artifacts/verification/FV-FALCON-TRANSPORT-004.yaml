@@ -1,0 +1,111 @@
+artifacts:
+  - id: FV-FALCON-TRANSPORT-004
+    type: sw-verification
+    title: "Binding v2 — a host that speaks ONLY the binding configures, calibrates, arms and takes off the supervised vehicle; battery says ABSENT; non-finite is refused"
+    status: implemented
+    release: falcon-v1.141.0
+    description: >
+      Closes relay#609 finding 9 (BLOCKER) together with the already-decided
+      #572 and #527, as ONE wire revision so the integrator's decoder changes
+      once. Binding v1 carried Config/Ack/Sensor/Motors only, so a rig driving
+      the @0.12.0 supervised component purely through binding frames could
+      never send `configure-supervisor`, a calibration or `arm`: the
+      FlightSupervisor stayed `disarmed` and wrote zero motors — the
+      requirement's own falsification clause.
+
+      WHAT v2 IS (crates/falcon-hitl/src/wire.rs, VERSION 1 -> 2):
+      `SupervisorConfig` type 4, 24 B (home.x/y/z NED m, fence-radius m,
+      cruise-alt m AGL POSITIVE, low-batt-v V — WIT order);
+      `Calibration` type 5, 72 B (#611's `sensor-calibration`: gyro-bias,
+      accel-bias, accel-scale, mag-offset, mag-scale, then mag-offdiag
+      appended at 60/64/68 — six vec3; it was 60 B before the 2026-10-28
+      pre-release amendment, #614);
+      `Command` type 6, 3 B (pilot-command 0..7 in WIT declaration order,
+      level 0/1, throttle-low 0/1 — any other interlock byte is refused, a
+      stray byte must never read as `true`); `Sensor` grows 76 -> 81 B with
+      `battery-v` as a presence byte at payload 76 and an f32 at 77 — ABSENT
+      is the presence byte, never a 0.0 sentinel; and `decode_frame` rejects
+      NaN/±inf in ANY f32 slot (present or absent, never the s32 rpm) with
+      `WireError::NonFinite { msg, offset }`.
+
+      THE END-TO-END LEG IS NATIVE, and that is stated rather than implied.
+      `tests/binding_drives_the_supervisor.rs` puts a native
+      `FlightSupervisor` behind `decode_frame` and has the reference
+      `BindingHost` exchange only bytes with it: Config -> SupervisorConfig ->
+      Calibration -> 1500 warm-up Sensor frames with battery present ->
+      Command(arm) -> Command(request-takeoff) -> the plant climbs to and holds
+      2 m AGL. Three controls refuse on the NAMED pre-arm row — no calibration
+      frame -> CalibrationPresent, battery ABSENT -> BatteryOk, no
+      supervisor-config -> FailsafeConfigured — so the success is attributable
+      to the frames. It arms AFTER stepping, so it does not lean on the
+      arm-before-first-step defaults path #611 closes. The published wasm
+      component is not behind a byte endpoint, and its
+      `pilot.configure-calibration` exists only on #611; re-run against it
+      after #611 merges before promoting.
+
+      CONFORMANCE, NOT ONLY ROBUSTNESS: hand-computed little-endian byte
+      vectors for every new frame (and a v2 Sensor frame whose rpm bytes spell
+      -inf), checked both ways; and the docs/TRANSPORT-BINDING.md offset
+      tables are PARSED and checked against encoder output in which every field
+      holds a distinct value, so a doc row cannot drift from the code.
+
+      FAILS ON main 038f6e2, MEASURED 2026-10-28. (a) Compile level: the new
+      wire.rs test module spliced onto main's codec gives 91 compile errors
+      (no v2 API). (b) Assertion level, against main's codec with only the v1
+      API: four tests — a NaN motor command is rejected, an infinite dt-s is
+      rejected, SENSOR_PAYLOAD_LEN == 81, type 4 decodes — FAIL 4/4 on main
+      (v1 ACCEPTS the NaN and the inf, 76 B, `UnknownType { got: 4 }`) and
+      PASS 4/4 on this branch. That probe lived in a scratch crate and is not
+      committed. (c) Mutations on this branch, each applied by exact match and
+      restored: M1 non-finite check disabled -> 2 unit tests FAIL
+      (`a_non_finite_value_in_any_float_field_of_any_frame_is_rejected`,
+      `..._in_an_absent_slot_is_still_rejected`) and the Motors and
+      SupervisorConfig Kani harnesses FAIL (the other dispatch harnesses were
+      not run under M1); M2 battery presence from the value -> 2 unit tests
+      FAIL and the Sensor harness FAILS; M3 decoder forgets the battery-v slot
+      -> 2 unit tests and the Sensor harness FAIL; M4 interlock bytes > 1
+      accepted -> `a_malformed_command_is_refused` and the Command harness
+      FAIL; M5 the host's sample_sensor_frame drops battery-v ->
+      `a_binding_only_host_configures_calibrates_arms_and_takes_off` FAILS.
+    tags: [verification, falcon, transport, hitl, wire, binding-v2, v1.141]
+    fields:
+      method: test
+      level: integration
+      steps:
+        - run: "grep -q 'pub const VERSION: u8 = 2;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const SENSOR_PAYLOAD_LEN: usize = 81;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const SUPERVISOR_CONFIG_PAYLOAD_LEN: usize = 24;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const CALIBRATION_PAYLOAD_LEN: usize = 72;' crates/falcon-hitl/src/wire.rs"
+        # 60 -> 72 (#614 amendment): mag-offdiag APPENDED at 60/64/68, every
+        # earlier offset unchanged; the doc table is parsed and checked by
+        # the_binding_document_offset_tables_match_the_encoder.
+        - run: "grep -q '<!-- wire-layout: calibration 72 -->' docs/TRANSPORT-BINDING.md"
+        - run: "grep -q 'pub mag_offdiag: \\[f32; 3\\],' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const COMMAND_PAYLOAD_LEN: usize = 3;' crates/falcon-hitl/src/wire.rs"
+        # The doc bumped with the code.
+        - run: "grep -q 'transport binding, v2' docs/TRANSPORT-BINDING.md"
+        # v2 amended pre-release (#614): the doc says the version stays 2.
+        - run: "grep -q 'and .version. STAYS 2' docs/TRANSPORT-BINDING.md"
+        - run: "grep -q '<!-- wire-layout: sensor 81 -->' docs/TRANSPORT-BINDING.md"
+        # Named tests, one step each, so a deleted test fails this artifact.
+        - run: "grep -q 'fn a_binding_only_host_configures_calibrates_arms_and_takes_off' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn without_the_calibration_frame_arming_is_refused_on_calibration_present' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn with_the_battery_element_absent_arming_is_refused_on_battery_ok' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn without_the_supervisor_config_frame_arming_is_refused_on_failsafe_configured' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn a_non_finite_value_in_any_float_field_of_any_frame_is_rejected' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'fn a_present_zero_volt_battery_is_not_absent' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'fn the_binding_document_offset_tables_match_the_encoder' crates/falcon-hitl/src/wire.rs"
+        # jess#167 / #614 amendment: presence bytes are strictly 0 or 1.
+        - run: "grep -q 'fn every_sensor_presence_byte_is_strictly_zero_or_one' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const SENSOR_PRESENCE: \\[usize; 5\\] = \\[28, 41, 54, 59, 76\\];' crates/falcon-hitl/src/wire.rs"
+        # The echo rule (jess#167, #614 amendment): every reply's seq is the
+        # seq of the frame it answers; the endpoint keeps no counter of its own.
+        - run: "grep -q 'fn every_reply_echoes_the_seq_of_the_frame_it_answers_across_a_dropped_sensor_frame' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'wire::encode_motors(&mut out, h.seq, b.motors);' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'The echo rule: a reply' docs/TRANSPORT-BINDING.md"
+        - run: "cargo test -p falcon-hitl --test binding_drives_the_supervisor"
+        - run: "cargo test -p falcon-hitl --lib wire::tests"
+        - run: "cargo test -p falcon-hitl --all-targets"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRANSPORT-P01

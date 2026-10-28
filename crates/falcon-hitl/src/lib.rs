@@ -62,10 +62,25 @@ pub type Vec3 = [f32; 3];
 /// frame is 24; re-using it with a new value is the kind of change that fails
 /// SILENTLY in a caller that happens to compile. A new name fails loudly.
 pub const MOTORS_FRAME_LEN: usize = wire::HEADER_LEN + wire::MOTORS_PAYLOAD_LEN;
-/// Bytes in a `Sensor` frame on the wire: header plus the 76-byte payload.
+/// Bytes in a `Sensor` frame on the wire: header plus the payload (81 B at
+/// binding v2, which appended `battery-v`; 76 B at v1).
 ///
 /// Same reasoning — the retired `SENSOR_FRAME_LEN` meant 54.
 pub const SENSOR_WIRE_FRAME_LEN: usize = wire::HEADER_LEN + wire::SENSOR_PAYLOAD_LEN;
+/// Bytes in a `Config` frame (`vehicle-config`).
+pub const CONFIG_FRAME_LEN: usize = wire::HEADER_LEN + wire::CONFIG_PAYLOAD_LEN;
+/// Bytes in an `Ack` frame.
+pub const ACK_FRAME_LEN: usize = wire::HEADER_LEN + wire::ACK_PAYLOAD_LEN;
+/// Bytes in a `SupervisorConfig` frame (binding v2).
+pub const SUPERVISOR_CONFIG_FRAME_LEN: usize =
+    wire::HEADER_LEN + wire::SUPERVISOR_CONFIG_PAYLOAD_LEN;
+/// Bytes in a `Calibration` frame (binding v2).
+pub const CALIBRATION_FRAME_LEN: usize = wire::HEADER_LEN + wire::CALIBRATION_PAYLOAD_LEN;
+/// Bytes in a `Command` frame (binding v2).
+pub const COMMAND_FRAME_LEN: usize = wire::HEADER_LEN + wire::COMMAND_PAYLOAD_LEN;
+/// The longest frame the binding defines — a receive buffer of this size holds
+/// any of them.
+pub const MAX_FRAME_LEN: usize = SENSOR_WIRE_FRAME_LEN;
 
 /// The link transport: send one `Motors` frame, receive one `Sensor` frame.
 /// Your impl wraps a UART/USB/UDP socket; the request/response shape models the
@@ -219,29 +234,17 @@ impl<T: Transport> FlightBackend for LinkBackend<T> {
         }
     }
     fn read_battery_v(&mut self) -> Option<f32> {
-        // NONE, AND THAT IS THE POINT RATHER THAN A REGRESSION.
+        // WHAT THE FRAME SAID, INCLUDING "ABSENT" (binding v2, #572).
         //
         // The retired 54-byte frame carried a bare `battery: f32` with no
-        // validity flag, so a host with no battery sense had to send a NUMBER.
-        // The old code sent 0.0 V and said why: "adding one changes the HITL
-        // wire format — so until that protocol changes, the fallback is chosen
-        // to be fail-SAFE". That is a field that can only lie, and this crate's
-        // own module note named it: those frames "cannot carry heading, rotor
-        // RPM, or a battery that says ABSENT (#466)".
-        //
-        // The binding's `sensor-frame` has no battery field at all, so ABSENT is
-        // now representable honestly, and `FlightBackend`'s own default for this
-        // method is `None` too.
-        //
-        // WHAT IS DEFERRED, stated so it is not mistaken for complete: a host
-        // that genuinely HAS a battery cannot report it over this binding at
-        // @0.11.0. `battery-v: option<f32>` is drafted for @0.12.0 ("Pack
-        // voltage (V), or `none` when the host has no battery sense"), which is
-        // parked behind the same seam decision as the supervisor's mode and
-        // failsafe fields. Until it lands, a HITL battery failsafe is
-        // unreachable through this path — which is already true of the seam
-        // generally, not something introduced here.
-        None
+        // validity flag, so a host with no battery sense had to send a NUMBER
+        // (it sent 0.0 V — a field that can only lie, #466). v1 of the binding
+        // carried no battery at all, so this returned `None` unconditionally
+        // and a supervised vehicle behind it could never arm. v2 carries
+        // `battery-v` with its own presence byte, so `None` here now means the
+        // HOST SAID absent, and `Some(0.0)` means it measured a dead pack —
+        // which the battery failsafe must see rather than read as "no sense".
+        self.cache.battery_v
     }
 }
 
@@ -319,29 +322,252 @@ impl<B: FlightBackend> SimServer<B> {
             self.backend.write_motors(&motors); // steps the plant
         }
 
-        let imu = self.backend.read_imu();
-        let frame = wire::WireSensorFrame {
-            imu: [
-                imu.accel[0],
-                imu.accel[1],
-                imu.accel[2],
-                imu.gyro[0],
-                imu.gyro[1],
-                imu.gyro[2],
-            ],
-            dt_s: self.backend.dt(),
-            position_ned: self.backend.read_position(),
-            mag_body: self.backend.read_mag(),
-            // The seam's optional aiding fields. `SimBackend` resolves neither a
-            // heading nor rotor RPM, and the binding's own aiding-rate table
-            // records what degrades when each is absent — withholding
-            // `motor-rpm` leaves the FDI inert. Sending `none` is the truthful
-            // answer for this plant; a host that has them sends them.
-            heading_rad: None,
-            motor_rpm: None,
-        };
+        // THE ECHO RULE, in this pair's INVERTED topology: here the flight
+        // computer ([`LinkBackend`]) leads with `Motors` and the plant
+        // answers with `Sensor`, so it is the `Sensor` reply that carries the
+        // seq of the frame it answers. Same rule as §3 — a reply echoes its
+        // request — with the roles swapped; `LinkBackend` numbers its own
+        // requests because it is the side that asks.
+        let frame = sample_sensor_frame(&mut self.backend);
         wire::encode_sensor_frame(reply, h.seq, &frame);
         Ok(verdict)
+    }
+}
+
+/// Sample a plant's sensors into one binding `Sensor` payload.
+///
+/// The ONE place the reference host turns a [`FlightBackend`] into wire
+/// fields, shared by [`SimServer`] and a [`BindingHost`] driving a plant, so
+/// the two cannot disagree about what the plant reported.
+pub fn sample_sensor_frame<B: FlightBackend>(backend: &mut B) -> wire::WireSensorFrame {
+    let imu = backend.read_imu();
+    wire::WireSensorFrame {
+        imu: [
+            imu.accel[0],
+            imu.accel[1],
+            imu.accel[2],
+            imu.gyro[0],
+            imu.gyro[1],
+            imu.gyro[2],
+        ],
+        dt_s: backend.dt(),
+        position_ned: backend.read_position(),
+        mag_body: backend.read_mag(),
+        // The seam's optional aiding fields. `SimBackend` resolves neither a
+        // heading nor rotor RPM, and the binding's own aiding-rate table
+        // records what degrades when each is absent — withholding
+        // `motor-rpm` leaves the FDI inert. Sending `none` is the truthful
+        // answer for this plant; a host that has them sends them.
+        heading_rad: None,
+        motor_rpm: None,
+        // binding v2 (#572): whatever the plant reports, `None` included. A
+        // plant with no battery sense says ABSENT; it is never rounded to a
+        // number.
+        battery_v: backend.read_battery_v(),
+    }
+}
+
+/// Why a [`BindingHost`] refused to send or to accept a frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HostError {
+    /// A control frame (`Config`, `SupervisorConfig`, `Calibration`,
+    /// `Command`) with this sequence is still unacknowledged. The handshake
+    /// is stop-and-wait: the host must not send `Sensor` frames — or another
+    /// control frame — until its ack arrives (docs/TRANSPORT-BINDING.md §2).
+    AwaitingAck { seq: u32 },
+    /// The reply was not a frame of this binding.
+    Wire(wire::WireError),
+    /// An `Ack` for a sequence this host is not waiting on.
+    UnexpectedAck { acked: u32 },
+    /// A frame type the component never sends (anything but `Ack`/`Motors`).
+    UnexpectedType { msg: wire::MsgType },
+}
+
+impl From<wire::WireError> for HostError {
+    fn from(e: wire::WireError) -> Self {
+        HostError::Wire(e)
+    }
+}
+
+/// What one component -> host frame said.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HostReply {
+    /// The control frame with this sequence was RECEIVED. Not "applied": the
+    /// component may discard a configuration it is not in a state to take
+    /// (e.g. relay#611 discards `configure-*` while armed), and the binding has
+    /// no state frame to report that — see the binding document's gaps.
+    Acked { seq: u32 },
+    /// A repeat of the ack for the control frame acknowledged last — a
+    /// duplicated datagram. Nothing changed; in particular it does NOT close a
+    /// later handshake.
+    DuplicateAck { seq: u32 },
+    /// One tick's motor commands, and what the tick contract says about the
+    /// reply's sequence.
+    Motors {
+        motors: [f32; 4],
+        /// The reply's header sequence — by the binding's ECHO RULE
+        /// (docs/TRANSPORT-BINDING.md §3), the sequence of the `sensor` frame
+        /// these motors answer. A host indexes its per-tick record by this,
+        /// not by arrival order, so a lost frame cannot shift every later
+        /// reply onto the wrong tick (jess#167).
+        seq: u32,
+        verdict: wire::TickVerdict,
+    },
+}
+
+/// THE HOST SIDE OF THE BINDING (TRANSPORT-P01 element 5, binding v2) — what a
+/// GCS / simulator / HITL rig needs to drive the supervised component with
+/// nothing but binding frames.
+///
+/// It owns the host's outbound sequence (one counter for EVERY message it
+/// sends, per §3) and the stop-and-wait configuration handshake, and it
+/// classifies the component's replies with the same [`wire::SeqTracker`].
+/// Because every reply ECHOES the seq of the frame it answers (§3, the echo
+/// rule), the reply stream is the host's own sequence space: a gap there is a
+/// request or a reply that was lost, and [`HostReply::Motors`] names the
+/// `sensor` tick it answers. It
+/// does not own a socket: each method returns the exact bytes to send, and
+/// [`on_reply`](Self::on_reply) takes the bytes that came back.
+///
+/// Before v2 the binding could carry `configure` and `step` and nothing else,
+/// so a host driving the @0.12.0 supervised component over it could never
+/// configure the supervisor, never install a calibration and never send `arm`
+/// — the vehicle stayed `disarmed` and the binding's only supported path
+/// could not fly it (#609 finding 9).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BindingHost {
+    seq: u32,
+    awaiting: Option<u32>,
+    last_acked: Option<u32>,
+    tracker: wire::SeqTracker,
+}
+
+impl BindingHost {
+    pub const fn new() -> Self {
+        BindingHost {
+            seq: 0,
+            awaiting: None,
+            last_acked: None,
+            tracker: wire::SeqTracker::new(),
+        }
+    }
+
+    /// The control frame whose ack this host is waiting on, if any.
+    pub const fn awaiting_ack(&self) -> Option<u32> {
+        self.awaiting
+    }
+
+    /// Give up on the outstanding ack (a host's timeout path). The next
+    /// control frame goes out with a NEW sequence; re-sending the old bytes
+    /// would read as a `Duplicate` at the component.
+    pub fn cancel_pending(&mut self) {
+        self.awaiting = None;
+    }
+
+    fn next_control(&mut self) -> Result<u32, HostError> {
+        if let Some(seq) = self.awaiting {
+            return Err(HostError::AwaitingAck { seq });
+        }
+        self.seq = self.seq.wrapping_add(1);
+        self.awaiting = Some(self.seq);
+        Ok(self.seq)
+    }
+
+    /// `controller.configure` as a `Config` frame.
+    pub fn configure(
+        &mut self,
+        cfg: &wire::WireVehicleConfig,
+    ) -> Result<[u8; CONFIG_FRAME_LEN], HostError> {
+        let seq = self.next_control()?;
+        let mut out = [0u8; CONFIG_FRAME_LEN];
+        wire::encode_config(&mut out, seq, cfg);
+        Ok(out)
+    }
+
+    /// `pilot.configure-supervisor` as a `SupervisorConfig` frame.
+    pub fn configure_supervisor(
+        &mut self,
+        cfg: &wire::WireSupervisorConfig,
+    ) -> Result<[u8; SUPERVISOR_CONFIG_FRAME_LEN], HostError> {
+        let seq = self.next_control()?;
+        let mut out = [0u8; SUPERVISOR_CONFIG_FRAME_LEN];
+        wire::encode_supervisor_config(&mut out, seq, cfg);
+        Ok(out)
+    }
+
+    /// `pilot.configure-calibration` as a `Calibration` frame.
+    pub fn configure_calibration(
+        &mut self,
+        cal: &wire::WireCalibration,
+    ) -> Result<[u8; CALIBRATION_FRAME_LEN], HostError> {
+        let seq = self.next_control()?;
+        let mut out = [0u8; CALIBRATION_FRAME_LEN];
+        wire::encode_calibration(&mut out, seq, cal);
+        Ok(out)
+    }
+
+    /// `pilot.command` as a `Command` frame.
+    pub fn command(
+        &mut self,
+        cmd: &wire::WireCommand,
+    ) -> Result<[u8; COMMAND_FRAME_LEN], HostError> {
+        let seq = self.next_control()?;
+        let mut out = [0u8; COMMAND_FRAME_LEN];
+        wire::encode_command(&mut out, seq, cmd);
+        Ok(out)
+    }
+
+    /// One tick's `sensor-frame` (the `step` input). Refused while a control
+    /// frame is unacknowledged — the handshake's rule 3.
+    pub fn sensor(
+        &mut self,
+        f: &wire::WireSensorFrame,
+    ) -> Result<[u8; SENSOR_WIRE_FRAME_LEN], HostError> {
+        if let Some(seq) = self.awaiting {
+            return Err(HostError::AwaitingAck { seq });
+        }
+        self.seq = self.seq.wrapping_add(1);
+        let mut out = [0u8; SENSOR_WIRE_FRAME_LEN];
+        wire::encode_sensor_frame(&mut out, self.seq, f);
+        Ok(out)
+    }
+
+    /// Classify one component -> host frame.
+    ///
+    /// A frame that fails [`wire::decode_frame`] — including a `Motors` frame
+    /// carrying a NaN command (#527) — is an error, never a reply: a host must
+    /// not apply motor commands it could not decode.
+    pub fn on_reply(&mut self, frame: &[u8]) -> Result<HostReply, HostError> {
+        let (h, payload) = wire::decode_frame(frame)?;
+        match h.msg {
+            wire::MsgType::Ack => {
+                let acked = wire::decode_ack(payload)?;
+                if self.awaiting == Some(acked) {
+                    self.tracker.observe(h.seq);
+                    self.awaiting = None;
+                    self.last_acked = Some(acked);
+                    return Ok(HostReply::Acked { seq: acked });
+                }
+                // A network-duplicated ack of the frame ALREADY acknowledged:
+                // accept the bytes and change nothing (§3, `Duplicate`). It
+                // must not close a LATER handshake, and it is not an error.
+                if self.last_acked == Some(acked) {
+                    self.tracker.observe(h.seq);
+                    return Ok(HostReply::DuplicateAck { seq: acked });
+                }
+                Err(HostError::UnexpectedAck { acked })
+            }
+            wire::MsgType::Motors => {
+                let motors = wire::decode_motors(payload)?;
+                let verdict = self.tracker.observe(h.seq);
+                Ok(HostReply::Motors {
+                    motors,
+                    seq: h.seq,
+                    verdict,
+                })
+            }
+            other => Err(HostError::UnexpectedType { msg: other }),
+        }
     }
 }
 
@@ -531,6 +757,131 @@ mod tests {
             backend.read_battery_v(),
             None,
             "absent must not be reported as a number"
+        );
+    }
+
+    /// A plant WITH battery sense: the voltage crosses the binding (v2, #572),
+    /// and a measured 0.0 V — a dead pack — arrives as `Some(0.0)`, not as
+    /// ABSENT. On binding v1 `read_battery_v` returned `None` unconditionally,
+    /// so this fails there on the first assertion.
+    #[test]
+    fn a_host_with_battery_sense_reports_it_and_zero_volts_stays_present() {
+        struct Pack(f32);
+        impl FlightBackend for Pack {
+            fn read_imu(&mut self) -> ImuSample {
+                ImuSample {
+                    accel: [0.0, 0.0, -9.81],
+                    gyro: [0.0; 3],
+                }
+            }
+            fn read_position(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn read_mag(&mut self) -> Option<Vec3> {
+                None
+            }
+            fn write_motors(&mut self, _m: &[f32]) {}
+            fn dt(&self) -> f32 {
+                0.002
+            }
+            fn read_battery_v(&mut self) -> Option<f32> {
+                Some(self.0)
+            }
+        }
+        let mut backend = LinkBackend::new(
+            Loopback {
+                server: SimServer::new(Pack(16.4)),
+            },
+            0.002,
+        );
+        assert_eq!(backend.read_battery_v(), Some(16.4));
+
+        let mut dead = LinkBackend::new(
+            Loopback {
+                server: SimServer::new(Pack(0.0)),
+            },
+            0.002,
+        );
+        assert_eq!(
+            dead.read_battery_v(),
+            Some(0.0),
+            "a measured 0.0 V is a dead pack, not an absent sensor"
+        );
+    }
+
+    /// The host's stop-and-wait handshake: no `Sensor` frame and no second
+    /// control frame while a control frame is unacknowledged, and an ack for
+    /// a sequence it did not send is refused.
+    #[test]
+    fn the_binding_host_waits_for_each_ack_before_sending_on() {
+        let mut host = BindingHost::new();
+        let f = host
+            .configure_supervisor(&wire::WireSupervisorConfig {
+                home: [0.0; 3],
+                fence_radius: 50.0,
+                cruise_alt: 2.0,
+                low_batt_v: 14.0,
+            })
+            .unwrap();
+        let (h, _) = wire::decode_frame(&f).unwrap();
+        assert_eq!(host.awaiting_ack(), Some(h.seq));
+        assert_eq!(
+            host.sensor(&wire::WireSensorFrame::default()),
+            Err(HostError::AwaitingAck { seq: h.seq })
+        );
+        assert!(matches!(
+            host.command(&wire::WireCommand {
+                cmd: wire::WirePilotCommand::Arm,
+                level: true,
+                throttle_low: true,
+            }),
+            Err(HostError::AwaitingAck { .. })
+        ));
+
+        let mut ack = [0u8; ACK_FRAME_LEN];
+        wire::encode_ack(&mut ack, 1, h.seq.wrapping_add(5));
+        assert!(matches!(
+            host.on_reply(&ack),
+            Err(HostError::UnexpectedAck { .. })
+        ));
+        wire::encode_ack(&mut ack, 1, h.seq);
+        assert_eq!(host.on_reply(&ack), Ok(HostReply::Acked { seq: h.seq }));
+        assert!(host.sensor(&wire::WireSensorFrame::default()).is_ok());
+
+        // A duplicated datagram of that same ack is accepted and changes
+        // nothing — even while a LATER control frame is outstanding.
+        let f2 = host
+            .command(&wire::WireCommand {
+                cmd: wire::WirePilotCommand::Arm,
+                level: true,
+                throttle_low: true,
+            })
+            .unwrap();
+        let (h2, _) = wire::decode_frame(&f2).unwrap();
+        assert_eq!(
+            host.on_reply(&ack),
+            Ok(HostReply::DuplicateAck { seq: h.seq })
+        );
+        assert_eq!(
+            host.awaiting_ack(),
+            Some(h2.seq),
+            "a duplicate of an old ack must not close the new handshake"
+        );
+    }
+
+    /// A `Motors` reply carrying a NaN command is an ERROR at the host, never
+    /// a set of motor commands to apply (#527).
+    #[test]
+    fn the_binding_host_refuses_a_nan_motor_command() {
+        let mut host = BindingHost::new();
+        let mut m = [0u8; MOTORS_FRAME_LEN];
+        wire::encode_motors(&mut m, 1, [0.5, f32::NAN, 0.5, 0.5]);
+        assert_eq!(
+            host.on_reply(&m),
+            Err(HostError::Wire(wire::WireError::NonFinite {
+                msg: wire::MsgType::Motors,
+                offset: 4
+            }))
         );
     }
 
