@@ -2,9 +2,44 @@ artifacts:
   - id: FV-FALCON-TRANSPORT-002
     type: sw-verification
     title: "The TRANSPORT-P01 wire decoder is proven total on untrusted bytes — and the proof found that it accepts NaN"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
+      *** DEMOTED verified -> implemented 2026-10-28: ITS CENTRAL FINDING WAS
+      ACTED ON, SO ITS EVIDENCE CHANGED (relay#527, #609 finding 9). *** The
+      maintainer decided (2026-10-21) to REJECT non-finite at the decoder, so
+      the two `cover!`s that demonstrated "a NaN / an infinite motor command is
+      accepted" are gone and the `! grep is_finite|is_nan` step that recorded
+      the finding no longer describes the code. The dispatch harnesses now
+      prove the NEW contract as a biconditional per frame type —
+      `decode_frame` is Ok iff every f32 slot is finite, and otherwise the
+      error is exactly `NonFinite` naming the FIRST non-finite slot in field
+      order — with the harnesses' OWN slot tables (from the WIT order), slot
+      bits assembled byte by byte and finiteness judged by shifting out the
+      exponent field, while the decoder uses its own table, `from_le_bytes`
+      and a mask-and-compare, so the proof is not the decoder agreeing with a
+      copy of itself. Binding v2 adds three harnesses (SupervisorConfig,
+      Calibration, Command) and the sensor harness now also proves #572's
+      property: `battery-v` is present exactly when its presence byte is
+      non-zero, bit-for-bit the wire value when present.
+
+      MEASURED 2026-10-28, Kani 0.67.0, local: 9 harnesses verified, 0
+      failures, 26 of 26 covers SATISFIED. MUTATION-TESTED, each mutation
+      applied by exact match (count asserted == 1, diff non-empty) and
+      restored: (M1) the non-finite check disabled -> the Motors and
+      SupervisorConfig dispatch harnesses report VERIFICATION FAILED (and two
+      unit tests fail); (M2) battery presence decided from the value
+      (`!= 0.0`) instead of the presence byte -> the Sensor harness FAILS;
+      (M3) the decoder's slot table forgets battery-v at 77 -> the Sensor
+      harness FAILS; (M4) interlock bytes accepted when > 1 -> the Command
+      harness FAILS.
+
+      COST, stated because it is a CI property: the v1 set ran in ~0.7 s; the
+      v2 set took 488 s wall on a host at load average ~120 (Sensor 154 s,
+      Calibration 110 s), ~25 s CPU for the heaviest harness. Watch the
+      falcon-hitl matrix leg for the SAT heavy tail before promoting.
+      Re-promotion is a separate code-free PR that re-runs this.
+
       Closes the decoder-proof blocker SWREQ-FALCON-TRANSPORT-P01 names in its
       own text: "NO PROOF ON THE DECODER, and it is a promotion blocker rather
       than a caveat: `wire::decode_frame` parses UNTRUSTED BYTES and has no Kani
@@ -123,14 +158,23 @@ artifacts:
         - run: "grep -q 'fn a_well_formed_ack_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
         - run: "grep -q 'fn a_well_formed_config_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
         - run: "grep -q 'fn a_well_formed_sensor_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
-        # The anti-vacuity covers, including the two that record the non-finite
-        # finding. If these disappear the artifact's central claim is gone.
-        - run: "grep -q 'a NaN motor command is accepted' crates/falcon-hitl/src/kani_proofs.rs"
-        - run: "grep -q 'an infinite motor command is accepted' crates/falcon-hitl/src/kani_proofs.rs"
-        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 10"
-        # The finding itself: still no finiteness check in the decoder. This
-        # step FLIPS when someone fixes it, which is the intended signal.
-        - run: "! grep -qE 'is_finite|is_nan' crates/falcon-hitl/src/wire.rs"
+        # Binding v2's three new frame types (#609 finding 9).
+        - run: "grep -q 'fn a_well_formed_supervisor_config_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'fn a_well_formed_calibration_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'fn a_well_formed_command_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
+        # The anti-vacuity covers. CHANGED 2026-10-28 (#527): the two covers
+        # that recorded "a NaN / an infinite motor command is accepted" are
+        # REPLACED by covers for both outcomes of the new contract, and the
+        # count moves 10 -> 26 with the three new harnesses.
+        - run: "grep -q 'a NaN or infinite motor command is rejected' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'a finite motor command is accepted' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'a present 0.0 V battery decodes as present' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 26"
+        # The finding is FIXED: the decoder rejects non-finite (this step
+        # inverted the old `! grep -qE 'is_finite|is_nan'`, which flipped as
+        # intended when the fix landed).
+        - run: "grep -q 'return Err(WireError::NonFinite { msg, offset: at });' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'validate_values(msg, payload)?;' crates/falcon-hitl/src/wire.rs"
         # THE STEP VGATE-P02 REQUIRES, and the house shape for a Kani-backed
         # artifact. Every crate the Kani matrix model-checks must be cited by a
         # `cargo kani -p <crate>` step in some artifact, or the verification

@@ -2,9 +2,41 @@ artifacts:
   - id: SWREQ-FALCON-TRANSPORT-P01
     type: sw-req
     title: "TRANSPORT-P01 — the cascade seam shall have ONE supported transport binding, so an integrator does not invent a fifth"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
+      *** DEMOTED verified -> implemented 2026-10-28 (relay#609 finding 9,
+      BLOCKER). *** It was verified while the binding could not fly the
+      component it binds: #571 made the published @0.12.0 component wrap
+      `FlightSupervisor`, which writes zero motors until it has been sent
+      `pilot.configure-supervisor`, a calibration and `pilot.command(arm)` /
+      `(request-takeoff)` — and binding v1's frames (Config/Ack/Sensor/Motors)
+      carried none of them. A rig driving the component purely through binding
+      frames sat `disarmed` for ever, which is THIS requirement's own
+      falsification clause: an integrator would have to write framing of their
+      own.
+
+      BINDING v2 closes it, as ONE wire revision so a host's decoder changes
+      once (maintainer decisions 2026-10-21 #572/#527 and 2026-10-28 #609):
+      `SupervisorConfig` (type 4, 24 B), `Calibration` (type 5, 60 B — #611's
+      `sensor-calibration`, five vec3) and `Command` (type 6, 3 B) frames; a
+      `battery-v` element on `Sensor` with an explicit presence byte, NOT a
+      0.0 sentinel (76 -> 81 B, every v1 offset unchanged); and
+      `decode_frame` REJECTS any non-finite f32 slot with `NonFinite`.
+      VERSION 1 -> 2. Evidence: FV-FALCON-TRANSPORT-004 (a binding-only host
+      configures, calibrates, arms and takes off a native FlightSupervisor,
+      with three named-row controls), the rewritten Kani contract in
+      FV-FALCON-TRANSPORT-002, and docs/TRANSPORT-BINDING.md whose offset
+      tables are now TESTED against the encoder rather than typed.
+
+      HELD AT `implemented` (two-commit rule), and NOT re-promotable until
+      relay#611 merges: the `Calibration` frame's target,
+      `pilot.configure-calibration`, does not exist on main yet, so the
+      end-to-end leg runs against the native supervisor, not the published
+      wasm component. Remaining, recorded in the binding document: no state
+      frame (a binding host cannot see `mode` / `arm-blocked`) and no mission
+      waypoint on the wire.
+
       *** PROMOTED implemented -> verified 2026-10-09 ON A FULL RE-RUN OF ITS
       EVIDENCE, NOT ON A STATUS SWEEP. *** This requirement carries NO steps of
       its own; it is verified by FV-FALCON-TRANSPORT-001/002/003, each of which

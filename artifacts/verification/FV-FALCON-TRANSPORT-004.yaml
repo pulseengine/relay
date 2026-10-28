@@ -1,0 +1,81 @@
+artifacts:
+  - id: FV-FALCON-TRANSPORT-004
+    type: sw-verification
+    title: "Binding v2 — a host that speaks ONLY the binding configures, calibrates, arms and takes off the supervised vehicle; battery says ABSENT; non-finite is refused"
+    status: implemented
+    release: falcon-v1.141.0
+    description: >
+      Closes relay#609 finding 9 (BLOCKER) together with the already-decided
+      #572 and #527, as ONE wire revision so the integrator's decoder changes
+      once. Binding v1 carried Config/Ack/Sensor/Motors only, so a rig driving
+      the @0.12.0 supervised component purely through binding frames could
+      never send `configure-supervisor`, a calibration or `arm`: the
+      FlightSupervisor stayed `disarmed` and wrote zero motors — the
+      requirement's own falsification clause.
+
+      WHAT v2 IS (crates/falcon-hitl/src/wire.rs, VERSION 1 -> 2):
+      `SupervisorConfig` type 4, 24 B (home.x/y/z NED m, fence-radius m,
+      cruise-alt m AGL POSITIVE, low-batt-v V — WIT order);
+      `Calibration` type 5, 60 B (#611's `sensor-calibration`: gyro-bias,
+      accel-bias, accel-scale, mag-offset, mag-scale, five vec3);
+      `Command` type 6, 3 B (pilot-command 0..7 in WIT declaration order,
+      level 0/1, throttle-low 0/1 — any other interlock byte is refused, a
+      stray byte must never read as `true`); `Sensor` grows 76 -> 81 B with
+      `battery-v` as a presence byte at payload 76 and an f32 at 77 — ABSENT
+      is the presence byte, never a 0.0 sentinel; and `decode_frame` rejects
+      NaN/±inf in ANY f32 slot (present or absent, never the s32 rpm) with
+      `WireError::NonFinite { msg, offset }`.
+
+      THE END-TO-END LEG IS NATIVE, and that is stated rather than implied.
+      `tests/binding_drives_the_supervisor.rs` puts a native
+      `FlightSupervisor` behind `decode_frame` and has the reference
+      `BindingHost` exchange only bytes with it: Config -> SupervisorConfig ->
+      Calibration -> 1500 warm-up Sensor frames with battery present ->
+      Command(arm) -> Command(request-takeoff) -> the plant climbs to and holds
+      2 m AGL. Three controls refuse on the NAMED pre-arm row — no calibration
+      frame -> CalibrationPresent, battery ABSENT -> BatteryOk, no
+      supervisor-config -> FailsafeConfigured — so the success is attributable
+      to the frames. It arms AFTER stepping, so it does not lean on the
+      arm-before-first-step defaults path #611 closes. The published wasm
+      component is not behind a byte endpoint, and its
+      `pilot.configure-calibration` exists only on #611; re-run against it
+      after #611 merges before promoting.
+
+      CONFORMANCE, NOT ONLY ROBUSTNESS: hand-computed little-endian byte
+      vectors for every new frame (and a v2 Sensor frame whose rpm bytes spell
+      -inf), checked both ways; and the docs/TRANSPORT-BINDING.md offset
+      tables are PARSED and checked against encoder output in which every field
+      holds a distinct value, so a doc row cannot drift from the code.
+
+      FAILS ON main 038f6e2: the new tests do not compile there (no v2 API);
+      at the assertion level, removing the non-finite check fails the
+      table-driven NonFinite test and the Kani dispatch harnesses, and
+      deciding battery presence from the value fails the 0.0-V-present test
+      and the sensor harness — recorded in the PR.
+    tags: [verification, falcon, transport, hitl, wire, binding-v2, v1.141]
+    fields:
+      method: test
+      level: integration
+      steps:
+        - run: "grep -q 'pub const VERSION: u8 = 2;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const SENSOR_PAYLOAD_LEN: usize = 81;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const SUPERVISOR_CONFIG_PAYLOAD_LEN: usize = 24;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const CALIBRATION_PAYLOAD_LEN: usize = 60;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const COMMAND_PAYLOAD_LEN: usize = 3;' crates/falcon-hitl/src/wire.rs"
+        # The doc bumped with the code.
+        - run: "grep -q 'transport binding, v2' docs/TRANSPORT-BINDING.md"
+        - run: "grep -q '<!-- wire-layout: sensor 81 -->' docs/TRANSPORT-BINDING.md"
+        # Named tests, one step each, so a deleted test fails this artifact.
+        - run: "grep -q 'fn a_binding_only_host_configures_calibrates_arms_and_takes_off' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn without_the_calibration_frame_arming_is_refused_on_calibration_present' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn with_the_battery_element_absent_arming_is_refused_on_battery_ok' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn without_the_supervisor_config_frame_arming_is_refused_on_failsafe_configured' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn a_non_finite_value_in_any_float_field_of_any_frame_is_rejected' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'fn a_present_zero_volt_battery_is_not_absent' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'fn the_binding_document_offset_tables_match_the_encoder' crates/falcon-hitl/src/wire.rs"
+        - run: "cargo test -p falcon-hitl --test binding_drives_the_supervisor"
+        - run: "cargo test -p falcon-hitl --lib wire::tests"
+        - run: "cargo test -p falcon-hitl --all-targets"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRANSPORT-P01
