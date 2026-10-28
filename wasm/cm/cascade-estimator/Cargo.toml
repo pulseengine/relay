@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+falcon-cm-rt = { path = "../../../crates/falcon-cm-rt" }
 falcon-core = { path = "../../../crates/falcon-core" }
 
 [package.metadata.component]
@@ -31,9 +32,11 @@ codegen-units = 1
 [workspace]
 
 [features]
-# STD ONLY FOR NOW. The no_std build of the split components waits on #574
-# (arena reclamation): every seam call between these components spills its
-# parameters through cabi_realloc, and the bump arena the no_std components use
-# cannot reclaim them. Building no_std is a compile_error!, not a silent leak.
+# The DEPLOYMENT build is `--no-default-features`: no_std, linked against
+# falcon-cm-rt's bounded bump arena (no allocator that grows, so no
+# `memory.grow`), exactly like the monolithic `cascade`. That is the build meld
+# fuses into one shared memory. Every export resets the arena on entry (the
+# `cascade` pattern; #574's CallScope will replace it). `std` remains for host
+# tooling that wants it.
 default = ["std"]
 std = []

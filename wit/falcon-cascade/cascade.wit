@@ -392,6 +392,25 @@ interface types {
         m1: f32, m2: f32, m3: f32, m4: f32,
         status: control-status,
     }
+
+    /// The sensor calibration as it crosses the partition seam (#586) —
+    /// falcon-core `CalParams`, field for field, ALREADY VALIDATED by the
+    /// orchestrator with `pilot.configure-calibration`'s rules (an invalid one
+    /// arrives here as the identity). Same fields as `pilot.sensor-calibration`.
+    ///
+    /// A RECORD OF ITS OWN, in `types`, rather than `use pilot.{..}`: an
+    /// `estimator` or `flight-control` that used a `pilot` type would make
+    /// `pilot` an import of the partition components, which survives `wac plug`
+    /// as an extra import of the composition and breaks
+    /// `wasm-tools component targets --world cascade` (the failure that moved
+    /// the other seam records here).
+    record calibration-params {
+        gyro-bias: vec3,
+        accel-bias: vec3,
+        accel-scale: vec3,
+        mag-offset: vec3,
+        mag-scale: vec3,
+    }
 }
 
 /// State estimator — wraps relay-ekf (Mahony complementary filter).
@@ -718,6 +737,7 @@ world cascade {
 /// the jess#144 core mapping).
 interface estimator {
     use types.{sensor-frame, nav-state, estimator-health, estimator-config};
+    use types.{calibration-params};
 
     /// Rebuild THIS partition and apply `cfg` (`none` = built-in defaults).
     ///
@@ -753,6 +773,18 @@ interface estimator {
 
     /// The supervisor's estimator inputs, without ticking.
     read-health: func() -> estimator-health;
+
+    /// Install the calibration the estimator applies to raw IMU/mag samples,
+    /// IN PLACE (resets nothing). The orchestrator forwards every calibration
+    /// it installs to BOTH partitions, as falcon-core `FlightCore::set_calibration`
+    /// writes both halves, and re-sends it after every partition rebuild.
+    configure-calibration: func(cal: calibration-params);
+
+    /// The calibration the estimator ACTUALLY applies. The supervisor's
+    /// `CalibrationPresent` pre-arm row is derived from this read, never from
+    /// a copy the orchestrator keeps, so the row and the estimator cannot
+    /// disagree about whether the vehicle is calibrated.
+    read-calibration: func() -> calibration-params;
 }
 
 /// The FLIGHT-CONTROL partition (falcon-core `CascadePartition`: geometric
@@ -760,6 +792,7 @@ interface estimator {
 interface flight-control {
     use types.{sensor-frame, imu-sample, vec3};
     use types.{nav-state, control-config, control-status, control-output};
+    use types.{calibration-params};
 
     /// Rebuild THIS partition and apply `cfg` (`none` = built-in defaults).
     /// Drops ONLY the control partition's state; see `estimator.configure`.
@@ -781,6 +814,11 @@ interface flight-control {
 
     /// The supervisor's control inputs, without ticking.
     read-status: func() -> control-status;
+
+    /// Install the calibration on the control half's OWN copy of the gyro
+    /// stream (the rate loop de-biases it too), in place. See
+    /// `estimator.configure-calibration`: always sent to both.
+    configure-calibration: func(cal: calibration-params);
 }
 
 world estimator-component      { export estimator; }
