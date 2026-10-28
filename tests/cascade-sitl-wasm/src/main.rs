@@ -27,6 +27,9 @@
 // The SITL plant itself. `gz_real` inside it is `#[cfg(feature = "gazebo")]`,
 // so without that feature this pulls exactly `Physics` + `MockPhysics`.
 mod native_mirror;
+// Arena soak tests for the leaf components (#574); `#[ignore]`, need built wasm.
+#[cfg(test)]
+mod arena_soak;
 #[path = "../../../examples/falcon-sitl-gz/src/physics.rs"]
 mod physics;
 // The SAME pacing logic the native bench uses, included by path rather than
