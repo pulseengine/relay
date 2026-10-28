@@ -1,17 +1,29 @@
-# The `pulseengine:falcon-cascade` transport binding, v1
+# The `pulseengine:falcon-cascade` transport binding, v2
 
 **Requirement:** SWREQ-FALCON-TRANSPORT-P01 · **Reference implementation:**
-`crates/falcon-hitl/src/wire.rs` · **Seam:** `pulseengine:falcon-cascade@0.11.0`
+`crates/falcon-hitl/src/wire.rs` (codec) and `crates/falcon-hitl/src/lib.rs`
+(`BindingHost`, `SimServer`) · **Seam:** `pulseengine:falcon-cascade@0.12.0`
+(the `Calibration` frame carries `pilot.sensor-calibration` from relay#611)
 
-> **This binding is deliberately one seam revision behind, and it is a known
-> limitation rather than a stale header.** The published component moved to
-> `@0.12.0` (SUPERVISOR-P01): it now runs the `FlightSupervisor`, publishes
-> `mode` and `failsafe`, and takes a pack voltage in the sensor frame. This v1
-> binding carries **no battery element** — `SENSOR_PAYLOAD_LEN` is 76 — so a
-> host driving the supervised component over this transport reports no pack,
-> and the pre-arm table correctly refuses to arm it. Tracked as #572; adding
-> the element is a wire revision with its own Kani oracle, not an edit to this
-> page.
+> **What changed from v1, in one revision so a host's decoder changes once**
+> (relay#609 finding 9, #572, #527):
+>
+> 1. **`sensor` gains `battery-v`** — a presence byte at payload offset 76 and
+>    an `f32` at 77. The payload grows **76 → 81 B**; every v1 offset is
+>    unchanged. Presence 0 is **ABSENT**; a present 0.0 V is a measured dead
+>    pack and is *not* absent.
+> 2. **Three new host → component frames** — `supervisor-config` (type 4),
+>    `calibration` (type 5) and `command` (type 6) — so a host can drive
+>    `pilot.configure-supervisor`, `pilot.configure-calibration` and
+>    `pilot.command` over the binding. v1 could carry `configure` and `step`
+>    only, so the supervised `@0.12.0` component could never be armed over its
+>    only supported binding: it stayed `disarmed` and wrote zero motors.
+> 3. **Non-finite floats are rejected.** A receiver refuses a frame with NaN or
+>    ±infinity in any `f32` slot (`WireError::NonFinite`). v1 passed them
+>    through. Say "no reading" with the presence byte, never with NaN.
+>
+> `version` is now **2**. A v1 host is refused with `BadVersion { got: 1,
+> want: 2 }`, which is the intended way to discover the change.
 
 ## Why this document exists
 
@@ -29,30 +41,70 @@ change.
 > states which parts of the framing are normative choices rather than
 > measurements.
 
+**The offset tables below are tested, not typed.** Each sits between
+`wire-layout` markers, and `the_binding_document_offset_tables_match_the_encoder`
+in `wire.rs` parses this file and checks every row against bytes the encoder
+produced from a frame where every field holds a different value. A wrong,
+missing, duplicated or shifted row fails the build.
+
 ## 1. Framing
 
 Every message is an 8-byte header followed by a fixed-length payload.
 
+<!-- wire-layout: header 8 -->
 ```text
- off  size  field
-   0     2  magic        0x1c 0xfa
-   2     1  version      1
-   3     1  message type 0=config 1=ack 2=sensor 3=motors
-   4     4  sequence     u32, little-endian
-   8     N  payload      the seam's own record, flat little-endian
+ off  size  type  field
+   0     1  u8    magic0    0x1c
+   1     1  u8    magic1    0xfa
+   2     1  u8    version   2
+   3     1  u8    type      0=config 1=ack 2=sensor 3=motors 4=supervisor-config 5=calibration 6=command
+   4     4  u32   seq       little-endian
 ```
+<!-- /wire-layout -->
 
-| type | direction | payload | frame |
-|---|---|---|---|
-| `config` | host → component | 36 B (`vehicle-config`, 9×f32) | 44 B |
-| `ack` | component → host | 4 B (the acknowledged sequence) | 12 B |
-| `sensor` | host → component | 76 B (`sensor-frame`) | 84 B |
-| `motors` | component → host | 16 B (`motor-pwm`, 4×f32) | 24 B |
+The payload follows at frame offset 8. All offsets in the payload tables below
+are **payload** offsets; add 8 for the frame offset.
+
+| type | id | direction | payload | frame |
+|---|---|---|---|---|
+| `config` | 0 | host → component | 36 B (`vehicle-config`, 9×f32) | 44 B |
+| `ack` | 1 | component → host | 4 B (the acknowledged sequence) | 12 B |
+| `sensor` | 2 | host → component | 81 B (`sensor-frame`) | 89 B |
+| `motors` | 3 | component → host | 16 B (`motor-pwm`, 4×f32) | 24 B |
+| `supervisor-config` | 4 | host → component | 24 B (`supervisor-config`, 6×f32) | 32 B |
+| `calibration` | 5 | host → component | 60 B (`sensor-calibration`, 15×f32) | 68 B |
+| `command` | 6 | host → component | 3 B (`pilot-command` + 2 interlocks) | 11 B |
 
 **All integers and floats are little-endian.** Every field is byte-aligned;
 there is no bit packing anywhere in this binding, deliberately — the one wire
 decoder in this project that had bit-misaligned fields shipped garbage ESC
 throttles past 40 tests and 9 proof harnesses.
+
+### What a receiver rejects
+
+Every rejection is a refusal of the whole frame; nothing is salvaged.
+
+| condition | error |
+|---|---|
+| fewer than 8 bytes | `TooShort` |
+| magic is not `1c fa` | `BadMagic` |
+| version is not 2 | `BadVersion { got, want }` |
+| type is not 0–6 | `UnknownType` |
+| payload length is not the type's exact length | `BadLength` |
+| **any `f32` slot is NaN or ±infinity** | **`NonFinite { msg, offset }`** |
+| `command.cmd` is not 0–7 | `BadCommand` |
+| `command.level` / `command.throttle-low` is not 0 or 1 | `BadBool` |
+
+**The non-finite rule applies to every `f32` SLOT, present or absent.** An
+optional field's value bytes are checked even when its presence byte is 0 (the
+encoder writes 0.0 there). It does **not** apply to presence bytes or to the
+`s32` `motor-rpm` values: an rpm of −8388608 is the bytes `00 00 80 ff`, which
+is the −inf bit pattern, and it is a valid rpm. `offset` in the error is the
+payload offset of the slot, so a host can name the field from the tables below.
+
+**The interlock bytes are strictly 0 or 1.** `level` and `throttle-low` are RC
+arming interlocks; reading a stray `0xab` as `true` would be the fail-unsafe
+direction.
 
 ### `version` is the binding's version, not the WIT package's
 
@@ -81,14 +133,15 @@ Called out precisely so an existing host knows what to change.
    **So 8 is a normative choice**, made because it is what the requirement's own
    field enumeration adds up to and because it keeps an existing host's header
    unchanged. It is not a measurement.
-2. **The sensor payload is 76 bytes; the capture implies 75.** A flat
-   `sensor-frame` is imu 24 + `dt-s` 4 + `position-ned` 13 + `mag-body` 13 +
+2. **The v1 sensor payload was 76 bytes; the capture implies 75.** A flat
+   v1 `sensor-frame` is imu 24 + `dt-s` 4 + `position-ned` 13 + `mag-body` 13 +
    `heading-rad` 5 + `motor-rpm` 17 = 76, while the captured 83-byte frame
    leaves 75. The likeliest cause is that the integrator sent `heading-rad` as
    a bare `f32`, dropping its presence byte, because their rig always has one.
-   **This is not established** — the capture is not in this repository (#503). This
-   binding requires the presence byte. A host built from the capture must add
-   one byte at offset 54 of the payload.
+   **This is not established** — the capture is not in this repository (#503).
+   This binding requires the presence byte. A host built from the capture must
+   add one byte at offset 54 of the payload — and, at v2, the five-byte
+   `battery-v` element at 76.
 
 ### Optional fields are fixed-width, not compact
 
@@ -105,23 +158,148 @@ absence — never as a zero measurement.** This project has shipped the opposite
 twice: a battery whose absence read as a healthy pack (#413) and an
 accelerometer whose absence read as gravity (#452). Both flew.
 
-#### `sensor` payload layout
+### Payload layouts
 
+Field names are the WIT's (`vec3` components are `x y z`; for `position-ned`
+and `home` that is north, east, down). Units and signs are the WIT's own —
+read `wit/falcon-cascade/cascade.wit` for each field's definition rather than
+inferring it from its neighbours.
+
+#### `sensor` (type 2) — `types.sensor-frame`
+
+<!-- wire-layout: sensor 81 -->
 ```text
- off  size  field
-   0    24  imu            ax ay az gx gy gz (f32)
-  24     4  dt-s           f32 — the host's ACTUAL period (see §3)
-  28     1  position-ned present
-  29    12  position-ned   n e d (f32)
-  41     1  mag-body present
-  42    12  mag-body       x y z (f32)
-  54     1  heading-rad present
-  55     4  heading-rad    f32
-  59     1  motor-rpm present
-  60    16  motor-rpm      m1..m4 (s32)
-       ---
-        76
+ off  size  type  field
+   0     4  f32   imu.ax                m/s², body
+   4     4  f32   imu.ay
+   8     4  f32   imu.az
+  12     4  f32   imu.gx                rad/s, body
+  16     4  f32   imu.gy
+  20     4  f32   imu.gz
+  24     4  f32   dt-s                  s — the host's ACTUAL period (§3)
+  28     1  u8    position-ned.present
+  29     4  f32   position-ned.x        NED m (north)
+  33     4  f32   position-ned.y        (east)
+  37     4  f32   position-ned.z        (down)
+  41     1  u8    mag-body.present
+  42     4  f32   mag-body.x            any consistent unit
+  46     4  f32   mag-body.y
+  50     4  f32   mag-body.z
+  54     1  u8    heading-rad.present
+  55     4  f32   heading-rad           rad, NED
+  59     1  u8    motor-rpm.present
+  60     4  s32   motor-rpm.m1          motor-pwm order
+  64     4  s32   motor-rpm.m2
+  68     4  s32   motor-rpm.m3
+  72     4  s32   motor-rpm.m4
+  76     1  u8    battery-v.present     v2 (#572): 0 = ABSENT
+  77     4  f32   battery-v             V, whole pack
 ```
+<!-- /wire-layout -->
+
+#### `config` (type 0) — `types.vehicle-config`
+
+<!-- wire-layout: config 36 -->
+```text
+ off  size  type  field
+   0     4  f32   hover-thrust
+   4     4  f32   loop-rate-hz
+   8     4  f32   pos-var
+  12     4  f32   process-floor-vel
+  16     4  f32   process-floor-pos
+  20     4  f32   altitude-kp
+  24     4  f32   altitude-kd
+  28     4  f32   altitude-ki
+  32     4  f32   position-ki
+```
+<!-- /wire-layout -->
+
+#### `ack` (type 1)
+
+<!-- wire-layout: ack 4 -->
+```text
+ off  size  type  field
+   0     4  u32   acked-seq    the sequence of the frame acknowledged
+```
+<!-- /wire-layout -->
+
+#### `motors` (type 3) — `types.motor-pwm`
+
+<!-- wire-layout: motors 16 -->
+```text
+ off  size  type  field
+   0     4  f32   m1    [0, 1]
+   4     4  f32   m2
+   8     4  f32   m3
+  12     4  f32   m4
+```
+<!-- /wire-layout -->
+
+#### `supervisor-config` (type 4) — `pilot.supervisor-config`
+
+<!-- wire-layout: supervisor-config 24 -->
+```text
+ off  size  type  field
+   0     4  f32   home.x          NED m (north) — geofence centre AND RTL point
+   4     4  f32   home.y          (east)
+   8     4  f32   home.z          (down)
+  12     4  f32   fence-radius    m about home
+  16     4  f32   cruise-alt      m AGL, POSITIVE — NOT NED-signed
+  20     4  f32   low-batt-v      V, whole pack (not per cell)
+```
+<!-- /wire-layout -->
+
+**`cruise-alt` is positive-up**, unlike every other altitude in the seam: the
+supervisor negates it itself. Sending −30.0 to mean "30 m up" commands 30 m
+*below* the ground.
+
+#### `calibration` (type 5) — `pilot.sensor-calibration` (relay#611)
+
+<!-- wire-layout: calibration 60 -->
+```text
+ off  size  type  field
+   0     4  f32   gyro-bias.x      rad/s, subtracted
+   4     4  f32   gyro-bias.y
+   8     4  f32   gyro-bias.z
+  12     4  f32   accel-bias.x     m/s², subtracted
+  16     4  f32   accel-bias.y
+  20     4  f32   accel-bias.z
+  24     4  f32   accel-scale.x    unitless, > 0, applied after de-biasing
+  28     4  f32   accel-scale.y
+  32     4  f32   accel-scale.z
+  36     4  f32   mag-offset.x     same unit as sensor.mag-body, subtracted
+  40     4  f32   mag-offset.y
+  44     4  f32   mag-offset.z
+  48     4  f32   mag-scale.x      unitless, > 0
+  52     4  f32   mag-scale.y
+  56     4  f32   mag-scale.z
+```
+<!-- /wire-layout -->
+
+The identity calibration (biases 0, scales 1) means **not calibrated**: the
+component's `CalibrationPresent` pre-arm row is `calibration != identity`.
+
+#### `command` (type 6) — `pilot.command(cmd, level, throttle-low)`
+
+<!-- wire-layout: command 3 -->
+```text
+ off  size  type  field
+   0     1  u8    cmd             pilot-command, WIT declaration order (below)
+   1     1  u8    level           0/1 — RC interlock: vehicle level
+   2     1  u8    throttle-low    0/1 — RC interlock: throttle stick low
+```
+<!-- /wire-layout -->
+
+| `cmd` | `pilot-command` |
+|---|---|
+| 0 | `arm` |
+| 1 | `request-takeoff` |
+| 2 | `request-mission` |
+| 3 | `request-loiter` |
+| 4 | `request-rtl` |
+| 5 | `request-land` |
+| 6 | `request-disarm` |
+| 7 | `terminate` |
 
 ## 2. The configuration handshake
 
@@ -129,9 +307,38 @@ accelerometer whose absence read as gravity (#452). Both flew.
 falcon-quad: a wrong `hover-thrust` alone put the altitude estimate **58.8 m**
 out, and with default tuning the vehicle **never left the ground**.
 
-1. The host sends `config` with sequence `s`.
-2. The component applies it and replies `ack` carrying `s`.
-3. The host **must not** send `sensor` frames until that ack arrives.
+The four CONTROL frames — `config`, `supervisor-config`, `calibration` and
+`command` — share one stop-and-wait handshake:
+
+1. The host sends the control frame with sequence `s`.
+2. The component replies `ack` carrying `s`.
+3. The host **must not** send `sensor` frames, or another control frame, until
+   that ack arrives. (`BindingHost` in the reference implementation enforces
+   this: it returns `AwaitingAck` instead of the bytes.)
+
+**An ack means RECEIVED, not APPLIED.** The component may discard a
+configuration it is not in a state to take — relay#611 makes `configure`,
+`configure-supervisor` and `configure-calibration` silently discarded unless
+the supervisor is `disarmed`, and makes `arm` refused until the pre-arm table
+passes. The binding has no frame that reports the outcome (see the gaps
+below); a host learns it from the motors it gets back.
+
+**A frame rejected by the decoder is not acked.** For `supervisor-config` and
+`calibration` that rejection is also a statement: the latest thing the host
+sent was invalid. Per relay#611's semantics for those two calls, a component
+must then behave as if the host had sent an invalid configuration — the
+supervisor configuration is dropped (arming refused on `FailsafeConfigured`)
+and the calibration is replaced by the identity (arming refused on
+`CalibrationPresent`) — rather than keep flying on the previous one.
+
+The order a host follows to fly the supervised component:
+
+1. `config` → ack
+2. `supervisor-config` → ack
+3. `calibration` → ack
+4. `sensor` frames, with `battery-v` present, until the estimator converges
+5. `command` `arm` (with `level` and `throttle-low` true) → ack
+6. `command` `request-takeoff` → ack, then keep sending `sensor` frames
 
 `configure` may be called again later. Doing so **re-initialises the control
 core, estimator state included**, because `loop-rate-hz` is fixed at
@@ -151,10 +358,12 @@ than 2%, so an honest `dt-s` is what makes that correction possible. **A host
 that reports a nominal period while running a different one defeats it.**
 
 **The component clamps `dt-s` to [0.0001, 0.1] s** (10 Hz – 10 kHz) so a garbage
-frame cannot wind the filters, and **a non-finite `dt-s` falls back to 0.001 s**,
-the only rate that was ever safe to assume. Both are silent. A host running
-outside that range is therefore not told that its period was overridden — so do
-not rely on the clamp as a diagnostic.
+frame cannot wind the filters. Silently — a host running outside that range is
+not told that its period was overridden, so do not rely on the clamp as a
+diagnostic. **A non-finite `dt-s` never reaches the component over this
+binding:** the frame is rejected with `NonFinite { offset: 24 }`. (The
+component's own fallback to 0.001 s for a non-finite value remains for callers
+of the WIT interface that do not go through this binding.)
 
 ### Late, dropped and duplicated
 
@@ -169,6 +378,9 @@ reference implementation:
 | `seq == last` | `Duplicate` | accept the bytes, **do not step the controller twice** |
 | `seq > last` (forward) | `Dropped { lost }` | accept, and treat `lost` ticks as missing |
 | `seq < last` (backward) | `Late { by }` | **discard**; a newer frame already superseded it |
+
+A `Duplicate` control frame is re-acked and **not re-applied** — a repeated
+`command` must not deliver its command twice.
 
 **`Late` and `Dropped` are distinct, with counts.** The requirement's
 falsification condition says so explicitly: it is wrong "if a host that
@@ -196,6 +408,7 @@ host's to accept**:
 | `mag-body` | yes | contributes no heading reference |
 | `heading-rad` | yes | **yaw becomes unobservable** |
 | `motor-rpm` | yes | the rotor-out FDI is **inert** — a dead rotor is never isolated |
+| `battery-v` | yes | **the vehicle cannot arm** — the `BatteryOk` pre-arm row is false while no pack has been seen |
 
 Two of those are measured, not predicted:
 
@@ -212,7 +425,17 @@ Two of those are measured, not predicted:
 ## 5. The reference host
 
 `crates/falcon-hitl/src/wire.rs` — `no_std`, no-alloc, fixed buffers, so the
-same codec runs on the MCU and on a host PC.
+same codec runs on the MCU and on a host PC. `crates/falcon-hitl/src/lib.rs`
+carries the host side: `BindingHost` (sequencing, the handshake, reply
+classification) and `SimServer` / `sample_sensor_frame` (a plant's sensors,
+battery included, as a `sensor` frame).
+
+`crates/falcon-hitl/tests/binding_drives_the_supervisor.rs` is the executable
+form of §2: a host that exchanges **only bytes** with a native
+`FlightSupervisor` behind the binding configures it, calibrates it, warms the
+estimator, arms and takes off — and the same run with the calibration frame,
+the battery element or the supervisor configuration withheld is refused on the
+named pre-arm row.
 
 **`falcon-hitl`'s legacy 16/54-byte frames are SUPERSEDED by this binding** and
 remain only so existing callers keep building. They cannot carry heading, rotor
@@ -221,19 +444,18 @@ needed by being driven. New hosts use `wire`.
 
 ## What this binding does not yet give you
 
-- **No mode and no failsafe.** The component wraps `FlightCore`, not
-  `FlightSupervisor`, so there is no mode machine or failsafe latch to publish
-  (#414). A consumer gets the estimate and **cannot see why** the vehicle is
-  doing something — so it cannot report a failsafe as `STATUSTEXT` even though
-  the MAVLink stack that would carry it is verified (MAVLINK-P06, v1.119).
-  This is the binding's largest gap and it closes with #414.
-- **`SimServer` is not yet re-pointed** at this binding; it still speaks the
-  legacy frames.
-- **No proof coverage on the decoder.** `wire::decode_frame` parses untrusted
-  bytes and has **no Kani harness**; `falcon-hitl` is not in the `kani.yml`
-  matrix at all. CLAUDE.md requires proof for logic that can carry it, so this
-  is a promotion blocker for TRANSPORT-P01 and is named here rather than
-  discovered later.
+- **No state frame.** `observer.read-state` (mode, failsafe, the estimate) has
+  no frame here, so a binding-only host cannot see `mode` or the `arm-blocked`
+  failsafe bit: it learns that an `arm` was refused only because the motors
+  stay at zero. The `ack` deliberately says "received", not "accepted".
+- **No mission target.** `controller.step` takes a `waypoint` beside the
+  `sensor-frame`, and the `sensor` frame does not carry one, so a binding host
+  cannot set a mission leg. Takeoff, loiter, land and RTL need none (the
+  supervisor derives those setpoints from `home` and `cruise-alt`).
+- **The published wasm component is not yet behind a byte endpoint.** The
+  end-to-end test above drives the native `FlightSupervisor`; the
+  `calibration` frame's target, `pilot.configure-calibration`, exists only once
+  relay#611 merges.
 - **No physical-transport contract.** Latency, jitter, MTU, reconnect and
   framing-error recovery are the host's. The sequence semantics above are what
   this binding gives you to detect the symptoms.
