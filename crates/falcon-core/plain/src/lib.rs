@@ -1395,6 +1395,45 @@ pub struct KeepoutZone {
     pub radius: f32,
 }
 
+/// The setpoint regimes whose horizontal target is LATCHED on entry rather than
+/// re-derived each tick (#609 finding 4, maintainer decision 2026-10-28:
+/// "latch on entry", PX4-like). The latch is captured from the estimate on the
+/// first tick a regime is derived, and held until the regime changes.
+///
+///   * `Hold` = Takeoff or Loiter. Armed -> Takeoff captures the launch point,
+///     so the climb is flown over it. Takeoff -> Loiter is the SAME regime and
+///     keeps that point: re-latching at the top of the climb would bake in
+///     whatever the wind did during it. Mission -> Loiter (RequestLoiter, or
+///     ReachedHome) enters the regime afresh and captures where the vehicle is
+///     ("pause here"), not the waypoint and not the takeoff point.
+///     Rtl -> Loiter and Land -> Loiter do not exist in `relay_fsm`; every
+///     failsafe goes to Rtl / Land / Terminated, which leave only through
+///     Touchdown -> Disarmed, so Loiter after a failsafe is always reached
+///     through a fresh Armed -> Takeoff, which latches its own launch point.
+///   * `None` = every other mode: Mission flies its leg, Rtl and the healthy
+///     Land fly home, the motors-off states command nothing, and the ROTOR-OUT
+///     Land keeps commanding the CURRENT estimate (zero horizontal demand).
+///
+/// WHY ROTOR-OUT LAND IS NOT LATCHED, measured rather than argued (2026-10-28,
+/// `SimBackend`, `rot_drag` 0.02, each rotor 0-3 killed from a settled Loiter
+/// under 5 m/s wind). From 2 m the descent takes ~3.7 s and the two policies
+/// are indistinguishable (touchdown 0.54-0.72 m from the isolation point
+/// either way, peak tilt within 0.004 rad). From 10 m (~17-18 s of descent)
+/// latching is WORSE on every rotor: touchdown 9.9-39.2 m from the isolation
+/// point against 3.5-26.1 m, peak tilt 0.21-0.29 rad against 0.13-0.25 rad. A
+/// spinning, yaw-less 3-rotor airframe cannot fly a position correction
+/// cleanly; asking it to fight the wind back to a point makes it tilt harder
+/// and land further away. So rotor-out Land stays "level up and come down
+/// here", and the latch is confined to the healthy hold modes.
+///
+/// The frame's `target` in the published component is a Mission leg only; it
+/// never moves this point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HoldRegime {
+    None,
+    Hold,
+}
+
 pub struct FlightSupervisor {
     core: FlightCore,
     fsm: relay_fsm::FlightFsm,
@@ -1433,6 +1472,17 @@ pub struct FlightSupervisor {
     zones: [KeepoutZone; MAX_KEEPOUT_ZONES],
     zone_count: usize,
     rtl_latched: bool,
+    /// The horizontal hold point (NED north, east) Takeoff and Loiter fly to
+    /// (#609 finding 4). LATCHED ON ENTRY from the estimate, never recomputed
+    /// from it: a setpoint re-derived from the current estimate every tick has
+    /// zero horizontal error by construction, so nothing held position against
+    /// wind. See [`HoldRegime`] for exactly when it is (re-)captured.
+    hold_xy: [f32; 2],
+    /// Which latched setpoint regime the previous tick's setpoint was derived
+    /// for. A change of regime is how entry is detected, whichever path the
+    /// mode changed by (a `command` between ticks, or a failsafe / milestone
+    /// inside `step`).
+    hold_regime: HoldRegime,
     /// Consecutive cycles the estimated tilt has exceeded TILT_RUNAWAY_LIMIT
     /// while airborne — the attitude-runaway detector (v1.99 expanded failsafe).
     /// On reaching TILT_RUNAWAY_CYCLES it fires Event::Terminate (motor cut).
@@ -1551,6 +1601,8 @@ impl FlightSupervisor {
             }; MAX_KEEPOUT_ZONES],
             zone_count: 0,
             rtl_latched: false,
+            hold_xy: [home[0], home[1]],
+            hold_regime: HoldRegime::None,
             runaway_count: 0,
             wind_count: 0,
             check_table: {
@@ -2101,15 +2153,33 @@ impl FlightSupervisor {
             && (self.core.failed_motor().is_some() || (horiz_speed < 0.4 && dist_home < 0.5));
         self.core.set_landing(landing);
 
+        // ── HOLD-POINT LATCH (#609 finding 4) ── capture the horizontal hold
+        // point on ENTRY to a latched regime, from the estimate this tick
+        // started with; hold it until the regime changes. Updated every tick,
+        // ahead of the motors-off early return, so a Disarmed tick ends the
+        // regime and the next Takeoff latches afresh. Rules: [`HoldRegime`].
+        let regime = match self.fsm.mode() {
+            Mode::Takeoff | Mode::Loiter => HoldRegime::Hold,
+            _ => HoldRegime::None,
+        };
+        if regime == HoldRegime::Hold && self.hold_regime != HoldRegime::Hold {
+            self.hold_xy = [est.p[0], est.p[1]];
+        }
+        self.hold_regime = regime;
+
         // ── mode → setpoint ── (horizontal hold target; while landing the core's
         // velocity-landing owns the vertical once engaged — until then Land holds
         // at cruise altitude over home to kill the horizontal drift). ──
         let sp = match self.fsm.mode() {
-            Mode::Takeoff | Mode::Loiter => [est.p[0], est.p[1], -self.cruise_alt],
+            // Latched on entry, NOT the current estimate: that had zero
+            // horizontal error by construction and drifted with the wind.
+            Mode::Takeoff | Mode::Loiter => [self.hold_xy[0], self.hold_xy[1], -self.cruise_alt],
             Mode::Mission => self.current_waypoint(), // fly the active leg (its own altitude)
             Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
             // Land holds HOME (rate-descend once settled) — except rotor-out,
             // which holds the CURRENT position: land-where-you-are (v1.117).
+            // Deliberately NOT latched like Loiter (#609 finding 4): measured
+            // worse on a 3-rotor airframe, see [`HoldRegime`].
             Mode::Land if self.core.failed_motor().is_some() => {
                 [est.p[0], est.p[1], -self.cruise_alt]
             }
