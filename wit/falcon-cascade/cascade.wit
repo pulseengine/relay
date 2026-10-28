@@ -384,8 +384,24 @@ interface controller {
     /// rejection is silent (this function returns nothing); a host re-sends
     /// once `flight-state.mode` reads `disarmed`.
     ///
-    /// A host that never calls this keeps the built-in defaults, which fly the
-    /// SITL mock plant and nothing else.
+    /// VALIDATED AS A WHOLE, NEVER CLAMPED (#609, maintainer decision
+    /// 2026-10-28). Each field has a domain, read from its own definition:
+    /// `hover-thrust` in (0, 1] (normalised collective); `loop-rate-hz` in
+    /// [10, 10000] (the reciprocal of `sensor-frame.dt-s`'s accepted
+    /// [0.1 ms, 100 ms]); `pos-var` > 0 (a variance); `process-floor-vel` and
+    /// `process-floor-pos` >= 0 (variances, 0 = off); `altitude-kp` in [0, 1],
+    /// `altitude-kd` in [0, 3], `altitude-ki` in [0, 0.2] (the ranges the
+    /// control law accepts; 0 is legitimate for each); `position-ki` >= 0
+    /// (0 disables it). Every field must also be finite. If ANY field is
+    /// outside its domain the whole configuration is REFUSED: it is not
+    /// installed, it does not re-initialise anything, and the previous valid
+    /// configuration stays in force. Until this release each invalid field
+    /// was silently replaced by a built-in default and the call accepted.
+    ///
+    /// A host that never sends a VALID configuration flies nothing: the
+    /// built-in defaults fly the SITL mock plant and nothing else, so arming
+    /// is refused (pre-arm row "params are defaults", observable as `mode`
+    /// `disarmed` with `failsafe` bit 7 set).
     configure: func(cfg: vehicle-config);
 }
 

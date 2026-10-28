@@ -143,8 +143,9 @@ const V_MODE: u32 = 1 << 7;
 const V_FAILSAFE: u32 = 1 << 8;
 
 /// `vehicle-config` as falcon-core's record — field for field, no
-/// interpretation. The per-field fallbacks live in
-/// `falcon_core::host::VehicleConfig::tuning`.
+/// interpretation. NOT validated here and never clamped: each field's domain
+/// is `falcon_core::host::VehicleConfig::tuning`, and an out-of-domain record
+/// is refused there.
 fn vehicle_config(c: &VehicleConfig) -> host::VehicleConfig {
     host::VehicleConfig {
         hover_thrust: c.hover_thrust,
@@ -336,10 +337,12 @@ impl Guest for Component {
 
     /// Install the vehicle configuration and rebuild the supervisor from it —
     /// ONLY while a rebuild loses nothing; otherwise the call is REJECTED and
-    /// `cfg` discarded (#609 finding 1). The rule is
-    /// `SupervisorHost::configure_vehicle` / `rebuild_permitted`. The WIT
-    /// return type is unit, so a rejection is silent here; a host re-reads
-    /// `observer.read-state` and re-sends once `mode` is `disarmed`.
+    /// `cfg` discarded (#609 finding 1). An out-of-domain configuration is
+    /// refused (never clamped) and the previous valid one stays in force; with
+    /// none ever valid, arming is refused. The rules are
+    /// `SupervisorHost::configure_vehicle` / `rebuild_permitted` /
+    /// `VehicleConfig::tuning`. The WIT return type is unit, so a refusal is
+    /// silent here; a host re-reads `observer.read-state`.
     fn configure(cfg: VehicleConfig) {
         #[cfg(not(feature = "std"))]
         let _call = falcon_cm_rt::CallScope::enter();

@@ -14,15 +14,16 @@
 //! at the source; the component and the mirror are field-for-field adapters,
 //! so the differential tests the ABI rather than two copies of the logic.
 //!
-//! WHAT IS FAIL-CLOSED AND WHAT IS NOT, deliberately:
+//! EVERYTHING A HOST CONFIGURES FAILS CLOSED, and nothing is clamped:
 //!   * [`SupervisorConfig`] and the calibration ([`validate_calibration`]) are
-//!     SAFETY configuration. An invalid one is never clamped: it counts as
-//!     absent, which refuses arming through a named pre-arm row.
-//!   * [`VehicleConfig`] is TUNING. Each invalid field falls back to the
-//!     built-in default ([`VehicleConfig::tuning`]), which is wrong for the
-//!     airframe but not divergent. That is the behaviour the seam has shipped
-//!     since v0.9, kept bit-for-bit here; making it refuse instead would change
-//!     the exported behaviour and is a separate decision.
+//!     SAFETY configuration. An invalid one counts as absent (revoking an
+//!     earlier valid one), which refuses arming through a named pre-arm row.
+//!   * [`VehicleConfig`] is TUNING ([`VehicleConfig::tuning`]). An invalid one
+//!     is refused and NOT installed; the previous valid tuning stays in force
+//!     (maintainer decision 2026-10-28). With no valid tuning ever configured,
+//!     arming is refused (`ParamsFromNvm`: the vehicle would fly on built-in
+//!     defaults). Until then each invalid field was silently replaced by a
+//!     built-in default and the call accepted.
 //!
 //! STACK. The published component links an 8 KiB shadow stack and a by-value
 //! `FlightCore` already trapped there once. So the host never returns a
@@ -47,9 +48,9 @@ use relay_calib::CalParams;
 use relay_fsm::{Event, Mode};
 use relay_preflight::CheckId;
 
-/// The seam's `vehicle-config` record, as sent: plant tuning, not safety
-/// configuration. See [`VehicleConfig::tuning`] for how invalid fields are
-/// treated.
+/// The seam's `vehicle-config` record, as sent: plant tuning. See
+/// [`VehicleConfig::tuning`] for each field's domain; an out-of-domain value
+/// refuses the whole record.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VehicleConfig {
     pub hover_thrust: f32,
@@ -67,8 +68,9 @@ pub struct VehicleConfig {
     pub position_ki: f32,
 }
 
-/// [`VehicleConfig`] after the per-field fallbacks: exactly the values the
-/// core's setters receive.
+/// A [`VehicleConfig`] that passed [`VehicleConfig::tuning`]: exactly the
+/// values the core's setters receive, each inside the range the setter itself
+/// accepts, so no setter clamp ever engages on an installed tuning.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VehicleTuning {
     pub hover_thrust: f32,
@@ -81,33 +83,59 @@ pub struct VehicleTuning {
     pub position_ki: f32,
 }
 
-/// Sanitise one tuning number. A calibration arrives across an ABI from code
-/// this crate does not control, and `pos-var = 0` or a NaN gain does not fail
-/// loudly — it quietly destroys the filter several seconds later. A rejected
-/// value falls back to the built-in default.
-fn sane(v: f32, default: f32, positive: bool) -> f32 {
-    if v.is_finite() && (!positive || v > 0.0) {
-        v
-    } else {
-        default
-    }
-}
-
 impl VehicleConfig {
-    /// The tuning a core is built with. Each field that is non-finite (or,
-    /// where it must be, not > 0) falls back to falcon-core's own default —
-    /// note `position_ki`'s is 0.02, NOT zero.
-    pub fn tuning(&self) -> VehicleTuning {
-        VehicleTuning {
-            hover_thrust: sane(self.hover_thrust, 0.5, true),
-            pos_var: sane(self.pos_var, 0.01, true),
-            process_floor_vel: sane(self.process_floor_vel, 0.0, false),
-            process_floor_pos: sane(self.process_floor_pos, 0.0, false),
-            altitude_kp: sane(self.altitude_kp, 0.05, false),
-            altitude_kd: sane(self.altitude_kd, 0.30, false),
-            altitude_ki: sane(self.altitude_ki, 0.0, false),
-            position_ki: sane(self.position_ki, 0.02, false),
-        }
+    /// The tuning a core is built with, or `None` if ANY field is outside its
+    /// domain. Never clamped, never defaulted. Each domain is the field's OWN
+    /// definition (cascade.wit `vehicle-config`, and the falcon-core setter it
+    /// feeds), not an invented range:
+    ///   * `hover_thrust` — "normalised collective throttle" that holds a
+    ///     hover: in (0, 1]. 0 cannot hover; `set_hover_thrust` would clamp
+    ///     anything above 1.
+    ///   * `loop_rate_hz` — the control-loop rate: in [10, 10000] Hz, the
+    ///     reciprocal of the seam's own per-tick `dt-s` domain [0.1 ms, 100 ms]
+    ///     (the frame clamp in `step`). Validated though not yet read (#609
+    ///     finding 7).
+    ///   * `pos_var` — a measurement VARIANCE (m²): strictly positive. Zero
+    ///     over-trusts GNSS into a deaf estimator.
+    ///   * `process_floor_vel`, `process_floor_pos` — additive variance floors:
+    ///     at least 0. ZERO IS LEGITIMATE ("0 = off (default)"); negative is not a
+    ///     variance.
+    ///   * `altitude_kp` in [0, 1], `altitude_kd` in [0, 3], `altitude_ki` in
+    ///     [0, 0.2] — the ranges `set_altitude_gains` /
+    ///     `set_altitude_integral_gain` accept (they clamp outside them). ZERO
+    ///     IS LEGITIMATE for each (the setter's own lower bound; `ki = 0`
+    ///     "disables it").
+    ///   * `position_ki` — >= 0, "0 disables it". ZERO IS LEGITIMATE. No upper
+    ///     bound: neither the WIT nor `set_position_integral_gain` defines one,
+    ///     so none is invented here.
+    pub fn tuning(&self) -> Option<VehicleTuning> {
+        let fin = |v: f32| v.is_finite();
+        let within = |v: f32, lo: f32, hi: f32| fin(v) && v >= lo && v <= hi;
+        let ok = fin(self.hover_thrust)
+            && self.hover_thrust > 0.0
+            && self.hover_thrust <= 1.0
+            && within(self.loop_rate_hz, 10.0, 10_000.0)
+            && fin(self.pos_var)
+            && self.pos_var > 0.0
+            && fin(self.process_floor_vel)
+            && self.process_floor_vel >= 0.0
+            && fin(self.process_floor_pos)
+            && self.process_floor_pos >= 0.0
+            && within(self.altitude_kp, 0.0, 1.0)
+            && within(self.altitude_kd, 0.0, 3.0)
+            && within(self.altitude_ki, 0.0, 0.2)
+            && fin(self.position_ki)
+            && self.position_ki >= 0.0;
+        ok.then_some(VehicleTuning {
+            hover_thrust: self.hover_thrust,
+            pos_var: self.pos_var,
+            process_floor_vel: self.process_floor_vel,
+            process_floor_pos: self.process_floor_pos,
+            altitude_kp: self.altitude_kp,
+            altitude_kd: self.altitude_kd,
+            altitude_ki: self.altitude_ki,
+            position_ki: self.position_ki,
+        })
     }
 }
 
@@ -249,9 +277,10 @@ pub enum Configured {
 /// takes effect; the next call rebuilds it.
 pub struct SupervisorHost {
     sup: Option<FlightSupervisor>,
-    /// The last vehicle tuning the host sent, as sent. `None` keeps the core's
-    /// built-in defaults.
-    vehicle: Option<VehicleConfig>,
+    /// The last VALID vehicle tuning. An invalid one never replaces it.
+    /// `None` = no valid tuning ever configured: the core runs its built-in
+    /// defaults and arming is refused (`ParamsFromNvm`).
+    vehicle: Option<VehicleTuning>,
     /// The last VALID supervisor configuration. `None` (never sent, or the
     /// last one sent was invalid) is NOT a neutral state: the
     /// configuration-dependent failsafes run on the inactive `SUP_*_UNSET`
@@ -343,11 +372,21 @@ impl SupervisorHost {
     /// while [`rebuild_permitted`](Self::rebuild_permitted). A rebuild rather
     /// than an in-place update: applying a late change in place would honour
     /// some fields and not others.
+    ///
+    /// FAILS CLOSED (maintainer decision 2026-10-28): a record with any field
+    /// outside its domain ([`VehicleConfig::tuning`]) is `Invalid`, NOT
+    /// installed, and does NOT rebuild — the previous valid tuning (if any)
+    /// stays in force on the live supervisor. Unlike the safety configs it does
+    /// not revoke: a broken retune leaves the vehicle on the last tuning that
+    /// was valid, and a vehicle that never had one is refused arming.
     pub fn configure_vehicle(&mut self, cfg: VehicleConfig) -> Configured {
         if !self.rebuild_permitted() {
             return Configured::Rejected;
         }
-        self.vehicle = Some(cfg);
+        let Some(t) = cfg.tuning() else {
+            return Configured::Invalid;
+        };
+        self.vehicle = Some(t);
         self.sup = None;
         Configured::Accepted
     }
@@ -453,7 +492,7 @@ impl SupervisorHost {
                 SUP_LOW_BATT_UNSET,
             ),
         };
-        let tuning = self.vehicle.map(|v| v.tuning());
+        let tuning = self.vehicle;
         let calib = self.calib;
         let configured = self.failsafe_configured();
         // Constructed straight into the slot — the by-value form of this
@@ -478,6 +517,11 @@ impl SupervisorHost {
         // from the first `arm` — the constructor's bring-up default (true)
         // must not stand for "configured" on a host that sent none.
         sup.set_check(CheckId::CalibrationPresent, sup.calibration_configured());
+        // NO VALID TUNING, NO ARMING: without one the core flies falcon-core's
+        // built-in defaults, which fly the SITL mock plant and nothing else.
+        // `ParamsFromNvm` ("params are defaults") is the table's row for
+        // exactly that; declared here, it is required from then on.
+        sup.set_check(CheckId::ParamsFromNvm, tuning.is_some());
         // UNDECLARED IS FAIL, NOT PASS (#609 finding 2): until a `step` has
         // run, nothing a step feeds has been measured.
         for id in ROWS_FED_BY_STEP {
@@ -509,6 +553,14 @@ mod tests {
         cruise_alt: 2.0,
         low_batt_v: 14.0,
     };
+
+    /// A host with a VALID vehicle tuning, so the tests below are about what
+    /// they name and not refused by `ParamsFromNvm`.
+    fn tuned() -> SupervisorHost {
+        let mut h = SupervisorHost::new();
+        assert_eq!(h.configure_vehicle(vcfg()), Configured::Accepted);
+        h
+    }
 
     /// Level, at rest, GNSS at the origin, a configurable pack voltage.
     struct Rest {
@@ -542,7 +594,7 @@ mod tests {
     /// A host configured with `cfg` + a valid calibration, stepped until the
     /// estimator has settled, then asked to arm. Returns the resulting mode.
     fn arm_after_settling(cfg: SupervisorConfig) -> (Mode, Option<CheckId>) {
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.configure_supervisor(cfg);
         h.configure_calibration(CAL);
         let mut b = Rest { batt: Some(16.8) };
@@ -594,7 +646,7 @@ mod tests {
         assert_eq!(n, 27);
         for c in cases.iter().flatten() {
             assert!(!c.is_valid(), "{c:?} must be invalid");
-            let mut h = SupervisorHost::new();
+            let mut h = tuned();
             assert_eq!(h.configure_supervisor(*c), Configured::Invalid);
             assert!(!h.failsafe_configured());
             let (mode, why) = arm_after_settling(*c);
@@ -606,7 +658,7 @@ mod tests {
     /// An invalid configuration REVOKES an earlier valid one.
     #[test]
     fn an_invalid_supervisor_config_revokes_the_valid_one() {
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         assert_eq!(h.configure_supervisor(GOOD), Configured::Accepted);
         assert!(h.failsafe_configured());
         let bad = SupervisorConfig {
@@ -621,7 +673,7 @@ mod tests {
     /// RTL on the ground) and refuses to arm by `FailsafeConfigured`.
     #[test]
     fn an_unconfigured_host_runs_inert_and_refuses_arm() {
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.configure_calibration(CAL);
         let mut b = Rest { batt: Some(16.8) };
         for _ in 0..1500 {
@@ -638,7 +690,7 @@ mod tests {
     /// FAILING, and refuses `arm` — whatever the configuration.
     #[test]
     fn a_fresh_supervisor_declares_step_fed_rows_false() {
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.configure_supervisor(GOOD);
         h.configure_calibration(CAL);
         h.command(Event::Arm, true, true);
@@ -661,7 +713,7 @@ mod tests {
         );
         // A host that sent NO calibration: the row is the supervisor's flag
         // (false) from build, not the constructor's bring-up default (true).
-        let mut bare = SupervisorHost::new();
+        let mut bare = tuned();
         bare.configure_supervisor(GOOD);
         bare.command(Event::Arm, true, true);
         let s = bare.supervisor().unwrap();
@@ -695,7 +747,7 @@ mod tests {
         // configured (true) while differing from nothing.
         for cal in [Some(CAL), Some(CalParams::identity()), None] {
             let calibrated = cal.is_some();
-            let mut h = SupervisorHost::new();
+            let mut h = tuned();
             if let Some(c) = cal {
                 h.configure_calibration(c);
             }
@@ -782,7 +834,7 @@ mod tests {
     /// installed, earlier one revoked, arm refused by `CalibrationPresent`.
     #[test]
     fn calibration_install_revoke_and_survive_rebuild() {
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         assert_eq!(h.configure_calibration(CAL), Configured::Accepted);
         h.configure_supervisor(GOOD);
         let mut b = Rest { batt: Some(16.8) };
@@ -819,7 +871,7 @@ mod tests {
     /// upstream", jess#167): it arms. Never configured: refused.
     #[test]
     fn identity_calibration_arms_and_none_refuses() {
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.configure_supervisor(GOOD);
         assert_eq!(
             h.configure_calibration(CalParams::identity()),
@@ -832,7 +884,7 @@ mod tests {
         h.command(Event::Arm, true, true);
         assert_eq!(h.supervisor().unwrap().mode(), Mode::Armed);
 
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.configure_supervisor(GOOD);
         for _ in 0..1500 {
             h.step([0.0, 0.0, -2.0], &mut b);
@@ -848,7 +900,7 @@ mod tests {
     fn calibration_is_rejected_unless_disarmed() {
         let (mode, _) = arm_after_settling(GOOD);
         assert_eq!(mode, Mode::Armed);
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.configure_supervisor(GOOD);
         h.configure_calibration(CAL);
         let mut b = Rest { batt: Some(16.8) };
@@ -899,7 +951,7 @@ mod tests {
 
     #[test]
     fn rebuild_guard_permits_unbuilt_and_clean_disarmed() {
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         assert!(h.rebuild_permitted());
         assert_eq!(h.configure_vehicle(vcfg()), Configured::Accepted);
         let mut b = Rest { batt: Some(16.8) };
@@ -913,7 +965,7 @@ mod tests {
     /// #609 finding 1: Armed, airborne and Terminated all reject.
     #[test]
     fn rebuild_guard_rejects_armed_airborne_and_terminated() {
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.configure_supervisor(GOOD);
         h.configure_calibration(CAL);
         let mut b = Rest { batt: Some(16.8) };
@@ -942,7 +994,7 @@ mod tests {
         // critical-only case let a dropped `!batt.low` clause survive).
         // 4S at a 14 V low threshold: low = 3.50 V/cell, critical = 3.35.
         for (v, low, critical) in [(13.6, true, false), (13.0, true, true)] {
-            let mut h = SupervisorHost::new();
+            let mut h = tuned();
             h.configure_supervisor(GOOD);
             let mut b = Rest { batt: Some(v) };
             for _ in 0..1500 {
@@ -988,7 +1040,7 @@ mod tests {
             sup.core().failed_motor().is_some(),
             "precondition: rotor isolated"
         );
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.sup = Some(sup);
         assert_rejected(&mut h, "isolated rotor");
     }
@@ -1010,51 +1062,337 @@ mod tests {
         }
         assert_eq!(sup.mode(), Mode::Disarmed);
         assert!(sup.core().nav_compromised(), "precondition: nav latched");
-        let mut h = SupervisorHost::new();
+        let mut h = tuned();
         h.sup = Some(sup);
         assert_rejected(&mut h, "nav integrity");
     }
 
-    /// The tuning fallbacks: valid values pass through, each invalid field
-    /// falls back to its own default (`position_ki` to 0.02, not 0).
+    /// Valid values pass through VERBATIM, boundaries included; the fields
+    /// whose definition allows 0 accept 0.
     #[test]
-    fn vehicle_tuning_fallbacks() {
-        let t = vcfg().tuning();
+    fn vehicle_tuning_accepts_its_domain_verbatim() {
+        let t = vcfg().tuning().expect("valid");
         assert_eq!(t.hover_thrust, 0.55);
         assert_eq!(t.pos_var, 0.02);
-        let nan = VehicleConfig {
-            hover_thrust: f32::NAN,
-            loop_rate_hz: f32::NAN,
-            pos_var: 0.0,
-            process_floor_vel: f32::INFINITY,
-            process_floor_pos: f32::NAN,
-            altitude_kp: f32::NAN,
-            altitude_kd: f32::NAN,
-            altitude_ki: f32::NAN,
-            position_ki: f32::NAN,
-        }
-        .tuning();
-        assert_eq!(
-            nan,
-            VehicleTuning {
-                hover_thrust: 0.5,
-                pos_var: 0.01,
+        assert_eq!(t.position_ki, 0.02);
+        let g = vcfg();
+        let edges = [
+            VehicleConfig {
+                hover_thrust: 1.0,
+                ..g
+            },
+            VehicleConfig {
+                loop_rate_hz: 10.0,
+                ..g
+            },
+            VehicleConfig {
+                loop_rate_hz: 10_000.0,
+                ..g
+            },
+            VehicleConfig {
                 process_floor_vel: 0.0,
                 process_floor_pos: 0.0,
-                altitude_kp: 0.05,
-                altitude_kd: 0.30,
+                ..g
+            },
+            VehicleConfig {
+                altitude_kp: 0.0,
+                altitude_kd: 0.0,
                 altitude_ki: 0.0,
-                position_ki: 0.02,
-            }
-        );
-        // Sign: hover thrust and pos_var must be > 0; gains may be 0 / negative.
-        let neg = VehicleConfig {
-            hover_thrust: -0.1,
-            altitude_ki: -0.1,
-            ..vcfg()
+                ..g
+            },
+            VehicleConfig {
+                altitude_kp: 1.0,
+                altitude_kd: 3.0,
+                altitude_ki: 0.2,
+                ..g
+            },
+            VehicleConfig {
+                position_ki: 0.0,
+                ..g
+            },
+            VehicleConfig {
+                position_ki: 5.0,
+                ..g
+            },
+        ];
+        for c in edges {
+            let t = c.tuning();
+            assert!(t.is_some(), "{c:?} is in its domain");
+            let t = t.unwrap();
+            assert_eq!(
+                (
+                    t.hover_thrust,
+                    t.altitude_kp,
+                    t.altitude_kd,
+                    t.altitude_ki,
+                    t.position_ki
+                ),
+                (
+                    c.hover_thrust,
+                    c.altitude_kp,
+                    c.altitude_kd,
+                    c.altitude_ki,
+                    c.position_ki
+                ),
+                "never clamped"
+            );
         }
-        .tuning();
-        assert_eq!(neg.hover_thrust, 0.5);
-        assert_eq!(neg.altitude_ki, -0.1);
+    }
+
+    /// No valid tuning ever configured: the supervisor runs, publishes, and
+    /// REFUSES arming by `ParamsFromNvm` (it would fly on built-in defaults).
+    #[test]
+    fn no_valid_vehicle_tuning_refuses_arm() {
+        for first in [
+            None,
+            Some(VehicleConfig {
+                pos_var: f32::NAN,
+                ..vcfg()
+            }),
+        ] {
+            let mut h = SupervisorHost::new();
+            if let Some(bad) = first {
+                assert_eq!(h.configure_vehicle(bad), Configured::Invalid);
+            }
+            h.configure_supervisor(GOOD);
+            h.configure_calibration(CAL);
+            let mut b = Rest { batt: Some(16.8) };
+            for _ in 0..1500 {
+                h.step([0.0, 0.0, -2.0], &mut b);
+            }
+            h.command(Event::Arm, true, true);
+            let s = h.supervisor().unwrap();
+            assert_eq!(s.mode(), Mode::Disarmed);
+            assert_eq!(s.arm_blocked_check(), Some(CheckId::ParamsFromNvm));
+            assert_ne!(s.failsafe_flags() & crate::failsafe_flags::ARM_BLOCKED, 0);
+        }
+    }
+
+    /// Valid, then invalid: the invalid one is NOT installed, does NOT rebuild,
+    /// and the first tuning stays in force (the vehicle arms on it).
+    #[test]
+    fn an_invalid_vehicle_config_keeps_the_previous_valid_one() {
+        let mut h = tuned();
+        h.configure_supervisor(GOOD);
+        h.configure_calibration(CAL);
+        let mut b = Rest { batt: Some(16.8) };
+        h.step([0.0, 0.0, -2.0], &mut b);
+        let bad = VehicleConfig {
+            hover_thrust: 0.0,
+            ..vcfg()
+        };
+        assert_eq!(h.configure_vehicle(bad), Configured::Invalid);
+        assert!(
+            h.supervisor().is_some(),
+            "an invalid config must not rebuild"
+        );
+        assert_eq!(h.vehicle, vcfg().tuning());
+        for _ in 0..1500 {
+            h.step([0.0, 0.0, -2.0], &mut b);
+        }
+        h.command(Event::Arm, true, true);
+        assert_eq!(h.supervisor().unwrap().mode(), Mode::Armed);
+        // And it survives a rebuild by a later supervisor config.
+        let mut h = tuned();
+        h.configure_vehicle(bad);
+        assert_eq!(h.configure_supervisor(GOOD), Configured::Accepted);
+        h.step([0.0, 0.0, -2.0], &mut b);
+        assert!(
+            h.supervisor()
+                .unwrap()
+                .check_table()
+                .passed(CheckId::ParamsFromNvm)
+        );
+    }
+
+    /// Every out-of-domain vehicle-config value, per field. Each was CLAMPED
+    /// to a default (or passed through) and ACCEPTED before vehicle tuning
+    /// failed closed; now each is `Invalid`.
+    const N_INVALID_VEHICLE: usize = 43;
+    fn invalid_vehicle_values() -> [(&'static str, VehicleConfig); N_INVALID_VEHICLE] {
+        let g = vcfg();
+        let mut out = [("", g); N_INVALID_VEHICLE];
+        let mut n = 0;
+        let mut push = |name: &'static str, c: VehicleConfig| {
+            out[n] = (name, c);
+            n += 1;
+        };
+        for v in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            push(
+                "hover_thrust non-finite",
+                VehicleConfig {
+                    hover_thrust: v,
+                    ..g
+                },
+            );
+            push(
+                "loop_rate_hz non-finite",
+                VehicleConfig {
+                    loop_rate_hz: v,
+                    ..g
+                },
+            );
+            push("pos_var non-finite", VehicleConfig { pos_var: v, ..g });
+            push(
+                "process_floor_vel non-finite",
+                VehicleConfig {
+                    process_floor_vel: v,
+                    ..g
+                },
+            );
+            push(
+                "process_floor_pos non-finite",
+                VehicleConfig {
+                    process_floor_pos: v,
+                    ..g
+                },
+            );
+            push(
+                "altitude_kp non-finite",
+                VehicleConfig {
+                    altitude_kp: v,
+                    ..g
+                },
+            );
+            push(
+                "altitude_kd non-finite",
+                VehicleConfig {
+                    altitude_kd: v,
+                    ..g
+                },
+            );
+            push(
+                "altitude_ki non-finite",
+                VehicleConfig {
+                    altitude_ki: v,
+                    ..g
+                },
+            );
+            push(
+                "position_ki non-finite",
+                VehicleConfig {
+                    position_ki: v,
+                    ..g
+                },
+            );
+        }
+        push(
+            "hover_thrust 0",
+            VehicleConfig {
+                hover_thrust: 0.0,
+                ..g
+            },
+        );
+        push(
+            "hover_thrust 1.2",
+            VehicleConfig {
+                hover_thrust: 1.2,
+                ..g
+            },
+        );
+        push(
+            "loop_rate_hz 0",
+            VehicleConfig {
+                loop_rate_hz: 0.0,
+                ..g
+            },
+        );
+        push(
+            "loop_rate_hz 5",
+            VehicleConfig {
+                loop_rate_hz: 5.0,
+                ..g
+            },
+        );
+        push(
+            "loop_rate_hz 20000",
+            VehicleConfig {
+                loop_rate_hz: 20000.0,
+                ..g
+            },
+        );
+        push("pos_var 0", VehicleConfig { pos_var: 0.0, ..g });
+        push("pos_var -1", VehicleConfig { pos_var: -1.0, ..g });
+        push(
+            "process_floor_vel -0.1",
+            VehicleConfig {
+                process_floor_vel: -0.1,
+                ..g
+            },
+        );
+        push(
+            "process_floor_pos -0.1",
+            VehicleConfig {
+                process_floor_pos: -0.1,
+                ..g
+            },
+        );
+        push(
+            "altitude_kp -0.1",
+            VehicleConfig {
+                altitude_kp: -0.1,
+                ..g
+            },
+        );
+        push(
+            "altitude_kp 1.5",
+            VehicleConfig {
+                altitude_kp: 1.5,
+                ..g
+            },
+        );
+        push(
+            "altitude_kd -0.1",
+            VehicleConfig {
+                altitude_kd: -0.1,
+                ..g
+            },
+        );
+        push(
+            "altitude_kd 3.5",
+            VehicleConfig {
+                altitude_kd: 3.5,
+                ..g
+            },
+        );
+        push(
+            "altitude_ki -0.1",
+            VehicleConfig {
+                altitude_ki: -0.1,
+                ..g
+            },
+        );
+        push(
+            "altitude_ki 0.3",
+            VehicleConfig {
+                altitude_ki: 0.3,
+                ..g
+            },
+        );
+        push(
+            "position_ki -0.1",
+            VehicleConfig {
+                position_ki: -0.1,
+                ..g
+            },
+        );
+        assert_eq!(n, N_INVALID_VEHICLE, "case count");
+        out
+    }
+
+    #[test]
+    fn an_invalid_vehicle_config_is_refused_per_field() {
+        extern crate std;
+        let mut accepted = 0;
+        for (name, c) in invalid_vehicle_values() {
+            let mut h = SupervisorHost::new();
+            let r = h.configure_vehicle(c);
+            if r != Configured::Invalid {
+                accepted += 1;
+                // Printed so a fail-first run names every field.
+                std::println!("ACCEPTED invalid vehicle config: {name} -> {r:?}");
+            }
+        }
+        assert_eq!(accepted, 0, "invalid vehicle configs were accepted");
     }
 }
