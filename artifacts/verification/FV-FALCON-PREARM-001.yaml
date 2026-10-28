@@ -15,12 +15,15 @@ artifacts:
       (the exit gate) — a proven entry + proven exit bracket the armed lifecycle.
 
       SEAM (falcon-core) — prearm_checks_gate_arming: the FlightSupervisor computes
-      `relay_preflight::arm_check` over its PreflightChecks and passes the verdict
-      as the FSM `prearm_ok` gate. With all checks failing, command(Arm) leaves the
-      vehicle Disarmed and arm_blocked_reason() == Sensors; with only battery
-      failing, the reason == Battery; once every check passes, the same physical
-      command arms. The predicate itself is proven by relay-preflight PREFLIGHT-K01/
-      K02 (out-of-checks never allows; Blocked names a truly-failed check).
+      `relay_preflight::arm_check_table` over its PREARM-P03 check table (the
+      ONLY verdict since #609's single-source refactor deleted the legacy
+      six-field struct) and passes it as the FSM `prearm_ok` gate. With the six
+      always-required rows failing, command(Arm) leaves the vehicle Disarmed
+      and arm_blocked_check() == SensorsHealthy; with only BatteryOk failing,
+      the reason == BatteryOk; once every row passes, the same physical command
+      arms. The table verdict is proven by relay-preflight PREFLIGHT-K03/K04
+      (exact + monotone), the six-check predicate by PREFLIGHT-K01/K02
+      (out-of-checks never allows; Blocked names a truly-failed check).
 
       ENFORCEMENT: relay-fsm + relay-preflight added to the Kani CI matrix — the
       three FSM harnesses + the two preflight harnesses run on every PR.

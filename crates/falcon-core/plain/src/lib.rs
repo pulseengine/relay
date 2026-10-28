@@ -1497,13 +1497,13 @@ pub struct FlightSupervisor {
     /// rows are refreshed every step; integration-fed rows (RC/GCS link,
     /// params-from-NVM, sensor freshness, …) enter via [`set_check`] —
     /// setting one DECLARES it required from then on.
+    ///
+    /// THE ONLY PRE-ARM VERDICT (#609, single-source refactor). Until then a
+    /// legacy six-field `relay_preflight::PreflightChecks` lived beside this
+    /// table (since fe29d37, 2026-07-16) with its own `arm_check` verdict, and
+    /// the two disagreed in both directions (#609 finding 6). Arming, failsafe
+    /// bit 7 and [`FlightSupervisor::arm_blocked_check`] all read this table.
     check_table: relay_preflight::CheckTable,
-    /// The latest pre-arm / commander check inputs (sensor health, estimator
-    /// convergence, calibration, geofence, battery, failsafe config). Fed by
-    /// `set_preflight`; `command(Arm, …)` gates arming on `arm_check` of these
-    /// (relay-preflight). Defaults all-passing for back-compat; an integration
-    /// that wires real health signals tightens it.
-    preflight: relay_preflight::PreflightChecks,
     /// A VALID calibration has been explicitly installed through
     /// [`set_calibration`](Self::set_calibration) and not since revoked by an
     /// invalid one. THIS, not "the calibration differs from the identity", is
@@ -1614,26 +1614,18 @@ impl FlightSupervisor {
             runaway_count: 0,
             wind_count: 0,
             check_table: {
-                // back-compat: mirror the default-true legacy six (below) —
+                // back-compat: the always-required six rows start PASSING —
                 // a supervisor that has never stepped can still be armed by
                 // the bring-up tests; the first update_preflight refreshes
-                // every row with real signals.
+                // every row it can measure with real signals. A host that
+                // must not arm before a measured step declares those rows
+                // false itself (#609 finding 2).
                 let mut t = relay_preflight::CheckTable::new();
                 use relay_preflight::CheckId;
                 for id in CheckId::ALL.iter().take(6) {
                     t.set(*id, true);
                 }
                 t
-            },
-            // back-compat default: all checks pass (an integration that feeds real
-            // health via set_preflight tightens this to a fail-safe gate).
-            preflight: relay_preflight::PreflightChecks {
-                sensors_healthy: true,
-                estimator_converged: true,
-                calibration_present: true,
-                geofence_loaded: true,
-                battery_ok: true,
-                failsafe_configured: true,
             },
             calibration_configured: false,
         }
@@ -1769,69 +1761,48 @@ impl FlightSupervisor {
         self.core.calibration()
     }
 
-    /// Feed the latest pre-arm / commander check inputs. The integration calls
-    /// this each cycle from the real health sources (estimator convergence,
-    /// battery, sensor/RC presence, …); `command(Arm, …)` then gates on them.
-    pub fn set_preflight(&mut self, checks: relay_preflight::PreflightChecks) {
-        self.preflight = checks;
-        // keep the PREARM-P03 table's legacy rows in lockstep — the arm
-        // gate reads the TABLE (which embeds these as rows 0..=5).
-        use relay_preflight::CheckId;
-        let t = &mut self.check_table;
-        t.set(CheckId::SensorsHealthy, checks.sensors_healthy);
-        t.set(CheckId::EstimatorConverged, checks.estimator_converged);
-        t.set(CheckId::CalibrationPresent, checks.calibration_present);
-        t.set(CheckId::GeofenceLoaded, checks.geofence_loaded);
-        t.set(CheckId::BatteryOk, checks.battery_ok);
-        t.set(CheckId::FailsafeConfigured, checks.failsafe_configured);
-    }
-
-    /// Derive the pre-arm checks the supervisor can know from its OWN state, each
+    /// Derive the pre-arm rows the supervisor can know from its OWN state, each
     /// cycle (v1.99 — the pre-arm gate fed by real signals, not all-pass
-    /// defaults). Four of the six are wired here:
-    ///   * estimator_converged — the IEKF attitude uncertainty has settled below
-    ///     [`PREARM_TILT_UNCERT_MAX`] (a divergent/just-started filter blocks arming);
-    ///   * calibration_present — a VALID calibration was explicitly configured
+    /// defaults), straight into the PREARM-P03 table:
+    ///   * `SensorsHealthy` — no navigation-integrity latch (GNSS-P02). Both
+    ///     latches it reads (`SpoofMonitor::spoofed`, `DualGnss::diverged`)
+    ///     are monotone for the life of the core — nothing in falcon-core
+    ///     calls a ground reset — so this is the value the legacy sticky
+    ///     `sensors_healthy = false` produced;
+    ///   * `EstimatorConverged` — the IEKF attitude uncertainty has settled
+    ///     below [`PREARM_TILT_UNCERT_MAX`] (a divergent/just-started filter
+    ///     blocks arming);
+    ///   * `CalibrationPresent` — a VALID calibration was explicitly configured
     ///     via `set_calibration` (the identity counts: "calibrated upstream");
-    ///   * battery_ok — the estimated battery state (BATTERY-P02: debounced,
-    ///     latched low/critical flags) is clear;
-    ///   * geofence_loaded — a positive fence radius is configured.
+    ///   * `GeofenceLoaded` — a positive fence radius is configured;
+    ///   * `BatteryOk` — a reading arrived AND the estimated battery state
+    ///     (BATTERY-P02: debounced, latched low/critical flags) is clear;
+    ///   * the breadth rows below.
     ///
-    /// `sensors_healthy` and `failsafe_configured` are left as last set (default
-    /// true / via [`set_preflight`]) — they need a sensor-health / arbiter input
-    /// the backend does not yet provide (documented follow-up).
+    /// `FailsafeConfigured` is NOT written here. The constructor sets it true
+    /// (it is handed the failsafe configuration), and an integration that
+    /// knows better re-declares it via [`set_check`]. Until #609's
+    /// single-source refactor this rewrote it every cycle from a default-true
+    /// legacy field nothing refreshed, which CLOBBERED such a re-declaration.
     pub fn update_preflight<B: FlightBackend>(&mut self, _b: &mut B) {
-        self.preflight.estimator_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
-        self.preflight.calibration_present = self.calibration_configured;
-        // No battery data => NOT ok. A vehicle that cannot see its pack must not
-        // report that the pack is fine.
-        self.preflight.battery_ok =
-            self.batt_present && !(self.batt_state.low || self.batt_state.critical);
+        use relay_preflight::CheckId;
+        let nav_compromised = self.core.nav_compromised();
+        let tilt_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
+        let calibrated = self.calibration_configured;
+        let t = &mut self.check_table;
         // GNSS-P02: a latched receiver divergence or spoof walk-off blocks
         // arming (the flag only clears via a ground reset).
-        if self.core.nav_compromised() {
-            self.preflight.sensors_healthy = false;
-        }
-        // PREARM-P03: mirror the legacy six into the table and refresh every
-        // row the supervisor can feed itself.
-        use relay_preflight::CheckId;
-        let t = &mut self.check_table;
-        t.set(CheckId::SensorsHealthy, self.preflight.sensors_healthy);
+        t.set(CheckId::SensorsHealthy, !nav_compromised);
+        t.set(CheckId::EstimatorConverged, tilt_converged);
+        t.set(CheckId::CalibrationPresent, calibrated);
+        t.set(CheckId::GeofenceLoaded, self.fence_radius > 0.0);
+        // No battery data => NOT ok. A vehicle that cannot see its pack must not
+        // report that the pack is fine.
         t.set(
-            CheckId::EstimatorConverged,
-            self.preflight.estimator_converged,
+            CheckId::BatteryOk,
+            self.batt_present && !(self.batt_state.low || self.batt_state.critical),
         );
-        t.set(
-            CheckId::CalibrationPresent,
-            self.preflight.calibration_present,
-        );
-        t.set(CheckId::GeofenceLoaded, self.preflight.geofence_loaded);
-        t.set(CheckId::BatteryOk, self.preflight.battery_ok);
-        t.set(
-            CheckId::FailsafeConfigured,
-            self.preflight.failsafe_configured,
-        );
-        t.set(CheckId::EstimatorInnovation, !self.core.nav_compromised());
+        t.set(CheckId::EstimatorInnovation, !nav_compromised);
         t.set(CheckId::GnssAgreement, !self.core.gnss_diverged());
         t.set(
             CheckId::GeofenceSane,
@@ -1859,11 +1830,8 @@ impl FlightSupervisor {
             CheckId::NoFailsafeLatched,
             !self.rtl_latched && !self.batt_state.low && !self.batt_state.critical,
         );
-        self.preflight.geofence_loaded = self.fence_radius > 0.0;
     }
 
-    /// Why arming would be refused right now (the first failing pre-arm check),
-    /// or `None` if all checks pass — the reason a GCS surfaces to the operator.
     /// Shared view of the wrapped [`FlightCore`] (estimator state, FDI,
     /// GNSS-integrity flags) — the telemetry/pre-arm read seam.
     pub fn core(&self) -> &FlightCore {
@@ -1895,20 +1863,14 @@ impl FlightSupervisor {
         }
     }
 
-    pub fn arm_blocked_reason(&self) -> Option<relay_preflight::CheckFail> {
-        match relay_preflight::arm_check(self.preflight) {
-            relay_preflight::ArmVerdict::Allowed => None,
-            relay_preflight::ArmVerdict::Blocked(reason) => Some(reason),
-        }
-    }
-
     /// Inject an external command/event (Arm, RequestTakeoff, RequestMission…).
     /// An `Arm` is gated on the pre-arm / commander checks (relay-preflight): the
     /// FSM only enters `Armed` when every check passes AND the vehicle is level
     /// with throttle idle — the Kani-proven entry gate (relay-fsm FSM-K03).
     pub fn command(&mut self, ev: relay_fsm::Event, level: bool, throttle_low: bool) {
-        // v1.122: the PREARM-P03 table is the gate — it embeds the legacy
-        // six as rows 0..=5 and adds the declared breadth rows.
+        // v1.122: the PREARM-P03 table is the gate — the always-required six
+        // rows 0..=5 plus the declared breadth rows. It is the ONLY verdict:
+        // the legacy six-field struct beside it is gone (#609 single-source).
         let prearm_ok = matches!(
             relay_preflight::arm_check_table(&self.check_table),
             relay_preflight::TableVerdict::Allowed
@@ -4495,7 +4457,7 @@ mod tests {
         for _ in 0..2000 {
             sup.step(&mut b);
         }
-        assert_eq!(sup.arm_blocked_reason(), None, "healthy dual-GNSS arms");
+        assert_eq!(sup.arm_blocked_check(), None, "healthy dual-GNSS arms");
         b.gnss_b_offset = [12.0, 0.0]; // B starts lying
         for _ in 0..2000 {
             sup.step(&mut b);
@@ -4504,8 +4466,11 @@ mod tests {
             sup.core().gnss_diverged(),
             "sustained 12 m split must latch"
         );
-        assert!(
-            sup.arm_blocked_reason().is_some(),
+        // The legacy struct reported this as `CheckFail::Sensors`; the table's
+        // first failing row for a nav-integrity latch is `SensorsHealthy`.
+        assert_eq!(
+            sup.arm_blocked_check(),
+            Some(relay_preflight::CheckId::SensorsHealthy),
             "divergence blocks arming"
         );
         let e = sup.core().state();
@@ -5859,8 +5824,8 @@ mod tests {
         }
 
         assert_eq!(
-            sup.arm_blocked_reason(),
-            Some(relay_preflight::CheckFail::Battery),
+            sup.arm_blocked_check(),
+            Some(relay_preflight::CheckId::BatteryOk),
             "a vehicle that cannot see its pack must be blocked ON THE BATTERY row"
         );
         sup.command(relay_fsm::Event::Arm, true, true);
@@ -5918,8 +5883,8 @@ mod tests {
             "must not arm without calibration"
         );
         assert_eq!(
-            sup.arm_blocked_reason(),
-            Some(relay_preflight::CheckFail::Calibration)
+            sup.arm_blocked_check(),
+            Some(relay_preflight::CheckId::CalibrationPresent)
         );
 
         // install a (valid) calibration → step once to refresh → arms.
@@ -5928,7 +5893,7 @@ mod tests {
             ..CalParams::identity()
         });
         sup.step(&mut b);
-        assert_eq!(sup.arm_blocked_reason(), None, "all real checks pass");
+        assert_eq!(sup.arm_blocked_check(), None, "all real checks pass");
         sup.command(relay_fsm::Event::Arm, true, true);
         assert_eq!(
             sup.mode(),
@@ -5953,52 +5918,56 @@ mod tests {
             "low battery blocks arming"
         );
         assert_eq!(
-            sup2.arm_blocked_reason(),
-            Some(relay_preflight::CheckFail::Battery)
+            sup2.arm_blocked_check(),
+            Some(relay_preflight::CheckId::BatteryOk)
         );
     }
 
     /// v1.97 pre-arm gate (the seam): the FlightSupervisor refuses to arm unless
     /// every commander check passes, surfaces the first failing reason, and arms
     /// once they all pass — even when the vehicle is physically level + idle.
+    ///
+    /// Driven through the PREARM-P03 table's always-required six rows (the
+    /// legacy `set_preflight(PreflightChecks)` seam is gone, #609
+    /// single-source refactor); the gate and the reason are the table's.
     #[test]
     fn prearm_checks_gate_arming() {
-        use relay_preflight::{CheckFail, PreflightChecks};
+        use relay_preflight::CheckId;
+        const SIX: [CheckId; 6] = [
+            CheckId::SensorsHealthy,
+            CheckId::EstimatorConverged,
+            CheckId::CalibrationPresent,
+            CheckId::GeofenceLoaded,
+            CheckId::BatteryOk,
+            CheckId::FailsafeConfigured,
+        ];
         let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
 
-        // all checks FAILING (Default = all false): arming refused, reason = first.
-        sup.set_preflight(PreflightChecks::default());
+        // all checks FAILING: arming refused, reason = the first row.
+        for id in SIX {
+            sup.set_check(id, false);
+        }
         sup.command(relay_fsm::Event::Arm, true, true); // level + throttle idle
         assert_eq!(
             sup.mode(),
             relay_fsm::Mode::Disarmed,
             "no arm with failed pre-arm checks"
         );
-        assert_eq!(sup.arm_blocked_reason(), Some(CheckFail::Sensors));
+        assert_eq!(sup.arm_blocked_check(), Some(CheckId::SensorsHealthy));
 
-        // only the battery failing → blocked on Battery, still won't arm.
-        sup.set_preflight(PreflightChecks {
-            sensors_healthy: true,
-            estimator_converged: true,
-            calibration_present: true,
-            geofence_loaded: true,
-            battery_ok: false,
-            failsafe_configured: true,
-        });
-        assert_eq!(sup.arm_blocked_reason(), Some(CheckFail::Battery));
+        // only the battery failing → blocked on BatteryOk, still won't arm.
+        for id in SIX {
+            sup.set_check(id, id != CheckId::BatteryOk);
+        }
+        assert_eq!(sup.arm_blocked_check(), Some(CheckId::BatteryOk));
         sup.command(relay_fsm::Event::Arm, true, true);
         assert_eq!(sup.mode(), relay_fsm::Mode::Disarmed);
 
         // every check passing → arms.
-        sup.set_preflight(PreflightChecks {
-            sensors_healthy: true,
-            estimator_converged: true,
-            calibration_present: true,
-            geofence_loaded: true,
-            battery_ok: true,
-            failsafe_configured: true,
-        });
-        assert_eq!(sup.arm_blocked_reason(), None);
+        for id in SIX {
+            sup.set_check(id, true);
+        }
+        assert_eq!(sup.arm_blocked_check(), None);
         sup.command(relay_fsm::Event::Arm, true, true);
         assert_eq!(
             sup.mode(),
@@ -6364,9 +6333,8 @@ mod tests {
             sup.mode(),
             Mode::Disarmed,
             "a vehicle with a latched dead motor must REFUSE to arm; \
-             arm_blocked_check={:?} reason={:?} failed_motor={:?}",
+             arm_blocked_check={:?} failed_motor={:?}",
             sup.arm_blocked_check(),
-            sup.arm_blocked_reason(),
             sup.core().failed_motor()
         );
     }
@@ -6454,9 +6422,8 @@ mod tests {
             sup.mode(),
             Mode::Disarmed,
             "a vehicle with a latched dead motor must REFUSE to arm; \
-             arm_blocked_check={:?} reason={:?} failed_motor={:?}",
+             arm_blocked_check={:?} failed_motor={:?}",
             sup.arm_blocked_check(),
-            sup.arm_blocked_reason(),
             sup.core().failed_motor()
         );
         assert_eq!(

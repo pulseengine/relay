@@ -11,11 +11,11 @@ artifacts:
       falcon-core prearm_gate_fed_by_real_state (the end-to-end test): a level,
       at-rest backend with a healthy battery + a loaded fence is stepped 1500
       cycles to settle the estimator; with NO calibration installed, command(Arm)
-      leaves the vehicle Disarmed and arm_blocked_reason() == Calibration (the
-      estimator has converged, so calibration is the first failing check);
-      installing a non-identity calibration and stepping once → arm_blocked_reason
-      None and command(Arm) reaches Armed; a separate run with a 13 V pack (below
-      the 14 V threshold) refuses arming with reason Battery. So a divergent
+      leaves the vehicle Disarmed and arm_blocked_check() == CalibrationPresent
+      (the estimator has converged, so calibration is the first failing table
+      row); installing a valid calibration and stepping once →
+      arm_blocked_check() None and command(Arm) reaches Armed; a separate run
+      with a 13 V pack (below the 14 V threshold) refuses arming with BatteryOk. So a divergent
       estimator / missing calibration / low battery / unset fence each block
       arming on LIVE signals — the gate is no longer inert all-pass defaults.
 

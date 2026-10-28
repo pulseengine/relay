@@ -468,9 +468,9 @@ struct FrameBackend {
     /// supervisor calls that `FlightCore` did not, and both DEFAULT to `None` in
     /// the trait — so without this field the switch to a supervisor would ship a
     /// vehicle that can never arm. Measured: `read_battery_v` defaults `None`,
-    /// `update_preflight` sets `battery_ok = batt_present && ..` with
-    /// `batt_present == false`, `all_pass()` ANDs `battery_ok`, and `arm_check`
-    /// returns `Blocked(CheckFail::Battery)` forever.
+    /// `update_preflight` writes the `BatteryOk` row as `batt_present && ..`
+    /// with `batt_present == false`, and `arm_check_table` returns
+    /// `Blocked(CheckId::BatteryOk)` forever.
     battery_v: Option<f32>,
     dt: f32,
     motors: [f32; 4],

@@ -392,9 +392,9 @@ mod arm_blocked_bit {
     }
 
     /// A supervisor with NO calibration configured. `step` runs
-    /// `update_preflight`, which marks the LEGACY struct `calibration_present =
-    /// false`; on main that held bit 7 set on every tick while armed and
-    /// airborne. Armed, the bit must be clear.
+    /// `update_preflight`, which writes `CalibrationPresent = false`; before
+    /// #612 the legacy struct's verdict held bit 7 set on every tick while
+    /// armed and airborne. Armed, the bit must be clear.
     #[test]
     fn armed_airborne_without_a_configured_calibration_leaves_bit_7_clear() {
         use falcon_core::{FlightBackend, ImuSample};
@@ -440,9 +440,12 @@ mod arm_blocked_bit {
             "still flying, got {:?}",
             s.mode()
         );
-        // Precondition that makes this the component's shape: the legacy
-        // struct DOES fail (no calibration configured) while we are airborne.
-        assert!(s.arm_blocked_reason().is_some(), "legacy struct fails");
+        // Precondition that makes this the component's shape: the table DOES
+        // refuse (no calibration configured fails CalibrationPresent once a
+        // step has refreshed it) while we are airborne. Before #609's
+        // single-source refactor this read the deleted legacy struct's
+        // `arm_blocked_reason`.
+        assert!(s.arm_blocked_check().is_some(), "the table refuses");
         assert_eq!(s.failsafe_flags() & ff::ARM_BLOCKED, 0, "airborne");
         // Even a failing table row must not raise the bit once past the gate.
         s.set_check(CheckId::MotorsHealthy, false);

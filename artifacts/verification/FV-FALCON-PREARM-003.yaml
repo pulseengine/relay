@@ -25,8 +25,9 @@ artifacts:
       never permit arming.
 
       Integration (falcon-core): FlightSupervisor::command(Arm) gates on
-      the table (the legacy six mirrored as rows 0..=5 via set_preflight
-      and update_preflight); self-feedable rows refresh every step
+      the table (rows 0..=5 are the always-required six, written by
+      update_preflight; the legacy set_preflight struct was removed in
+      #609's single-source refactor); self-feedable rows refresh every step
       (estimator innovation via the spoof CUSUM, GNSS agreement, geofence
       sanity, battery takeoff margin, no-failsafe-latched, ESC telemetry
       with declare-on-first-sight semantics). Cold-boot criterion on the
