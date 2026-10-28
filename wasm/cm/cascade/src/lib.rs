@@ -346,8 +346,10 @@ struct Component;
 
 impl Guest for Component {
     fn step(sensors: SensorFrame, target: Waypoint) -> MotorPwm {
+        // Arena reclamation (#574): see falcon_cm_rt::CallScope. First statement,
+        // bound to a name so it lives until the body returns.
         #[cfg(not(feature = "std"))]
-        falcon_cm_rt::BumpArena::reset();
+        let _call = falcon_cm_rt::CallScope::enter();
 
         // The host's ACTUAL period. Clamped to [0.1 ms, 100 ms] so a garbage
         // frame cannot wind the filters; a non-finite value falls back to the
@@ -450,7 +452,7 @@ impl Guest for Component {
     /// built to remove. An explicit re-initialisation is louder and cheaper.
     fn configure(cfg: VehicleConfig) {
         #[cfg(not(feature = "std"))]
-        falcon_cm_rt::BumpArena::reset();
+        let _call = falcon_cm_rt::CallScope::enter();
 
         *CONFIG.0.borrow_mut() = Some(cfg);
         *CORE.0.borrow_mut() = None;
@@ -467,6 +469,8 @@ impl Guest for Component {
 /// only a middle"; this is one half of the answer.
 impl ObserverGuest for Component {
     fn read_state() -> FlightState {
+        #[cfg(not(feature = "std"))]
+        let _call = falcon_cm_rt::CallScope::enter();
         let s = PUBLISHED.0.borrow();
         match s.as_ref() {
             Some(p) => FlightState {
@@ -534,7 +538,7 @@ impl PilotGuest for Component {
     /// safety configuration, which is worse than an explicit re-initialisation.
     fn configure_supervisor(cfg: SupervisorConfig) {
         #[cfg(not(feature = "std"))]
-        falcon_cm_rt::BumpArena::reset();
+        let _call = falcon_cm_rt::CallScope::enter();
 
         *SUPCFG.0.borrow_mut() = Some(cfg);
         *CORE.0.borrow_mut() = None;
@@ -549,7 +553,7 @@ impl PilotGuest for Component {
     /// `arm` from passing on the constructor's bring-up defaults.
     fn command(cmd: PilotCommand, level: bool, throttle_low: bool) {
         #[cfg(not(feature = "std"))]
-        falcon_cm_rt::BumpArena::reset();
+        let _call = falcon_cm_rt::CallScope::enter();
 
         use falcon_core::relay_fsm::Event;
         // EXHAUSTIVE on purpose — no `_` arm. The seam's enum is deliberately

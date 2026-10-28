@@ -31,6 +31,10 @@ struct Component;
 
 impl Guest for Component {
     fn mix(torque: TorqueSetpoint) -> MotorPwm {
+        // Arena reclamation (#574): see falcon_cm_rt::CallScope. First statement,
+        // bound to a name so it lives until the body returns.
+        #[cfg(not(feature = "std"))]
+        let _call = falcon_cm_rt::CallScope::enter();
         let mut mixer = QuadMixer::new();
         let m = mixer.mix([torque.tx, torque.ty, torque.tz], torque.thrust);
         MotorPwm {

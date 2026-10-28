@@ -1,0 +1,50 @@
+artifacts:
+  - id: SWREQ-FALCON-OCI-P08
+    type: sw-req
+    title: "OCI-P08 — the bounded arena is reclaimed per call without freeing a live call's arguments (#574)"
+    status: implemented
+    release: falcon-v1.142.0
+    description: >
+      Every published component's `cabi_realloc` arena (falcon-cm-rt, 8 KiB,
+      no `memory.grow` per OCI-P02) shall be reclaimed once per export call, so
+      a component runs indefinitely, AND reclamation shall never release memory
+      that is still live for the current call: the spilled argument area the
+      host lowered before the export began, anything the call itself has
+      allocated, or the call's results while the host lifts them.
+
+      WHY. When an export's flattened parameters exceed MAX_FLAT_PARAMS (16)
+      the host allocates the argument area through `cabi_realloc` before the
+      export runs, and the generated `cabi_dealloc` is a no-op in a bump arena.
+      `position#tick` (18 flat params, 72 B) and `attitude#tick` (19, 76 B)
+      never reclaimed: measured on components built from main, their
+      `cabi_realloc` returns 0 at call 114 and call 108 respectively (#566,
+      #574). The exports that did reclaim used `BumpArena::reset()` at entry,
+      which rewinds over the CURRENT call's argument area — sound only because
+      wit-bindgen 0.41 copies all-scalar records out before the body runs,
+      which is not an ABI guarantee and is false for a `list`/`string`
+      parameter (the guest borrows it in place) and at risk in the wit-bindgen
+      0.41 -> 0.58 migration (#330).
+
+      THE SHALLS.
+      (1) Each export opens `falcon_cm_rt::CallScope` as its first statement;
+      no export in wasm/cm calls `BumpArena::reset()`.
+      (2) Entering a scope reclaims the arena only if the previous call has
+      returned and nothing has been allocated since; arguments the host
+      allocated for this call are preserved.
+      (3) Dropping the scope marks the call returned and does not rewind;
+      results stay valid until the next host allocation or the next entry.
+      Only the host `cabi_realloc` path reclaims; a guest allocation (e.g.
+      result-lowering glue after the body returns) never does.
+      (4) Exhaustion is bounded: the allocator returns null, never wraps, never
+      overlaps; `cabi_realloc` traps rather than hand the host address 0.
+      (5) Behaviour is otherwise unchanged: outputs bit-identical to the
+      previous build, components still no_std with zero `memory.grow`.
+
+      PRECONDITIONS (stated in the crate docs): single-threaded, non-reentrant
+      instance; synchronous lifting; nothing in the arena outlives its call.
+    tags: [falcon, oci, wasm, component-model, arena, embedded]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-002
+      - type: refines
+        target: SWREQ-FALCON-OCI-P02

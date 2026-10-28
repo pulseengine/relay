@@ -28,6 +28,10 @@ struct Component;
 impl Guest for Component {
     /// Recover a body tilted ~0.4 rad to level; return the final tilt (rad).
     fn run_stabilization() -> f32 {
+        // Arena reclamation (#574): see falcon_cm_rt::CallScope. First statement,
+        // bound to a name so it lives until the body returns.
+        #[cfg(not(feature = "std"))]
+        let _call = falcon_cm_rt::CallScope::enter();
         let dt = 0.002f32;
         let th = 0.4f32;
         let (c, s) = (relay_math::cosf(th), relay_math::sinf(th));
@@ -43,6 +47,8 @@ impl Guest for Component {
 
     /// Fly to a [2,-1.5,-2] m setpoint; return the final position error (m).
     fn run_position_hold() -> f32 {
+        #[cfg(not(feature = "std"))]
+        let _call = falcon_cm_rt::CallScope::enter();
         let dt = 0.002f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let mut b = SimBackend::new(level, dt);

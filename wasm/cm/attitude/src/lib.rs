@@ -55,6 +55,10 @@ struct Component;
 
 impl Guest for Component {
     fn tick(state: VehicleState, sp: AttitudeSetpoint) -> RateSetpoint {
+        // Arena reclamation (#574): see falcon_cm_rt::CallScope. First statement,
+        // bound to a name so it lives until the body returns.
+        #[cfg(not(feature = "std"))]
+        let _call = falcon_cm_rt::CallScope::enter();
         let rate = { let a = &ATT.0;
             a.borrow_mut().tick(
                 next_timestamp(),
