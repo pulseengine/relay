@@ -223,6 +223,8 @@ jobs:
           # — the dispatch harnesses now prove non-finite is REJECTED (they
           # proved it accepted at v1), three new frame types are covered, and
           # this leg is no longer ~1 s: 488 s wall locally at load ~120.
+          # Amended 2026-10-28 (#614): 29 covers (strict presence bytes,
+          # 72 B calibration); 283 s wall locally at load ~50.
           - falcon-hitl
           - relay-log
           - relay-modextra

@@ -40,6 +40,21 @@ artifacts:
       falcon-hitl matrix leg for the SAT heavy tail before promoting.
       Re-promotion is a separate code-free PR that re-runs this.
 
+      AMENDED 2026-10-28 (#614, jess#167; still binding v2): the Sensor
+      harness proves presence bytes strictly 0/1 (a three-way contract:
+      NonFinite at the first bad float, else BadBool at the first presence
+      byte > 1, else Ok — and on Ok all five optional fields present exactly
+      when their byte is 1); the Calibration harness covers 18 slots
+      (mag-offdiag at 60/64/68, unwind 20). Covers 26 -> 29. MEASURED, Kani
+      0.67.0, local: 9 harnesses verified, 0 failures, 29 of 29 covers
+      SATISFIED, 283 s wall (Sensor 62 s, Calibration 51 s, rejection ladder
+      48 s, Config 40 s, structural 29 s, Motors 21 s, SupervisorConfig 13 s,
+      Command 2 s, Ack 1 s). Mutations: (M5) presence > 1 accepted again ->
+      the Sensor harness FAILS ("presence byte above 1 was ACCEPTED");
+      (M6) mag-offdiag slots dropped from the decoder's slot table -> the
+      Calibration harness FAILS. The earlier figures above are kept as the
+      record of that run.
+
       Closes the decoder-proof blocker SWREQ-FALCON-TRANSPORT-P01 names in its
       own text: "NO PROOF ON THE DECODER, and it is a promotion blocker rather
       than a caveat: `wire::decode_frame` parses UNTRUSTED BYTES and has no Kani

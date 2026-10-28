@@ -29,6 +29,13 @@ artifacts:
       FV-FALCON-TRANSPORT-002, and docs/TRANSPORT-BINDING.md whose offset
       tables are now TESTED against the encoder rather than typed.
 
+      AMENDED 2026-10-28, still v2 (unreleased, never tagged; #614 after the
+      integrator review on jess#167): `Calibration` grows 60 -> 72 B with
+      `mag-offdiag` APPENDED at payload 60/64/68 (provisional [xy, xz, yz],
+      must match #611); every `Sensor` presence byte (28, 41, 54, 59, 76) is
+      strictly 0 or 1, else `BadBool`; and every reply echoes the seq of the
+      frame it answers (Motors <- its Sensor, Ack <- its control frame).
+
       HELD AT `implemented` (two-commit rule), and NOT re-promotable until
       relay#611 merges: the `Calibration` frame's target,
       `pilot.configure-calibration`, does not exist on main yet, so the

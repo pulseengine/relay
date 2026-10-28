@@ -68,6 +68,12 @@ pub const MAGIC: [u8; 2] = [0x1c, 0xfa];
 /// `pilot.command` over the binding; and [`decode_frame`] REJECTS a non-finite
 /// `f32` in any float slot with [`WireError::NonFinite`] instead of passing it
 /// through.
+///
+/// **Still v2 after the pre-release amendments** (#614, from the integrator
+/// review on jess#167): strict 0/1 presence bytes, the reply echo rule, and
+/// `Calibration` 60 -> 72 B with `mag-offdiag` appended. v2 has never been
+/// tagged, so these are part of v2, not a v3. From the first release that
+/// ships v2, a payload change bumps this.
 pub const VERSION: u8 = 2;
 
 /// magic(2) + version(1) + msg type(1) + sequence(4). See the module note on

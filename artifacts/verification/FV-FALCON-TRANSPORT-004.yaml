@@ -16,8 +16,10 @@ artifacts:
       WHAT v2 IS (crates/falcon-hitl/src/wire.rs, VERSION 1 -> 2):
       `SupervisorConfig` type 4, 24 B (home.x/y/z NED m, fence-radius m,
       cruise-alt m AGL POSITIVE, low-batt-v V — WIT order);
-      `Calibration` type 5, 60 B (#611's `sensor-calibration`: gyro-bias,
-      accel-bias, accel-scale, mag-offset, mag-scale, five vec3);
+      `Calibration` type 5, 72 B (#611's `sensor-calibration`: gyro-bias,
+      accel-bias, accel-scale, mag-offset, mag-scale, then mag-offdiag
+      appended at 60/64/68 — six vec3; it was 60 B before the 2026-10-28
+      pre-release amendment, #614);
       `Command` type 6, 3 B (pilot-command 0..7 in WIT declaration order,
       level 0/1, throttle-low 0/1 — any other interlock byte is refused, a
       stray byte must never read as `true`); `Sensor` grows 76 -> 81 B with
@@ -82,6 +84,8 @@ artifacts:
         - run: "grep -q 'pub const COMMAND_PAYLOAD_LEN: usize = 3;' crates/falcon-hitl/src/wire.rs"
         # The doc bumped with the code.
         - run: "grep -q 'transport binding, v2' docs/TRANSPORT-BINDING.md"
+        # v2 amended pre-release (#614): the doc says the version stays 2.
+        - run: "grep -q 'and .version. STAYS 2' docs/TRANSPORT-BINDING.md"
         - run: "grep -q '<!-- wire-layout: sensor 81 -->' docs/TRANSPORT-BINDING.md"
         # Named tests, one step each, so a deleted test fails this artifact.
         - run: "grep -q 'fn a_binding_only_host_configures_calibrates_arms_and_takes_off' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"

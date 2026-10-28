@@ -26,8 +26,23 @@
 >    interlocks. An earlier revision of v2 read any non-zero value as present
 >    (found by an integrator's encoder probe — jess#167).
 >
+> 5. **Every reply echoes the `seq` of the frame it answers** (§3) — a
+>    `motors` reply its `sensor` frame's, an `ack` its control frame's. No
+>    layout change.
+>
 > `version` is now **2**. A v1 host is refused with `BadVersion { got: 1,
 > want: 2 }`, which is the intended way to discover the change.
+
+> **v2 was amended before release, and `version` STAYS 2.** v2 has never been
+> tagged or shipped in a release, so the pre-release amendments below are part
+> of v2 itself rather than a v3: items 4 and 5 above, and the `calibration`
+> payload growing **60 → 72 B** (`mag-offdiag` appended at 60/64/68, every
+> earlier offset unchanged). A host built against an earlier draft of v2 sees
+> `BadLength { want: 72 }` on a calibration frame, `BadBool` on a presence
+> byte above 1, and replies whose `seq` now names the frame they answer. The
+> integrator review on jess#167 confirmed the v2 layout from the encoder's
+> bytes and agreed to these changes inside v2. **From the first release that
+> ships v2, any further payload change bumps `version`** (§1).
 
 ## Why this document exists
 
