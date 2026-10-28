@@ -79,7 +79,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, light]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # `gh` is NOT installed on the self-hosted fleet. The fleet monitor ran
       # `gh api ... || true` on these boxes for months without it and every
       # "no starvation" was an empty result (#436), so the pinned action is
@@ -112,7 +112,7 @@ jobs:
       - name: Mint an App token (probe only)
         id: apptoken
         continue-on-error: true
-        uses: actions/create-github-app-token@v3.3.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           # `app-id` is DEPRECATED in favour of `client-id` (the action warns on
           # every run). NOT changed here on purpose: `client-id` wants the App's
