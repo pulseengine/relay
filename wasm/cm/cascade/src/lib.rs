@@ -384,9 +384,11 @@ impl Guest for Component {
             // `target` IS NOW A MISSION LEG, NOT A POSITION COMMAND — the one
             // semantic change at @0.12.0 a host must be told about. The
             // supervisor OWNS the position setpoint: it derives one per mode
-            // (RTL flies home at `cruise-alt`, Land descends, Mission flies the
+            // (Takeoff/Loiter hold a horizontal point latched on entry, RTL
+            // flies home at `cruise-alt`, Land descends, Mission flies the
             // active leg) and calls `core.set_position` itself at the end of its
-            // own step. Writing the core's setpoint from here would be
+            // own step. OUTSIDE MISSION THE TARGET IS IGNORED (#609 finding 4).
+            // Writing the core's setpoint from here would be
             // overwritten within the same tick, so the honest wiring is to make
             // the frame's target the mission rather than pretend it still
             // commands position directly. THAT IS THE POINT of SUPERVISOR-P01:

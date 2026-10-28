@@ -269,6 +269,8 @@ impl NativeCascade {
         // `target` is a MISSION LEG at @0.12.0, not a position command: the
         // supervisor owns the setpoint and derives one per mode, so writing the
         // core's setpoint here would be overwritten inside the same tick.
+        // Outside Mission it is ignored; Takeoff/Loiter's latched hold point
+        // lives inside `FlightSupervisor`, so the mirror shares it as is.
         sup.set_mission(target);
         sup.step(&mut b);
         b.motors

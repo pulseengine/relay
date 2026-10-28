@@ -351,7 +351,16 @@ interface controller {
     use types.{sensor-frame, waypoint, motor-pwm, vehicle-config};
     /// One full flight-core tick: estimate, fuse whatever aiding the frame
     /// carries, then geometric SE(3) attitude → ADRC rate → mixer, with the
-    /// rotor-out FDI and the altitude/position loops the vehicle actually flies.
+    /// rotor-out FDI and the supervisor's altitude/position loops.
+    ///
+    /// `target` is the MISSION LEG, read only in Mission mode (a one-leg
+    /// mission; arriving at it ends the mission with an RTL). In every other
+    /// mode the supervisor derives the position setpoint itself and `target`
+    /// is ignored: Takeoff and Loiter hold a horizontal point LATCHED ON ENTRY
+    /// (Takeoff latches the launch point and Loiter after it keeps that point;
+    /// Mission → Loiter latches where the vehicle is when it pauses), at
+    /// `cruise-alt`; Rtl flies home; Land descends over home, or where it is
+    /// after a rotor loss; the motors-off modes command nothing.
     step: func(sensors: sensor-frame, target: waypoint) -> motor-pwm;
 
     /// Install this vehicle's calibration.
