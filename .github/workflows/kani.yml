@@ -219,6 +219,10 @@ jobs:
           # the payload-length equality to `<`, which FAILS the structural
           # harness. Harnesses live in crates/falcon-hitl/src/kani_proofs.rs,
           # not a `plain/` sibling, because this crate has no verus split.
+          # Binding v2 (#609 finding 9, #572, #527): NINE harnesses, 26 covers
+          # — the dispatch harnesses now prove non-finite is REJECTED (they
+          # proved it accepted at v1), three new frame types are covered, and
+          # this leg is no longer ~1 s: 488 s wall locally at load ~120.
           - falcon-hitl
           - relay-log
           - relay-modextra

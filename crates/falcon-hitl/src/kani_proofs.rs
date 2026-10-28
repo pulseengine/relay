@@ -73,9 +73,9 @@ fn bits_at(payload: &[u8], at: usize) -> u32 {
 
 /// IEEE-754 binary32 finiteness, judged from the EXPONENT FIELD by shift: the
 /// biased exponent (bits 23..31) is 255 exactly for NaN and ±infinity. A
-/// different formulation from the decoder's mask-and-compare, and integer-only,
-/// because a floating-point classification per symbolic slot is what made
-/// these harnesses ~100x slower than the v1 set.
+/// different formulation from the decoder's mask-and-compare, and
+/// integer-only, so the harness's oracle involves no floating-point
+/// classification of its own.
 fn finite_bits(bits: u32) -> bool {
     (bits >> 23) & 0xff != 0xff
 }

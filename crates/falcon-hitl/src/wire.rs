@@ -180,12 +180,12 @@ const SENSOR_F32: [usize; 15] = [0, 4, 8, 12, 16, 20, 24, 29, 33, 37, 42, 46, 50
 
 /// Is this little-endian `f32` bit pattern finite?
 ///
-/// An exponent-field test on the raw bits rather than `f32::is_finite`, for
-/// two reasons: it is a single mask-and-compare that bounded model checking
-/// handles cheaply, and the Kani harnesses then check the decoder against
-/// `f32::is_finite` — a different formulation — so the proof is not the
-/// decoder agreeing with a copy of itself. All-ones exponent = NaN (any
-/// payload, either sign) or ±infinity.
+/// An exponent-field test on the raw bits rather than `f32::is_finite`: a
+/// single integer mask-and-compare, which needs no float in the decoder at
+/// all. The Kani harnesses judge finiteness with a DIFFERENT integer
+/// formulation (shifting the exponent out of bits assembled byte by byte), so
+/// the proof is not the decoder agreeing with a copy of itself. All-ones
+/// exponent = NaN (any payload, either sign) or ±infinity.
 fn finite_bits(b: [u8; 4]) -> bool {
     (u32::from_le_bytes(b) & 0x7f80_0000) != 0x7f80_0000
 }
