@@ -47,20 +47,44 @@ artifacts:
 
         (3) RESETS. `controller.configure` and `pilot.configure-supervisor`
             shall each drop the supervisor AND rebuild both partitions, as both
-            drop the whole supervisor (core included) in `cascade`. Each
-            partition's own `configure` drops only that partition's state.
+            drop the whole supervisor (core included) in `cascade` — and, as in
+            `cascade` (#609 finding 1), ONLY while a rebuild loses nothing: no
+            supervisor yet, or a Disarmed one with no isolated rotor, no
+            nav-integrity latch and no latched low/critical battery. Otherwise
+            the call is rejected. Each partition's own `configure` drops only
+            that partition's state.
 
         (4) PUBLISHED STATE. The published tick is monotonic and is not reset by
             either configure; a clear `valid` bit means NOT MEASURED, never zero.
 
-      OUT OF SCOPE HERE, recorded so it is not mistaken for done: the no_std
-      build of the three components waits on #574 (arena reclamation — every
-      seam call spills through cabi_realloc), so they build `std` and refuse a
-      no_std build with a compile_error!; the three-partition shape (supervisor
-      as its own component) is a separate step; Bazel targets for the three
-      components and their inclusion in the release bundle are not added; the
-      meld `--memory shared --pack-rebase` fusion and the synth lowering are
-      the follow-up #575 names.
+        (5) THE SEAM LIFECYCLE (#609 findings 2, 3). An invalid
+            `supervisor-config` shall be treated as none (never clamped,
+            `FailsafeConfigured` false), and a freshly built supervisor shall
+            declare every pre-arm row a step re-derives FALSE until it has
+            stepped — the same rules, and the same tests, as `cascade`.
+
+        (6) THE CALIBRATION (#586). `pilot.configure-calibration` shall behave
+            as in `cascade` (accepted only while Disarmed, in place; an invalid
+            value — non-finite, or a scale not > 0 — installs the identity; it
+            survives a rebuild). It shall reach BOTH partitions, because the
+            control half de-biases its own copy of the gyro, and the
+            supervisor's `CalibrationPresent` row shall be derived from the
+            calibration the ESTIMATOR reports it applies, read across the seam,
+            not from a copy in the orchestrator — so the row and the estimator
+            cannot disagree.
+
+      BUILD SHAPE. All three components build no_std on falcon-cm-rt's bounded
+      bump arena (`BumpArena::reset()` first in every export, the `cascade`
+      pattern; #574's `CallScope` will replace it), so none of the three
+      modules contains `memory.grow` or imports WASI — the precondition for
+      meld's single-shared-memory fusion.
+
+      OUT OF SCOPE HERE, recorded so it is not mistaken for done: the
+      three-partition shape (supervisor as its own component) is a separate
+      step; Bazel targets for the three components and their inclusion in the
+      release bundle are not added (the split is not published); the meld
+      `--memory shared --pack-rebase` fusion and the synth lowering are the
+      follow-up #575 names.
     tags: [falcon, partition, split, supervisor, wit, wac, m4, m7, "575"]
     fields:
       req-type: interface
@@ -71,15 +95,20 @@ artifacts:
         published vs the wac-composed `cascade-split`, one input stream, motors
         + every flight-state field compared by bit pattern each tick, through a
         scenario that must visit takeoff, loiter, mission, RTL, land and
-        terminated and raise arm-blocked, batt-low, rtl-latched and batt-silent
-        and isolate a rotor — or the run fails. Negative controls: cutting the
+        terminated, raise arm-blocked, batt-low, batt-critical, rtl-latched and
+        batt-silent, isolate a rotor, see the fresh-supervisor and
+        dead-accelerometer arm refusals and the three configures #609 rejects —
+        or the run fails. The #609/#586 seam lifecycle tests
+        (tests/cascade-sitl-wasm/src/seam_tests.rs) run against the composed
+        split (`split_*`) as well as against `cascade` (`wasm_*`). Negative controls: cutting the
         flying edge, writing it on estimate-only ticks, and skipping the
         partition reset on rebuild must each turn it red; dropping keep_warm
         must turn it red at the 1000 Hz design rate. In CI: the PRODUCTION
         forwarding (falcon-core `split::SplitCore`) over real partitions matches
         the fused core bit for bit under the supervisor, and mutated seams
-        (edge, estimate-only flag, keep_warm, tilt forward, reset) must each
-        diverge (falcon-core tests/supervised_core_split.rs).
+        (edge, estimate-only flag, keep_warm, tilt forward, reset, calibration
+        not forwarded to the control half, calibration read-back stubbed) must
+        each diverge (falcon-core tests/supervised_core_split.rs).
     links:
       - type: derives-from
         target: SYSREQ-FALCON-020
