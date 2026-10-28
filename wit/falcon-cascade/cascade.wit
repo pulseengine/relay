@@ -514,10 +514,46 @@ interface pilot {
     /// `CAL_MAGn_{X,Y,Z}SCALE` (diagonal) and `CAL_MAGn_{X,Y,Z}ODIAG`
     /// (off-diagonal) in the same order.
     ///
+    /// WHAT THIS CALIBRATION IS: RESIDUAL / BOARD-LEVEL TERMS ONLY. The
+    /// calibration of each PHYSICAL sensor is applied BELOW this seam, per
+    /// sensor instance and before any selection or vote, so that it follows
+    /// the sensor when the selection fails over to another instance:
+    ///   * for a sensor relay decodes, in relay's decode/voting stage, from
+    ///     per-instance values the integrator/host supplies and persists;
+    ///   * for a sensor that arrives already calibrated (e.g. a DroneCAN node
+    ///     that calibrates on board), not at all.
+    /// The single `sensor-calibration` here is applied to the frame that
+    /// stage produces, whichever instance that came from. It must NOT carry
+    /// one physical sensor's own calibration: after a failover it would be
+    /// applied to a different sensor. (A per-instance calibration entry point
+    /// on relay's decode/voting component is a separate follow-up.)
+    ///
     /// THE IDENTITY (all biases/offsets 0, all scales 1, all off-diagonal 0)
     /// IS A VALID CALIBRATION, meaning "calibrated upstream, no residual". It
     /// satisfies `CalibrationPresent` like any other valid calibration. See
     /// `configure-calibration` for what that obliges a host to do.
+    ///
+    /// FRAME. Every term is applied in the BODY frame, to a sample the host
+    /// has already rotated into it (`mag-body`, and the IMU likewise). PX4
+    /// calibrates in the SENSOR frame and rotates afterwards, so values taken
+    /// from a sensor-frame calibration (PX4's `CAL_*` parameters) carry over
+    /// exactly only as follows:
+    ///   * BIASES and `mag-offset` are vectors: a sensor-frame offset `o` is
+    ///     exactly the body-frame offset `R·o`, for ANY mount rotation `R`;
+    ///   * the FULL soft-iron matrix is also exact for any mount, as
+    ///     `S_body = R · S_sensor · Rᵀ`. But that generally MOVES terms
+    ///     between the diagonal and the off-diagonal, and even an
+    ///     axis-permuting mount flips off-diagonal SIGNS (ROTATION_PITCH_180
+    ///     negates xy and yz). So send the rotated body-frame matrix, never
+    ///     the sensor-frame `CAL_MAGn_*SCALE` / `*ODIAG` copied over;
+    ///   * DIAGONAL-ONLY terms (`accel-scale`, and `mag-scale` with
+    ///     `mag-offdiag` zero) equal the sensor-frame ones, axes permuted,
+    ///     ONLY for an AXIS-PERMUTING mount, i.e. one that only swaps or flips
+    ///     axes. ROTATION_PITCH_180, ROTATION_YAW_180 and ROTATION_YAW_270 are
+    ///     examples (the IMU mounts of a Pixhawk 6X-RT, for one). For any
+    ///     other mount, e.g. ROTATION_YAW_45, a sensor-frame diagonal scale
+    ///     becomes a body-frame matrix WITH off-diagonal terms, and it has no
+    ///     exact diagonal body-frame equivalent.
     ///
     /// VALIDATED, NEVER CLAMPED (`relay_calib::CalParams::is_valid`): every
     /// component must be finite, every `accel-scale` > 0, and the soft-iron

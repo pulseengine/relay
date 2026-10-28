@@ -12,14 +12,38 @@
 //!     reading per axis).
 //!   * [`mag_hardiron`] / [`mag_softiron_diag`] — magnetometer offset (hard iron)
 //!     and a diagonal soft-iron scale, from the min/max sweep over a rotation.
-//!     (The full off-diagonal ellipsoid fit is a documented follow-up; the
-//!     hard-iron offset is the dominant correction and is Kani-tractable.)
+//!     [`CalParams::apply_mag`] APPLIES a full symmetric soft-iron matrix
+//!     (`mag_offdiag`, PX4's `CAL_MAGn_ODIAG`). An ellipsoid fit that SOLVES
+//!     the off-diagonal is a documented follow-up. The hard-iron offset is the
+//!     dominant correction and is Kani-tractable.
 //!
 //! The solved [`CalParams`] feed [`CalParams::apply_gyro`]/`apply_accel`/
 //! `apply_mag`, which the estimator runs on each raw sample before the IEKF
 //! propagate/update. [`CalParams::identity`] (zero bias, unit scale) is a no-op —
 //! the explicit replacement for the estimator's prior identity-remap placeholder.
 //! The offsets serialise to the relay-param store via [`CalParams::to_named`].
+//!
+//! ## Where this calibration sits, and in which frame
+//!
+//! **Ownership.** The calibration of each PHYSICAL sensor is applied per
+//! sensor instance, before any selection or vote, so it follows the sensor on
+//! a failover. For sensors relay decodes, relay's decode/voting stage applies
+//! it, from values the integrator/host supplies and persists. A sensor that
+//! arrives already calibrated (e.g. a DroneCAN node calibrating on board) needs
+//! none. The single [`CalParams`] the flight core applies (falcon-core
+//! `set_calibration`, the cascade component's `pilot.configure-calibration`)
+//! holds the RESIDUAL / board-level terms on the selected stream. An explicit
+//! [`CalParams::identity`] there means "calibrated upstream, no residual".
+//!
+//! **Frame.** `apply_*` runs on BODY-frame samples. PX4 calibrates in the
+//! SENSOR frame and rotates afterwards. Offsets and biases carry over exactly
+//! for any mount (`R·o`). The full symmetric soft-iron matrix carries over
+//! exactly as `R·S·Rᵀ`, which in general moves terms between the diagonal and
+//! the off-diagonal, and flips off-diagonal signs even for axis-permuting
+//! mounts. A DIAGONAL-ONLY scale (accel, or mag with a zero off-diagonal)
+//! equals the sensor-frame one, axes permuted, only for an AXIS-PERMUTING
+//! mount: one that only swaps or flips axes, e.g. ROTATION_PITCH_180, _YAW_180
+//! or _YAW_270. It does not for e.g. ROTATION_YAW_45.
 //!
 //! ## Verification split (the codebase's f32 discipline)
 //!   * **Kani** proves TOTALITY + bounds: the solvers never panic / index out of
