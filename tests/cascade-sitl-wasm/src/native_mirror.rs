@@ -34,10 +34,17 @@
 //!     `1/dt` (80 at 400 Hz) and does not resync, because only the loop RATE
 //!     resyncs from the backend, not the warm-up. A mirror that kept building
 //!     the core directly would differ in FDI/innovation warm-up alone.
+//!
+//! #609 single-source refactor: the supervisor, its construction and every
+//! seam rule now come from `falcon_core::host::SupervisorHost` — the SAME type
+//! and code the component holds — so both bullets above are satisfied by
+//! construction rather than by a hand-kept copy.
 
+use falcon_core::host::{self, SupervisorHost};
 use falcon_core::relay_fsm::Event;
+#[cfg(test)]
 use falcon_core::relay_preflight::CheckId;
-use falcon_core::{FlightBackend, FlightSupervisor, ImuSample as CoreImu};
+use falcon_core::{FlightBackend, ImuSample as CoreImu};
 
 type Vec3 = [f32; 3];
 
@@ -133,35 +140,16 @@ pub struct SensorCal {
     pub mag_offdiag: Vec3,
 }
 
-impl SensorCal {
-    /// Mirrors the component's `cal_params`: a field-for-field copy, never
-    /// clamped; `FlightSupervisor::set_calibration` validates it.
-    fn to_core(self) -> falcon_core::relay_calib::CalParams {
-        falcon_core::relay_calib::CalParams {
-            gyro_bias: self.gyro_bias,
-            accel_bias: self.accel_bias,
-            accel_scale: self.accel_scale,
-            mag_offset: self.mag_offset,
-            mag_scale: self.mag_scale,
-            mag_offdiag: self.mag_offdiag,
-        }
-    }
-}
-
-/// Mirrors the component's unconfigured-supervisor constants. A supervisor on
-/// defaults is worse than no supervisor, so "unset" means the
-/// configuration-dependent failsafes are INACTIVE, never zero.
-const SUP_FENCE_UNSET: f32 = 1.0e9;
-const SUP_LOW_BATT_UNSET: f32 = 0.0;
-const SUP_CRUISE_UNSET: f32 = 2.0;
-
+/// THE SAME `SupervisorHost` THE COMPONENT HOLDS (#609, single-source
+/// refactor). Until then this file re-implemented the component's seam rules
+/// (`supcfg_valid`, `cal_params`, `sup_params`, `ROWS_FED_BY_STEP`,
+/// `rebuild_permitted`, `ensure_supervisor`, the configure guards) line for
+/// line, so the differential compared two copies of the logic as well as the
+/// boundary. Now both sides call `falcon_core::host`, and what this mirror
+/// still owns is exactly what the component owns: the field-for-field record
+/// conversions and the frame backend. A difference is therefore about the ABI.
 pub struct NativeCascade {
-    sup: Option<FlightSupervisor>,
-    cfg: Option<Calib>,
-    supcfg: Option<SupCalib>,
-    /// Mirrors the component's `CALIB`: the configured VALID calibration, or
-    /// `None` (never configured, or revoked by an invalid one).
-    calib: Option<falcon_core::relay_calib::CalParams>,
+    host: SupervisorHost,
 }
 
 impl Default for NativeCascade {
@@ -170,137 +158,64 @@ impl Default for NativeCascade {
     }
 }
 
-/// Mirrors the component's `sane()`. Same fallbacks, same positivity rules —
-/// a mirror that sanitised differently would report a difference that is about
-/// the mirror, not about the Component Model.
-fn sane(v: f32, default: f32, positive: bool) -> f32 {
-    if v.is_finite() && (!positive || v > 0.0) {
-        v
-    } else {
-        default
-    }
-}
-
-/// Mirrors the component's `supcfg_valid` (#609 finding 3): home finite;
-/// fence-radius, cruise-alt (m AGL, POSITIVE) and low-batt-v finite and > 0.
-fn supcfg_valid(c: &SupCalib) -> bool {
-    let pos = |v: f32| v.is_finite() && v > 0.0;
-    c.home.iter().all(|v| v.is_finite())
-        && pos(c.fence_radius)
-        && pos(c.cruise_alt)
-        && pos(c.low_batt_v)
-}
-
-/// Mirrors the component's `usable_supcfg`: an invalid configuration counts
-/// as none — never clamped into a permissive one.
-fn usable_supcfg(cfg: Option<&SupCalib>) -> Option<&SupCalib> {
-    cfg.filter(|c| supcfg_valid(c))
-}
-
-/// Mirrors the component's `sup_params`.
-fn sup_params(cfg: Option<&SupCalib>) -> (Vec3, f32, f32, f32) {
-    match usable_supcfg(cfg) {
-        None => (
-            [0.0, 0.0, 0.0],
-            SUP_FENCE_UNSET,
-            SUP_CRUISE_UNSET,
-            SUP_LOW_BATT_UNSET,
-        ),
-        Some(c) => (c.home, c.fence_radius, c.cruise_alt, c.low_batt_v),
-    }
-}
-
-/// Mirrors the component's `ROWS_FED_BY_STEP`: exactly the rows
-/// `update_preflight` refreshes every step, declared FALSE on construction.
-const ROWS_FED_BY_STEP: [CheckId; 12] = [
-    CheckId::SensorsHealthy,
-    CheckId::EstimatorConverged,
-    CheckId::CalibrationPresent,
-    CheckId::GeofenceLoaded,
-    CheckId::BatteryOk,
-    CheckId::FailsafeConfigured,
-    CheckId::EstimatorInnovation,
-    CheckId::GnssAgreement,
-    CheckId::GeofenceSane,
-    CheckId::BatteryTakeoffMargin,
-    CheckId::MotorsHealthy,
-    CheckId::NoFailsafeLatched,
-];
-
-/// Mirrors the component's `rebuild_permitted` (#609 finding 1): a configure
-/// may drop the supervisor only if none exists, or it is Disarmed and holds no
-/// latch a rebuild would reset (isolated rotor, nav-integrity, battery).
-fn rebuild_permitted(slot: &Option<FlightSupervisor>) -> bool {
-    match slot {
-        None => true,
-        Some(sup) => {
-            let batt = sup.battery();
-            sup.mode() == falcon_core::relay_fsm::Mode::Disarmed
-                && sup.core().failed_motor().is_none()
-                && !sup.core().nav_compromised()
-                && !batt.low
-                && !batt.critical
-        }
-    }
-}
-
 impl NativeCascade {
     pub fn new() -> Self {
         Self {
-            sup: None,
-            cfg: None,
-            supcfg: None,
-            calib: None,
+            host: SupervisorHost::new(),
         }
     }
 
-    /// Mirrors `Component::configure`: rebuild from the new configuration only
-    /// while `rebuild_permitted`, otherwise discard it (#609 finding 1).
+    /// Mirrors `Component::configure`: field-for-field into
+    /// `SupervisorHost::configure_vehicle`.
     pub fn configure(&mut self, cfg: Calib) {
-        if !rebuild_permitted(&self.sup) {
-            return;
-        }
-        self.cfg = Some(cfg);
-        self.sup = None;
+        self.host.configure_vehicle(host::VehicleConfig {
+            hover_thrust: cfg.hover_thrust,
+            loop_rate_hz: cfg.loop_rate_hz,
+            pos_var: cfg.pos_var,
+            process_floor_vel: cfg.process_floor_vel,
+            process_floor_pos: cfg.process_floor_pos,
+            altitude_kp: cfg.altitude_kp,
+            altitude_kd: cfg.altitude_kd,
+            altitude_ki: cfg.altitude_ki,
+            position_ki: cfg.position_ki,
+        });
     }
 
-    /// Mirrors `PilotGuest::configure_supervisor`, same guard.
+    /// Mirrors `PilotGuest::configure_supervisor`.
     pub fn configure_supervisor(&mut self, cfg: SupCalib) {
-        if !rebuild_permitted(&self.sup) {
-            return;
-        }
-        self.supcfg = Some(cfg);
-        self.sup = None;
+        self.host.configure_supervisor(host::SupervisorConfig {
+            home: cfg.home,
+            fence_radius: cfg.fence_radius,
+            cruise_alt: cfg.cruise_alt,
+            low_batt_v: cfg.low_batt_v,
+        });
     }
 
-    /// Mirrors `PilotGuest::configure_calibration`: installed IN PLACE, only
-    /// while Disarmed (or not yet built); otherwise rejected and discarded. A
-    /// valid one (identity included) is CONFIGURED; an invalid one revokes.
+    /// Mirrors `PilotGuest::configure_calibration`.
     pub fn configure_calibration(&mut self, cal: SensorCal) {
-        if let Some(sup) = self.sup.as_ref() {
-            if sup.mode() != falcon_core::relay_fsm::Mode::Disarmed {
-                return;
-            }
-        }
-        let params = cal.to_core();
-        self.calib = params.is_valid().then_some(params);
-        if let Some(sup) = self.sup.as_mut() {
-            sup.set_calibration(params);
-        }
+        self.host
+            .configure_calibration(falcon_core::relay_calib::CalParams {
+                gyro_bias: cal.gyro_bias,
+                accel_bias: cal.accel_bias,
+                accel_scale: cal.accel_scale,
+                mag_offset: cal.mag_offset,
+                mag_scale: cal.mag_scale,
+                mag_offdiag: cal.mag_offdiag,
+            });
     }
 
     /// The published `mode` byte, or `None` before any supervisor exists.
     /// (Test-only readers: the differential compares motors, not these.)
     #[cfg(test)]
     pub fn mode(&self) -> Option<u8> {
-        self.sup.as_ref().map(|s| s.mode() as u8)
+        self.host.supervisor().map(|s| s.mode() as u8)
     }
 
     /// The published `failed-rotor` byte (0xFF = none).
     #[cfg(test)]
     pub fn failed_rotor(&self) -> Option<u8> {
-        self.sup
-            .as_ref()
+        self.host
+            .supervisor()
             .map(|s| s.core().failed_motor().map(|i| i as u8).unwrap_or(0xFF))
     }
 
@@ -309,54 +224,12 @@ impl NativeCascade {
     /// is visible only natively, which is why the mirror tests can NAME it.
     #[cfg(test)]
     pub fn arm_blocked_check(&self) -> Option<CheckId> {
-        self.sup.as_ref().and_then(|s| s.arm_blocked_check())
-    }
-
-    /// Mirrors the component's `ensure_supervisor` exactly, declaration included.
-    fn ensure(&mut self) -> &mut FlightSupervisor {
-        let fresh = self.sup.is_none();
-        let (home, fence, cruise, low_batt) = sup_params(self.supcfg.as_ref());
-        let cfg = self.cfg;
-        let sup = self
-            .sup
-            .get_or_insert_with(|| FlightSupervisor::new(home, fence, cruise, low_batt));
-        if fresh {
-            if let Some(c) = cfg {
-                sup.set_hover_thrust(sane(c.hover_thrust, 0.5, true));
-                let core = sup.core_mut();
-                core.set_pos_var(sane(c.pos_var, 0.01, true));
-                core.set_process_floor(
-                    sane(c.process_floor_vel, 0.0, false),
-                    sane(c.process_floor_pos, 0.0, false),
-                );
-                core.set_altitude_gains(
-                    sane(c.altitude_kp, 0.05, false),
-                    sane(c.altitude_kd, 0.30, false),
-                );
-                core.set_altitude_integral_gain(sane(c.altitude_ki, 0.0, false));
-                core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
-            }
-            // Mirrors the component: a configured calibration survives a
-            // rebuild; none configured stays none.
-            if let Some(c) = self.calib {
-                sup.set_calibration(c);
-            }
-            // Mirrors the component's `ROWS_FED_BY_STEP` (#609 finding 2):
-            // nothing a step feeds has been measured yet, so all of it fails.
-            for id in ROWS_FED_BY_STEP {
-                sup.set_check(id, false);
-            }
-        }
-        let configured = usable_supcfg(self.supcfg.as_ref()).is_some();
-        let sup = self.sup.as_mut().expect("just inserted");
-        sup.set_check(CheckId::FailsafeConfigured, configured);
-        sup
+        self.host.supervisor().and_then(|s| s.arm_blocked_check())
     }
 
     /// Mirrors `PilotGuest::command`.
     pub fn command(&mut self, ev: Event, level: bool, throttle_low: bool) {
-        let sup = self.ensure();
-        sup.command(ev, level, throttle_low);
+        self.host.command(ev, level, throttle_low);
     }
 
     /// Mirrors `wasm/cm/cascade::step` call for call, including the dt clamp and
@@ -391,20 +264,9 @@ impl NativeCascade {
             dt,
             motors: [0.0; 4],
         };
-        let configured = usable_supcfg(self.supcfg.as_ref()).is_some();
-        let sup = self.ensure();
-        // `target` is a MISSION LEG at @0.12.0, not a position command: the
-        // supervisor owns the setpoint and derives one per mode, so writing the
-        // core's setpoint here would be overwritten inside the same tick.
-        // Outside Mission it is ignored; Takeoff/Loiter's latched hold point
-        // lives inside `FlightSupervisor`, so the mirror shares it as is.
-        sup.set_mission(target);
-        sup.step(&mut b);
-        // Mirrors the component's RE-DECLARATION after the step:
-        // `update_preflight` rewrites `FailsafeConfigured` from a default-true
-        // field, so without this the mirror's table would disagree with what
-        // the component's `command` (and `read-state`) sees.
-        sup.set_check(CheckId::FailsafeConfigured, configured);
+        // `target` is a MISSION LEG at @0.12.0, not a position command — the
+        // supervisor owns the setpoint (see the component).
+        self.host.step(target, &mut b);
         b.motors
     }
 }

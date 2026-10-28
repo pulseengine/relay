@@ -115,8 +115,8 @@ fn failsafe_bits_are_disjoint() {
 /// TRUE for bring-up back-compat, and `update_preflight` never writes the
 /// `FailsafeConfigured` row — so that default is what a host's very first
 /// `arm` would be judged against. The component therefore declares this row
-/// explicitly on every entry through the `pilot` interface, from
-/// `ensure_supervisor`.
+/// explicitly whenever it builds the supervisor, in
+/// `falcon_core::host::SupervisorHost`.
 ///
 /// Without it, a host that called `pilot.command(arm, ..)` before ever calling
 /// `pilot.configure-supervisor(..)` would arm a vehicle whose geofence centre,

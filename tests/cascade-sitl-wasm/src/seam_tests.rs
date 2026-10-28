@@ -1294,3 +1294,64 @@ fn mirror_each_refusal_is_decided_by_the_expected_row() {
         "dead accelerometer"
     );
 }
+
+// ── #609 single-source refactor: guards mutation testing found unpinned ─────
+//
+// Mutating `falcon_core::host` (the rules' one location since the refactor)
+// showed two rules no seam scenario could see: dropping the LOW-battery
+// clause of the rebuild guard, and letting an invalid supervisor config leave
+// the earlier valid one in force. Both are observable through the seam.
+
+/// #609 finding 1, battery latch: a Disarmed supervisor whose pack has
+/// latched LOW (but not critical) must REJECT `configure-supervisor`, because a
+/// rebuild would start a fresh, clear battery estimator. Observable as: swap in
+/// a full pack, reconfigure, and arming is still refused.
+///
+/// This pins the REBUILD GUARD, not the open #609 finding 5 question of how a
+/// vehicle should re-arm after a battery failsafe in-process.
+fn latched_low_battery_survives_configure<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_calibration(good_cal());
+    s.configure_supervisor(good_sup());
+    // 4S against a 14.0 V threshold: LOW is 3.50 V/cell, CRITICAL 3.35.
+    rig.battery_v = Some(13.6);
+    rig.fly(s, 3000);
+    rig.battery_v = Some(PACK_V);
+    s.configure_supervisor(good_sup());
+    assert_eq!(
+        arm_on_measured_table(s, &mut rig, ARM_WINDOW),
+        None,
+        "a configure reset a latched LOW battery and the vehicle re-armed"
+    );
+}
+
+/// #609 finding 3, revocation: an invalid supervisor config sent AFTER a valid
+/// one must not leave the valid one in force. The latest thing the host sent
+/// was broken, so arming is refused.
+fn invalid_supervisor_config_revokes_a_valid_one<S: Seam>(s: &mut S) {
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_calibration(good_cal());
+    s.configure_supervisor(good_sup());
+    s.configure_supervisor(SupCalib {
+        fence_radius: f32::NAN,
+        ..good_sup()
+    });
+    assert_eq!(
+        arm_on_measured_table(s, &mut rig, ARM_WINDOW),
+        None,
+        "an invalid supervisor config left the earlier valid one in force"
+    );
+}
+
+both!(
+    mirror_latched_low_battery_survives_configure,
+    wasm_latched_low_battery_survives_configure,
+    |s| latched_low_battery_survives_configure(s)
+);
+both!(
+    mirror_invalid_supervisor_config_revokes_a_valid_one,
+    wasm_invalid_supervisor_config_revokes_a_valid_one,
+    |s| invalid_supervisor_config_revokes_a_valid_one(s)
+);

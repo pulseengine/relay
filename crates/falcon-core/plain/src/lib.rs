@@ -1727,14 +1727,21 @@ impl FlightSupervisor {
     ///
     /// A VALID calibration ([`relay_calib::CalParams::is_valid`]: finite, every
     /// scale positive, soft-iron positive definite) is installed and marks the calibration
-    /// CONFIGURED, so `CalibrationPresent` passes from the next
-    /// `update_preflight` — the IDENTITY included: it means "calibrated
-    /// upstream, no residual", because per-sensor calibration is applied below
-    /// this layer (jess#167). An INVALID one is NOT installed: the identity
-    /// is installed in its place and the calibration is marked NOT configured,
-    /// revoking any earlier valid one, so arming is refused (#611). A
-    /// supervisor that is never given one reports `CalibrationPresent` false
-    /// once stepped.
+    /// CONFIGURED, so `CalibrationPresent` passes AT ONCE — the IDENTITY
+    /// included: it means "calibrated upstream, no residual", because
+    /// per-sensor calibration is applied below this layer (jess#167). An
+    /// INVALID one is NOT installed: the identity is installed in its place
+    /// and the calibration is marked NOT configured, revoking any earlier
+    /// valid one, so arming is refused at once (#611). A supervisor that is
+    /// never given one reports `CalibrationPresent` false from construction.
+    ///
+    /// ONE SOURCE OF TRUTH (#609 single-source refactor): the row is only ever
+    /// a projection of [`calibration_configured`](Self::calibration_configured),
+    /// written here at once and re-projected by `update_preflight`. The one
+    /// window where they differ is a NEVER-STEPPED supervisor that was never
+    /// given a calibration: it keeps the constructor's bring-up default (row
+    /// true) until its first step, which ~27 native call sites (the gz
+    /// harness among them) arm on.
     ///
     /// Delegates to the FlightCore, where the estimator applies it.
     /// (`FlightCore::set_calibration` itself does not validate; it has no
@@ -1747,11 +1754,16 @@ impl FlightSupervisor {
             relay_calib::CalParams::identity()
         });
         self.calibration_configured = ok;
+        // Project the flag into the row NOW, so a revocation refuses arming at
+        // once rather than from the next step. `update_preflight` re-projects
+        // the SAME flag each step; nothing writes the row from anything else.
+        self.check_table
+            .set(relay_preflight::CheckId::CalibrationPresent, ok);
         ok
     }
 
-    /// Whether a valid calibration is configured — the `CalibrationPresent`
-    /// signal `update_preflight` feeds the pre-arm table.
+    /// Whether a valid calibration is configured — the value of the
+    /// `CalibrationPresent` pre-arm row, always.
     pub fn calibration_configured(&self) -> bool {
         self.calibration_configured
     }
@@ -1772,12 +1784,19 @@ impl FlightSupervisor {
     ///   * `EstimatorConverged` — the IEKF attitude uncertainty has settled
     ///     below [`PREARM_TILT_UNCERT_MAX`] (a divergent/just-started filter
     ///     blocks arming);
-    ///   * `CalibrationPresent` — a VALID calibration was explicitly configured
-    ///     via `set_calibration` (the identity counts: "calibrated upstream");
     ///   * `GeofenceLoaded` — a positive fence radius is configured;
     ///   * `BatteryOk` — a reading arrived AND the estimated battery state
     ///     (BATTERY-P02: debounced, latched low/critical flags) is clear;
     ///   * the breadth rows below.
+    ///
+    /// Two of the always-required six are CONFIGURED, not measured
+    /// (#609 single-source refactor):
+    ///
+    /// `CalibrationPresent` is re-projected here from the supervisor's own
+    /// `calibration_configured` flag (a VALID calibration was explicitly
+    /// configured; the identity counts as "calibrated upstream") — the same
+    /// flag [`set_calibration`](Self::set_calibration) projects at once. It is
+    /// not a measurement and has no other source.
     ///
     /// `FailsafeConfigured` is NOT written here. The constructor sets it true
     /// (it is handed the failsafe configuration), and an integration that
@@ -1788,13 +1807,13 @@ impl FlightSupervisor {
         use relay_preflight::CheckId;
         let nav_compromised = self.core.nav_compromised();
         let tilt_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
-        let calibrated = self.calibration_configured;
         let t = &mut self.check_table;
         // GNSS-P02: a latched receiver divergence or spoof walk-off blocks
         // arming (the flag only clears via a ground reset).
         t.set(CheckId::SensorsHealthy, !nav_compromised);
         t.set(CheckId::EstimatorConverged, tilt_converged);
-        t.set(CheckId::CalibrationPresent, calibrated);
+        // A projection of the configured flag, not a measurement (see above).
+        t.set(CheckId::CalibrationPresent, self.calibration_configured);
         t.set(CheckId::GeofenceLoaded, self.fence_radius > 0.0);
         // No battery data => NOT ok. A vehicle that cannot see its pack must not
         // report that the pack is fine.
@@ -1856,6 +1875,14 @@ impl FlightSupervisor {
     /// Why arming would be refused by the PREARM-P03 table (the first
     /// failing required row), with the operator STATUSTEXT via
     /// `CheckId::reason_text`. `None` = the table allows.
+    /// Read-only view of the PREARM-P03 table: which rows are declared
+    /// (required) and which pass. The verdict itself is
+    /// [`arm_blocked_check`](Self::arm_blocked_check); this exists so a host
+    /// and its tests can check a declaration row by row.
+    pub fn check_table(&self) -> &relay_preflight::CheckTable {
+        &self.check_table
+    }
+
     pub fn arm_blocked_check(&self) -> Option<relay_preflight::CheckId> {
         match relay_preflight::arm_check_table(&self.check_table) {
             relay_preflight::TableVerdict::Allowed => None,
@@ -2995,6 +3022,9 @@ impl FlightBackend for SimBackend {
 }
 
 pub mod blackbox_backend;
+/// The published seam's supervisor lifecycle rules, written ONCE (#609
+/// single-source refactor): `SupervisorHost`.
+pub mod host;
 pub mod tuning;
 
 #[cfg(test)]
