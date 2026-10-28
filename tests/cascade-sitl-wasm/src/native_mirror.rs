@@ -134,18 +134,17 @@ pub struct SensorCal {
 }
 
 impl SensorCal {
-    /// Mirrors the component's `cal_params`: `None` unless
-    /// `CalParams::is_valid`. Never clamped.
-    fn to_core(self) -> Option<falcon_core::relay_calib::CalParams> {
-        let p = falcon_core::relay_calib::CalParams {
+    /// Mirrors the component's `cal_params`: a field-for-field copy, never
+    /// clamped; `FlightSupervisor::set_calibration` validates it.
+    fn to_core(self) -> falcon_core::relay_calib::CalParams {
+        falcon_core::relay_calib::CalParams {
             gyro_bias: self.gyro_bias,
             accel_bias: self.accel_bias,
             accel_scale: self.accel_scale,
             mag_offset: self.mag_offset,
             mag_scale: self.mag_scale,
             mag_offdiag: self.mag_offdiag,
-        };
-        p.is_valid().then_some(p)
+        }
     }
 }
 
@@ -160,8 +159,9 @@ pub struct NativeCascade {
     sup: Option<FlightSupervisor>,
     cfg: Option<Calib>,
     supcfg: Option<SupCalib>,
-    /// Mirrors the component's `CALIB`: last valid calibration, else identity.
-    calib: falcon_core::relay_calib::CalParams,
+    /// Mirrors the component's `CALIB`: the configured VALID calibration, or
+    /// `None` (never configured, or revoked by an invalid one).
+    calib: Option<falcon_core::relay_calib::CalParams>,
 }
 
 impl Default for NativeCascade {
@@ -250,7 +250,7 @@ impl NativeCascade {
             sup: None,
             cfg: None,
             supcfg: None,
-            calib: falcon_core::relay_calib::CalParams::identity(),
+            calib: None,
         }
     }
 
@@ -274,19 +274,18 @@ impl NativeCascade {
     }
 
     /// Mirrors `PilotGuest::configure_calibration`: installed IN PLACE, only
-    /// while Disarmed (or not yet built); otherwise rejected and discarded. An
-    /// invalid one replaces any earlier calibration with the identity.
+    /// while Disarmed (or not yet built); otherwise rejected and discarded. A
+    /// valid one (identity included) is CONFIGURED; an invalid one revokes.
     pub fn configure_calibration(&mut self, cal: SensorCal) {
         if let Some(sup) = self.sup.as_ref() {
             if sup.mode() != falcon_core::relay_fsm::Mode::Disarmed {
                 return;
             }
         }
-        self.calib = cal
-            .to_core()
-            .unwrap_or(falcon_core::relay_calib::CalParams::identity());
+        let params = cal.to_core();
+        self.calib = params.is_valid().then_some(params);
         if let Some(sup) = self.sup.as_mut() {
-            sup.set_calibration(self.calib);
+            sup.set_calibration(params);
         }
     }
 
@@ -337,8 +336,11 @@ impl NativeCascade {
                 core.set_altitude_integral_gain(sane(c.altitude_ki, 0.0, false));
                 core.set_position_integral_gain(sane(c.position_ki, 0.02, false));
             }
-            // Mirrors the component: the stored calibration survives a rebuild.
-            sup.set_calibration(self.calib);
+            // Mirrors the component: a configured calibration survives a
+            // rebuild; none configured stays none.
+            if let Some(c) = self.calib {
+                sup.set_calibration(c);
+            }
             // Mirrors the component's `ROWS_FED_BY_STEP` (#609 finding 2):
             // nothing a step feeds has been measured yet, so all of it fails.
             for id in ROWS_FED_BY_STEP {

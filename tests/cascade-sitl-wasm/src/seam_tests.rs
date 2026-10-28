@@ -596,8 +596,9 @@ fn invalid_sup_configs() -> Vec<(&'static str, SupCalib)> {
 }
 
 /// Every invalid CALIBRATION (`relay_calib::CalParams::is_valid`: finite, accel
-/// scale > 0, soft-iron positive definite), plus the valid-but-IDENTITY one
-/// falcon-core reads as "not calibrated".
+/// scale > 0, soft-iron positive definite). The IDENTITY is NOT here: since
+/// jess#167 an explicitly configured identity is VALID ("calibrated upstream")
+/// and arms — see `identity_calibration_arms`.
 fn bad_calibrations() -> Vec<(&'static str, SensorCal)> {
     let c = good_cal();
     vec![
@@ -652,7 +653,6 @@ fn bad_calibrations() -> Vec<(&'static str, SensorCal)> {
                 ..c
             },
         ),
-        ("identity", identity_cal()),
     ]
 }
 
@@ -665,9 +665,16 @@ const ARM_WINDOW: u32 = 4000;
 /// then try BOTH arm paths: before the first step, and on the measured table
 /// for `ARM_WINDOW` ticks. Returns how it armed, if it did.
 fn try_arm<S: Seam>(s: &mut S, sup: SupCalib, cal: SensorCal) -> Option<String> {
+    try_arm_with(s, sup, Some(cal))
+}
+
+/// `try_arm`, where `None` = `configure-calibration` is never called.
+fn try_arm_with<S: Seam>(s: &mut S, sup: SupCalib, cal: Option<SensorCal>) -> Option<String> {
     let mut rig = Rig::new();
     s.configure(mock_calib());
-    s.configure_calibration(cal);
+    if let Some(cal) = cal {
+        s.configure_calibration(cal);
+    }
     s.configure_supervisor(sup);
     s.command(Event::Arm);
     s.command(Event::RequestTakeoff);
@@ -698,8 +705,8 @@ fn invalid_supervisor_config_refuses_arm<S: Seam>(mk: impl Fn() -> S) {
     );
 }
 
-/// A bad calibration (invalid, or the identity) must leave the vehicle
-/// unarmable even with a VALID supervisor config.
+/// An INVALID calibration must leave the vehicle unarmable even with a VALID
+/// supervisor config.
 fn bad_calibration_refuses_arm<S: Seam>(mk: impl Fn() -> S) {
     let mut armed = Vec::new();
     for (name, bad) in bad_calibrations() {
@@ -708,6 +715,29 @@ fn bad_calibration_refuses_arm<S: Seam>(mk: impl Fn() -> S) {
         }
     }
     assert!(armed.is_empty(), "bad calibrations were ARMED: {armed:?}");
+}
+
+/// NEVER configured: `CalibrationPresent` is false, so `arm` is refused on
+/// both paths (before the first step, and on the measured table).
+fn never_configured_calibration_refuses_arm<S: Seam>(s: &mut S) {
+    let how = try_arm_with(s, good_sup(), None);
+    assert!(
+        how.is_none(),
+        "armed with NO calibration ever configured: {how:?}"
+    );
+}
+
+/// An explicitly configured IDENTITY is a VALID calibration ("calibrated
+/// upstream, no residual", jess#167) and ARMS. The rig's sensor carries
+/// `GYRO_BIAS`, which the identity leaves in — harmless at 0.1 °/s, and it is
+/// the host's assertion that matters to the pre-arm row, not the residual.
+fn identity_calibration_arms<S: Seam>(s: &mut S) {
+    let how = try_arm(s, good_sup(), identity_cal());
+    assert!(
+        how.is_some(),
+        "an explicitly configured IDENTITY calibration was REFUSED; mode {:?}",
+        s.mode()
+    );
 }
 
 /// THE CONTROL for every refusal in this file: the SAME rig with a valid
@@ -729,13 +759,25 @@ fn valid_config_arms_on_the_measured_table<S: Seam>(s: &mut S) -> u32 {
 
 // ── configure-calibration lifecycle (relay#586) ─────────────────────────────
 
-/// Accepted only while Disarmed: an IDENTITY calibration sent in flight must be
-/// discarded, so after landing the vehicle is still calibrated. Observable
-/// through the seam as: land, disarm, and the next arm still succeeds.
+/// An INVALID calibration (it would revoke) — the observable probe for
+/// "was this call applied?": applied while Disarmed, the next arm is refused.
+fn invalid_cal() -> SensorCal {
+    SensorCal {
+        accel_scale: [0.0, 1.0, 1.0],
+        ..good_cal()
+    }
+}
+
+/// Accepted only while Disarmed: an INVALID calibration sent in flight must be
+/// discarded (had it been applied it would have revoked the valid one), so
+/// after landing the vehicle is still calibrated. Observable through the seam
+/// as: land, disarm, and the next arm still succeeds. (It used the identity
+/// as the probe until jess#167 made the identity valid — then the re-arm
+/// would succeed either way and the test could not fail.)
 fn calibration_is_rejected_while_not_disarmed<S: Seam>(s: &mut S) {
     let mut rig = Rig::new();
     launch(s, &mut rig);
-    s.configure_calibration(identity_cal());
+    s.configure_calibration(invalid_cal());
     let mut disarmed = false;
     for _ in 0..80 {
         // RequestLand is only honoured from Loiter/Mission/Rtl, and `launch`
@@ -754,33 +796,34 @@ fn calibration_is_rejected_while_not_disarmed<S: Seam>(s: &mut S) {
     );
     assert!(
         arm_on_measured_table(s, &mut rig, ARM_WINDOW).is_some(),
-        "the in-flight identity calibration was APPLIED (re-arm refused) — it \
+        "the in-flight invalid calibration was APPLIED (re-arm refused) — it \
          must have been rejected because the vehicle was not disarmed"
     );
 }
 
-/// On the ground it IS applied, in place: an identity calibration sent while
-/// Disarmed makes the next arm fail, and a valid one restores it.
+/// On the ground it IS applied, in place: an invalid calibration sent while
+/// Disarmed makes the next arm fail, and a valid one — here the IDENTITY —
+/// restores it.
 fn calibration_applies_in_place_on_the_ground<S: Seam>(s: &mut S) {
     let mut rig = Rig::new();
     s.configure(mock_calib());
     s.configure_calibration(good_cal());
     s.configure_supervisor(good_sup());
     rig.fly(s, 10);
-    s.configure_calibration(identity_cal());
+    s.configure_calibration(invalid_cal());
     assert!(
         arm_on_measured_table(s, &mut rig, ARM_WINDOW).is_none(),
-        "an identity calibration sent while Disarmed was not applied"
+        "an invalid calibration sent while Disarmed was not applied"
     );
-    s.configure_calibration(good_cal());
+    s.configure_calibration(identity_cal());
     assert!(
         arm_on_measured_table(s, &mut rig, 10).is_some(),
-        "a valid calibration sent while Disarmed was not applied in place"
+        "a valid (identity) calibration sent while Disarmed was not applied in place"
     );
 }
 
-/// An INVALID calibration replaces an earlier valid one with the identity — the
-/// vehicle must not fly on a calibration the host has just tried to replace.
+/// An INVALID calibration REVOKES an earlier valid one — the vehicle must not
+/// fly on a calibration the host has just tried to replace.
 fn invalid_calibration_clears_a_previous_valid_one<S: Seam>(s: &mut S) {
     let mut rig = Rig::new();
     s.configure(mock_calib());
@@ -1139,6 +1182,16 @@ both!(
     |s| calibration_survives_a_rebuild(s)
 );
 both!(
+    mirror_never_configured_calibration_refuses_arm,
+    wasm_never_configured_calibration_refuses_arm,
+    |s| never_configured_calibration_refuses_arm(s)
+);
+both!(
+    mirror_identity_calibration_arms,
+    wasm_identity_calibration_arms,
+    |s| identity_calibration_arms(s)
+);
+both!(
     mirror_dead_accelerometer_refuses_arm,
     wasm_dead_accelerometer_refuses_arm,
     |s| dead_accelerometer_refuses_arm(s)
@@ -1178,12 +1231,23 @@ fn mirror_fresh_supervisor_is_refused_by_an_unmeasured_row() {
 /// Warm a mirror on the rig for as long as a valid config needs (+ margin) and
 /// return the row refusing `arm` (None = allowed).
 fn deciding_row(sup: SupCalib, cal: SensorCal, accel: Option<[f32; 3]>) -> Option<CheckId> {
+    deciding_row_with(sup, Some(cal), accel)
+}
+
+/// `deciding_row`, where `None` = `configure-calibration` is never called.
+fn deciding_row_with(
+    sup: SupCalib,
+    cal: Option<SensorCal>,
+    accel: Option<[f32; 3]>,
+) -> Option<CheckId> {
     let warm = valid_config_arms_on_the_measured_table(&mut NativeCascade::new());
     let mut n = NativeCascade::new();
     let mut rig = Rig::new();
     rig.accel_override = accel;
     n.configure(mock_calib());
-    n.configure_calibration(cal);
+    if let Some(cal) = cal {
+        n.configure_calibration(cal);
+    }
     n.configure_supervisor(sup);
     rig.fly(&mut n, warm + 50);
     n.arm_blocked_check()
@@ -1212,6 +1276,17 @@ fn mirror_each_refusal_is_decided_by_the_expected_row() {
             "bad calibration {name}"
         );
     }
+    // Never configured -> CalibrationPresent; an explicit identity -> nothing.
+    assert_eq!(
+        deciding_row_with(good_sup(), None, None),
+        Some(CheckId::CalibrationPresent),
+        "never-configured calibration"
+    );
+    assert_eq!(
+        deciding_row(good_sup(), identity_cal(), None),
+        None,
+        "an explicitly configured identity calibration must not refuse"
+    );
     // Estimator health: a dead accelerometer -> EstimatorConverged decides.
     assert_eq!(
         deciding_row(good_sup(), good_cal(), Some([0.0, 0.0, 0.0])),

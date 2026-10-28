@@ -245,31 +245,32 @@ fn supcfg_valid(c: &SupervisorConfig) -> bool {
 
 /// `pilot.configure-calibration`'s record as falcon-core's `CalParams` — a
 /// field-for-field copy, no conversion of units or meaning (`mag-offdiag`
-/// keeps its `[xy, xz, yz]` order) — or `None` if it is INVALID by
-/// `CalParams::is_valid`: any component non-finite, an accel scale not > 0, or
-/// a soft-iron matrix that is not positive definite. Never clamped. The rule
-/// lives in relay-calib, once, so the component and the native mirror cannot
-/// drift from it.
-fn cal_params(c: &SensorCalibration) -> Option<falcon_core::relay_calib::CalParams> {
+/// keeps its `[xy, xz, yz]` order). NOT validated here and never clamped:
+/// `CalParams::is_valid` (finite, accel scale > 0, soft-iron positive
+/// definite) is applied by `FlightSupervisor::set_calibration`, once, so the
+/// component and the native mirror cannot drift from it.
+fn cal_params(c: &SensorCalibration) -> falcon_core::relay_calib::CalParams {
     let v = |a: &Vec3Wit| [a.x, a.y, a.z];
-    let p = falcon_core::relay_calib::CalParams {
+    falcon_core::relay_calib::CalParams {
         gyro_bias: v(&c.gyro_bias),
         accel_bias: v(&c.accel_bias),
         accel_scale: v(&c.accel_scale),
         mag_offset: v(&c.mag_offset),
         mag_scale: v(&c.mag_scale),
         mag_offdiag: v(&c.mag_offdiag),
-    };
-    p.is_valid().then_some(p)
+    }
 }
 
-/// The calibration the supervisor runs on: the last VALID one the host sent
-/// through `pilot.configure-calibration`, or the identity. falcon-core reads the
-/// identity as "not calibrated" (`CalibrationPresent` false), so the identity
-/// is the fail-safe value. Kept here as well as in the core so a rebuild by
-/// `configure` / `configure-supervisor` does not silently drop it.
-static CALIB: SingleThreaded<falcon_core::relay_calib::CalParams> =
-    SingleThreaded(RefCell::new(falcon_core::relay_calib::CalParams::identity()));
+/// The calibration the host CONFIGURED: `Some` = the last call to
+/// `pilot.configure-calibration` carried a VALID calibration (the identity
+/// included — "calibrated upstream", jess#167); `None` = never called, or the
+/// last call was INVALID (which revokes). This is explicit state, NOT a
+/// comparison against the identity, and it is what decides
+/// `CalibrationPresent` (via `FlightSupervisor::set_calibration`). Kept here
+/// as well as in the core so a rebuild by `configure` /
+/// `configure-supervisor` does not silently drop it.
+static CALIB: SingleThreaded<Option<falcon_core::relay_calib::CalParams>> =
+    SingleThreaded(RefCell::new(None));
 
 /// The configuration the supervisor may actually be built from: `Some` only if
 /// the host sent one AND it is valid.
@@ -385,10 +386,12 @@ fn ensure_supervisor<'a>(
             sup.set_hover_thrust(sane(c.hover_thrust, 0.5, true));
             apply_tuning(sup.core_mut(), c);
         }
-        // The host's calibration (`CALIB`: last valid one, else identity), so a
-        // rebuild keeps it. The identity is what falcon-core reads as "not
-        // calibrated": `CalibrationPresent` then fails and `arm` is refused.
-        sup.set_calibration(*CALIB.0.borrow());
+        // The host's calibration, so a rebuild keeps it. A freshly built
+        // supervisor has NONE configured (`CalibrationPresent` false), so only
+        // a configured valid one is re-installed; `None` leaves it that way.
+        if let Some(c) = *CALIB.0.borrow() {
+            sup.set_calibration(c);
+        }
         // UNDECLARED IS FAIL, NOT PASS (#609 finding 2). See
         // `ROWS_FED_BY_STEP`: until a `step` has run, nothing has been measured.
         for id in ROWS_FED_BY_STEP {
@@ -750,10 +753,16 @@ impl PilotGuest for Component {
     /// discards `cal` — the same reject-not-queue rule as the two configure
     /// calls, for the same reason.
     ///
-    /// An INVALID calibration is not installed: it REPLACES any earlier one with
-    /// the identity, so `CalibrationPresent` fails and `arm` is refused. The
-    /// latest thing the host sent was broken; flying on an older calibration it
-    /// has just tried to replace is not the fail-safe reading of that.
+    /// `CalibrationPresent` then means "a VALID calibration was configured"
+    /// (jess#167): a valid one, the IDENTITY included, makes it pass. An
+    /// INVALID calibration is not installed: the identity is applied in its
+    /// place and the calibration counts as NOT configured, REVOKING any
+    /// earlier valid one, so `CalibrationPresent` fails and `arm` is refused.
+    /// The latest thing the host sent was broken; flying on an older
+    /// calibration it has just tried to replace is not the fail-safe reading
+    /// of that. The validity rule and the flag both live in falcon-core
+    /// (`FlightSupervisor::set_calibration`); this only remembers the outcome
+    /// across rebuilds.
     fn configure_calibration(cal: SensorCalibration) {
         #[cfg(not(feature = "std"))]
         let _call = falcon_cm_rt::CallScope::enter();
@@ -764,9 +773,11 @@ impl PilotGuest for Component {
                 return;
             }
         }
-        let params = cal_params(&cal).unwrap_or(falcon_core::relay_calib::CalParams::identity());
-        *CALIB.0.borrow_mut() = params;
+        let params = cal_params(&cal);
+        *CALIB.0.borrow_mut() = params.is_valid().then_some(params);
         if let Some(sup) = core.as_mut() {
+            // Validates again and, if invalid, installs the identity and
+            // clears the configured flag — the revocation.
             sup.set_calibration(params);
         }
     }

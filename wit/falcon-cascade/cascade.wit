@@ -226,9 +226,9 @@ interface types {
         /// WHAT IT DOES NOT DO ALONE is make the component armable. A host that
         /// warms its estimator before arming — what a real GCS does, and what
         /// `step_estimate_only` exists for — is refused by `CalibrationPresent`
-        /// unless it also sent `pilot.configure-calibration`, because
-        /// `update_preflight` derives that row from
-        /// `core.calibration() != identity()`. Until that field existed the
+        /// unless it also sent a VALID `pilot.configure-calibration`, because
+        /// `update_preflight` derives that row from "a valid calibration has
+        /// been explicitly configured". Until that entry point existed the
         /// component could only be armed BEFORE its first `step`, judged
         /// against `FlightSupervisor::new`'s bring-up defaults; that path is
         /// now CLOSED (#609 finding 2: a never-stepped supervisor declares
@@ -236,7 +236,7 @@ interface types {
         /// GCS does: configure (with a calibration), step with a battery
         /// reading until the estimator converges, then `arm` against the
         /// measured table. Pinned natively by
-        /// `a_warmed_host_arms_only_with_a_non_identity_calibration` in
+        /// `a_warmed_host_arms_only_with_a_configured_valid_calibration` in
         /// `crates/falcon-core/tests/supervisor_seam_contract.rs`.
         ///
         /// FREE, MEASURED: `controller#step` flattens to 26 params today
@@ -514,12 +514,10 @@ interface pilot {
     /// `CAL_MAGn_{X,Y,Z}SCALE` (diagonal) and `CAL_MAGn_{X,Y,Z}ODIAG`
     /// (off-diagonal) in the same order.
     ///
-    /// THE IDENTITY CALIBRATION (all biases/offsets 0, all scales 1) MEANS "NOT
-    /// CALIBRATED", not "perfectly calibrated": falcon-core derives
-    /// `CalibrationPresent` as `calibration != identity`, so sending the
-    /// identity leaves that row FALSE and `arm` refused. A host sends what its
-    /// calibration procedure (relay-calib gyro-null / accel 6-point / mag iron)
-    /// actually solved.
+    /// THE IDENTITY (all biases/offsets 0, all scales 1, all off-diagonal 0)
+    /// IS A VALID CALIBRATION, meaning "calibrated upstream, no residual". It
+    /// satisfies `CalibrationPresent` like any other valid calibration. See
+    /// `configure-calibration` for what that obliges a host to do.
     ///
     /// VALIDATED, NEVER CLAMPED (`relay_calib::CalParams::is_valid`): every
     /// component must be finite, every `accel-scale` > 0, and the soft-iron
@@ -595,11 +593,28 @@ interface pilot {
 
     /// Install the IMU / magnetometer calibration (relay#586, #609).
     ///
-    /// WHY IT EXISTS. falcon-core derives the `CalibrationPresent` pre-arm row
-    /// as `calibration != identity`, and before this nothing in the seam
-    /// carried a calibration, so a supervisor that had been stepped was refused
-    /// on that row for ever. Since #609 a never-stepped supervisor refuses
-    /// every arm, so without this the component could not be armed at all.
+    /// WHY IT EXISTS. Before this nothing in the seam carried a calibration,
+    /// so a supervisor that had been stepped was refused on the
+    /// `CalibrationPresent` row for ever. Since #609 a never-stepped
+    /// supervisor refuses every arm, so without this the component could not
+    /// be armed at all.
+    ///
+    /// WHAT `CalibrationPresent` MEANS — explicit state, NOT a comparison
+    /// against the identity (jess#167):
+    ///   * never called                    -> FALSE: `arm` is refused;
+    ///   * called with a VALID calibration -> TRUE, the IDENTITY included;
+    ///   * called with an INVALID one      -> FALSE, and an earlier valid one
+    ///     is revoked (below).
+    ///
+    /// AN EXPLICIT IDENTITY MEANS "CALIBRATED UPSTREAM". The pre-arm table
+    /// cannot tell a host that measured "no residual" from one that sent the
+    /// identity without measuring anything, so the only thing standing
+    /// between an uncalibrated vehicle and an armed one is this contract:
+    ///   * a host MUST NOT send the identity as a default or a placeholder;
+    ///   * it sends the identity only when its sensors are calibrated below
+    ///     this seam and no residual remains;
+    ///   * a host that has no calibration MUST NOT call this function at all,
+    ///     and arming then stays refused.
     ///
     /// INSTALLED IN PLACE, no rebuild: estimator state, the published tick and
     /// every latch are kept. It is ACCEPTED ONLY WHILE `disarmed` — in any other
@@ -612,9 +627,11 @@ interface pilot {
     ///
     /// An INVALID calibration (any component non-finite, an `accel-scale` not
     /// > 0, or a soft-iron matrix that is not positive definite — see
-    /// `sensor-calibration`) is not installed; it REPLACES any earlier one with the identity, so
-    /// `CalibrationPresent` is false and `arm` refused — the latest thing the
-    /// host sent was broken, and the vehicle must not fly on an older one.
+    /// `sensor-calibration`) is NOT installed: the identity is applied in its
+    /// place, the calibration counts as NOT configured, and any earlier valid
+    /// one is REVOKED, so `CalibrationPresent` is false and `arm` refused. The
+    /// latest thing the host sent was broken, and the vehicle must not fly on
+    /// an older one.
     ///
     /// FLATTENING: 18 f32 (six vec3), OVER `MAX_FLAT_PARAMS = 16`, so this
     /// export is lowered INDIRECTLY: the core function takes one `i32`

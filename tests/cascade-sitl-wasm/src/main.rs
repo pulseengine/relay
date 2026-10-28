@@ -103,20 +103,80 @@ const SITL_FENCE_M: f32 = 100.0;
 /// hands the component (and the mirror), and the calibration it configures to
 /// cancel it.
 ///
-/// WHY THE HARNESS SIMULATES A BIAS AT ALL (#609). The component now arms only
-/// on the measured pre-arm table, and falcon-core reads the IDENTITY
-/// calibration as "not calibrated" (`CalibrationPresent` =
-/// `calibration != identity`). Neither plant here has an IMU bias to solve, so
-/// the only identity-free calibration that is not a fabrication is one that
-/// corrects a bias the harness itself put on the sensor: what reaches the
-/// estimator after `apply_gyro` is the plant's gyro again. Small (≈0.1 °/s),
-/// typical of a MEMS gyro after warm-up.
+/// WHY THE HARNESS SIMULATES A BIAS AT ALL (#609). The component arms only on
+/// the measured pre-arm table, which needs a configured calibration. Neither
+/// plant here has an IMU bias to solve, so the default run configures a
+/// calibration that corrects a bias the harness itself put on the sensor: what
+/// reaches the estimator after `apply_gyro` is the plant's gyro again — the
+/// calibration path is EXERCISED, not just declared. Small (≈0.1 °/s), typical
+/// of a MEMS gyro after warm-up.
+///
+/// `SITL_CALIBRATION` selects what the host configures (jess#167 semantics:
+/// `CalibrationPresent` = "a VALID calibration was explicitly configured"):
+///   * `injected` (default) — this bias on the sensor, and the calibration
+///     that cancels it. Must ARM.
+///   * `identity` — NO bias on the sensor (calibrated upstream) and an
+///     explicitly configured IDENTITY. Must ARM.
+///   * `invalid`  — an invalid calibration (soft-iron not positive definite).
+///     Must be REFUSED for the whole run.
+///   * `none`     — `configure-calibration` never called. Must be REFUSED.
 const SITL_GYRO_BIAS: [f32; 3] = [0.002, -0.0015, 0.001];
 
 /// How long the vehicle may sit on the ground, stepping, before the measured
 /// pre-arm table must allow the arm. Exceeding it FAILS the run: a component
 /// that cannot be armed through its own seam is the defect this exists to catch.
 const ARM_DEADLINE_S: f32 = 10.0;
+
+/// What `SITL_CALIBRATION` asks the host to configure (see `SITL_GYRO_BIAS`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum SitlCal {
+    Injected,
+    Identity,
+    Invalid,
+    None,
+}
+
+impl SitlCal {
+    fn from_env() -> Result<Self> {
+        Ok(
+            match std::env::var("SITL_CALIBRATION")
+                .as_deref()
+                .unwrap_or("injected")
+            {
+                "injected" => SitlCal::Injected,
+                "identity" => SitlCal::Identity,
+                "invalid" => SitlCal::Invalid,
+                "none" => SitlCal::None,
+                other => bail!("SITL_CALIBRATION={other}: expected injected|identity|invalid|none"),
+            },
+        )
+    }
+    /// The bias the harness puts on the SENSOR's gyro.
+    fn sensor_bias(self) -> [f32; 3] {
+        match self {
+            SitlCal::Injected => SITL_GYRO_BIAS,
+            _ => [0.0; 3],
+        }
+    }
+    /// The calibration the host sends, as plain arrays
+    /// `(gyro_bias, accel_bias, accel_scale, mag_offset, mag_scale, mag_offdiag)`,
+    /// or `None` for "never call configure-calibration".
+    #[allow(clippy::type_complexity)]
+    fn sent(self) -> Option<([f32; 3], [f32; 3], [f32; 3], [f32; 3], [f32; 3], [f32; 3])> {
+        let id = ([0.0; 3], [0.0; 3], [1.0; 3], [0.0; 3], [1.0; 3], [0.0; 3]);
+        match self {
+            SitlCal::Injected => Some((SITL_GYRO_BIAS, id.1, id.2, id.3, id.4, id.5)),
+            SitlCal::Identity => Some(id),
+            // Finite, every scale > 0, but S = [[1,2,0],[2,1,0],[0,0,1]] is
+            // indefinite: invalid by relay_calib::CalParams::is_valid.
+            SitlCal::Invalid => Some((id.0, id.1, id.2, id.3, id.4, [2.0, 0.0, 0.0])),
+            SitlCal::None => None,
+        }
+    }
+    fn must_arm(self) -> bool {
+        matches!(self, SitlCal::Injected | SitlCal::Identity)
+    }
+}
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -271,22 +331,38 @@ fn main() -> Result<()> {
     // configure-supervisor so the order a host is most likely to use is the
     // one gated here. It cancels the harness's simulated gyro bias
     // (`SITL_GYRO_BIAS`) — what a gyro-null would solve for this IMU.
-    let v3 = |x: f32, y: f32, z: f32| Vec3 { x, y, z };
-    pilot.call_configure_calibration(
-        &mut store,
-        SensorCalibration {
-            gyro_bias: v3(SITL_GYRO_BIAS[0], SITL_GYRO_BIAS[1], SITL_GYRO_BIAS[2]),
-            accel_bias: v3(0.0, 0.0, 0.0),
-            accel_scale: v3(1.0, 1.0, 1.0),
-            mag_offset: v3(0.0, 0.0, 0.0),
-            mag_scale: v3(1.0, 1.0, 1.0),
-            mag_offdiag: v3(0.0, 0.0, 0.0),
-        },
-    )?;
+    let sitl_cal = SitlCal::from_env()?;
+    let sensor_bias = sitl_cal.sensor_bias();
+    let v3 = |a: [f32; 3]| Vec3 {
+        x: a[0],
+        y: a[1],
+        z: a[2],
+    };
+    if let Some((gb, ab, asc, mo, ms, mod_)) = sitl_cal.sent() {
+        pilot.call_configure_calibration(
+            &mut store,
+            SensorCalibration {
+                gyro_bias: v3(gb),
+                accel_bias: v3(ab),
+                accel_scale: v3(asc),
+                mag_offset: v3(mo),
+                mag_scale: v3(ms),
+                mag_offdiag: v3(mod_),
+            },
+        )?;
+    }
     pilot.call_configure_supervisor(&mut store, supcfg)?;
     println!(
         "supervisor : home=[0,0,0] fence={:.0} m cruise={:.2} m AGL low_batt={:.1} V gyro_bias={:?}",
-        supcfg.fence_radius, supcfg.cruise_alt, supcfg.low_batt_v, SITL_GYRO_BIAS
+        supcfg.fence_radius, supcfg.cruise_alt, supcfg.low_batt_v, sensor_bias
+    );
+    println!(
+        "calibration: SITL_CALIBRATION={sitl_cal:?} (must {})",
+        if sitl_cal.must_arm() {
+            "ARM"
+        } else {
+            "be REFUSED"
+        }
     );
 
     // NO ARM HERE. Until #609 this harness armed BEFORE the first `step`, and
@@ -354,14 +430,16 @@ fn main() -> Result<()> {
             // one. Derived from the same values the component was given, for
             // the same reason the calibration is.
             // Same order as the component: calibration, then supervisor config.
-            n.configure_calibration(native_mirror::SensorCal {
-                gyro_bias: SITL_GYRO_BIAS,
-                accel_bias: [0.0; 3],
-                accel_scale: [1.0; 3],
-                mag_offset: [0.0; 3],
-                mag_scale: [1.0; 3],
-                mag_offdiag: [0.0; 3],
-            });
+            if let Some((gb, ab, asc, mo, ms, mod_)) = sitl_cal.sent() {
+                n.configure_calibration(native_mirror::SensorCal {
+                    gyro_bias: gb,
+                    accel_bias: ab,
+                    accel_scale: asc,
+                    mag_offset: mo,
+                    mag_scale: ms,
+                    mag_offdiag: mod_,
+                });
+            }
             n.configure_supervisor(native_mirror::SupCalib {
                 home: [0.0, 0.0, 0.0],
                 fence_radius: SITL_FENCE_M,
@@ -479,9 +557,9 @@ fn main() -> Result<()> {
         // configured calibration removes (see `SITL_GYRO_BIAS`). Both sides of
         // the differential receive this same biased sample.
         let gyro_meas = [
-            s.gyro_body[0] + SITL_GYRO_BIAS[0],
-            s.gyro_body[1] + SITL_GYRO_BIAS[1],
-            s.gyro_body[2] + SITL_GYRO_BIAS[2],
+            s.gyro_body[0] + sensor_bias[0],
+            s.gyro_body[1] + sensor_bias[1],
+            s.gyro_body[2] + sensor_bias[2],
         ];
         let imu = WitImu {
             ax: s.accel_body[0],
@@ -877,6 +955,22 @@ fn main() -> Result<()> {
     // (1b) Did it ARM through the seam on the measured pre-arm table (#609)?
     // Judged before the hold, because a vehicle that never armed "fails" the
     // hold for a reason the hold message would misattribute.
+    if !sitl_cal.must_arm() {
+        return match armed_tick {
+            Some(t) => bail!(
+                "FAIL: SITL_CALIBRATION={sitl_cal:?} ARMED at tick {t} — with no valid \
+                 calibration configured the measured pre-arm table must refuse `arm` \
+                 (CalibrationPresent)."
+            ),
+            None => {
+                println!(
+                    "PASS: SITL_CALIBRATION={sitl_cal:?} — `arm` REFUSED for the whole run, \
+                     as required (no valid calibration configured)."
+                );
+                Ok(())
+            }
+        };
+    }
     match armed_tick {
         Some(t) => println!(
             "ARMED      : on the measured pre-arm table at tick {t} ({:.2} s)",
@@ -886,8 +980,8 @@ fn main() -> Result<()> {
             "FAIL: the component never ARMED through the seam — the measured pre-arm \
              table refused `arm` for {ARM_DEADLINE_S} s of ground ticks (or the run \
              was shorter). Since #609 a never-stepped supervisor refuses by design; a \
-             stepped one needs battery-v, a converged estimator and a NON-IDENTITY \
-             calibration via pilot.configure-calibration."
+             stepped one needs battery-v, a converged estimator and a VALID calibration \
+             explicitly configured via pilot.configure-calibration."
         ),
     }
 
