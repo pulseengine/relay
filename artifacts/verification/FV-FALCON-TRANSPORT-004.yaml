@@ -86,6 +86,9 @@ artifacts:
         - run: "grep -q 'fn a_non_finite_value_in_any_float_field_of_any_frame_is_rejected' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'fn a_present_zero_volt_battery_is_not_absent' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'fn the_binding_document_offset_tables_match_the_encoder' crates/falcon-hitl/src/wire.rs"
+        # jess#167 / #614 amendment: presence bytes are strictly 0 or 1.
+        - run: "grep -q 'fn every_sensor_presence_byte_is_strictly_zero_or_one' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const SENSOR_PRESENCE: \\[usize; 5\\] = \\[28, 41, 54, 59, 76\\];' crates/falcon-hitl/src/wire.rs"
         - run: "cargo test -p falcon-hitl --test binding_drives_the_supervisor"
         - run: "cargo test -p falcon-hitl --lib wire::tests"
         - run: "cargo test -p falcon-hitl --all-targets"

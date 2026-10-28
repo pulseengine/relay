@@ -177,6 +177,12 @@ const CALIBRATION_F32: [usize; 15] = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 4
 /// 55, battery-v 77. The presence bytes (28, 41, 54, 59, 76) and the motor-rpm
 /// `s32`s (60..76) are not float slots.
 const SENSOR_F32: [usize; 15] = [0, 4, 8, 12, 16, 20, 24, 29, 33, 37, 42, 46, 50, 55, 77];
+/// The `Sensor` payload's PRESENCE bytes, in field order: position-ned 28,
+/// mag-body 41, heading-rad 54, motor-rpm 59, battery-v 76. Each is strictly
+/// 0 (ABSENT) or 1 (present) — anything else is [`WireError::BadBool`]
+/// (an integrator's encoder probe found a presence byte of 2 decoding as
+/// present — jess#167).
+pub const SENSOR_PRESENCE: [usize; 5] = [28, 41, 54, 59, 76];
 
 /// Is this little-endian `f32` bit pattern finite?
 ///
@@ -230,9 +236,21 @@ pub enum WireError {
     NonFinite { msg: MsgType, offset: usize },
     /// A `Command` byte that is not a `pilot-command` discriminant (0..=7).
     BadCommand { got: u8 },
-    /// A boolean byte (`Command`'s `level` / `throttle-low`) that is neither
-    /// 0 nor 1. Those are ARMING INTERLOCKS: reading a stray 0xAB as `true`
-    /// would be the fail-unsafe direction, so anything but 0/1 is refused.
+    /// A boolean byte that is neither 0 nor 1. Two kinds of byte are
+    /// boolean on this wire, and both are refused on anything else:
+    ///
+    /// - `Command`'s `level` / `throttle-low` (offsets 1, 2): ARMING
+    ///   INTERLOCKS — reading a stray 0xAB as `true` would be the fail-unsafe
+    ///   direction.
+    /// - `Sensor`'s five PRESENCE bytes ([`SENSOR_PRESENCE`]: 28, 41, 54, 59,
+    ///   76), each the 0/1 discriminant of an `option`. Before this, any
+    ///   non-zero value read as present (found by an integrator's probe,
+    ///   jess#167), so a corrupted byte became a reading
+    ///   instead of a rejection.
+    ///
+    /// One variant for both, not a separate `BadPresence`: the rule is the
+    /// same (0 or 1, nothing else), and `msg` + `offset` already name which
+    /// byte it was, so a host that handles `BadBool` handles both.
     BadBool {
         msg: MsgType,
         offset: usize,
@@ -287,8 +305,9 @@ pub fn encode_header(out: &mut [u8], msg: MsgType, seq: u32) -> Result<(), WireE
 }
 
 /// Decode a header and validate the payload that follows it — its length, and
-/// (v2) its VALUES: every `f32` slot finite (#527) and every `Command` byte in
-/// range. A frame this returns `Ok` for is one every `decode_*` reader accepts.
+/// (v2) its VALUES: every `f32` slot finite (#527), every `Sensor` presence
+/// byte 0 or 1, and every `Command` byte in range. A frame this returns `Ok`
+/// for is one every `decode_*` reader accepts.
 ///
 /// Returns the header and the payload slice, so a caller cannot accidentally
 /// read past the frame.
@@ -341,6 +360,20 @@ fn validate_values(msg: MsgType, payload: &[u8]) -> Result<(), WireError> {
         b.copy_from_slice(&payload[at..at + 4]);
         if !finite_bits(b) {
             return Err(WireError::NonFinite { msg, offset: at });
+        }
+    }
+    if msg == MsgType::Sensor {
+        // Presence is 0 or 1, never "non-zero" (jess#167). Checked AFTER the
+        // float slots, in ascending offset order, so the first error a frame
+        // has is the one reported (the Kani sensor harness pins that order).
+        for at in SENSOR_PRESENCE {
+            if payload[at] > 1 {
+                return Err(WireError::BadBool {
+                    msg,
+                    offset: at,
+                    got: payload[at],
+                });
+            }
         }
     }
     if msg == MsgType::Command {
@@ -702,7 +735,8 @@ pub fn encode_sensor_frame(
     put_f32(out, b + 77, f.battery_v.unwrap_or(0.0));
 }
 
-/// Decode a `Sensor` payload.
+/// Decode a `Sensor` payload. A field is present EXACTLY when its presence
+/// byte is 1; `check_payload` has already refused any presence byte above 1.
 pub fn decode_sensor_frame(payload: &[u8]) -> Result<WireSensorFrame, WireError> {
     check_payload(MsgType::Sensor, payload)?;
     let mut f = WireSensorFrame::default();
@@ -710,24 +744,24 @@ pub fn decode_sensor_frame(payload: &[u8]) -> Result<WireSensorFrame, WireError>
         *v = get_f32(payload, i * 4);
     }
     f.dt_s = get_f32(payload, 24);
-    if payload[28] != 0 {
+    if payload[28] == 1 {
         f.position_ned = Some([
             get_f32(payload, 29),
             get_f32(payload, 33),
             get_f32(payload, 37),
         ]);
     }
-    if payload[41] != 0 {
+    if payload[41] == 1 {
         f.mag_body = Some([
             get_f32(payload, 42),
             get_f32(payload, 46),
             get_f32(payload, 50),
         ]);
     }
-    if payload[54] != 0 {
+    if payload[54] == 1 {
         f.heading_rad = Some(get_f32(payload, 55));
     }
-    if payload[59] != 0 {
+    if payload[59] == 1 {
         f.motor_rpm = Some([
             get_i32(payload, 60),
             get_i32(payload, 64),
@@ -735,7 +769,7 @@ pub fn decode_sensor_frame(payload: &[u8]) -> Result<WireSensorFrame, WireError>
             get_i32(payload, 72),
         ]);
     }
-    if payload[76] != 0 {
+    if payload[76] == 1 {
         f.battery_v = Some(get_f32(payload, 77));
     }
     Ok(f)
@@ -1693,8 +1727,10 @@ mod tests {
         }
     }
 
-    /// The non-float bytes are NOT subject to the rule: rpm s32s whose bytes
-    /// spell NaN / ±inf, and presence bytes of any value, decode.
+    /// The non-float bytes are NOT subject to the non-finite rule: rpm s32s
+    /// whose bytes spell NaN / ±inf decode. A presence byte is not a float
+    /// either — it has its OWN rule (0 or 1), so a 0xff there is
+    /// `BadBool`, never `NonFinite`.
     #[test]
     fn integer_and_presence_bytes_are_not_float_slots() {
         let mut b = [0u8; HEADER_LEN + SENSOR_PAYLOAD_LEN];
@@ -1713,7 +1749,85 @@ mod tests {
         );
         assert!(decode_frame(&b).is_ok(), "rpm is s32, never a float slot");
         b[HEADER_LEN + 76] = 0xff; // a presence byte is a byte, not a float
-        assert!(decode_frame(&b).is_ok());
+        assert_eq!(
+            decode_frame(&b),
+            Err(WireError::BadBool {
+                msg: MsgType::Sensor,
+                offset: 76,
+                got: 0xff
+            })
+        );
+    }
+
+    /// TABLE-DRIVEN: every `Sensor` presence byte (offsets written
+    /// here from the layout table, not read from `SENSOR_PRESENCE`) accepts
+    /// exactly 0 and 1, and refuses 2, 0x80 and 0xFF with `BadBool` naming
+    /// that offset — through `decode_frame` AND the payload reader. On the
+    /// base this amends, a 2 decoded as PRESENT (an integrator's probe measured
+    /// it, jess#167).
+    #[test]
+    fn every_sensor_presence_byte_is_strictly_zero_or_one() {
+        let full = WireSensorFrame {
+            imu: [0.0, 0.0, -9.81, 0.0, 0.0, 0.0],
+            dt_s: 0.004,
+            position_ned: Some([1.0, 2.0, 3.0]),
+            mag_body: Some([0.2, 0.0, 0.4]),
+            heading_rad: Some(0.5),
+            motor_rpm: Some([1, 2, 3, 4]),
+            battery_v: Some(16.0),
+        };
+        let mut base = [0u8; HEADER_LEN + SENSOR_PAYLOAD_LEN];
+        encode_sensor_frame(&mut base, 1, &full);
+        // (name, payload offset) — position-ned, mag-body, heading-rad,
+        // motor-rpm, battery-v.
+        let table: [(&str, usize); 5] = [
+            ("position-ned", 28),
+            ("mag-body", 41),
+            ("heading-rad", 54),
+            ("motor-rpm", 59),
+            ("battery-v", 76),
+        ];
+        assert_eq!(
+            table.map(|(_, o)| o),
+            SENSOR_PRESENCE,
+            "the decoder's presence list"
+        );
+        let mut checked = 0;
+        for (name, at) in table {
+            // accepted: 0 reads as absent, 1 as present
+            for ok in [0u8, 1] {
+                let mut f = base;
+                f[HEADER_LEN + at] = ok;
+                let (_, p) = decode_frame(&f).unwrap_or_else(|e| panic!("{name}={ok}: {e}"));
+                let d = decode_sensor_frame(p).unwrap();
+                let present = match at {
+                    28 => d.position_ned.is_some(),
+                    41 => d.mag_body.is_some(),
+                    54 => d.heading_rad.is_some(),
+                    59 => d.motor_rpm.is_some(),
+                    _ => d.battery_v.is_some(),
+                };
+                assert_eq!(present, ok == 1, "{name} presence {ok}");
+            }
+            // refused: anything else, from either reader
+            for bad in [2u8, 0x80, 0xff] {
+                let mut f = base;
+                f[HEADER_LEN + at] = bad;
+                let want = Err(WireError::BadBool {
+                    msg: MsgType::Sensor,
+                    offset: at,
+                    got: bad,
+                });
+                assert_eq!(decode_frame(&f).map(|_| ()), want, "{name} = {bad:#x}");
+                assert_eq!(
+                    decode_sensor_frame(&f[HEADER_LEN..]).map(|_| ()),
+                    want,
+                    "{name} = {bad:#x}, payload reader"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 5 * 3, "every presence byte x every bad value");
     }
 
     // ── the binding document's offset tables, checked against the encoder ──

@@ -169,7 +169,11 @@ artifacts:
         - run: "grep -q 'a NaN or infinite motor command is rejected' crates/falcon-hitl/src/kani_proofs.rs"
         - run: "grep -q 'a finite motor command is accepted' crates/falcon-hitl/src/kani_proofs.rs"
         - run: "grep -q 'a present 0.0 V battery decodes as present' crates/falcon-hitl/src/kani_proofs.rs"
-        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 26"
+        # 26 -> 28 (jess#167, #614 amendment): the sensor harness gains a
+        # cover for "presence byte above 1 is rejected" and one for the
+        # measured presence-2 case; it now proves presence is strictly 0/1.
+        - run: "grep -q 'a sensor frame with a presence byte above 1 is rejected' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 28"
         # The finding is FIXED: the decoder rejects non-finite (this step
         # inverted the old `! grep -qE 'is_finite|is_nan'`, which flipped as
         # intended when the fix landed).

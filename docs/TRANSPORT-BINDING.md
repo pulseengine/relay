@@ -21,6 +21,10 @@
 > 3. **Non-finite floats are rejected.** A receiver refuses a frame with NaN or
 >    ±infinity in any `f32` slot (`WireError::NonFinite`). v1 passed them
 >    through. Say "no reading" with the presence byte, never with NaN.
+> 4. **Presence bytes are strictly 0 or 1.** A `sensor` presence byte of any
+>    other value is refused (`WireError::BadBool`), like the `command`
+>    interlocks. An earlier revision of v2 read any non-zero value as present
+>    (found by an integrator's encoder probe — jess#167).
 >
 > `version` is now **2**. A v1 host is refused with `BadVersion { got: 1,
 > want: 2 }`, which is the intended way to discover the change.
@@ -94,6 +98,11 @@ Every rejection is a refusal of the whole frame; nothing is salvaged.
 | **any `f32` slot is NaN or ±infinity** | **`NonFinite { msg, offset }`** |
 | `command.cmd` is not 0–7 | `BadCommand` |
 | `command.level` / `command.throttle-low` is not 0 or 1 | `BadBool` |
+| **a `sensor` presence byte (payload 28, 41, 54, 59, 76) is not 0 or 1** | **`BadBool { msg, offset, got }`** |
+
+When a frame breaks more than one rule, the error reported is the FIRST in
+this order: the non-finite rule over the `f32` slots in field order, then the
+presence bytes in offset order. (The Kani sensor harness proves that order.)
 
 **The non-finite rule applies to every `f32` SLOT, present or absent.** An
 optional field's value bytes are checked even when its presence byte is 0 (the
@@ -105,6 +114,15 @@ payload offset of the slot, so a host can name the field from the tables below.
 **The interlock bytes are strictly 0 or 1.** `level` and `throttle-low` are RC
 arming interlocks; reading a stray `0xab` as `true` would be the fail-unsafe
 direction.
+
+**So are the presence bytes.** Each is the 0/1 discriminant of an
+`option`: 0 is ABSENT, 1 is present, and 2, `0x80` or `0xff` is a corrupted
+byte — refused as `BadBool` naming its offset, never read as "present". An
+earlier revision of v2 read any non-zero byte as present; an integrator's
+encoder probe measured a presence byte of 2 decoding as a reading
+(jess#167). One error variant
+covers both kinds of boolean byte because the rule is the same and
+`msg`/`offset` name which byte it was.
 
 ### `version` is the binding's version, not the WIT package's
 
@@ -153,7 +171,8 @@ This costs bytes and buys three things: the MCU uses one static buffer; a
 length disagreement is always an error rather than a legal short encoding; and
 offsets are constant, so a capture is readable by eye.
 
-**A presence byte of 0 means ABSENT, and a decoder must surface that as
+**A presence byte of 0 means ABSENT, 1 means present, and nothing else is
+legal** (§1, "What a receiver rejects"). **A decoder must surface absence as
 absence — never as a zero measurement.** This project has shipped the opposite
 twice: a battery whose absence read as a healthy pack (#413) and an
 accelerometer whose absence read as gravity (#452). Both flew.
@@ -177,7 +196,7 @@ inferring it from its neighbours.
   16     4  f32   imu.gy
   20     4  f32   imu.gz
   24     4  f32   dt-s                  s — the host's ACTUAL period (§3)
-  28     1  u8    position-ned.present
+  28     1  u8    position-ned.present  0 = ABSENT, 1 = present, else BadBool
   29     4  f32   position-ned.x        NED m (north)
   33     4  f32   position-ned.y        (east)
   37     4  f32   position-ned.z        (down)
@@ -192,7 +211,7 @@ inferring it from its neighbours.
   64     4  s32   motor-rpm.m2
   68     4  s32   motor-rpm.m3
   72     4  s32   motor-rpm.m4
-  76     1  u8    battery-v.present     v2 (#572): 0 = ABSENT
+  76     1  u8    battery-v.present     v2 (#572): 0 = ABSENT, 1 = present
   77     4  f32   battery-v             V, whole pack
 ```
 <!-- /wire-layout -->

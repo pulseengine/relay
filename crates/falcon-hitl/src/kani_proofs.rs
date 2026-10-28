@@ -18,7 +18,8 @@
 //! type:
 //!
 //!   decode_frame(frame) is Ok  <=>  every f32 slot of the payload is finite
-//!                                   (and, for Command, every byte in range)
+//!                                   (and, for Command, every byte in range;
+//!                                   for Sensor, every presence byte 0 or 1)
 //!   ...and when it is not Ok, the error is EXACTLY `NonFinite` (or
 //!   `BadCommand` / `BadBool`), naming a slot that really is non-finite.
 //!
@@ -61,6 +62,21 @@ const CAL_SLOTS: [usize; 15] = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48,
 /// (presence 41), heading-rad (presence 54), battery-v (presence 76). The four
 /// motor-rpm s32s at 60..76 are NOT float slots.
 const SENSOR_SLOTS: [usize; 15] = [0, 4, 8, 12, 16, 20, 24, 29, 33, 37, 42, 46, 50, 55, 77];
+/// The harness's OWN list of the sensor PRESENCE bytes, from the
+/// layout table: position-ned, mag-body, heading-rad, motor-rpm, battery-v.
+/// Deliberately not `wire::SENSOR_PRESENCE`.
+const SENSOR_PRESENCE_BYTES: [usize; 5] = [28, 41, 54, 59, 76];
+
+/// The FIRST presence byte, in field order, that is neither 0 nor 1.
+fn first_bad_presence(payload: &[u8]) -> Option<usize> {
+    let mut first = None;
+    for &at in &SENSOR_PRESENCE_BYTES {
+        if first.is_none() && payload[at] > 1 {
+            first = Some(at);
+        }
+    }
+    first
+}
 
 /// The slot's bits, assembled BYTE BY BYTE (little-endian), not via
 /// `from_le_bytes` — a second, independent reading of the wire order.
@@ -319,23 +335,80 @@ fn a_well_formed_config_frame_dispatches_without_panicking() {
 /// `Sensor` — 81 bytes at v2, the largest payload and the one that feeds the
 /// estimator. Its own harness because it is the most expensive to explore.
 ///
-/// Beyond the value contract, it proves the #572 property: `battery-v` is
-/// present EXACTLY when its presence byte is non-zero — never inferred from the
-/// value — and a present value is the wire value bit for bit, so a present
-/// 0.0 V can never decode as ABSENT.
+/// Its own CONTRACT too, because the sensor payload has a second value rule
+/// (provenance: jess#167): every presence byte is strictly 0 or 1. The verdict is a
+/// three-way biconditional with a pinned precedence —
+///
+///   first non-finite float slot      -> exactly `NonFinite` at that slot
+///   else first presence byte > 1     -> exactly `BadBool` at that byte
+///   else                             -> `Ok`
+///
+/// and on `Ok`, EVERY optional field (all five, not just battery) is present
+/// exactly when its presence byte is 1 — never inferred from the value — with
+/// a present value bit for bit the wire value. That last clause carries #572
+/// (a present 0.0 V can never decode as ABSENT) and the presence rule (a presence byte
+/// of 2 can never decode as present, because it never decodes at all).
 #[kani::proof]
 #[kani::unwind(32)]
 fn a_well_formed_sensor_frame_dispatches_without_panicking() {
     const N: usize = HEADER_LEN + SENSOR_PAYLOAD_LEN;
     let buf: [u8; N] = well_formed(MsgType::Sensor);
-    let ok = value_contract(&buf, MsgType::Sensor, &SENSOR_SLOTS);
     let payload = &buf[HEADER_LEN..];
+    let first_nan = first_non_finite(payload, &SENSOR_SLOTS);
+    let first_presence = first_bad_presence(payload);
+    let ok = match decode_frame(&buf) {
+        Ok((h, p)) => {
+            assert!(
+                first_nan.is_none(),
+                "a frame with a non-finite slot was ACCEPTED"
+            );
+            assert!(
+                first_presence.is_none(),
+                "a frame with a presence byte above 1 was ACCEPTED"
+            );
+            assert!(h.msg == MsgType::Sensor);
+            assert!(p.len() == SENSOR_PAYLOAD_LEN);
+            true
+        }
+        Err(WireError::NonFinite { msg, offset }) => {
+            assert!(msg == MsgType::Sensor);
+            assert!(
+                first_nan == Some(offset),
+                "NonFinite must name the first non-finite float slot"
+            );
+            false
+        }
+        Err(WireError::BadBool { msg, offset, got }) => {
+            assert!(msg == MsgType::Sensor);
+            assert!(first_nan.is_none(), "floats are judged first");
+            assert!(
+                first_presence == Some(offset),
+                "BadBool must name the first presence byte above 1"
+            );
+            assert!(got == payload[offset] && got > 1);
+            false
+        }
+        Err(_) => {
+            assert!(
+                false,
+                "a well-formed sensor frame was rejected for another reason"
+            );
+            false
+        }
+    };
     if ok {
         let f = decode_sensor_frame(payload)
             .expect("the payload reader must accept what decode_frame accepted");
-        assert!(f.battery_v.is_some() == (payload[76] != 0));
+        assert!(f.position_ned.is_some() == (payload[28] == 1));
+        assert!(f.mag_body.is_some() == (payload[41] == 1));
+        assert!(f.heading_rad.is_some() == (payload[54] == 1));
+        assert!(f.motor_rpm.is_some() == (payload[59] == 1));
+        assert!(f.battery_v.is_some() == (payload[76] == 1));
         if let Some(v) = f.battery_v {
             assert!(v.to_bits() == bits_at(payload, 77));
+        }
+        if let Some(h) = f.heading_rad {
+            assert!(h.to_bits() == bits_at(payload, 55));
         }
         kani::cover!(
             f.battery_v.map(f32::to_bits) == Some(0),
@@ -346,7 +419,18 @@ fn a_well_formed_sensor_frame_dispatches_without_panicking() {
         assert!(decode_sensor_frame(payload).is_err());
     }
     kani::cover!(ok, "a finite sensor frame is accepted");
-    kani::cover!(!ok, "a sensor frame with a non-finite field is rejected");
+    kani::cover!(
+        first_nan.is_some() && !ok,
+        "a sensor frame with a non-finite field is rejected"
+    );
+    kani::cover!(
+        first_nan.is_none() && first_presence.is_some() && !ok,
+        "a sensor frame with a presence byte above 1 is rejected"
+    );
+    kani::cover!(
+        first_nan.is_none() && payload[28] <= 1 && payload[41] <= 1 && payload[54] == 2,
+        "a heading presence byte of 2 (the case an integrator's probe measured) is reached"
+    );
 }
 
 /// `SupervisorConfig` (v2) — 24 bytes, `pilot.configure-supervisor`.
