@@ -12,9 +12,21 @@
 # Both sides are SUPERVISED: both are components exporting `pilot`. There is no
 # native mirror in this comparison to fall out of step with.
 #
+# ALL FOUR BUILDS ARE THE DEPLOYMENT BUILD: no_std (falcon-cm-rt bump arena,
+# reset on every export entry), wasm32-unknown-unknown, an 8 KiB shadow stack,
+# relocations and the extent markers — so the composed split is the
+# multi-module artifact meld fuses (`--memory shared`), and what flies here is
+# that build, not a std stand-in.
+#
+# THREE CHECKS, all of which must pass:
+#   1. the twin (cascade vs cascade-split, bit-exact) at 400 Hz and 1000 Hz;
+#   2. the #609/#586 seam lifecycle tests against BOTH components
+#      (tests/cascade-sitl-wasm/src/seam_tests.rs, `wasm_*` and `split_*`);
+#   3. each component against the native mirror (DIFFERENTIAL=1), hold and
+#      rotor-out, which must be bit-identical.
+#
 # BENCH-ONLY: needs cargo-component and wac (like build-components.sh, the CI
-# gate runner has neither). The split components build `std` for now — their
-# no_std build waits on #574 (arena reclamation).
+# gate runner has neither).
 #
 # Usage:
 #   scripts/split-differential.sh              # build, compose, compare
@@ -44,15 +56,12 @@ artifact() {
   exit 1
 }
 
-echo "== monolithic cascade (the published build: no_std, 8 KiB stack)"
-( cd "$HERE/wasm/cm/cascade" && \
-  RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs -C link-arg=-zstack-size=8192 -C link-arg=--export=__heap_base -C link-arg=--export=__data_end" \
-  cargo component build --release --target "$TARGET" --no-default-features )
-cp "$(artifact "$HERE/wasm/cm/cascade")" "$OUT/cascade.wasm"
-
-for c in cascade-estimator cascade-control cascade-split; do
-  echo "== $c (std; no_std waits on #574)"
-  ( cd "$HERE/wasm/cm/$c" && cargo component build --release --target "$TARGET" )
+DEPLOY_FLAGS="-C link-arg=--emit-relocs -C link-arg=-zstack-size=8192 -C link-arg=--export=__heap_base -C link-arg=--export=__data_end"
+for c in cascade cascade-estimator cascade-control cascade-split; do
+  echo "== $c (no_std, 8 KiB stack, relocations)"
+  ( cd "$HERE/wasm/cm/$c" && \
+    RUSTFLAGS="${RUSTFLAGS:-} $DEPLOY_FLAGS" \
+    cargo component build --release --target "$TARGET" --no-default-features )
   cp "$(artifact "$HERE/wasm/cm/$c")" "$OUT/$c.wasm"
 done
 
@@ -73,4 +82,15 @@ HARNESS="${CARGO_TARGET_DIR:-$HERE/tests/cascade-sitl-wasm/target}/release/casca
 for DT in 0.0025 0.001; do
   echo "== twin @ dt=$DT: cascade (A, drives the plant) vs cascade-split (B)"
   DIFF_AGAINST="$OUT/cascade-split-composed.wasm" "$HARNESS" "$OUT/cascade.wasm" "" "$DT"
+done
+
+echo "== seam lifecycle tests (#609, #586) against cascade AND cascade-split"
+( cd "$HERE/tests/cascade-sitl-wasm" && \
+  CASCADE_WASM="$OUT/cascade.wasm" CASCADE_SPLIT_WASM="$OUT/cascade-split-composed.wasm" \
+  cargo test --release -- --include-ignored )
+
+for W in cascade.wasm cascade-split-composed.wasm; do
+  echo "== $W vs the native mirror (DIFFERENTIAL=1): hold, then rotor-out"
+  DIFFERENTIAL=1 "$HARNESS" "$OUT/$W" 6250 0.004
+  FAIL_ROTOR=0@12 DIFFERENTIAL=1 "$HARNESS" "$OUT/$W" 6250 0.004
 done

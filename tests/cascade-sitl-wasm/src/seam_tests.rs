@@ -7,6 +7,12 @@
 //!     `CASCADE_WASM=<falcon_cascade_cm.wasm> cargo test -- --ignored`.
 //!     An ignored test is REPORTED as ignored, never as passed, so an absent
 //!     artifact cannot masquerade as a green run.
+//!   * the wac-composed `cascade-split` (#575), through the SAME scenarios:
+//!     every `wasm_*` test has a `split_*` twin that loads
+//!     `CASCADE_SPLIT_WASM=<cascade-split-composed.wasm>` instead. The split
+//!     must carry #609's lifecycle rules and #586's calibration exactly, and
+//!     these are the tests that say so. `scripts/split-differential.sh` runs
+//!     both sets.
 //!   * the native mirror (`native_mirror.rs`), which runs on every
 //!     `cargo test` and so keeps the mirror's copy of the lifecycle rules from
 //!     drifting away from the component's.
@@ -142,13 +148,20 @@ struct WasmSeam {
 }
 
 impl WasmSeam {
+    /// The monolithic `cascade` (`CASCADE_WASM`).
     fn load() -> Self {
+        Self::load_from("CASCADE_WASM")
+    }
+    /// The composed `cascade-split` (`CASCADE_SPLIT_WASM`, #575).
+    fn load_split() -> Self {
+        Self::load_from("CASCADE_SPLIT_WASM")
+    }
+    fn load_from(var: &str) -> Self {
         use wasmtime::component::{Component, Linker};
         use wasmtime::{Config, Engine, Store};
-        let path = std::env::var("CASCADE_WASM").expect(
-            "CASCADE_WASM must name a built falcon_cascade_cm.wasm to run the \
-             component half of these tests",
-        );
+        let path = std::env::var(var).unwrap_or_else(|_| {
+            panic!("{var} must name a built component to run the component half of these tests")
+        });
         let mut cfg = Config::new();
         cfg.wasm_component_model(true);
         let engine = Engine::new(&cfg).unwrap();
@@ -850,10 +863,11 @@ fn rebuilt_supervisor_refuses_arm_before_first_step<S: Seam>(s: &mut S) {
 
 // ── native mirror: every `cargo test` ─────────────────────────────────────
 
-/// One `#[test]` per scenario on the mirror, and an `#[ignore]`d twin on the
-/// shipped component — written once here so the two lists cannot drift.
+/// One `#[test]` per scenario on the mirror, and `#[ignore]`d twins on the
+/// shipped component and on the composed split — written once here so the
+/// three lists cannot drift.
 macro_rules! both {
-    ($mirror:ident, $wasm:ident, $body:expr) => {
+    ($mirror:ident, $wasm:ident, $split:ident, $body:expr) => {
         #[test]
         fn $mirror() {
             let f: fn(&mut NativeCascade) = $body;
@@ -865,37 +879,49 @@ macro_rules! both {
             let f: fn(&mut WasmSeam) = $body;
             f(&mut WasmSeam::load());
         }
+        #[test]
+        #[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+        fn $split() {
+            let f: fn(&mut WasmSeam) = $body;
+            f(&mut WasmSeam::load_split());
+        }
     };
 }
 
 both!(
     mirror_reconfigure_in_flight_keeps_flying,
     wasm_reconfigure_in_flight_keeps_flying,
+    split_reconfigure_in_flight_keeps_flying,
     |s| reconfigure_in_flight_keeps_flying(s)
 );
 both!(
     mirror_terminated_is_absorbing_through_configure,
     wasm_terminated_is_absorbing_through_configure,
+    split_terminated_is_absorbing_through_configure,
     |s| terminated_is_absorbing_through_configure(s)
 );
 both!(
     mirror_isolated_rotor_survives_configure,
     wasm_isolated_rotor_survives_configure,
+    split_isolated_rotor_survives_configure,
     |s| isolated_rotor_survives_configure(s)
 );
 both!(
     mirror_fresh_supervisor_refuses_arm_before_first_step,
     wasm_fresh_supervisor_refuses_arm_before_first_step,
+    split_fresh_supervisor_refuses_arm_before_first_step,
     |s| fresh_supervisor_refuses_arm_before_first_step(s)
 );
 both!(
     mirror_rebuilt_supervisor_refuses_arm_before_first_step,
     wasm_rebuilt_supervisor_refuses_arm_before_first_step,
+    split_rebuilt_supervisor_refuses_arm_before_first_step,
     |s| rebuilt_supervisor_refuses_arm_before_first_step(s)
 );
 both!(
     mirror_valid_config_arms_on_the_measured_table,
     wasm_valid_config_arms_on_the_measured_table,
+    split_valid_config_arms_on_the_measured_table,
     |s| {
         valid_config_arms_on_the_measured_table(s);
     }
@@ -903,26 +929,31 @@ both!(
 both!(
     mirror_calibration_is_rejected_while_not_disarmed,
     wasm_calibration_is_rejected_while_not_disarmed,
+    split_calibration_is_rejected_while_not_disarmed,
     |s| calibration_is_rejected_while_not_disarmed(s)
 );
 both!(
     mirror_calibration_applies_in_place_on_the_ground,
     wasm_calibration_applies_in_place_on_the_ground,
+    split_calibration_applies_in_place_on_the_ground,
     |s| calibration_applies_in_place_on_the_ground(s)
 );
 both!(
     mirror_invalid_calibration_clears_a_previous_valid_one,
     wasm_invalid_calibration_clears_a_previous_valid_one,
+    split_invalid_calibration_clears_a_previous_valid_one,
     |s| invalid_calibration_clears_a_previous_valid_one(s)
 );
 both!(
     mirror_calibration_survives_a_rebuild,
     wasm_calibration_survives_a_rebuild,
+    split_calibration_survives_a_rebuild,
     |s| calibration_survives_a_rebuild(s)
 );
 both!(
     mirror_dead_accelerometer_refuses_arm,
     wasm_dead_accelerometer_refuses_arm,
+    split_dead_accelerometer_refuses_arm,
     |s| dead_accelerometer_refuses_arm(s)
 );
 
@@ -936,6 +967,11 @@ fn wasm_invalid_supervisor_config_refuses_arm() {
     invalid_supervisor_config_refuses_arm(WasmSeam::load);
 }
 #[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_invalid_supervisor_config_refuses_arm() {
+    invalid_supervisor_config_refuses_arm(WasmSeam::load_split);
+}
+#[test]
 fn mirror_bad_calibration_refuses_arm() {
     bad_calibration_refuses_arm(NativeCascade::new);
 }
@@ -943,6 +979,11 @@ fn mirror_bad_calibration_refuses_arm() {
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
 fn wasm_bad_calibration_refuses_arm() {
     bad_calibration_refuses_arm(WasmSeam::load);
+}
+#[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_bad_calibration_refuses_arm() {
+    bad_calibration_refuses_arm(WasmSeam::load_split);
 }
 
 /// Names the row: with nothing measured, the FIRST row in gate order
