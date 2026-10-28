@@ -1,0 +1,182 @@
+artifacts:
+  - id: FV-FALCON-SPLIT-001
+    type: sw-verification
+    title: "SPLIT-P01 — the wac-composed cascade-split is bit-exact with the monolithic cascade, supervised on both sides, through every mode"
+    status: implemented
+    description: >
+      Verification of SWREQ-FALCON-SPLIT-P01. Revised after a cold clean-room
+      review (relay#585) found the first evidence weaker than claimed: keep_warm
+      was never measured, the estimator-health forwards were masked, and no CI
+      job exercised the production forwarding. Each gap is addressed below, and
+      what still cannot be measured is stated with the reason.
+
+      (1) THE PRODUCTION FORWARDING RUNS IN CI. `RemoteCore`'s logic now lives
+      in falcon-core as `split::SplitCore<P: PartitionSeam>`; the partition
+      components run `split::{estimator_tick, control_tick, ...}`; the three
+      wasm crates are thin WIT adapters over them. The test
+      crates/falcon-core/tests/supervised_core_split.rs drives THAT SplitCore,
+      with real partitions through those same partition-side functions, under
+      FlightSupervisor, against a fused FlightSupervisor — both sampled once per
+      tick through the production `SeamFrame::read` and served from the frame.
+      Bit-exact in motors, NavState, calibration, mode, failsafe word, failed rotor, and the
+      DIRECTLY compared forwards (tilt-uncertainty, max-motor, nav-compromised,
+      gnss-diverged), through: arm, an ARMED HOLD (estimate-only ticks, noisy
+      gyro), takeoff, loiter, mission, RTL, land, touchdown disarm, ground
+      ticks, a supervisor + partition rebuild, a second flight. Its negative
+      controls are #[test]s that REQUIRE divergence:
+        edge cut                           -> nav-state, tick 401
+        estimate-only ticks write the flag -> nav-state, tick 51971
+        keep_warm dropped                  -> motors, tick 690
+        tilt-uncertainty stubbed to 0      -> tilt-uncertainty, tick 0
+        rebuild without partition reset    -> motors, tick 52271
+        calibration not sent to control    -> motors, tick 690
+        calibration read-back stubbed      -> calibration, tick 0
+      Mutating the PRODUCTION SplitCore (not the test seam) was also run and is
+      red: keep_warm call deleted -> motors tick 690; tilt forward stubbed ->
+      tick 0; edge cut -> tick 401.
+
+      (2) keep_warm, MEASURED. The reset-free estimate-only -> flight path is
+      arm-then-hold: the twin holds flight 1 ARMED for 400 ticks with a noisy
+      gyro before takeoff. It is decisive only at the 1000 Hz design rate
+      (elsewhere `resync_loop_rate` rebuilds the gyro filter on the first
+      control tick), so the twin runs at dt=0.0025 AND dt=0.001. Dropping
+      keep_warm in the WIT adapter: twin@0.001 RED (motor m1, tick 803 — the
+      first control tick after the hold).
+
+      (3) THE CALIBRATION (#586), FORWARDED, NOT COPIED. `FlightSupervisor::
+      set_calibration` is generic over the core; `SplitCore::set_calibration`
+      writes BOTH partitions (`estimator.configure-calibration`,
+      `flight-control.configure-calibration` — the control half de-biases its
+      own gyro copy), and `SplitCore::calibration()` READS the estimator's value
+      back (`estimator.read-calibration`), so `CalibrationPresent` is derived
+      from what the estimator applies. In CI (1) compares `calibration()` bit
+      for bit every tick and two more negative controls must diverge: control
+      half not forwarded -> motors, tick 690; read-back stubbed to identity ->
+      calibration, tick 0.
+
+      (4) ESTIMATOR HEALTH, NOW DECISIVE AT THE WASM SEAM. With the calibration
+      crossing, `CalibrationPresent` no longer masks the estimator rows, so the
+      `TWIN_PENDING_586` stage is gone and its intent runs always: the twin's
+      termination segment starts with a DEAD ACCELEROMETER for 400 ticks with
+      `arm` sent every tick, and every one must be refused (399 + the
+      fresh-supervisor one). Stubbing the split's tilt forward to 0 goes RED
+      there (failsafe word, DeadAccel tick 1). Measured, and the reason the
+      stage exists: on a healthy sensor stubbing the tilt forward changed
+      nothing (twin green), because the accepted-arm tick is not decided by
+      that row. nav-compromised and gnss-diverged remain constant false
+      through this seam BY CONSTRUCTION (fed only on the dual-GNSS path); the CI
+      test pins that with an assertion that fails if either ever rises.
+
+      (5) THE #609 SEAM LIFECYCLE, ON THE SPLIT. Every `wasm_*` seam test in
+      tests/cascade-sitl-wasm/src/seam_tests.rs has a `split_*` twin run
+      against the composed split (CASCADE_SPLIT_WASM): 13/13 pass, as 13/13
+      `wasm_*` pass on `cascade`. They cover reconfigure-in-flight,
+      Terminated absorbing, isolated rotor surviving configure, fresh and
+      rebuilt supervisors refusing arm before the first step, invalid
+      supervisor configs and bad calibrations refusing arm, calibration
+      rejected while not disarmed / applied in place / cleared by an invalid
+      one / surviving a rebuild, the dead accelerometer, and arming on the
+      measured table.
+
+      (6) TWIN DIFFERENTIAL (bench-only, scripts/split-differential.sh).
+      Published-shape `cascade` vs the wac-composed split, three segments on
+      fresh instances (lifecycle; dead accelerometer + termination;
+      rotor-out): 50402 ticks @ 400 Hz and 109301 @ 1000 Hz, motors + all 23
+      flight-state fields bit-exact every tick, plus each segment's pre-tick
+      read. It ASSERTS modes armed, takeoff, loiter, mission, RTL, land,
+      terminated; failsafe bits rtl-latched, batt-low, batt-critical,
+      batt-silent, arm-blocked; a rotor isolation; the 400-tick armed hold; 4
+      fresh-supervisor and 2 other arm refusals; 399 dead-accelerometer
+      refusals; and the three configures #609 must reject (latched battery,
+      Terminated, isolated rotor), each checked on the state a rebuild would
+      have erased. The same run's native leg: each component against the
+      native mirror (DIFFERENTIAL=1, 6250 ticks @ 4 ms, hold and rotor-out at
+      12 s): worst |wasm - native| = 0.000000000 for both.
+
+      (7) MUTATION TESTING of the wasm split (`cascade-split` rebuilt and
+      recomposed per mutant; twin @400 Hz + the split_* seam tests). Each
+      is RED:
+        control half not given the calibration -> twin, motors tick 803
+        calibration read-back stubbed           -> twin tick 1 + 6 split_* tests
+        tilt forward stubbed                    -> twin DeadAccel tick 1 + 1 test
+        rebuild always permitted                -> twin + 3 split_* tests
+        fresh rows not declared false           -> twin tick 400 + 3 tests
+        FailsafeConfigured = supcfg.is_some()   -> split_invalid_supervisor_config
+        calibration lost on rebuild             -> twin tick 0 + 5 tests
+        invalid calibration keeps the old one   -> split_invalid_calibration_clears
+        Disarmed guard on calibration removed   -> split_calibration_is_rejected
+        keep_warm dropped (twin @1000 Hz)       -> twin, motors tick 803
+      The last four are not visible to the twin (it sends no invalid config and
+      no in-flight calibration), which is why the seam tests run on the split.
+
+      STILL NOT MEASURED: failsafe bits 4-6 (geofence, runaway, wind) are never
+      raised, so `max_motor` (read only by the wind detector) is falsified only
+      by the CI test's direct comparison, not by behaviour.
+
+      DROP-IN CONFORMANCE. The composed split imports only `types`, exports
+      controller/observer/pilot, and `wasm-tools component targets
+      wit/falcon-cascade <composed> --world cascade` passes.
+
+      MULTI-MODULE, NO-GROW. All three components build no_std (falcon-cm-rt
+      arena, reset on every export entry) with the deployment flags. Measured
+      with FV-FALCON-OCI-002's method (`wasm-tools print | grep -c
+      memory.grow`): 0 in each of cascade-estimator, cascade-control,
+      cascade-split and in the composition; 0 wasi imports; each module carries
+      relocation sections and exports `__heap_base`. The composition holds 5
+      core modules: the three Rust code modules (estimator, control,
+      orchestrator — three memories) plus wit-component's `shim` and `fixups`
+      in the orchestrator.
+
+      REFACTOR NEUTRALITY. The monolithic `cascade` is NOT byte-identical to
+      the #611 base (67511 -> 67274 B; code section 37099 -> 37034 B, data
+      12478 -> 12458 B; all builds from equal-length paths). ATTRIBUTED by a
+      third build at the last #585 commit carried over (b85a2b1): its code and
+      data sections are byte-identical to this branch's head and only the
+      path-hashed `linking`/`name` custom sections differ, so the whole delta
+      comes from #585's generic-supervisor refactor and the calibration
+      forwarding added after it costs the monolith zero code bytes. Its
+      embedded WIT is identical to the base's and it is behaviourally
+      bit-exact with the base in the twin (50402 ticks @ 400 Hz).
+    tags: [verification, falcon, partition, split, supervisor, "575"]
+    fields:
+      method: automated-test
+      steps:
+        # In-crate, runs in CI: the PRODUCTION SplitCore over real partitions
+        # is bit-exact with the fused core under the supervisor, and seven
+        # negative controls each REQUIRE divergence.
+        - run: "cargo test -p falcon-core --test supervised_core_split"
+        - run: "grep -q 'fn negative_control_dropped_keep_warm_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        - run: "grep -q 'fn negative_control_stubbed_tilt_uncertainty_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        - run: "grep -q 'fn negative_control_flying_edge_cut_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        - run: "grep -q 'fn negative_control_rebuild_without_partition_reset_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        - run: "grep -q 'fn negative_control_calibration_not_forwarded_to_control_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        - run: "grep -q 'fn negative_control_calibration_read_back_stubbed_diverges' crates/falcon-core/tests/supervised_core_split.rs"
+        # The calibration crosses to BOTH halves and is read back from the
+        # estimator (#586).
+        - run: "grep -q 'self.0.estimator_calibration()' crates/falcon-core/plain/src/split.rs"
+        - run: "grep -q 'self.0.control_set_calibration(calib);' crates/falcon-core/plain/src/split.rs"
+        - run: "grep -q 'read-calibration: func() -> calibration-params;' wit/falcon-cascade/cascade.wit"
+        # The split carries #609's lifecycle rules.
+        - run: "grep -q 'fn rebuild_permitted' wasm/cm/cascade-split/src/lib.rs"
+        - run: "grep -q 'for id in ROWS_FED_BY_STEP' wasm/cm/cascade-split/src/lib.rs"
+        - run: "grep -q 'fn configure_calibration(cal: SensorCalibration)' wasm/cm/cascade-split/src/lib.rs"
+        # The seam lifecycle tests have a split_* leg (bench: run with
+        # CASCADE_SPLIT_WASM by scripts/split-differential.sh, which needs
+        # cargo-component and wac).
+        - run: "grep -q 'fn load_split' tests/cascade-sitl-wasm/src/seam_tests.rs"
+        # The orchestrator's core IS the tested SplitCore.
+        - run: "grep -q 'type RemoteCore = SplitCore<WitSeam>;' wasm/cm/cascade-split/src/lib.rs"
+        # The trait the split depends on, and the partition equivalence it
+        # builds on (PART-P01), stay green.
+        - run: "cargo test -p falcon-core --release partitioned"
+        # The feedback edge is an option, None on estimate-only ticks.
+        - run: "grep -q 'tick: func(sensors: sensor-frame, in-flight: option<bool>) -> nav-state;' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'let nav = self.0.estimator_tick(&f, Some(flying));' crates/falcon-core/plain/src/split.rs"
+        - run: "grep -q 'let _ = self.0.estimator_tick(&f, None);' crates/falcon-core/plain/src/split.rs"
+        # The split world exports what cascade exports.
+        - run: "grep -qE '^world cascade-split' wit/falcon-cascade/cascade.wit"
+        # The twin differential itself (bench-only).
+        - run: "scripts/split-differential.sh"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-SPLIT-P01

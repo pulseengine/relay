@@ -1,0 +1,42 @@
+# Standalone cargo-component crate — part of the cascade-split deployment (#575).
+[package]
+name = "falcon-cascade-estimator-cm"
+description = "The falcon-core ESTIMATOR partition (EstimatorPartition — IEKF propagate and every measurement update) as one WebAssembly Component, WIT pulseengine:falcon-cascade@0.12.0 estimator-component. One half of the cascade-split deployment (#575); the supervisor lives in cascade-split, not here."
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/pulseengine/relay"
+rust-version = "1.85"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+falcon-cm-rt = { path = "../../../crates/falcon-cm-rt" }
+falcon-core = { path = "../../../crates/falcon-core" }
+
+[package.metadata.component]
+package = "pulseengine:falcon-cascade"
+
+[package.metadata.component.target]
+path = "../../../wit/falcon-cascade"
+world = "estimator-component"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+[workspace]
+
+[features]
+# The DEPLOYMENT build is `--no-default-features`: no_std, linked against
+# falcon-cm-rt's bounded bump arena (no allocator that grows, so no
+# `memory.grow`), exactly like the monolithic `cascade`. That is the build meld
+# fuses into one shared memory. Every export resets the arena on entry (the
+# `cascade` pattern; #574's CallScope will replace it). `std` remains for host
+# tooling that wants it.
+default = ["std"]
+std = []

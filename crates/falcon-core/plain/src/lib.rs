@@ -33,7 +33,11 @@ pub use relay_preflight;
 
 use relay_adrc::{AdrcRate, GyroLpf};
 use relay_geo::{GeoAtt, GeoGains, quat_to_rotmat, thrust_axis_ned};
-use relay_iekf::{Iekf, Imu as IekfImu, NavState, RotorFaultDetector, Vec3};
+/// The estimator partition's sole output (16×f32), re-exported so a component
+/// that carries it across a seam (the `cascade-split` orchestrator, #575) can
+/// name the type the supervisor reads without a second `relay-iekf` dependency.
+pub use relay_iekf::NavState;
+use relay_iekf::{Iekf, Imu as IekfImu, RotorFaultDetector, Vec3};
 use relay_mix_quad::{QuadMixer, motors_to_torque_signs};
 
 /// One inertial-measurement sample in the body frame.
@@ -198,7 +202,12 @@ pub struct EstimatorPartition {
 }
 
 impl EstimatorPartition {
-    fn new(warmup: u32) -> Self {
+    /// `pub` for the split deployment (#575): a `cascade-estimator` component
+    /// builds this half on its own. `warmup` must be
+    /// [`FlightCore::warmup_steps`] of the loop rate the fused core would have
+    /// been built with, or the split diverges from the fused core at the
+    /// innovation-gate engagement tick.
+    pub fn new(warmup: u32) -> Self {
         EstimatorPartition {
             iekf: Iekf::level(),
             grav_var: 0.5,
@@ -490,7 +499,10 @@ pub struct CascadePartition {
 }
 
 impl CascadePartition {
-    fn new(hover_thrust: f32, loop_hz: f32, warmup: u32) -> Self {
+    /// `pub` for the split deployment (#575): a `cascade-control` component
+    /// builds this half on its own. Same `warmup` contract as
+    /// [`EstimatorPartition::new`].
+    pub fn new(hover_thrust: f32, loop_hz: f32, warmup: u32) -> Self {
         CascadePartition {
             designed_hz: loop_hz,
             geo: GeoAtt::new(GeoGains::FALCON_QUAD),
@@ -701,7 +713,10 @@ impl CascadePartition {
 
     /// Keep stateful filters warm while idle (estimate-only mode): the
     /// gyro low-pass tracks so the first live tick has no filter jump.
-    fn keep_warm(&mut self, raw: ImuSample) {
+    ///
+    /// `pub` for the split deployment (#575): the control half of
+    /// [`FlightCore::step_estimate_only`] runs in another component there.
+    pub fn keep_warm(&mut self, raw: ImuSample) {
         let gyro = self.calib.apply_gyro(raw.gyro);
         let _ = self.gyro_lpf.filter(gyro);
     }
@@ -1056,14 +1071,25 @@ pub struct FlightCore {
 
 impl FlightCore {
     pub fn new(hover_thrust: f32, loop_hz: f32) -> Self {
-        // Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
-        // achieved rotor state has caught the command by then. The same
-        // count seeds the estimator's innovation-gate warm-up (×5).
-        let warmup = ((loop_hz * 0.2) as u32).max(10);
+        let warmup = Self::warmup_steps(loop_hz);
         FlightCore {
             est: EstimatorPartition::new(warmup),
             casc: CascadePartition::new(hover_thrust, loop_hz, warmup),
         }
+    }
+
+    /// The warm-up step count both partitions are built with at `loop_hz`.
+    ///
+    /// Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
+    /// achieved rotor state has caught the command by then. The same
+    /// count seeds the estimator's innovation-gate warm-up (×5).
+    ///
+    /// ONE definition, `pub` (#575): the fused core, the partitioned core and
+    /// a split deployment that builds each half in its own component must all
+    /// derive it identically, or the halves engage their gates on different
+    /// ticks than the fused core does.
+    pub fn warmup_steps(loop_hz: f32) -> u32 {
+        ((loop_hz * 0.2) as u32).max(10)
     }
 
     /// Install solved sensor offsets — synced to BOTH partitions (each
@@ -1243,7 +1269,7 @@ impl PartitionedCore {
         jitter: bool,
         seed: u32,
     ) -> Self {
-        let warmup = ((loop_hz * 0.2) as u32).max(10);
+        let warmup = FlightCore::warmup_steps(loop_hz);
         PartitionedCore {
             est: EstimatorPartition::new(warmup),
             casc: CascadePartition::new(hover_thrust, loop_hz, warmup),
@@ -1395,8 +1421,114 @@ pub struct KeepoutZone {
     pub radius: f32,
 }
 
-pub struct FlightSupervisor {
-    core: FlightCore,
+/// WHAT A [`FlightSupervisor`] NEEDS FROM THE CORE IT SUPERVISES (#575).
+///
+/// The supervisor used to own a concrete [`FlightCore`] and call it directly,
+/// so it could only ever supervise a fused core in its own address space. The
+/// split deployment (`cascade-split`, #575) runs the two partitions in two
+/// separate components joined by the `nav-state` seam, and the supervisor in
+/// a third. It still has to drive them, with the mode machine, the failsafe
+/// arbiter and the pre-arm rows intact, or the published split component is
+/// the stabiliser #414 was filed about.
+///
+/// So this trait is EXACTLY the set of calls `FlightSupervisor` makes on its
+/// core. Nothing was added for convenience: every method maps to a `self.core.*`
+/// call site that existed before the trait did. [`FlightCore`] implements it by
+/// pure delegation to its own inherent methods, so a `FlightSupervisor` (the
+/// default `C = FlightCore`) runs the same code it always ran.
+///
+/// An implementation over remote halves must preserve what
+/// [`FlightCore::step`] and [`FlightCore::step_estimate_only`] do, including
+/// the ONE-TICK-DELAYED `flying` edge from the control half back into the
+/// estimator (#452) and its ABSENCE on estimate-only ticks. Losing either
+/// breaks flight, not the build.
+pub trait SupervisedCore {
+    /// The estimator's current navigation state.
+    fn state(&self) -> NavState;
+    /// See [`EstimatorPartition::tilt_uncertainty`].
+    fn tilt_uncertainty(&self) -> f32;
+    /// The calibration the estimator applies to raw samples.
+    fn calibration(&self) -> relay_calib::CalParams;
+    /// Install a calibration on EVERY half that applies one — the estimator
+    /// AND the control partition, which de-biases its own copy of the gyro
+    /// stream (see [`FlightCore::set_calibration`]). Forwarding it to only one
+    /// half makes the two disagree about what the gyro read.
+    fn set_calibration(&mut self, calib: relay_calib::CalParams);
+    /// See [`EstimatorPartition::nav_compromised`].
+    fn nav_compromised(&self) -> bool;
+    /// See [`EstimatorPartition::gnss_diverged`].
+    fn gnss_diverged(&self) -> bool;
+    /// See [`CascadePartition::failed_motor`].
+    fn failed_motor(&self) -> Option<usize>;
+    /// See [`CascadePartition::max_motor`].
+    fn max_motor(&self) -> f32;
+    /// See [`CascadePartition::set_landing`].
+    fn set_landing(&mut self, on: bool);
+    /// See [`CascadePartition::set_position`].
+    fn set_position(&mut self, ned: Vec3);
+    /// One control tick — the semantics of [`FlightCore::step`].
+    fn step<B: FlightBackend>(&mut self, b: &mut B);
+    /// One estimate-only tick, motors commanded zero — the semantics of
+    /// [`FlightCore::step_estimate_only`].
+    fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B);
+}
+
+/// The fused core: pure delegation to the inherent methods, so the default
+/// `FlightSupervisor` (= `FlightSupervisor<FlightCore>`) is unchanged.
+impl SupervisedCore for FlightCore {
+    fn state(&self) -> NavState {
+        FlightCore::state(self)
+    }
+    fn tilt_uncertainty(&self) -> f32 {
+        FlightCore::tilt_uncertainty(self)
+    }
+    fn calibration(&self) -> relay_calib::CalParams {
+        FlightCore::calibration(self)
+    }
+    fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        FlightCore::set_calibration(self, calib)
+    }
+    fn nav_compromised(&self) -> bool {
+        FlightCore::nav_compromised(self)
+    }
+    fn gnss_diverged(&self) -> bool {
+        FlightCore::gnss_diverged(self)
+    }
+    fn failed_motor(&self) -> Option<usize> {
+        FlightCore::failed_motor(self)
+    }
+    fn max_motor(&self) -> f32 {
+        FlightCore::max_motor(self)
+    }
+    fn set_landing(&mut self, on: bool) {
+        FlightCore::set_landing(self, on)
+    }
+    fn set_position(&mut self, ned: Vec3) {
+        FlightCore::set_position(self, ned)
+    }
+    fn step<B: FlightBackend>(&mut self, b: &mut B) {
+        FlightCore::step(self, b)
+    }
+    fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
+        FlightCore::step_estimate_only(self, b)
+    }
+}
+
+/// The construction parameters `FlightSupervisor::new` gives its core:
+/// `FlightCore::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ)`.
+///
+/// `pub` so a split deployment (#575) builds its two halves from the SAME
+/// numbers rather than a copy of them. The loop rate is a nominal design rate:
+/// `CascadePartition::resync_loop_rate` re-derives the filters from the
+/// backend's real `dt` on the first tick, but the warm-up count derived from it
+/// is NOT resynced, so a split that guessed a different rate here would engage
+/// its FDI and innovation gates on different ticks than the fused core does.
+pub const SUPERVISOR_CORE_HOVER_THRUST: f32 = 0.5;
+/// See [`SUPERVISOR_CORE_HOVER_THRUST`].
+pub const SUPERVISOR_CORE_LOOP_HZ: f32 = 1000.0;
+
+pub struct FlightSupervisor<C = FlightCore> {
+    core: C,
     fsm: relay_fsm::FlightFsm,
     home: Vec3,
     fence_radius: f32,
@@ -1495,7 +1627,44 @@ pub mod failsafe_flags {
     pub const ARM_BLOCKED: u32 = 1 << 7;
 }
 
-impl FlightSupervisor {
+impl FlightSupervisor<FlightCore> {
+    /// `home` NED, `fence_radius` m (breach ⇒ RTL), `cruise_alt` m AGL,
+    /// `low_batt_v` V (below ⇒ failsafe). Supervises a fused [`FlightCore`].
+    pub fn new(home: Vec3, fence_radius: f32, cruise_alt: f32, low_batt_v: f32) -> Self {
+        Self::with_core(
+            FlightCore::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ),
+            home,
+            fence_radius,
+            cruise_alt,
+            low_batt_v,
+        )
+    }
+
+    /// Set the hover-thrust feedforward on the wrapped core (per-plant: the
+    /// analytic sim hovers at ~0.49, the real gz falcon-quad at ~0.585).
+    pub fn set_hover_thrust(&mut self, t: f32) {
+        self.core.casc.hover_thrust = if t.is_finite() {
+            t.clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+    }
+}
+
+impl<C: SupervisedCore> FlightSupervisor<C> {
+    /// Install the sensor calibration applied to raw IMU/mag samples each cycle.
+    /// Solved by relay-calib (gyro null / accel 6-point / mag iron) and typically
+    /// loaded from the relay-param store; identity until then. Delegates to the
+    /// core, where the estimator (and the control half's gyro path) apply it.
+    ///
+    /// Generic over the core (#575, #586) so a split deployment installs the
+    /// calibration through the SAME call as the fused one; the
+    /// `CalibrationPresent` row then reads it back from the core
+    /// ([`SupervisedCore::calibration`]), never from a copy.
+    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
+        self.core.set_calibration(calib);
+    }
+
     /// Severity rank of a mode, for failsafe arbitration (#562).
     ///
     /// A `Failsafe` event must only ESCALATE. The FSM's `(Rtl, Failsafe) =>
@@ -1521,11 +1690,24 @@ impl FlightSupervisor {
         }
     }
 
-    /// `home` NED, `fence_radius` m (breach ⇒ RTL), `cruise_alt` m AGL,
-    /// `low_batt_v` V (below ⇒ failsafe).
-    pub fn new(home: Vec3, fence_radius: f32, cruise_alt: f32, low_batt_v: f32) -> Self {
+    /// Supervise an arbitrary [`SupervisedCore`] — the split deployment's
+    /// remote estimator/control pair (#575). [`FlightSupervisor::new`] is this
+    /// with a fused [`FlightCore`]; every other field is initialised here, once,
+    /// so the two constructors cannot drift.
+    ///
+    /// `inline(always)` because the published component links an 8 KiB shadow
+    /// stack and a by-value `FlightCore` already trapped there once; inlining
+    /// lets `new`'s core be built straight into the supervisor.
+    #[inline(always)]
+    pub fn with_core(
+        core: C,
+        home: Vec3,
+        fence_radius: f32,
+        cruise_alt: f32,
+        low_batt_v: f32,
+    ) -> Self {
         FlightSupervisor {
-            core: FlightCore::new(0.5, 1000.0),
+            core,
             fsm: relay_fsm::FlightFsm::new(),
             home,
             fence_radius,
@@ -1583,18 +1765,8 @@ impl FlightSupervisor {
     /// altitude gains, estimator process floor) tunes the same core the
     /// supervisor flies. Flight logic must not use this to bypass the
     /// supervisor's mode/setpoint ownership.
-    pub fn core_mut(&mut self) -> &mut FlightCore {
+    pub fn core_mut(&mut self) -> &mut C {
         &mut self.core
-    }
-
-    /// Set the hover-thrust feedforward on the wrapped core (per-plant: the
-    /// analytic sim hovers at ~0.49, the real gz falcon-quad at ~0.585).
-    pub fn set_hover_thrust(&mut self, t: f32) {
-        self.core.casc.hover_thrust = if t.is_finite() {
-            t.clamp(0.0, 1.0)
-        } else {
-            0.5
-        };
     }
 
     pub fn mode(&self) -> relay_fsm::Mode {
@@ -1654,14 +1826,6 @@ impl FlightSupervisor {
 
     pub fn state(&self) -> NavState {
         self.core.state()
-    }
-
-    /// Install the sensor calibration applied to raw IMU/mag samples each cycle.
-    /// Solved by relay-calib (gyro null / accel 6-point / mag iron) and typically
-    /// loaded from the relay-param store; identity until then. Delegates to the
-    /// FlightCore, where the estimator applies it.
-    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
-        self.core.set_calibration(calib);
     }
 
     /// The calibration currently applied to raw samples.
@@ -1766,7 +1930,7 @@ impl FlightSupervisor {
     /// or `None` if all checks pass — the reason a GCS surfaces to the operator.
     /// Shared view of the wrapped [`FlightCore`] (estimator state, FDI,
     /// GNSS-integrity flags) — the telemetry/pre-arm read seam.
-    pub fn core(&self) -> &FlightCore {
+    pub fn core(&self) -> &C {
         &self.core
     }
 
@@ -2915,6 +3079,9 @@ impl FlightBackend for SimBackend {
 }
 
 pub mod blackbox_backend;
+/// The cascade-split forwarding (#575): `SplitCore` + what each partition
+/// component runs behind the seam.
+pub mod split;
 pub mod tuning;
 
 #[cfg(test)]

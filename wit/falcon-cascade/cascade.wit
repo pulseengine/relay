@@ -223,18 +223,21 @@ interface types {
         /// row refuses. That part is real: this field is a PREREQUISITE for
         /// clause (1), not a feature of it.
         ///
-        /// WHAT IT DOES NOT DO is make the component armable. MEASURED: a host
-        /// that warms its estimator before arming — what a real GCS does, and
-        /// what `step_estimate_only` exists for — is refused by
-        /// `CalibrationPresent` FIRST, because `update_preflight` derives it
-        /// from `core.calibration() != identity()` and NOTHING IN THIS SEAM
-        /// CARRIES A CALIBRATION. So the published component can presently only
-        /// be armed on the arm-before-first-step path, judged against
-        /// `FlightSupervisor::new`'s deliberate bring-up defaults. That is
-        /// SUPERVISOR-P01's own falsification condition, and it means a green
-        /// SITL gate shows the DEFAULTS path works, not the pre-arm table.
-        /// Pinned by `the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused`
-        /// in `crates/falcon-core/tests/supervisor_seam_contract.rs`.
+        /// WHAT IT DOES NOT DO ALONE is make the component armable. A host that
+        /// warms its estimator before arming — what a real GCS does, and what
+        /// `step_estimate_only` exists for — is refused by `CalibrationPresent`
+        /// unless it also sent `pilot.configure-calibration`, because
+        /// `update_preflight` derives that row from
+        /// `core.calibration() != identity()`. Until that field existed the
+        /// component could only be armed BEFORE its first `step`, judged
+        /// against `FlightSupervisor::new`'s bring-up defaults; that path is
+        /// now CLOSED (#609 finding 2: a never-stepped supervisor declares
+        /// every row a step feeds as failing). So a host arms the way a real
+        /// GCS does: configure (with a calibration), step with a battery
+        /// reading until the estimator converges, then `arm` against the
+        /// measured table. Pinned natively by
+        /// `a_warmed_host_arms_only_with_a_non_identity_calibration` in
+        /// `crates/falcon-core/tests/supervisor_seam_contract.rs`.
         ///
         /// FREE, MEASURED: `controller#step` flattens to 26 params today
         /// (sensor-frame 22 + waypoint 4) against `MAX_FLAT_PARAMS = 16`, so it
@@ -302,6 +305,112 @@ interface types {
         /// Horizontal position-loop integral gain. 0 disables it.
         position-ki: f32,
     }
+
+    // ── the SPLIT deployment's seam records (#575) ─────────────────────
+    //
+    // In `types`, not in an interface of their own, so the wac-composed
+    // `cascade-split` imports exactly what `cascade` imports and is a drop-in
+    // for the `cascade` world (`wasm-tools component targets` passes). A
+    // separate type-only interface survived composition as an extra import
+    // and made it NOT conform.
+    //
+    // MEASURED BYTE-NEUTRAL for the published `cascade` component: its build is
+    // byte-identical with and without these records, because the component
+    // encodes only the types its world actually uses, and no `cascade` export
+    // uses any of them.
+
+    /// The estimator partition's SOLE output — falcon-core `NavState`, all 16
+    /// f32 of it (q, v, p, b_g, b_a). The control half consumes exactly what
+    /// the fused core's cascade partition consumes, so nothing is dropped at
+    /// the seam: a field the control law does not read today is still carried,
+    /// because the equivalence claim is "same NavState", not "same subset".
+    ///
+    /// NOT `flight-state`. That is the PUBLISHED observer record (seqlock,
+    /// `valid` mask, mode, failsafe); this is the INTERNAL partition seam.
+    /// Different jobs, and they must not be unified — but they will drift, and
+    /// the cascade/cascade-split differential is what notices when they do.
+    record nav-state {
+        /// Body→NED attitude (unit quaternion, Hamilton scalar-first).
+        qw: f32, qx: f32, qy: f32, qz: f32,
+        /// NED velocity (m/s).
+        vel-n: f32, vel-e: f32, vel-d: f32,
+        /// NED position (m).
+        pos-n: f32, pos-e: f32, pos-d: f32,
+        /// Estimated gyro bias (rad/s).
+        bgx: f32, bgy: f32, bgz: f32,
+        /// Estimated accelerometer bias (m/s²).
+        bax: f32, bay: f32, baz: f32,
+    }
+
+    /// The estimator facts the SUPERVISOR reads (pre-arm rows, nav integrity).
+    /// Read LIVE from the estimator component, never cached by the orchestrator:
+    /// the supervisor reads them BEFORE the core steps, including on the first
+    /// tick after a reset, so a cache would have to be seeded from somewhere —
+    /// and a hand-written default is exactly the value that drifts.
+    record estimator-health {
+        /// Roll+pitch attitude uncertainty (rad²) — the `EstimatorConverged` row.
+        tilt-uncertainty: f32,
+        /// Anti-spoof CUSUM latched OR dual-GNSS divergence latched.
+        nav-compromised: bool,
+        /// Dual-GNSS divergence alone.
+        gnss-diverged: bool,
+    }
+
+    /// The estimator's share of `vehicle-config`, already SANITISED by the
+    /// orchestrator (the same rules the monolithic `cascade` applies), so the
+    /// two deployments cannot disagree about what a bad value falls back to.
+    record estimator-config {
+        pos-var: f32,
+        process-floor-vel: f32,
+        process-floor-pos: f32,
+    }
+
+    /// The control partition's share of `vehicle-config`, sanitised likewise.
+    record control-config {
+        hover-thrust: f32,
+        altitude-kp: f32,
+        altitude-kd: f32,
+        altitude-ki: f32,
+        position-ki: f32,
+    }
+
+    /// The control facts the supervisor and the estimator read.
+    record control-status {
+        /// `CascadePartition::flying()` — FROM THE CASCADE'S OWN LAST COMMAND,
+        /// the FEEDBACK EDGE into the estimator (#452). Read at the START of a
+        /// tick, so the estimator sees the previous tick's value: one tick of
+        /// delay, exactly as in the fused core.
+        flying: bool,
+        /// The largest last-commanded motor output — the high-wind detector.
+        max-motor: f32,
+        /// Isolated failed rotor, 0-3; 0xFF when none.
+        failed-rotor: u8,
+    }
+
+    /// One control tick's result: the motor command, plus the status AFTER it.
+    record control-output {
+        m1: f32, m2: f32, m3: f32, m4: f32,
+        status: control-status,
+    }
+
+    /// The sensor calibration as it crosses the partition seam (#586) —
+    /// falcon-core `CalParams`, field for field, ALREADY VALIDATED by the
+    /// orchestrator with `pilot.configure-calibration`'s rules (an invalid one
+    /// arrives here as the identity). Same fields as `pilot.sensor-calibration`.
+    ///
+    /// A RECORD OF ITS OWN, in `types`, rather than `use pilot.{..}`: an
+    /// `estimator` or `flight-control` that used a `pilot` type would make
+    /// `pilot` an import of the partition components, which survives `wac plug`
+    /// as an extra import of the composition and breaks
+    /// `wasm-tools component targets --world cascade` (the failure that moved
+    /// the other seam records here).
+    record calibration-params {
+        gyro-bias: vec3,
+        accel-bias: vec3,
+        accel-scale: vec3,
+        mag-offset: vec3,
+        mag-scale: vec3,
+    }
 }
 
 /// State estimator — wraps relay-ekf (Mahony complementary filter).
@@ -356,12 +465,24 @@ interface controller {
 
     /// Install this vehicle's calibration.
     ///
-    /// Call ONCE before the first `step`. Calling it later is legal and
-    /// RE-INITIALISES the control core — estimator state included — because
-    /// `loop-rate-hz` is fixed at construction and a partially-applied
-    /// configuration is worse than an explicit reset. A host that never calls
-    /// this keeps the built-in defaults, which fly the SITL mock plant and
-    /// nothing else.
+    /// Call ONCE before the first `step`. A later call RE-INITIALISES the
+    /// supervisor and control core — estimator state included — because a
+    /// partially-applied configuration is worse than an explicit reset.
+    ///
+    /// THAT RE-INITIALISATION IS ONLY PERFORMED ON THE GROUND (#609). It is
+    /// applied only while the supervisor is `disarmed` and holds no latch a
+    /// rebuild would reset (an isolated rotor, a navigation-integrity latch, a
+    /// latched low/critical battery). In every other mode — `armed`, any
+    /// airborne mode, `terminated` — and on a latched `disarmed` vehicle, the
+    /// call is REJECTED: `cfg` is discarded, not queued, and the running
+    /// supervisor is untouched. A rebuild produces a `disarmed` supervisor that
+    /// commands zero motors, so accepting it in flight would cut the motors,
+    /// and accepting it in `terminated` would leave the absorbing state. The
+    /// rejection is silent (this function returns nothing); a host re-sends
+    /// once `flight-state.mode` reads `disarmed`.
+    ///
+    /// A host that never calls this keeps the built-in defaults, which fly the
+    /// SITL mock plant and nothing else.
     configure: func(cfg: vehicle-config);
 }
 
@@ -413,6 +534,14 @@ interface observer {
 /// calling convention from flattened scalars to a pointer, and the canonical
 /// ABI passes GARBAGE rather than erroring when a caller assumed the other
 /// form. `vehicle-config` therefore stays at 9 and keeps its byte-identity.
+///
+/// THE CALIBRATION HAS ITS OWN ENTRY POINT, `configure-calibration`, rather
+/// than a field of `supervisor-config` — the maintainer's decision of
+/// 2026-10-21 (relay#586), announced on jess#167. Measured reason: folded in,
+/// `supervisor-config` would grow from 6 flat params to 21 and cross
+/// `MAX_FLAT_PARAMS`, changing `configure-supervisor` from scalars to a
+/// pointer. As its own function the record is 15 flat params, under 16, and
+/// `configure-supervisor` keeps its 6-scalar lowering.
 interface pilot {
     use types.{vec3};
 
@@ -424,12 +553,23 @@ interface pilot {
     /// SUPERVISOR — a 0 m geofence about a (0,0,0) home latches an RTL on the
     /// first tick — which is why these land in the same change that wires it
     /// in rather than in a follow-up.
+    ///
+    /// VALIDATED AS A WHOLE, NEVER CLAMPED (#609). If ANY field is outside its
+    /// own definition below — `home` non-finite; `fence-radius`, `cruise-alt`
+    /// or `low-batt-v` non-finite or not > 0 — the configuration is treated
+    /// exactly as if `configure-supervisor` had never been called: the
+    /// configuration-dependent failsafes stay inactive and the
+    /// `FailsafeConfigured` pre-arm row is FALSE, so `arm` is REFUSED (the
+    /// mode stays `disarmed`). Earlier builds instead mapped such values to
+    /// permissive ones (a NaN fence to "no geofence", a NaN or negative
+    /// low-batt-v to "no battery failsafe") and still armed.
     record supervisor-config {
         /// Home / launch point, NED metres: the geofence centre AND the RTL
         /// destination. Both, from one field — they are the same point.
+        /// Must be finite.
         home: vec3,
-        /// Geofence radius in metres about `home`. Exceeding it latches an RTL
-        /// (bit 4 of `flight-state.failsafe`).
+        /// Geofence radius in metres about `home`, finite and > 0. Exceeding
+        /// it latches an RTL (bit 4 of `flight-state.failsafe`).
         fence-radius: f32,
         /// Cruise altitude in metres AGL, and it is **POSITIVE** — the one
         /// field in this package that is NOT NED-signed.
@@ -442,13 +582,47 @@ interface pilot {
         /// command +30.0 NED — thirty metres BELOW the ground. Every in-tree
         /// call site passes a positive value.
         ///
-        /// A non-positive value is therefore rejected rather than clamped: zero
-        /// or negative is not a conservative cruise altitude, it is a commanded
-        /// descent into the ground.
+        /// A non-positive (or non-finite) value is therefore rejected rather
+        /// than clamped — the whole configuration is refused and arming with
+        /// it is impossible: zero or negative is not a conservative cruise
+        /// altitude, it is a commanded descent into the ground.
         cruise-alt: f32,
         /// Pack LOW threshold in volts for the WHOLE battery, not per cell;
-        /// the estimator derives its per-cell fallbacks from this.
+        /// the estimator derives its per-cell fallbacks from this. Finite and
+        /// > 0: a zero or negative threshold could never be crossed, so the
+        /// battery failsafe would be silently off.
         low-batt-v: f32,
+    }
+
+    /// `relay_calib::CalParams`, field for field and with its semantics —
+    /// nothing added. Applied to the RAW frame before the estimator:
+    ///   gyro  = raw − gyro-bias
+    ///   accel = accel-scale ∘ (raw − accel-bias)      (∘ = per-axis product)
+    ///   mag   = mag-scale ∘ (raw − mag-offset)
+    ///
+    /// THE IDENTITY CALIBRATION (all biases/offsets 0, all scales 1) MEANS "NOT
+    /// CALIBRATED", not "perfectly calibrated": falcon-core derives
+    /// `CalibrationPresent` as `calibration != identity`, so sending the
+    /// identity leaves that row FALSE and `arm` refused. A host sends what its
+    /// calibration procedure (relay-calib gyro-null / accel 6-point / mag iron)
+    /// actually solved.
+    ///
+    /// VALIDATED, NEVER CLAMPED: every component must be finite and every
+    /// SCALE must be > 0 (a zero scale erases an axis, a negative one mirrors
+    /// it). See `configure-calibration` for what an invalid one does.
+    record sensor-calibration {
+        /// Gyro zero-rate bias, rad/s (subtracted).
+        gyro-bias: vec3,
+        /// Accelerometer zero-g bias, m/s² (subtracted).
+        accel-bias: vec3,
+        /// Accelerometer per-axis scale factor, unitless (multiplied after
+        /// de-biasing). > 0.
+        accel-scale: vec3,
+        /// Magnetometer hard-iron offset, in the SAME unit the host sends
+        /// `sensor-frame.mag-body` in (subtracted before normalisation).
+        mag-offset: vec3,
+        /// Magnetometer soft-iron diagonal scale, unitless. > 0.
+        mag-scale: vec3,
     }
 
     /// A command a PILOT or GCS may legitimately issue.
@@ -479,10 +653,43 @@ interface pilot {
 
     /// Install the supervisor's configuration.
     ///
-    /// Call before the first `step`, as with `controller.configure`. A host
-    /// that never calls it gets the built-in defaults, which are suitable for
-    /// the SITL mock plant and nothing else.
+    /// Call before the first `step`, as with `controller.configure`. A later
+    /// call rebuilds the supervisor under EXACTLY the same rule: only while it
+    /// is `disarmed` and unlatched; otherwise it is silently REJECTED and `cfg`
+    /// discarded (#609 — see `controller.configure`). It can therefore never
+    /// cut the motors in flight, never leave `terminated`, and never clear an
+    /// isolated-rotor latch.
+    ///
+    /// A host that never calls it gets NO supervisor configuration: the
+    /// configuration-dependent failsafes stay inactive and arming is refused
+    /// (`FailsafeConfigured`).
     configure-supervisor: func(cfg: supervisor-config);
+
+    /// Install the IMU / magnetometer calibration (relay#586, #609).
+    ///
+    /// WHY IT EXISTS. falcon-core derives the `CalibrationPresent` pre-arm row
+    /// as `calibration != identity`, and before this nothing in the seam
+    /// carried a calibration, so a supervisor that had been stepped was refused
+    /// on that row for ever. Since #609 a never-stepped supervisor refuses
+    /// every arm, so without this the component could not be armed at all.
+    ///
+    /// INSTALLED IN PLACE, no rebuild: estimator state, the published tick and
+    /// every latch are kept. It is ACCEPTED ONLY WHILE `disarmed` — in any other
+    /// mode (`armed`, airborne, `terminated`) the call is REJECTED and `cal`
+    /// discarded, because changing what the estimator subtracts from the raw
+    /// IMU mid-flight would step the attitude estimate under the controller.
+    /// A calibration sent before the supervisor exists is kept and installed
+    /// when it is built, and it survives a later `configure` /
+    /// `configure-supervisor` rebuild.
+    ///
+    /// An INVALID calibration (non-finite, or a scale not > 0) is not
+    /// installed; it REPLACES any earlier one with the identity, so
+    /// `CalibrationPresent` is false and `arm` refused — the latest thing the
+    /// host sent was broken, and the vehicle must not fly on an older one.
+    ///
+    /// FLATTENING: 15 f32, under `MAX_FLAT_PARAMS = 16`, so this lowers to 15
+    /// scalars, not a pointer.
+    configure-calibration: func(cal: sensor-calibration);
 
     /// Deliver one pilot command to the mode machine.
     ///
@@ -501,6 +708,130 @@ interface pilot {
 }
 
 world cascade {
+    export controller;
+    export observer;
+    export pilot;
+}
+
+// ── the SPLIT deployment (#575) ───────────────────────────────────
+//
+// The same supervised vehicle as `cascade`, built from THREE components
+// instead of one: `cascade-estimator` (falcon-core `EstimatorPartition`),
+// `cascade-control` (falcon-core `CascadePartition`) and the `cascade-split`
+// orchestrator, which holds `FlightSupervisor` and drives the two halves
+// through the interfaces below. `wac plug` composes them; the result exports
+// exactly what `cascade` exports — `controller`, `observer` and `pilot` — and
+// must be behaviourally IDENTICAL to it, tick for tick.
+//
+// WHY THE ORCHESTRATOR HOLDS THE SUPERVISOR (decision on #575, option 1). The
+// supervisor wraps a whole core and adds the mode machine, the failsafe arbiter
+// and the pre-arm rows. A split that wrapped only the two partitions would be
+// "a stabiliser with no supervisor" again — #414 under a new name, and a new
+// world rather than an edit, so it would not read as a regression in review.
+//
+// Everything here is ADDITIVE. The seam records live in `types` (see the note
+// there): measured byte-neutral for the published `cascade` component.
+
+
+/// The ESTIMATOR partition (falcon-core `EstimatorPartition`; the M4 half of
+/// the jess#144 core mapping).
+interface estimator {
+    use types.{sensor-frame, nav-state, estimator-health, estimator-config};
+    use types.{calibration-params};
+
+    /// Rebuild THIS partition and apply `cfg` (`none` = built-in defaults).
+    ///
+    /// Drops ONLY the estimator's state. The orchestrator calls it whenever the
+    /// monolithic component would have rebuilt its core: when it first builds
+    /// the supervisor, and when it rebuilds it after an ACCEPTED
+    /// `controller.configure` or `pilot.configure-supervisor` — both are
+    /// rejected unless a rebuild loses nothing (#609 finding 1), exactly as in
+    /// `cascade`, where both drop the whole supervisor, core included.
+    configure: func(cfg: option<estimator-config>);
+
+    /// One estimator tick.
+    ///
+    /// `in-flight` IS THE FEEDBACK EDGE (#452), and it is an `option` because
+    /// the fused core has TWO paths and they differ:
+    ///   - a control tick (`FlightCore::step`) sets the estimator's in-flight
+    ///     flag from the control half's PREVIOUS command first: `some(flying)`;
+    ///   - an estimate-only tick (`FlightCore::step_estimate_only`, the
+    ///     supervisor's Disarmed/Armed/Terminated path) does NOT touch it, so
+    ///     the flag keeps whatever the last control tick left: `none`.
+    /// The difference is observable. At a touchdown, and after a flight
+    /// termination in the air, the last control tick left the flag TRUE, and
+    /// the fused core keeps it so until the next control tick. Passing
+    /// `some(false)` on those estimate-only ticks was MEASURED to break the
+    /// equivalence at the first touchdown of the cascade/cascade-split
+    /// differential (tests/cascade-sitl-wasm, twin mode).
+    ///
+    /// Only the estimator's channels of the frame are read (IMU, dt, position,
+    /// magnetometer, heading); `dt-s` must already be the orchestrator's
+    /// clamped period.
+    tick: func(sensors: sensor-frame, in-flight: option<bool>) -> nav-state;
+
+    /// The current estimate, without ticking.
+    read-nav: func() -> nav-state;
+
+    /// The supervisor's estimator inputs, without ticking.
+    read-health: func() -> estimator-health;
+
+    /// Install the calibration the estimator applies to raw IMU/mag samples,
+    /// IN PLACE (resets nothing). The orchestrator forwards every calibration
+    /// it installs to BOTH partitions, as falcon-core `FlightCore::set_calibration`
+    /// writes both halves, and re-sends it after every partition rebuild.
+    configure-calibration: func(cal: calibration-params);
+
+    /// The calibration the estimator ACTUALLY applies. The supervisor's
+    /// `CalibrationPresent` pre-arm row is derived from this read, never from
+    /// a copy the orchestrator keeps, so the row and the estimator cannot
+    /// disagree about whether the vehicle is calibrated.
+    read-calibration: func() -> calibration-params;
+}
+
+/// The FLIGHT-CONTROL partition (falcon-core `CascadePartition`: geometric
+/// attitude, ADRC, mixer, rotor-out FDI, position/altitude loops; the M7 half).
+interface flight-control {
+    use types.{sensor-frame, imu-sample, vec3};
+    use types.{nav-state, control-config, control-status, control-output};
+    use types.{calibration-params};
+
+    /// Rebuild THIS partition and apply `cfg` (`none` = built-in defaults).
+    /// Drops ONLY the control partition's state; see `estimator.configure`.
+    configure: func(cfg: option<control-config>);
+
+    /// The supervisor's position setpoint (NED m) for the next tick.
+    set-position: func(ned: vec3);
+
+    /// Engage/disengage the velocity-based touchdown law.
+    set-landing: func(on: bool);
+
+    /// One control tick on the estimator's `nav`. Only the control channels of
+    /// the frame are read (IMU, dt, heading presence, motor RPM).
+    tick: func(nav: nav-state, sensors: sensor-frame) -> control-output;
+
+    /// The control half of an estimate-only tick: keep the gyro filter warm,
+    /// command nothing. The orchestrator commands zero motors itself.
+    keep-warm: func(imu: imu-sample);
+
+    /// The supervisor's control inputs, without ticking.
+    read-status: func() -> control-status;
+
+    /// Install the calibration on the control half's OWN copy of the gyro
+    /// stream (the rate loop de-biases it too), in place. See
+    /// `estimator.configure-calibration`: always sent to both.
+    configure-calibration: func(cal: calibration-params);
+}
+
+world estimator-component      { export estimator; }
+world flight-control-component { export flight-control; }
+
+/// The split orchestrator: the supervisor, driving the two partitions it
+/// imports. `wac plug` satisfies the imports from `estimator-component` and
+/// `flight-control-component`; the composition exports what `cascade` exports.
+world cascade-split {
+    import estimator;
+    import flight-control;
     export controller;
     export observer;
     export pilot;

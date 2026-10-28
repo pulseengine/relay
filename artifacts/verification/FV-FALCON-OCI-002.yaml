@@ -103,10 +103,14 @@ artifacts:
     fields:
       method: test
       steps:
-        # (a) ALL EIGHT stages are no_std — not "at least one"
-        - run: "test \"$(grep -l 'no_std)' wasm/cm/*/src/lib.rs | wc -l)\" -eq 8"
-        # ...and all eight export the shared bounded-arena CM runtime
-        - run: "test \"$(grep -l 'export_cm_rt' wasm/cm/*/src/lib.rs | wc -l)\" -eq 8"
+        # (a) EVERY component crate is no_std — not "at least one" — and the
+        # eight v1.133 stages are still among them. (Was `-eq 8` over the glob;
+        # the #575 split adds three more no_std crates, so "all of them" is now
+        # stated as "none lacks it", which is the same claim and cannot be
+        # satisfied by counting.)
+        - run: "test -z \"$(grep -L 'no_std)' wasm/cm/*/src/lib.rs)\" && test \"$(ls wasm/cm/*/src/lib.rs | wc -l)\" -ge 8"
+        # ...and every one exports the shared bounded-arena CM runtime
+        - run: "test -z \"$(grep -L 'export_cm_rt' wasm/cm/*/src/lib.rs)\" && test \"$(ls wasm/cm/*/src/lib.rs | wc -l)\" -ge 8"
         # (b) the binding evidence, per published blob
         - run: "wasm-tools component wit wasm/cm/rate/target/wasm32-unknown-unknown/release/falcon_rate_cm.wasm  # bench-only, after scripts/build-components.sh: expect 0 wasi:* imports"
         - run: "wasm-tools print wasm/cm/rate/target/wasm32-unknown-unknown/release/falcon_rate_cm.wasm | grep -c 'memory.grow'  # bench-only, after scripts/build-components.sh: expect 0"
