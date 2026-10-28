@@ -1646,7 +1646,20 @@ impl FlightSupervisor {
         if self.wind_count > 0 {
             bits |= f::WIND_ARMING;
         }
-        if self.arm_blocked_reason().is_some() {
+        // ARM_BLOCKED (bit 7) = "`command(Arm)` would be refused RIGHT NOW",
+        // judged by the SAME 20-row `check_table` that `command` gates on
+        // (#609 finding 6). It used to read `arm_blocked_reason()`, the legacy
+        // six-field struct, so it disagreed with the gate both ways: a
+        // MotorsHealthy / FailsafeConfigured refusal left it clear, and the
+        // component's identity calibration (which fails only the legacy
+        // struct) held it set on every tick, armed or not.
+        //
+        // Scope: a refusal only means something while DISARMED; arming is the
+        // thing being refused. In any other mode (Armed, Takeoff, Loiter, ...,
+        // Terminated) the vehicle is already past the gate, so the bit is
+        // CLEAR rather than reporting a verdict nobody is asking for. The
+        // table verdict is still available via `arm_blocked_check()`.
+        if self.fsm.mode() == relay_fsm::Mode::Disarmed && self.arm_blocked_check().is_some() {
             bits |= f::ARM_BLOCKED;
         }
         bits

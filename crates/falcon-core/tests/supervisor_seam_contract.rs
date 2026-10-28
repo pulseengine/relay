@@ -312,3 +312,103 @@ fn the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused() {
          does not, the refusal above was not caused by the missing calibration"
     );
 }
+
+/// #609 finding 6 — bit 7 (`ARM_BLOCKED`) must report the verdict of the table
+/// `command(Arm)` actually gates on, while Disarmed, and nothing once armed.
+mod arm_blocked_bit {
+    use super::ff;
+    use falcon_core::FlightSupervisor;
+    use falcon_core::relay_fsm::{Event, Mode};
+    use falcon_core::relay_preflight::CheckId;
+
+    fn sup() -> FlightSupervisor {
+        FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0)
+    }
+
+    #[test]
+    fn motors_healthy_refusal_sets_bit_7() {
+        let mut s = sup();
+        s.set_check(CheckId::MotorsHealthy, false);
+        s.command(Event::Arm, true, true);
+        assert_eq!(s.mode(), Mode::Disarmed);
+        assert_eq!(s.arm_blocked_check(), Some(CheckId::MotorsHealthy));
+        assert_ne!(s.failsafe_flags() & ff::ARM_BLOCKED, 0, "bit 7 must be set");
+    }
+
+    #[test]
+    fn failsafe_configured_refusal_sets_bit_7() {
+        let mut s = sup();
+        s.set_check(CheckId::FailsafeConfigured, false);
+        s.command(Event::Arm, true, true);
+        assert_eq!(s.mode(), Mode::Disarmed);
+        assert_eq!(s.arm_blocked_check(), Some(CheckId::FailsafeConfigured));
+        assert_ne!(s.failsafe_flags() & ff::ARM_BLOCKED, 0, "bit 7 must be set");
+    }
+
+    #[test]
+    fn disarmed_with_every_row_passing_leaves_bit_7_clear() {
+        let mut s = sup();
+        assert_eq!(s.arm_blocked_check(), None, "control: the table allows");
+        assert_eq!(s.failsafe_flags() & ff::ARM_BLOCKED, 0);
+        s.command(Event::Arm, true, true);
+        assert_eq!(s.mode(), Mode::Armed, "control: arm really is allowed");
+    }
+
+    /// The published component's shape: IDENTITY calibration. `step` runs
+    /// `update_preflight`, which marks the LEGACY struct `calibration_present =
+    /// false`; on main that held bit 7 set on every tick while armed and
+    /// airborne. Armed, the bit must be clear.
+    #[test]
+    fn armed_airborne_with_identity_calibration_leaves_bit_7_clear() {
+        use falcon_core::{FlightBackend, ImuSample};
+        struct Host;
+        impl FlightBackend for Host {
+            fn read_imu(&mut self) -> ImuSample {
+                ImuSample {
+                    accel: [0.0, 0.0, -9.80665],
+                    gyro: [0.0; 3],
+                }
+            }
+            fn read_position(&mut self) -> Option<[f32; 3]> {
+                Some([0.0, 0.0, 0.0])
+            }
+            fn read_mag(&mut self) -> Option<[f32; 3]> {
+                None
+            }
+            fn read_heading(&mut self) -> Option<f32> {
+                Some(0.0)
+            }
+            fn write_motors(&mut self, _: &[f32]) {}
+            fn dt(&self) -> f32 {
+                0.0025
+            }
+            fn read_battery_v(&mut self) -> Option<f32> {
+                Some(16.8)
+            }
+            fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+                Some([3000; 4])
+            }
+        }
+        let mut s = sup();
+        let mut b = Host;
+        s.command(Event::Arm, true, true);
+        assert_eq!(s.mode(), Mode::Armed);
+        s.command(Event::RequestTakeoff, true, true);
+        assert_eq!(s.mode(), Mode::Takeoff);
+        for _ in 0..20 {
+            s.step(&mut b);
+        }
+        assert!(
+            matches!(s.mode(), Mode::Takeoff | Mode::Loiter | Mode::Armed),
+            "still flying, got {:?}",
+            s.mode()
+        );
+        // Precondition that makes this the component's shape: the legacy
+        // struct DOES fail (identity calibration) while we are airborne.
+        assert!(s.arm_blocked_reason().is_some(), "legacy struct fails");
+        assert_eq!(s.failsafe_flags() & ff::ARM_BLOCKED, 0, "airborne");
+        // Even a failing table row must not raise the bit once past the gate.
+        s.set_check(CheckId::MotorsHealthy, false);
+        assert_eq!(s.failsafe_flags() & ff::ARM_BLOCKED, 0, "row failing");
+    }
+}
