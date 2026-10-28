@@ -105,7 +105,11 @@ interface types {
         /// a winner and discard the rest.
         ///   bit 0 rtl-latched     1 batt-low        2 batt-critical
         ///   bit 3 batt-silent     4 geofence-breach 5 runaway-arming
-        ///   bit 6 wind-arming     7 arm-blocked
+        ///   bit 6 wind-arming     7 arm-blocked     8 target-stale
+        ///
+        /// bit 8 (#609 finding 4): no fresh `step` target is in force (none
+        /// yet, or none finite for 1.0 s). Live, not latched; in Mission it is
+        /// the cause of the HOLD (Loiter) the supervisor takes.
         ///
         /// `mode` is the OUTCOME; this is the CAUSE. Without it a consumer sees
         /// the vehicle divert and cannot tell a flat pack from a geofence
@@ -469,8 +473,21 @@ interface controller {
     /// carries, then geometric SE(3) attitude → ADRC rate → mixer, with the
     /// rotor-out FDI and the supervisor's altitude/position loops.
     ///
-    /// `target` is the MISSION LEG, read only in Mission mode (a one-leg
-    /// mission; arriving at it ends the mission with an RTL). In every other
+    /// `target` is the MISSION-MODE SETPOINT, read only in Mission mode, and
+    /// there it is a LIVE FOLLOW setpoint (offboard-style): the latest fresh
+    /// target is flown every tick, and REACHING IT ENDS NOTHING. The vehicle
+    /// holds it, in Mission, for as long as it is streamed; the host ends
+    /// Mission with `request-rtl`, `request-land` or `request-loiter`.
+    /// FRESHNESS: each `step` delivers one sample. A target whose three
+    /// components are all finite refreshes the stream; one with any non-finite
+    /// component is REJECTED (not followed; this is also how a host says "no
+    /// target this frame"). With no fresh target for 1.0 s
+    /// (`FOLLOW_TARGET_TIMEOUT_US`) the stream is STALE and the supervisor
+    /// takes the stale-offboard failsafe, HOLD: it switches to Loiter at the
+    /// point the vehicle has reached and raises `failsafe` bit 8. A resumed
+    /// stream does not re-enter Mission by itself. A host that stops calling
+    /// `step` at all cannot be detected from inside this component.
+    /// In every other
     /// mode the supervisor derives the position setpoint itself and `target`
     /// is ignored: Takeoff and Loiter hold a horizontal point LATCHED ON ENTRY
     /// (Takeoff latches the launch point and Loiter after it keeps that point;

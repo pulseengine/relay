@@ -6,7 +6,7 @@
 
 A capability counts as **delivered** only if something we ship depends on it: the flight core (`falcon-core`), a published wasm component (including Bazel-only sources), or the released binary (`falcon-hello`). Derived from the dependency graph, not written by hand (#422).
 
-**28 of 60 crates under `crates/` have no consumer at all** — nothing falcon releases depends on them and no sibling repo uses them, whatever any other document says. A further 10 are not shipped by falcon but are a sibling repo's dependency (relay is a shared framework).
+**26 of 60 crates under `crates/` have no consumer at all** — nothing falcon releases depends on them and no sibling repo uses them, whatever any other document says. A further 10 are not shipped by falcon but are a sibling repo's dependency (relay is a shared framework).
 
 **Not shipped is not the same as dead.** Several consumer-less crates are rivet-traced relay framework engines awaiting a consumer, or seams other repos (e.g. jess) integrate against without a code dependency. For *flight* capabilities the disposition — wire, park against a configuration axis, or retire — is SWREQ-FALCON-ORPHAN-P01; nothing here should be retired from this table alone.
 
@@ -25,7 +25,6 @@ A capability counts as **delivered** only if something we ship depends on it: th
 | `relay-ci` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-ci` |
 | `relay-dronecan` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-dronecan` |
 | `relay-fm` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-fm` |
-| `relay-fsafe` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-fsafe` |
 | `relay-hal` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-hal` |
 | `relay-lc-diff` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-lc-diff` |
 | `relay-md` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-md` |
@@ -33,7 +32,6 @@ A capability counts as **delivered** only if something we ship depends on it: th
 | `relay-mm` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-mm` |
 | `relay-modextra` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-modextra` |
 | `relay-nid` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-nid` |
-| `relay-offboard` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-offboard` |
 | `relay-primitives` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-primitives` |
 | `relay-rc` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-rc` |
 | `relay-sca` | **NOT SHIPPED — no consumer** | — | — | — | `crates/relay-sca` |
@@ -53,6 +51,7 @@ A capability counts as **delivered** only if something we ship depends on it: th
 | `relay-ekf` | shipped in a component | — | yes | — | `crates/relay-ekf` |
 | `relay-ekf-stub` | shipped in falcon-hello only | — | — | yes | `crates/relay-ekf-stub` |
 | `relay-flowrange` | flight core | yes | yes | — | `crates/relay-flowrange` |
+| `relay-fsafe` | flight core | yes | yes | — | `crates/relay-fsafe` |
 | `relay-fsm` | flight core | yes | yes | — | `crates/relay-fsm` |
 | `relay-geo` | flight core | yes | yes | — | `crates/relay-geo` |
 | `relay-hk` | not shipped here — consumed by wohl | — | — | — | `crates/relay-hk` |
@@ -64,6 +63,7 @@ A capability counts as **delivered** only if something we ship depends on it: th
 | `relay-mavlink` | shipped in falcon-hello only | — | — | yes | `crates/relay-mavlink` |
 | `relay-mix-quad` | flight core | yes | yes | — | `crates/relay-mix-quad` |
 | `relay-notch` | flight core | yes | yes | — | `crates/relay-notch` |
+| `relay-offboard` | flight core | yes | yes | — | `crates/relay-offboard` |
 | `relay-param` | flight core | yes | yes | — | `crates/relay-param` |
 | `relay-pos` | shipped in a component | — | yes | — | `crates/relay-pos` |
 | `relay-preflight` | flight core | yes | yes | — | `crates/relay-preflight` |

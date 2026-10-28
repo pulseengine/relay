@@ -304,7 +304,10 @@ fn hold_point_latch_rules_across_mode_transitions() {
     sup.command(Event::RequestMission, true, true);
     assert_eq!(sup.mode(), Mode::Mission);
     for _ in 0..(5.0 / DT) as u32 {
-        sup.set_mission(wp); // the component re-sends the frame target every tick
+        // Re-sent every tick, as the component did before #609 Decision A. It
+        // now streams a FOLLOW target instead; this is the native Waypoints
+        // source, whose one-leg mission is unchanged.
+        sup.set_mission(wp);
         sup.step(&mut b);
         assert_eq!(sup.mode(), Mode::Mission);
     }

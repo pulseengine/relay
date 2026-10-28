@@ -1342,6 +1342,52 @@ pub const MAX_WAYPOINTS: usize = 16;
 /// fully settle on each leg.
 const WAYPOINT_RADIUS: f32 = 1.2;
 
+/// How long a FOLLOW target (see [`MissionSource::Follow`]) stays in force
+/// without a fresh one before the stream is STALE (#609 finding 4, maintainer
+/// decision 2026-10-28: the published component's frame target is a live
+/// setpoint). 1.0 s: ten times the longest frame period the component accepts
+/// (its dt clamp tops out at 100 ms), so at least ten consecutive frames must
+/// all carry an unusable target; and short enough that a dead stream is not
+/// flown on. The last good target is a fixed POINT, so in the worst case the
+/// vehicle spends one more second closing on where the host last asked.
+/// Enforced by the verified `relay_offboard::OffboardReceiver` (OFFB-P01,
+/// Kani OFFB-K02: strictly past the timeout the stream is ALWAYS stale).
+pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;
+
+/// Where Mission mode takes its setpoint from (#609 finding 4).
+///
+/// The two are DIFFERENT CONTRACTS and deliberately do not share a code path:
+///
+///   * `Waypoints` (the default, every native user): the stored mission
+///     (`set_mission` / `set_mission_waypoints`, MISSION-P01). Arriving at a leg
+///     advances to the next; arriving at the LAST leg ends the sortie with an
+///     autonomous RTL + land. Unchanged.
+///   * `Follow` (the published component): an offboard-style LIVE setpoint
+///     ([`FlightSupervisor::set_follow_target`]). The latest fresh target is
+///     the setpoint every tick; REACHING IT ENDS NOTHING (the vehicle holds it,
+///     in Mission, for as long as the host keeps sending it). The host ends
+///     Mission explicitly with RequestRtl / RequestLand / RequestLoiter. A
+///     stream with no fresh target for [`FOLLOW_TARGET_TIMEOUT_US`] (never
+///     started, stopped, or only non-finite targets) is STALE, and the
+///     supervisor takes `relay_fsafe`'s policy action for a stale offboard
+///     stream, HOLD, which it flies as RequestLoiter: a Loiter at the point the
+///     vehicle had reached, latched on entry like every Loiter. A stream that
+///     resumes does NOT re-enter Mission by itself; the host sends
+///     RequestMission again.
+///
+/// Why not one path with a flag: the component used to feed its target
+/// through `set_mission`, which RESET a one-leg mission every tick, so arrival
+/// fired the mission-complete RTL and the vehicle landed while the host was
+/// still streaming the target. Bending the waypoint sequencer into a "never
+/// finish" mode would leave the follow path with no freshness contract at all;
+/// a separate source gets the verified timeout instead, and MISSION-P01's
+/// sequencer stays exactly as it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissionSource {
+    Waypoints,
+    Follow,
+}
+
 /// Nominal ESC RPM at full throttle — normalises reported RPM to a per-rotor
 /// EFFECTIVENESS (≈ commanded throttle when healthy) for the single-rotor-out FDI
 /// residual (v1.103). Only the ratio matters; a per-airframe value scales it.
@@ -1452,8 +1498,8 @@ pub struct KeepoutZone {
 /// and land further away. So rotor-out Land stays "level up and come down
 /// here", and the latch is confined to the healthy hold modes.
 ///
-/// The frame's `target` in the published component is a Mission leg only; it
-/// never moves this point.
+/// The frame's `target` in the published component is read only in Mission
+/// (a live follow setpoint, #609 finding 4); it never moves this point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HoldRegime {
     None,
@@ -1615,6 +1661,17 @@ pub struct FlightSupervisor<C = FlightCore> {
     /// mode changed by (a `command` between ticks, or a failsafe / milestone
     /// inside `step`).
     hold_regime: HoldRegime,
+    /// Where Mission takes its setpoint from. See [`MissionSource`].
+    mission_source: MissionSource,
+    /// Freshness of the FOLLOW target stream (OFFB-P01's verified receiver).
+    follow: relay_offboard::OffboardReceiver,
+    /// Monotonic counter handed to `follow` with each accepted target. The
+    /// receiver rejects a non-increasing counter (replay); here every accepted
+    /// call is a new sample, so it simply increments.
+    follow_counter: u64,
+    /// Supervisor time (µs), advanced by the backend's `dt` at the top of every
+    /// `step`. The follow-stream timeout is measured on it.
+    clock_us: u64,
     /// Consecutive cycles the estimated tilt has exceeded TILT_RUNAWAY_LIMIT
     /// while airborne — the attitude-runaway detector (v1.99 expanded failsafe).
     /// On reaching TILT_RUNAWAY_CYCLES it fires Event::Terminate (motor cut).
@@ -1683,6 +1740,11 @@ pub mod failsafe_flags {
     pub const WIND_ARMING: u32 = 1 << 6;
     /// A pre-arm row is failing, so arming is refused.
     pub const ARM_BLOCKED: u32 = 1 << 7;
+    /// Mission takes a FOLLOW target ([`super::MissionSource::Follow`], the
+    /// published component) and no fresh one is in force: never started, or
+    /// none accepted for [`super::FOLLOW_TARGET_TIMEOUT_US`]. In Mission this is
+    /// the cause of the HOLD (Loiter) the supervisor takes (#609 finding 4).
+    pub const TARGET_STALE: u32 = 1 << 8;
 }
 
 impl FlightSupervisor<FlightCore> {
@@ -1780,6 +1842,10 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             rtl_latched: false,
             hold_xy: [home[0], home[1]],
             hold_regime: HoldRegime::None,
+            mission_source: MissionSource::Waypoints,
+            follow: relay_offboard::OffboardReceiver::new(FOLLOW_TARGET_TIMEOUT_US),
+            follow_counter: 0,
+            clock_us: 0,
             runaway_count: 0,
             wind_count: 0,
             check_table: {
@@ -1873,6 +1939,9 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // table verdict is still available via `arm_blocked_check()`.
         if self.fsm.mode() == relay_fsm::Mode::Disarmed && self.arm_blocked_check().is_some() {
             bits |= f::ARM_BLOCKED;
+        }
+        if self.mission_source == MissionSource::Follow && self.follow_target().is_none() {
+            bits |= f::TARGET_STALE;
         }
         bits
     }
@@ -2088,6 +2157,64 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         self.wp_index = 0;
     }
 
+    /// Choose where Mission takes its setpoint from (#609 finding 4). The
+    /// default is [`MissionSource::Waypoints`]; [`host::SupervisorHost`] (the
+    /// published seam, its mirror, the HITL endpoint and the split) selects
+    /// [`MissionSource::Follow`] on every supervisor it builds. The
+    /// selector is explicit rather than inferred from which setter was called
+    /// last, so a stray `set_mission` cannot silently turn a live follow into a
+    /// mission that RTLs on arrival, nor the reverse.
+    pub fn set_mission_source(&mut self, src: MissionSource) {
+        self.mission_source = src;
+    }
+
+    /// The active [`MissionSource`].
+    pub fn mission_source(&self) -> MissionSource {
+        self.mission_source
+    }
+
+    /// Deliver one FOLLOW target (NED metres; z negative = up), the live
+    /// Mission setpoint under [`MissionSource::Follow`]. Returns whether it was
+    /// accepted.
+    ///
+    /// FRESHNESS. A call that delivers a target with all three components
+    /// FINITE is one fresh sample, time-stamped on the supervisor clock; the
+    /// published component makes one call per `step` frame, so per-tick delivery
+    /// is what keeps the stream alive. A target with ANY non-finite component
+    /// is REJECTED: it is not followed, it does not refresh the stream, and the
+    /// last accepted target stays in force until [`FOLLOW_TARGET_TIMEOUT_US`]
+    /// expires, after which the stream is stale (see [`MissionSource`]). The
+    /// WIT frame has no "absent" flag, so a non-finite target is also how a host
+    /// says "no target this frame".
+    ///
+    /// What this CANNOT see: a host that stops calling `step` altogether. No
+    /// code inside the component runs then, so no timeout can fire; that
+    /// failure belongs to the host's own watchdog. And a host whose transport
+    /// re-sends a stale target every frame is, to this receiver, a fresh one.
+    ///
+    /// Accepted in every mode (it is only CONSUMED in Mission), so a host that
+    /// streams before RequestMission enters Mission with a fresh target.
+    pub fn set_follow_target(&mut self, ned: Vec3) -> bool {
+        if !(ned[0].is_finite() && ned[1].is_finite() && ned[2].is_finite()) {
+            return false;
+        }
+        self.follow_counter = self.follow_counter.saturating_add(1);
+        self.follow.accept(
+            relay_offboard::OffboardSetpoint::position(ned),
+            self.follow_counter,
+            self.clock_us,
+        )
+    }
+
+    /// The follow target in force now, or `None` when the stream is stale
+    /// (never started, timed out). Telemetry / tests.
+    pub fn follow_target(&self) -> Option<Vec3> {
+        match self.follow.status(self.clock_us) {
+            relay_offboard::OffboardStatus::Active(sp) => Some(sp.position_ned),
+            relay_offboard::OffboardStatus::Stale => None,
+        }
+    }
+
     /// The waypoint currently being flown to (home if the mission is empty).
     fn current_waypoint(&self) -> Vec3 {
         if self.wp_count == 0 {
@@ -2185,6 +2312,16 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         if self.fsm.mode() == Mode::Disarmed {
             self.rtl_latched = false;
         }
+        // Supervisor clock for the follow-stream timeout. A backend dt that is
+        // not a positive finite number still advances it (by 1 ms), so a broken
+        // clock cannot freeze a stale stream into a fresh one.
+        let dt_s = b.dt();
+        let dt_us = if dt_s.is_finite() && dt_s > 0.0 {
+            ((dt_s * 1.0e6 + 0.5) as u64).max(1)
+        } else {
+            1_000
+        };
+        self.clock_us = self.clock_us.saturating_add(dt_us);
         // v1.99 — refresh the pre-arm checks from real vehicle state each cycle,
         // so a later command(Arm) gates on live signals, not all-pass defaults.
         self.update_preflight(b);
@@ -2308,6 +2445,34 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             // ── v1.30: multi-waypoint mission sequencing. Fly the stored legs
             // in order; on arriving at the active leg advance to the next, and
             // on finishing the last leg autonomously return home and land. ──
+            // ── #609 finding 4: a FOLLOW target is a live setpoint. Reaching it
+            // ends nothing; only a STALE stream does, and then with the
+            // verified arbiter's policy for a stale offboard stream (HOLD,
+            // flown as Loiter). Otherwise the host ends Mission itself. ──
+            Mode::Mission if self.mission_source == MissionSource::Follow => {
+                if self.follow_target().is_none() {
+                    let policy = relay_fsafe::Triggers {
+                        offboard_stale: true,
+                        ..relay_fsafe::Triggers::default()
+                    }
+                    .policy_action();
+                    match policy {
+                        relay_fsafe::FailsafeAction::None => {}
+                        relay_fsafe::FailsafeAction::Hold => {
+                            self.fsm.on(Event::RequestLoiter, g);
+                        }
+                        relay_fsafe::FailsafeAction::Rtl => {
+                            self.fsm.on(Event::RequestRtl, g);
+                        }
+                        relay_fsafe::FailsafeAction::Land => {
+                            self.fsm.on(Event::RequestLand, g);
+                        }
+                        relay_fsafe::FailsafeAction::Terminate => {
+                            self.fsm.on(Event::Terminate, g);
+                        }
+                    }
+                }
+            }
             Mode::Mission => {
                 let wp = self.current_waypoint();
                 let wdx = est.p[0] - wp[0];
@@ -2370,7 +2535,16 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             // Latched on entry, NOT the current estimate: that had zero
             // horizontal error by construction and drifted with the wind.
             Mode::Takeoff | Mode::Loiter => [self.hold_xy[0], self.hold_xy[1], -self.cruise_alt],
-            Mode::Mission => self.current_waypoint(), // fly the active leg (its own altitude)
+            Mode::Mission => match self.mission_source {
+                MissionSource::Waypoints => self.current_waypoint(), // the active leg (its own altitude)
+                // The LATEST fresh follow target. Stale is unreachable here in
+                // practice (the milestone above already left Mission this
+                // tick); if it ever is, command zero demand where the vehicle
+                // is rather than any stale target.
+                MissionSource::Follow => self
+                    .follow_target()
+                    .unwrap_or([est.p[0], est.p[1], est.p[2]]),
+            },
             Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
             // Land holds HOME (rate-descend once settled) — except rotor-out,
             // which holds the CURRENT position: land-where-you-are (v1.117).

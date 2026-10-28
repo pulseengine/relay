@@ -39,7 +39,7 @@
 //! [`HostCore::build_supervisor`] reads the supervisor only through
 //! [`SupervisedCore`] calls (`mode`, `battery`, `core().failed_motor()`,
 //! `core().nav_compromised()`, `set_check`, `set_calibration`, `command`,
-//! `step`, `set_mission`), so the rules below are the SAME code for both
+//! `step`, `set_mission_source`, `set_follow_target`), so the rules below are the SAME code for both
 //! deployments. The one per-core step is how a fresh core is constructed and
 //! receives the tuning: the fused core gets `set_hover_thrust` + the setters
 //! below; the split resets BOTH partitions with the same [`VehicleTuning`]. The
@@ -47,7 +47,7 @@
 //! construct (with tuning), install the calibration, declare the rows. A
 //! partition reset after `set_calibration` would wipe the calibration.
 
-use crate::{FlightBackend, FlightCore, FlightSupervisor, SupervisedCore, Vec3};
+use crate::{FlightBackend, FlightCore, FlightSupervisor, MissionSource, SupervisedCore, Vec3};
 use relay_calib::CalParams;
 use relay_fsm::{Event, Mode};
 use relay_preflight::CheckId;
@@ -503,13 +503,31 @@ impl<C: HostCore> SupervisorHost<C> {
         self.ensure().command(ev, level, throttle_low);
     }
 
-    /// One control tick. `mission_leg` is the frame's target, which is a
-    /// MISSION LEG at `@0.12.0`, not a position command: the supervisor owns
-    /// the position setpoint and derives one per mode, so outside Mission it is
+    /// One control tick. `target` is the frame's target: the MISSION-MODE
+    /// setpoint at `@0.12.0`, not a position command. The supervisor owns the
+    /// position setpoint and derives one per mode, so outside Mission it is
     /// ignored (#609 finding 4).
-    pub fn step<B: FlightBackend>(&mut self, mission_leg: Vec3, b: &mut B) -> &FlightSupervisor<C> {
+    ///
+    /// IN MISSION IT IS A LIVE FOLLOW SETPOINT (#609 finding 4, maintainer
+    /// decision 2026-10-28, "live setpoint, no RTL"): every supervisor this
+    /// host builds runs [`MissionSource::Follow`] (see [`build`](Self::build)),
+    /// and each `step` delivers exactly ONE sample through
+    /// [`FlightSupervisor::set_follow_target`]. A finite target refreshes the
+    /// stream; a target with any non-finite component is rejected (not
+    /// followed, does not refresh). Reaching it ends nothing; the host ends
+    /// Mission with RequestRtl / RequestLand / RequestLoiter. No fresh target
+    /// for [`FOLLOW_TARGET_TIMEOUT_US`](crate::FOLLOW_TARGET_TIMEOUT_US) is a
+    /// STALE stream: failsafe bit 8 (`TARGET_STALE`), and in Mission the
+    /// offboard-stale HOLD (Loiter where the vehicle is). Until #609 this fed
+    /// `set_mission`, which reset a one-leg mission every tick, so arrival
+    /// fired the mission-complete RTL while the host was still streaming.
+    ///
+    /// Written HERE, once, so the published `cascade`, the native mirror, the
+    /// falcon-hitl endpoint and the `cascade-split` orchestrator cannot
+    /// disagree about it.
+    pub fn step<B: FlightBackend>(&mut self, target: Vec3, b: &mut B) -> &FlightSupervisor<C> {
         let sup = self.ensure();
-        sup.set_mission(mission_leg);
+        sup.set_follow_target(target);
         sup.step(b);
         sup
     }
@@ -542,6 +560,11 @@ impl<C: HostCore> SupervisorHost<C> {
         let configured = self.failsafe_configured();
         // The per-core step: construct a fresh core carrying the tuning.
         let sup = C::build_supervisor(&mut self.sup, (home, fence, cruise, low_batt), tuning);
+        // The seam's frame target is a LIVE follow setpoint in Mission (#609
+        // finding 4; see `step`). Selected on EVERY build, so a supervisor
+        // rebuilt by an accepted configure has the same contract as the first.
+        // Not core-specific: the fused and the split host share it.
+        sup.set_mission_source(MissionSource::Follow);
         // A configured calibration survives a rebuild; none configured stays
         // none (the fresh supervisor's CalibrationPresent row starts false).
         if let Some(c) = calib {
