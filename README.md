@@ -1,19 +1,27 @@
 # relay
 
-**Stream-based component framework for safety-critical real-time systems, with formal proofs of specific safety properties (Kani bounded model checking + Lean).**
+**Stream-based component framework for safety-critical real-time systems, with formal proofs of specific safety properties (Verus, Kani, Rocq and Lean).**
 
 Relay is a flight-software substrate: WIT-typed `stream<T>` components,
 fused statically at build time by [meld](https://github.com/pulseengine/meld),
 AOT-compiled to ARM/RISC-V by [synth](https://github.com/pulseengine/synth),
-run on [Gale](https://github.com/pulseengine/gale) (verified Rust RTOS)
+run on [Gale](https://github.com/pulseengine/gale) (a Rust port of Zephyr
+kernel primitives with Verus, Rocq and Lean proofs on its source; scope in its
+[claims ledger](https://github.com/pulseengine/gale/blob/main/docs/safety/verification-honesty.md))
 via WASM Component Model Preview 3 streams.
 
-Triple-track formal verification: **Verus** (SMT/Z3) for component
-logic, **Rocq** for stream-routing correctness, **Lean** for
-scheduling theory and WCET. Traceability via
+What the proofs cover: **Verus** (SMT/Z3) contracts on the cFS-DNA
+mission-layer crates (19 `verus_test` targets in `BUILD.bazel`),
+**Kani** bounded model checking on their engines, **Rocq** models of
+the sch, sc, lc, hs and cfdp engines plus the sin/cos approximations
+(`proofs/rocq/`), and **Lean** for the Lyapunov algebra and WCET
+composition (`proofs/lean/`). The PX4-DNA control cascade has no Verus
+target, the IEKF estimator is property-tested, and composed-pipeline
+MC/DC coverage is 0/2713 because the witness harness cannot yet drive
+the stream exports ([#202](https://github.com/pulseengine/relay/issues/202)). Traceability via
 [rivet](https://github.com/pulseengine/rivet).
 
-Part of the [pulseengine](https://github.com/pulseengine) toolchain.
+Part of the [pulseengine](https://github.com/pulseengine) WebAssembly Component Model engine.
 
 > *Relay routes. Falcon flies.*
 
@@ -31,7 +39,7 @@ shared mutable state.
 ## falcon — the dual-DNA flight stack
 
 falcon fuses cFS-DNA mission semantics with the PX4-DNA control cascade.
-The verified cascade (**IEKF → geometric SE(3) → ADRC → mixer**) flies
+The cascade (**IEKF → geometric SE(3) → ADRC → mixer**) flies
 autonomous waypoint missions in **Gazebo Harmonic SITL**, runs bare-metal on
 an emulated **Cortex-M (STM32H743)**, and sits behind a backend-agnostic
 hardware-abstraction seam (`FlightBackend`) so the *same* `no_std` code runs
