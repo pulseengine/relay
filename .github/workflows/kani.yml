@@ -225,6 +225,10 @@ jobs:
           # this leg is no longer ~1 s: 488 s wall locally at load ~120.
           # Amended 2026-10-28 (#614): 29 covers (strict presence bytes,
           # 72 B calibration); 283 s wall locally at load ~50.
+          # #614 follow-up (provenance jess#167): TEN harnesses, 39 covers —
+          # `the_host_accepts_only_replies_to_frames_it_sent` proves the
+          # echo rule over BindingHost's reply classifier (5 symbolic steps,
+          # ~30 s locally).
           - falcon-hitl
           - relay-log
           - relay-modextra

@@ -191,7 +191,16 @@ artifacts:
         # 28 -> 29 (#614 amendment): the calibration harness covers a
         # non-finite value in the last appended mag-offdiag slot (68).
         - run: "grep -q 'a non-finite mag-offdiag.yz (the last appended slot) is rejected' crates/falcon-hitl/src/kani_proofs.rs"
-        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 29"
+        # 29 -> 39 (#614 follow-up; provenance jess#167): a tenth harness over
+        # BindingHost's reply classifier proves the echo rule — an Ok tick
+        # names a sensor frame the host sent and had not had answered, a loss
+        # count never exceeds the frames really unanswered, every refusal
+        # leaves the host unchanged — with ten covers, one per accept/refuse
+        # branch. Mutation: accepting any Motors seq FAILS it.
+        - run: "grep -q 'fn the_host_accepts_only_replies_to_frames_it_sent' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'a never-sent seq is refused' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'genuine loss is reported' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 39"
         # The finding is FIXED: the decoder rejects non-finite (this step
         # inverted the old `! grep -qE 'is_finite|is_nan'`, which flipped as
         # intended when the fix landed).

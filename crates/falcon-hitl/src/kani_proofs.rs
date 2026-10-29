@@ -536,3 +536,241 @@ fn a_well_formed_command_frame_dispatches_without_panicking() {
         "a non-0/1 interlock byte is rejected"
     );
 }
+
+// ── the echo rule at the host (#614; provenance jess#167) ────────────────
+//
+// `BindingHost::on_reply` used to feed a reply's header seq straight into its
+// tracker, so a `Motors` reply carrying a seq the host never sent was accepted
+// and could report ticks that never existed as lost. This harness drives the
+// post-decode half (`classify`) over a bounded, symbolic interleaving of
+// sends, cancels and replies with ARBITRARY header seqs, against a GHOST
+// ledger of what the host actually put on the wire. Bytes are not symbolic
+// here: the decoder has its own harnesses above, and a symbolic 81-byte decode
+// inside a multi-step loop is the state-space shape this file avoids.
+
+use crate::wire::{SeqTracker, TickVerdict};
+use crate::{BindingHost, HostError, HostReply, ReplyBody, Stray};
+
+/// Steps in one symbolic run.
+const OPS: usize = 5;
+
+#[derive(Clone, Copy, PartialEq)]
+enum Sent {
+    Sensor,
+    Control,
+}
+
+/// What the host really sent: seq, kind, and whether a reply to it was
+/// accepted. Independent of `BindingHost`'s own bookkeeping.
+struct Ledger {
+    seq: [u32; OPS],
+    kind: [Sent; OPS],
+    answered: [bool; OPS],
+    n: usize,
+}
+
+impl Ledger {
+    fn find(&self, s: u32, kind: Sent) -> Option<usize> {
+        let mut i = 0;
+        while i < self.n {
+            if self.seq[i] == s && self.kind[i] == kind {
+                return Some(i);
+            }
+            i += 1;
+        }
+        None
+    }
+    /// Frames sent BEFORE index `i` whose reply was never accepted.
+    fn unanswered_before(&self, i: usize) -> u32 {
+        let mut c = 0;
+        let mut j = 0;
+        while j < i {
+            if !self.answered[j] {
+                c += 1;
+            }
+            j += 1;
+        }
+        c
+    }
+    fn push(&mut self, s: u32, kind: Sent) {
+        self.seq[self.n] = s;
+        self.kind[self.n] = kind;
+        self.answered[self.n] = false;
+        self.n += 1;
+    }
+}
+
+/// Every field of the host, for the "a refusal changes nothing" check.
+fn snapshot(
+    h: &BindingHost,
+) -> (
+    u32,
+    u32,
+    Option<u32>,
+    Option<u32>,
+    Option<u32>,
+    Option<u32>,
+    Option<u32>,
+) {
+    (
+        h.seq,
+        h.sent,
+        h.awaiting,
+        h.last_acked,
+        h.outstanding_sensor,
+        h.last_motors,
+        h.tracker.last(),
+    )
+}
+
+/// THE ECHO RULE, MECHANICALLY. Over every interleaving of up to five
+/// sensor-sends, control-sends, cancels, `Motors` replies and `Ack` replies —
+/// with symbolic header seqs, a symbolic `acked-seq`, and a symbolic starting
+/// seq so the u32 wrap is in scope:
+///
+/// 1. an `Ok` tick (`Motors`, not `Duplicate`) names a `sensor` frame the host
+///    SENT and had not had answered;
+/// 2. its `Dropped { lost }` never exceeds the number of frames sent BEFORE
+///    that tick and still unanswered — loss is never invented;
+/// 3. an `Ok` `Duplicate` names a `sensor` frame already answered;
+/// 4. an `Acked` names a control frame sent and unanswered, and its header
+///    equalled its payload; a `DuplicateAck` names one already answered;
+/// 5. every `Err` leaves the host's state bit-for-bit unchanged.
+#[kani::proof]
+#[kani::unwind(8)]
+fn the_host_accepts_only_replies_to_frames_it_sent() {
+    let start: u32 = kani::any();
+    let mut host = BindingHost {
+        seq: start,
+        sent: 0,
+        awaiting: None,
+        last_acked: None,
+        outstanding_sensor: None,
+        last_motors: None,
+        tracker: SeqTracker::starting_at(start),
+    };
+    let mut g = Ledger {
+        seq: [0; OPS],
+        kind: [Sent::Sensor; OPS],
+        answered: [false; OPS],
+        n: 0,
+    };
+    let mut step = 0;
+    while step < OPS {
+        let op: u8 = kani::any();
+        match op % 5 {
+            0 => {
+                if let Ok(s) = host.next_sensor() {
+                    g.push(s, Sent::Sensor);
+                }
+            }
+            1 => {
+                if let Ok(s) = host.next_control() {
+                    g.push(s, Sent::Control);
+                }
+            }
+            2 => host.cancel_pending(),
+            3 => {
+                let seq: u32 = kani::any();
+                let before = snapshot(&host);
+                match host.classify(seq, ReplyBody::Motors([0.0; 4])) {
+                    Ok(HostReply::Motors {
+                        seq: got, verdict, ..
+                    }) => {
+                        assert!(got == seq);
+                        if verdict == TickVerdict::Duplicate {
+                            let i = g.find(seq, Sent::Sensor);
+                            assert!(i.is_some(), "a Duplicate of a frame never sent");
+                            assert!(g.answered[i.unwrap()]);
+                            kani::cover!(true, "a duplicated Motors reads Duplicate");
+                        } else {
+                            let i = g.find(seq, Sent::Sensor);
+                            assert!(i.is_some(), "an Ok tick the host never sent");
+                            let i = i.unwrap();
+                            assert!(!g.answered[i], "an Ok tick answered twice");
+                            if let TickVerdict::Dropped { lost } = verdict {
+                                assert!(
+                                    lost <= g.unanswered_before(i),
+                                    "a loss count larger than the frames really unanswered"
+                                );
+                                kani::cover!(lost >= 1, "genuine loss is reported");
+                            }
+                            kani::cover!(verdict == TickVerdict::InOrder, "an in-order tick");
+                            g.answered[i] = true;
+                        }
+                    }
+                    Ok(_) => assert!(false, "a Motors frame classified as an ack"),
+                    Err(e) => {
+                        assert!(snapshot(&host) == before, "a refusal changed state");
+                        kani::cover!(
+                            matches!(
+                                e,
+                                HostError::StrayMotors {
+                                    why: Stray::NeverSent,
+                                    ..
+                                }
+                            ),
+                            "a never-sent seq is refused"
+                        );
+                        kani::cover!(
+                            matches!(
+                                e,
+                                HostError::StrayMotors {
+                                    why: Stray::Unsolicited,
+                                    ..
+                                }
+                            ),
+                            "an unsolicited Motors is refused"
+                        );
+                        kani::cover!(
+                            matches!(
+                                e,
+                                HostError::StrayMotors {
+                                    why: Stray::Superseded { .. },
+                                    ..
+                                }
+                            ),
+                            "a superseded or control seq is refused"
+                        );
+                    }
+                }
+            }
+            _ => {
+                let header: u32 = kani::any();
+                let acked: u32 = kani::any();
+                let before = snapshot(&host);
+                match host.classify(header, ReplyBody::Ack { acked }) {
+                    Ok(HostReply::Acked { seq }) => {
+                        assert!(seq == acked && header == acked);
+                        let i = g.find(seq, Sent::Control);
+                        assert!(i.is_some(), "an ack of a control frame never sent");
+                        let i = i.unwrap();
+                        assert!(!g.answered[i]);
+                        g.answered[i] = true;
+                        kani::cover!(true, "an ack closes the handshake");
+                    }
+                    Ok(HostReply::DuplicateAck { seq }) => {
+                        assert!(seq == acked && header == acked);
+                        let i = g.find(seq, Sent::Control);
+                        assert!(i.is_some() && g.answered[i.unwrap()]);
+                        assert!(snapshot(&host) == before);
+                        kani::cover!(true, "a duplicated ack is benign");
+                    }
+                    Ok(_) => assert!(false, "an Ack classified as motors"),
+                    Err(e) => {
+                        assert!(snapshot(&host) == before, "a refusal changed state");
+                        kani::cover!(
+                            matches!(e, HostError::AckSeqMismatch { .. }),
+                            "an ack whose header disagrees with its payload is refused"
+                        );
+                        kani::cover!(
+                            matches!(e, HostError::UnexpectedAck { .. }),
+                            "an ack of a frame not awaited is refused"
+                        );
+                    }
+                }
+            }
+        }
+        step += 1;
+    }
+}

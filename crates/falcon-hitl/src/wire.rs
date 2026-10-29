@@ -461,6 +461,17 @@ impl SeqTracker {
         Self { last: None }
     }
 
+    /// A tracker whose baseline is `seq`, as if `seq` had already been
+    /// accepted.
+    ///
+    /// For a receiver that KNOWS where the stream starts — a host classifying
+    /// replies in its own sequence space, which it numbered from `seq`. An
+    /// unseeded tracker reads its first frame as `First` whatever its value,
+    /// which hides the loss of every frame sent before it.
+    pub const fn starting_at(seq: u32) -> Self {
+        Self { last: Some(seq) }
+    }
+
     /// The last sequence this tracker accepted as current.
     pub const fn last(&self) -> Option<u32> {
         self.last

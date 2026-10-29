@@ -111,6 +111,7 @@ pub struct LinkBackend<T> {
     /// worse here than no field.
     last_verdict: Option<wire::TickVerdict>,
     rejected: u32,
+    misechoed: u32,
     dt: f32,
 }
 
@@ -123,40 +124,70 @@ impl<T: Transport> LinkBackend<T> {
         let mut reply = [0u8; SENSOR_WIRE_FRAME_LEN];
         transport.exchange(&out, &mut reply);
         let mut tracker = wire::SeqTracker::default();
-        let (cache, last_verdict) = Self::read_reply(&reply, &mut tracker);
+        let r = Self::read_reply(&reply, 0, &mut tracker);
         LinkBackend {
             transport,
-            cache: cache.unwrap_or_default(),
+            cache: r.frame.unwrap_or_default(),
             seq: 0,
             tracker,
-            rejected: u32::from(last_verdict.is_none()),
-            last_verdict,
+            rejected: u32::from(r.rejected),
+            misechoed: u32::from(r.misechoed),
+            last_verdict: r.verdict,
             dt,
         }
     }
 
-    /// Decode one reply, classify its sequence, and hand back both.
+    /// Decode one reply to the `Motors` frame numbered `sent`, classify its
+    /// sequence, and hand back both.
     ///
     /// A frame that does not decode leaves the cache ALONE rather than zeroing
     /// it: the last good sensors are a better estimate for one tick than a
     /// synthetic zero reading, and zeroed accelerometers read as free-fall.
+    ///
+    /// THE ECHO RULE IS ENFORCED HERE (#614). The exchange is synchronous —
+    /// one `Motors` out, one reply back — so the only reply that answers it is
+    /// a `Sensor` frame whose header `seq` is `sent`. Any other seq is a frame
+    /// this exchange never asked for (a stale datagram, another session, a
+    /// plant numbering its replies from a counter of its own): it is REFUSED —
+    /// not cached, not classified, counted in
+    /// [`misechoed_replies`](Self::misechoed_replies). Before this, the seq
+    /// went straight into the tracker, so a reply carrying seq 1000 to a
+    /// request numbered 0 was cached and classified as a tick. Because only
+    /// `sent` is accepted and `sent` advances by one per exchange, the
+    /// tracker's `Dropped { lost }` counts exactly the exchanges since the last
+    /// accepted reply whose own reply was refused or undecodable.
     fn read_reply(
         reply: &[u8; SENSOR_WIRE_FRAME_LEN],
+        sent: u32,
         tracker: &mut wire::SeqTracker,
-    ) -> (Option<wire::WireSensorFrame>, Option<wire::TickVerdict>) {
+    ) -> ReplyRead {
         match wire::decode_frame(reply) {
+            Ok((h, _)) if h.msg == wire::MsgType::Sensor && h.seq != sent => ReplyRead {
+                frame: None,
+                verdict: None,
+                rejected: false,
+                misechoed: true,
+            },
             Ok((h, payload)) if h.msg == wire::MsgType::Sensor => {
                 let verdict = tracker.observe(h.seq);
-                match wire::decode_sensor_frame(payload) {
-                    // The header decoded and the sequence was classified, but
-                    // the payload did not: report the verdict and no frame.
-                    Err(_) => (None, Some(verdict)),
-                    Ok(f) => (Some(f), Some(verdict)),
+                // The header decoded and the sequence was classified; if the
+                // payload did not, report the verdict and no frame.
+                let frame = wire::decode_sensor_frame(payload).ok();
+                ReplyRead {
+                    frame,
+                    verdict: Some(verdict),
+                    rejected: false,
+                    misechoed: false,
                 }
             }
             // Not a frame, or not a Sensor frame. There is no sequence to
             // classify, so there is no verdict — NOT `First`.
-            _ => (None, None),
+            _ => ReplyRead {
+                frame: None,
+                verdict: None,
+                rejected: true,
+                misechoed: false,
+            },
         }
     }
 
@@ -184,6 +215,27 @@ impl<T: Transport> LinkBackend<T> {
     pub fn rejected_replies(&self) -> u32 {
         self.rejected
     }
+
+    /// How many replies WERE decodable `Sensor` frames but did not echo the
+    /// seq of the `Motors` frame they came back to (the echo rule, #614).
+    ///
+    /// Separate from [`rejected_replies`](Self::rejected_replies) for the same
+    /// reason that one is separate from the verdicts: a well-formed frame that
+    /// answers a different request is a different fault from line noise, and
+    /// a cross-wired link should not look like a noisy one.
+    pub fn misechoed_replies(&self) -> u32 {
+        self.misechoed
+    }
+}
+
+/// What [`LinkBackend::read_reply`] made of one reply.
+struct ReplyRead {
+    frame: Option<wire::WireSensorFrame>,
+    verdict: Option<wire::TickVerdict>,
+    /// Not a decodable `Sensor` frame header.
+    rejected: bool,
+    /// A `Sensor` frame whose seq is not the request's.
+    misechoed: bool,
 }
 
 impl<T: Transport> FlightBackend for LinkBackend<T> {
@@ -211,12 +263,15 @@ impl<T: Transport> FlightBackend for LinkBackend<T> {
         wire::encode_motors(&mut out, self.seq, m);
         let mut reply = [0u8; SENSOR_WIRE_FRAME_LEN];
         self.transport.exchange(&out, &mut reply);
-        let (frame, verdict) = Self::read_reply(&reply, &mut self.tracker);
-        if verdict.is_none() {
+        let r = Self::read_reply(&reply, self.seq, &mut self.tracker);
+        if r.rejected {
             self.rejected = self.rejected.saturating_add(1);
         }
-        self.last_verdict = verdict;
-        if let Some(f) = frame {
+        if r.misechoed {
+            self.misechoed = self.misechoed.saturating_add(1);
+        }
+        self.last_verdict = r.verdict;
+        if let Some(f) = r.frame {
             self.cache = f;
         }
     }
@@ -377,10 +432,40 @@ pub enum HostError {
     AwaitingAck { seq: u32 },
     /// The reply was not a frame of this binding.
     Wire(wire::WireError),
-    /// An `Ack` for a sequence this host is not waiting on.
+    /// An `Ack` for a sequence this host is not waiting on (and not a repeat
+    /// of the ack it accepted last).
     UnexpectedAck { acked: u32 },
+    /// An `Ack` whose header `seq` is not its `acked-seq` payload. The echo
+    /// rule (docs/TRANSPORT-BINDING.md §3) puts the acknowledged control
+    /// frame's seq in BOTH places; a frame where they disagree answers no
+    /// request coherently, so neither value is trusted (#614).
+    AckSeqMismatch { header: u32, acked: u32 },
+    /// A `Motors` reply that does not answer the host's outstanding `sensor`
+    /// frame — the echo rule, enforced (#614). `why` says which way it fails.
+    /// Its motor commands must not be applied, and the host's state is
+    /// unchanged by it.
+    StrayMotors { seq: u32, why: Stray },
     /// A frame type the component never sends (anything but `Ack`/`Motors`).
     UnexpectedType { msg: wire::MsgType },
+}
+
+/// Why a `Motors` reply was refused as [`HostError::StrayMotors`].
+///
+/// Only ONE `sensor` frame is ever answerable: the newest one the host sent,
+/// until its reply is accepted (see [`BindingHost`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Stray {
+    /// No `sensor` frame is awaiting an answer — none was sent since the last
+    /// accepted `Motors`, or none was ever sent.
+    Unsolicited,
+    /// A `sensor` frame IS outstanding, but this seq is one the host never
+    /// put on the wire at all.
+    NeverSent,
+    /// The host did send this seq, but it is not the outstanding tick: a
+    /// `sensor` frame the host has since SUPERSEDED with a newer one (its
+    /// commands are stale, and the tick is counted lost when the newer reply
+    /// lands), or a control frame, which a `Motors` frame never answers.
+    Superseded { outstanding: u32 },
 }
 
 impl From<wire::WireError> for HostError {
@@ -410,6 +495,11 @@ pub enum HostReply {
         /// these motors answer. A host indexes its per-tick record by this,
         /// not by arrival order, so a lost frame cannot shift every later
         /// reply onto the wrong tick (jess#167).
+        ///
+        /// ENFORCED, not assumed (#614): `on_reply` returns this variant only
+        /// when `seq` is the host's outstanding `sensor` frame (or, with
+        /// `verdict: Duplicate`, the `Motors` it accepted last); any other
+        /// seq is [`HostError::StrayMotors`].
         seq: u32,
         verdict: wire::TickVerdict,
     },
@@ -421,12 +511,34 @@ pub enum HostReply {
 ///
 /// It owns the host's outbound sequence (one counter for EVERY message it
 /// sends, per §3) and the stop-and-wait configuration handshake, and it
-/// classifies the component's replies with the same [`wire::SeqTracker`].
-/// Because every reply ECHOES the seq of the frame it answers (§3, the echo
-/// rule), the reply stream is the host's own sequence space: a gap there is a
-/// request or a reply that was lost, and [`HostReply::Motors`] names the
-/// `sensor` tick it answers. It
-/// does not own a socket: each method returns the exact bytes to send, and
+/// classifies the component's replies with the same [`wire::SeqTracker`],
+/// seeded at the host's own starting sequence.
+///
+/// THE ECHO RULE IS ENFORCED, not assumed (#614). A reply's header `seq` must
+/// be the seq of a frame this host sent and is still waiting on, or it is
+/// refused and changes nothing:
+///
+/// | reply | accepted when | otherwise |
+/// |---|---|---|
+/// | `Motors` seq `s` | `s` is the OUTSTANDING `sensor` frame: the newest one sent, not yet answered | [`HostError::StrayMotors`] |
+/// | `Motors` seq `s` | `s` is the `Motors` accepted last | `Ok(Motors { verdict: Duplicate })` — a duplicated datagram; do not act twice |
+/// | `Ack` | header `seq == acked-seq`, and that is the awaited control frame | [`HostError::AckSeqMismatch`] / [`HostError::UnexpectedAck`] |
+/// | `Ack` | header `seq` == `acked-seq` == the ack accepted last | `Ok(DuplicateAck)` |
+///
+/// Only the newest `sensor` frame is answerable. A host that sends tick `n+1`
+/// before tick `n`'s reply arrived has superseded `n`: a late reply to `n` is
+/// refused (`Stray::Superseded`), and `n` is counted in the `Dropped { lost }`
+/// of `n+1`'s reply. So `lost` counts frames this host SENT whose replies were
+/// never accepted — it can no longer be inflated by a reply carrying a seq
+/// the host never sent (an integrator's probe on jess#167 got
+/// `Dropped { lost: 3 }` for three ticks that never existed). Because the
+/// tracker is seeded at the host's starting seq, loss before the first
+/// accepted reply is reported too: Sensor 1, 2, 3 out and only Motors 3 back
+/// reads `Dropped { lost: 2 }`, where an unseeded tracker said `First`. An
+/// accepted `Ack` advances the same baseline, so an acknowledged control
+/// frame between two ticks is not counted lost.
+///
+/// It does not own a socket: each method returns the exact bytes to send, and
 /// [`on_reply`](Self::on_reply) takes the bytes that came back.
 ///
 /// Before v2 the binding could carry `configure` and `step` and nothing else,
@@ -434,22 +546,68 @@ pub enum HostReply {
 /// configure the supervisor, never install a calibration and never send `arm`
 /// — the vehicle stayed `disarmed` and the binding's only supported path
 /// could not fly it (#609 finding 9).
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct BindingHost {
+    /// The seq of the last frame sent (the starting value before any).
     seq: u32,
+    /// How many frames this host has sent, saturating. Only used to say
+    /// WHICH way a stray reply fails (`NeverSent` vs `Superseded`); the
+    /// acceptance itself is an equality on `outstanding_sensor`.
+    sent: u32,
     awaiting: Option<u32>,
     last_acked: Option<u32>,
+    /// The newest `sensor` frame sent and not yet answered — the ONLY seq a
+    /// `Motors` reply may carry to be accepted as a tick.
+    outstanding_sensor: Option<u32>,
+    /// The seq of the `Motors` reply accepted last (its duplicate is benign).
+    last_motors: Option<u32>,
     tracker: wire::SeqTracker,
+}
+
+impl Default for BindingHost {
+    /// Not derived: a derived default would leave the reply tracker UNSEEDED,
+    /// and an unseeded tracker reads its first reply as `First` whatever was
+    /// lost before it.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A component -> host frame after decoding, before the echo rule is applied.
+#[derive(Clone, Copy, Debug)]
+enum ReplyBody {
+    Ack { acked: u32 },
+    Motors([f32; 4]),
 }
 
 impl BindingHost {
     pub const fn new() -> Self {
         BindingHost {
             seq: 0,
+            sent: 0,
             awaiting: None,
             last_acked: None,
-            tracker: wire::SeqTracker::new(),
+            outstanding_sensor: None,
+            last_motors: None,
+            tracker: wire::SeqTracker::starting_at(0),
         }
+    }
+
+    /// The `sensor` frame a `Motors` reply would be accepted for, if any.
+    pub const fn outstanding_sensor(&self) -> Option<u32> {
+        self.outstanding_sensor
+    }
+
+    /// Number the next outbound frame.
+    fn next_seq(&mut self) -> u32 {
+        self.seq = self.seq.wrapping_add(1);
+        self.sent = self.sent.saturating_add(1);
+        self.seq
+    }
+
+    /// Did this host put `s` on the wire (within the last `sent` frames)?
+    fn was_sent(&self, s: u32) -> bool {
+        self.seq.wrapping_sub(s) < self.sent
     }
 
     /// The control frame whose ack this host is waiting on, if any.
@@ -468,9 +626,20 @@ impl BindingHost {
         if let Some(seq) = self.awaiting {
             return Err(HostError::AwaitingAck { seq });
         }
-        self.seq = self.seq.wrapping_add(1);
-        self.awaiting = Some(self.seq);
-        Ok(self.seq)
+        let seq = self.next_seq();
+        self.awaiting = Some(seq);
+        Ok(seq)
+    }
+
+    /// Number the next `sensor` frame; it becomes the outstanding tick,
+    /// superseding any earlier unanswered one.
+    fn next_sensor(&mut self) -> Result<u32, HostError> {
+        if let Some(seq) = self.awaiting {
+            return Err(HostError::AwaitingAck { seq });
+        }
+        let seq = self.next_seq();
+        self.outstanding_sensor = Some(seq);
+        Ok(seq)
     }
 
     /// `controller.configure` as a `Config` frame.
@@ -523,12 +692,9 @@ impl BindingHost {
         &mut self,
         f: &wire::WireSensorFrame,
     ) -> Result<[u8; SENSOR_WIRE_FRAME_LEN], HostError> {
-        if let Some(seq) = self.awaiting {
-            return Err(HostError::AwaitingAck { seq });
-        }
-        self.seq = self.seq.wrapping_add(1);
+        let seq = self.next_sensor()?;
         let mut out = [0u8; SENSOR_WIRE_FRAME_LEN];
-        wire::encode_sensor_frame(&mut out, self.seq, f);
+        wire::encode_sensor_frame(&mut out, seq, f);
         Ok(out)
     }
 
@@ -536,14 +702,31 @@ impl BindingHost {
     ///
     /// A frame that fails [`wire::decode_frame`] — including a `Motors` frame
     /// carrying a NaN command (#527) — is an error, never a reply: a host must
-    /// not apply motor commands it could not decode.
+    /// not apply motor commands it could not decode. A frame that decodes is
+    /// then held to the echo rule (see the table on [`BindingHost`]); every
+    /// refusal leaves the host's state exactly as it was.
     pub fn on_reply(&mut self, frame: &[u8]) -> Result<HostReply, HostError> {
         let (h, payload) = wire::decode_frame(frame)?;
-        match h.msg {
-            wire::MsgType::Ack => {
-                let acked = wire::decode_ack(payload)?;
+        let body = match h.msg {
+            wire::MsgType::Ack => ReplyBody::Ack {
+                acked: wire::decode_ack(payload)?,
+            },
+            wire::MsgType::Motors => ReplyBody::Motors(wire::decode_motors(payload)?),
+            other => return Err(HostError::UnexpectedType { msg: other }),
+        };
+        self.classify(h.seq, body)
+    }
+
+    /// The echo rule over a decoded reply whose header carried `seq`. Split
+    /// from the byte decoding so the Kani harness can drive it directly.
+    fn classify(&mut self, seq: u32, body: ReplyBody) -> Result<HostReply, HostError> {
+        match body {
+            ReplyBody::Ack { acked } => {
+                if seq != acked {
+                    return Err(HostError::AckSeqMismatch { header: seq, acked });
+                }
                 if self.awaiting == Some(acked) {
-                    self.tracker.observe(h.seq);
+                    self.tracker.observe(seq);
                     self.awaiting = None;
                     self.last_acked = Some(acked);
                     return Ok(HostReply::Acked { seq: acked });
@@ -552,21 +735,37 @@ impl BindingHost {
                 // accept the bytes and change nothing (§3, `Duplicate`). It
                 // must not close a LATER handshake, and it is not an error.
                 if self.last_acked == Some(acked) {
-                    self.tracker.observe(h.seq);
                     return Ok(HostReply::DuplicateAck { seq: acked });
                 }
                 Err(HostError::UnexpectedAck { acked })
             }
-            wire::MsgType::Motors => {
-                let motors = wire::decode_motors(payload)?;
-                let verdict = self.tracker.observe(h.seq);
-                Ok(HostReply::Motors {
-                    motors,
-                    seq: h.seq,
-                    verdict,
-                })
+            ReplyBody::Motors(motors) => {
+                // THE SENT-CHECK: only the outstanding tick is answerable.
+                if self.outstanding_sensor == Some(seq) {
+                    let verdict = self.tracker.observe(seq);
+                    self.outstanding_sensor = None;
+                    self.last_motors = Some(seq);
+                    return Ok(HostReply::Motors {
+                        motors,
+                        seq,
+                        verdict,
+                    });
+                }
+                // A duplicated datagram of the reply accepted last.
+                if self.last_motors == Some(seq) {
+                    return Ok(HostReply::Motors {
+                        motors,
+                        seq,
+                        verdict: wire::TickVerdict::Duplicate,
+                    });
+                }
+                let why = match self.outstanding_sensor {
+                    None => Stray::Unsolicited,
+                    Some(_) if !self.was_sent(seq) => Stray::NeverSent,
+                    Some(outstanding) => Stray::Superseded { outstanding },
+                };
+                Err(HostError::StrayMotors { seq, why })
             }
-            other => Err(HostError::UnexpectedType { msg: other }),
         }
     }
 }
@@ -839,12 +1038,15 @@ mod tests {
         ));
 
         let mut ack = [0u8; ACK_FRAME_LEN];
-        wire::encode_ack(&mut ack, 1, h.seq.wrapping_add(5));
-        assert!(matches!(
+        // Header and payload agree (the echo rule) but name a frame this host
+        // is not waiting on.
+        let stray = h.seq.wrapping_add(5);
+        wire::encode_ack(&mut ack, stray, stray);
+        assert_eq!(
             host.on_reply(&ack),
-            Err(HostError::UnexpectedAck { .. })
-        ));
-        wire::encode_ack(&mut ack, 1, h.seq);
+            Err(HostError::UnexpectedAck { acked: stray })
+        );
+        wire::encode_ack(&mut ack, h.seq, h.seq);
         assert_eq!(host.on_reply(&ack), Ok(HostReply::Acked { seq: h.seq }));
         assert!(host.sensor(&wire::WireSensorFrame::default()).is_ok());
 
@@ -883,6 +1085,360 @@ mod tests {
                 offset: 4
             }))
         );
+    }
+
+    // ── the echo rule, ENFORCED at the host (#614; provenance jess#167) ──────
+    //
+    // An integrator's probe drove `BindingHost` with replies it never sent and
+    // it accepted every one: `on_reply` only fed the header seq to a tracker.
+    // These four reproduce the probe's rows.
+
+    fn motors_frame(seq: u32) -> [u8; MOTORS_FRAME_LEN] {
+        let mut m = [0u8; MOTORS_FRAME_LEN];
+        wire::encode_motors(&mut m, seq, [0.5; 4]);
+        m
+    }
+
+    fn sensor_seq(host: &mut BindingHost) -> u32 {
+        let f = host.sensor(&wire::WireSensorFrame::default()).unwrap();
+        wire::decode_frame(&f).unwrap().0.seq
+    }
+
+    fn supervisor_seq(host: &mut BindingHost) -> u32 {
+        let f = host
+            .configure_supervisor(&wire::WireSupervisorConfig {
+                home: [0.0; 3],
+                fence_radius: 50.0,
+                cruise_alt: 2.0,
+                low_batt_v: 14.0,
+            })
+            .unwrap();
+        wire::decode_frame(&f).unwrap().0.seq
+    }
+
+    /// Probe row 1, the harmful one: Sensor 1 and 2 out, Motors 5 back. It
+    /// was accepted as `Dropped { lost: 3 }` — three ticks that were never
+    /// sent, reported lost.
+    #[test]
+    fn echo_rule_a_motors_seq_the_host_never_sent_is_refused() {
+        let mut host = BindingHost::new();
+        assert_eq!(sensor_seq(&mut host), 1);
+        assert!(host.on_reply(&motors_frame(1)).is_ok(), "the genuine reply");
+        assert_eq!(sensor_seq(&mut host), 2);
+        let r = host.on_reply(&motors_frame(5));
+        assert_eq!(
+            r,
+            Err(HostError::StrayMotors {
+                seq: 5,
+                why: Stray::NeverSent
+            }),
+            "a reply to seq 5, never sent, must be refused — not read as 3 lost ticks"
+        );
+        assert_eq!(
+            host.outstanding_sensor(),
+            Some(2),
+            "tick 2 is still answerable"
+        );
+    }
+
+    /// Probe row 2: a fresh host sent Sensor 1; Motors 1000 came back.
+    #[test]
+    fn echo_rule_a_far_future_motors_seq_on_a_fresh_host_is_refused() {
+        let mut host = BindingHost::new();
+        assert_eq!(sensor_seq(&mut host), 1);
+        let r = host.on_reply(&motors_frame(1000));
+        assert_eq!(
+            r,
+            Err(HostError::StrayMotors {
+                seq: 1000,
+                why: Stray::NeverSent
+            })
+        );
+    }
+
+    /// Probe row 3: nothing sent at all, and a Motors arrives.
+    #[test]
+    fn echo_rule_an_unsolicited_motors_is_refused() {
+        let mut host = BindingHost::new();
+        let r = host.on_reply(&motors_frame(5));
+        assert_eq!(
+            r,
+            Err(HostError::StrayMotors {
+                seq: 5,
+                why: Stray::Unsolicited
+            })
+        );
+    }
+
+    /// Probe row 4: a control frame seq 1 out; an Ack whose HEADER says 8 and
+    /// whose `acked-seq` payload says 1. The two must agree (§3).
+    #[test]
+    fn echo_rule_an_ack_whose_header_disagrees_with_its_payload_is_refused() {
+        let mut host = BindingHost::new();
+        let c = supervisor_seq(&mut host);
+        assert_eq!(c, 1);
+        let mut ack = [0u8; ACK_FRAME_LEN];
+        wire::encode_ack(&mut ack, 8, c);
+        let r = host.on_reply(&ack);
+        assert_eq!(
+            r,
+            Err(HostError::AckSeqMismatch {
+                header: 8,
+                acked: 1
+            })
+        );
+        assert_eq!(
+            host.awaiting_ack(),
+            Some(c),
+            "a refused ack closed the handshake"
+        );
+    }
+
+    /// GENUINE loss is still reported, and exactly: a fresh host sends Sensor
+    /// 1, 2, 3 and only 3's Motors arrives — two ticks have no answer.
+    #[test]
+    fn echo_rule_real_loss_is_reported_exactly() {
+        let mut host = BindingHost::new();
+        for want in 1..=3 {
+            assert_eq!(sensor_seq(&mut host), want);
+        }
+        let r = host.on_reply(&motors_frame(3));
+        assert!(
+            matches!(
+                r,
+                Ok(HostReply::Motors {
+                    seq: 3,
+                    verdict: wire::TickVerdict::Dropped { lost: 2 },
+                    ..
+                })
+            ),
+            "{r:?}"
+        );
+        // ...and across an interleaved, acked control frame no loss is
+        // invented: Sensor 4 -> Motors 4, Config 5 -> Ack 5, Sensor 6 -> Motors 6.
+        assert_eq!(sensor_seq(&mut host), 4);
+        assert!(matches!(
+            host.on_reply(&motors_frame(4)),
+            Ok(HostReply::Motors {
+                seq: 4,
+                verdict: wire::TickVerdict::InOrder,
+                ..
+            })
+        ));
+        let c = supervisor_seq(&mut host);
+        let mut ack = [0u8; ACK_FRAME_LEN];
+        wire::encode_ack(&mut ack, c, c);
+        assert_eq!(host.on_reply(&ack), Ok(HostReply::Acked { seq: c }));
+        let s = sensor_seq(&mut host);
+        assert!(matches!(
+            host.on_reply(&motors_frame(s)),
+            Ok(HostReply::Motors {
+                verdict: wire::TickVerdict::InOrder,
+                ..
+            })
+        ));
+    }
+
+    /// A refused reply changes NOTHING: after a stray Motors 5 is refused, the
+    /// genuine reply to the outstanding tick still reads exactly as before.
+    #[test]
+    fn echo_rule_a_refused_reply_leaves_the_host_state_untouched() {
+        let mut host = BindingHost::new();
+        assert_eq!(sensor_seq(&mut host), 1);
+        assert!(matches!(
+            host.on_reply(&motors_frame(1)),
+            Ok(HostReply::Motors { seq: 1, .. })
+        ));
+        assert_eq!(sensor_seq(&mut host), 2);
+        assert_eq!(
+            host.on_reply(&motors_frame(5)),
+            Err(HostError::StrayMotors {
+                seq: 5,
+                why: Stray::NeverSent
+            })
+        );
+        assert!(
+            matches!(
+                host.on_reply(&motors_frame(2)),
+                Ok(HostReply::Motors {
+                    seq: 2,
+                    verdict: wire::TickVerdict::InOrder,
+                    ..
+                })
+            ),
+            "a refused reply must not move the host's sequence baseline"
+        );
+    }
+
+    /// Reordering and duplication. A duplicated datagram of the reply just
+    /// accepted reads `Duplicate` (accept the bytes, do not act twice). A reply
+    /// to a SUPERSEDED tick — Sensor 3 then Sensor 4 sent, Motors 3 arriving
+    /// after — is refused: only the newest tick is answerable, so 3 counts as
+    /// lost when 4's reply lands.
+    #[test]
+    fn echo_rule_a_duplicate_reads_duplicate_and_a_superseded_reply_is_refused() {
+        let mut host = BindingHost::new();
+        assert_eq!(sensor_seq(&mut host), 1);
+        assert!(host.on_reply(&motors_frame(1)).is_ok());
+        assert_eq!(sensor_seq(&mut host), 2);
+        assert!(host.on_reply(&motors_frame(2)).is_ok());
+        assert!(
+            matches!(
+                host.on_reply(&motors_frame(2)),
+                Ok(HostReply::Motors {
+                    seq: 2,
+                    verdict: wire::TickVerdict::Duplicate,
+                    ..
+                })
+            ),
+            "a duplicated datagram of the last reply"
+        );
+        assert_eq!(sensor_seq(&mut host), 3);
+        assert_eq!(sensor_seq(&mut host), 4);
+        let r = host.on_reply(&motors_frame(3));
+        assert_eq!(
+            r,
+            Err(HostError::StrayMotors {
+                seq: 3,
+                why: Stray::Superseded { outstanding: 4 }
+            }),
+            "a reply to the superseded tick 3"
+        );
+        let r = host.on_reply(&motors_frame(4));
+        assert!(
+            matches!(
+                r,
+                Ok(HostReply::Motors {
+                    seq: 4,
+                    verdict: wire::TickVerdict::Dropped { lost: 1 },
+                    ..
+                })
+            ),
+            "{r:?}"
+        );
+        // A Motors carrying the seq of a CONTROL frame answers nothing —
+        // whether or not a tick is outstanding.
+        let c = supervisor_seq(&mut host);
+        assert_eq!(
+            host.on_reply(&motors_frame(c)),
+            Err(HostError::StrayMotors {
+                seq: c,
+                why: Stray::Unsolicited
+            })
+        );
+        let mut ack = [0u8; ACK_FRAME_LEN];
+        wire::encode_ack(&mut ack, c, c);
+        assert!(host.on_reply(&ack).is_ok());
+        let s = sensor_seq(&mut host);
+        assert_eq!(
+            host.on_reply(&motors_frame(c)),
+            Err(HostError::StrayMotors {
+                seq: c,
+                why: Stray::Superseded { outstanding: s }
+            })
+        );
+        // ...and the Motors frame of tick 2, long answered, is not a duplicate
+        // of anything now: refused.
+        assert!(host.on_reply(&motors_frame(2)).is_err());
+    }
+
+    /// The documented edge: a control frame sent while a tick is outstanding,
+    /// acked BEFORE that tick's reply arrives. The reply still answers the
+    /// outstanding tick, so it is accepted — and reads `Late`, which the
+    /// binding's table says to discard. Pinned so the doc's sentence stays true.
+    #[test]
+    fn echo_rule_a_tick_reply_overtaken_by_a_later_ack_reads_late() {
+        let mut host = BindingHost::new();
+        let s = sensor_seq(&mut host);
+        let c = supervisor_seq(&mut host);
+        let mut ack = [0u8; ACK_FRAME_LEN];
+        wire::encode_ack(&mut ack, c, c);
+        assert_eq!(host.on_reply(&ack), Ok(HostReply::Acked { seq: c }));
+        assert!(matches!(
+            host.on_reply(&motors_frame(s)),
+            Ok(HostReply::Motors {
+                verdict: wire::TickVerdict::Late { by: 1 },
+                ..
+            })
+        ));
+    }
+
+    /// THE INVERSE PAIR: `LinkBackend` leads with `Motors` and must refuse a
+    /// `Sensor` reply that does not echo the seq it sent. A reply echoing a
+    /// different seq is not this exchange's answer, so it must neither update
+    /// the cache nor be classified as a tick.
+    #[test]
+    fn echo_rule_link_backend_refuses_a_sensor_reply_with_the_wrong_seq() {
+        struct Misecho(u32);
+        impl Transport for Misecho {
+            fn exchange(
+                &mut self,
+                out: &[u8; MOTORS_FRAME_LEN],
+                reply: &mut [u8; SENSOR_WIRE_FRAME_LEN],
+            ) {
+                let (h, _) = wire::decode_frame(out).unwrap();
+                let f = wire::WireSensorFrame {
+                    battery_v: Some(16.4),
+                    ..Default::default()
+                };
+                wire::encode_sensor_frame(reply, h.seq.wrapping_add(self.0), &f);
+            }
+        }
+        let mut backend = LinkBackend::new(Misecho(1000), 0.002);
+        assert_eq!(
+            backend.last_verdict(),
+            None,
+            "a Sensor reply to a seq never sent was classified as a tick"
+        );
+        assert_eq!(backend.read_battery_v(), None, "and its payload was cached");
+        assert_eq!(backend.misechoed_replies(), 1);
+        assert_eq!(
+            backend.rejected_replies(),
+            0,
+            "well-formed, so not 'rejected'"
+        );
+        backend.write_motors(&[0.1; 4]);
+        assert_eq!(backend.last_verdict(), None);
+        assert_eq!(backend.read_battery_v(), None);
+        assert_eq!(backend.misechoed_replies(), 2);
+    }
+
+    /// The inverse pair still reports GENUINE loss exactly: when one
+    /// exchange's reply is mis-echoed, the next correctly echoed reply reads
+    /// `Dropped { lost: 1 }` — one exchange went unanswered, no more.
+    #[test]
+    fn echo_rule_link_backend_counts_a_refused_reply_as_one_lost_exchange() {
+        struct OneBad {
+            n: u32,
+        }
+        impl Transport for OneBad {
+            fn exchange(
+                &mut self,
+                out: &[u8; MOTORS_FRAME_LEN],
+                reply: &mut [u8; SENSOR_WIRE_FRAME_LEN],
+            ) {
+                let (h, _) = wire::decode_frame(out).unwrap();
+                self.n += 1;
+                let seq = if self.n == 3 {
+                    h.seq.wrapping_add(7)
+                } else {
+                    h.seq
+                };
+                wire::encode_sensor_frame(reply, seq, &wire::WireSensorFrame::default());
+            }
+        }
+        let mut backend = LinkBackend::new(OneBad { n: 0 }, 0.002);
+        assert_eq!(backend.last_verdict(), Some(wire::TickVerdict::First));
+        backend.write_motors(&[0.1; 4]);
+        assert_eq!(backend.last_verdict(), Some(wire::TickVerdict::InOrder));
+        backend.write_motors(&[0.1; 4]); // the mis-echoed one
+        assert_eq!(backend.last_verdict(), None);
+        backend.write_motors(&[0.1; 4]);
+        assert_eq!(
+            backend.last_verdict(),
+            Some(wire::TickVerdict::Dropped { lost: 1 })
+        );
+        assert_eq!(backend.misechoed_replies(), 1);
     }
 
     /// The verified core stabilises a tilted vehicle **over the HITL link** —
