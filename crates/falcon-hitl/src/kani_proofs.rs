@@ -463,8 +463,8 @@ fn a_well_formed_supervisor_config_frame_dispatches_without_panicking() {
 }
 
 /// `Calibration` (v2) — 72 bytes, `pilot.configure-calibration` (relay#611):
-/// five vec3s, then `mag-offdiag` appended at 60/64/68 (provisional
-/// `[xy, xz, yz]` order — must match #611's relay-calib ordering). Every one
+/// five vec3s, then `mag-offdiag` appended at 60/64/68 (`[xy, xz, yz]`, the
+/// order of `relay_calib::CalParams::mag_offdiag`). Every one
 /// of the 18 slots is NonFinite-checked; the unwind bound covers the 18-slot
 /// loops.
 #[kani::proof]
