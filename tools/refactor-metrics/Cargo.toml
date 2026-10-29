@@ -1,0 +1,18 @@
+[package]
+name = "refactor-metrics"
+version = "1.0.0"
+edition = "2021"
+publish = false
+description = "Frozen fix-of-a-fix (re-fix) detector over first-parent history (pulseengine/pulseengine.eu#294)"
+license = "Apache-2.0"
+
+# Standalone workspace: a research instrument, never part of the root
+# workspace's build graph or CI. Version 1.0.0 IS the frozen method; see README.
+[workspace]
+
+[dependencies]
+regex = "1"
+serde_json = "1"
+
+[profile.release]
+debug = false

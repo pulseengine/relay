@@ -1,0 +1,11 @@
+# Revisions passed to `git blame --ignore-rev` (in file order), and excluded
+# as re-fixing commits (a FIX whose full sha starts with an entry is never the
+# fixing side of a pair).
+#
+# Format: one hex revision (4..40 chars) per line (first token), rest = note.
+# Every entry must resolve to a commit in the measured repo, else the tool
+# exits 1 (the baseline script would have silently blamed nothing).
+#
+# Frozen with refactor-metrics 1.0.0. Changing this list changes the
+# measurement: bump the tool version and report it.
+4c5feda fix(ci): the required Format gate has never been able to fail (#424) -- the repo-wide cargo fmt

@@ -1,0 +1,112 @@
+# FIX commits (first-parent, origin/main): 78 of 500
+# blame fix->fix pairs (>= 1 overlapping lines): 24; distinct re-fixing commits: 19
+# chain depth distribution (1 = fix of non-fix code): {1: 59, 2: 12, 3: 6, 4: 1}
+  2026-05-19 be1c5a3 fix(release): portable sha256 via python3 (#12)
+      <- ebb0682 fix(release): use shasum -a 256 for cross-platform portability  [2 lines: .github/workflows/release.yml:2]
+  2026-06-10 875a7f7 fix(video): transparent achievement cards — crop burned-in HUD
+      <- 26b7199 docs(falcon-video): fix the setup gap + add the one "achieveme  [4 lines: examples/falcon-sitl-gz/tools/make-achievements-video.sh:3, examples/falcon-sitl-gz/tools/gen-achievements-card.py:1]
+  2026-06-11 bacf862 fix(video): achievements framing — native 1280x720, opaque reg
+      <- 26b7199 docs(falcon-video): fix the setup gap + add the one "achieveme  [22 lines: examples/falcon-sitl-gz/tools/gen-achievements-card.py:21, examples/falcon-sitl-gz/tools/make-achievements-video.sh:1]
+  2026-06-11 bacf862 fix(video): achievements framing — native 1280x720, opaque reg
+      <- 875a7f7 fix(video): transparent achievement cards — crop burned-in HUD  [6 lines: examples/falcon-sitl-gz/tools/make-achievements-video.sh:4, examples/falcon-sitl-gz/tools/gen-achievements-card.py:2]
+  2026-07-29 34fa39a fix(video): default the TTS voice to af_nova (the one actually
+      <- 26b7199 docs(falcon-video): fix the setup gap + add the one "achieveme  [1 lines: examples/falcon-sitl-gz/tools/make-achievements-video.sh:1]
+  2026-07-30 109fd8e fix(build): de-conflate std from bazel-bindings; select artifa
+      <- 89b325a fix(oci): falcon-rate shipped as a core module — export cabi_r  [1 lines: wasm/cm/rate/src/lib.rs:1]
+  2026-09-10 0bd85c2 fix(verus): the gate enforcing the proofs has never passed — a
+      <- 585ad08 fix(verification-gate): use sw-verification type + heuristic b  [5 lines: scripts/run-falcon-verification.py:5]
+  2026-09-17 bcbe93e fix(ci): the fleet monitor installs gh instead of assuming it 
+      <- 7daf818 fix(ci): the fleet monitor can see a wedged job — and "could n  [4 lines: artifacts/verification/FV-RELAY-FLEET-001.yaml:3, .github/workflows/fleet-status.yml:1]
+  2026-09-17 505d481 fix(evidence): single-quoted text is literal — the checker was
+      <- 3df545c fix(evidence): no verified artifact on evidence that cannot ru  [2 lines: scripts/check-evidence.rs:2]
+  2026-09-18 f9ea446 fix(ci): the v1.139 review's findings — an injectable dispatch
+      <- bcbe93e fix(ci): the fleet monitor installs gh instead of assuming it   [1 lines: .github/actions/setup-gh/action.yml:1]
+  2026-09-18 f9ea446 fix(ci): the v1.139 review's findings — an injectable dispatch
+      <- 3df545c fix(evidence): no verified artifact on evidence that cannot ru  [1 lines: scripts/check-evidence.rs:1]
+  2026-09-18 0185e8a fix(core+bench): the accelerometer is not a gravity reference 
+      <- 7daf818 fix(ci): the fleet monitor can see a wedged job — and "could n  [3 lines: .github/workflows/fleet-status.yml:3]
+  2026-09-18 0185e8a fix(core+bench): the accelerometer is not a gravity reference 
+      <- 283224d fix(core): the 15-second swing is altitude-integral windup; pl  [1 lines: crates/falcon-core/plain/src/lib.rs:1]
+  2026-09-18 0185e8a fix(core+bench): the accelerometer is not a gravity reference 
+      <- a1b0e17 fix(core): an absent battery is ABSENT, not healthy — and it b  [1 lines: crates/falcon-core/plain/src/lib.rs:1]
+  2026-09-23 854a0ac fix(failsafe): silence is only a failsafe once the vehicle has
+      <- 0185e8a fix(core+bench): the accelerometer is not a gravity reference   [1 lines: crates/falcon-core/plain/src/lib.rs:1]
+  2026-09-25 279b0c5 fix(est): the accelerometer is never a tilt reference in fligh
+      <- 8358958 fix(ci): harden against the rivet-install OOM — pin rivet + ca  [8 lines: .github/workflows/release.yml:4, .github/workflows/verification-gate.yml:4]
+  2026-09-25 279b0c5 fix(est): the accelerometer is never a tilt reference in fligh
+      <- 0185e8a fix(core+bench): the accelerometer is not a gravity reference   [18 lines: crates/falcon-core/plain/src/lib.rs:13, artifacts/verification/FV-FALCON-HOLD-001.yaml:5]
+  2026-10-09 2df2b53 fix(ci): bazel.yml queries instead of enumerating — #407's cau
+      <- b03a179 fix(ci): the cascade needs no composition any more — retire th  [1 lines: .github/workflows/bazel.yml:1]
+  2026-10-09 efc0dbf docs(release): disclose the v1.140 clean-room review, write th
+      <- 16a0d70 fix(release): every release records which verification tracks   [4 lines: scripts/verification-tracks.rs:4]
+  2026-10-09 56ab534 fix(ci): kani.yml scopes a PUSH against the push's own base — 
+      <- 16a0d70 fix(release): every release records which verification tracks   [1 lines: scripts/verification-tracks.rs:1]
+  2026-10-09 c2ed8bf fix(sim): the hold bars now EQUAL HOLD-P01's figures, and the 
+      <- 0185e8a fix(core+bench): the accelerometer is not a gravity reference   [2 lines: artifacts/verification/FV-FALCON-HOLD-001.yaml:1, examples/falcon-sitl-gz/src/main.rs:1]
+  2026-10-10 b7e517e fix(notes): retire two structural-gap entries whose gaps are c
+      <- efc0dbf docs(release): disclose the v1.140 clean-room review, write th  [1 lines: scripts/verification-tracks.rs:1]
+  2026-10-22 86239ac fix(sitl-gz): retire the legacy hover scenario; default to fli
+      <- c2ed8bf fix(sim): the hold bars now EQUAL HOLD-P01's figures, and the   [1 lines: examples/falcon-sitl-gz/src/main.rs:1]
+  2026-10-28 6ece964 fix(falcon-cm-rt): per-call arena reclamation via CallScope, K
+      <- 6d11f9c fix(rate): bounded arena instead of a growing allocator — remo  [5 lines: wasm/cm/rate/src/lib.rs:5]
+
+# per window: commits, fixes, fix%, re-fixes (blame), fix lines churn
+  v0.x                       2026-04-12..2026-06-02 commits= 82 fix=  4 (5%) refix= 1 fixchurn=394
+  v1.0-49                    2026-06-02..2026-06-10 commits= 70 fix=  3 (4%) refix= 0 fixchurn=2542
+  v1.50-99                   2026-06-10..2026-06-26 commits= 90 fix=  9 (10%) refix= 2 fixchurn=1161
+  v1.100-119                 2026-06-26..2026-07-16 commits= 26 fix=  1 (4%) refix= 0 fixchurn=93
+  v1.120-129                 2026-07-16..2026-07-29 commits= 38 fix=  2 (5%) refix= 1 fixchurn=203
+  v1.130-135                 2026-07-29..2026-08-26 commits= 34 fix=  7 (21%) refix= 1 fixchurn=325
+  v1.136-138                 2026-08-26..2026-09-15 commits= 27 fix=  7 (26%) refix= 1 fixchurn=616
+  v1.139                     2026-09-16..2026-09-18 commits= 35 fix= 18 (51%) refix= 3 fixchurn=19386
+  v1.140                     2026-09-18..2026-10-09 commits= 62 fix= 14 (23%) refix= 5 fixchurn=2507
+  post-v1.140 (unreleased)   2026-10-09..2026-10-28 commits= 36 fix= 13 (36%) refix= 5 fixchurn=3834
+
+# hotspots: files by #fix commits, #refix commits (blame-overlap on that file), fix churn, total commits
+  crates/falcon-core/plain/src/lib.rs                                    fix=13 refix_pairs= 4 fixchurn=  2143 allcommits=54
+  .github/workflows/release.yml                                          fix=10 refix_pairs= 2 fixchurn=   143 allcommits=42
+  .github/workflows/soak.yml                                             fix= 8 refix_pairs= 0 fixchurn=   180 allcommits=16
+  examples/falcon-sitl-gz/src/main.rs                                    fix= 7 refix_pairs= 2 fixchurn=  1076 allcommits=31
+  .github/workflows/verification-gate.yml                                fix= 6 refix_pairs= 1 fixchurn=   125 allcommits=32
+  examples/falcon-sitl-gz/src/physics.rs                                 fix= 6 refix_pairs= 0 fixchurn=   239 allcommits=17
+  .github/workflows/kani.yml                                             fix= 5 refix_pairs= 0 fixchurn=    79 allcommits=29
+  scripts/build-components.sh                                            fix= 5 refix_pairs= 0 fixchurn=   110 allcommits=15
+  .gitignore                                                             fix= 4 refix_pairs= 0 fixchurn=     7 allcommits=12
+  examples/falcon-sitl-gz/tools/make-achievements-video.sh               fix= 4 refix_pairs= 4 fixchurn=   155 allcommits=4
+  wasm/cm/rate/src/lib.rs                                                fix= 4 refix_pairs= 2 fixchurn=   160 allcommits=9
+  .github/workflows/gazebo.yml                                           fix= 4 refix_pairs= 0 fixchurn=    96 allcommits=17
+  scripts/check-evidence.rs                                              fix= 4 refix_pairs= 2 fixchurn=   478 allcommits=4
+  scripts/verification-tracks.rs                                         fix= 4 refix_pairs= 3 fixchurn=   299 allcommits=6
+  artifacts/verification/FV-FALCON-ENDURANCE-001.yaml                    fix= 4 refix_pairs= 0 fixchurn=   128 allcommits=7
+  artifacts/verification/FV-FALCON-COV-004.yaml                          fix= 3 refix_pairs= 0 fixchurn=     9 allcommits=6
+  scripts/run-falcon-verification.py                                     fix= 3 refix_pairs= 1 fixchurn=   178 allcommits=20
+  crates/relay-adrc/plain/src/lib.rs                                     fix= 3 refix_pairs= 0 fixchurn=   237 allcommits=6
+  examples/falcon-sitl-gz/tools/gen-achievements-card.py                 fix= 3 refix_pairs= 3 fixchurn=   125 allcommits=3
+  BUILD.bazel                                                            fix= 3 refix_pairs= 0 fixchurn=   171 allcommits=52
+  wasm/cm/rate/Cargo.toml                                                fix= 3 refix_pairs= 0 fixchurn=    13 allcommits=9
+  .github/workflows/ci.yml                                               fix= 3 refix_pairs= 0 fixchurn=    90 allcommits=20
+  tests/cascade-sitl-wasm/src/main.rs                                    fix= 3 refix_pairs= 0 fixchurn=    60 allcommits=12
+  wasm/cm/cascade/src/lib.rs                                             fix= 3 refix_pairs= 0 fixchurn=    29 allcommits=12
+  crates/relay-mix-quad/plain/src/lib.rs                                 fix= 3 refix_pairs= 0 fixchurn=   252 allcommits=10
+  .github/workflows/fleet-status.yml                                     fix= 3 refix_pairs= 2 fixchurn=   232 allcommits=4
+  docs/RELEASE-PLAN.md                                                   fix= 3 refix_pairs= 0 fixchurn=    12 allcommits=9
+  artifacts/swreq/SWREQ-FALCON-ENDURANCE-P01.yaml                        fix= 3 refix_pairs= 0 fixchurn=   104 allcommits=12
+  artifacts/verification/FV-FALCON-HOLD-001.yaml                         fix= 3 refix_pairs= 2 fixchurn=   199 allcommits=6
+  artifacts/verification/FV-FALCON-COV-005.yaml                          fix= 2 refix_pairs= 0 fixchurn=     7 allcommits=5
+
+# files by refix pairs
+  examples/falcon-sitl-gz/tools/make-achievements-video.sh               4
+  crates/falcon-core/plain/src/lib.rs                                    4
+  examples/falcon-sitl-gz/tools/gen-achievements-card.py                 3
+  scripts/verification-tracks.rs                                         3
+  .github/workflows/release.yml                                          2
+  wasm/cm/rate/src/lib.rs                                                2
+  .github/workflows/fleet-status.yml                                     2
+  scripts/check-evidence.rs                                              2
+  artifacts/verification/FV-FALCON-HOLD-001.yaml                         2
+  examples/falcon-sitl-gz/src/main.rs                                    2
+  scripts/run-falcon-verification.py                                     1
+  artifacts/verification/FV-RELAY-FLEET-001.yaml                         1
+  .github/actions/setup-gh/action.yml                                    1
+  .github/workflows/verification-gate.yml                                1
+  .github/workflows/bazel.yml                                            1
