@@ -11,7 +11,7 @@
 # listed. Each track reports RUN(pass/fail) / PRESENT(not run here) / ABSENT.
 # Exit non-zero only if a track that ACTUALLY RAN failed.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 ENGINES=(relay-lc relay-sch relay-sc relay-hs relay-cfdp)
 [ "${1:-}" = "--all" ] && targets=("${ENGINES[@]}") || targets=("${1:-relay-lc}")

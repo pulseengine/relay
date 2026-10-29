@@ -48,7 +48,7 @@ trap 'kill $SRV_PID $GUI_PID 2>/dev/null || true' EXIT
 echo "== waiting for the VideoRecorder service =="
 echo "   >>> CLICK the Gazebo window to focus it so the recorder can arm <<<"
 ARMED=0
-for i in $(seq 1 30); do   # up to ~60 s
+for _ in $(seq 1 30); do   # up to ~60 s
   if gz service --list 2>/dev/null | grep -q '/gui/record_video'; then
     ARMED=1; break
   fi

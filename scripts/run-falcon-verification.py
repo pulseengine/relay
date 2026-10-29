@@ -27,6 +27,8 @@ Usage:
     python3 scripts/run-falcon-verification.py --markdown
 """
 
+from __future__ import annotations
+
 import argparse
 import glob
 import json

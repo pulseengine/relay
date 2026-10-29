@@ -19,6 +19,8 @@ gives the workflow comment-write permission (see the
 `pull-requests: write` permission in the workflow).
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import subprocess
