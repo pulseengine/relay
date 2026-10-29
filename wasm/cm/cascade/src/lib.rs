@@ -47,10 +47,10 @@ use bindings::exports::pulseengine::falcon_cascade::observer::Guest as ObserverG
 // the stakeholder's decision (pulseengine/jess#167) and the only one of the
 // three candidate shapes with a byte-identity measurement behind it.
 use bindings::exports::pulseengine::falcon_cascade::pilot::{
-    Guest as PilotGuest, PilotCommand, SupervisorConfig,
+    Guest as PilotGuest, PilotCommand, SensorCalibration, SupervisorConfig,
 };
 use bindings::pulseengine::falcon_cascade::types::{
-    FlightState, MotorPwm, SensorFrame, VehicleConfig, Waypoint,
+    FlightState, MotorPwm, SensorFrame, Vec3 as Vec3Wit, VehicleConfig, Waypoint,
 };
 
 use core::cell::RefCell;
@@ -81,6 +81,8 @@ unsafe impl<T> Sync for SingleThreaded<T> {}
 static CORE: SingleThreaded<Option<FlightSupervisor>> = SingleThreaded(RefCell::new(None));
 
 /// The supervisor's configuration, if the host called `pilot.configure-supervisor`.
+/// Stored as sent; an INVALID one (see `supcfg_valid`) counts as `None` for
+/// every purpose below.
 ///
 /// `None` IS NOT A NEUTRAL STATE and must not be treated as one. A supervisor on
 /// defaults is worse than no supervisor: a 0 m geofence about a (0,0,0) home
@@ -202,14 +204,85 @@ const SUP_LOW_BATT_UNSET: f32 = 0.0;
 ///
 /// NOT NED-signed, unlike every other altitude in this seam. falcon-core
 /// documents it as "m AGL" and negates it when deriving the setpoint, so a
-/// negative value here commands a descent BELOW the ground. Hence `positive`
-/// below, not merely finite.
+/// negative value here commands a descent BELOW the ground — which is why
+/// `supcfg_valid` requires a host's value to be positive, not merely finite.
+///
+/// These three constants are reached ONLY while arming is refused
+/// (`FailsafeConfigured` false): they keep a never-armed, unconfigured or
+/// mis-configured supervisor from latching spurious failsafes on the ground.
+/// They are never what an ARMED vehicle flies on.
 const SUP_CRUISE_UNSET: f32 = 2.0;
 
-/// The supervisor's four constructor inputs, sanitised, with the unconfigured
-/// case spelled out above rather than left to a zero.
+/// Is this supervisor configuration usable AS GIVEN? (#609 finding 3)
+///
+/// Each bound is the field's OWN definition (cascade.wit `supervisor-config`
+/// and `FlightSupervisor::new`), not an invented range:
+///   * `home` — NED metres, any finite point;
+///   * `fence-radius` — metres about home, finite and > 0 (0 or negative is no
+///     fence; +inf is no fence);
+///   * `cruise-alt` — metres AGL, POSITIVE (the supervisor negates it; 0 or
+///     negative commands a descent into the ground), finite;
+///   * `low-batt-v` — whole-pack volts, finite and > 0 (0 or negative puts both
+///     derived per-cell thresholds at or below zero, so the battery failsafe
+///     could never fire).
+///
+/// This used to be done field-by-field with `sane()`, which mapped every
+/// invalid value to something PERMISSIVE — a NaN fence to 1e9 (geofence off),
+/// a NaN low-batt to 0 V (battery failsafe off), a -30 cruise to 2 m — while
+/// `FailsafeConfigured` was still declared TRUE. Now an invalid configuration
+/// is treated exactly like no configuration: nothing is clamped, the
+/// configuration-dependent failsafes stay at their inactive constants, and
+/// `FailsafeConfigured` is declared FALSE, so arming is refused.
+fn supcfg_valid(c: &SupervisorConfig) -> bool {
+    let pos = |v: f32| v.is_finite() && v > 0.0;
+    c.home.x.is_finite()
+        && c.home.y.is_finite()
+        && c.home.z.is_finite()
+        && pos(c.fence_radius)
+        && pos(c.cruise_alt)
+        && pos(c.low_batt_v)
+}
+
+/// `pilot.configure-calibration`'s record as falcon-core's `CalParams` — a
+/// field-for-field copy, no conversion of units or meaning (`mag-offdiag`
+/// keeps its `[xy, xz, yz]` order). NOT validated here and never clamped:
+/// `CalParams::is_valid` (finite, accel scale > 0, soft-iron positive
+/// definite) is applied by `FlightSupervisor::set_calibration`, once, so the
+/// component and the native mirror cannot drift from it.
+fn cal_params(c: &SensorCalibration) -> falcon_core::relay_calib::CalParams {
+    let v = |a: &Vec3Wit| [a.x, a.y, a.z];
+    falcon_core::relay_calib::CalParams {
+        gyro_bias: v(&c.gyro_bias),
+        accel_bias: v(&c.accel_bias),
+        accel_scale: v(&c.accel_scale),
+        mag_offset: v(&c.mag_offset),
+        mag_scale: v(&c.mag_scale),
+        mag_offdiag: v(&c.mag_offdiag),
+    }
+}
+
+/// The calibration the host CONFIGURED: `Some` = the last call to
+/// `pilot.configure-calibration` carried a VALID calibration (the identity
+/// included — "calibrated upstream", jess#167); `None` = never called, or the
+/// last call was INVALID (which revokes). This is explicit state, NOT a
+/// comparison against the identity, and it is what decides
+/// `CalibrationPresent` (via `FlightSupervisor::set_calibration`). Kept here
+/// as well as in the core so a rebuild by `configure` /
+/// `configure-supervisor` does not silently drop it.
+static CALIB: SingleThreaded<Option<falcon_core::relay_calib::CalParams>> =
+    SingleThreaded(RefCell::new(None));
+
+/// The configuration the supervisor may actually be built from: `Some` only if
+/// the host sent one AND it is valid.
+fn usable_supcfg(cfg: Option<&SupervisorConfig>) -> Option<&SupervisorConfig> {
+    cfg.filter(|c| supcfg_valid(c))
+}
+
+/// The supervisor's four constructor inputs. A usable configuration is passed
+/// through VERBATIM; anything else (absent or invalid) gets the inactive
+/// constants above — never a clamped variant of what the host sent.
 fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
-    match cfg {
+    match usable_supcfg(cfg) {
         None => (
             [0.0, 0.0, 0.0],
             SUP_FENCE_UNSET,
@@ -217,19 +290,56 @@ fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
             SUP_LOW_BATT_UNSET,
         ),
         Some(c) => (
-            [
-                sane(c.home.x, 0.0, false),
-                sane(c.home.y, 0.0, false),
-                sane(c.home.z, 0.0, false),
-            ],
-            // A non-finite or non-positive radius falls back to INACTIVE, never
-            // to 0.0 — same reason as the constant.
-            sane(c.fence_radius, SUP_FENCE_UNSET, true),
-            sane(c.cruise_alt, SUP_CRUISE_UNSET, true),
-            sane(c.low_batt_v, SUP_LOW_BATT_UNSET, false),
+            [c.home.x, c.home.y, c.home.z],
+            c.fence_radius,
+            c.cruise_alt,
+            c.low_batt_v,
         ),
     }
 }
+
+/// The pre-arm rows `FlightSupervisor::update_preflight` (re)writes from real
+/// input on EVERY `step`. A freshly built supervisor has measured none of
+/// them, so the component declares every one FALSE at construction (#609
+/// finding 2).
+///
+/// WHY. `FlightSupervisor::new` forces the legacy six rows TRUE for bring-up
+/// back-compat and leaves the breadth rows undeclared, i.e. not required. A
+/// host whose first act was `arm` — the first call, or any call after a
+/// configure rebuilt the supervisor — was judged against that, and armed past
+/// battery, estimator convergence, calibration and `MotorsHealthy` without any
+/// of them ever having been measured. Declared false here, they stay false
+/// until the first `step` refreshes them, so "never measured" refuses exactly
+/// as "measured bad" does. (What a step refreshes them FROM is falcon-core's
+/// business and not uniformly a live signal: `SensorsHealthy` is rewritten
+/// from a default-true field nothing refreshes, and `GeofenceLoaded` lags the
+/// fence radius by one step. This closes the never-stepped bypass; it does
+/// not make those two rows measurements.)
+///
+/// EXACTLY the rows `update_preflight` refreshes, and no others. Declaring an
+/// integration-fed row (RC/GCS link, params-from-NVM, sensor freshness, ...)
+/// would block arming forever, because nothing in this component ever writes
+/// it again. `EscTelemetry` is excluded for the same reason: `step` declares it
+/// only on first sight of eRPM, so a rig without ESC telemetry never feeds it.
+/// `FailsafeConfigured` is in the list for completeness; `ensure_supervisor`
+/// re-declares it from the configuration straight afterwards.
+const ROWS_FED_BY_STEP: [falcon_core::relay_preflight::CheckId; 12] = {
+    use falcon_core::relay_preflight::CheckId as C;
+    [
+        C::SensorsHealthy,
+        C::EstimatorConverged,
+        C::CalibrationPresent,
+        C::GeofenceLoaded,
+        C::BatteryOk,
+        C::FailsafeConfigured,
+        C::EstimatorInnovation,
+        C::GnssAgreement,
+        C::GeofenceSane,
+        C::BatteryTakeoffMargin,
+        C::MotorsHealthy,
+        C::NoFailsafeLatched,
+    ]
+};
 
 /// Build the supervisor into its slot if absent, and DECLARE whether it is
 /// configured — on every call, not only on construction.
@@ -238,8 +348,9 @@ fn sup_params(cfg: Option<&SupervisorConfig>) -> ([f32; 3], f32, f32, f32) {
 /// `arm_check_table` is read inside `FlightSupervisor::command`, and the
 /// constructor defaults the first six pre-arm rows TRUE for bring-up
 /// back-compat. A host that sent `arm` before its first `step` would otherwise
-/// arm an unconfigured supervisor off that default — the gate must be correct at
-/// the moment it is READ, not merely refreshed once a tick has run.
+/// arm off that default — the gate must be correct at the moment it is READ,
+/// not merely refreshed once a tick has run. That applies to EVERY row a step
+/// feeds, not only this one, which is what `ROWS_FED_BY_STEP` closes.
 ///
 /// AND IT HAS TO BE RE-DECLARED AFTER EVERY `step`, which the first version of
 /// this missed. `update_preflight` DOES write the `FailsafeConfigured` row — as
@@ -275,12 +386,64 @@ fn ensure_supervisor<'a>(
             sup.set_hover_thrust(sane(c.hover_thrust, 0.5, true));
             apply_tuning(sup.core_mut(), c);
         }
+        // The host's calibration, so a rebuild keeps it. A freshly built
+        // supervisor has NONE configured (`CalibrationPresent` false), so only
+        // a configured valid one is re-installed; `None` leaves it that way.
+        if let Some(c) = *CALIB.0.borrow() {
+            sup.set_calibration(c);
+        }
+        // UNDECLARED IS FAIL, NOT PASS (#609 finding 2). See
+        // `ROWS_FED_BY_STEP`: until a `step` has run, nothing has been measured.
+        for id in ROWS_FED_BY_STEP {
+            sup.set_check(id, false);
+        }
     }
     sup.set_check(
         falcon_core::relay_preflight::CheckId::FailsafeConfigured,
-        supcfg.is_some(),
+        usable_supcfg(supcfg).is_some(),
     );
     sup
+}
+
+/// May a `configure` / `configure-supervisor` DROP the live supervisor?
+///
+/// #609 finding 1. Both calls used to drop it unconditionally, and the next
+/// `step` rebuilt a `FlightSupervisor` in `Mode::Disarmed`, which commands
+/// ZERO motors — a re-configure in Loiter cut the motors in flight, and a
+/// configure after `terminate` escaped the absorbing `Terminated` state.
+///
+/// A rebuild is therefore permitted ONLY when nothing is lost by it:
+///   * no supervisor exists yet, or
+///   * it is `Disarmed` (on the ground, by the FSM's own never-disarm-airborne
+///     invariant) AND it holds none of the latches a rebuild would silently
+///     reset:
+///       - an ISOLATED ROTOR (`failed_motor`, the #565 dead-motor interlock —
+///         the FDI never un-isolates, and a fresh core starts with `None`),
+///       - a NAVIGATION-INTEGRITY latch (`nav_compromised`, GNSS-P02: "only
+///         clears via a ground reset" — a configure is not that reset),
+///       - a LATCHED low/critical BATTERY flag (relay-batt latches these; a
+///         fresh estimator would start clear).
+///
+/// Every other state — Armed, any airborne mode, `Terminated` — and every
+/// latched Disarmed supervisor REJECTS the call: the new configuration is
+/// discarded, not queued. Rejecting rather than holding it as pending is a
+/// deliberate choice: a pending configuration would be applied at a moment the
+/// host did not pick (the next touchdown), and applying it is itself a rebuild,
+/// so it would reset exactly the latches listed above. The WIT return type is
+/// unit, so the rejection is SILENT at the call; a host that needs to know
+/// re-reads `observer.read-state` and re-sends once `mode` is `disarmed`.
+fn rebuild_permitted(slot: &Option<FlightSupervisor>) -> bool {
+    match slot {
+        None => true,
+        Some(sup) => {
+            let batt = sup.battery();
+            sup.mode() == falcon_core::relay_fsm::Mode::Disarmed
+                && sup.core().failed_motor().is_none()
+                && !sup.core().nav_compromised()
+                && !batt.low
+                && !batt.critical
+        }
+    }
 }
 
 /// One tick's sensors in, motors out.
@@ -409,7 +572,7 @@ impl Guest for Component {
             // bit would contradict what `command` would actually do.
             sup.set_check(
                 falcon_core::relay_preflight::CheckId::FailsafeConfigured,
-                supcfg.is_some(),
+                usable_supcfg(supcfg.as_ref()).is_some(),
             );
             let mode = sup.mode() as u8;
             let failsafe = sup.failsafe_flags();
@@ -443,21 +606,25 @@ impl Guest for Component {
         }
     }
 
-    /// Install the calibration and DROP the existing core, so the next `step`
-    /// rebuilds from it.
+    /// Install the vehicle configuration and rebuild the supervisor from it —
+    /// ONLY while a rebuild loses nothing (see `rebuild_permitted`). Otherwise
+    /// the call is REJECTED and `cfg` discarded (#609 finding 1).
     ///
-    /// Dropping is deliberate. `loop_rate_hz` is fixed at construction while
-    /// every other knob is live-settable, so applying a late `configure` in
-    /// place would silently honour eight fields and ignore the ninth. A host
-    /// would then be flying a rate it did not ask for with no error of any
-    /// kind — the same shape of defect as the hardcoded `dt` this seam was
-    /// built to remove. An explicit re-initialisation is louder and cheaper.
+    /// The rebuild is still how a configuration is applied: the tuning is
+    /// installed on construction (`ensure_supervisor`), and applying a late
+    /// change in place would honour some fields and not others. But a rebuild
+    /// yields a Disarmed supervisor that commands zero motors, so it may only
+    /// happen on the ground — never in flight, never out of `Terminated`.
     fn configure(cfg: VehicleConfig) {
         #[cfg(not(feature = "std"))]
         let _call = falcon_cm_rt::CallScope::enter();
 
+        let mut core = CORE.0.borrow_mut();
+        if !rebuild_permitted(&core) {
+            return;
+        }
         *CONFIG.0.borrow_mut() = Some(cfg);
-        *CORE.0.borrow_mut() = None;
+        *core = None;
     }
 }
 
@@ -481,11 +648,22 @@ impl ObserverGuest for Component {
                 // case (head first, tail last) so the layout is already right
                 // when this lands in shared OCRAM.
                 tick_head: p.tick,
-                qw: p.q[0], qx: p.q[1], qy: p.q[2], qz: p.q[3],
-                pos_n: p.p[0], pos_e: p.p[1], pos_d: p.p[2],
-                vel_n: p.v[0], vel_e: p.v[1], vel_d: p.v[2],
-                wx: p.w[0], wy: p.w[1], wz: p.w[2],
-                bgx: p.bg[0], bgy: p.bg[1], bgz: p.bg[2],
+                qw: p.q[0],
+                qx: p.q[1],
+                qy: p.q[2],
+                qz: p.q[3],
+                pos_n: p.p[0],
+                pos_e: p.p[1],
+                pos_d: p.p[2],
+                vel_n: p.v[0],
+                vel_e: p.v[1],
+                vel_d: p.v[2],
+                wx: p.w[0],
+                wy: p.w[1],
+                wz: p.w[2],
+                bgx: p.bg[0],
+                bgy: p.bg[1],
+                bgz: p.bg[2],
                 innovation: p.innovation,
                 failed_rotor: p.failed_rotor,
                 mode: p.mode,
@@ -499,11 +677,22 @@ impl ObserverGuest for Component {
             // set would be the absence-looks-like-data defect again.
             None => FlightState {
                 tick_head: 0,
-                qw: 1.0, qx: 0.0, qy: 0.0, qz: 0.0,
-                pos_n: 0.0, pos_e: 0.0, pos_d: 0.0,
-                vel_n: 0.0, vel_e: 0.0, vel_d: 0.0,
-                wx: 0.0, wy: 0.0, wz: 0.0,
-                bgx: 0.0, bgy: 0.0, bgz: 0.0,
+                qw: 1.0,
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                pos_n: 0.0,
+                pos_e: 0.0,
+                pos_d: 0.0,
+                vel_n: 0.0,
+                vel_e: 0.0,
+                vel_d: 0.0,
+                wx: 0.0,
+                wy: 0.0,
+                wz: 0.0,
+                bgx: 0.0,
+                bgy: 0.0,
+                bgz: 0.0,
                 innovation: 0.0,
                 failed_rotor: 0xFF,
                 // NOT `disarmed`. 0 is a MEANINGFUL mode value, so publishing it
@@ -529,30 +718,79 @@ impl ObserverGuest for Component {
 /// seam. That is ORPHAN-P01's fourth state (implemented, verified, advertised,
 /// unreachable) occurring at the seam rather than inside a crate.
 impl PilotGuest for Component {
-    /// Install the supervisor's configuration and DROP the supervisor, so the
-    /// next call rebuilds from it.
+    /// Install the supervisor's configuration and rebuild the supervisor from
+    /// it — ONLY while a rebuild loses nothing (see `rebuild_permitted`).
+    /// Otherwise the call is REJECTED and `cfg` discarded (#609 finding 1).
     ///
-    /// Dropping mirrors `controller.configure` and for the same reason: `home`
-    /// seeds `waypoints` and the keep-out zone centres at construction, and
+    /// A rebuild rather than an in-place update because `home` seeds
+    /// `waypoints` and the keep-out zone centres at construction, and
     /// `low-batt-v` is folded into the battery estimator's per-cell fallbacks
-    /// there too. Applying a late change in place would honour the geofence
-    /// centre and silently keep the old battery thresholds — a partially-applied
-    /// safety configuration, which is worse than an explicit re-initialisation.
+    /// there too: an in-place change would honour the geofence centre and keep
+    /// the old battery thresholds, a partially-applied safety configuration.
+    /// And because a rebuild yields a Disarmed, zero-motor supervisor, it is
+    /// refused in flight and in `Terminated`.
     fn configure_supervisor(cfg: SupervisorConfig) {
         #[cfg(not(feature = "std"))]
         let _call = falcon_cm_rt::CallScope::enter();
 
+        let mut core = CORE.0.borrow_mut();
+        if !rebuild_permitted(&core) {
+            return;
+        }
         *SUPCFG.0.borrow_mut() = Some(cfg);
-        *CORE.0.borrow_mut() = None;
+        *core = None;
+    }
+
+    /// Install the IMU / magnetometer calibration (relay#586, #609).
+    ///
+    /// IN PLACE, NOT BY REBUILD — chosen because `set_calibration` is a pure
+    /// setter on what the estimator subtracts from the raw sample: installing it
+    /// resets nothing, so the latches `rebuild_permitted` protects are not at
+    /// stake and a rebuild (which would also throw away a warmed estimator)
+    /// buys nothing. What IS at stake is the attitude estimate stepping under
+    /// the controller, so it is accepted ONLY while the supervisor is
+    /// `Disarmed` (or not yet built). Every other mode REJECTS the call and
+    /// discards `cal` — the same reject-not-queue rule as the two configure
+    /// calls, for the same reason.
+    ///
+    /// `CalibrationPresent` then means "a VALID calibration was configured"
+    /// (jess#167): a valid one, the IDENTITY included, makes it pass. An
+    /// INVALID calibration is not installed: the identity is applied in its
+    /// place and the calibration counts as NOT configured, REVOKING any
+    /// earlier valid one, so `CalibrationPresent` fails and `arm` is refused.
+    /// The latest thing the host sent was broken; flying on an older
+    /// calibration it has just tried to replace is not the fail-safe reading
+    /// of that. The validity rule and the flag both live in falcon-core
+    /// (`FlightSupervisor::set_calibration`); this only remembers the outcome
+    /// across rebuilds.
+    fn configure_calibration(cal: SensorCalibration) {
+        #[cfg(not(feature = "std"))]
+        let _call = falcon_cm_rt::CallScope::enter();
+
+        let mut core = CORE.0.borrow_mut();
+        if let Some(sup) = core.as_ref() {
+            if sup.mode() != falcon_core::relay_fsm::Mode::Disarmed {
+                return;
+            }
+        }
+        let params = cal_params(&cal);
+        *CALIB.0.borrow_mut() = params.is_valid().then_some(params);
+        if let Some(sup) = core.as_mut() {
+            // Validates again and, if invalid, installs the identity and
+            // clears the configured flag — the revocation.
+            sup.set_calibration(params);
+        }
     }
 
     /// Deliver one pilot command to the mode machine.
     ///
     /// The supervisor is built here if it does not exist yet, rather than the
     /// command being dropped: a host whose first act is `arm` must get a real
-    /// verdict from the pre-arm table, not silence. `ensure_supervisor` declares
-    /// `FailsafeConfigured` on the way through, which is what stops that first
-    /// `arm` from passing on the constructor's bring-up defaults.
+    /// verdict from the pre-arm table, not silence. That verdict is a REFUSAL
+    /// until a `step` has run: `ensure_supervisor` declares every row a step
+    /// feeds FALSE on construction (`ROWS_FED_BY_STEP`) and `FailsafeConfigured`
+    /// from the configuration, so a first `arm` can no longer pass on the
+    /// constructor's bring-up defaults (#609 finding 2).
     fn command(cmd: PilotCommand, level: bool, throttle_low: bool) {
         #[cfg(not(feature = "std"))]
         let _call = falcon_cm_rt::CallScope::enter();

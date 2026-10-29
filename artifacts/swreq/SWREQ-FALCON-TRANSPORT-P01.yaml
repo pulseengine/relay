@@ -31,8 +31,8 @@ artifacts:
 
       AMENDED 2026-10-28, still v2 (unreleased, never tagged; #614 after the
       integrator review on jess#167): `Calibration` grows 60 -> 72 B with
-      `mag-offdiag` APPENDED at payload 60/64/68 (provisional [xy, xz, yz],
-      must match #611); every `Sensor` presence byte (28, 41, 54, 59, 76) is
+      `mag-offdiag` APPENDED at payload 60/64/68 ([xy, xz, yz], the
+      relay-calib / #611 order); every `Sensor` presence byte (28, 41, 54, 59, 76) is
       strictly 0 or 1, else `BadBool`; and every reply echoes the seq of the
       frame it answers (Motors <- its Sensor, Ack <- its control frame).
 

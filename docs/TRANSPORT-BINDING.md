@@ -324,13 +324,12 @@ calibrations produce (PX4 calls the off-diagonal `CAL_MAGn_ODIAG`) — which a
 diagonal-only `mag-scale` cannot express. Every slot is checked by the
 non-finite rule like any other `f32`.
 
-> **Provisional:** the component order is `[xy, xz, yz]`, and it **must match
-> the `mag-offdiag` ordering of relay#611's `sensor-calibration` record —
-> confirm at integration.** Until #611's amendment lands, the WIT record and
-> `relay_calib::CalParams` have no off-diagonal field: the native test
-> endpoint decodes these three values and does **not** forward them, so it
-> applies no off-diagonal correction and a calibration that differs from the
-> identity *only* in `mag-offdiag` reads there as not calibrated.
+> **Order:** the components are `[xy, xz, yz]`, the same order as the
+> `mag-offdiag` field of `pilot.sensor-calibration` and of
+> `relay_calib::CalParams` (relay#611), which is PX4's
+> `CAL_MAGn_XODIAG / YODIAG / ZODIAG` in `Magnetometer::set_offdiagonal`'s
+> order. The native test endpoint forwards all six fields, so the off-diagonal
+> soft-iron correction is applied there too.
 
 #### `command` (type 6) — `pilot.command(cmd, level, throttle-low)`
 

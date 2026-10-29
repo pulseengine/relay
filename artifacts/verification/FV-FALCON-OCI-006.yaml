@@ -62,7 +62,7 @@ artifacts:
       method: formal-verification
       steps:
         # every export is scoped, and the old entry reset is gone
-        - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _call = falcon_cm_rt::CallScope::enter();')\" -eq 13"
+        - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _call = falcon_cm_rt::CallScope::enter();')\" -eq 14"
         - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'BumpArena::reset')\" -eq 0"
         - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _ = falcon_cm_rt::CallScope')\" -eq 0"
         # the harnesses exist (the step below is enforced by the Kani gate)

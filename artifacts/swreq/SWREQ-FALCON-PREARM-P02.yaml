@@ -12,8 +12,10 @@ artifacts:
       (update_preflight, called in step):
         * estimator_converged — the IEKF TILT uncertainty (roll²+pitch², the
           gravity-observable attitude, mag-independent) is at/below a threshold;
-        * calibration_present — a non-identity sensor calibration ([[SWREQ-FALCON-CALIB-P01]])
-          is installed;
+        * calibration_present — a VALID sensor calibration ([[SWREQ-FALCON-CALIB-P01]])
+          has been explicitly configured via set_calibration (explicit state; the
+          identity counts as "calibrated upstream"; an invalid one is not installed
+          and revokes an earlier valid one — jess#167, #611);
         * battery_ok — the pack voltage (backend read_battery_v) is at/above the
           arming threshold;
         * geofence_loaded — a positive fence radius is configured.

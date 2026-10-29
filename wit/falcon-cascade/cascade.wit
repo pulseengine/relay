@@ -223,18 +223,21 @@ interface types {
         /// row refuses. That part is real: this field is a PREREQUISITE for
         /// clause (1), not a feature of it.
         ///
-        /// WHAT IT DOES NOT DO is make the component armable. MEASURED: a host
-        /// that warms its estimator before arming — what a real GCS does, and
-        /// what `step_estimate_only` exists for — is refused by
-        /// `CalibrationPresent` FIRST, because `update_preflight` derives it
-        /// from `core.calibration() != identity()` and NOTHING IN THIS SEAM
-        /// CARRIES A CALIBRATION. So the published component can presently only
-        /// be armed on the arm-before-first-step path, judged against
-        /// `FlightSupervisor::new`'s deliberate bring-up defaults. That is
-        /// SUPERVISOR-P01's own falsification condition, and it means a green
-        /// SITL gate shows the DEFAULTS path works, not the pre-arm table.
-        /// Pinned by `the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused`
-        /// in `crates/falcon-core/tests/supervisor_seam_contract.rs`.
+        /// WHAT IT DOES NOT DO ALONE is make the component armable. A host that
+        /// warms its estimator before arming — what a real GCS does, and what
+        /// `step_estimate_only` exists for — is refused by `CalibrationPresent`
+        /// unless it also sent a VALID `pilot.configure-calibration`, because
+        /// `update_preflight` derives that row from "a valid calibration has
+        /// been explicitly configured". Until that entry point existed the
+        /// component could only be armed BEFORE its first `step`, judged
+        /// against `FlightSupervisor::new`'s bring-up defaults; that path is
+        /// now CLOSED (#609 finding 2: a never-stepped supervisor declares
+        /// every row a step feeds as failing). So a host arms the way a real
+        /// GCS does: configure (with a calibration), step with a battery
+        /// reading until the estimator converges, then `arm` against the
+        /// measured table. Pinned natively by
+        /// `a_warmed_host_arms_only_with_a_configured_valid_calibration` in
+        /// `crates/falcon-core/tests/supervisor_seam_contract.rs`.
         ///
         /// FREE, MEASURED: `controller#step` flattens to 26 params today
         /// (sensor-frame 22 + waypoint 4) against `MAX_FLAT_PARAMS = 16`, so it
@@ -365,12 +368,24 @@ interface controller {
 
     /// Install this vehicle's calibration.
     ///
-    /// Call ONCE before the first `step`. Calling it later is legal and
-    /// RE-INITIALISES the control core — estimator state included — because
-    /// `loop-rate-hz` is fixed at construction and a partially-applied
-    /// configuration is worse than an explicit reset. A host that never calls
-    /// this keeps the built-in defaults, which fly the SITL mock plant and
-    /// nothing else.
+    /// Call ONCE before the first `step`. A later call RE-INITIALISES the
+    /// supervisor and control core — estimator state included — because a
+    /// partially-applied configuration is worse than an explicit reset.
+    ///
+    /// THAT RE-INITIALISATION IS ONLY PERFORMED ON THE GROUND (#609). It is
+    /// applied only while the supervisor is `disarmed` and holds no latch a
+    /// rebuild would reset (an isolated rotor, a navigation-integrity latch, a
+    /// latched low/critical battery). In every other mode — `armed`, any
+    /// airborne mode, `terminated` — and on a latched `disarmed` vehicle, the
+    /// call is REJECTED: `cfg` is discarded, not queued, and the running
+    /// supervisor is untouched. A rebuild produces a `disarmed` supervisor that
+    /// commands zero motors, so accepting it in flight would cut the motors,
+    /// and accepting it in `terminated` would leave the absorbing state. The
+    /// rejection is silent (this function returns nothing); a host re-sends
+    /// once `flight-state.mode` reads `disarmed`.
+    ///
+    /// A host that never calls this keeps the built-in defaults, which fly the
+    /// SITL mock plant and nothing else.
     configure: func(cfg: vehicle-config);
 }
 
@@ -422,6 +437,16 @@ interface observer {
 /// calling convention from flattened scalars to a pointer, and the canonical
 /// ABI passes GARBAGE rather than erroring when a caller assumed the other
 /// form. `vehicle-config` therefore stays at 9 and keeps its byte-identity.
+///
+/// THE CALIBRATION HAS ITS OWN ENTRY POINT, `configure-calibration`, rather
+/// than a field of `supervisor-config` — the maintainer's decision of
+/// 2026-10-21 (relay#586), announced on jess#167. Measured reason: folded in,
+/// `supervisor-config` would grow from 6 flat params to 24 and cross
+/// `MAX_FLAT_PARAMS`, changing `configure-supervisor` from scalars to a
+/// pointer. As its own function `configure-supervisor` keeps its 6-scalar
+/// lowering. `configure-calibration` itself is 18 flat params since the
+/// soft-iron off-diagonal (jess#167, 2026-10-28) and is therefore passed
+/// INDIRECTLY — see that function.
 interface pilot {
     use types.{vec3};
 
@@ -433,12 +458,24 @@ interface pilot {
     /// SUPERVISOR — a 0 m geofence about a (0,0,0) home latches an RTL on the
     /// first tick — which is why these land in the same change that wires it
     /// in rather than in a follow-up.
+    ///
+    /// VALIDATED AS A WHOLE, NEVER CLAMPED (#609). If ANY field is outside its
+    /// own definition below — `home` non-finite; `fence-radius`, `cruise-alt`
+    /// or `low-batt-v` non-finite or not > 0 — the configuration is treated
+    /// exactly as if `configure-supervisor` had never been called: the
+    /// configuration-dependent failsafes stay inactive and the
+    /// `FailsafeConfigured` pre-arm row is FALSE, so `arm` is REFUSED: the
+    /// mode stays `disarmed`, and from the next `step` bit 7 (`arm-blocked`)
+    /// of `flight-state.failsafe` is set. Earlier builds instead mapped such
+    /// values to permissive ones (a NaN fence to "no geofence", a NaN or
+    /// negative low-batt-v to "no battery failsafe") and still armed.
     record supervisor-config {
         /// Home / launch point, NED metres: the geofence centre AND the RTL
         /// destination. Both, from one field — they are the same point.
+        /// Must be finite.
         home: vec3,
-        /// Geofence radius in metres about `home`. Exceeding it latches an RTL
-        /// (bit 4 of `flight-state.failsafe`).
+        /// Geofence radius in metres about `home`, finite and > 0. Exceeding
+        /// it latches an RTL (bit 4 of `flight-state.failsafe`).
         fence-radius: f32,
         /// Cruise altitude in metres AGL, and it is **POSITIVE** — the one
         /// field in this package that is NOT NED-signed.
@@ -451,13 +488,103 @@ interface pilot {
         /// command +30.0 NED — thirty metres BELOW the ground. Every in-tree
         /// call site passes a positive value.
         ///
-        /// A non-positive value is therefore rejected rather than clamped: zero
-        /// or negative is not a conservative cruise altitude, it is a commanded
-        /// descent into the ground.
+        /// A non-positive (or non-finite) value is therefore rejected rather
+        /// than clamped — the whole configuration is refused and arming with
+        /// it is impossible: zero or negative is not a conservative cruise
+        /// altitude, it is a commanded descent into the ground.
         cruise-alt: f32,
         /// Pack LOW threshold in volts for the WHOLE battery, not per cell;
-        /// the estimator derives its per-cell fallbacks from this.
+        /// the estimator derives its per-cell fallbacks from this. Finite and
+        /// > 0: a zero or negative threshold could never be crossed, so the
+        /// battery failsafe would be silently off.
         low-batt-v: f32,
+    }
+
+    /// `relay_calib::CalParams`, field for field and with its semantics —
+    /// nothing added. Applied to the RAW frame before the estimator:
+    ///   gyro  = raw − gyro-bias
+    ///   accel = accel-scale ∘ (raw − accel-bias)      (∘ = per-axis product)
+    ///   mag   = S · (raw − mag-offset)
+    /// where S is the SYMMETRIC soft-iron matrix
+    ///         | sx  xy  xz |    [sx, sy, sz] = mag-scale
+    ///     S = | xy  sy  yz |    [xy, xz, yz] = mag-offdiag
+    ///         | xz  yz  sz |
+    /// — PX4's `Magnetometer::Correct` without its rotation and power
+    /// compensation, `_scale * (data - _offset)`, with `_scale` built from
+    /// `CAL_MAGn_{X,Y,Z}SCALE` (diagonal) and `CAL_MAGn_{X,Y,Z}ODIAG`
+    /// (off-diagonal) in the same order.
+    ///
+    /// WHAT THIS CALIBRATION IS: RESIDUAL / BOARD-LEVEL TERMS ONLY. The
+    /// calibration of each PHYSICAL sensor is applied BELOW this seam, per
+    /// sensor instance and before any selection or vote, so that it follows
+    /// the sensor when the selection fails over to another instance:
+    ///   * for a sensor relay decodes, in relay's decode/voting stage, from
+    ///     per-instance values the integrator/host supplies and persists;
+    ///   * for a sensor that arrives already calibrated (e.g. a DroneCAN node
+    ///     that calibrates on board), not at all.
+    /// The single `sensor-calibration` here is applied to the frame that
+    /// stage produces, whichever instance that came from. It must NOT carry
+    /// one physical sensor's own calibration: after a failover it would be
+    /// applied to a different sensor. (A per-instance calibration entry point
+    /// on relay's decode/voting component is a separate follow-up.)
+    ///
+    /// THE IDENTITY (all biases/offsets 0, all scales 1, all off-diagonal 0)
+    /// IS A VALID CALIBRATION, meaning "calibrated upstream, no residual". It
+    /// satisfies `CalibrationPresent` like any other valid calibration. See
+    /// `configure-calibration` for what that obliges a host to do.
+    ///
+    /// FRAME. Every term is applied in the BODY frame, to a sample the host
+    /// has already rotated into it (`mag-body`, and the IMU likewise). PX4
+    /// calibrates in the SENSOR frame and rotates afterwards, so values taken
+    /// from a sensor-frame calibration (PX4's `CAL_*` parameters) carry over
+    /// exactly only as follows:
+    ///   * BIASES and `mag-offset` are vectors: a sensor-frame offset `o` is
+    ///     exactly the body-frame offset `R·o`, for ANY mount rotation `R`;
+    ///   * the FULL soft-iron matrix is also exact for any mount, as
+    ///     `S_body = R · S_sensor · Rᵀ`. But that generally MOVES terms
+    ///     between the diagonal and the off-diagonal, and even an
+    ///     axis-permuting mount flips off-diagonal SIGNS (ROTATION_PITCH_180
+    ///     negates xy and yz). So send the rotated body-frame matrix, never
+    ///     the sensor-frame `CAL_MAGn_*SCALE` / `*ODIAG` copied over;
+    ///   * DIAGONAL-ONLY terms (`accel-scale`, and `mag-scale` with
+    ///     `mag-offdiag` zero) equal the sensor-frame ones, axes permuted,
+    ///     ONLY for an AXIS-PERMUTING mount, i.e. one that only swaps or flips
+    ///     axes. ROTATION_PITCH_180, ROTATION_YAW_180 and ROTATION_YAW_270 are
+    ///     examples (the IMU mounts of a Pixhawk 6X-RT, for one). For any
+    ///     other mount, e.g. ROTATION_YAW_45, a sensor-frame diagonal scale
+    ///     becomes a body-frame matrix WITH off-diagonal terms, and it has no
+    ///     exact diagonal body-frame equivalent.
+    ///
+    /// VALIDATED, NEVER CLAMPED (`relay_calib::CalParams::is_valid`): every
+    /// component must be finite, every `accel-scale` > 0, and the soft-iron
+    /// matrix S POSITIVE DEFINITE — its leading minors sx, sx·sy − xy² and
+    /// det S all > 0 and finite; with `mag-offdiag` zero that is exactly
+    /// "every `mag-scale` > 0", the rule before the off-diagonal existed. A
+    /// zero or negative scale erases or mirrors an axis; a singular or
+    /// indefinite S does the same to a field direction, so heading would be
+    /// lost or turn the wrong way. See `configure-calibration` for what an
+    /// invalid one does.
+    record sensor-calibration {
+        /// Gyro zero-rate bias, rad/s (subtracted).
+        gyro-bias: vec3,
+        /// Accelerometer zero-g bias, m/s² (subtracted).
+        accel-bias: vec3,
+        /// Accelerometer per-axis scale factor, unitless (multiplied after
+        /// de-biasing). > 0.
+        accel-scale: vec3,
+        /// Magnetometer hard-iron offset, in the SAME unit the host sends
+        /// `sensor-frame.mag-body` in (subtracted before normalisation).
+        mag-offset: vec3,
+        /// Magnetometer soft-iron matrix DIAGONAL [sx, sy, sz], unitless.
+        /// > 0 (and see the positive-definiteness rule above).
+        mag-scale: vec3,
+        /// Magnetometer soft-iron matrix OFF-DIAGONAL, symmetric, unitless,
+        /// ORDERED `x = xy` (S01 = S10), `y = xz` (S02 = S20), `z = yz`
+        /// (S12 = S21) — PX4's `CAL_MAGn_XODIAG`, `YODIAG`, `ZODIAG`, in the
+        /// order of PX4's `Magnetometer::set_offdiagonal`. `{0, 0, 0}` is the
+        /// diagonal soft-iron, and reproduces the pre-off-diagonal output bit
+        /// for bit.
+        mag-offdiag: vec3,
     }
 
     /// A command a PILOT or GCS may legitimately issue.
@@ -488,10 +615,68 @@ interface pilot {
 
     /// Install the supervisor's configuration.
     ///
-    /// Call before the first `step`, as with `controller.configure`. A host
-    /// that never calls it gets the built-in defaults, which are suitable for
-    /// the SITL mock plant and nothing else.
+    /// Call before the first `step`, as with `controller.configure`. A later
+    /// call rebuilds the supervisor under EXACTLY the same rule: only while it
+    /// is `disarmed` and unlatched; otherwise it is silently REJECTED and `cfg`
+    /// discarded (#609 — see `controller.configure`). It can therefore never
+    /// cut the motors in flight, never leave `terminated`, and never clear an
+    /// isolated-rotor latch.
+    ///
+    /// A host that never calls it gets NO supervisor configuration: the
+    /// configuration-dependent failsafes stay inactive and arming is refused
+    /// (`FailsafeConfigured`).
     configure-supervisor: func(cfg: supervisor-config);
+
+    /// Install the IMU / magnetometer calibration (relay#586, #609).
+    ///
+    /// WHY IT EXISTS. Before this nothing in the seam carried a calibration,
+    /// so a supervisor that had been stepped was refused on the
+    /// `CalibrationPresent` row for ever. Since #609 a never-stepped
+    /// supervisor refuses every arm, so without this the component could not
+    /// be armed at all.
+    ///
+    /// WHAT `CalibrationPresent` MEANS — explicit state, NOT a comparison
+    /// against the identity (jess#167):
+    ///   * never called                    -> FALSE: `arm` is refused;
+    ///   * called with a VALID calibration -> TRUE, the IDENTITY included;
+    ///   * called with an INVALID one      -> FALSE, and an earlier valid one
+    ///     is revoked (below).
+    ///
+    /// AN EXPLICIT IDENTITY MEANS "CALIBRATED UPSTREAM". The pre-arm table
+    /// cannot tell a host that measured "no residual" from one that sent the
+    /// identity without measuring anything, so the only thing standing
+    /// between an uncalibrated vehicle and an armed one is this contract:
+    ///   * a host MUST NOT send the identity as a default or a placeholder;
+    ///   * it sends the identity only when its sensors are calibrated below
+    ///     this seam and no residual remains;
+    ///   * a host that has no calibration MUST NOT call this function at all,
+    ///     and arming then stays refused.
+    ///
+    /// INSTALLED IN PLACE, no rebuild: estimator state, the published tick and
+    /// every latch are kept. It is ACCEPTED ONLY WHILE `disarmed` — in any other
+    /// mode (`armed`, airborne, `terminated`) the call is REJECTED and `cal`
+    /// discarded, because changing what the estimator subtracts from the raw
+    /// IMU mid-flight would step the attitude estimate under the controller.
+    /// A calibration sent before the supervisor exists is kept and installed
+    /// when it is built, and it survives a later `configure` /
+    /// `configure-supervisor` rebuild.
+    ///
+    /// An INVALID calibration (any component non-finite, an `accel-scale` not
+    /// > 0, or a soft-iron matrix that is not positive definite — see
+    /// `sensor-calibration`) is NOT installed: the identity is applied in its
+    /// place, the calibration counts as NOT configured, and any earlier valid
+    /// one is REVOKED, so `CalibrationPresent` is false and `arm` refused. The
+    /// latest thing the host sent was broken, and the vehicle must not fly on
+    /// an older one.
+    ///
+    /// FLATTENING: 18 f32 (six vec3), OVER `MAX_FLAT_PARAMS = 16`, so this
+    /// export is lowered INDIRECTLY: the core function takes one `i32`
+    /// pointer and the host writes the 72-byte record into the component's
+    /// memory through `cabi_realloc` before the call (measured on the built
+    /// component; it was 15 scalars before the off-diagonal). That spilled
+    /// argument area is reclaimed per call by falcon-cm-rt's `CallScope`
+    /// (#574), so repeated calls do not exhaust the component's arena.
+    configure-calibration: func(cal: sensor-calibration);
 
     /// Deliver one pilot command to the mode machine.
     ///

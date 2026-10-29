@@ -564,10 +564,7 @@ pub struct WireSupervisorConfig {
 /// per the WIT: gyro-bias rad/s, accel-bias m/s², the scales and the
 /// off-diagonal terms unitless, mag-offset in the host's own `mag-body` unit.
 ///
-/// The first five fields map field for field onto `relay_calib::CalParams`.
-/// `mag_offdiag` does NOT yet have a `CalParams` counterpart: it rides on the
-/// wire now so the frame does not change again when relay#611's amendment
-/// adds `mag-offdiag: vec3` to the WIT record.
+/// All six fields map field for field onto `relay_calib::CalParams`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WireCalibration {
     pub gyro_bias: [f32; 3],
@@ -577,8 +574,8 @@ pub struct WireCalibration {
     pub mag_scale: [f32; 3],
     /// Symmetric soft-iron OFF-DIAGONAL terms (unitless): with `mag_scale` as
     /// the diagonal, the whole symmetric 3x3 soft-iron matrix (the shape PX4
-    /// calibrates as `CAL_MAGn_ODIAG`). PROVISIONAL ORDER `[xy, xz, yz]` —
-    /// must match #611's relay-calib ordering; confirm at integration.
+    /// calibrates as `CAL_MAGn_ODIAG`), ordered `[xy, xz, yz]` as in
+    /// `relay_calib::CalParams::mag_offdiag` and PX4's `set_offdiagonal`.
     pub mag_offdiag: [f32; 3],
 }
 
@@ -849,7 +846,7 @@ pub fn encode_calibration(
         c.accel_scale,
         c.mag_offset,
         c.mag_scale,
-        // appended at payload 60 — provisional [xy, xz, yz], see the struct
+        // appended at payload 60 — [xy, xz, yz], see the struct
         c.mag_offdiag,
     ];
     for (g, v3) in groups.iter().enumerate() {
@@ -1186,7 +1183,7 @@ mod tests {
     /// `Calibration` (type 5), seq 3, in #611's `sensor-calibration` order:
     /// gyro-bias (0.125, 0, -0.5), accel-bias (0.25, 0, 0), accel-scale
     /// (1.0, 1.5, 0.75), mag-offset (4.0, 0, -1.0), mag-scale (1.0, 2.0, 0.5),
-    /// mag-offdiag (0.25, -0.5, 0.125) in the PROVISIONAL [xy, xz, yz] order.
+    /// mag-offdiag (0.25, -0.5, 0.125) in [xy, xz, yz] order.
     const CAL_VECTOR: [u8; 80] = [
         0x1c, 0xfa, 0x02, 0x05, 0x03, 0x00, 0x00, 0x00, // magic, v2, type 5, seq 3
         0x00, 0x00, 0x00, 0x3e, // 0  gyro-bias.x    0.125

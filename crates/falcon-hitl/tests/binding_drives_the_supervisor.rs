@@ -40,15 +40,11 @@ use falcon_hitl::{BindingHost, HostReply, sample_sensor_frame};
 
 // ── the component side: a native supervisor behind the binding ──────────────
 
-/// The calibration frame -> the native `CalParams` on THIS base.
+/// The calibration frame -> the native `CalParams`, field for field.
 ///
-/// WHAT WAITS ON relay#611's AMENDMENT: the frame carries `mag_offdiag`
-/// (payload 60/64/68), but `relay_calib::CalParams` has no off-diagonal field
-/// yet, so it is NOT forwarded here — the five diagonal-model fields are. Until
-/// `CalParams` gains it, this endpoint (a) does not apply soft-iron
-/// off-diagonal correction, and (b) judges "calibrated" without it: a
-/// calibration that differs from the identity ONLY in `mag_offdiag` reads as
-/// not calibrated (`CalibrationPresent` refuses arming).
+/// All six fields are forwarded, including `mag_offdiag` (payload 60/64/68),
+/// which `relay_calib::CalParams` applies as the off-diagonal of the symmetric
+/// soft-iron matrix, ordered `[xy, xz, yz]` (relay#611).
 fn cal_params(c: &WireCalibration) -> CalParams {
     CalParams {
         gyro_bias: c.gyro_bias,
@@ -56,6 +52,7 @@ fn cal_params(c: &WireCalibration) -> CalParams {
         accel_scale: c.accel_scale,
         mag_offset: c.mag_offset,
         mag_scale: c.mag_scale,
+        mag_offdiag: c.mag_offdiag,
     }
 }
 
@@ -117,7 +114,10 @@ struct Endpoint {
     sup: Option<Box<FlightSupervisor>>,
     vcfg: Option<WireVehicleConfig>,
     scfg: Option<WireSupervisorConfig>,
-    cal: CalParams,
+    /// The last VALID calibration the host sent; `None` = never sent, or
+    /// revoked by an invalid one. Never the identity as a placeholder: an
+    /// explicit identity means "calibrated upstream" and arms (relay#611).
+    cal: Option<CalParams>,
     inbound: SeqTracker,
     // No outbound counter: every reply echoes the seq of the frame it
     // answers (docs/TRANSPORT-BINDING.md §3, the echo rule).
@@ -129,7 +129,7 @@ impl Endpoint {
             sup: None,
             vcfg: None,
             scfg: None,
-            cal: CalParams::identity(),
+            cal: None,
             inbound: SeqTracker::new(),
         }
     }
@@ -157,8 +157,11 @@ impl Endpoint {
                 core.set_altitude_integral_gain(v.altitude_ki);
                 core.set_position_integral_gain(v.position_ki);
             }
-            // The calibration survives a rebuild (relay#611).
-            s.set_calibration(self.cal);
+            // The calibration survives a rebuild (relay#611); with none, the
+            // supervisor is left uncalibrated and `CalibrationPresent` refuses.
+            if let Some(c) = self.cal {
+                s.set_calibration(c);
+            }
             self.sup = Some(s);
         }
         let configured = self.scfg.is_some();
@@ -182,15 +185,22 @@ impl Endpoint {
         let (h, payload) = match wire::decode_frame(frame) {
             Ok(x) => x,
             // relay#611: the latest calibration the host sent was invalid, so
-            // the vehicle must not keep flying on an older one — the identity
-            // is installed and `CalibrationPresent` refuses arming.
+            // the vehicle must not keep flying on an older one. Revoke it the
+            // way the component does, by handing the supervisor an INVALID
+            // calibration (`set_calibration` then clears the configured flag
+            // and `CalibrationPresent` refuses arming). The rejected frame's
+            // values never reach us, so any non-finite record stands in.
             Err(WireError::NonFinite {
                 msg: MsgType::Calibration,
                 ..
             }) => {
-                self.cal = CalParams::identity();
+                self.cal = None;
                 if let Some(s) = self.sup.as_deref_mut() {
-                    s.set_calibration(self.cal);
+                    let revoked = s.set_calibration(CalParams {
+                        gyro_bias: [f32::NAN; 3],
+                        ..CalParams::identity()
+                    });
+                    debug_assert!(!revoked);
                 }
                 return None;
             }
@@ -225,11 +235,12 @@ impl Endpoint {
             }
             MsgType::Calibration => {
                 if fresh {
-                    self.cal = cal_params(&wire::decode_calibration(payload).unwrap());
-                    let cal = self.cal;
-                    if let Some(s) = self.sup.as_deref_mut() {
-                        s.set_calibration(cal);
-                    }
+                    let cal = cal_params(&wire::decode_calibration(payload).unwrap());
+                    let valid = match self.sup.as_deref_mut() {
+                        Some(s) => s.set_calibration(cal),
+                        None => cal.is_valid(),
+                    };
+                    self.cal = valid.then_some(cal);
                 }
                 Some(self.reply_ack(h.seq))
             }
@@ -380,7 +391,8 @@ fn fly(r: Run) -> Outcome {
         control(&mut host, &mut ep, &f);
     }
     // 3. calibration: a small non-identity gyro bias (rad/s) — what a
-    // gyro-null procedure solves; identity would read as "not calibrated".
+    // gyro-null procedure solves. (An explicit identity would also arm: it
+    // means "calibrated upstream"; withholding the frame is what refuses.)
     if r.calibration {
         let f = host
             .configure_calibration(&WireCalibration {
@@ -535,7 +547,7 @@ fn a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration() {
     };
     let f = host.configure_calibration(&good).unwrap();
     control(&mut host, &mut ep, &f);
-    assert_ne!(ep.cal, CalParams::identity());
+    assert!(ep.cal.is_some());
 
     let bad = WireCalibration {
         accel_scale: [1.0, f32::NAN, 1.0],
@@ -551,9 +563,12 @@ fn a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration() {
     );
     assert_eq!(ep.handle(&f), None, "a rejected frame is not acked");
     assert_eq!(
-        ep.cal,
-        CalParams::identity(),
+        ep.cal, None,
         "the earlier calibration must not survive an invalid one"
+    );
+    assert!(
+        !ep.ensure().calibration_configured(),
+        "and a supervisor built now must be uncalibrated, so CalibrationPresent refuses"
     );
 }
 

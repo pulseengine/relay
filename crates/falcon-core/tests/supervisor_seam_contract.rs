@@ -210,32 +210,29 @@ fn a_positive_cruise_alt_commands_a_climb_not_a_descent() {
     );
 }
 
-/// MEASURED GAP, pinned so it cannot be forgotten: the `@0.12.0` seam cannot
-/// supply a CALIBRATION, so a host that warms its estimator before arming — the
-/// way a real GCS does — is refused by `CalibrationPresent`.
+/// `CalibrationPresent` means "a VALID calibration has been EXPLICITLY
+/// configured" (jess#167, #611), and a host that warms its estimator before
+/// arming (the way a real GCS does, and since #609 finding 2 the ONLY way the
+/// published component arms) is judged on exactly that:
 ///
-/// This test asserts a LIMITATION, not a feature, and it is here because I
-/// published the wrong cause. I claimed the component "cannot arm" without
-/// `battery-v`, which is true but mis-attributed: with a warmed estimator the
-/// FIRST row to refuse is `CalibrationPresent`, and adding battery does not
-/// move it. `update_preflight` sets
-/// `calibration_present = core.calibration() != CalParams::identity()`, and
-/// nothing in `vehicle-config` or `supervisor-config` carries a calibration —
-/// the component never calls `set_calibration` because it has nothing to pass.
+///   * NEVER configured            -> refused, by `CalibrationPresent`;
+///   * an explicit IDENTITY         -> ARMS: per-sensor calibration is applied
+///     below the seam, so the identity means "calibrated upstream, no
+///     residual", not "not calibrated";
+///   * an INVALID one afterwards    -> refused again (`set_calibration`
+///     returns false, installs the identity, and REVOKES the earlier valid
+///     one);
+///   * a valid non-identity one     -> arms.
 ///
-/// WHY IT MATTERS BEYOND THE SEAM. The published component can therefore only
-/// be armed on the *arm-before-first-step* path, where `FlightSupervisor::new`'s
-/// deliberate bring-up defaults (the legacy six rows forced true) are what the
-/// pre-arm table is judged against. That is SUPERVISOR-P01's own falsification
-/// condition — "the supervisor runs against default inputs the host cannot
-/// supply" — so a GREEN SITL GATE IS NOT EVIDENCE that the pre-arm table works
-/// through the seam. It shows the defaults path works.
-///
-/// The fix is a seam change (a calibration input) and therefore not this test's
-/// to make. Until it lands, this test is the honest record of where the V is
-/// open.
+/// HISTORY, kept because it is why the seam changed. This test was
+/// `the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused`, then
+/// `a_warmed_host_arms_only_with_a_non_identity_calibration`, which pinned
+/// `calibration_present = core.calibration() != CalParams::identity()`. That
+/// rule could not tell "never configured" from "calibrated upstream", and it
+/// counted a NaN calibration as present. The component installs the
+/// calibration with `set_calibration`, the call this test makes.
 #[test]
-fn the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused() {
+fn a_warmed_host_arms_only_with_a_configured_valid_calibration() {
     use falcon_core::relay_calib::CalParams;
     use falcon_core::relay_preflight::CheckId;
     use falcon_core::{FlightBackend, FlightSupervisor, ImuSample, relay_fsm::Event};
@@ -272,45 +269,85 @@ fn the_seam_cannot_supply_a_calibration_so_a_warmed_host_is_refused() {
         }
     }
 
-    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, 2.0, 14.0);
-    let mut b = SeamHost;
-    // Warm the estimator first, which is what `step_estimate_only` exists for
-    // and what a real host does before arming. Motors are zero throughout.
-    for _ in 0..1500 {
-        sup.step(&mut b);
+    /// Step, then try to arm; the deciding row (None = armed).
+    fn try_arm(sup: &mut FlightSupervisor, b: &mut SeamHost, steps: u32) -> Option<CheckId> {
+        for _ in 0..steps {
+            sup.step(b);
+        }
+        sup.set_check(CheckId::FailsafeConfigured, true);
+        sup.command(Event::Arm, true, true);
+        let row = sup.arm_blocked_check();
+        assert_eq!(
+            sup.mode() == Mode::Armed,
+            row.is_none(),
+            "the mode and the table's verdict disagree (row {row:?}, mode {:?})",
+            sup.mode()
+        );
+        row
     }
-    sup.set_check(CheckId::FailsafeConfigured, true);
-    sup.command(Event::Arm, true, true);
 
+    let mut b = SeamHost;
+
+    // 1. NEVER configured: refused, and by CalibrationPresent — if a
+    //    DIFFERENT row refuses first, the cascade.wit account of what a host
+    //    must send is stale.
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, 2.0, 14.0);
+    assert!(!sup.calibration_configured());
     assert_eq!(
-        sup.arm_blocked_check(),
+        try_arm(&mut sup, &mut b, 1500),
         Some(CheckId::CalibrationPresent),
-        "a warmed host supplying everything the seam carries must still be \
-         refused, and the row must be CalibrationPresent — if this changes, the \
-         seam gained a calibration path (good: delete this test and verify the \
-         new one) or a DIFFERENT row now refuses first (bad: the gap moved and \
-         the published justification is stale again)"
+        "a warmed host that never configured a calibration must be refused"
     );
-    assert_eq!(sup.mode(), Mode::Disarmed, "and it must not be armed");
 
-    // THE CONTROL — install a calibration, the one thing the seam cannot pass,
-    // and the identical arm succeeds. This is what attributes the refusal above
-    // to the missing calibration rather than to the host being unarmable.
-    sup.set_calibration(CalParams {
+    // 2. An explicitly configured IDENTITY is a valid calibration: arms.
+    assert!(
+        sup.set_calibration(CalParams::identity()),
+        "identity is valid"
+    );
+    assert!(sup.calibration_configured());
+    assert_eq!(
+        try_arm(&mut sup, &mut b, 10),
+        None,
+        "an explicitly configured IDENTITY must allow arming"
+    );
+
+    // 3. An INVALID calibration on a fresh, warmed supervisor that HAD a valid
+    //    one: not installed, the earlier one revoked, refused.
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 100.0, 2.0, 14.0);
+    assert!(sup.set_calibration(CalParams {
         gyro_bias: [0.001, 0.0, 0.0],
         ..CalParams::identity()
-    });
-    for _ in 0..10 {
-        sup.step(&mut b);
-    }
-    sup.set_check(CheckId::FailsafeConfigured, true);
-    sup.command(Event::Arm, true, true);
-    assert_eq!(
-        sup.mode(),
-        Mode::Armed,
-        "with a calibration installed the identical arm must succeed — if it \
-         does not, the refusal above was not caused by the missing calibration"
+    }));
+    let bad = CalParams {
+        mag_offdiag: [f32::NAN, 0.0, 0.0],
+        ..CalParams::identity()
+    };
+    assert!(
+        !sup.set_calibration(bad),
+        "an invalid calibration was installed"
     );
+    assert!(
+        !sup.calibration_configured(),
+        "the valid one was not revoked"
+    );
+    assert_eq!(
+        sup.calibration(),
+        CalParams::identity(),
+        "an invalid calibration must leave the identity applied, never itself"
+    );
+    assert_eq!(
+        try_arm(&mut sup, &mut b, 1500),
+        Some(CheckId::CalibrationPresent),
+        "an invalid calibration must refuse arming"
+    );
+
+    // 4. THE CONTROL — a valid non-identity calibration on the same warmed
+    //    supervisor arms, attributing step 3's refusal to the calibration.
+    assert!(sup.set_calibration(CalParams {
+        gyro_bias: [0.001, 0.0, 0.0],
+        ..CalParams::identity()
+    }));
+    assert_eq!(try_arm(&mut sup, &mut b, 10), None, "the control must arm");
 }
 
 /// #609 finding 6 — bit 7 (`ARM_BLOCKED`) must report the verdict of the table
@@ -354,12 +391,12 @@ mod arm_blocked_bit {
         assert_eq!(s.mode(), Mode::Armed, "control: arm really is allowed");
     }
 
-    /// The published component's shape: IDENTITY calibration. `step` runs
+    /// A supervisor with NO calibration configured. `step` runs
     /// `update_preflight`, which marks the LEGACY struct `calibration_present =
     /// false`; on main that held bit 7 set on every tick while armed and
     /// airborne. Armed, the bit must be clear.
     #[test]
-    fn armed_airborne_with_identity_calibration_leaves_bit_7_clear() {
+    fn armed_airborne_without_a_configured_calibration_leaves_bit_7_clear() {
         use falcon_core::{FlightBackend, ImuSample};
         struct Host;
         impl FlightBackend for Host {
@@ -404,7 +441,7 @@ mod arm_blocked_bit {
             s.mode()
         );
         // Precondition that makes this the component's shape: the legacy
-        // struct DOES fail (identity calibration) while we are airborne.
+        // struct DOES fail (no calibration configured) while we are airborne.
         assert!(s.arm_blocked_reason().is_some(), "legacy struct fails");
         assert_eq!(s.failsafe_flags() & ff::ARM_BLOCKED, 0, "airborne");
         // Even a failing table row must not raise the bit once past the gate.

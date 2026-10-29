@@ -1504,6 +1504,14 @@ pub struct FlightSupervisor {
     /// (relay-preflight). Defaults all-passing for back-compat; an integration
     /// that wires real health signals tightens it.
     preflight: relay_preflight::PreflightChecks,
+    /// A VALID calibration has been explicitly installed through
+    /// [`set_calibration`](Self::set_calibration) and not since revoked by an
+    /// invalid one. THIS, not "the calibration differs from the identity", is
+    /// what `update_preflight` reports as `CalibrationPresent` (jess#167,
+    /// #611): per-sensor calibration is applied below this seam, so an
+    /// explicitly configured IDENTITY is a valid calibration meaning
+    /// "calibrated upstream, no residual". Never configured => false.
+    calibration_configured: bool,
 }
 
 /// How long a battery may say NOTHING before it counts as lost, in seconds.
@@ -1627,6 +1635,7 @@ impl FlightSupervisor {
                 battery_ok: true,
                 failsafe_configured: true,
             },
+            calibration_configured: false,
         }
     }
 
@@ -1721,12 +1730,38 @@ impl FlightSupervisor {
         self.core.state()
     }
 
-    /// Install the sensor calibration applied to raw IMU/mag samples each cycle.
-    /// Solved by relay-calib (gyro null / accel 6-point / mag iron) and typically
-    /// loaded from the relay-param store; identity until then. Delegates to the
-    /// FlightCore, where the estimator applies it.
-    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) {
-        self.core.set_calibration(calib);
+    /// Install the sensor calibration applied to raw IMU/mag samples each cycle,
+    /// and return whether it was installed.
+    ///
+    /// A VALID calibration ([`relay_calib::CalParams::is_valid`]: finite, every
+    /// scale positive, soft-iron positive definite) is installed and marks the calibration
+    /// CONFIGURED, so `CalibrationPresent` passes from the next
+    /// `update_preflight` — the IDENTITY included: it means "calibrated
+    /// upstream, no residual", because per-sensor calibration is applied below
+    /// this layer (jess#167). An INVALID one is NOT installed: the identity
+    /// is installed in its place and the calibration is marked NOT configured,
+    /// revoking any earlier valid one, so arming is refused (#611). A
+    /// supervisor that is never given one reports `CalibrationPresent` false
+    /// once stepped.
+    ///
+    /// Delegates to the FlightCore, where the estimator applies it.
+    /// (`FlightCore::set_calibration` itself does not validate; it has no
+    /// pre-arm gate to report to.)
+    pub fn set_calibration(&mut self, calib: relay_calib::CalParams) -> bool {
+        let ok = calib.is_valid();
+        self.core.set_calibration(if ok {
+            calib
+        } else {
+            relay_calib::CalParams::identity()
+        });
+        self.calibration_configured = ok;
+        ok
+    }
+
+    /// Whether a valid calibration is configured — the `CalibrationPresent`
+    /// signal `update_preflight` feeds the pre-arm table.
+    pub fn calibration_configured(&self) -> bool {
+        self.calibration_configured
     }
 
     /// The calibration currently applied to raw samples.
@@ -1756,7 +1791,8 @@ impl FlightSupervisor {
     /// defaults). Four of the six are wired here:
     ///   * estimator_converged — the IEKF attitude uncertainty has settled below
     ///     [`PREARM_TILT_UNCERT_MAX`] (a divergent/just-started filter blocks arming);
-    ///   * calibration_present — a non-identity sensor calibration is installed;
+    ///   * calibration_present — a VALID calibration was explicitly configured
+    ///     via `set_calibration` (the identity counts: "calibrated upstream");
     ///   * battery_ok — the estimated battery state (BATTERY-P02: debounced,
     ///     latched low/critical flags) is clear;
     ///   * geofence_loaded — a positive fence radius is configured.
@@ -1766,8 +1802,7 @@ impl FlightSupervisor {
     /// the backend does not yet provide (documented follow-up).
     pub fn update_preflight<B: FlightBackend>(&mut self, _b: &mut B) {
         self.preflight.estimator_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
-        self.preflight.calibration_present =
-            self.core.calibration() != relay_calib::CalParams::identity();
+        self.preflight.calibration_present = self.calibration_configured;
         // No battery data => NOT ok. A vehicle that cannot see its pack must not
         // report that the pack is fine.
         self.preflight.battery_ok =
@@ -5887,7 +5922,7 @@ mod tests {
             Some(relay_preflight::CheckFail::Calibration)
         );
 
-        // install a (non-identity) calibration → step once to refresh → arms.
+        // install a (valid) calibration → step once to refresh → arms.
         sup.set_calibration(CalParams {
             gyro_bias: [0.001, 0.0, 0.0],
             ..CalParams::identity()
