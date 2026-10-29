@@ -28,7 +28,8 @@
 >
 > 5. **Every reply echoes the `seq` of the frame it answers** (§3) — a
 >    `motors` reply its `sensor` frame's, an `ack` its control frame's. No
->    layout change.
+>    layout change. The reference host **refuses** a reply that does not
+>    (§3, "What the reference host enforces").
 >
 > `version` is now **2**. A v1 host is refused with `BadVersion { got: 1,
 > want: 2 }`, which is the intended way to discover the change.
@@ -444,6 +445,36 @@ gets `motors` 41 and 43 back knows tick 42 has no answer. (This rule was an
 open point in an earlier draft of v2; it is pinned here. The integrator review
 on jess#167 asked for exactly this.)
 
+**What the reference host enforces** (`BindingHost::on_reply`; #614 — an
+integrator's probe on jess#167 found the rule stated here but unchecked, and a
+`motors` reply carrying a seq the host never sent was accepted as three lost
+ticks). A reply that breaks the rule is **refused and changes nothing**:
+
+| reply | accepted when | otherwise |
+|---|---|---|
+| `motors` seq `s` | `s` is the **outstanding** `sensor` frame — the newest one the host sent, not yet answered | refused, `StrayMotors` |
+| `motors` seq `s` | `s` is the `motors` accepted last | accepted as `Duplicate`; do not act twice |
+| `ack` | header `seq` == `acked-seq`, and it is the control frame awaited | refused, `AckSeqMismatch` or `UnexpectedAck` |
+| `ack` | header `seq` == `acked-seq` == the ack accepted last | accepted as a duplicate ack |
+
+`StrayMotors` says which way the reply fails: `Unsolicited` (no `sensor` frame
+is outstanding), `NeverSent` (one is, but this seq never went on the wire), or
+`Superseded` (the host sent this seq, but it is a `sensor` frame since
+superseded by a newer one, or a control frame).
+
+**Only the newest `sensor` frame is answerable.** A host that sends tick
+`n + 1` before tick `n`'s reply arrived has given tick `n` up: a late reply to
+`n` is refused, and `n` is counted in the `Dropped { lost }` of `n + 1`'s
+reply. So `lost` counts frames the host **sent** whose replies it never
+accepted — never more. The host's tracker starts at the host's own first
+`seq`, so loss before the first accepted reply is reported too: `sensor` 1, 2,
+3 out and only `motors` 3 back reads `Dropped { lost: 2 }`, not `First`. An
+accepted `ack` advances the same baseline, so an acknowledged control frame
+between two ticks is not counted lost. One consequence to know: if a control
+frame is sent while a tick is outstanding and its ack arrives first, the
+tick's `motors` reply is accepted but reads `Late` — the table below says
+discard it.
+
 **What a component does with a frame it will not act on.** A `Duplicate` or
 `Late` `sensor` frame never steps the controller. The component may leave it
 unanswered (the native test endpoint does) or answer it with the same `seq`
@@ -454,7 +485,14 @@ and **not re-applied**.
 **The same rule, other polarity.** In `falcon-hitl`'s `LinkBackend` /
 `SimServer` pair the flight computer leads with `motors` and the plant answers
 with `sensor`; there the `sensor` reply echoes the `motors` frame's `seq`. A
-reply echoes its request, whichever side asks.
+reply echoes its request, whichever side asks. `LinkBackend` enforces it: the
+exchange is synchronous, so a `sensor` reply whose `seq` is not the `motors`
+frame just sent is refused — not cached, not classified, counted in
+`misechoed_replies()` — and the next correctly echoed reply's
+`Dropped { lost }` counts the exchanges in between. (`SimServer` is the side
+that is asked, not the side that asks, so it has no reply to check; it
+classifies the requests it receives with `SeqTracker` as the table below
+says.)
 
 Each receiver classifies the frames it receives against the last it accepted —
 `SeqTracker` in the reference implementation:
@@ -514,8 +552,9 @@ Two of those are measured, not predicted:
 `crates/falcon-hitl/src/wire.rs` — `no_std`, no-alloc, fixed buffers, so the
 same codec runs on the MCU and on a host PC. `crates/falcon-hitl/src/lib.rs`
 carries the host side: `BindingHost` (sequencing, the handshake, reply
-classification) and `SimServer` / `sample_sensor_frame` (a plant's sensors,
-battery included, as a `sensor` frame).
+classification and the echo rule it enforces) and `SimServer` /
+`sample_sensor_frame` (a plant's sensors, battery included, as a `sensor`
+frame).
 
 `crates/falcon-hitl/tests/binding_drives_the_supervisor.rs` is the executable
 form of §2: a host that exchanges **only bytes** with a native
