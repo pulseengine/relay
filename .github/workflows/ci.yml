@@ -40,7 +40,10 @@ env:
 jobs:
   fmt:
     name: Format
-    runs-on: [self-hosted, linux, x64, light]
+    # Routes fork PRs to GitHub-hosted runners by default. This is NOT a security
+    # boundary: a fork PR can edit this file. Isolation is enforced by the org's
+    # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -62,7 +65,7 @@ jobs:
 
   workflow-lint:
     name: Workflow lint (actionlint)
-    runs-on: [self-hosted, linux, x64, light]
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
       - uses: actions/checkout@v7
       # WHY THIS GATE EXISTS — it is not style, it caught a live outage.
@@ -115,7 +118,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -151,7 +154,11 @@ jobs:
             runner: macos-latest
           - label: windows
             runner: windows-latest
-    runs-on: ${{ matrix.runner }}
+    # Routes fork PRs to GitHub-hosted runners by default (self-hosted matrix
+    # entries only). This is NOT a security boundary: a fork PR can edit this
+    # file. Isolation is enforced by the org's smithy runner-group policy and
+    # fork-PR approval (pulseengine/warte#35).
+    runs-on: ${{ github.event.pull_request.head.repo.fork && contains(matrix.runner, 'self-hosted') && 'ubuntu-latest' || matrix.runner }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -161,7 +168,7 @@ jobs:
 
   falcon-hello-smoke:
     name: falcon-hello end-to-end demo
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -200,7 +207,7 @@ jobs:
   # worst-case-margin lines in the CI log for trend-watching.
   closed-loop-sim:
     name: Closed-loop simulation + Monte-Carlo campaigns
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

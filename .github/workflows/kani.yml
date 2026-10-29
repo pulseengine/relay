@@ -52,7 +52,10 @@ jobs:
   # third-party action), mirroring verification-gate.yml's #298 scope check.
   changes:
     name: Detect engine changes
-    runs-on: [self-hosted, linux, x64, light]
+    # Routes fork PRs to GitHub-hosted runners by default. This is NOT a security
+    # boundary: a fork PR can edit this file. Isolation is enforced by the org's
+    # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     outputs:
       run: ${{ steps.scope.outputs.run }}
       # Why the matrix was skipped: `deferred` (pull_request — it runs in the
@@ -132,7 +135,7 @@ jobs:
     name: Kani (${{ matrix.engine }})
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
     # A cap, not a budget (#429). Without one a hung leg holds its runner for
     # GitHub's default 360 min while the PR looks merely slow. `Kani
     # (relay-mix-quad)` hung inside the Kani step FOUR times on 2026-09-16/17
@@ -271,7 +274,7 @@ jobs:
   # without registering a separate required check per engine.
   kani-gate:
     name: Kani gate
-    runs-on: [self-hosted, linux, x64, light]
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     needs: [changes, kani]
     if: always()
     steps:

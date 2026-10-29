@@ -70,7 +70,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, light]
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/actions
 
@@ -279,7 +279,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, light]
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             scripts
@@ -287,7 +287,7 @@ jobs:
 
       - uses: ./.github/actions/setup-gh
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
       - name: Install rust-script
         shell: bash
