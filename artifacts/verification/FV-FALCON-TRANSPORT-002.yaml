@@ -55,6 +55,17 @@ artifacts:
       Calibration harness FAILS. The earlier figures above are kept as the
       record of that run.
 
+      AMENDED 2026-10-29 (#614 follow-up; provenance jess#167): a tenth
+      harness, `the_host_accepts_only_replies_to_frames_it_sent`, proves the
+      echo rule over BindingHost's reply classifier (5 symbolic steps, ghost
+      ledger, symbolic start seq). MEASURED, Kani 0.67.0, local: 10 harnesses
+      verified, 0 failures, 39 of 39 covers SATISFIED, 151 s wall (new
+      harness 21 s). Mutations: Motors accepted for any seq -> FAILS (Ok tick
+      never sent / answered twice); Ack header check removed -> FAILS;
+      tracker loss inflated by one -> FAILS (loss bound). An unseeded tracker
+      does NOT fail it (the harness bounds loss from above; exactness is the
+      unit tests').
+
       Closes the decoder-proof blocker SWREQ-FALCON-TRANSPORT-P01 names in its
       own text: "NO PROOF ON THE DECODER, and it is a promotion blocker rather
       than a caveat: `wire::decode_frame` parses UNTRUSTED BYTES and has no Kani

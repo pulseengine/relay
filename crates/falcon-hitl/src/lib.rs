@@ -123,7 +123,10 @@ impl<T: Transport> LinkBackend<T> {
         wire::encode_motors(&mut out, 0, [0.0; 4]);
         let mut reply = [0u8; SENSOR_WIRE_FRAME_LEN];
         transport.exchange(&out, &mut reply);
-        let mut tracker = wire::SeqTracker::default();
+        // Seeded one BEFORE the first request (seq 0, by wrap), so a lost
+        // init exchange is counted by the next good reply instead of that
+        // reply reading as a fresh `First`.
+        let mut tracker = wire::SeqTracker::starting_at(u32::MAX);
         let r = Self::read_reply(&reply, 0, &mut tracker);
         LinkBackend {
             transport,
@@ -1342,6 +1345,38 @@ mod tests {
         assert!(host.on_reply(&motors_frame(2)).is_err());
     }
 
+    /// The init exchange (seq 0, inside `new`) mis-echoed: the next good
+    /// reply must still count it lost, not read as a fresh `First`.
+    #[test]
+    fn echo_rule_link_backend_counts_a_lost_init_exchange() {
+        struct BadFirst {
+            n: u32,
+        }
+        impl Transport for BadFirst {
+            fn exchange(
+                &mut self,
+                out: &[u8; MOTORS_FRAME_LEN],
+                reply: &mut [u8; SENSOR_WIRE_FRAME_LEN],
+            ) {
+                let (h, _) = wire::decode_frame(out).unwrap();
+                self.n += 1;
+                let seq = if self.n == 1 {
+                    h.seq.wrapping_add(9)
+                } else {
+                    h.seq
+                };
+                wire::encode_sensor_frame(reply, seq, &wire::WireSensorFrame::default());
+            }
+        }
+        let mut backend = LinkBackend::new(BadFirst { n: 0 }, 0.002);
+        assert_eq!(backend.last_verdict(), None);
+        backend.write_motors(&[0.1; 4]);
+        assert_eq!(
+            backend.last_verdict(),
+            Some(wire::TickVerdict::Dropped { lost: 1 })
+        );
+    }
+
     /// The documented edge: a control frame sent while a tick is outstanding,
     /// acked BEFORE that tick's reply arrives. The reply still answers the
     /// outstanding tick, so it is accepted — and reads `Late`, which the
@@ -1428,7 +1463,7 @@ mod tests {
             }
         }
         let mut backend = LinkBackend::new(OneBad { n: 0 }, 0.002);
-        assert_eq!(backend.last_verdict(), Some(wire::TickVerdict::First));
+        assert_eq!(backend.last_verdict(), Some(wire::TickVerdict::InOrder));
         backend.write_motors(&[0.1; 4]);
         assert_eq!(backend.last_verdict(), Some(wire::TickVerdict::InOrder));
         backend.write_motors(&[0.1; 4]); // the mis-echoed one
