@@ -98,6 +98,12 @@ def check_source(src, path="<src>"):
                  and any(a.name == "annotations" for a in n.names)
                  for n in tree.body)
     findings = []
+    # `import datetime as _dt` -> {"_dt": "datetime"}, so `_dt.UTC` is seen.
+    alias = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                alias[a.asname or a.name] = a.name
 
     # Imports guarded by try/except ImportError, an `if sys.version_info`
     # branch, or a top-level version check that exits before them.
@@ -178,9 +184,10 @@ def check_source(src, path="<src>"):
                 k.arg == "strict" for k in n.keywords):
             findings.append(f"{path}:{n.lineno}: zip(strict=) needs 3.10")
         elif (isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
-              and (n.value.id, n.attr) in NEW_NAMES and n.value.id != "typing"):
-            findings.append(f"{path}:{n.lineno}: {n.value.id}.{n.attr} needs "
-                            f"{NEW_NAMES[(n.value.id, n.attr)]}")
+              and (alias.get(n.value.id, n.value.id), n.attr) in NEW_NAMES
+              and alias.get(n.value.id, n.value.id) != "typing"):
+            mod = alias.get(n.value.id, n.value.id)
+            findings.append(f"{path}:{n.lineno}: {mod}.{n.attr} needs {NEW_NAMES[(mod, n.attr)]}")
     # Several evaluated annotations nest (BinOp inside BinOp); report a line once.
     seen, out = set(), []
     for f in findings:
@@ -202,6 +209,8 @@ FIXTURES = [
     ("union in isinstance", "def g(v):\n    return isinstance(v, int | str)\n", True),
     ("zip strict", "list(zip([1], [2], strict=True))\n", True),
     ("datetime.UTC", "import datetime\nnow = datetime.datetime.now(datetime.UTC)\n", True),
+    ("aliased datetime.UTC", "import datetime as _dt\nnow = _dt.datetime.now(_dt.UTC)\n", True),
+    ("datetime.timezone.utc (3.9)", "import datetime\nnow = datetime.datetime.now(datetime.timezone.utc)\n", False),
     ("from datetime import UTC", "from datetime import UTC\n", True),
     ("typing.Self", "from typing import Self\n", True),
     ("match statement", "match 1:\n    case 1:\n        pass\n", sys.version_info < (3, 10)),
