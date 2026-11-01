@@ -36,6 +36,6 @@ falcon-core = { path = "../../crates/falcon-core" }
 # EXACTLY; a different gz-transport here would be a different bridge than the
 # one every native SITL result was produced with, and the comparison would stop
 # meaning anything.
-gz-transport = { version = "0.10", features = ["harmonic"], optional = true }
-gz-msgs = { version = "0.10", features = ["harmonic"], optional = true }
+gz-transport = { version = "0.11", features = ["harmonic"], optional = true }
+gz-msgs = { version = "0.11", features = ["harmonic"], optional = true }
 crossbeam-channel = { version = "0.5", optional = true }
