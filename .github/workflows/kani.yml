@@ -63,7 +63,7 @@ jobs:
       # when it runs. kani-gate fails closed on a skip without a reason.
       reason: ${{ steps.scope.outputs.reason }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - name: Scope check (do any Kani-relevant files change?)
@@ -244,7 +244,7 @@ jobs:
           # enter reclaims iff the previous call returned (P3), alignment (P4).
           - falcon-cm-rt
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # KANI VERSION IS PINNED. The action's `kani-version` input defaults to
       # `latest`, and we did not set it — so every run installed whatever Kani
       # had most recently released. On 2026-09-16 that broke all 45 engines at
@@ -264,7 +264,7 @@ jobs:
       # choosing a new one. Moving to 0.68.0 is a deliberate change with its own
       # validation, not something an upstream release should do to us at 03:43.
       - name: Kani verify ${{ matrix.engine }}
-        uses: model-checking/kani-github-action@v1
+        uses: model-checking/kani-github-action@69d357bade1eb7b32bc3fc3d5c3d173c5bfa5237 # v1
         with:
           kani-version: '0.67.0'
           working-directory: crates/${{ matrix.engine }}

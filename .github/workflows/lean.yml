@@ -38,12 +38,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout relay
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           path: relay
 
       - name: Checkout rules_lean
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pulseengine/rules_lean
           path: rules_lean
@@ -54,19 +54,19 @@ jobs:
       # MODULE graph resolves to keep `bazel test //proofs/lean:all` from
       # failing on a missing sibling.
       - name: Checkout rules_wasm_component
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pulseengine/rules_wasm_component
           path: rules_wasm_component
 
       - name: Checkout rules_verus
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pulseengine/rules_verus
           path: rules_verus
 
       - name: Checkout rules_rocq_rust
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pulseengine/rules_rocq_rust
           path: rules_rocq_rust

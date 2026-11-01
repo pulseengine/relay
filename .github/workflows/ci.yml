@@ -45,7 +45,7 @@ jobs:
     # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -67,7 +67,7 @@ jobs:
     name: Workflow lint (actionlint)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # WHY THIS GATE EXISTS — it is not style, it caught a live outage.
       #
       # A workflow file that Actions cannot PARSE does not fail loudly: GitHub
@@ -120,11 +120,11 @@ jobs:
     name: Clippy
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # Scope tight: only the v0.1 falcon crates. Workspace-wide
       # clippy lights up pre-existing warnings in cFS crates that
       # are out of v0.1 scope.
@@ -160,9 +160,9 @@ jobs:
     # fork-PR approval (pulseengine/warte#35).
     runs-on: ${{ github.event.pull_request.head.repo.fork && contains(matrix.runner, 'self-hosted') && 'ubuntu-latest' || matrix.runner }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: cargo test
         run: cargo test --workspace --all-targets
 
@@ -170,9 +170,9 @@ jobs:
     name: falcon-hello end-to-end demo
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Run falcon-hello UDP-loopback demo
         # The demo binds a FIXED UDP port pair (default 14700/14701). Several of
         # these jobs can land on the SAME self-hosted runner concurrently — which
@@ -209,9 +209,9 @@ jobs:
     name: Closed-loop simulation + Monte-Carlo campaigns
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Closed-loop safety suite + dispersion campaigns
         run: |
           # falcon-sitl-gz: integration safety tests + the nominal-recovery
@@ -231,7 +231,7 @@ jobs:
     name: Script portability (shellcheck + Python 3.9 floor)
     runs-on: [self-hosted, linux, x64, light]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # SHELLCHECK_SHA256 is the release asset's `digest` for
       # shellcheck-v0.11.0.linux.x86_64.tar.gz from

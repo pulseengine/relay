@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Gazebo Harmonic from the OSRF apt repo. Pinned to the keyring rather
       # than apt-key (deprecated) and to ubuntu-stable for the runner's codename.
@@ -126,7 +126,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       # build-components.sh drives cargo-component; scripts/compose-cascade.rs drives
       # wac. Neither is on a hosted runner. install-action serves prebuilt
@@ -437,7 +437,7 @@ jobs:
       # its channel-metadata.md entry, which is the durable path.
       - name: Store the flight video
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gazebo-flight-video
           path: /tmp/gz-video/
@@ -446,7 +446,7 @@ jobs:
 
       - name: Upload gz evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gazebo-evidence
           path: |

@@ -38,7 +38,7 @@ jobs:
       # self-hosted runner (same class as the rivet OOM in verification-gate.yml).
       CARGO_BUILD_JOBS: "2"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install spar v0.18.0 (pinned for reproducible codegen)
         shell: bash
