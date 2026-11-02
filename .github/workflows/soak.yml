@@ -46,9 +46,9 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Build the bench
         run: cargo build --release -p falcon-sitl-gz
@@ -159,9 +159,9 @@ jobs:
       # coincide: any regression below an hour now fails the nightly.
       GZ_FLOOR_S: '3600'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install Gazebo Harmonic
         shell: bash
@@ -461,11 +461,11 @@ jobs:
       # do not lower this floor without quoting it.
       WASM_FLOOR_S: '3600'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2, wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install cargo-component
         uses: taiki-e/install-action@v2.87.31
         with:
