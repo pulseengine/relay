@@ -1,0 +1,14 @@
+# Curated FIX commits: commits that ARE fixes but whose subject does not carry
+# a fix/hotfix/revert prefix, so the automated classifier misses them.
+#
+# Format: one 7-hex-char abbreviated sha per line (first token), rest = note.
+# Matching is EXACT on the first 7 characters of the full sha, as in the
+# baseline method (`sha[:7] in EXTRA`); entries of any other length are
+# rejected rather than silently never matching.
+#
+# Frozen with refactor-metrics 1.0.0 (baseline origin/main @55af1e9).
+# Adding or removing an entry changes the measurement: bump the tool version
+# and report it (README, "Changing the instrument").
+98d9b95 ci(gz): bound and retry the Gazebo apt install
+26b7199 docs(falcon-video): fix the setup gap + add the one "achievements" video
+efc0dbf docs(release): disclose the v1.140 clean-room review
