@@ -31,19 +31,23 @@
 //! (`Option::get_or_insert_with`) and hands out references. A host lives in a
 //! `static`, hence [`SupervisorHost::new`] is `const`.
 //!
-//! FOR THE #575 SPLIT. Everything here except [`SupervisorHost::build`] reads
-//! the supervisor only through calls the split's generic supervisor also has
-//! (`mode`, `battery`, `core().failed_motor()`, `core().nav_compromised()`,
-//! `set_check`, `set_calibration`, `command`, `step`, `set_mission`). The one
-//! core-specific step is how the tuning reaches a freshly built core, so on
-//! rebase `SupervisorHost` becomes generic over the core and `build` the one
-//! per-core hook (the fused core: `set_hover_thrust` + the setters below; the
-//! split: send the same [`VehicleTuning`] to both partitions). The ORDER inside
-//! `build` is an invariant either way: construct, apply tuning, install the
-//! calibration, declare the rows. A partition reset after `set_calibration`
-//! would wipe the calibration.
+//! GENERIC OVER THE CORE (#575). The host drives any [`HostCore`]: the fused
+//! [`FlightCore`] (the published `cascade` component, the native mirror, the
+//! falcon-hitl binding endpoint) or `split::SplitCore` (the `cascade-split`
+//! orchestrator, whose estimator and control halves live in two other
+//! components). Everything here except the core's own
+//! [`HostCore::build_supervisor`] reads the supervisor only through
+//! [`SupervisedCore`] calls (`mode`, `battery`, `core().failed_motor()`,
+//! `core().nav_compromised()`, `set_check`, `set_calibration`, `command`,
+//! `step`, `set_mission`), so the rules below are the SAME code for both
+//! deployments. The one per-core step is how a fresh core is constructed and
+//! receives the tuning: the fused core gets `set_hover_thrust` + the setters
+//! below; the split resets BOTH partitions with the same [`VehicleTuning`]. The
+//! ORDER inside [`SupervisorHost::build`] is an invariant either way:
+//! construct (with tuning), install the calibration, declare the rows. A
+//! partition reset after `set_calibration` would wipe the calibration.
 
-use crate::{FlightBackend, FlightCore, FlightSupervisor, Vec3};
+use crate::{FlightBackend, FlightCore, FlightSupervisor, SupervisedCore, Vec3};
 use relay_calib::CalParams;
 use relay_fsm::{Event, Mode};
 use relay_preflight::CheckId;
@@ -270,13 +274,54 @@ pub enum Configured {
     Rejected,
 }
 
+/// The ONE per-core hook of [`SupervisorHost`] (#575): build a supervisor over
+/// a FRESH core that carries `tuning`, straight into `slot` (never by value:
+/// see the module's STACK note), and return it.
+///
+/// `tuning == None` means no valid tuning was ever configured: the core keeps
+/// its built-in defaults, and the host refuses arming (`ParamsFromNvm`).
+/// Everything after construction (calibration, row declarations) is the host's,
+/// identical for every core.
+pub trait HostCore: SupervisedCore + Sized {
+    fn build_supervisor(
+        slot: &mut Option<FlightSupervisor<Self>>,
+        sup: (Vec3, f32, f32, f32),
+        tuning: Option<VehicleTuning>,
+    ) -> &mut FlightSupervisor<Self>;
+}
+
+/// The fused core: `FlightSupervisor::new` (which hardcodes
+/// `FlightCore::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ)`),
+/// then the tuning through the setters.
+impl HostCore for FlightCore {
+    #[inline(always)]
+    fn build_supervisor(
+        slot: &mut Option<FlightSupervisor<Self>>,
+        (home, fence, cruise, low_batt): (Vec3, f32, f32, f32),
+        tuning: Option<VehicleTuning>,
+    ) -> &mut FlightSupervisor<Self> {
+        // Constructed straight into the slot: the by-value form of this
+        // construction is what overflowed the component's 8 KiB shadow stack.
+        let sup = slot.get_or_insert_with(|| FlightSupervisor::new(home, fence, cruise, low_batt));
+        // `FlightSupervisor::new` hardcodes `FlightCore::new(0.5, 1000.0)`, so
+        // hover thrust must be re-applied; the loop RATE resyncs from the
+        // backend's `dt` on the first tick, the warm-up count does not (#609
+        // finding 7, open).
+        if let Some(t) = tuning {
+            sup.set_hover_thrust(t.hover_thrust);
+            t.apply(sup.core_mut());
+        }
+        sup
+    }
+}
+
 /// Owns the seam's supervisor and the configuration it is (re)built from.
 ///
 /// Lazily built: the supervisor exists from the first `command` or `step`.
 /// Dropping it is how an accepted `configure_vehicle` / `configure_supervisor`
 /// takes effect; the next call rebuilds it.
-pub struct SupervisorHost {
-    sup: Option<FlightSupervisor>,
+pub struct SupervisorHost<C: HostCore = FlightCore> {
+    sup: Option<FlightSupervisor<C>>,
     /// The last VALID vehicle tuning. An invalid one never replaces it.
     /// `None` = no valid tuning ever configured: the core runs its built-in
     /// defaults and arming is refused (`ParamsFromNvm`).
@@ -295,13 +340,13 @@ pub struct SupervisorHost {
     calib: Option<CalParams>,
 }
 
-impl Default for SupervisorHost {
+impl<C: HostCore> Default for SupervisorHost<C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SupervisorHost {
+impl<C: HostCore> SupervisorHost<C> {
     /// Nothing configured, nothing built. `const` so a component can hold the
     /// host in a `static`.
     pub const fn new() -> Self {
@@ -314,7 +359,7 @@ impl SupervisorHost {
     }
 
     /// The supervisor, if one has been built.
-    pub fn supervisor(&self) -> Option<&FlightSupervisor> {
+    pub fn supervisor(&self) -> Option<&FlightSupervisor<C>> {
         self.sup.as_ref()
     }
 
@@ -462,7 +507,7 @@ impl SupervisorHost {
     /// MISSION LEG at `@0.12.0`, not a position command: the supervisor owns
     /// the position setpoint and derives one per mode, so outside Mission it is
     /// ignored (#609 finding 4).
-    pub fn step<B: FlightBackend>(&mut self, mission_leg: Vec3, b: &mut B) -> &FlightSupervisor {
+    pub fn step<B: FlightBackend>(&mut self, mission_leg: Vec3, b: &mut B) -> &FlightSupervisor<C> {
         let sup = self.ensure();
         sup.set_mission(mission_leg);
         sup.step(b);
@@ -470,7 +515,7 @@ impl SupervisorHost {
     }
 
     /// The supervisor, built into its slot if absent.
-    fn ensure(&mut self) -> &mut FlightSupervisor {
+    fn ensure(&mut self) -> &mut FlightSupervisor<C> {
         if self.sup.is_none() {
             self.build();
         }
@@ -480,8 +525,8 @@ impl SupervisorHost {
     /// Build the supervisor INTO ITS SLOT, in the invariant order: construct,
     /// apply tuning, install the calibration, declare the rows.
     ///
-    /// The only core-specific step in this file (see the module docs, FOR THE
-    /// #575 SPLIT).
+    /// The core-specific step is [`HostCore::build_supervisor`] (see the
+    /// module docs, GENERIC OVER THE CORE).
     fn build(&mut self) {
         let (home, fence, cruise, low_batt) = match &self.supcfg {
             Some(c) => (c.home, c.fence_radius, c.cruise_alt, c.low_batt_v),
@@ -495,19 +540,8 @@ impl SupervisorHost {
         let tuning = self.vehicle;
         let calib = self.calib;
         let configured = self.failsafe_configured();
-        // Constructed straight into the slot — the by-value form of this
-        // construction is what overflowed the component's 8 KiB shadow stack.
-        let sup = self
-            .sup
-            .get_or_insert_with(|| FlightSupervisor::new(home, fence, cruise, low_batt));
-        // `FlightSupervisor::new` hardcodes `FlightCore::new(0.5, 1000.0)`, so
-        // hover thrust must be re-applied; the loop RATE resyncs from the
-        // backend's `dt` on the first tick, the warm-up count does not (#609
-        // finding 7, open).
-        if let Some(t) = tuning {
-            sup.set_hover_thrust(t.hover_thrust);
-            t.apply(sup.core_mut());
-        }
+        // The per-core step: construct a fresh core carrying the tuning.
+        let sup = C::build_supervisor(&mut self.sup, (home, fence, cruise, low_batt), tuning);
         // A configured calibration survives a rebuild; none configured stays
         // none (the fresh supervisor's CalibrationPresent row starts false).
         if let Some(c) = calib {
@@ -557,7 +591,7 @@ mod tests {
     /// A host with a VALID vehicle tuning, so the tests below are about what
     /// they name and not refused by `ParamsFromNvm`.
     fn tuned() -> SupervisorHost {
-        let mut h = SupervisorHost::new();
+        let mut h: SupervisorHost = SupervisorHost::new();
         assert_eq!(h.configure_vehicle(vcfg()), Configured::Accepted);
         h
     }
@@ -1150,7 +1184,7 @@ mod tests {
                 ..vcfg()
             }),
         ] {
-            let mut h = SupervisorHost::new();
+            let mut h: SupervisorHost = SupervisorHost::new();
             if let Some(bad) = first {
                 assert_eq!(h.configure_vehicle(bad), Configured::Invalid);
             }
@@ -1385,7 +1419,7 @@ mod tests {
         extern crate std;
         let mut accepted = 0;
         for (name, c) in invalid_vehicle_values() {
-            let mut h = SupervisorHost::new();
+            let mut h: SupervisorHost = SupervisorHost::new();
             let r = h.configure_vehicle(c);
             if r != Configured::Invalid {
                 accepted += 1;
