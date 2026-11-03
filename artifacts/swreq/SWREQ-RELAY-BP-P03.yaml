@@ -1,0 +1,23 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P03
+    type: sw-req
+    title: "BP-P03 — CRC types 1 and 2 are computed per RFC 9171 with only the CRC value bytes zeroed"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      CRC-16/X-25 (type 1) and CRC-32C (type 2) are computed over the whole block
+      with the CRC field value bytes set to zero and the CBOR byte-string header
+      kept (RFC 9171 erratum 8043, Verified). Values are big-endian on the wire.
+    tags: [falcon, relay, relay-bp, dtn, codec, crc, issue-626]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: published check values (reveng 0x906e and 0xe3069283, RFC 3720 B.4
+        vectors), CRC-bearing bundles from independent encoders (Wireshark bpv7
+        captures, downloaded in CI and not vendored until their licence is checked),
+        and a differential against hardy-bpv7 and bp7 used ONLY as dev-dependency
+        oracles.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

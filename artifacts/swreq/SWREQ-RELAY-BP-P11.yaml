@@ -1,0 +1,21 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P11
+    type: sw-req
+    title: "BP-P11 — Expiry: a bundle whose age exceeds its lifetime is deleted on the next tick"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      Age is now minus creation time when creation time is non-zero, otherwise the
+      Bundle Age block value plus local residence time (RFC 9171 5.5, a node
+      without a clock). Arithmetic saturates and never overflows. An expired
+      bundle is deleted with reason lifetime-expired; status reports for it are
+      deferred.
+    tags: [falcon, relay, relay-bp, dtn, store, lifetime, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Verus plus Kani overflow-freedom.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

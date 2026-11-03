@@ -1,0 +1,19 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P21
+    type: sw-req
+    title: "BP-P21 — Contact-plan earliest-arrival routing"
+    status: draft
+    description: >
+      UNSLOTTED. A contact plan of at most MAX_CONTACTS (from, to, start, end,
+      rate, owlt); next hop is the first hop of the earliest-arrival route (CCSDS
+      SABR 734.3-B-1, k=1) with a deterministic tie-break by contact index.
+    tags: [falcon, relay, relay-bp, dtn, later, routing, issue-626]
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Method: Kani termination and bounds; Verus or Lean for feasibility and
+        arrival-minimality; differential against a reference implementation.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

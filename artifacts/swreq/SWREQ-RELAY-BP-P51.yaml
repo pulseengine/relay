@@ -1,0 +1,18 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P51
+    type: sw-req
+    title: "BP-P51 — CCSDS 734.20 profile conformance claim"
+    status: draft
+    description: >
+      UNSLOTTED, blocked on SWREQ-RELAY-BP-P50. The profile requires forwarding
+      and delivery of bundles up to 10 MiB, which over a 65,507-byte UDP datagram
+      requires fragmentation. No such claim is made until then.
+    tags: [falcon, relay, relay-bp, dtn, later, profile, issue-626]
+    fields:
+      req-type: constraint
+      priority: could
+      verification-criteria: >
+        Method: PICS table against the implementation.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

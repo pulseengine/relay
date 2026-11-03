@@ -1,0 +1,22 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P06
+    type: sw-req
+    title: "BP-P06 — Endpoint IDs: dtn (including dtn:none) and two-element ipn are handled; every other EID form yields an explicit typed verdict"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      dtn-scheme EIDs including the null endpoint [1,0] and two-element ipn EIDs
+      [2,[node,service]] are decoded and encoded. The RFC 9758 three-element ipn
+      form and unknown schemes never mis-parse; they produce a documented explicit
+      accept-or-reject verdict. Which verdict is an open question recorded on
+      issue 626.
+    tags: [falcon, relay, relay-bp, dtn, codec, eid, issue-626]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: unit tests and external vectors (Wireshark ipn_3comp and eid_schemes
+        captures, downloaded in CI).
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

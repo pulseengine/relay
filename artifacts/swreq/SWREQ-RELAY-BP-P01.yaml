@@ -1,0 +1,20 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P01
+    type: sw-req
+    title: "BP-P01 — Decode is total: any byte slice yields Ok(BundleView) or a typed Err, never a panic or out-of-bounds access"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      The bundle decoder is a total function over arbitrary byte slices. It
+      returns a borrowed BundleView or a typed error and never panics, indexes out
+      of bounds, recurses unboundedly or allocates.
+    tags: [falcon, relay, relay-bp, dtn, codec, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Kani (per-item harnesses of at most 32 B, composed) plus a cargo-
+        fuzz target over the whole decoder.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

@@ -1,0 +1,19 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P31
+    type: sw-req
+    title: "BP-P31 — UDP convergence-layer binding: one bundle per datagram"
+    status: draft
+    description: >
+      UNSLOTTED adapter, outside the verified core. One bundle per datagram with
+      no extra framing, at most 65,507 bytes (CCSDS 734.20 Annex B UDP CLA, port
+      4556). Without fragmentation (SWREQ-RELAY-BP-P07) bundles larger than one
+      datagram cannot be carried.
+    tags: [falcon, relay, relay-bp, dtn, later, cla, issue-626]
+    fields:
+      req-type: interface
+      priority: could
+      verification-criteria: >
+        Method: unit tests; interop later.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

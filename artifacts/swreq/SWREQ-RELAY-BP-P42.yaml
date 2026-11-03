@@ -1,0 +1,20 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P42
+    type: sw-req
+    title: "BP-P42 — BPSec (RFC 9172) with the RFC 9173 default security contexts"
+    status: draft
+    description: >
+      UNSLOTTED, large. Needed for third-party verifiability and interoperability;
+      RFC 9171 section 8 requires a BPA that sources or verifies security services
+      to implement BPSec (CCSDS 734.20 3.7 waives it). The relay-sec sealing
+      profile (P40, P41) is the interim.
+    tags: [falcon, relay, relay-bp, dtn, later, security, bpsec, issue-626]
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Method: RFC 9173 A.1 and A.2 vectors; A.3 and A.4 are disputed (errata) and
+        tagged accordingly.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

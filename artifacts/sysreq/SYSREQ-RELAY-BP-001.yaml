@@ -1,0 +1,38 @@
+artifacts:
+  - id: SYSREQ-RELAY-BP-001
+    type: system-req
+    title: Store-and-forward telemetry delivery for nodes without a direct link (Bundle Protocol v7, no fragmentation)
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      A node that cannot reach its destination directly shall be able to hand
+      its report to a reachable neighbour that stores it and forwards it when a
+      contact exists, with bounded memory, bounded lifetime and no trust in the
+      forwarder. Protocol logic only: no I/O in the verified core.
+
+      Profile (maintainer decision 2026-11-03, issue 626): RFC 9171 BPv7 with
+      NO fragmentation. The node never fragments and explicitly rejects
+      fragments. Relay does NOT claim CCSDS 734.20 profile conformance until a
+      fragmentation slice exists, because that profile requires bundles up to
+      10 MiB to be forwarded and delivered while a datagram-only link carries at
+      most 65,507 bytes.
+
+      The first consumer is warte; the requirement is consumer-neutral and any
+      integrator with intermittently connected nodes is served by it.
+
+      Slots: falcon-v1.143.0 carries the codec and the bounded store;
+      falcon-v1.144.0 carries static routing, the convergence-layer seam and
+      the sealing profile. Contact-plan routing, status reports, BPSec,
+      fragmentation and the CCSDS profile are later and unslotted.
+    tags: [falcon, relay, relay-bp, dtn, bundle-protocol, store-and-forward, issue-626]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Derived software requirements SWREQ-RELAY-BP-P01..P07 and P10..P14
+        (v1.143) and P20, P30, P32, P40, P41 (v1.144) are verified by Kani and
+        Verus harnesses and external reference vectors; verification artifacts
+        for them must carry the falcon tag so the verification gate runs them.
+    links:
+      - type: derives-from
+        target: STKH-RELAY-001

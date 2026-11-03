@@ -1,0 +1,21 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P12
+    type: sw-req
+    title: "BP-P12 — Eviction on a full store is deterministic and never evicts a higher-priority bundle to admit a lower one"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      Eviction order is: expired first, then lowest priority, then earliest
+      expiry, then oldest sequence. If admitting a bundle would require evicting a
+      higher-priority one, the new bundle is refused instead. BPv7 has no priority
+      field in the primary block, so priority is a documented local policy per
+      destination or service.
+    tags: [falcon, relay, relay-bp, dtn, store, eviction, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Verus lemma on the ordering plus Kani; mutation-test the comparison.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

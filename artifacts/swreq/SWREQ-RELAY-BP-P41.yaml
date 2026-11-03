@@ -1,0 +1,25 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P41
+    type: sw-req
+    title: "BP-P41 — Freshness on the DTN path uses a dedicated relay-sec channel with a window sized to the backlog"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      Maintainer decision 2026-11-03 (resolves the draft freshness decision).
+      Bundled traffic uses its OWN relay-sec channel (own channel_id and security
+      association), separate from live traffic, with an anti-replay window sized
+      to the maximum store backlog. The receiver keeps the previous security
+      association until the bundle lifetime has expired, which covers a sender
+      that rekeys on reboot while bundles sealed under the old key are still in
+      flight.
+    tags: [falcon, relay, relay-bp, dtn, security, replay, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Kani on the window sizing bound and the old-SA retirement rule, plus
+        negative tests (replayed bundle rejected; in-flight bundle sealed under the
+        old SA accepted until lifetime expiry, then rejected).
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

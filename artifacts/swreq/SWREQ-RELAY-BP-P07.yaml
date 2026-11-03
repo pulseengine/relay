@@ -1,0 +1,27 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P07
+    type: sw-req
+    title: "BP-P07 — Fragments are rejected: the node never fragments and explicitly drops fragment bundles"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      Maintainer decision 2026-11-03: profile is RFC 9171 BPv7 with NO
+      fragmentation. A bundle whose fragment flag is set (bit 0 of the bundle
+      processing flags; primary block of 10 or 11 items) is rejected with a typed
+      error and is never stored, forwarded or delivered. The node never produces
+      fragments. Reassembly is therefore not implemented, which RFC 9171 permits
+      only because fragments are never delivered. Relay does NOT claim CCSDS
+      734.20 profile conformance: that profile requires forwarding and delivery of
+      bundles up to 10 MiB while its UDP convergence layer carries at most 65,507
+      bytes per datagram, so a datagram-only link needs fragmentation. The claim
+      waits for a fragmentation slice (SWREQ-RELAY-BP-P50).
+    tags: [falcon, relay, relay-bp, dtn, codec, profile, fragmentation, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: unit tests with fragment vectors expecting typed rejection; Kani
+        proof that no code path stores a bundle with the fragment flag set.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

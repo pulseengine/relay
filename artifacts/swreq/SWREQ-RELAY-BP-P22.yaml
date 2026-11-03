@@ -1,0 +1,17 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P22
+    type: sw-req
+    title: "BP-P22 — Route computation is bounded: O(C^2), no recursion"
+    status: draft
+    description: >
+      UNSLOTTED. Route computation is bounded by C = MAX_CONTACTS, uses no
+      recursion, and has a recorded worst-case execution time note.
+    tags: [falcon, relay, relay-bp, dtn, later, routing, issue-626]
+    fields:
+      req-type: safety
+      priority: could
+      verification-criteria: >
+        Method: Kani and a WCET note.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

@@ -1,0 +1,18 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P13
+    type: sw-req
+    title: "BP-P13 — Hop count is enforced and the Previous Node block is replaced on forward"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      A bundle whose hop count reaches its limit is deleted. On forwarding, the
+      Previous Node block is replaced with this node (RFC 9171 4.4).
+    tags: [falcon, relay, relay-bp, dtn, store, forwarding, issue-626]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: unit tests and Kani.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

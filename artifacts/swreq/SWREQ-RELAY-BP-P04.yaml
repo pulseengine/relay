@@ -1,0 +1,24 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P04
+    type: sw-req
+    title: "BP-P04 — The encoder never emits a bundle that violates the primary-CRC or bundle-age rules"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      The primary block CRC type is non-zero unless a BIB targets block 0 (RFC
+      9171 4.3.1). A bundle with creation time 0 carries exactly one Bundle Age
+      block (4.4.2). In strict mode the decoder classifies RFC 9173 A.1 and A.2
+      example bundles as violating, and the test table records that expected
+      verdict.
+    tags: [falcon, relay, relay-bp, dtn, codec, encoder, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Kani on the encoder plus vectors with expected strict-mode verdict.
+        RFC 9173 A.1-A.4 are tagged expected-strict-verdict reject; A.3 is
+        additionally disputed (errata) and is recorded as disputed, not as a
+        conformance vector.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

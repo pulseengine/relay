@@ -1,0 +1,22 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P05
+    type: sw-req
+    title: "BP-P05 — Canonical encoding round-trips: encode(decode(x)) == x on the canonical subset"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      For every input in the canonical CBOR subset used by BPv7 (outer array
+      indefinite, inner arrays definite, shortest-form integers) encoding the
+      decoded view reproduces the input bytes exactly. The CBOR layer is a fresh
+      fixed-capacity no_std implementation, not a wrapper over a third-party
+      crate.
+    tags: [falcon, relay, relay-bp, dtn, codec, cbor, issue-626]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: Kani round-trip at small N plus a differential against hardy-bpv7,
+        bp7 and minicbor as dev-dependency oracles only.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001
