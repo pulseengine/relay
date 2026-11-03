@@ -18,16 +18,18 @@
 //! frame, which the binding document lists as a gap — but the host never
 //! touches it, and the primary verdict is the plant's own altitude.
 //!
-//! WHAT THIS IS NOT. It is not the published wasm component. That component
-//! gains `pilot.configure-calibration` only in relay#611, and it has no byte
-//! endpoint at all; the WIT call it would forward the `Calibration` frame to
-//! does not exist on `main` yet. `Endpoint` therefore calls `FlightSupervisor`
-//! directly, mirroring the published component only where this test depends
-//! on it (lazy construction, `FailsafeConfigured` declared from whether a
-//! supervisor configuration arrived and re-declared after every step, the
-//! calibration surviving a rebuild), and following relay#611's documented
-//! semantics for an INVALID calibration / supervisor configuration.
+//! WHAT THIS IS NOT. It is not the published wasm component, which has no byte
+//! endpoint. But it runs the SAME lifecycle rules: [`Endpoint`] is a
+//! field-for-field adapter over `falcon_core::host::SupervisorHost`, the one
+//! implementation of the seam's rules (#609 single-source refactor) that the
+//! published component and the wasm/native mirror also adapt: lazy
+//! construction, the declared-false step-fed rows, `FailsafeConfigured` from
+//! the stored supervisor configuration, `ParamsFromNvm` from the stored vehicle
+//! tuning, the calibration surviving a rebuild, no rebuild in flight, and an
+//! INVALID calibration / supervisor configuration revoking the earlier one.
+//! Until then this file carried its own copy of those rules.
 
+use falcon_core::host::{self, SupervisorHost};
 use falcon_core::relay_calib::CalParams;
 use falcon_core::relay_fsm::{Event, Mode};
 use falcon_core::relay_preflight::CheckId;
@@ -56,6 +58,34 @@ fn cal_params(c: &WireCalibration) -> CalParams {
     }
 }
 
+/// The config frame -> the host's `VehicleConfig`, field for field. Its
+/// domains are `VehicleConfig::tuning`'s; an out-of-domain record is refused
+/// there, not here.
+fn vehicle_config(v: &WireVehicleConfig) -> host::VehicleConfig {
+    host::VehicleConfig {
+        hover_thrust: v.hover_thrust,
+        loop_rate_hz: v.loop_rate_hz,
+        pos_var: v.pos_var,
+        process_floor_vel: v.process_floor_vel,
+        process_floor_pos: v.process_floor_pos,
+        altitude_kp: v.altitude_kp,
+        altitude_kd: v.altitude_kd,
+        altitude_ki: v.altitude_ki,
+        position_ki: v.position_ki,
+    }
+}
+
+/// The supervisor-config frame -> the host's `SupervisorConfig`, field for
+/// field. Validity is `SupervisorConfig::is_valid`'s.
+fn supervisor_config(c: &WireSupervisorConfig) -> host::SupervisorConfig {
+    host::SupervisorConfig {
+        home: c.home,
+        fence_radius: c.fence_radius,
+        cruise_alt: c.cruise_alt,
+        low_batt_v: c.low_batt_v,
+    }
+}
+
 fn event(c: WirePilotCommand) -> Event {
     // Exhaustive, no `_` arm: a new wire command must be considered here.
     match c {
@@ -69,6 +99,13 @@ fn event(c: WirePilotCommand) -> Event {
         WirePilotCommand::Terminate => Event::Terminate,
     }
 }
+
+/// The binding has NO mission target (docs/TRANSPORT-BINDING.md, "What this
+/// binding does not yet give you"): the `sensor` frame carries no waypoint.
+/// `SupervisorHost::step` takes the frame's mission leg, which the supervisor
+/// ignores outside Mission mode (#609 finding 4); nothing here requests
+/// Mission, so this is the home point the tests configure.
+const NO_MISSION_LEG: [f32; 3] = [0.0, 0.0, 0.0];
 
 /// One tick's sensors from a decoded frame; the motors the supervisor wrote.
 struct FrameBackend {
@@ -109,15 +146,10 @@ impl FlightBackend for FrameBackend {
     }
 }
 
-/// The component side of the binding, natively.
+/// The component side of the binding, natively: bytes in, `SupervisorHost`
+/// calls out. It holds no configuration of its own.
 struct Endpoint {
-    sup: Option<Box<FlightSupervisor>>,
-    vcfg: Option<WireVehicleConfig>,
-    scfg: Option<WireSupervisorConfig>,
-    /// The last VALID calibration the host sent; `None` = never sent, or
-    /// revoked by an invalid one. Never the identity as a placeholder: an
-    /// explicit identity means "calibrated upstream" and arms (relay#611).
-    cal: Option<CalParams>,
+    seam: SupervisorHost,
     inbound: SeqTracker,
     // No outbound counter: every reply echoes the seq of the frame it
     // answers (docs/TRANSPORT-BINDING.md §3, the echo rule).
@@ -126,48 +158,15 @@ struct Endpoint {
 impl Endpoint {
     fn new() -> Self {
         Endpoint {
-            sup: None,
-            vcfg: None,
-            scfg: None,
-            cal: None,
+            seam: SupervisorHost::new(),
             inbound: SeqTracker::new(),
         }
     }
 
     fn supervisor(&self) -> &FlightSupervisor {
-        self.sup
-            .as_deref()
+        self.seam
+            .supervisor()
             .expect("built by the first command/sensor frame")
-    }
-
-    fn ensure(&mut self) -> &mut FlightSupervisor {
-        if self.sup.is_none() {
-            // Unconfigured: the published component's inactive defaults.
-            let (home, fence, cruise, low) = match self.scfg {
-                Some(c) => (c.home, c.fence_radius, c.cruise_alt, c.low_batt_v),
-                None => ([0.0; 3], 1.0e9, 2.0, 0.0),
-            };
-            let mut s = Box::new(FlightSupervisor::new(home, fence, cruise, low));
-            if let Some(v) = self.vcfg {
-                s.set_hover_thrust(v.hover_thrust);
-                let core = s.core_mut();
-                core.set_pos_var(v.pos_var);
-                core.set_process_floor(v.process_floor_vel, v.process_floor_pos);
-                core.set_altitude_gains(v.altitude_kp, v.altitude_kd);
-                core.set_altitude_integral_gain(v.altitude_ki);
-                core.set_position_integral_gain(v.position_ki);
-            }
-            // The calibration survives a rebuild (relay#611); with none, the
-            // supervisor is left uncalibrated and `CalibrationPresent` refuses.
-            if let Some(c) = self.cal {
-                s.set_calibration(c);
-            }
-            self.sup = Some(s);
-        }
-        let configured = self.scfg.is_some();
-        let s = self.sup.as_deref_mut().unwrap();
-        s.set_check(CheckId::FailsafeConfigured, configured);
-        s
     }
 
     /// THE ECHO RULE for acks: the header seq IS the acknowledged control
@@ -185,35 +184,37 @@ impl Endpoint {
         let (h, payload) = match wire::decode_frame(frame) {
             Ok(x) => x,
             // relay#611: the latest calibration the host sent was invalid, so
-            // the vehicle must not keep flying on an older one. Revoke it the
-            // way the component does, by handing the supervisor an INVALID
-            // calibration (`set_calibration` then clears the configured flag
-            // and `CalibrationPresent` refuses arming). The rejected frame's
-            // values never reach us, so any non-finite record stands in.
+            // the vehicle must not keep flying on an older one. The rejected
+            // frame's values never reach us, so a non-finite record stands in
+            // for it and goes through the host AS AN INVALID CALIBRATION, which
+            // revokes (under the host's own rule: only while Disarmed).
             Err(WireError::NonFinite {
                 msg: MsgType::Calibration,
                 ..
             }) => {
-                self.cal = None;
-                if let Some(s) = self.sup.as_deref_mut() {
-                    let revoked = s.set_calibration(CalParams {
-                        gyro_bias: [f32::NAN; 3],
-                        ..CalParams::identity()
-                    });
-                    debug_assert!(!revoked);
-                }
+                self.seam.configure_calibration(CalParams {
+                    gyro_bias: [f32::NAN; 3],
+                    ..CalParams::identity()
+                });
                 return None;
             }
-            // relay#611: an invalid supervisor configuration is treated as
-            // never configured — `FailsafeConfigured` refuses arming.
+            // relay#611: an invalid supervisor configuration counts as none,
+            // so `FailsafeConfigured` refuses arming. Same stand-in, same host
+            // rule (a rebuild only while `rebuild_permitted`).
             Err(WireError::NonFinite {
                 msg: MsgType::SupervisorConfig,
                 ..
             }) => {
-                self.scfg = None;
-                self.sup = None;
+                self.seam.configure_supervisor(host::SupervisorConfig {
+                    home: [f32::NAN; 3],
+                    fence_radius: f32::NAN,
+                    cruise_alt: f32::NAN,
+                    low_batt_v: f32::NAN,
+                });
                 return None;
             }
+            // Includes a non-finite vehicle config: an invalid tuning is never
+            // installed and does not revoke, so dropping it IS the host rule.
             Err(_) => return None,
         };
         let verdict = self.inbound.observe(h.seq);
@@ -221,33 +222,29 @@ impl Endpoint {
         match h.msg {
             MsgType::Config => {
                 if fresh {
-                    self.vcfg = Some(wire::decode_config(payload).unwrap());
-                    self.sup = None;
+                    let v = wire::decode_config(payload).unwrap();
+                    self.seam.configure_vehicle(vehicle_config(&v));
                 }
                 Some(self.reply_ack(h.seq))
             }
             MsgType::SupervisorConfig => {
                 if fresh {
-                    self.scfg = Some(wire::decode_supervisor_config(payload).unwrap());
-                    self.sup = None;
+                    let c = wire::decode_supervisor_config(payload).unwrap();
+                    self.seam.configure_supervisor(supervisor_config(&c));
                 }
                 Some(self.reply_ack(h.seq))
             }
             MsgType::Calibration => {
                 if fresh {
-                    let cal = cal_params(&wire::decode_calibration(payload).unwrap());
-                    let valid = match self.sup.as_deref_mut() {
-                        Some(s) => s.set_calibration(cal),
-                        None => cal.is_valid(),
-                    };
-                    self.cal = valid.then_some(cal);
+                    let c = wire::decode_calibration(payload).unwrap();
+                    self.seam.configure_calibration(cal_params(&c));
                 }
                 Some(self.reply_ack(h.seq))
             }
             MsgType::Command => {
                 if fresh {
                     let c = wire::decode_command(payload).unwrap();
-                    self.ensure().command(event(c.cmd), c.level, c.throttle_low);
+                    self.seam.command(event(c.cmd), c.level, c.throttle_low);
                 }
                 Some(self.reply_ack(h.seq))
             }
@@ -256,16 +253,11 @@ impl Endpoint {
                     return None;
                 }
                 let f = wire::decode_sensor_frame(payload).unwrap();
-                let configured = self.scfg.is_some();
                 let mut b = FrameBackend {
                     f,
                     motors: [0.0; 4],
                 };
-                let s = self.ensure();
-                s.step(&mut b);
-                // `update_preflight` inside `step` clobbers this row from a
-                // default-true field; re-declare it, as the component does.
-                s.set_check(CheckId::FailsafeConfigured, configured);
+                self.seam.step(NO_MISSION_LEG, &mut b);
                 // THE ECHO RULE: the reply carries the seq of the sensor
                 // frame it answers, never a counter of the endpoint's own.
                 let mut out = [0u8; falcon_hitl::MOTORS_FRAME_LEN];
@@ -547,7 +539,7 @@ fn a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration() {
     };
     let f = host.configure_calibration(&good).unwrap();
     control(&mut host, &mut ep, &f);
-    assert!(ep.cal.is_some());
+    assert!(ep.seam.calibration().is_some());
 
     let bad = WireCalibration {
         accel_scale: [1.0, f32::NAN, 1.0],
@@ -563,11 +555,16 @@ fn a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration() {
     );
     assert_eq!(ep.handle(&f), None, "a rejected frame is not acked");
     assert_eq!(
-        ep.cal, None,
+        ep.seam.calibration(),
+        None,
         "the earlier calibration must not survive an invalid one"
     );
+    // Build a supervisor now. Not through the binding: the host is still
+    // awaiting the ack the rejected frame never got. A harmless command
+    // straight to the endpoint's `SupervisorHost` builds it the same way.
+    ep.seam.command(Event::RequestDisarm, true, true);
     assert!(
-        !ep.ensure().calibration_configured(),
+        !ep.supervisor().calibration_configured(),
         "and a supervisor built now must be uncalibrated, so CalibrationPresent refuses"
     );
 }
