@@ -82,8 +82,9 @@ use pulseengine::falcon_cascade::types::{
 ///
 /// THE HARNESS HAS TO SUPPLY A BATTERY NOW, and that is not boilerplate.
 /// `FlightBackend::read_battery_v` defaults to `None`, `update_preflight` then
-/// sets `battery_ok = batt_present && ..` with `batt_present == false`,
-/// `all_pass()` ANDs it, and `arm_check` returns `Blocked(CheckFail::Battery)`.
+/// writes the `BatteryOk` row as `batt_present && ..` with
+/// `batt_present == false`, and `arm_check_table` returns
+/// `Blocked(CheckId::BatteryOk)`.
 /// So a frame with no battery cannot arm the supervised component at all.
 /// 16.8 V is a full 4S pack against a 14.0 V LOW threshold — comfortably clear,
 /// so the hold under test is never perturbed by a battery failsafe.

@@ -88,7 +88,8 @@ pub struct Gates {
     pub have_position: bool,
     /// The pre-arm / commander check verdict: every precondition (sensor health,
     /// estimator convergence, calibration, geofence, battery, failsafe config)
-    /// holds. Computed by `relay_preflight::arm_check` in the falcon-core seam and
+    /// holds. Computed by `relay_preflight::arm_check_table` (the PREARM-P03
+    /// table) in the falcon-core seam and
     /// passed in here — the FSM stays a pure state machine. Arming requires it
     /// (the entry gate, the architectural complement of the never-disarm-airborne
     /// exit invariant); PX4's commander pre-flight checks made provable.
@@ -130,7 +131,7 @@ impl FlightFsm {
         use Mode::*;
         let next = match (self.mode, ev) {
             // arm only from the ground: level + throttle idle + the pre-arm
-            // commander checks all hold (relay-preflight arm_check == Allowed)
+            // commander checks all hold (relay-preflight arm_check_table == Allowed)
             (Disarmed, Arm) if g.level && g.throttle_low && g.prearm_ok => Armed,
             // disarm ONLY on the ground (Armed) or after Touchdown (Land)
             (Armed, RequestDisarm) => Disarmed,

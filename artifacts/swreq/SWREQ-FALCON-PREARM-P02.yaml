@@ -21,20 +21,21 @@ artifacts:
         * geofence_loaded — a positive fence radius is configured.
       A just-started or divergent estimator, an uncalibrated vehicle, a low
       battery, or an unset fence shall each BLOCK arming, with the first failing
-      check surfaced ([`arm_blocked_reason`]). `sensors_healthy` and
-      `failsafe_configured` remain externally-fed / defaulted — a sensor-health
-      vote and a failsafe-arbiter input the backend does not yet provide
-      (documented follow-up).
+      check surfaced ([`arm_blocked_check`], the PREARM-P03 table row).
+      `SensorsHealthy` is derived only from the navigation-integrity latch and
+      `FailsafeConfigured` is true from construction unless the integration
+      re-declares it — a sensor-health vote and a failsafe-arbiter input the
+      backend does not yet provide (documented follow-up).
     tags: [falcon, prearm, commander, arming, estimator, calibration, battery, safety, v1.99]
     fields:
       req-type: safety
       priority: must
       verification-criteria: >
         falcon-core: with a level at-rest backend and NO calibration, after the
-        estimator settles arming is refused with reason Calibration; installing a
-        calibration and refreshing → arm_blocked_reason None and command(Arm)
-        reaches Armed; a low pack voltage (13 V < 14 V threshold) refuses arming
-        with reason Battery. FlightCore::tilt_uncertainty returns the roll+pitch
+        estimator settles arming is refused with arm_blocked_check() ==
+        CalibrationPresent; installing a calibration and refreshing →
+        arm_blocked_check() None and command(Arm) reaches Armed; a low pack
+        voltage (13 V < 14 V threshold) refuses arming with BatteryOk. FlightCore::tilt_uncertainty returns the roll+pitch
         covariance trace, which shrinks below PREARM_TILT_UNCERT_MAX as gravity
         updates arrive. The arm transition itself is gated (relay-fsm FSM-K03,
         unchanged).

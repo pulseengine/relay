@@ -64,7 +64,14 @@ artifacts:
         # `FlightSupervisor`, so the mirror must too — an unsupervised mirror
         # diverged from the component on gz within 7 minutes (4da8170). The
         # merge queue's full sweep caught this step still naming FlightCore.
-        - run: "grep -q 'falcon_core::{FlightBackend, FlightSupervisor' tests/cascade-sitl-wasm/src/native_mirror.rs"
+        #
+        # #609's single-source refactor moved the supervisor AND the seam's
+        # lifecycle rules into falcon-core's `SupervisorHost`, which both sides
+        # now hold. The property is unchanged and now checked on BOTH sides: the
+        # mirror and the component drive the same falcon-core supervisor type,
+        # so the differential compares the ABI, not two copies of the rules.
+        - run: "grep -q 'use falcon_core::host::{self, SupervisorHost};' tests/cascade-sitl-wasm/src/native_mirror.rs"
+        - run: "grep -q 'use falcon_core::host::{self, SupervisorHost};' wasm/cm/cascade/src/lib.rs"
         # No tolerance: the assertion is inequality with zero, not a threshold.
         - run: "grep -q 'worst != 0.0' tests/cascade-sitl-wasm/src/main.rs"
         # The mirror must MIRROR, not merely exist: a mirror that skipped the

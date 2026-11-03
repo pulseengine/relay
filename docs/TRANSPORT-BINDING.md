@@ -558,7 +558,9 @@ frame).
 
 `crates/falcon-hitl/tests/binding_drives_the_supervisor.rs` is the executable
 form of §2: a host that exchanges **only bytes** with a native
-`FlightSupervisor` behind the binding configures it, calibrates it, warms the
+`FlightSupervisor` behind the binding (held by falcon-core's `SupervisorHost`,
+the same lifecycle rules the published component adapts) configures it,
+calibrates it, warms the
 estimator, arms and takes off — and the same run with the calibration frame,
 the battery element or the supervisor configuration withheld is refused on the
 named pre-arm row.
@@ -579,9 +581,9 @@ needed by being driven. New hosts use `wire`.
   cannot set a mission leg. Takeoff, loiter, land and RTL need none (the
   supervisor derives those setpoints from `home` and `cruise-alt`).
 - **The published wasm component is not yet behind a byte endpoint.** The
-  end-to-end test above drives the native `FlightSupervisor`; the
-  `calibration` frame's target, `pilot.configure-calibration`, exists only once
-  relay#611 merges.
+  end-to-end test above drives the native `FlightSupervisor` through
+  `falcon_core::host::SupervisorHost`, which the component also adapts, so the
+  rules are shared but the bytes do not yet reach the wasm.
 - **No physical-transport contract.** Latency, jitter, MTU, reconnect and
   framing-error recovery are the host's. The sequence semantics above are what
   this binding gives you to detect the symptoms.
