@@ -55,6 +55,14 @@ artifacts:
       0.38 m, as before. Flight demo: 0.033705384 rad / 0.2090846 m, as
       before. All eight components: zero `memory.grow`, zero `wasi:*`.
 
+      (d) THE CASCADE-SPLIT CRATES (#575). Their 19 exports open a CallScope
+      too (they called the deprecated entry reset before), so the count above
+      is 33. Their soaks are in tests/cascade-sitl-wasm/src/seam_tests.rs
+      (`split_configure_calibration_core_area_is_pinned`,
+      `split_partition_ticks_core_area_is_pinned`,
+      `split_configure_calibration_soak_10k_calls`; FV-FALCON-SPLIT-001), not
+      under the `arena_soak` filter this artifact runs.
+
       STATUS: implemented. Promotion to verified is a separate code-free PR
       once the Kani matrix leg is green in the merge queue.
     tags: [verification, falcon, oci, wasm, component-model, arena, kani]
@@ -62,7 +70,9 @@ artifacts:
       method: formal-verification
       steps:
         # every export is scoped, and the old entry reset is gone
-        - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _call = falcon_cm_rt::CallScope::enter();')\" -eq 14"
+        # 14 in the eight published components + 19 in the three cascade-split
+        # crates (#575: 6 estimator, 7 flight-control, 6 orchestrator).
+        - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _call = falcon_cm_rt::CallScope::enter();')\" -eq 33"
         - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'BumpArena::reset')\" -eq 0"
         - run: "test \"$(cat wasm/cm/*/src/lib.rs | grep -c 'let _ = falcon_cm_rt::CallScope')\" -eq 0"
         # the harnesses exist (the step below is enforced by the Kani gate)
