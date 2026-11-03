@@ -7,6 +7,12 @@
 //!     `CASCADE_WASM=<falcon_cascade_cm.wasm> cargo test -- --ignored`.
 //!     An ignored test is REPORTED as ignored, never as passed, so an absent
 //!     artifact cannot masquerade as a green run.
+//!   * the wac-composed `cascade-split` (#575), through the SAME scenarios:
+//!     every `wasm_*` test has a `split_*` twin that loads
+//!     `CASCADE_SPLIT_WASM=<cascade-split-composed.wasm>` instead. The split
+//!     must carry #609's lifecycle rules and #586's calibration exactly, and
+//!     these are the tests that say so. `scripts/split-differential.sh` runs
+//!     both sets.
 //!   * the native mirror (`native_mirror.rs`), which runs on every
 //!     `cargo test` and so keeps the mirror's copy of the lifecycle rules from
 //!     drifting away from the component's.
@@ -143,13 +149,20 @@ struct WasmSeam {
 }
 
 impl WasmSeam {
+    /// The monolithic `cascade` (`CASCADE_WASM`).
     fn load() -> Self {
+        Self::load_from("CASCADE_WASM")
+    }
+    /// The composed `cascade-split` (`CASCADE_SPLIT_WASM`, #575).
+    fn load_split() -> Self {
+        Self::load_from("CASCADE_SPLIT_WASM")
+    }
+    fn load_from(var: &str) -> Self {
         use wasmtime::component::{Component, Linker};
         use wasmtime::{Config, Engine, Store};
-        let path = std::env::var("CASCADE_WASM").expect(
-            "CASCADE_WASM must name a built falcon_cascade_cm.wasm to run the \
-             component half of these tests",
-        );
+        let path = std::env::var(var).unwrap_or_else(|_| {
+            panic!("{var} must name a built component to run the component half of these tests")
+        });
         let mut cfg = Config::new();
         cfg.wasm_component_model(true);
         let engine = Engine::new(&cfg).unwrap();
@@ -956,7 +969,16 @@ fn motor_trace<S: Seam>(s: &mut S, cal: SensorCal) -> Vec<u32> {
 #[test]
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
 fn wasm_mag_offdiag_crosses_the_seam_bit_identically() {
-    let wasm = motor_trace(&mut WasmSeam::load(), offdiag_cal());
+    mag_offdiag_crosses_the_seam_bit_identically(WasmSeam::load);
+}
+/// The split: the orchestrator forwards all 18 f32 to BOTH partitions.
+#[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_mag_offdiag_crosses_the_seam_bit_identically() {
+    mag_offdiag_crosses_the_seam_bit_identically(WasmSeam::load_split);
+}
+fn mag_offdiag_crosses_the_seam_bit_identically(load: fn() -> WasmSeam) {
+    let wasm = motor_trace(&mut load(), offdiag_cal());
     let native = motor_trace(&mut NativeCascade::new(), offdiag_cal());
     assert_eq!(wasm.len(), native.len());
     let first = wasm.iter().zip(&native).position(|(a, b)| a != b);
@@ -1000,7 +1022,17 @@ const SOAK_CALLS: u32 = 10_000;
 #[test]
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
 fn wasm_configure_calibration_soak_10k_calls() {
-    let mut s = WasmSeam::load();
+    configure_calibration_soak_10k_calls(WasmSeam::load);
+}
+/// The split: every call also crosses INTO both partitions (each lowers the
+/// 18 f32 into its own arena), so all three arenas are soaked.
+#[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_configure_calibration_soak_10k_calls() {
+    configure_calibration_soak_10k_calls(WasmSeam::load_split);
+}
+fn configure_calibration_soak_10k_calls(load: fn() -> WasmSeam) {
+    let mut s = load();
     let mut rig = Rig::new();
     s.configure(mock_calib());
     s.configure_supervisor(good_sup());
@@ -1042,79 +1074,243 @@ fn wasm_configure_calibration_soak_10k_calls() {
 #[test]
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
 fn wasm_configure_calibration_core_area_is_pinned() {
-    use wasmtime::{Engine, Instance, Module, Store, ValType};
-    let path = std::env::var("CASCADE_WASM").expect("CASCADE_WASM must name the component");
+    assert_eq!(configure_calibration_core_area_is_pinned("CASCADE_WASM"), 1);
+}
+/// The split: THREE core modules take the 18 f32 indirectly — the
+/// orchestrator's `pilot#configure-calibration` and each partition's
+/// `configure-calibration` — and every one is soaked.
+#[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_configure_calibration_core_area_is_pinned() {
+    assert_eq!(
+        configure_calibration_core_area_is_pinned("CASCADE_SPLIT_WASM"),
+        3
+    );
+}
+
+/// Every core module in the component (nested components included, as `wac
+/// plug` embeds them), in encoding order.
+fn all_core_modules(component: &[u8]) -> Vec<&[u8]> {
+    let mut out = Vec::new();
+    let mut i = 8;
+    while i < component.len() {
+        let id = component[i];
+        i += 1;
+        let (mut size, mut shift) = (0usize, 0);
+        loop {
+            let b = component[i];
+            i += 1;
+            size |= ((b & 0x7f) as usize) << shift;
+            shift += 7;
+            if b & 0x80 == 0 {
+                break;
+            }
+        }
+        let body = &component[i..i + size];
+        match id {
+            1 => out.push(body),
+            4 => out.extend(all_core_modules(body)),
+            _ => {}
+        }
+        i += size;
+    }
+    out
+}
+
+/// Returns how many core modules export a `configure-calibration`; soaks each.
+/// Imports (the split orchestrator's partition calls) are satisfied by stubs
+/// that TRAP: a configure-calibration before any `step` builds no supervisor,
+/// so it must not cross into a partition, and a stub that ran would say so.
+fn configure_calibration_core_area_is_pinned(var: &str) -> usize {
+    use wasmtime::{Engine, ExternType, Linker, Module, Store, ValType};
+    let path = std::env::var(var).unwrap_or_else(|_| panic!("{var} must name the component"));
     let bytes = std::fs::read(path).unwrap();
     let engine = Engine::default();
-    let module = Module::new(&engine, crate::arena_soak::core_module(&bytes)).unwrap();
-    assert_eq!(
-        module.imports().len(),
-        0,
-        "cascade core module imports nothing"
-    );
-    let name = module
-        .exports()
-        .map(|e| e.name().to_string())
-        .find(|n| n.ends_with("#configure-calibration"))
-        .expect("no configure-calibration core export");
-    let ty = module.get_export(&name).unwrap().func().unwrap().clone();
-    let params: Vec<ValType> = ty.params().collect();
-    assert!(
-        params.len() == 1 && matches!(params[0], ValType::I32) && ty.results().len() == 0,
-        "configure-calibration is expected to lower INDIRECTLY to (param i32); \
-         measured {} params",
-        params.len()
-    );
-    let mut store = Store::new(&engine, ());
-    let inst = Instance::new(&mut store, &module, &[]).unwrap();
-    let memory = inst.get_memory(&mut store, "memory").unwrap();
-    let realloc = inst
-        .get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "cabi_realloc")
-        .unwrap();
-    let call = inst.get_typed_func::<i32, ()>(&mut store, &name).unwrap();
-    let mut first = None;
-    for i in 0..SOAK_CALLS {
-        let p = realloc
-            .call(&mut store, (0, 0, 4, 72))
-            .unwrap_or_else(|e| panic!("call {i}: cabi_realloc trapped: {e}"));
-        assert_ne!(p, 0, "call {i}: cabi_realloc returned NULL");
-        assert_eq!(
-            p,
-            *first.get_or_insert(p),
-            "call {i}: the 72 B area moved (leak)"
-        );
-        let c = if i % 2 == 0 {
-            good_cal()
-        } else {
-            offdiag_cal()
+    let mut soaked = 0;
+    for m in all_core_modules(&bytes) {
+        let module = Module::new(&engine, m).unwrap();
+        let Some(name) = module
+            .exports()
+            .map(|e| e.name().to_string())
+            .find(|n| n.ends_with("configure-calibration"))
+        else {
+            continue;
         };
-        let vals: Vec<f32> = [
-            c.gyro_bias,
-            c.accel_bias,
-            c.accel_scale,
-            c.mag_offset,
-            c.mag_scale,
-            c.mag_offdiag,
-        ]
-        .concat();
-        let raw: Vec<u8> = vals.iter().flat_map(|v| v.to_le_bytes()).collect();
-        assert_eq!(raw.len(), 72);
-        memory.write(&mut store, p as usize, &raw).unwrap();
-        call.call(&mut store, p)
-            .unwrap_or_else(|e| panic!("call {i}: configure-calibration trapped: {e}"));
+        let ty = module.get_export(&name).unwrap().func().unwrap().clone();
+        let params: Vec<ValType> = ty.params().collect();
+        assert!(
+            params.len() == 1 && matches!(params[0], ValType::I32) && ty.results().len() == 0,
+            "{name} is expected to lower INDIRECTLY to (param i32); measured {} params",
+            params.len()
+        );
+        let mut store = Store::new(&engine, ());
+        let mut linker: Linker<()> = Linker::new(&engine);
+        for imp in module.imports() {
+            match imp.ty() {
+                ExternType::Func(ft) => {
+                    let what = format!("{}#{}", imp.module(), imp.name());
+                    linker
+                        .func_new(imp.module(), imp.name(), ft, move |_, _, _| {
+                            Err(wasmtime::Error::msg(format!("stub import called: {what}")))
+                        })
+                        .unwrap();
+                }
+                other => panic!("{name}: unexpected non-function import {other:?}"),
+            }
+        }
+        let inst = linker.instantiate(&mut store, &module).unwrap();
+        let memory = inst.get_memory(&mut store, "memory").unwrap();
+        let realloc = inst
+            .get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "cabi_realloc")
+            .unwrap();
+        let call = inst.get_typed_func::<i32, ()>(&mut store, &name).unwrap();
+        let mut first = None;
+        for i in 0..SOAK_CALLS {
+            let p = realloc
+                .call(&mut store, (0, 0, 4, 72))
+                .unwrap_or_else(|e| panic!("{name} call {i}: cabi_realloc trapped: {e}"));
+            assert_ne!(p, 0, "{name} call {i}: cabi_realloc returned NULL");
+            assert_eq!(
+                p,
+                *first.get_or_insert(p),
+                "{name} call {i}: the 72 B area moved (leak)"
+            );
+            let c = if i % 2 == 0 {
+                good_cal()
+            } else {
+                offdiag_cal()
+            };
+            let vals: Vec<f32> = [
+                c.gyro_bias,
+                c.accel_bias,
+                c.accel_scale,
+                c.mag_offset,
+                c.mag_scale,
+                c.mag_offdiag,
+            ]
+            .concat();
+            let raw: Vec<u8> = vals.iter().flat_map(|v| v.to_le_bytes()).collect();
+            assert_eq!(raw.len(), 72);
+            memory.write(&mut store, p as usize, &raw).unwrap();
+            call.call(&mut store, p)
+                .unwrap_or_else(|e| panic!("{name} call {i}: trapped: {e}"));
+        }
+        println!(
+            "{var} {name}: {SOAK_CALLS} core calls, 72 B area pinned at {:#x}",
+            first.unwrap()
+        );
+        soaked += 1;
     }
-    println!(
-        "configure-calibration: {SOAK_CALLS} core calls, 72 B area pinned at {:#x}",
-        first.unwrap()
+    soaked
+}
+
+/// ARENA SOAK OF THE SPLIT'S PARTITION TICKS (#574, #575). The orchestrator
+/// calls `estimator#tick(sensor-frame, option<bool>)` (100 B) and
+/// `flight-control#tick(nav-state, sensor-frame)` (160 B) on EVERY control
+/// tick, and both spill: the adapter `cabi_realloc`s the argument area in the
+/// PARTITION's arena. Driven at the core level exactly as the canonical ABI
+/// does it, 10 000 calls each: the area must never move and never be NULL.
+/// (The component-level twin flies >100 000 such ticks, where exhaustion
+/// would be invisible; this is the oracle that sees it.)
+///
+/// Layouts (canonical ABI, all align 4): sensor-frame = imu 0..24, dt-s 24,
+/// position-ned 28..44, mag-body 44..60, heading-rad 60..68, motor-rpm
+/// 68..88, battery-v 88..96. All-zero bytes are a valid encoding (every
+/// option `none`); the IMU reads 1 g and dt-s 1 ms.
+///
+/// Not named `arena_soak`: FV-FALCON-OCI-006 runs `--ignored arena_soak` with
+/// only the leaf `FALCON_*_WASM` variables set.
+#[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_partition_ticks_core_area_is_pinned() {
+    use wasmtime::{Engine, Module, Store, ValType};
+    let path = std::env::var("CASCADE_SPLIT_WASM").expect("CASCADE_SPLIT_WASM");
+    let bytes = std::fs::read(path).unwrap();
+    let engine = Engine::default();
+    let mut soaked = Vec::new();
+    for m in all_core_modules(&bytes) {
+        let module = Module::new(&engine, m).unwrap();
+        let ticks: Vec<String> = module
+            .exports()
+            .map(|e| e.name().to_string())
+            .filter(|n| {
+                n.ends_with("/estimator@0.12.0#tick") || n.ends_with("/flight-control@0.12.0#tick")
+            })
+            .collect();
+        if ticks.is_empty() {
+            continue;
+        }
+        assert_eq!(
+            module.imports().len(),
+            0,
+            "a partition core module imports nothing"
+        );
+        for name in ticks {
+            let (len, nav_first) = if name.contains("estimator") {
+                (100usize, false)
+            } else {
+                (160usize, true)
+            };
+            let ty = module.get_export(&name).unwrap().func().unwrap().clone();
+            let params: Vec<ValType> = ty.params().collect();
+            assert!(
+                params.len() == 1 && matches!(params[0], ValType::I32),
+                "{name} is expected to lower INDIRECTLY to (param i32); measured {} params",
+                params.len()
+            );
+            let mut store = Store::new(&engine, ());
+            let inst = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+            let memory = inst.get_memory(&mut store, "memory").unwrap();
+            let realloc = inst
+                .get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "cabi_realloc")
+                .unwrap();
+            let func = inst.get_func(&mut store, &name).unwrap();
+            let mut results = vec![wasmtime::Val::I32(0); ty.results().len()];
+            let mut first = None;
+            for i in 0..SOAK_CALLS {
+                let p = realloc
+                    .call(&mut store, (0, 0, 4, len as i32))
+                    .unwrap_or_else(|e| panic!("{name} call {i}: cabi_realloc trapped: {e}"));
+                assert_ne!(p, 0, "{name} call {i}: cabi_realloc returned NULL");
+                assert_eq!(
+                    p,
+                    *first.get_or_insert(p),
+                    "{name} call {i}: the {len} B area moved (leak)"
+                );
+                let mut raw = vec![0u8; len];
+                let sf = if nav_first {
+                    raw[0..4].copy_from_slice(&1.0f32.to_le_bytes()); // nav qw
+                    64
+                } else {
+                    0
+                };
+                raw[sf + 8..sf + 12].copy_from_slice(&(-9.81f32).to_le_bytes()); // az
+                raw[sf + 24..sf + 28].copy_from_slice(&0.001f32.to_le_bytes()); // dt-s
+                memory.write(&mut store, p as usize, &raw).unwrap();
+                func.call(&mut store, &[wasmtime::Val::I32(p)], &mut results)
+                    .unwrap_or_else(|e| panic!("{name} call {i}: trapped: {e}"));
+            }
+            println!(
+                "{name}: {SOAK_CALLS} core calls, {len} B area pinned at {:#x}",
+                first.unwrap()
+            );
+            soaked.push(name);
+        }
+    }
+    assert_eq!(
+        soaked.len(),
+        2,
+        "estimator#tick and flight-control#tick: {soaked:?}"
     );
 }
 
 // ── native mirror: every `cargo test` ─────────────────────────────────────
 
-/// One `#[test]` per scenario on the mirror, and an `#[ignore]`d twin on the
-/// shipped component — written once here so the two lists cannot drift.
+/// One `#[test]` per scenario on the mirror, and `#[ignore]`d twins on the
+/// shipped component and on the composed split — written once here so the
+/// three lists cannot drift.
 macro_rules! both {
-    ($mirror:ident, $wasm:ident, $body:expr) => {
+    ($mirror:ident, $wasm:ident, $split:ident, $body:expr) => {
         #[test]
         fn $mirror() {
             let f: fn(&mut NativeCascade) = $body;
@@ -1126,37 +1322,49 @@ macro_rules! both {
             let f: fn(&mut WasmSeam) = $body;
             f(&mut WasmSeam::load());
         }
+        #[test]
+        #[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+        fn $split() {
+            let f: fn(&mut WasmSeam) = $body;
+            f(&mut WasmSeam::load_split());
+        }
     };
 }
 
 both!(
     mirror_reconfigure_in_flight_keeps_flying,
     wasm_reconfigure_in_flight_keeps_flying,
+    split_reconfigure_in_flight_keeps_flying,
     |s| reconfigure_in_flight_keeps_flying(s)
 );
 both!(
     mirror_terminated_is_absorbing_through_configure,
     wasm_terminated_is_absorbing_through_configure,
+    split_terminated_is_absorbing_through_configure,
     |s| terminated_is_absorbing_through_configure(s)
 );
 both!(
     mirror_isolated_rotor_survives_configure,
     wasm_isolated_rotor_survives_configure,
+    split_isolated_rotor_survives_configure,
     |s| isolated_rotor_survives_configure(s)
 );
 both!(
     mirror_fresh_supervisor_refuses_arm_before_first_step,
     wasm_fresh_supervisor_refuses_arm_before_first_step,
+    split_fresh_supervisor_refuses_arm_before_first_step,
     |s| fresh_supervisor_refuses_arm_before_first_step(s)
 );
 both!(
     mirror_rebuilt_supervisor_refuses_arm_before_first_step,
     wasm_rebuilt_supervisor_refuses_arm_before_first_step,
+    split_rebuilt_supervisor_refuses_arm_before_first_step,
     |s| rebuilt_supervisor_refuses_arm_before_first_step(s)
 );
 both!(
     mirror_valid_config_arms_on_the_measured_table,
     wasm_valid_config_arms_on_the_measured_table,
+    split_valid_config_arms_on_the_measured_table,
     |s| {
         valid_config_arms_on_the_measured_table(s);
     }
@@ -1164,36 +1372,43 @@ both!(
 both!(
     mirror_calibration_is_rejected_while_not_disarmed,
     wasm_calibration_is_rejected_while_not_disarmed,
+    split_calibration_is_rejected_while_not_disarmed,
     |s| calibration_is_rejected_while_not_disarmed(s)
 );
 both!(
     mirror_calibration_applies_in_place_on_the_ground,
     wasm_calibration_applies_in_place_on_the_ground,
+    split_calibration_applies_in_place_on_the_ground,
     |s| calibration_applies_in_place_on_the_ground(s)
 );
 both!(
     mirror_invalid_calibration_clears_a_previous_valid_one,
     wasm_invalid_calibration_clears_a_previous_valid_one,
+    split_invalid_calibration_clears_a_previous_valid_one,
     |s| invalid_calibration_clears_a_previous_valid_one(s)
 );
 both!(
     mirror_calibration_survives_a_rebuild,
     wasm_calibration_survives_a_rebuild,
+    split_calibration_survives_a_rebuild,
     |s| calibration_survives_a_rebuild(s)
 );
 both!(
     mirror_never_configured_calibration_refuses_arm,
     wasm_never_configured_calibration_refuses_arm,
+    split_never_configured_calibration_refuses_arm,
     |s| never_configured_calibration_refuses_arm(s)
 );
 both!(
     mirror_identity_calibration_arms,
     wasm_identity_calibration_arms,
+    split_identity_calibration_arms,
     |s| identity_calibration_arms(s)
 );
 both!(
     mirror_dead_accelerometer_refuses_arm,
     wasm_dead_accelerometer_refuses_arm,
+    split_dead_accelerometer_refuses_arm,
     |s| dead_accelerometer_refuses_arm(s)
 );
 
@@ -1207,6 +1422,11 @@ fn wasm_invalid_supervisor_config_refuses_arm() {
     invalid_supervisor_config_refuses_arm(WasmSeam::load);
 }
 #[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_invalid_supervisor_config_refuses_arm() {
+    invalid_supervisor_config_refuses_arm(WasmSeam::load_split);
+}
+#[test]
 fn mirror_bad_calibration_refuses_arm() {
     bad_calibration_refuses_arm(NativeCascade::new);
 }
@@ -1214,6 +1434,11 @@ fn mirror_bad_calibration_refuses_arm() {
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
 fn wasm_bad_calibration_refuses_arm() {
     bad_calibration_refuses_arm(WasmSeam::load);
+}
+#[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_bad_calibration_refuses_arm() {
+    bad_calibration_refuses_arm(WasmSeam::load_split);
 }
 
 /// Names the row: with nothing measured, the FIRST row in gate order
@@ -1348,11 +1573,13 @@ fn invalid_supervisor_config_revokes_a_valid_one<S: Seam>(s: &mut S) {
 both!(
     mirror_latched_low_battery_survives_configure,
     wasm_latched_low_battery_survives_configure,
+    split_latched_low_battery_survives_configure,
     |s| latched_low_battery_survives_configure(s)
 );
 both!(
     mirror_invalid_supervisor_config_revokes_a_valid_one,
     wasm_invalid_supervisor_config_revokes_a_valid_one,
+    split_invalid_supervisor_config_revokes_a_valid_one,
     |s| invalid_supervisor_config_revokes_a_valid_one(s)
 );
 
@@ -1402,6 +1629,7 @@ fn invalid_vehicle_config_keeps_the_previous_valid_one<S: Seam>(s: &mut S) {
 both!(
     mirror_invalid_vehicle_config_refuses_arm,
     wasm_invalid_vehicle_config_refuses_arm,
+    split_invalid_vehicle_config_refuses_arm,
     |s| invalid_vehicle_config_refuses_arm(s)
 );
 /// The same refusal for a field the core does not yet read (`loop-rate-hz`,
@@ -1424,11 +1652,13 @@ fn invalid_loop_rate_refuses_arm<S: Seam>(s: &mut S) {
 both!(
     mirror_invalid_loop_rate_refuses_arm,
     wasm_invalid_loop_rate_refuses_arm,
+    split_invalid_loop_rate_refuses_arm,
     |s| invalid_loop_rate_refuses_arm(s)
 );
 both!(
     mirror_invalid_vehicle_config_keeps_the_previous_valid_one,
     wasm_invalid_vehicle_config_keeps_the_previous_valid_one,
+    split_invalid_vehicle_config_keeps_the_previous_valid_one,
     |s| invalid_vehicle_config_keeps_the_previous_valid_one(s)
 );
 
@@ -1450,7 +1680,15 @@ fn mirror_invalid_vehicle_config_is_refused_by_params_from_nvm() {
 #[test]
 #[ignore = "needs CASCADE_WASM=<built falcon_cascade_cm.wasm>"]
 fn wasm_invalid_vehicle_config_publishes_arm_blocked() {
-    let mut s = WasmSeam::load();
+    invalid_vehicle_config_publishes_arm_blocked(WasmSeam::load);
+}
+#[test]
+#[ignore = "needs CASCADE_SPLIT_WASM=<wac-composed cascade-split.wasm>"]
+fn split_invalid_vehicle_config_publishes_arm_blocked() {
+    invalid_vehicle_config_publishes_arm_blocked(WasmSeam::load_split);
+}
+fn invalid_vehicle_config_publishes_arm_blocked(load: fn() -> WasmSeam) {
+    let mut s = load();
     let mut rig = Rig::new();
     s.configure(invalid_vehicle_calib());
     s.configure_calibration(good_cal());
