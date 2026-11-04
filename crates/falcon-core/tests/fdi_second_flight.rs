@@ -45,11 +45,13 @@ fn rig() -> (SimBackend, FlightSupervisor) {
 
 /// Arm, take off and reach Loiter, asserting NO rotor is isolated on the way.
 ///
-/// The takeoff is flown with a first-order ESC/rotor lag (50 ms): the achieved
-/// RPM trails the command at spin-up, the transient the spin-up guard exists
-/// for. The lag is switched off again once in Loiter, because with it a
-/// touchdown thrust cut ALSO trips the FDI (a separate landing-phase phantom,
-/// not this finding; reported, not fixed here).
+/// The whole flight is flown with a first-order ESC/rotor lag (50 ms): the
+/// achieved RPM trails the command at spin-up, the transient the spin-up guard
+/// exists for. The lag stays on through Loiter and the landing. Until #609
+/// finding 17 it had to be switched off in Loiter: the collective step when
+/// the landing law engages (a few ticks into Land, ~2 m up, not at touchdown)
+/// left all four rotors equally behind and the FDI isolated rotor 0. The
+/// residual now rejects that common mode (tests/fdi_common_mode.rs).
 fn takeoff_healthy(sup: &mut FlightSupervisor, b: &mut SimBackend, flight: u32) {
     b.motor_tau = 0.05;
     sup.command(Event::Arm, true, true);
@@ -69,7 +71,6 @@ fn takeoff_healthy(sup: &mut FlightSupervisor, b: &mut SimBackend, flight: u32) 
             sup.mode()
         );
         if sup.mode() == Mode::Loiter {
-            b.motor_tau = 0.0;
             return;
         }
         assert_eq!(

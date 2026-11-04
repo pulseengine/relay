@@ -283,11 +283,16 @@ interface types {
         /// hover. The dominant term — see the measurements above. gz
         /// falcon-quad 0.585; the SITL mock plant 0.49.
         hover-thrust: f32,
-        /// Control-loop rate (Hz). AUTHORITATIVE: the estimator and the ADRC
-        /// observer are discretised on it. `sensor-frame.dt-s` remains the
-        /// per-tick integration step (it varies); this is the design rate. A
-        /// host that supplies neither inherits a guess, which is how the v0.7
-        /// stages ended up 20x apart.
+        /// Control-loop rate (Hz). ADVISORY (#609 finding 7): validated, in
+        /// [10, 10000], and otherwise NOT READ. The rate the core flies at is
+        /// the frame's own: it is built at the nominal 1 kHz and RE-SYNCS to
+        /// `1 / sensor-frame.dt-s` whenever that differs by more than 2% (the
+        /// gyro low-pass, the notch bank, and since #609 the warm-ups: the
+        /// rotor-out FDI spin-up guard is a fixed 0.2 s and the estimator's
+        /// innovation-gate / yaw-capture warm-up 1 s, counted at that rate).
+        /// A host that sends a `loop-rate-hz` that disagrees with its frames
+        /// flies at its frames' rate. Kept in the record so the record stays
+        /// field-for-field what it was at @0.12.0.
         loop-rate-hz: f32,
         /// Position-measurement variance (m²). The default over-trusts a real
         /// GNSS: on a long static hover the covariance collapses, the outlier
@@ -744,7 +749,8 @@ interface pilot {
     /// raise a diversion with no cause recorded in `failsafe`. The seam does
     /// not offer a host the ability to lie to the mode machine about physics.
     enum pilot-command {
-        /// Arm. Gated by the 20-row pre-arm table; refusal is observable as
+        /// Arm. Gated by the 21-row pre-arm table (21 since
+        /// #609 finding 5 added `inside-geofence`, judged live); refusal is observable as
         /// bit 7 of `flight-state.failsafe`.
         arm,
         request-takeoff,
@@ -890,14 +896,14 @@ interface estimator {
     ///   - a control tick (`FlightCore::step`) sets the estimator's in-flight
     ///     flag from the control half's PREVIOUS command first: `some(flying)`;
     ///   - an estimate-only tick (`FlightCore::step_estimate_only`, the
-    ///     supervisor's Disarmed/Armed/Terminated path) does NOT touch it, so
-    ///     the flag keeps whatever the last control tick left: `none`.
-    /// The difference is observable. At a touchdown, and after a flight
-    /// termination in the air, the last control tick left the flag TRUE, and
-    /// the fused core keeps it so until the next control tick. Passing
-    /// `some(false)` on those estimate-only ticks was MEASURED to break the
-    /// equivalence at the first touchdown of the cascade/cascade-split
-    /// differential (tests/cascade-sitl-wasm, twin mode).
+    ///     supervisor's Disarmed/Armed/Terminated path) commands ZERO motors,
+    ///     so it writes the flag FALSE: `some(false)` (#609 finding 8).
+    /// `none` leaves the flag as the last tick set it. The cascade-split
+    /// orchestrator no longer sends it: until #609 the estimate-only path
+    /// did, and at a touchdown (which fires while the landing law still
+    /// commands near-hover collective) the flag then stayed TRUE on the
+    /// ground, suppressing the accelerometer gravity update for as long as
+    /// the vehicle sat there.
     ///
     /// Only the estimator's channels of the frame are read (IMU, dt, position,
     /// magnetometer, heading); `dt-s` must already be the orchestrator's

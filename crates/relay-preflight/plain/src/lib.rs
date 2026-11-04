@@ -133,10 +133,16 @@ pub enum CheckId {
     /// which only says eRPM is still ARRIVING: a dead rotor whose ESC keeps
     /// reporting telemetry passes that row untouched.
     MotorsHealthy = 19,
+    // — geofence, live —
+    /// The vehicle is INSIDE its geofence now (#609 finding 5): the
+    /// estimated horizontal distance from home is within the fence radius.
+    /// Distinct from `GeofenceLoaded` / `GeofenceSane`, which judge the
+    /// CONFIGURATION: a sane fence the vehicle is outside of passes both.
+    InsideGeofence = 20,
 }
 
 /// Number of table rows.
-pub const CHECK_COUNT: usize = 20;
+pub const CHECK_COUNT: usize = 21;
 
 impl CheckId {
     /// Every row, in gate (priority) order — coverage equals this length
@@ -152,6 +158,7 @@ impl CheckId {
         CheckId::GnssAgreement,
         CheckId::ParamsFromNvm,
         CheckId::GeofenceSane,
+        CheckId::InsideGeofence,
         CheckId::ThresholdsOrdered,
         CheckId::SensorsFresh,
         CheckId::EscTelemetry,
@@ -178,6 +185,7 @@ impl CheckId {
             CheckId::GnssAgreement => "PREARM: GNSS receivers disagree",
             CheckId::ParamsFromNvm => "PREARM: params are defaults (no NVM)",
             CheckId::GeofenceSane => "PREARM: geofence insane",
+            CheckId::InsideGeofence => "PREARM: outside geofence",
             CheckId::ThresholdsOrdered => "PREARM: failsafe thresholds unordered",
             CheckId::SensorsFresh => "PREARM: sensor data stale",
             CheckId::EscTelemetry => "PREARM: ESC telemetry missing",

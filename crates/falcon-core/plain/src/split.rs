@@ -31,8 +31,8 @@
 
 use crate::host::{HostCore, VehicleTuning};
 use crate::{
-    CascadePartition, EstimatorPartition, FlightBackend, FlightCore, FlightSupervisor, ImuSample,
-    NavState, SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ, SupervisedCore,
+    CascadePartition, EstimatorPartition, FlightBackend, FlightSupervisor, ImuSample, NavState,
+    SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ, SupervisedCore,
 };
 
 type Vec3 = [f32; 3];
@@ -227,11 +227,13 @@ impl<P: PartitionSeam> SupervisedCore for SplitCore<P> {
     }
 
     /// `FlightCore::step_estimate_only`, across the seam. The in-flight flag is
-    /// NOT written (`None`): the fused core leaves it as the last control tick
-    /// set it — TRUE at a touchdown and after a termination in the air.
+    /// written FALSE (`Some(false)`), as the fused core writes it: this tick
+    /// commands zero motors (#609 finding 8). Until #609 both left it as the
+    /// last control tick set it — TRUE at a touchdown — and the grounded
+    /// estimate never got its gravity reference back.
     fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
         let f = SeamFrame::read(b);
-        let _ = self.0.estimator_tick(&f, None);
+        let _ = self.0.estimator_tick(&f, Some(false));
         self.0.control_keep_warm(f.imu);
         b.write_motors(&[0.0, 0.0, 0.0, 0.0]);
     }
@@ -280,17 +282,13 @@ pub fn control_tuning(t: &VehicleTuning) -> ControlTuning {
 /// A fresh estimator partition, built as `FlightSupervisor::new` builds its
 /// core's.
 pub fn new_estimator() -> EstimatorPartition {
-    EstimatorPartition::new(FlightCore::warmup_steps(SUPERVISOR_CORE_LOOP_HZ))
+    EstimatorPartition::new(SUPERVISOR_CORE_LOOP_HZ)
 }
 
 /// A fresh control partition, built as `FlightSupervisor::new` builds its
 /// core's.
 pub fn new_control() -> CascadePartition {
-    CascadePartition::new(
-        SUPERVISOR_CORE_HOVER_THRUST,
-        SUPERVISOR_CORE_LOOP_HZ,
-        FlightCore::warmup_steps(SUPERVISOR_CORE_LOOP_HZ),
-    )
+    CascadePartition::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ)
 }
 
 /// The estimator's share of the vehicle tuning, already validated

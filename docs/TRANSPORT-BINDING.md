@@ -398,9 +398,10 @@ The order a host follows to fly the supervised component:
 6. `command` `request-takeoff` → ack, then keep sending `sensor` frames
 
 `configure` may be called again later. Doing so **re-initialises the control
-core, estimator state included**, because `loop-rate-hz` is fixed at
-construction and a partially-applied configuration is worse than an explicit
-reset. A host that never configures keeps the built-in defaults, which fly the
+core, estimator state included**, because a partially-applied configuration
+is worse than an explicit reset. (`loop-rate-hz` is advisory: the core runs at
+the rate the `sensor` frames' `dt-s` gives, filters and warm-ups included,
+#609 finding 7.) A host that never configures keeps the built-in defaults, which fly the
 SITL mock plant and nothing else.
 
 ## 3. The tick contract

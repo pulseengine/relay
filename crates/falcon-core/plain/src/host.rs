@@ -58,10 +58,11 @@ use relay_preflight::CheckId;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VehicleConfig {
     pub hover_thrust: f32,
-    /// Documented as authoritative by the seam, and NOT READ: the supervisor's
-    /// core is built at the nominal 1 kHz and `resync_loop_rate` re-derives
-    /// the filters from the frame's `dt` (#609 finding 7, open). Carried so
-    /// the record stays field-for-field with the WIT.
+    /// ADVISORY, and NOT READ (#609 finding 7, #587): the supervisor's core
+    /// is built at the nominal 1 kHz and `resync_loop_rate` re-derives the
+    /// filters AND the warm-ups (FDI spin-up guard 0.2 s, innovation gate 1 s)
+    /// from the frame's `dt`. Carried so the record stays field-for-field
+    /// with the WIT.
     pub loop_rate_hz: f32,
     pub pos_var: f32,
     pub process_floor_vel: f32,
@@ -97,8 +98,8 @@ impl VehicleConfig {
     ///     anything above 1.
     ///   * `loop_rate_hz` — the control-loop rate: in [10, 10000] Hz, the
     ///     reciprocal of the seam's own per-tick `dt-s` domain [0.1 ms, 100 ms]
-    ///     (the frame clamp in `step`). Validated though not yet read (#609
-    ///     finding 7).
+    ///     (the frame clamp in `step`). Validated, and advisory: the core runs
+    ///     at the frames' rate (#609 finding 7).
     ///   * `pos_var` — a measurement VARIANCE (m²): strictly positive. Zero
     ///     over-trusts GNSS into a deaf estimator.
     ///   * `process_floor_vel`, `process_floor_pos` — additive variance floors:
@@ -244,7 +245,7 @@ pub fn validate_calibration(c: CalParams) -> Option<CalParams> {
 ///     the stored calibration at build, so a rebuild keeps it, and projects
 ///     the flag there, so a host that sent none is refused from the first
 ///     `arm` rather than on the constructor's bring-up default.
-pub const ROWS_FED_BY_STEP: [CheckId; 10] = [
+pub const ROWS_FED_BY_STEP: [CheckId; 11] = [
     CheckId::SensorsHealthy,
     CheckId::EstimatorConverged,
     CheckId::GeofenceLoaded,
@@ -255,6 +256,7 @@ pub const ROWS_FED_BY_STEP: [CheckId; 10] = [
     CheckId::BatteryTakeoffMargin,
     CheckId::MotorsHealthy,
     CheckId::NoFailsafeLatched,
+    CheckId::InsideGeofence,
 ];
 
 /// What a `configure_*` call did. The seam's calls return unit, so a host
@@ -304,9 +306,9 @@ impl HostCore for FlightCore {
         // construction is what overflowed the component's 8 KiB shadow stack.
         let sup = slot.get_or_insert_with(|| FlightSupervisor::new(home, fence, cruise, low_batt));
         // `FlightSupervisor::new` hardcodes `FlightCore::new(0.5, 1000.0)`, so
-        // hover thrust must be re-applied; the loop RATE resyncs from the
-        // backend's `dt` on the first tick, the warm-up count does not (#609
-        // finding 7, open).
+        // hover thrust must be re-applied; the loop RATE, and the warm-up
+        // counted at it, resync from the backend's `dt` on the first tick
+        // (#609 finding 7).
         if let Some(t) = tuning {
             sup.set_hover_thrust(t.hover_thrust);
             t.apply(sup.core_mut());

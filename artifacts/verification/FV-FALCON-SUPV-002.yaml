@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-SUPV-002
     type: sw-verification
     title: "SUPV-P02 — the failsafe latch clears on disarm, and re-arming is gated by LIVE hazards only, in both directions (v1.141)"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
       Verification of SWREQ-FALCON-SUPV-P02, run independently of the
@@ -42,9 +42,30 @@ artifacts:
             makes the airborne test FAIL with arm_blocked_check=None while
             failed_motor=Some(1): the vehicle arms with a dead motor.
 
+      (3) GEOFENCE, LIVE (#609 finding 5, falcon-v1.141.0; implementation
+      evidence, not yet independently re-run). The requirement now names the
+      geofence as a live hazard: CheckId::InsideGeofence, the complement of
+      the in-flight breach term. tests/geofence_prearm.rs: a first arm
+      outside the fence is refused by it; after a breach, RTL, landing and
+      disarm, a vehicle outside the fence again is refused with it as the
+      ONLY failing row (forcing it true leaves arm_blocked_check()=None), and
+      arms once back inside. The recovery test above now ARMS INSIDE the
+      fence and is carried out of it in flight, because the row refuses the
+      out-of-fence first arm it used to provoke the breach with; it still
+      fails when the disarm clear is removed.
+
+      STATUS DEMOTED verified -> implemented by the #609 finding-5 change:
+      the requirement text and its evidence changed. It returns to verified
+      in a separate code-free verify PR (two-commit rule).
+
       High wind is deliberately outside the live-hazard set (maintainer
       decision, relay#564: re-arm after a wind RTL is permitted and
-      self-limiting); not exercised here because the requirement excludes it.
+      self-limiting — CORRECTED in the requirement, #609 finding 5: the wind
+      failsafe commands RTL only, never a landing in place); not exercised
+      here because the requirement excludes it. BATTERY IS TERMINAL until a
+      process restart (requirement, #609 finding 5): pinned by
+      tests/battery_failsafe_terminal.rs, documentation of the existing
+      behaviour, not a change to it.
 
       FALSIFICATION: wrong if a disarmed vehicle with no live hazard is
       refused, or a disarmed vehicle with an isolated rotor is accepted.
@@ -54,6 +75,8 @@ artifacts:
       steps:
         - run: cargo test -p falcon-core --lib re_arming_is_allowed_once_the_failsafe_condition_has_cleared
         - run: cargo test -p falcon-core --lib a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears
+        - run: cargo test -p falcon-core --test geofence_prearm
+        - run: cargo test -p falcon-core --test battery_failsafe_terminal
     links:
       - type: verifies
         target: SWREQ-FALCON-SUPV-P02

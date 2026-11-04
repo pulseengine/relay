@@ -199,15 +199,20 @@ pub struct EstimatorPartition {
     /// production core against the gz plant, where achieved starts at 0).
     step_count: u32,
     fdi_warmup_steps: u32,
+    /// The loop rate `fdi_warmup_steps` is counted at. Re-synced from the
+    /// backend's own `dt` exactly as the cascade's (see [`resynced_rate`]),
+    /// so the innovation-gate warm-up is a fixed TIME (#609 finding 7).
+    designed_hz: f32,
 }
 
 impl EstimatorPartition {
     /// `pub` for the split deployment (#575): a `cascade-estimator` component
-    /// builds this half on its own. `warmup` must be
-    /// [`FlightCore::warmup_steps`] of the loop rate the fused core would have
-    /// been built with, or the split diverges from the fused core at the
-    /// innovation-gate engagement tick.
-    pub fn new(warmup: u32) -> Self {
+    /// builds this half on its own. `loop_hz` is the NOMINAL rate the fused
+    /// core would have been built with; both halves re-derive their warm-up
+    /// from the rate the backend is actually stepped at, by the same rule
+    /// ([`resynced_rate`], [`FlightCore::warmup_steps`]), so they engage
+    /// their gates on the same tick as the fused core.
+    pub fn new(loop_hz: f32) -> Self {
         EstimatorPartition {
             iekf: Iekf::level(),
             grav_var: 0.5,
@@ -225,8 +230,19 @@ impl EstimatorPartition {
             ticks_since_aiding: u32::MAX,
             in_flight: false,
             step_count: 0,
-            fdi_warmup_steps: warmup,
+            fdi_warmup_steps: FlightCore::warmup_steps(loop_hz),
+            designed_hz: loop_hz,
             calib: relay_calib::CalParams::identity(),
+        }
+    }
+
+    /// Re-count the warm-up at the rate the backend really steps at (#609
+    /// finding 7). The same tolerance and the same count as the cascade's
+    /// `resync_loop_rate`, through the same two functions.
+    fn resync_loop_rate(&mut self, dt: f32) {
+        if let Some(actual) = resynced_rate(self.designed_hz, dt) {
+            self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
+            self.designed_hz = actual;
         }
     }
 
@@ -329,6 +345,7 @@ impl EstimatorPartition {
         // ── Calibrate (relay-calib): de-bias/scale the raw sample before the
         // estimator. Identity by default (a no-op) until set_calibration installs
         // solved offsets. ──
+        self.resync_loop_rate(dt);
         let gyro = self.calib.apply_gyro(raw.gyro);
         let accel = self.calib.apply_accel(raw.accel);
 
@@ -394,6 +411,20 @@ impl EstimatorPartition {
         self.step_count = self.step_count.saturating_add(1);
         self.iekf.state()
     }
+}
+
+/// The rate a partition should RE-DERIVE its rate-dependent state for, if
+/// the backend's `dt` says it is being stepped more than 2% away from
+/// `designed_hz` (jitter must not rebuild filters every tick); `None` to keep
+/// it, or for a `dt` that is not a positive finite number. ONE rule for both
+/// partitions (#609 finding 7), so a split's halves resync on the same tick.
+fn resynced_rate(designed_hz: f32, dt: f32) -> Option<f32> {
+    if !(dt.is_finite() && dt > 0.0) {
+        return None;
+    }
+    let actual = 1.0 / dt;
+    let drift = relay_math::fabsf(actual - designed_hz);
+    (drift > 0.02 * designed_hz).then_some(actual)
 }
 
 /// The CASCADE partition (PART-P01, v1.124): geometric attitude, ADRC,
@@ -507,9 +538,9 @@ pub struct CascadePartition {
 
 impl CascadePartition {
     /// `pub` for the split deployment (#575): a `cascade-control` component
-    /// builds this half on its own. Same `warmup` contract as
+    /// builds this half on its own. Same `loop_hz` contract as
     /// [`EstimatorPartition::new`].
-    pub fn new(hover_thrust: f32, loop_hz: f32, warmup: u32) -> Self {
+    pub fn new(hover_thrust: f32, loop_hz: f32) -> Self {
         CascadePartition {
             designed_hz: loop_hz,
             geo: GeoAtt::new(GeoGains::FALCON_QUAD),
@@ -547,7 +578,7 @@ impl CascadePartition {
             last_motor_cmd: [0.0; 4],
             dbg_fdi: (0.0, 1.0, false, [0.0; 4]),
             step_count: 0,
-            fdi_warmup_steps: warmup,
+            fdi_warmup_steps: FlightCore::warmup_steps(loop_hz),
             fdi_spinup: 0,
             calib: relay_calib::CalParams::identity(),
         }
@@ -776,16 +807,18 @@ impl CascadePartition {
     /// A setter would have been forgettable in exactly the way the hardcoded
     /// constructor already was, so this takes the rate from the backend and
     /// costs one comparison per tick.
+    ///
+    /// THE WARM-UP TOO (#609 finding 7, #587 maintainer decision 2026-10-21):
+    /// the FDI spin-up guard (and the yaw-capture freeze at 5x it) is a fixed
+    /// TIME, 0.2 s, counted at the resynced rate. It used to stay at the
+    /// count the nominal 1 kHz gave (200 ticks), so the 250 Hz gz bench held
+    /// the FDI off for 0.8 s and the yaw capture for 4 s, and a 2 kHz frame
+    /// shrank the guard to 0.1 s.
     fn resync_loop_rate(&mut self, dt: f32) {
-        if !(dt.is_finite() && dt > 0.0) {
-            return;
-        }
-        let actual = 1.0 / dt;
-        // 2% tolerance: jitter must not rebuild filters every tick.
-        let drift = relay_math::fabsf(actual - self.designed_hz);
-        if drift > 0.02 * self.designed_hz {
+        if let Some(actual) = resynced_rate(self.designed_hz, dt) {
             self.gyro_lpf = GyroLpf::new(60.0, actual);
             self.notch = relay_notch::HarmonicNotchBank::new(actual);
+            self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
             self.designed_hz = actual;
         }
     }
@@ -1070,6 +1103,24 @@ impl CascadePartition {
                     resid[i] = (self.last_motor_cmd[i] - achieved).abs();
                     i += 1;
                 }
+                // COMMON-MODE REJECTION (#609 finding 17): subtract what all
+                // four rotors share. The command-aligned residual above assumes
+                // ONE tick of telemetry lag; a real ESC/rotor lags by a
+                // first-order time constant of tens of ms, so any abrupt
+                // COLLECTIVE step leaves all four behind their commands by the
+                // same amount. The supervised landing makes that step when
+                // the velocity law engages (hover ~0.5 -> ~0.3): at 50 ms lag
+                // every residual read 0.19, equal to 1e-6, the CUSUM crossed
+                // on tick 7 and rotor 0 was isolated only because it is
+                // checked first. A single rotor out is DIFFERENTIAL (one
+                // residual rises, three stay near zero), so removing the
+                // per-tick minimum leaves it intact: Loiter isolation stays
+                // at 3 ticks; isolation at the landing step goes 4 -> 8-12
+                // ticks (tests/fdi_common_mode.rs).
+                let common = resid[0].min(resid[1]).min(resid[2]).min(resid[3]);
+                for r in resid.iter_mut() {
+                    *r -= common;
+                }
                 dbg_resid = resid;
                 self.failed_motor = self.fdi.update(resid);
             }
@@ -1095,14 +1146,13 @@ pub struct FlightCore {
 
 impl FlightCore {
     pub fn new(hover_thrust: f32, loop_hz: f32) -> Self {
-        let warmup = Self::warmup_steps(loop_hz);
         FlightCore {
-            est: EstimatorPartition::new(warmup),
-            casc: CascadePartition::new(hover_thrust, loop_hz, warmup),
+            est: EstimatorPartition::new(loop_hz),
+            casc: CascadePartition::new(hover_thrust, loop_hz),
         }
     }
 
-    /// The warm-up step count both partitions are built with at `loop_hz`.
+    /// The warm-up step count at `loop_hz`: 0.2 s of ticks, ROUNDED.
     ///
     /// Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
     /// achieved rotor state has caught the command by then. The same
@@ -1111,9 +1161,14 @@ impl FlightCore {
     /// ONE definition, `pub` (#575): the fused core, the partitioned core and
     /// a split deployment that builds each half in its own component must all
     /// derive it identically, or the halves engage their gates on different
-    /// ticks than the fused core does.
+    /// ticks than the fused core does. Both halves call it at construction
+    /// AND on every rate resync ([`resynced_rate`], #609 finding 7).
+    ///
+    /// ROUNDED, NOT TRUNCATED: the rate a resync derives is `1/dt` in f32,
+    /// and 1/(1/1000) is 999.99994, whose 0.2 s truncates to 199 ticks. A
+    /// 1 kHz frame must count the 200 the nominal construction counts.
     pub fn warmup_steps(loop_hz: f32) -> u32 {
-        ((loop_hz * 0.2) as u32).max(10)
+        ((loop_hz * 0.2 + 0.5) as u32).max(10)
     }
 
     /// Install solved sensor offsets — synced to BOTH partitions (each
@@ -1127,10 +1182,27 @@ impl FlightCore {
         self.est.calib
     }
 
+    /// One MOTORS-OFF tick (the supervisor's Disarmed / Armed / Terminated
+    /// path): estimator warm, cascade filters warm, zero motors commanded.
+    ///
+    /// NOT FLYING, BY CONSTRUCTION (#609 finding 8). This tick commands zero
+    /// thrust, so the estimator is told the vehicle is not flying — the same
+    /// rule [`step`](Self::step) applies from the cascade's previous command,
+    /// read here from the command this tick is known to write. Until #609 only
+    /// `step` wrote the flag, and a supervised touchdown fires (AGL < 0.15 m)
+    /// while the landing law still commands near-hover collective: the flag
+    /// stayed TRUE on the ground, the accelerometer gravity update stayed
+    /// suppressed for as long as the vehicle sat there, and with no GNSS and a
+    /// small gyro-bias ramp the published tilt of a level, grounded airframe
+    /// walked off by ~1 rad in 60 s
+    /// (`tests/grounded_estimator_after_touchdown.rs`). After a termination in
+    /// the air the vehicle is unpowered too; its specific force is then drag,
+    /// not thrust, and `update_gravity` inflates the variance with |a| − g.
     pub fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
         let dt = b.dt();
         let raw = b.read_imu();
         let heading = b.read_heading();
+        self.est.set_in_flight(false);
         let _ = self.est.step(b, raw, heading, dt);
         self.casc.keep_warm(raw);
         b.write_motors(&[0.0, 0.0, 0.0, 0.0]);
@@ -1298,10 +1370,9 @@ impl PartitionedCore {
         jitter: bool,
         seed: u32,
     ) -> Self {
-        let warmup = FlightCore::warmup_steps(loop_hz);
         PartitionedCore {
-            est: EstimatorPartition::new(warmup),
-            casc: CascadePartition::new(hover_thrust, loop_hz, warmup),
+            est: EstimatorPartition::new(loop_hz),
+            casc: CascadePartition::new(hover_thrust, loop_hz),
             buf: [NavState::identity(); 8],
             buf_len: 0,
             delay_ticks: delay_ticks.min(6),
@@ -1688,10 +1759,10 @@ impl SupervisedCore for FlightCore {
 ///
 /// `pub` so a split deployment (#575) builds its two halves from the SAME
 /// numbers rather than a copy of them. The loop rate is a nominal design rate:
-/// `CascadePartition::resync_loop_rate` re-derives the filters from the
-/// backend's real `dt` on the first tick, but the warm-up count derived from it
-/// is NOT resynced, so a split that guessed a different rate here would engage
-/// its FDI and innovation gates on different ticks than the fused core does.
+/// both partitions' `resync_loop_rate` re-derive the filters AND the warm-up
+/// counts from the backend's real `dt` on the first tick (#609 finding 7), by
+/// one shared rule, so the halves engage their FDI and innovation gates on the
+/// same tick as the fused core whatever rate the frames run at.
 pub const SUPERVISOR_CORE_HOVER_THRUST: f32 = 0.5;
 /// See [`SUPERVISOR_CORE_HOVER_THRUST`].
 pub const SUPERVISOR_CORE_LOOP_HZ: f32 = 1000.0;
@@ -2009,10 +2080,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         if self.batt_seen && self.batt_missing_s > BATT_SILENCE_S {
             bits |= f::BATT_SILENT;
         }
-        let est = self.core.state();
-        let dx = est.p[0] - self.home[0];
-        let dy = est.p[1] - self.home[1];
-        if relay_math::sqrtf(dx * dx + dy * dy) > self.fence_radius {
+        if self.outside_geofence() {
             bits |= f::GEOFENCE_BREACH;
         }
         if self.runaway_count > 0 {
@@ -2022,7 +2090,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             bits |= f::WIND_ARMING;
         }
         // ARM_BLOCKED (bit 7) = "`command(Arm)` would be refused RIGHT NOW",
-        // judged by the SAME 20-row `check_table` that `command` gates on
+        // judged by the SAME 21-row `check_table` that `command` gates on
         // (#609 finding 6). It used to read `arm_blocked_reason()`, the legacy
         // six-field struct, so it disagreed with the gate both ways: a
         // MotorsHealthy / FailsafeConfigured refusal left it clear, and the
@@ -2130,6 +2198,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
     /// legacy field nothing refreshed, which CLOBBERED such a re-declaration.
     pub fn update_preflight<B: FlightBackend>(&mut self, _b: &mut B) {
         use relay_preflight::CheckId;
+        let outside = self.outside_geofence();
         let nav_compromised = self.core.nav_compromised();
         let tilt_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
         let t = &mut self.check_table;
@@ -2170,10 +2239,32 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // vehicle re-armed with a dead motor and the table named no reason
         // at all). Derived live, exactly as the battery terms are.
         t.set(CheckId::MotorsHealthy, self.core.failed_motor().is_none());
+        // The geofence as a LIVE hazard (#609 finding 5): the complement of
+        // the in-flight breach term, the same quantity (`outside_geofence`).
+        // SUPV-P02 clears the RTL latch on disarm because the live hazard is
+        // what must block re-arming; until this row nothing did for the
+        // fence, so a vehicle disarmed outside it re-armed. A FIRST arm
+        // outside the fence is refused too (maintainer decision 2026-11-04).
+        t.set(CheckId::InsideGeofence, !outside);
         t.set(
             CheckId::NoFailsafeLatched,
             !self.rtl_latched && !self.batt_state.low && !self.batt_state.critical,
         );
+    }
+
+    /// Is the ESTIMATED position outside the geofence (horizontal distance
+    /// from home greater than the fence radius)? THE one definition: the
+    /// in-flight breach failsafe, failsafe bit 4 and the `InsideGeofence`
+    /// pre-arm row all read it (#609 finding 5), so the row cannot disagree
+    /// with the failsafe it stands in for on the ground. A NaN radius or
+    /// position compares false here, i.e. NOT outside; a NaN radius is
+    /// refused separately by `GeofenceSane`, and the seam never installs
+    /// one (`SupervisorConfig::is_valid`).
+    fn outside_geofence(&self) -> bool {
+        let est = self.core.state();
+        let dx = est.p[0] - self.home[0];
+        let dy = est.p[1] - self.home[1];
+        relay_math::sqrtf(dx * dx + dy * dy) > self.fence_radius
     }
 
     /// Shared view of the wrapped [`FlightCore`] (estimator state, FDI,
@@ -2415,9 +2506,18 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // the NoFailsafeLatched row refreshes on the SAME tick instead of
         // leaving one cycle of stale refusal.
         //
-        // What still blocks re-arming is the LIVE hazard, re-derived every
-        // cycle: the two battery terms, and MotorsHealthy for a rotor the FDI
-        // has isolated (#565). High wind is deliberately NOT blocked — it is
+        // What still blocks re-arming is the hazard itself, re-derived every
+        // cycle: MotorsHealthy for a rotor the FDI has isolated (#565),
+        // InsideGeofence for a vehicle outside its fence (#609 finding 5 —
+        // until then nothing did, so a vehicle disarmed outside the fence
+        // re-armed), and the two battery terms. THE BATTERY TERMS ARE NOT
+        // LIVE (#609 finding 5): relay-batt's low/critical flags latch until
+        // `BatteryEstimator::reset()`, which nothing calls, and the seam's
+        // `rebuild_permitted` refuses a rebuild over a latched pack. A battery
+        // failsafe is therefore TERMINAL until the process restarts; a fresh
+        // pack does not clear it (tests/battery_failsafe_terminal.rs). An
+        // explicit pack-replaced reset is planned for v1.142, not built here.
+        // High wind is deliberately NOT blocked — it is
         // the one trigger with no ground-observable signal (the detector needs
         // airborne saturation and wind_count is zeroed when !is_airborne), so a
         // transient gust must not brick the airframe (maintainer call, #564).
@@ -2499,7 +2599,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // reserve an RTL needs.
         let batt_lost = self.batt_seen && self.batt_missing_s > BATT_SILENCE_S;
         let batt_fail = self.batt_state.low || self.batt_state.critical || batt_lost;
-        let breach = dist_home > self.fence_radius || batt_fail;
+        let breach = self.outside_geofence() || batt_fail;
         // A critical pack must reach Land even from Rtl; a fence breach or a
         // low pack must not re-demote the Rtl it just commanded (#562).
         let want = if self.batt_state.critical { 3 } else { 2 };
@@ -5878,8 +5978,13 @@ mod tests {
     /// The geometry matters and a first attempt got it wrong: with a 1 cm
     /// fence, "breached" and "arrived home" (`dist_home < 0.4` at the Rtl
     /// arrival handoff) are true SIMULTANEOUSLY, so RTL ends via the arrival
-    /// path and the demotion is invisible. Home is 2 m away here: the breach
-    /// is sustained AND the arrival radius cannot fire.
+    /// path and the demotion is invisible. The vehicle is ~2 m from home
+    /// here: the breach is sustained AND the arrival radius cannot fire.
+    ///
+    /// ARMED INSIDE THE FENCE (#609 finding 5): this used to arm 2 m from
+    /// home, outside the fence, which `InsideGeofence` now refuses. It arms at
+    /// home and is carried 2 m out in flight instead (the plant is displaced;
+    /// the estimate follows GNSS).
     #[test]
     fn sustained_geofence_breach_does_not_demote_rtl() {
         use relay_calib::CalParams;
@@ -5887,7 +5992,7 @@ mod tests {
         let dt = 0.004f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let mut b = SimBackend::new(level, dt);
-        let mut sup = FlightSupervisor::new([2.0, 0.0, 0.0], 0.5, 2.0, 14.0);
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 0.5, 2.0, 14.0);
         sup.set_calibration(CalParams {
             gyro_bias: [0.001, 0.0, 0.0],
             ..CalParams::identity()
@@ -5896,9 +6001,18 @@ mod tests {
             sup.step(&mut b);
         }
         sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), Mode::Armed, "{:?}", sup.arm_blocked_check());
         sup.command(relay_fsm::Event::RequestTakeoff, true, false);
+        for _ in 0..20_000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Loiter {
+                break;
+            }
+        }
+        assert_eq!(sup.mode(), Mode::Loiter);
+        b.pos[0] += 2.0;
         let mut entered = false;
-        for _ in 0..200 {
+        for _ in 0..2000 {
             sup.step(&mut b);
             if sup.mode() == Mode::Rtl {
                 entered = true;
@@ -5927,8 +6041,9 @@ mod tests {
     /// airframe for the life of the process (#564: it did, and the pre-arm
     /// table reported "PREARM: failsafe latched" forever).
     ///
-    /// What still blocks re-arming is the LIVE hazard, re-derived every cycle:
-    /// the two battery terms, and `MotorsHealthy` for an isolated rotor (#565).
+    /// What still blocks re-arming is the hazard itself: `MotorsHealthy` for
+    /// an isolated rotor (#565), `InsideGeofence` (#609 finding 5), and the
+    /// battery terms, which LATCH until a process restart (#609 finding 5).
     /// High wind is permitted deliberately — it has no ground-observable
     /// signal, so a transient gust must not be a permanent block
     /// (maintainer decision, #564).
@@ -5940,9 +6055,11 @@ mod tests {
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let mut b = SimBackend::new(level, dt);
         b.ground_contact = true;
-        // Home 2 m away, 0.5 m fence: breached at the origin, distinguishable
-        // from "arrived home".
-        let mut sup = FlightSupervisor::new([2.0, 0.0, 0.0], 0.5, 2.0, 14.0);
+        // Home at the origin, 0.5 m fence. ARMED INSIDE IT (#609 finding 5:
+        // `InsideGeofence` refuses a first arm outside the fence, which is how
+        // this test used to provoke the breach); the vehicle is carried 2 m
+        // out in flight below, distinguishable from "arrived home".
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 0.5, 2.0, 14.0);
         sup.set_calibration(CalParams {
             gyro_bias: [0.001, 0.0, 0.0],
             ..CalParams::identity()
@@ -5954,7 +6071,16 @@ mod tests {
         assert_eq!(sup.mode(), Mode::Armed, "first arm must succeed");
         sup.command(Event::RequestTakeoff, true, false);
 
-        // Step 2: fly until the geofence failsafe latches.
+        // Step 2: climb to Loiter, carry the vehicle out of the fence, and fly
+        // until the geofence failsafe latches.
+        for _ in 0..5000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Loiter {
+                break;
+            }
+        }
+        assert_eq!(sup.mode(), Mode::Loiter);
+        b.pos[0] += 2.0;
         let mut latched = false;
         for _ in 0..2000 {
             sup.step(&mut b);
@@ -5988,7 +6114,7 @@ mod tests {
         assert_eq!(sup.mode(), Mode::Disarmed);
 
         // Step 4: the hazard is unambiguously gone.
-        let dx = b.pos[0] - 2.0;
+        let dx = b.pos[0];
         let dy = b.pos[1];
         let dist_home = (dx * dx + dy * dy).sqrt();
         assert!(
@@ -7291,5 +7417,72 @@ mod failsafe_campaign {
             rtl_fires > 40 && no_false_rtl > 40,
             "both regimes must be well-sampled ({rtl_fires}/{no_false_rtl})"
         );
+    }
+}
+
+/// #609 finding 7 / #587 (maintainer decision 2026-10-21): the FDI spin-up
+/// guard and the estimator's innovation-gate warm-up are a fixed TIME
+/// (0.2 s, and 5x it), counted in ticks of the rate the core RESYNCS to from
+/// the backend's own `dt`, not of the nominal 1 kHz it was constructed at.
+#[cfg(test)]
+mod warmup_time_tests {
+    extern crate std;
+    use super::*;
+
+    const LEVEL: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+    /// The supervisor's core: built at the nominal 1 kHz, stepped at `hz`.
+    fn hovering(hz: f32) -> (SimBackend, FlightCore) {
+        let mut b = SimBackend::new(LEVEL, 1.0 / hz);
+        b.rpm_telemetry = true;
+        b.pos = [0.0, 0.0, -2.0];
+        let mut core = FlightCore::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ);
+        core.set_position([0.0, 0.0, -2.0]);
+        (b, core)
+    }
+
+    /// Both halves derive the SAME count, ROUNDED: in f32, 1/(1/1000) is
+    /// 999.99994, and truncating 0.2 x that gives 199, not 200.
+    #[test]
+    fn the_warm_up_is_a_fixed_time_at_the_resynced_rate() {
+        for (hz, want) in [(250.0f32, 50u32), (400.0, 80), (500.0, 100), (1000.0, 200)] {
+            let (mut b, mut core) = hovering(hz);
+            core.step(&mut b);
+            assert_eq!(
+                (core.est.fdi_warmup_steps, core.casc.fdi_warmup_steps),
+                (want, want),
+                "at {hz} Hz the warm-up must be 0.2 s = {want} ticks"
+            );
+        }
+        assert_eq!(FlightCore::warmup_steps(1.0 / (1.0f32 / 1000.0)), 200);
+        assert_eq!(FlightCore::warmup_steps(1.0 / (1.0f32 / 250.0)), 50);
+    }
+
+    /// The FDI ENGAGES 0.2 s after spin-up at 250 Hz and at 1 kHz: a rotor
+    /// dead from the first tick is not isolated before the guard's last tick
+    /// (the check runs once the spin-up count reaches it), and is isolated
+    /// within a few ticks of it.
+    #[test]
+    fn the_fdi_engages_after_a_fixed_time_at_250_hz_and_1_khz() {
+        for hz in [250.0f32, 1000.0] {
+            let guard = (0.2 * hz + 0.5) as u32;
+            let (mut b, mut core) = hovering(hz);
+            b.fail_rotor(1);
+            let mut isolated = None;
+            for i in 1..=(2.0 * hz) as u32 {
+                core.step(&mut b);
+                if core.failed_motor().is_some() {
+                    isolated = Some(i);
+                    break;
+                }
+            }
+            std::eprintln!("{hz} Hz: guard {guard} ticks, rotor isolated at tick {isolated:?}");
+            let i = isolated.unwrap_or_else(|| panic!("{hz} Hz: never isolated"));
+            assert_eq!(core.failed_motor(), Some(1), "{hz} Hz: wrong rotor");
+            assert!(
+                i >= guard && i <= guard + 5,
+                "{hz} Hz: isolated at tick {i}, the FDI engages at tick {guard}"
+            );
+        }
     }
 }

@@ -40,10 +40,11 @@ artifacts:
             published mode and the failsafe bitmask.
 
         (2) THE FEEDBACK EDGE (#452). The control partition's `flying()` shall
-            reach the estimator ONE TICK DELAYED on a control tick, and shall NOT
-            be written on an estimate-only tick (the fused core leaves the flag
-            as the last control tick set it — TRUE at a touchdown and after a
-            termination in the air).
+            reach the estimator ONE TICK DELAYED on a control tick, and an
+            estimate-only tick shall write it FALSE, as the fused core does: that
+            tick commands zero motors (#609 finding 8 — until then both left the
+            flag as the last control tick set it, TRUE at a touchdown, and the
+            grounded estimate never regained its gravity reference).
 
         (3) RESETS. `controller.configure` and `pilot.configure-supervisor`
             shall each drop the supervisor AND rebuild both partitions, as both

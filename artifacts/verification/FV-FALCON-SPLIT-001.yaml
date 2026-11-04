@@ -25,7 +25,7 @@ artifacts:
       ticks, a supervisor + partition rebuild, a second flight. Its negative
       controls are #[test]s that REQUIRE divergence:
         edge cut                           -> nav-state, tick 401
-        estimate-only ticks write the flag -> nav-state, tick 52962
+        estimate-only ticks leave the flag -> nav-state, tick 52962
         keep_warm dropped                  -> motors, tick 690
         tilt-uncertainty stubbed to 0      -> tilt-uncertainty, tick 0
         rebuild without partition reset    -> motors, tick 53262
@@ -235,10 +235,12 @@ artifacts:
         # The trait the split depends on, and the partition equivalence it
         # builds on (PART-P01), stay green.
         - run: "cargo test -p falcon-core --release partitioned"
-        # The feedback edge is an option, None on estimate-only ticks.
+        # The feedback edge is an option; an estimate-only tick writes it FALSE
+        # (#609 finding 8), as the fused core does.
         - run: "grep -q 'tick: func(sensors: sensor-frame, in-flight: option<bool>) -> nav-state;' wit/falcon-cascade/cascade.wit"
         - run: "grep -q 'let nav = self.0.estimator_tick(&f, Some(flying));' crates/falcon-core/plain/src/split.rs"
-        - run: "grep -q 'let _ = self.0.estimator_tick(&f, None);' crates/falcon-core/plain/src/split.rs"
+        - run: "grep -q 'let _ = self.0.estimator_tick(&f, Some(false));' crates/falcon-core/plain/src/split.rs"
+        - run: "grep -q 'fn negative_control_estimate_only_leaving_the_flag_diverges' crates/falcon-core/tests/supervised_core_split.rs"
         # The split world exports what cascade exports.
         - run: "grep -qE '^world cascade-split' wit/falcon-cascade/cascade.wit"
         # The twin differential itself (bench-only).
