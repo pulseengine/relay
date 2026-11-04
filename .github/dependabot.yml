@@ -24,6 +24,13 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+      # gz-msgs and gz-transport are version-locked (the Gazebo bridge pins
+      # both to the same harmonic release); one PR for the pair, not two
+      # (#596 + #597).
+      gz-family:
+        patterns:
+          - "gz-msgs"
+          - "gz-transport"
   # fuzz/ is its own workspace with ONE direct dependency, libfuzzer-sys. Listed
   # in the group above it also "updated" wit-bindgen, which it only reaches
   # through path deps inheriting `workspace = true` from the ROOT manifest — so

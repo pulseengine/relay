@@ -14,7 +14,7 @@ publish = false
 # GazeboPhysics the native bench flies. Needs the gz-transport13 dev libs on
 # PKG_CONFIG_PATH and a running `gz sim`. Off by default so the mock path stays
 # dependency-free.
-gazebo = ["dep:gz-transport", "dep:gz-msgs", "dep:crossbeam-channel"]
+gazebo = ["dep:gz-transport", "dep:gz-msgs", "dep:async-channel"]
 
 [dependencies]
 wasmtime = { version = "41", features = ["component-model"] }
@@ -36,6 +36,6 @@ falcon-core = { path = "../../crates/falcon-core" }
 # EXACTLY; a different gz-transport here would be a different bridge than the
 # one every native SITL result was produced with, and the comparison would stop
 # meaning anything.
-gz-transport = { version = "0.10", features = ["harmonic"], optional = true }
-gz-msgs = { version = "0.10", features = ["harmonic"], optional = true }
-crossbeam-channel = { version = "0.5", optional = true }
+gz-transport = { version = "0.11", features = ["harmonic"], optional = true }
+gz-msgs = { version = "0.11", features = ["harmonic"], optional = true }
+async-channel = { version = "2.5", optional = true }
