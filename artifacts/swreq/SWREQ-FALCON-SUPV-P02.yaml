@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SUPV-P02
     type: sw-req
     title: "SUPV-P02 — a failsafe latch is an IN-FLIGHT device: it clears on disarm, and re-arming is gated by LIVE hazards only"
-    status: verified
+    status: implemented
     release: falcon-v1.141.0
     description: >
       The RTL latch the supervisor raises when it actuates a failsafe
@@ -13,8 +13,12 @@ artifacts:
 
       What blocks a subsequent arm shall instead be the LIVE hazard, re-derived
       every control cycle from real vehicle state (the [[SWREQ-FALCON-PREARM-P02]]
-      discipline): the battery terms, and the isolated-rotor row
-      [[SWREQ-FALCON-PREARM-P04]]. A hazard that is no longer present shall not
+      discipline): the battery terms, the isolated-rotor row
+      [[SWREQ-FALCON-PREARM-P04]], and the live geofence row
+      (CheckId::InsideGeofence, #609 finding 5): a vehicle whose estimated
+      position is outside its fence shall not arm, whether or not a failsafe
+      ever fired (a FIRST arm outside the fence is refused too). Until #609
+      no row checked the fence, so a vehicle disarmed outside it re-armed. A hazard that is no longer present shall not
       block arming, and a hazard that IS still present shall block it on its own
       merit and name its own reason.
 
@@ -51,7 +55,13 @@ artifacts:
         (tests::a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears).
         Direction (2) MUST be falsified by deleting PREARM-P04's MotorsHealthy
         row while the disarm-clear stays in place — NOT by removing the clear,
-        which would prove only that the latch still blocks.
+        which would prove only that the latch still blocks. (3) GEOFENCE:
+        armed inside the fence, carried out of it in flight (RTL latched),
+        home, landed, disarmed; on the ground outside the fence again the next
+        command(Arm) is REFUSED with CheckId::InsideGeofence the ONLY failing
+        row, and it arms once back inside; a first arm outside the fence is
+        refused by the same row (falcon-core tests/geofence_prearm.rs).
+        Falsified by forcing the row true: both refusals disappear.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-011

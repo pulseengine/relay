@@ -2080,10 +2080,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         if self.batt_seen && self.batt_missing_s > BATT_SILENCE_S {
             bits |= f::BATT_SILENT;
         }
-        let est = self.core.state();
-        let dx = est.p[0] - self.home[0];
-        let dy = est.p[1] - self.home[1];
-        if relay_math::sqrtf(dx * dx + dy * dy) > self.fence_radius {
+        if self.outside_geofence() {
             bits |= f::GEOFENCE_BREACH;
         }
         if self.runaway_count > 0 {
@@ -2093,7 +2090,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             bits |= f::WIND_ARMING;
         }
         // ARM_BLOCKED (bit 7) = "`command(Arm)` would be refused RIGHT NOW",
-        // judged by the SAME 20-row `check_table` that `command` gates on
+        // judged by the SAME 21-row `check_table` that `command` gates on
         // (#609 finding 6). It used to read `arm_blocked_reason()`, the legacy
         // six-field struct, so it disagreed with the gate both ways: a
         // MotorsHealthy / FailsafeConfigured refusal left it clear, and the
@@ -2201,6 +2198,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
     /// legacy field nothing refreshed, which CLOBBERED such a re-declaration.
     pub fn update_preflight<B: FlightBackend>(&mut self, _b: &mut B) {
         use relay_preflight::CheckId;
+        let outside = self.outside_geofence();
         let nav_compromised = self.core.nav_compromised();
         let tilt_converged = self.core.tilt_uncertainty() < PREARM_TILT_UNCERT_MAX;
         let t = &mut self.check_table;
@@ -2241,10 +2239,32 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // vehicle re-armed with a dead motor and the table named no reason
         // at all). Derived live, exactly as the battery terms are.
         t.set(CheckId::MotorsHealthy, self.core.failed_motor().is_none());
+        // The geofence as a LIVE hazard (#609 finding 5): the complement of
+        // the in-flight breach term, the same quantity (`outside_geofence`).
+        // SUPV-P02 clears the RTL latch on disarm because the live hazard is
+        // what must block re-arming; until this row nothing did for the
+        // fence, so a vehicle disarmed outside it re-armed. A FIRST arm
+        // outside the fence is refused too (maintainer decision 2026-11-04).
+        t.set(CheckId::InsideGeofence, !outside);
         t.set(
             CheckId::NoFailsafeLatched,
             !self.rtl_latched && !self.batt_state.low && !self.batt_state.critical,
         );
+    }
+
+    /// Is the ESTIMATED position outside the geofence (horizontal distance
+    /// from home greater than the fence radius)? THE one definition: the
+    /// in-flight breach failsafe, failsafe bit 4 and the `InsideGeofence`
+    /// pre-arm row all read it (#609 finding 5), so the row cannot disagree
+    /// with the failsafe it stands in for on the ground. A NaN radius or
+    /// position compares false here, i.e. NOT outside; a NaN radius is
+    /// refused separately by `GeofenceSane`, and the seam never installs
+    /// one (`SupervisorConfig::is_valid`).
+    fn outside_geofence(&self) -> bool {
+        let est = self.core.state();
+        let dx = est.p[0] - self.home[0];
+        let dy = est.p[1] - self.home[1];
+        relay_math::sqrtf(dx * dx + dy * dy) > self.fence_radius
     }
 
     /// Shared view of the wrapped [`FlightCore`] (estimator state, FDI,
@@ -2487,8 +2507,10 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // leaving one cycle of stale refusal.
         //
         // What still blocks re-arming is the LIVE hazard, re-derived every
-        // cycle: the two battery terms, and MotorsHealthy for a rotor the FDI
-        // has isolated (#565). High wind is deliberately NOT blocked — it is
+        // cycle: the two battery terms, MotorsHealthy for a rotor the FDI has
+        // isolated (#565), and InsideGeofence for a vehicle outside its fence
+        // (#609 finding 5 — until then nothing did, so a vehicle disarmed
+        // outside the fence re-armed). High wind is deliberately NOT blocked — it is
         // the one trigger with no ground-observable signal (the detector needs
         // airborne saturation and wind_count is zeroed when !is_airborne), so a
         // transient gust must not brick the airframe (maintainer call, #564).
@@ -2570,7 +2592,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // reserve an RTL needs.
         let batt_lost = self.batt_seen && self.batt_missing_s > BATT_SILENCE_S;
         let batt_fail = self.batt_state.low || self.batt_state.critical || batt_lost;
-        let breach = dist_home > self.fence_radius || batt_fail;
+        let breach = self.outside_geofence() || batt_fail;
         // A critical pack must reach Land even from Rtl; a fence breach or a
         // low pack must not re-demote the Rtl it just commanded (#562).
         let want = if self.batt_state.critical { 3 } else { 2 };
@@ -5949,8 +5971,13 @@ mod tests {
     /// The geometry matters and a first attempt got it wrong: with a 1 cm
     /// fence, "breached" and "arrived home" (`dist_home < 0.4` at the Rtl
     /// arrival handoff) are true SIMULTANEOUSLY, so RTL ends via the arrival
-    /// path and the demotion is invisible. Home is 2 m away here: the breach
-    /// is sustained AND the arrival radius cannot fire.
+    /// path and the demotion is invisible. The vehicle is ~2 m from home
+    /// here: the breach is sustained AND the arrival radius cannot fire.
+    ///
+    /// ARMED INSIDE THE FENCE (#609 finding 5): this used to arm 2 m from
+    /// home, outside the fence, which `InsideGeofence` now refuses. It arms at
+    /// home and is carried 2 m out in flight instead (the plant is displaced;
+    /// the estimate follows GNSS).
     #[test]
     fn sustained_geofence_breach_does_not_demote_rtl() {
         use relay_calib::CalParams;
@@ -5958,7 +5985,7 @@ mod tests {
         let dt = 0.004f32;
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let mut b = SimBackend::new(level, dt);
-        let mut sup = FlightSupervisor::new([2.0, 0.0, 0.0], 0.5, 2.0, 14.0);
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 0.5, 2.0, 14.0);
         sup.set_calibration(CalParams {
             gyro_bias: [0.001, 0.0, 0.0],
             ..CalParams::identity()
@@ -5967,9 +5994,18 @@ mod tests {
             sup.step(&mut b);
         }
         sup.command(relay_fsm::Event::Arm, true, true);
+        assert_eq!(sup.mode(), Mode::Armed, "{:?}", sup.arm_blocked_check());
         sup.command(relay_fsm::Event::RequestTakeoff, true, false);
+        for _ in 0..20_000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Loiter {
+                break;
+            }
+        }
+        assert_eq!(sup.mode(), Mode::Loiter);
+        b.pos[0] += 2.0;
         let mut entered = false;
-        for _ in 0..200 {
+        for _ in 0..2000 {
             sup.step(&mut b);
             if sup.mode() == Mode::Rtl {
                 entered = true;
@@ -6011,9 +6047,11 @@ mod tests {
         let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let mut b = SimBackend::new(level, dt);
         b.ground_contact = true;
-        // Home 2 m away, 0.5 m fence: breached at the origin, distinguishable
-        // from "arrived home".
-        let mut sup = FlightSupervisor::new([2.0, 0.0, 0.0], 0.5, 2.0, 14.0);
+        // Home at the origin, 0.5 m fence. ARMED INSIDE IT (#609 finding 5:
+        // `InsideGeofence` refuses a first arm outside the fence, which is how
+        // this test used to provoke the breach); the vehicle is carried 2 m
+        // out in flight below, distinguishable from "arrived home".
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 0.5, 2.0, 14.0);
         sup.set_calibration(CalParams {
             gyro_bias: [0.001, 0.0, 0.0],
             ..CalParams::identity()
@@ -6025,7 +6063,16 @@ mod tests {
         assert_eq!(sup.mode(), Mode::Armed, "first arm must succeed");
         sup.command(Event::RequestTakeoff, true, false);
 
-        // Step 2: fly until the geofence failsafe latches.
+        // Step 2: climb to Loiter, carry the vehicle out of the fence, and fly
+        // until the geofence failsafe latches.
+        for _ in 0..5000 {
+            sup.step(&mut b);
+            if sup.mode() == Mode::Loiter {
+                break;
+            }
+        }
+        assert_eq!(sup.mode(), Mode::Loiter);
+        b.pos[0] += 2.0;
         let mut latched = false;
         for _ in 0..2000 {
             sup.step(&mut b);
@@ -6059,7 +6106,7 @@ mod tests {
         assert_eq!(sup.mode(), Mode::Disarmed);
 
         // Step 4: the hazard is unambiguously gone.
-        let dx = b.pos[0] - 2.0;
+        let dx = b.pos[0];
         let dy = b.pos[1];
         let dist_home = (dx * dx + dy * dy).sqrt();
         assert!(

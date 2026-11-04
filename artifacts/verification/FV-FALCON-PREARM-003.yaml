@@ -10,7 +10,8 @@ artifacts:
 
       Per-check pair tests, TABLE-DRIVEN (coverage equals the table length
       by construction — a row added to CheckId::ALL is automatically
-      covered): every one of the 19 rows individually blocks arming with
+      covered): every one of the rows (19 at v1.122; 21 since #609 finding 5
+      added InsideGeofence) individually blocks arming with
       EXACTLY its own id and a DISTINCT operator-readable STATUSTEXT
       reason, and clears when passed
       (relay-preflight tests::every_row_blocks_alone_and_clears).

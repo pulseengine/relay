@@ -749,7 +749,8 @@ interface pilot {
     /// raise a diversion with no cause recorded in `failsafe`. The seam does
     /// not offer a host the ability to lie to the mode machine about physics.
     enum pilot-command {
-        /// Arm. Gated by the 20-row pre-arm table; refusal is observable as
+        /// Arm. Gated by the 21-row pre-arm table (21 since
+        /// #609 finding 5 added `inside-geofence`, judged live); refusal is observable as
         /// bit 7 of `flight-state.failsafe`.
         arm,
         request-takeoff,

@@ -407,7 +407,7 @@ fn main() -> Result<()> {
     // within ~2 ticks of a fresh filter (measured: this harness arms at tick 2),
     // contrary to falcon-core's "starts well above it". So a green run shows
     // the component arms through the seam on refreshed rows, not that every
-    // one of the 20 rows is a live signal; it must not be cited for
+    // one of the 21 rows is a live signal; it must not be cited for
     // SUPERVISOR-P01 promotion beyond that.
     println!("commanded  : Arm on the measured pre-arm table, then RequestTakeoff");
     println!();

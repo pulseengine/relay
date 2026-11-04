@@ -245,7 +245,7 @@ pub fn validate_calibration(c: CalParams) -> Option<CalParams> {
 ///     the stored calibration at build, so a rebuild keeps it, and projects
 ///     the flag there, so a host that sent none is refused from the first
 ///     `arm` rather than on the constructor's bring-up default.
-pub const ROWS_FED_BY_STEP: [CheckId; 10] = [
+pub const ROWS_FED_BY_STEP: [CheckId; 11] = [
     CheckId::SensorsHealthy,
     CheckId::EstimatorConverged,
     CheckId::GeofenceLoaded,
@@ -256,6 +256,7 @@ pub const ROWS_FED_BY_STEP: [CheckId; 10] = [
     CheckId::BatteryTakeoffMargin,
     CheckId::MotorsHealthy,
     CheckId::NoFailsafeLatched,
+    CheckId::InsideGeofence,
 ];
 
 /// What a `configure_*` call did. The seam's calls return unit, so a host
