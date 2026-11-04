@@ -517,8 +517,10 @@ pub struct CascadePartition {
     /// residual spikes on EVERY rotor for the first fraction of a second — which
     /// would false-trip the CUSUM and drop a healthy vehicle into the degraded
     /// 3-rotor law. The FDI is held off until the actuators have spun up
-    /// (`fdi_warmup_steps`), then runs normally (v1.113 — caught flying the
-    /// production core against the gz plant, where achieved starts at 0).
+    /// (now `fdi_guard_steps`, 0.3 s, #609 finding 18), then runs normally
+    /// (v1.113 — caught flying the production core against the gz plant,
+    /// where achieved starts at 0). `fdi_warmup_steps` (0.2 s) is no longer
+    /// the FDI guard: it times the yaw-capture freeze (x5).
     step_count: u32,
     fdi_warmup_steps: u32,
     /// Control steps since the FDI was last (re-)armed: the spin-up guard's
@@ -528,6 +530,18 @@ pub struct CascadePartition {
     /// ([`Self::rearm_fdi`]); `step_count` keeps its other job (the one-time
     /// launch-heading capture) unchanged.
     fdi_spinup: u32,
+    /// The spin-up guard in ticks: [`FDI_SPINUP_GUARD_S`] at the resynced
+    /// rate (#609 finding 18). The FDI runs once `fdi_spinup` reaches it.
+    /// Separate from `fdi_warmup_steps` (0.2 s), which keeps driving the
+    /// yaw-capture freeze unchanged.
+    fdi_guard_steps: u32,
+    /// `dt / FDI_ROTOR_LAG_TAU_S` at the resynced rate, capped at 1: the
+    /// per-tick gain of the rotor lag model (#609 finding 18).
+    fdi_lag_alpha: f32,
+    /// The rotor lag model's state per rotor: the effectiveness a healthy
+    /// rotor lagging [`FDI_ROTOR_LAG_TAU_S`] behind `last_motor_cmd` would
+    /// report now. The FDI residual's reference. Zeroed by `rearm_fdi`.
+    fdi_lag_model: [f32; 4],
     /// The cascade's own copy of the sensor calibration (the M7 sees the
     /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
@@ -580,6 +594,9 @@ impl CascadePartition {
             step_count: 0,
             fdi_warmup_steps: FlightCore::warmup_steps(loop_hz),
             fdi_spinup: 0,
+            fdi_guard_steps: FlightCore::fdi_guard_steps(loop_hz),
+            fdi_lag_alpha: FlightCore::fdi_lag_alpha(loop_hz),
+            fdi_lag_model: [0.0; 4],
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -742,8 +759,9 @@ impl CascadePartition {
         self.alt_int = 0.0;
     }
     /// RE-ARM the rotor-out FDI for a new spin-up (#609 finding 16): restart the
-    /// spin-up guard, forget the previous flight's last motor command (the
-    /// residual's reference, which nothing else resets on the ground) and clear
+    /// spin-up guard, forget the previous flight's last motor command and the
+    /// rotor lag model's state (the residual's reference, which nothing else
+    /// resets on the ground) and clear
     /// the CUSUM accumulators. ONLY while no rotor is isolated: a rotor the FDI
     /// HAS isolated stays isolated, so the `MotorsHealthy` pre-arm row keeps
     /// refusing to arm a vehicle with a dead motor (#565) and the degraded law
@@ -753,6 +771,7 @@ impl CascadePartition {
         if self.failed_motor.is_none() {
             self.fdi_spinup = 0;
             self.last_motor_cmd = [0.0; 4];
+            self.fdi_lag_model = [0.0; 4];
             self.fdi = RotorFaultDetector::new(FDI_CUSUM_THRESHOLD, FDI_CUSUM_DRIFT);
         }
     }
@@ -809,16 +828,20 @@ impl CascadePartition {
     /// costs one comparison per tick.
     ///
     /// THE WARM-UP TOO (#609 finding 7, #587 maintainer decision 2026-10-21):
-    /// the FDI spin-up guard (and the yaw-capture freeze at 5x it) is a fixed
-    /// TIME, 0.2 s, counted at the resynced rate. It used to stay at the
-    /// count the nominal 1 kHz gave (200 ticks), so the 250 Hz gz bench held
-    /// the FDI off for 0.8 s and the yaw capture for 4 s, and a 2 kHz frame
-    /// shrank the guard to 0.1 s.
+    /// the FDI spin-up guard (and the yaw-capture freeze at 5x the 0.2 s
+    /// warm-up) is a fixed TIME, counted at the resynced rate. It used to
+    /// stay at the count the nominal 1 kHz gave (200 ticks), so the 250 Hz gz
+    /// bench held the FDI off for 0.8 s and the yaw capture for 4 s, and a
+    /// 2 kHz frame shrank the guard to 0.1 s. Since #609 finding 18 the guard
+    /// is its own time, [`FDI_SPINUP_GUARD_S`] (0.3 s), and the rotor lag
+    /// model's per-tick gain is re-derived here too.
     fn resync_loop_rate(&mut self, dt: f32) {
         if let Some(actual) = resynced_rate(self.designed_hz, dt) {
             self.gyro_lpf = GyroLpf::new(60.0, actual);
             self.notch = relay_notch::HarmonicNotchBank::new(actual);
             self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
+            self.fdi_guard_steps = FlightCore::fdi_guard_steps(actual);
+            self.fdi_lag_alpha = FlightCore::fdi_lag_alpha(actual);
             self.designed_hz = actual;
         }
     }
@@ -1060,9 +1083,20 @@ impl CascadePartition {
         // ── Single-rotor-out FDI ── form the per-rotor effectiveness residual
         // |commanded − achieved| from ESC RPM telemetry and feed the CUSUM; on
         // isolation, latch the failed rotor (next step runs the degraded path).
-        // Held off for `fdi_warmup_steps` (spin-up guard) — see the field docs.
+        // Held off for `fdi_guard_steps` (spin-up guard, FDI_SPINUP_GUARD_S)
+        // — see the field docs.
         self.step_count = self.step_count.saturating_add(1);
         self.fdi_spinup = self.fdi_spinup.saturating_add(1);
+        // ROTOR LAG MODEL (#609 finding 18): advance the first-order model of
+        // what a healthy rotor reports now, driven by the command that
+        // produced this tick's telemetry (`last_motor_cmd`, the v1.115
+        // alignment). Every tick, gate open or shut, so it never goes stale.
+        let mut k = 0;
+        while k < 4 {
+            self.fdi_lag_model[k] +=
+                (self.last_motor_cmd[k] - self.fdi_lag_model[k]) * self.fdi_lag_alpha;
+            k += 1;
+        }
         // ATTITUDE/RATE GATE: a rotor-out residual is only DISTINGUISHABLE in
         // near-level, low-rate flight. During an attitude transient the
         // controller commands large asymmetric motors, so |commanded − achieved|
@@ -1091,16 +1125,19 @@ impl CascadePartition {
         // command-ALIGNED residual, not this gate.
         let fdi_steady = tilt_cos > 0.90 && rp_rate2 < 4.0; // ≲26° tilt, ≲2 rad/s roll+pitch
         let mut dbg_resid = [0.0f32; 4];
-        if self.failed_motor.is_none() && self.fdi_spinup >= self.fdi_warmup_steps && fdi_steady {
+        if self.failed_motor.is_none() && self.fdi_spinup >= self.fdi_guard_steps && fdi_steady {
             if let Some(rpm) = rpm_now {
                 let mut resid = [0.0f32; 4];
                 let mut i = 0;
                 while i < 4 {
                     let achieved = (rpm[i] as f32 / ESC_RPM_FULL).clamp(0.0, 2.0);
-                    // Compare achieved against the PREVIOUS command that produced
-                    // it (v1.115): the telemetry lags one tick, so using the
-                    // current command spikes every residual on an abrupt step.
-                    resid[i] = (self.last_motor_cmd[i] - achieved).abs();
+                    // Compare achieved against the LAG-MODELLED command (#609
+                    // finding 18): the previous command that produced it
+                    // (v1.115 — the telemetry lags one tick, so the current
+                    // command spikes every residual on an abrupt step), passed
+                    // through FDI_ROTOR_LAG_TAU_S. A healthy rotor still
+                    // catching up reads ~0; a dead one reads the model.
+                    resid[i] = (self.fdi_lag_model[i] - achieved).abs();
                     i += 1;
                 }
                 // COMMON-MODE REJECTION (#609 finding 17): subtract what all
@@ -1117,6 +1154,11 @@ impl CascadePartition {
                 // per-tick minimum leaves it intact: Loiter isolation stays
                 // at 3 ticks; isolation at the landing step goes 4 -> 8-12
                 // ticks (tests/fdi_common_mode.rs).
+                //
+                // KEPT with the lag model (#609 finding 18): the model is
+                // one assumed time constant, so a fleet of ESCs lagging
+                // faster or slower than it, all alike, still leaves a shared
+                // residual on every collective step, and this removes it.
                 let common = resid[0].min(resid[1]).min(resid[2]).min(resid[3]);
                 for r in resid.iter_mut() {
                     *r -= common;
@@ -1154,9 +1196,10 @@ impl FlightCore {
 
     /// The warm-up step count at `loop_hz`: 0.2 s of ticks, ROUNDED.
     ///
-    /// Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
-    /// achieved rotor state has caught the command by then. The same
-    /// count seeds the estimator's innovation-gate warm-up (×5).
+    /// It seeds the estimator's innovation-gate warm-up and the cascade's
+    /// yaw-capture freeze (both ×5, ≥10 steps floor). It USED to be the FDI
+    /// spin-up guard as well; since #609 finding 18 that is its own, longer
+    /// time ([`Self::fdi_guard_steps`], [`FDI_SPINUP_GUARD_S`]).
     ///
     /// ONE definition, `pub` (#575): the fused core, the partitioned core and
     /// a split deployment that builds each half in its own component must all
@@ -1169,6 +1212,21 @@ impl FlightCore {
     /// 1 kHz frame must count the 200 the nominal construction counts.
     pub fn warmup_steps(loop_hz: f32) -> u32 {
         ((loop_hz * 0.2 + 0.5) as u32).max(10)
+    }
+
+    /// The rotor-out FDI spin-up guard at `loop_hz`: [`FDI_SPINUP_GUARD_S`]
+    /// of ticks, ROUNDED like [`Self::warmup_steps`] (1/(1/1000) is
+    /// 999.99994 in f32), same >= 10 floor (#609 finding 18). ONE definition
+    /// for the fused core and both halves of a split.
+    pub fn fdi_guard_steps(loop_hz: f32) -> u32 {
+        ((loop_hz * FDI_SPINUP_GUARD_S + 0.5) as u32).max(10)
+    }
+
+    /// The rotor lag model's per-tick gain at `loop_hz`:
+    /// `(1 / loop_hz) / FDI_ROTOR_LAG_TAU_S`, capped at 1 (#609 finding 18).
+    /// Forward Euler, no libm on the flight path.
+    pub fn fdi_lag_alpha(loop_hz: f32) -> f32 {
+        ((1.0 / loop_hz) / FDI_ROTOR_LAG_TAU_S).min(1.0)
     }
 
     /// Install solved sensor offsets — synced to BOTH partitions (each
@@ -1536,6 +1594,50 @@ const ESC_RPM_FULL: f32 = 8000.0;
 /// to the original (#609 finding 16).
 const FDI_CUSUM_THRESHOLD: f32 = 0.5;
 const FDI_CUSUM_DRIFT: f32 = 0.1;
+
+/// The rotor-out FDI SPIN-UP GUARD, in seconds after every motors-off ->
+/// flying edge (#609 finding 18, maintainer decision 2026-11-04 "T300+M50").
+/// A fixed TIME, counted in ticks of the RESYNCED loop rate and rounded
+/// ([`FlightCore::fdi_guard_steps`]), exactly like finding 7's warm-up.
+///
+/// It was 0.2 s (the shared [`FlightCore::warmup_steps`]). One ESC whose
+/// output ramps up more slowly than the other three (a soft-start) leaves a
+/// DIFFERENTIAL residual that finding 17's common-mode subtraction cannot
+/// remove, and a 0.2 s guard released while it was still large: measured on
+/// SimBackend, 48/60/76 of 192 (ramp x lag x rotor) spin-ups at
+/// 250/500/1000 Hz isolated the slow, HEALTHY rotor. With this guard and the
+/// lag model below: 4/8/12, every one of them a 300 ms ramp (the named
+/// known limit in `tests/fdi_spinup_guard.rs`).
+///
+/// THE CEILING IS CLOSE. A rotor dead from the first tick is caught when
+/// the guard releases, so the guard IS its detection latency: at 0.3 s it is
+/// isolated in <= 0.3 s with tilt <= 0.33 rad; at 0.4 s the vehicle flips
+/// before isolation. The margin to that ceiling is ~0.1 s on the GROUND
+/// (SimBackend's ground contact holds the airframe; not checked on gz or
+/// hardware); do not lengthen this without re-measuring the dead-at-spin-up
+/// case. AIRBORNE the margin is NEGATIVE: a core started hovering with a
+/// rotor dead from tick 1 shuts the 2 rad/s roll/pitch rate gate at
+/// ~0.26 s, before 0.3 s releases the guard, and is never isolated (the
+/// 0.2 s guard caught it). Open on #609 finding 18.
+pub const FDI_SPINUP_GUARD_S: f32 = 0.3;
+
+/// First-order time constant (s) of the ROTOR LAG MODEL the FDI residual is
+/// computed against (#609 finding 18). The residual compares the achieved
+/// effectiveness (ESC RPM / [`ESC_RPM_FULL`]) with the command passed
+/// through `y += (u - y) * dt / tau` (forward Euler, `dt / tau` capped at 1),
+/// instead of with the raw previous command: a healthy rotor tracking its
+/// command with this lag then reads ~0 even while it is still catching up.
+///
+/// ASSUMPTION, NOT A MEASUREMENT. 50 ms is the lag the SimBackend sweep was
+/// run at; it is not derived from the first vehicle's ESCs. Replace it from
+/// real ESC data for the BOM's ESCs: the spin-UP and spin-DOWN time
+/// constants (they differ; this model uses one), the ESC soft-start profile,
+/// the unit-to-unit spread, and the RPM telemetry latency. A plant slower
+/// than the model leaves a residual on every transient (removed by the
+/// common-mode subtraction only when all four lag alike); a faster one
+/// leaves the model behind instead. Not a configuration field on purpose:
+/// it would be another integrator-facing seam change.
+pub const FDI_ROTOR_LAG_TAU_S: f32 = 0.05;
 
 /// Thrust floor for the reconfigured (single-rotor-out) allocator. With the
 /// rank-3 allocation (v1.114) the diagonal-opposite of the failed rotor
@@ -7422,7 +7524,7 @@ mod failsafe_campaign {
 
 /// #609 finding 7 / #587 (maintainer decision 2026-10-21): the FDI spin-up
 /// guard and the estimator's innovation-gate warm-up are a fixed TIME
-/// (0.2 s, and 5x it), counted in ticks of the rate the core RESYNCS to from
+/// (the guard 0.3 s since #609 finding 18; the warm-up 0.2 s, and 5x it), counted in ticks of the rate the core RESYNCS to from
 /// the backend's own `dt`, not of the nominal 1 kHz it was constructed at.
 #[cfg(test)]
 mod warmup_time_tests {
@@ -7458,14 +7560,37 @@ mod warmup_time_tests {
         assert_eq!(FlightCore::warmup_steps(1.0 / (1.0f32 / 250.0)), 50);
     }
 
-    /// The FDI ENGAGES 0.2 s after spin-up at 250 Hz and at 1 kHz: a rotor
+    /// #609 finding 18: the FDI spin-up guard is its own 0.3 s, ROUNDED at
+    /// the resynced rate, and the lag model's gain follows the rate too.
+    #[test]
+    fn the_fdi_guard_is_0_3_s_at_the_resynced_rate() {
+        for (hz, want) in [(250.0f32, 75u32), (400.0, 120), (500.0, 150), (1000.0, 300)] {
+            let (mut b, mut core) = hovering(hz);
+            core.step(&mut b);
+            assert_eq!(
+                core.casc.fdi_guard_steps, want,
+                "at {hz} Hz the guard must be 0.3 s"
+            );
+            let alpha = (1.0 / hz) / 0.05;
+            assert!(
+                (core.casc.fdi_lag_alpha - alpha).abs() < 1e-4,
+                "at {hz} Hz the lag gain is {} not {alpha}",
+                core.casc.fdi_lag_alpha
+            );
+        }
+        assert_eq!(FlightCore::fdi_guard_steps(1.0 / (1.0f32 / 1000.0)), 300);
+        assert_eq!(FlightCore::fdi_guard_steps(1.0 / (1.0f32 / 250.0)), 75);
+    }
+
+    /// The FDI ENGAGES 0.3 s (#609 finding 18; 0.2 s before it) after
+    /// spin-up at 250 Hz and at 1 kHz: a rotor
     /// dead from the first tick is not isolated before the guard's last tick
     /// (the check runs once the spin-up count reaches it), and is isolated
     /// within a few ticks of it.
     #[test]
     fn the_fdi_engages_after_a_fixed_time_at_250_hz_and_1_khz() {
         for hz in [250.0f32, 1000.0] {
-            let guard = (0.2 * hz + 0.5) as u32;
+            let guard = (0.3 * hz + 0.5) as u32;
             let (mut b, mut core) = hovering(hz);
             b.fail_rotor(1);
             let mut isolated = None;

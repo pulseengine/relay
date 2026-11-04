@@ -1,7 +1,7 @@
 artifacts:
   - id: FV-FALCON-FAULT-004
     type: sw-verification
-    title: "Single-rotor-out FDI noise-robustness — command-aligned residual + roll/pitch gate (v1.115)"
+    title: "Single-rotor-out FDI noise-robustness — lag-modelled, command-aligned residual + roll/pitch gate + 0.3 s spin-up guard (v1.115, #609 f17/f18)"
     status: implemented
     release: falcon-v1.115.0
     description: >
@@ -15,7 +15,10 @@ artifacts:
       checked first. Measured baseline at gps σ ≤ 0.3 m / gyro ≤ 0.02:
       43/300 false isolations, 26 misses.
 
-      FIX (falcon-core FlightCore::step):
+      FIX (falcon-core CascadePartition::step; residual definition as flown
+      since #609 finding 18: resid[i] = |lag_model[i] - achieved[i]|, where
+      lag_model is last_motor_cmd passed through a first-order 50 ms lag,
+      then minus the per-tick minimum of the four):
         1. Command-ALIGNED residual — compare achieved against the PREVIOUS
            command that produced it (stored last_motor_cmd), so a healthy
            rotor's residual is ~0 even through abrupt command changes and only a
@@ -43,6 +46,51 @@ artifacts:
            the landing step, 8-12 ticks (was 4), always the correct rotor; a
            rotor whose thrust decays with a 100 ms time constant, 39 ticks
            (unchanged). Motors are byte-identical in every phantom-free run.
+        4. LAG-MODELLED REFERENCE + 0.3 s SPIN-UP GUARD (#609 finding 18,
+           maintainer decision 2026-11-04 "T300+M50", falcon-v1.141.0). The
+           residual's reference is no longer the raw previous command but
+           that command through a first-order lag model,
+           y += (u - y) * dt / FDI_ROTOR_LAG_TAU_S (forward Euler, gain
+           capped at 1, re-derived at the resynced rate, zeroed by
+           rearm_fdi), FDI_ROTOR_LAG_TAU_S = 0.05 s. And the spin-up guard is
+           its own fixed TIME, FDI_SPINUP_GUARD_S = 0.3 s, rounded to ticks
+           of the resynced rate (75 at 250 Hz, 300 at 1 kHz); it was the
+           shared 0.2 s warm-up, which still times the estimator gate and
+           the yaw capture. The case: ONE ESC soft-starting more slowly than
+           the other three leaves a DIFFERENTIAL residual that the
+           common-mode subtraction (3) cannot remove; the 0.2 s guard
+           released while it was still large and the slow, HEALTHY rotor was
+           isolated (rotor 2 ramping 100 ms at 50 ms lag: ~0.25 s into the
+           first takeoff at 1 kHz, then a flip). The common-mode subtraction
+           is KEPT: the model is one assumed time constant, and a plant
+           lagging differently (all four alike) still needs it (mutation:
+           removing it phantom-isolates a healthy landing at 0 ms lag).
+           Measured, SimBackend only (falcon-core tests/fdi_spinup_guard.rs;
+           the ramp 0-300 ms x lag 0-80 ms x 4 rotors grid is its ignored
+           bench spinup_sweep_bench): false isolations 48/60/76 of 192 ->
+           4/8/12 at 250/500/1000 Hz, the production code reproducing the
+           prototype's 576 cells exactly; a rotor dead from the first
+           flying tick isolated on the guard's own tick (0.300 s), correct
+           rotor, tilt <= 0.327 rad (was caught at 0.2 s); Loiter isolation
+           3 ticks (unchanged); land-entry isolation at 20-80 ms lag 8-12 ->
+           3 ticks; 100 ms gradual decay 39 -> 43 ticks; the noise campaign
+           still 0 false / 0 missed, worst latency 2 steps (as on the base).
+           ASSUMPTION: 50 ms is the sweep's lag, not a measured ESC; see the
+           constant's doc for the data that must replace it.
+           KNOWN LIMITS: (a) a 300 ms ESC soft-start is STILL isolated as a
+           rotor-out and flips (the 4/8/12 cells, all ramp 300 ms; named
+           test known_limit_a_300_ms_esc_soft_start_is_still_isolated);
+           (b) the guard IS the dead-at-spin-up detection latency and its
+           ceiling is close: a 0.4 s guard is never isolated and flips
+           (mutation measured). The ground contact of SimBackend is what
+           holds the airframe for those 0.3 s; not checked on gz/hardware.
+           (c) AN AIRBORNE START REGRESSED: a core constructed hovering at
+           2 m with a rotor dead from tick 1 (lib test
+           the_fdi_engages_after_a_fixed_time_at_250_hz_and_1_khz) is never
+           isolated with 0.3 s, because the 2 rad/s roll/pitch rate gate
+           shuts at 0.264 s (250 Hz) / 0.261 s (1 kHz), before the guard
+           releases; the 0.2 s guard caught it. Supervised flight spins up
+           on the ground only; this is open with the maintainer (#609 f18).
 
       STATUS DEMOTED verified -> implemented by the #609 finding-17 change:
       the residual this artifact verified is no longer the one flown. It
@@ -81,6 +129,11 @@ artifacts:
         - run: cargo test -p falcon-core survives_single_rotor_failure_without_flipping
         - run: cargo test -p falcon-core --test fdi_common_mode
         - run: cargo test -p falcon-core --test fdi_second_flight
+        - run: cargo test -p falcon-core --test fdi_spinup_guard
+        - run: cargo test -p falcon-core --lib the_fdi_guard_is_0_3_s_at_the_resynced_rate
+        - run: "grep -q 'pub const FDI_SPINUP_GUARD_S: f32 = 0.3;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const FDI_ROTOR_LAG_TAU_S: f32 = 0.05;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'resid\\[i\\] = (self.fdi_lag_model\\[i\\] - achieved).abs();' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'let common = resid\\[0\\].min(resid\\[1\\]).min(resid\\[2\\]).min(resid\\[3\\]);' crates/falcon-core/plain/src/lib.rs"
     links:
       - type: verifies
