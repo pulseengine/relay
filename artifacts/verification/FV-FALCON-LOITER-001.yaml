@@ -1,0 +1,47 @@
+artifacts:
+  - id: FV-FALCON-LOITER-001
+    type: sw-verification
+    title: "LOITER-P01 — a Loiter entered at transit speed brakes, latches at rest, and then meets HOLD-P01 at 2 and 5 m/s wind (#632)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-LOITER-P01 on SimBackend, each step naming its
+      test.
+
+        - falcon-core loiter_hold_latch hold_point_latch_rules_across_mode_transitions,
+          leg (c): Mission -> Loiter at transit speed has NO hold point on the
+          first Loiter tick (it brakes), the point is latched while still in
+          Loiter at < 0.1 m/s within 31 s, and from it both the braking-window
+          peak and the settled peak stay inside HOLD-P01's 1.0 m. The same
+          test pins the other latch rules across mode transitions (#616).
+        - falcon-core mission_pause_brake b1_mission_pause_brakes_then_holds_2ms
+          and b2_mission_pause_brakes_then_holds_5ms: the same pause under 2
+          and 5 m/s wind, judged with no supervisor accessor against where the
+          vehicle actually ends up. The hold is real (last 10 s within 0.1 m
+          of its mean), and HOLD-P01's window passes horizontally and
+          vertically. #632 measured the #616 rule (latch on entry) failing B1:
+          11.6 m overshoot, 1.59 m in the window. That measurement is the
+          implementation PR's, not re-run here.
+        - the four thresholds the requirement names are pinned by greps.
+
+      NOT COVERED: the stale-follow HOLD as a moving entry. FV-FALCON-FOLLOW-001
+      checks that it takes Loiter, not where it latches.
+
+      Status `implemented` (new requirement, new verifier).
+
+      FALSIFICATION: wrong if a Loiter entered faster than 0.3 m/s latches on
+      entry, latches while still moving (>= 0.1 m/s) before 30 s of braking,
+      or the latched point is not held to HOLD-P01's bars.
+    tags: [verification, falcon, hold, loiter, supervisor, v1.141]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-core --test loiter_hold_latch hold_point_latch_rules_across_mode_transitions
+        - run: cargo test -p falcon-core --test mission_pause_brake b1_mission_pause_brakes_then_holds_2ms
+        - run: cargo test -p falcon-core --test mission_pause_brake b2_mission_pause_brakes_then_holds_5ms
+        - run: "grep -q 'pub const HOLD_BRAKE_ENTRY_MS: f32 = 0.3;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const HOLD_REST_MS: f32 = 0.1;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const HOLD_REST_S: f32 = 3.0;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const HOLD_BRAKE_MAX_S: f32 = 30.0;' crates/falcon-core/plain/src/lib.rs"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-LOITER-P01

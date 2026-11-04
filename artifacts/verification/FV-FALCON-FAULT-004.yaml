@@ -142,9 +142,10 @@ artifacts:
       isolated as a rotor-out, in 4/8/12 of 192 sweep cells at
       250/500/1000 Hz. #609 records the remaining cells as a "named known
       limit", but no decision narrows this clause, or SWREQ-FALCON-FAULT-P03,
-      to exclude them. Promotion needs either that decision (the soft-start is
-      not sensor noise, so FAULT-P03's envelope arguably does not cover it)
-      or the soft-start case fixed. Status stays implemented.
+      to exclude them. MAINTAINER DECISION 2026-11-04: this artifact and
+      SWREQ-FALCON-FAULT-P03 (demoted verified -> implemented in the same
+      PR) stay implemented until the soft-start case is fixed or real BOM ESC
+      startup data shows it does not occur.
 
       EVIDENCE:
         - falcon-sitl-gz fdi_noise_robustness_monte_carlo_campaign: 200 dispersed
