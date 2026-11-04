@@ -578,8 +578,16 @@ needed by being driven. New hosts use `wire`.
   stay at zero. The `ack` deliberately says "received", not "accepted".
 - **No mission target.** `controller.step` takes a `waypoint` beside the
   `sensor-frame`, and the `sensor` frame does not carry one, so a binding host
-  cannot set a mission leg. Takeoff, loiter, land and RTL need none (the
-  supervisor derives those setpoints from `home` and `cruise-alt`).
+  cannot stream a Mission target. Takeoff, loiter, land and RTL need none (the
+  supervisor derives those setpoints from `home` and `cruise-alt`). In Mission
+  the `step` target is a LIVE follow setpoint (#609 finding 4), so the endpoint
+  delivers the seam's "no target this frame" encoding, a non-finite target,
+  rather than a point nobody sent: a `request-mission` (command 2) over this
+  binding takes the stale-target HOLD on its first tick (Loiter where the
+  vehicle is, `failsafe` bit 8 `target-stale`). For the same reason bit 8 is
+  up for the whole run of a binding host; outside Mission it changes nothing
+  the vehicle does (pinned bit for bit in
+  `crates/falcon-hitl/tests/binding_drives_the_supervisor.rs`).
 - **The published wasm component is not yet behind a byte endpoint.** The
   end-to-end test above drives the native `FlightSupervisor` through
   `falcon_core::host::SupervisorHost`, which the component also adapts, so the
