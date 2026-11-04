@@ -26,24 +26,31 @@ artifacts:
           check starts failing the build once it has been green on one tag.
           The two checks that only guard against NEW drift (enumerate and
           lock diff) fail from day one.
-        - Cross-repo: the shared schema lives in pulseengine.eu (plugin).
-          warte PULLS each repo's manifest from its latest release and runs
-          the pin-vs-latest-release checks. relay is the first instance and
-          does not wait for them.
+        - Cross-repo: warte PULLS each repo's manifest (the exported release
+          asset) from its latest release and runs the pin-vs-latest-release
+          checks. The schema lives IN RIVET (pulseengine/rivet#1159); the
+          plugin keeps only a thin skill that points at it. The jess#167
+          seam block becomes a view derived from relay's `provides` and
+          jess's `consumes`, which jess#167 still has to agree.
 
       SLICE 1 SHALL deliver:
-        (1) An artifact type for a shipped or promised item. Kinds include:
-            crate, wasm component, WIT package + version, OCI path, release
-            asset, Kani/Verus/Rocq/Lean target, Bazel target, required CI
-            context, integrator contract (seam version, wire binding version,
-            pre-arm row table, failsafe bits), cross-file version pin, named
-            assumption constant. Fields: kind, release it entered, source
-            location(s), consumers. Links: the requirements/verifications
-            that guard it. A rivet built-in type (e.g. supply-chain's
-            release-artifact) may be reused if it fits; otherwise this needs
-            a custom schema or a rivet feature. Record which, and file the
-            rivet friction (`rivet list --format json` drops `fields`, which
-            the checker needs).
+        (1) The artifact types come from rivet's EMBEDDED `manifest` schema,
+            pulseengine/rivet#1159 (the owner decided 2026-11-04, on
+            pulseengine.eu): `provides` and `consumes` types, a pin
+            {kind: tag|rev|sha256|path+ref|oci, value} on every relation,
+            gate links, and `rivet manifest export --format json` producing
+            `pulseengine.manifest.json`, which validates against
+            `pulseengine.manifest/1`. relay is the first real instance, and
+            its definition is posted to #1159 so the embedded schema follows
+            it. Kinds relay needs: crate, wasm component, WIT package +
+            version, OCI path, release asset, Kani/Verus/Rocq/Lean target,
+            Bazel target, required CI context, integrator contract (seam
+            version, wire binding version, pre-arm row table, failsafe
+            bits), cross-file version pin, named assumption constant. Where
+            relay needs something #1159 lacks, say so on #1159 rather than
+            forking a local type. DEPENDENCY: a rivet release carrying #1159,
+            pinned in relay's gate. Until then, slice 1 can author the
+            entries but not export them.
         (2) A generator that derives what is ON DISK (crates, components,
             WIT packages, harness crates, workflow contexts, release.yml
             assets, pinned versions) into a committed lock, diffed in CI
