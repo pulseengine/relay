@@ -1,0 +1,80 @@
+artifacts:
+  - id: SWREQ-RELAY-MANIFEST-P01
+    type: sw-req
+    title: "MANIFEST-P01 — every thing relay ships or promises shall be listed once, as rivet artifacts, and a mechanical check shall fail when the repo and the list disagree"
+    status: draft
+    release: falcon-v1.142.0
+    description: >
+      WHY. The 2026-11-04 inventory (read-only, origin/main 6a0fa86) found
+      relay's shipped and promised surface stated by hand in several places,
+      with nothing comparing them. The published component set is listed in
+      five places (BUNDLE_DIRS in scripts/build-components.sh, SLUGS in
+      release.yml, docs/OCI-DISTRIBUTION.md, the wasm.directory entry,
+      bazel.yml's waived/must-build lists). The pre-arm row count is 21 in
+      code and 19/20 in prose. Required-check claims in verus/lean/rocq.yml
+      contradict branch protection. A verified v1.141 artifact
+      (FV-RELAY-VGATE-006) carries no `falcon` tag, so the required gate never
+      re-runs it. Past drift of the same class: Kani crates orphaned from
+      the kani.yml matrix, the v1.133 OCI path move announced to no
+      integrator, the gz pins split between two Cargo.tomls.
+
+      MAINTAINER DECISIONS 2026-11-04:
+        - The manifest is a NEW RIVET ARTIFACT TYPE (not a root TOML), so it
+          lives in the one traceability graph. Each entry cites the
+          requirements and verifications that guard it.
+        - Slice 1 is in falcon-v1.142.0 and is REPORT-ONLY at rollout. Each
+          check starts failing the build once it has been green on one tag.
+          The two checks that only guard against NEW drift (enumerate and
+          lock diff) fail from day one.
+        - Cross-repo: the shared schema lives in pulseengine.eu (plugin).
+          warte PULLS each repo's manifest from its latest release and runs
+          the pin-vs-latest-release checks. relay is the first instance and
+          does not wait for them.
+
+      SLICE 1 SHALL deliver:
+        (1) An artifact type for a shipped or promised item. Kinds include:
+            crate, wasm component, WIT package + version, OCI path, release
+            asset, Kani/Verus/Rocq/Lean target, Bazel target, required CI
+            context, integrator contract (seam version, wire binding version,
+            pre-arm row table, failsafe bits), cross-file version pin, named
+            assumption constant. Fields: kind, release it entered, source
+            location(s), consumers. Links: the requirements/verifications
+            that guard it. A rivet built-in type (e.g. supply-chain's
+            release-artifact) may be reused if it fits; otherwise this needs
+            a custom schema or a rivet feature. Record which, and file the
+            rivet friction (`rivet list --format json` drops `fields`, which
+            the checker needs).
+        (2) A generator that derives what is ON DISK (crates, components,
+            WIT packages, harness crates, workflow contexts, release.yml
+            assets, pinned versions) into a committed lock, diffed in CI
+            like the spar->WIT drift gate.
+        (3) Three checks, each with a negative control that proves it can
+            fail:
+              ENUMERATE — anything on disk that has no manifest entry fails;
+              PUBLISH-LISTS — the lists the release consumes agree with the
+                manifest, or better, read it instead of restating it;
+              LOCK-DIFF — the committed lock equals a fresh generation.
+        (4) The lock as a release asset, and the lock diff between the
+            previous tag and the candidate as an input to the review gate
+            (FV-RELAY-REVIEW-1xx).
+      New relay tooling is a small Rust tool under tools/<name>/ with its own
+      [workspace].
+
+      OUT OF SLICE 1 (later slices): the remaining checks from the inventory
+      report (tag coverage vs the gate filter, Kani crates vs matrix,
+      required contexts vs protection, reproducibility pins), the shared
+      schema, warte ingest.
+    tags: [requirement, relay, manifest, inventory, drift, process, v1.142]
+    fields:
+      priority: should
+      req-type: process
+      verification-criteria: >
+        On the v1.142 candidate: the generator's lock is committed and equals
+        a fresh generation; each of ENUMERATE, PUBLISH-LISTS and LOCK-DIFF
+        goes red under its negative control (add an unlisted component;
+        drift one publish list; edit the lock by hand) and green on main;
+        the release carries the lock as an asset; the v1.142 review cites
+        the lock diff against falcon-v1.141.0.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-022
