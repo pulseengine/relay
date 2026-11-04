@@ -2,9 +2,29 @@ artifacts:
   - id: FV-FALCON-TRANSPORT-002
     type: sw-verification
     title: "The TRANSPORT-P01 wire decoder is proven total on untrusted bytes, and (binding v2) proven to REJECT every non-finite float — the v1 proof found it accepted NaN"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
+      *** RE-PROMOTED implemented -> verified 2026-11-04, IN A CODE-FREE PR,
+      ON A RE-RUN OF EVERY STEP ON main ca8d4ed. *** All 26 steps. The 25
+      non-Kani steps were each run from a file under /bin/sh with stdin
+      closed: 25 PASS, 0 FAIL. The 26th, `cargo kani -p falcon-hitl`, is
+      covered below. The
+      gate's own runner (scripts/run-falcon-verification.py) gives the same
+      verdict, with `cargo kani -p falcon-hitl` resolved as
+      enforced-by-kani-gate. The gate's own matrix helpers show falcon-hitl
+      is in the kani.yml matrix and cited, so it is neither orphaned nor
+      untraced. `cargo kani -p
+      falcon-hitl` run as well, locally, Kani 0.67.0: 10 harnesses verified,
+      0 failures, 39 of 39 covers SATISFIED, 186 s total solver time. `cargo
+      test -p falcon-hitl --all-targets`: 50 + 6 passed, 0 failed.
+
+      THE SAT HEAVY TAIL this text said to watch before promoting was
+      watched: every `Kani (falcon-hitl)` leg in the merge-queue runs from
+      fe81707 (binding v2) to ca8d4ed, 11 of 11, concluded `success`, in
+      197..506 s against the job's 60-minute timeout. 11 runs is a small
+      sample, and a stall rate well under 1 in 11 would not show in it.
+
       *** DEMOTED verified -> implemented 2026-10-28: ITS CENTRAL FINDING WAS
       ACTED ON, SO ITS EVIDENCE CHANGED (relay#527, #609 finding 9). *** The
       maintainer decided (2026-10-21) to REJECT non-finite at the decoder, so
