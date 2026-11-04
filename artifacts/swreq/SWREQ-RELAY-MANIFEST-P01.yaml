@@ -42,11 +42,24 @@ artifacts:
             `pulseengine.manifest.json`, which validates against
             `pulseengine.manifest/1`. relay is the first real instance, and
             its definition is posted to #1159 so the embedded schema follows
-            it. Kinds relay needs: crate, wasm component, WIT package +
-            version, OCI path, release asset, Kani/Verus/Rocq/Lean target,
-            Bazel target, required CI context, integrator contract (seam
-            version, wire binding version, pre-arm row table, failsafe
-            bits), cross-file version pin, named assumption constant. Where
+            it. The manifest covers only what CROSSES THE REPO BOUNDARY.
+            #1159's `provides.kind` values, posted 2026-11-04 from relay's
+            list:
+              crate (workspace); component (oci, index, world);
+              wit-package (version); release-asset (asset); proof-target
+              (backend kani|verus|rocq|lean); bazel-target (must-build |
+              waived + issue); required-check (context); contract
+              (seam | wire-binding | table, + version; the pre-arm rows and
+              failsafe bits are tables).
+            Kept OUT of the manifest in v1:
+              - named assumption constants (e.g. the FDI lag and stall
+                thresholds) stay ordinary relay requirements with status
+                and evidence, because nothing outside relay consumes them;
+              - cross-file version pins (e.g. gz-transport in two
+                Cargo.tomls) are checked by relay's own tools/manifest-check,
+                because rivet does not parse Cargo.toml.
+            A `constraint` kind can be revisited once a second repo needs
+            one. Where
             relay needs something #1159 lacks, say so on #1159 rather than
             forking a local type. DEPENDENCY: a rivet release carrying #1159,
             pinned in relay's gate. Until then, slice 1 can author the
