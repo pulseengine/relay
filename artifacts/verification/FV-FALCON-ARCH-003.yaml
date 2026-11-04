@@ -22,8 +22,11 @@ artifacts:
       the model. Tagged `falcon` so the verification gate executes it (#601:
       untagged artifacts are never run).
 
-      NOT CLAIMED: that every sw-req is allocated. About 100 of 279 are, to
-      the AADL-derived components; the rest belong to subsystems the AADL does
+      NOT CLAIMED: that every sw-req is allocated. Counted 2026-11-04 (relay#609
+      finding 15): 91 of 281 sw-reqs are allocated to some sw-arch component,
+      64 of them to the three AADL-derived ones. Before 15 requirements on
+      retired engines were de-allocated from SWARCH-FALCON-CASCADE-001 the
+      count was 106, and the old "about 100" figure counted those 15. The rest belong to subsystems the AADL does
       not model yet (mission engines, drivers, ground link, packaging,
       tooling) and are allocated as each is modelled in spar. Nor a timing
       claim: both ticks' WCET is the whole period, UNMEASURED (#157).

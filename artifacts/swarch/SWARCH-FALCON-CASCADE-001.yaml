@@ -5,26 +5,89 @@ artifacts:
     status: approved
     description: >
       The control-and-supervision half of the RT1176 two-partition deployment
-      (#591). DERIVED FROM THE AADL (#261, AADL first, then allocate): its
-      boundary is exactly `Falcon_Cascade::CascadePartition.Supervised`, whose
-      one thread `CascadeTick` runs at 1 ms on processor `Rt1176M7`, bound to
-      `OnChipRam`.
+      (#591). Its boundary comes from the AADL (#261, AADL first, then
+      allocate): `Falcon_Cascade::CascadePartition.Supervised`, whose one
+      thread `CascadeTick` runs at 1 ms on processor `Rt1176M7`, bound to
+      `OnChipRam`. CORRECTED 2026-11-04 (relay#609 finding 15) against the
+      code on main ca8d4ed: the first version of this text repeated the AADL
+      where the AADL is wrong, packaged the partition as a component it is
+      not, and was allocated requirements on engines it does not run.
 
-      Owns: the position / attitude / rate cascade, control allocation (the
-      mixer, including rank-3 rotor-out reallocation), and the
-      FlightSupervisor that runs INSIDE CascadeTick — the mode machine,
-      pre-arm table, arming, geofence, battery / link / estimator failsafe
-      ACTIONS, RTL and land. The supervisor is not a separate AADL component
-      (falcon_cascade.aadl models it as part of CascadeTick), so it is not a
-      separate architecture component either. The published WASM component
-      (`pilot` / `controller` / `observer`, SUPERVISOR-P01) is this partition's
-      packaging.
+      OWNS (falcon-core `CascadePartition` + `FlightSupervisor`): geometric
+      SE(3) attitude (relay-geo `GeoAtt`), ADRC rate control with a gyro LPF
+      (relay-adrc), the RPM-tracked harmonic notch on the control-path gyro
+      (relay-notch), the altitude / position / landing loops (inline in
+      `CascadePartition`, rangefinder AGL via relay-flowrange), control
+      allocation (relay-mix-quad, including rank-3 rotor-out reallocation) and
+      single-rotor-out FDI (relay-iekf `RotorFaultDetector`). Around them, the
+      FlightSupervisor: mode machine (relay-fsm), pre-arm table
+      (relay-preflight), battery estimation (relay-batt), the geofence, the
+      estimator / battery / geofence failsafe ACTIONS, RTL and land (the old
+      text also listed a "link" failsafe; falcon-core has none). The retired legacy
+      engines relay-pos, relay-att, relay-rate and relay-arm are NOT in this
+      partition: falcon-core has no dependency on them (#388).
 
-      Consumes `nav_in` from SWARCH-FALCON-EST-001 and publishes
-      `in_flight_out` back, across SWARCH-FALCON-SEAM-001.
+      WHAT THE PARTITION CONSUMES, from the code, because the AADL lists less:
+      `CascadePartition::step(b, est: &NavState, raw: ImuSample, ..)` takes
+      the estimator's nav state AND the raw IMU sample (the rate loop reads
+      the gyro directly), reads the rangefinder (`read_range`) and the ESC
+      RPM telemetry (`read_motor_rpm`, for the notch and the FDI), and writes
+      the motors. The supervisor reads battery voltage / current and takes
+      pilot commands (arm, takeoff, land, RTL ...) and the supervisor
+      configuration. In the split, `flight-control.tick(nav, sensors)` takes
+      the whole `sensor-frame` beside `nav-state`
+      (wit/falcon-cascade/cascade.wit). It publishes `in_flight_out` back to
+      SWARCH-FALCON-EST-001 across SWARCH-FALCON-SEAM-001. ONLY NATIVE HOSTS
+      FEED TWO OF THESE: the WIT `sensor-frame` carries the IMU, dt, position,
+      mag, heading, motor RPM and battery voltage, but no rangefinder and no
+      battery current, so both wasm packagings see `None` for `read_range`
+      and `read_battery_i`. A trace from RANGEDRV-P01 or a battery-current
+      requirement to the published component ends there.
+
+      THE AADL DISAGREES WITH THE CODE, AND THE AADL IS THE WRONG SIDE
+      (recorded, not fixed here; a spar change goes through its own drift
+      gate). spar/falcon_cascade.aadl gives `CascadeTick` only `nav_in` and
+      `waypoint_in` and calls nav state "the only value that crosses to the
+      cascade". The code it models also feeds the cascade the IMU gyro,
+      rangefinder, ESC RPM, battery V/I and pilot commands; none of those has
+      a port, so BATTERY-P02/P03, NOTCH-P01 and FAULT-P01..P04 are allocated
+      here with no AADL interface to trace them against.
+
+      PACKAGING, which is NOT one-to-one with this partition:
+        - The PUBLISHED component (`wasm/cm/cascade`, @0.12.0, exports
+          `pilot` / `controller` / `observer`, SUPERVISOR-P01) is the FUSED
+          core: `SupervisorHost` over `FlightCore`, i.e. BOTH partitions in
+          one tick of one module, with no transport delay between them. That
+          is the only build that has been released and flown (in simulation).
+          It packages this partition AND
+          SWARCH-FALCON-EST-001; it is not this partition's packaging alone.
+        - The split deployment (#575 / #617, on main, UNPUBLISHED, no release)
+          packages this partition as `wasm/cm/cascade-control` (WIT
+          `flight-control`). In the split the FlightSupervisor is NOT inside
+          the control partition: it runs in a third component, the
+          `cascade-split` orchestrator (`SupervisorHost<SplitCore<WitSeam>>`),
+          which drives `cascade-estimator` and `cascade-control`. The AADL
+          has no component for that orchestrator and binds it to no core.
+          "The supervisor runs inside CascadeTick" is therefore true of the
+          fused build only.
 
       NOT CLAIMED: a timing budget. CascadeTick's WCET is 0..1 ms, the whole
-      period, UNMEASURED (#157).
+      period, UNMEASURED (#157). Nothing has executed on an RT1176.
+
+      DE-ALLOCATED 2026-11-04 (finding 15), because each constrains a retired
+      engine or a legacy per-stage component this partition does not contain:
+      RATE-P01..P04 (relay-rate PID; the partition flies ADRC, RATE-P05 stays),
+      ATT-P01..P03 (relay-att quaternion-error controller; the partition flies
+      GeoAtt), POS-P01..P03 (relay-pos; the position loop is inline in
+      `CascadePartition`), ARM-P01 (relay-arm `ArmingSequencer`; arming is
+      relay-fsm + the pre-arm table), and STREAM-P05/P06/P07/P09 (the legacy
+      falcon-rate / -position / -attitude / -mixer P3 stream components).
+      Those 15 now have no sw-arch allocation, which is the true state, not a
+      gap to re-home onto an invented component. Still allocated with a
+      mechanism mismatch in their own text (a requirement change, not an
+      allocation one): GEO-P01 names the relay-lc box geofence (the flown
+      fence is the supervisor's radius check) and FAULT-P01 names the relay-hs
+      EkfHealthMonitor; falcon-core depends on neither.
     tags: [architecture, falcon, aadl, rt1176, m7, cascade, supervisor, partition]
     fields:
       aadl:
@@ -32,20 +95,12 @@ artifacts:
         - "Falcon_Cascade::CascadePartition.Supervised — spar/falcon_cascade.aadl:126"
         - "Falcon_Cascade::CascadeTick — spar/falcon_cascade.aadl:103"
         - "Falcon_System::Rt1176M7 (m7) — spar/falcon_system.aadl:30"
-      crates: [falcon-core, relay-pos, relay-att, relay-rate, relay-mix-quad, relay-fsm, relay-preflight, relay-arm, relay-geo]
+      crates: [falcon-core, relay-geo, relay-adrc, relay-notch, relay-flowrange, relay-mix-quad, relay-iekf, relay-calib, relay-fsm, relay-preflight, relay-batt]
       period: "1 ms (AADL)"
       wcet: "0..1 ms — UNMEASURED (#157)"
     links:
       - type: allocated-from
         target: SWREQ-FALCON-ADRC-P05
-      - type: allocated-from
-        target: SWREQ-FALCON-ARM-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-ATT-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-ATT-P02
-      - type: allocated-from
-        target: SWREQ-FALCON-ATT-P03
       - type: allocated-from
         target: SWREQ-FALCON-AVOID-P01
       - type: allocated-from
@@ -97,12 +152,6 @@ artifacts:
       - type: allocated-from
         target: SWREQ-FALCON-PART-P01
       - type: allocated-from
-        target: SWREQ-FALCON-POS-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-POS-P02
-      - type: allocated-from
-        target: SWREQ-FALCON-POS-P03
-      - type: allocated-from
         target: SWREQ-FALCON-PREARM-P01
       - type: allocated-from
         target: SWREQ-FALCON-PREARM-P02
@@ -112,14 +161,6 @@ artifacts:
         target: SWREQ-FALCON-PREARM-P04
       - type: allocated-from
         target: SWREQ-FALCON-PREFLIGHT-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-RATE-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-RATE-P02
-      - type: allocated-from
-        target: SWREQ-FALCON-RATE-P03
-      - type: allocated-from
-        target: SWREQ-FALCON-RATE-P04
       - type: allocated-from
         target: SWREQ-FALCON-RATE-P05
       - type: allocated-from
@@ -146,13 +187,5 @@ artifacts:
         target: SWREQ-FALCON-WIND-P01
       - type: allocated-from
         target: SWREQ-FALCON-WINDFS-P01
-      - type: allocated-from
-        target: SWREQ-RELAY-STREAM-P05
-      - type: allocated-from
-        target: SWREQ-RELAY-STREAM-P06
-      - type: allocated-from
-        target: SWREQ-RELAY-STREAM-P07
-      - type: allocated-from
-        target: SWREQ-RELAY-STREAM-P09
       - type: refines
         target: SWARCH-FALCON-001
