@@ -133,8 +133,11 @@ enum Mutation {
     None,
     /// The #452 edge never arrives: the estimator always hears "not flying".
     EdgeCut,
-    /// Estimate-only ticks write the flag (`Some(false)`) instead of leaving it.
-    EstimateOnlyClearsFlag,
+    /// Estimate-only ticks LEAVE the flag (`None`) instead of writing it false
+    /// — the pre-#609-finding-8 contract. Applied where the call can only be
+    /// an estimate-only tick: `Some(false)` while the control half's previous
+    /// command reads flying (a control tick would have sent `Some(true)`).
+    EstimateOnlyLeavesFlag,
     /// The control half's `keep_warm` is dropped.
     NoKeepWarm,
     /// The tilt-uncertainty forward is stubbed to 0.
@@ -163,7 +166,11 @@ impl PartitionSeam for Mutant {
     fn estimator_tick(&mut self, f: &SeamFrame, in_flight: Option<bool>) -> NavState {
         let in_flight = match (self.m, in_flight) {
             (Mutation::EdgeCut, Some(_)) => Some(false),
-            (Mutation::EstimateOnlyClearsFlag, None) => Some(false),
+            (Mutation::EstimateOnlyLeavesFlag, Some(false))
+                if self.inner.control_status().flying =>
+            {
+                None
+            }
             (_, x) => x,
         };
         self.inner.estimator_tick(f, in_flight)
@@ -487,8 +494,8 @@ fn negative_control_flying_edge_cut_diverges() {
 }
 
 #[test]
-fn negative_control_estimate_only_clearing_the_flag_diverges() {
-    must_diverge(Mutation::EstimateOnlyClearsFlag);
+fn negative_control_estimate_only_leaving_the_flag_diverges() {
+    must_diverge(Mutation::EstimateOnlyLeavesFlag);
 }
 
 #[test]

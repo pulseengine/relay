@@ -890,14 +890,14 @@ interface estimator {
     ///   - a control tick (`FlightCore::step`) sets the estimator's in-flight
     ///     flag from the control half's PREVIOUS command first: `some(flying)`;
     ///   - an estimate-only tick (`FlightCore::step_estimate_only`, the
-    ///     supervisor's Disarmed/Armed/Terminated path) does NOT touch it, so
-    ///     the flag keeps whatever the last control tick left: `none`.
-    /// The difference is observable. At a touchdown, and after a flight
-    /// termination in the air, the last control tick left the flag TRUE, and
-    /// the fused core keeps it so until the next control tick. Passing
-    /// `some(false)` on those estimate-only ticks was MEASURED to break the
-    /// equivalence at the first touchdown of the cascade/cascade-split
-    /// differential (tests/cascade-sitl-wasm, twin mode).
+    ///     supervisor's Disarmed/Armed/Terminated path) commands ZERO motors,
+    ///     so it writes the flag FALSE: `some(false)` (#609 finding 8).
+    /// `none` leaves the flag as the last tick set it. The cascade-split
+    /// orchestrator no longer sends it: until #609 the estimate-only path
+    /// did, and at a touchdown (which fires while the landing law still
+    /// commands near-hover collective) the flag then stayed TRUE on the
+    /// ground, suppressing the accelerometer gravity update for as long as
+    /// the vehicle sat there.
     ///
     /// Only the estimator's channels of the frame are read (IMU, dt, position,
     /// magnetometer, heading); `dt-s` must already be the orchestrator's

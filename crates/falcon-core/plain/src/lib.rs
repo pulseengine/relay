@@ -1127,10 +1127,27 @@ impl FlightCore {
         self.est.calib
     }
 
+    /// One MOTORS-OFF tick (the supervisor's Disarmed / Armed / Terminated
+    /// path): estimator warm, cascade filters warm, zero motors commanded.
+    ///
+    /// NOT FLYING, BY CONSTRUCTION (#609 finding 8). This tick commands zero
+    /// thrust, so the estimator is told the vehicle is not flying — the same
+    /// rule [`step`](Self::step) applies from the cascade's previous command,
+    /// read here from the command this tick is known to write. Until #609 only
+    /// `step` wrote the flag, and a supervised touchdown fires (AGL < 0.15 m)
+    /// while the landing law still commands near-hover collective: the flag
+    /// stayed TRUE on the ground, the accelerometer gravity update stayed
+    /// suppressed for as long as the vehicle sat there, and with no GNSS and a
+    /// small gyro-bias ramp the published tilt of a level, grounded airframe
+    /// walked off by ~1 rad in 60 s
+    /// (`tests/grounded_estimator_after_touchdown.rs`). After a termination in
+    /// the air the vehicle is unpowered too; its specific force is then drag,
+    /// not thrust, and `update_gravity` inflates the variance with |a| − g.
     pub fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
         let dt = b.dt();
         let raw = b.read_imu();
         let heading = b.read_heading();
+        self.est.set_in_flight(false);
         let _ = self.est.step(b, raw, heading, dt);
         self.casc.keep_warm(raw);
         b.write_motors(&[0.0, 0.0, 0.0, 0.0]);

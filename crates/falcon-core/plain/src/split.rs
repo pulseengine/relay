@@ -227,11 +227,13 @@ impl<P: PartitionSeam> SupervisedCore for SplitCore<P> {
     }
 
     /// `FlightCore::step_estimate_only`, across the seam. The in-flight flag is
-    /// NOT written (`None`): the fused core leaves it as the last control tick
-    /// set it — TRUE at a touchdown and after a termination in the air.
+    /// written FALSE (`Some(false)`), as the fused core writes it: this tick
+    /// commands zero motors (#609 finding 8). Until #609 both left it as the
+    /// last control tick set it — TRUE at a touchdown — and the grounded
+    /// estimate never got its gravity reference back.
     fn step_estimate_only<B: FlightBackend>(&mut self, b: &mut B) {
         let f = SeamFrame::read(b);
-        let _ = self.0.estimator_tick(&f, None);
+        let _ = self.0.estimator_tick(&f, Some(false));
         self.0.control_keep_warm(f.imu);
         b.write_motors(&[0.0, 0.0, 0.0, 0.0]);
     }

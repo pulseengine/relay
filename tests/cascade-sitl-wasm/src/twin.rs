@@ -51,12 +51,12 @@
 //!      4: the frame target is a live follow setpoint), the stream going
 //!      non-finite into the stale-target HOLD (Loiter, failsafe bit 8), a
 //!      commanded RTL, its landing and the touchdown disarm; estimate-only ticks after touchdown (the
-//!      estimator's in-flight flag deliberately left stale, #452); a
+//!      estimator's in-flight flag written FALSE, #609 finding 8); a
 //!      low-battery failsafe; a refused re-arm; a silent pack; and a
 //!      `configure-supervisor` the battery latch must REJECT.
 //!   2. TERMINATION — a dead accelerometer refusing every arm; then a flight
-//!      TERMINATED IN THE AIR (estimate-only ticks with
-//!      the in-flight flag still set), the fall, and a `configure-supervisor`
+//!      TERMINATED IN THE AIR (estimate-only ticks, the
+//!      in-flight flag written FALSE: motors are off), the fall, and a `configure-supervisor`
 //!      the absorbing `Terminated` mode must REJECT.
 //!   3. ROTOR-OUT — a dead rotor, FDI isolation, land-in-place, and a
 //!      `configure` the isolated rotor must REJECT.
@@ -300,7 +300,7 @@ enum Stage {
     /// Held in that Loiter (brake, then latch), then a commanded RTL, its
     /// landing at home and the touchdown disarm.
     F1Hold,
-    /// On the ground after flight 1: estimate-only ticks, in-flight flag stale;
+    /// On the ground after flight 1: estimate-only ticks, in-flight flag FALSE;
     /// then a `controller.configure` rebuild.
     F1Ground,
     /// Flight 2, waiting for loiter.
@@ -317,8 +317,10 @@ enum Stage {
     /// TERMINATED IN THE AIR, then the fall and the ground; then a
     /// `configure-supervisor` that `Terminated` must reject. This is the case
     /// that tells "estimate-only leaves the estimator's in-flight flag alone"
-    /// apart from "estimate-only clears it": the fused core keeps the flag the
-    /// last control tick set — TRUE, mid-hover — through every Terminated tick.
+    /// apart from "estimate-only clears it": since #609 finding 8 the fused
+    /// core CLEARS it on every motors-off tick (it was left TRUE, mid-hover,
+    /// through every Terminated tick), so a split that still passed `none`
+    /// would diverge here.
     Terminated,
     /// A dead rotor: isolate, land in place, disarm.
     RotorOut,
