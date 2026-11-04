@@ -26,7 +26,7 @@ artifacts:
         geofence -> RTL                      low-battery failsafe
         attitude-runaway motor-cut (Terminated)   high-wind -> RTL
         keep-out-zone deflection             the relay-fsm mode machine
-        waypoint sequencing                  all 19 pre-arm rows
+        waypoint sequencing                  every pre-arm row (CHECK_COUNT)
 
       THIS IS AN INSTANCE OF ORPHAN-P01's FOURTH STATE — implemented, verified,
       advertised and unreachable — at the seam rather than in a crate. ORPHAN-P01
@@ -127,7 +127,7 @@ artifacts:
             arm / disarm / request-takeoff / land / rtl, with the pre-arm gates
             (`level`, `throttle-low`) the supervisor's own signature requires, so
             a host can reach Loiter. An auto-arm inside `step` is NOT acceptable:
-            it would make arming unobservable and bypass the 19 pre-arm rows that
+            it would make arming unobservable and bypass the pre-arm rows that
             are the point of having a supervisor.
 
         (6) THE BUMP SHALL BE ANNOUNCED BEFORE ANYTHING PUBLISHES.
