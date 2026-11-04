@@ -5,9 +5,17 @@ name: Rocq
 # coqc-verified) via rules_rocq_rust (Bazel). Both sets were authored +
 # locally kernel-verified but NEVER gated in CI — the same orphaned-proof gap
 # that left the Kani harnesses unenforced until v1.104 and the Lean proofs
-# until lean.yml. This makes `bazel test //proofs/rocq:all //proofs/gappa:all`
-# a required check so a rules_rocq_rust / Coq / Gappa toolchain bump or an
-# edit that breaks a proof (or loosens a proven bound) cannot land silently.
+# until lean.yml. This runs `bazel test //proofs/rocq:all //proofs/gappa:all`
+# so that a rules_rocq_rust / Coq / Gappa toolchain bump or an edit that breaks
+# a proof (or loosens a proven bound) shows up red.
+#
+# NOT A REQUIRED CHECK. Branch protection on main requires 10 contexts and
+# "Rocq + Gappa proofs" is not one of them (measured 2026-11-04 with
+# `gh api repos/pulseengine/relay/branches/main/protection`). The reason is in
+# the trigger below: PR runs are path-filtered and there is no `merge_group`
+# trigger. A required context that never reports would hold a PR, and the merge
+# queue, forever. push:main runs unfiltered, so a break shows up red on main;
+# it does not block the merge that caused it.
 #
 # Separate workflow (not the cascade Bazel job): the first run fetches the
 # Rocq + Flocq + Gappa + Coq-Interval toolchain via nix — heavier than the
