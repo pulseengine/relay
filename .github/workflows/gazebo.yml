@@ -93,20 +93,12 @@ jobs:
           # 45-min timeout cancelled it, still trickling one package every ~2 s,
           # so no per-request apt timeout fires. Under the merge queue each stall
           # EJECTS the PR being built (#595, #571). Each attempt is capped at
-          # 10 min; downloaded .debs stay in apt's cache, so a retry resumes; and
-          # a retry moves off the azure mirror. A real failure still fails: the
-          # third attempt's exit status is the step's.
-          apt_retry() {
-            local n
-            for n in 1 2 3; do
-              if sudo timeout 600 apt-get -o Acquire::Retries=3 "$@"; then return 0; fi
-              echo "::warning::apt-get $* failed or exceeded 10 min (attempt $n/3) — switching to archive.ubuntu.com"
-              sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-                /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
-              sudo timeout 300 apt-get update || true
-            done
-            return 1
-          }
+          # 10 min; downloaded .debs stay in apt's cache, so a retry resumes. A
+          # real failure still fails: the third attempt's exit status is the
+          # step's. The logic is in scripts/apt-retry.sh, which says why its
+          # first version could not move off the azure mirror (#609 finding 10)
+          # and what is still unbounded.
+          apt_retry() { bash scripts/apt-retry.sh "$@"; }
           apt_retry update
           apt_retry install -y lsb-release gnupg curl
           sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
