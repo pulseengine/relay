@@ -13,14 +13,28 @@ artifacts:
 
       What blocks a subsequent arm shall instead be the LIVE hazard, re-derived
       every control cycle from real vehicle state (the [[SWREQ-FALCON-PREARM-P02]]
-      discipline): the battery terms, the isolated-rotor row
-      [[SWREQ-FALCON-PREARM-P04]], and the live geofence row
+      discipline): the isolated-rotor row [[SWREQ-FALCON-PREARM-P04]], the
+      battery terms (see BATTERY IS TERMINAL below), and the live geofence row
       (CheckId::InsideGeofence, #609 finding 5): a vehicle whose estimated
       position is outside its fence shall not arm, whether or not a failsafe
       ever fired (a FIRST arm outside the fence is refused too). Until #609
-      no row checked the fence, so a vehicle disarmed outside it re-armed. A hazard that is no longer present shall not
-      block arming, and a hazard that IS still present shall block it on its own
-      merit and name its own reason.
+      no row checked the fence, so a vehicle disarmed outside it re-armed. A
+      hazard that is no longer present shall not block arming, and a hazard
+      that IS still present shall block it on its own merit and name its own
+      reason, WITH ONE STATED EXCEPTION:
+
+      BATTERY IS TERMINAL UNTIL A PROCESS RESTART (#609 finding 5, maintainer
+      decision 2026-11-04, falcon-v1.141.0). relay-batt's low/critical flags
+      latch until BatteryEstimator::reset(), which the supervisor never
+      calls, and the seam refuses a rebuild over a latched pack
+      (SupervisorHost::rebuild_permitted). So after a battery failsafe the
+      vehicle cannot be re-armed in the same process even with a fresh pack:
+      BatteryOk refuses it (measured: a 16.8 V pack, soc 1.00, still refused
+      after 30 s). The latch is deliberate: an at-rest spent pack rebounds
+      and cannot be told from a fresh one without an explicit signal. An
+      explicit, Disarmed-only "pack replaced" reset is planned for
+      falcon-v1.142.0; until then the hazard here is "a pack that has
+      failsafed this process", and it does not clear.
 
       MEASURED defect this replaces (relay#564): the latch was never cleared
       anywhere, so after ANY failsafe the airframe could never be re-armed for
@@ -32,10 +46,15 @@ artifacts:
       is an in-flight signature (control allocation saturated while leaning) and
       its counter is zeroed whenever the vehicle is not airborne, so no
       ground-observable wind signal exists. Permitting re-arm after a wind RTL
-      is a recorded maintainer decision (relay#564): if the wind is still beyond
-      the rate loop's authority the vehicle takes off, saturates, and is landed
-      again by the same failsafe — self-limiting — whereas a permanent block
-      would brick the airframe after a transient gust, which is the common case.
+      is a recorded maintainer decision (relay#564): a permanent block would
+      brick the airframe after a transient gust, which is the common case.
+      CORRECTED (#609 finding 5): this said the vehicle "is landed again by
+      the same failsafe — self-limiting". The wind failsafe only ever commands
+      RTL (Failsafe at rank 2); it never commands a landing in place. If the
+      wind is still beyond the rate loop's authority the re-armed vehicle
+      saturates and is sent home again, landing only if it reaches home;
+      what bounds a flight that cannot get home is the battery failsafe
+      (above) and the attitude-runaway termination, not the wind detector.
     tags: [falcon, supervisor, failsafe, latch, arming, safety, v1.141]
     fields:
       req-type: safety

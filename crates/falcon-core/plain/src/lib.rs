@@ -2506,11 +2506,18 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // the NoFailsafeLatched row refreshes on the SAME tick instead of
         // leaving one cycle of stale refusal.
         //
-        // What still blocks re-arming is the LIVE hazard, re-derived every
-        // cycle: the two battery terms, MotorsHealthy for a rotor the FDI has
-        // isolated (#565), and InsideGeofence for a vehicle outside its fence
-        // (#609 finding 5 — until then nothing did, so a vehicle disarmed
-        // outside the fence re-armed). High wind is deliberately NOT blocked — it is
+        // What still blocks re-arming is the hazard itself, re-derived every
+        // cycle: MotorsHealthy for a rotor the FDI has isolated (#565),
+        // InsideGeofence for a vehicle outside its fence (#609 finding 5 —
+        // until then nothing did, so a vehicle disarmed outside the fence
+        // re-armed), and the two battery terms. THE BATTERY TERMS ARE NOT
+        // LIVE (#609 finding 5): relay-batt's low/critical flags latch until
+        // `BatteryEstimator::reset()`, which nothing calls, and the seam's
+        // `rebuild_permitted` refuses a rebuild over a latched pack. A battery
+        // failsafe is therefore TERMINAL until the process restarts; a fresh
+        // pack does not clear it (tests/battery_failsafe_terminal.rs). An
+        // explicit pack-replaced reset is planned for v1.142, not built here.
+        // High wind is deliberately NOT blocked — it is
         // the one trigger with no ground-observable signal (the detector needs
         // airborne saturation and wind_count is zeroed when !is_airborne), so a
         // transient gust must not brick the airframe (maintainer call, #564).
@@ -6034,8 +6041,9 @@ mod tests {
     /// airframe for the life of the process (#564: it did, and the pre-arm
     /// table reported "PREARM: failsafe latched" forever).
     ///
-    /// What still blocks re-arming is the LIVE hazard, re-derived every cycle:
-    /// the two battery terms, and `MotorsHealthy` for an isolated rotor (#565).
+    /// What still blocks re-arming is the hazard itself: `MotorsHealthy` for
+    /// an isolated rotor (#565), `InsideGeofence` (#609 finding 5), and the
+    /// battery terms, which LATCH until a process restart (#609 finding 5).
     /// High wind is permitted deliberately — it has no ground-observable
     /// signal, so a transient gust must not be a permanent block
     /// (maintainer decision, #564).

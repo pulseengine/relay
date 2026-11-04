@@ -60,7 +60,12 @@ artifacts:
 
       High wind is deliberately outside the live-hazard set (maintainer
       decision, relay#564: re-arm after a wind RTL is permitted and
-      self-limiting); not exercised here because the requirement excludes it.
+      self-limiting — CORRECTED in the requirement, #609 finding 5: the wind
+      failsafe commands RTL only, never a landing in place); not exercised
+      here because the requirement excludes it. BATTERY IS TERMINAL until a
+      process restart (requirement, #609 finding 5): pinned by
+      tests/battery_failsafe_terminal.rs, documentation of the existing
+      behaviour, not a change to it.
 
       FALSIFICATION: wrong if a disarmed vehicle with no live hazard is
       refused, or a disarmed vehicle with an isolated rotor is accepted.
@@ -71,6 +76,7 @@ artifacts:
         - run: cargo test -p falcon-core --lib re_arming_is_allowed_once_the_failsafe_condition_has_cleared
         - run: cargo test -p falcon-core --lib a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears
         - run: cargo test -p falcon-core --test geofence_prearm
+        - run: cargo test -p falcon-core --test battery_failsafe_terminal
     links:
       - type: verifies
         target: SWREQ-FALCON-SUPV-P02
