@@ -25,12 +25,14 @@
 #   3. It ran a fallback `apt-get update` even after the LAST failure, which
 #      only spent another 300 s before failing anyway.
 #
-# NOT FIXED HERE, deliberately: the step's worst case is still about the
-# job's 45-min timeout (one stalled call is 3x600 s of attempts + 2x300 s of
-# update, plus up to 2x300 s of dpkg repair, which takes seconds when there is
-# nothing to configure). Bounding it means
-# choosing a step-level deadline against measured rest-of-job time, which is a
-# maintainer decision recorded on #609, not a number to guess here.
+# BUDGET (maintainer decision 2026-11-04, #609 finding 10): each attempt is
+# capped at 300 s, not 600 s. Measured over 56 gz runs: a clean install takes
+# median 71 s, max 273 s (300 s is ~1.1x that, so a slow-but-healthy mirror can
+# be cut and retried on the other mirror). Worst case for one stalled call:
+# 3x300 s of attempts + 2x300 s of update + 2x300 s of dpkg repair = 2100 s,
+# plus at most 463 s for the rest of a successful job = 2563 s, inside the
+# job's 2700 s (45 min). The update and repair calls take seconds when nothing
+# stalls, so the realistic worst case is ~900 s + 463 s.
 #
 # Test seams (all default to the real system): APT_RETRY_MIRRORS_FILE,
 # APT_RETRY_SOURCES (space-separated), APT_RETRY_ATTEMPT_S, APT_RETRY_UPDATE_S.
@@ -38,7 +40,7 @@ set -euo pipefail
 
 MIRRORS="${APT_RETRY_MIRRORS_FILE:-/etc/apt/apt-mirrors.txt}"
 SOURCES="${APT_RETRY_SOURCES:-/etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list}"
-ATTEMPT_S="${APT_RETRY_ATTEMPT_S:-600}"
+ATTEMPT_S="${APT_RETRY_ATTEMPT_S:-300}"
 UPDATE_S="${APT_RETRY_UPDATE_S:-300}"
 AZURE='http://azure\.archive\.ubuntu\.com/ubuntu'
 
