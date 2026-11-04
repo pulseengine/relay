@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SUPV-P02
     type: sw-req
     title: "SUPV-P02 — a failsafe latch is an IN-FLIGHT device: it clears on disarm, and re-arming is gated by LIVE hazards only"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
       The RTL latch the supervisor raises when it actuates a failsafe

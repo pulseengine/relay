@@ -2,12 +2,13 @@ artifacts:
   - id: FV-FALCON-SUPV-002
     type: sw-verification
     title: "SUPV-P02 — the failsafe latch clears on disarm, and re-arming is gated by LIVE hazards only, in both directions (v1.141)"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
       Verification of SWREQ-FALCON-SUPV-P02, run independently of the
-      implementation PR (#565) per the two-commit rule, on main 985114b.
-      The requirement names two directions; each is checked and each is
+      implementation PR (#565) per the two-commit rule, originally on main
+      985114b (directions 1 and 2; the 2026-11-04 re-run of all three, on
+      5cdb766, is recorded below). The requirement names two directions; each is checked and each is
       falsified by the mutation the requirement itself prescribes.
 
       (1) RECOVERY. A geofence breach latches the failsafe; the vehicle flies
@@ -42,8 +43,7 @@ artifacts:
             makes the airborne test FAIL with arm_blocked_check=None while
             failed_motor=Some(1): the vehicle arms with a dead motor.
 
-      (3) GEOFENCE, LIVE (#609 finding 5, falcon-v1.141.0; implementation
-      evidence, not yet independently re-run). The requirement now names the
+      (3) GEOFENCE, LIVE (#609 finding 5, falcon-v1.141.0). The requirement now names the
       geofence as a live hazard: CheckId::InsideGeofence, the complement of
       the in-flight breach term. tests/geofence_prearm.rs: a first arm
       outside the fence is refused by it; after a breach, RTL, landing and
@@ -54,9 +54,32 @@ artifacts:
       out-of-fence first arm it used to provoke the breach with; it still
       fails when the disarm clear is removed.
 
-      STATUS DEMOTED verified -> implemented by the #609 finding-5 change:
-      the requirement text and its evidence changed. It returns to verified
-      in a separate code-free verify PR (two-commit rule).
+      STATUS DEMOTED verified -> implemented by the #609 finding-5 change
+      (#633): the requirement text and its evidence changed.
+
+      INDEPENDENT RE-RUN 2026-11-04, code-free verify PR (two-commit rule),
+      on 5cdb766 (the head of #634, which carries #633): every declared step
+      from a file under /bin/sh with stdin closed, and again through
+      scripts/run-falcon-verification.py. Tests executed:
+        re_arming_is_allowed_once_the_failsafe_condition_has_cleared              1 passed
+        a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears 1 passed
+        --test geofence_prearm                                                     3 passed
+        --test battery_failsafe_terminal                                           2 passed
+      FALSIFIED AGAIN on that commit, each mutation applied by a script that
+      asserted its target text occurs exactly once, then reverted:
+        (1) the single `self.rtl_latched = false;` removed: the recovery test
+            FAILS ("the latch must CLEAR on disarm ..."), so the re-written
+            test (arm inside, carried out in flight) still needs the clear.
+        (2) the MotorsHealthy row forced true, the clear left in place: the
+            airborne test FAILS, the vehicle ARMS with arm_blocked_check=None
+            and failed_motor=Some(1).
+        (3) the InsideGeofence row forced true, as the requirement
+            prescribes: a_first_arm_outside_the_fence_is_refused_by_the_fence_row
+            and re_arming_outside_the_fence_after_a_breach_is_refused_by_the_fence_row
+            both FAIL (arm_blocked_check None, not Some(InsideGeofence));
+            inside_the_fence_arms still passes. Both refusals disappear.
+      The battery-terminal tests pin existing behaviour and were not
+      mutation-tested here. Promoted implemented -> verified.
 
       High wind is deliberately outside the live-hazard set (maintainer
       decision, relay#564: re-arm after a wind RTL is permitted and

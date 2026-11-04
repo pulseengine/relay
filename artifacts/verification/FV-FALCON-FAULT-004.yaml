@@ -116,9 +116,35 @@ artifacts:
            above 20 % would be isolated as dead on a healthy spin-up. Only a
            FULLY stalled rotor is caught early.
 
-      STATUS DEMOTED verified -> implemented by the #609 finding-17 change:
-      the residual this artifact verified is no longer the one flown. It
-      returns to verified in a separate code-free verify PR (two-commit rule).
+      STATUS DEMOTED verified -> implemented by the #609 finding-17 change
+      (#633), and its evidence changed again with finding 18 (#634).
+      RE-RUN in a separate code-free verify PR (two-commit rule), on 5cdb766
+      (the head of #634): every declared step
+      re-run, each from a file under /bin/sh with stdin closed, and again
+      through scripts/run-falcon-verification.py. Tests executed per named
+      step: noise campaign 1, fdi_isolates_dead_rotor_and_reconfigures 1,
+      survives_single_rotor_failure_without_flipping 1, fdi_common_mode 3,
+      fdi_second_flight 3, fdi_spinup_guard 7 (spinup_sweep_bench is
+      #[ignore]d and not run), each --lib test 1; all seven greps match. The
+      noise campaign runs on the campaign plant, not a live gz server.
+      Added in the same PR: the_warm_up_is_a_fixed_time_at_the_resynced_rate
+      (#609 finding 7, #633): the shared 0.2 s warm-up, which times the
+      estimator FDI gate and the cascade's FDI warm-up, is 0.2 s rounded at
+      the RESYNCED rate (50/80/100/200 ticks at 250/400/500/1000 Hz), not a
+      tick count fixed at construction. The mutations quoted above are the
+      implementation PRs' own, not re-run here.
+
+      NOT PROMOTED, although every step passes: the evidence MEETS this
+      artifact's own FALSIFICATION clause below ("wrong if ... it isolates a
+      HEALTHY rotor"). Known limit (a), pinned by the passing test
+      known_limit_a_300_ms_esc_soft_start_is_still_isolated inside the
+      fdi_spinup_guard step, is a healthy rotor (a 300 ms ESC soft-start)
+      isolated as a rotor-out, in 4/8/12 of 192 sweep cells at
+      250/500/1000 Hz. #609 records the remaining cells as a "named known
+      limit", but no decision narrows this clause, or SWREQ-FALCON-FAULT-P03,
+      to exclude them. Promotion needs either that decision (the soft-start is
+      not sensor noise, so FAULT-P03's envelope arguably does not cover it)
+      or the soft-start case fixed. Status stays implemented.
 
       EVIDENCE:
         - falcon-sitl-gz fdi_noise_robustness_monte_carlo_campaign: 200 dispersed
@@ -154,6 +180,7 @@ artifacts:
         - run: cargo test -p falcon-core --test fdi_common_mode
         - run: cargo test -p falcon-core --test fdi_second_flight
         - run: cargo test -p falcon-core --test fdi_spinup_guard
+        - run: cargo test -p falcon-core --lib the_warm_up_is_a_fixed_time_at_the_resynced_rate
         - run: cargo test -p falcon-core --lib the_fdi_guard_is_0_3_s_at_the_resynced_rate
         - run: cargo test -p falcon-core --lib the_stall_window_is_0_1_s_at_the_resynced_rate
         - run: cargo test -p falcon-core --lib an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check
