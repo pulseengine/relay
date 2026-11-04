@@ -89,7 +89,11 @@ artifacts:
       harmonic notch bank. It carries an explicit guard:
 
         // 2% tolerance: jitter must not rebuild filters every tick.
-        if drift > 0.02 * self.designed_hz { ... }
+        (drift > 0.02 * designed_hz).then_some(actual)
+
+      (since #609 finding 7 in the shared `resynced_rate`, which both
+      partitions call; it was `if drift > 0.02 * self.designed_hz` inside
+      the cascade's `resync_loop_rate`, same tolerance)
 
       So a real host's tick-to-tick jitter does not reset filter state; only a
       sustained rate change past 2% does, which is the resync this is for. The
@@ -162,7 +166,7 @@ artifacts:
         - run: "grep -q 'pub fn last_verdict(&self) -> Option<wire::TickVerdict>' crates/falcon-hitl/src/lib.rs"
         - run: "grep -q 'pub fn rejected_replies(&self) -> u32' crates/falcon-hitl/src/lib.rs"
         # The 2% tolerance this artifact quotes must still be in the callee.
-        - run: "grep -q '0.02 \\* self.designed_hz' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q '(drift > 0.02 \\* designed_hz).then_some(actual)' crates/falcon-core/plain/src/lib.rs"
         - run: "cargo test -p falcon-hitl --all-targets"
     links:
       - type: verifies
