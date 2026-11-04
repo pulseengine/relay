@@ -98,3 +98,93 @@ fn a_silence_longer_than_batt_silence_s_does_raise_batt_silent() {
         silence_ticks as f32 * DT
     );
 }
+
+// ── THE ACTING TERM, IN FLIGHT (#609 finding 13) ────────────────────────────
+//
+// The two tests above judge `failsafe_flags()`, which is an OBSERVER: it
+// recomputes BATT_SILENT for telemetry and actuates nothing. They also never
+// arm, so `is_airborne()` is false throughout and the failsafe in `step()`
+// could not fire whatever its threshold was. Mutating `step()`'s
+// `batt_missing_s > BATT_SILENCE_S` to `> 0.0` — one dropped sample now sends
+// the vehicle Loiter -> Rtl — left both of them green. The tests below fly a
+// real Loiter on `SimBackend` and judge the MODE, which is what acts.
+
+use falcon_core::SimBackend;
+use falcon_core::failsafe_flags::RTL_LATCHED;
+use falcon_core::relay_fsm::{Event, Mode};
+
+const FLIGHT_DT: f32 = 0.002;
+
+/// Arm, take off and settle into `Loiter` with a healthy, reporting pack, and
+/// PROVE the vehicle is airborne — without that, "the mode did not change"
+/// would be true of a supervisor on the ground for any threshold.
+fn loitering() -> (FlightSupervisor, SimBackend) {
+    let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut backend = SimBackend::new(level, FLIGHT_DT);
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+    sup.command(Event::Arm, true, true);
+    assert_eq!(sup.mode(), Mode::Armed, "precondition: the supervisor arms");
+    sup.command(Event::RequestTakeoff, true, true);
+    for _ in 0..8000 {
+        sup.step(&mut backend); // 16 s
+    }
+    assert_eq!(
+        sup.mode(),
+        Mode::Loiter,
+        "precondition: airborne in Loiter with a healthy pack"
+    );
+    assert_eq!(
+        sup.failsafe_flags() & RTL_LATCHED,
+        0,
+        "precondition: no recovery latched before the drop"
+    );
+    (sup, backend)
+}
+
+#[test]
+fn a_single_dropped_battery_sample_in_flight_does_not_divert_the_vehicle() {
+    let (mut sup, mut backend) = loitering();
+    // ONE missing reading: one control tick of silence, then the pack reports
+    // again.
+    backend.battery_lost = true;
+    sup.step(&mut backend);
+    backend.battery_lost = false;
+    for _ in 0..1000 {
+        sup.step(&mut backend); // 2 s afterwards, twice BATT_SILENCE_S
+        assert_eq!(
+            sup.mode(),
+            Mode::Loiter,
+            "ONE dropped battery reading ({FLIGHT_DT} s) diverted the vehicle; \
+             the pack is only lost after BATT_SILENCE_S = {BATT_SILENCE_S} s"
+        );
+    }
+    assert_eq!(
+        sup.failsafe_flags() & RTL_LATCHED,
+        0,
+        "ONE dropped battery reading latched a recovery"
+    );
+}
+
+#[test]
+fn a_silence_longer_than_batt_silence_s_in_flight_does_divert_the_vehicle() {
+    // THE CONTROL for the test above: the same flight with a silence 1.5x
+    // the threshold must divert, so the first test's "still in Loiter" is
+    // attributable to the threshold and not to a failsafe that cannot fire.
+    let (mut sup, mut backend) = loitering();
+    let silence_ticks = ((BATT_SILENCE_S * 1.5) / FLIGHT_DT) as u32 + 1;
+    backend.battery_lost = true;
+    for _ in 0..silence_ticks {
+        sup.step(&mut backend);
+    }
+    assert!(
+        matches!(sup.mode(), Mode::Rtl | Mode::Land | Mode::Disarmed),
+        "a {:.2} s battery silence in flight did NOT divert the vehicle, mode {:?}",
+        silence_ticks as f32 * FLIGHT_DT,
+        sup.mode()
+    );
+    assert_ne!(
+        sup.failsafe_flags() & RTL_LATCHED,
+        0,
+        "and a recovery latched"
+    );
+}

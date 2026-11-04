@@ -94,16 +94,20 @@ const TRACKS: &[Track] = &[
 //         including two that FV-FALCON-HOLD-001 cites by name. Baseline 69/0,
 //         mutated 59/10, file restored byte-identical. Issue closed on
 //         falcon-v1.140.0.
-//   546 — the gap is CLOSED ON MAIN: the gz verdict now bars rms_steady < 0.5
-//         and peak_horiz < 1.0, equal to HOLD-P01's own figures, verified on
-//         THREE gz runs measuring peak_horiz at 0.01 / 0.02 / 0.03 m. The
-//         issue stays open only because closure cites a tag, so its entry's
-//         TEXT ("aggregates at twice it") is now false. Keeping it would
-//         OVERSTATE the weakness in every future release note, which is the
-//         opposite of this list's purpose.
+//   546 — RE-ADDED 2026-11-04 (#609 finding 12). The horizontal half is
+//         closed on main: the gz verdict bars peak_horiz < 1.0 and
+//         rms_steady < 0.5, equal to HOLD-P01's figures. The VERTICAL half is
+//         not: altitude is bounded only by the final sample plus an RMS over
+//         the last 5 s (the wasm leg by the final sample alone), and the
+//         required gz gate flies 25 s, so it cannot evidence HOLD-P01's
+//         ">= 60 s" at all. Retiring the whole entry overstated the evidence.
+//         Maintainer decision: disclose now; a defined hold window plus a
+//         settled-window vertical peak bar, judged on >= 60 s soak rungs, is
+//         a falcon-v1.142.0 item.
 const STRUCTURAL: &[(u32, &str)] = &[
     (417, "the required gates can pass vacuously for a PR that touches only the shipped wasm components"),
     (436, "scheduled monitors run every few hours, not on their cron cadence"),
+    (546, "the gz HOLD verdict bounds altitude only by the final sample and a 5 s RMS, and the required gate flies 25 s, not HOLD-P01's 60 s"),
 ];
 
 #[derive(Debug, Clone, serde::Deserialize)]

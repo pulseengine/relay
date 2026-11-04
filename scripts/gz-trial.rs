@@ -71,6 +71,11 @@ const KEEP: &[&str] = &[
     // recorded as closing a BOTH-PATHS clause it had not measured. If you add a
     // number to the harness, add it to every allowlist in the same change.
     "horizontal",
+    // FIFTH, 2026-11-04 (#609 finding 14): supervised-rotorout's pre-kill
+    // `  ring: prekill_ticks=...` summary, the line soak.yml's #270 check
+    // judges. "RING " above is the per-tick RING_TRACE prefix and is
+    // case-sensitive, so it never matched this one.
+    "  ring: ",
 ];
 
 struct Args {
