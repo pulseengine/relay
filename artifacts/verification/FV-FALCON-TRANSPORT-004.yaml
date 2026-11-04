@@ -2,9 +2,35 @@ artifacts:
   - id: FV-FALCON-TRANSPORT-004
     type: sw-verification
     title: "Binding v2 — a host that speaks ONLY the binding configures, calibrates, arms and takes off the supervised vehicle; battery says ABSENT; non-finite is refused"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0
     description: >
+      *** PROMOTED implemented -> verified 2026-11-04, IN A CODE-FREE PR, ON A
+      RE-RUN OF EVERY STEP ON main ca8d4ed, after #611 (34819cf) and
+      #627 (14c7dfe) merged. *** All 25 steps run from a file under
+      /bin/sh with stdin closed: 25 PASS, 0 FAIL. The gate's own runner gives
+      the same verdict. `cargo test -p falcon-hitl --test
+      binding_drives_the_supervisor`: 6 passed; `--lib wire::tests`: 29 passed;
+      `--all-targets`: 50 + 6 passed.
+
+      WHAT THIS PROMOTION DOES NOT CLAIM, because the text below set a
+      condition it cannot literally meet. It said "re-run against it [the
+      published wasm component] after #611 merges before promoting". #611
+      merged and the re-run happened, but it ran against the NATIVE
+      endpoint again. The published component is still not behind a byte
+      endpoint, so binding bytes never reach the wasm. What changed is the
+      code under the native leg. Since #627 the test's `Endpoint` is an
+      adapter over `falcon_core::host::SupervisorHost`, which the published
+      `cascade` component also runs. So the lifecycle rules exercised here
+      are the component's rules. The component's ABI and wasm build are not
+      exercised. The component's own `pilot.configure-calibration` is
+      exercised by the #611 lifecycle tests in
+      tests/cascade-sitl-wasm/src/seam_tests.rs. This artifact does not rest
+      on those tests. No artifact step runs them either. The only `cargo
+      test` step in tests/cascade-sitl-wasm (FV-FALCON-OCI-006) filters
+      `--ignored arena_soak`. The other artifacts that name the crate grep
+      its sources or run its binary.
+
       Closes relay#609 finding 9 (BLOCKER) together with the already-decided
       #572 and #527, as ONE wire revision so the integrator's decoder changes
       once. Binding v1 carried Config/Ack/Sensor/Motors only, so a rig driving
@@ -39,9 +65,12 @@ artifacts:
       supervisor-config -> FailsafeConfigured — so the success is attributable
       to the frames. It arms AFTER stepping, so it does not lean on the
       arm-before-first-step defaults path #611 closes. The published wasm
-      component is not behind a byte endpoint, and its
-      `pilot.configure-calibration` exists only on #611; re-run against it
-      after #611 merges before promoting.
+      component is not behind a byte endpoint. Its
+      `pilot.configure-calibration` landed with #611 (34819cf). This artifact
+      was re-run after that merge on main ca8d4ed, against the native
+      endpoint, which since #627 adapts the same SupervisorHost the
+      component runs. It did not run against the wasm (see the promotion note
+      above).
 
       CONFORMANCE, NOT ONLY ROBUSTNESS: hand-computed little-endian byte
       vectors for every new frame (and a v2 Sensor frame whose rpm bytes spell

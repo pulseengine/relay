@@ -5,6 +5,20 @@ artifacts:
     status: implemented
     release: falcon-v1.141.0
     description: >
+      *** STILL `implemented` ON 2026-11-04, AND NOW FOR ITS FALSIFICATION
+      CLAUSE, NOT FOR #611. *** #611 merged (34819cf), and FV-FALCON-TRANSPORT-
+      002 / -004 were re-run on main ca8d4ed and promoted in a code-free PR.
+      All four verifiers (001..004) are now `verified`. The requirement is NOT
+      promoted with them, because its own FALSIFICATION condition is still
+      met: "wrong ... if a host holding the binding still cannot stream the
+      vehicle's attitude, position and failsafe state to a GCS". Binding v2
+      has no state frame. docs/TRANSPORT-BINDING.md says so itself ("No
+      state frame ... a binding-only host cannot see `mode` or the
+      `arm-blocked` failsafe bit"). relay#609 finding 9 is still unticked.
+      Re-promotion needs a state frame on the wire, or a maintainer decision
+      that narrows this requirement. A green set of verifiers does not
+      settle it.
+
       *** DEMOTED verified -> implemented 2026-10-28 (relay#609 finding 9,
       BLOCKER). *** It was verified while the binding could not fly the
       component it binds: #571 made the published @0.12.0 component wrap
@@ -37,7 +51,8 @@ artifacts:
       frame it answers (Motors <- its Sensor, Ack <- its control frame).
 
       HELD AT `implemented` (two-commit rule), and NOT re-promotable until
-      relay#611 merges: the `Calibration` frame's target,
+      relay#611 merges (it merged 2026-10-29 as 34819cf; see the note at the
+      top for what still holds this): the `Calibration` frame's target,
       `pilot.configure-calibration`, does not exist on main yet, so the
       end-to-end leg runs against the native supervisor, not the published
       wasm component. Remaining, recorded in the binding document: no state
