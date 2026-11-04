@@ -1,0 +1,67 @@
+artifacts:
+  - id: SWREQ-FALCON-FOLLOW-P01
+    type: sw-req
+    title: "FOLLOW-P01 — in Mission the step target is a LIVE follow setpoint: flown every tick, ends nothing, and a stale stream HOLDS"
+    status: implemented
+    description: >
+      In Mission, the target a host passes to the published component's
+      `controller.step` shall be a LIVE follow setpoint, not a one-leg
+      mission:
+
+        (1) The latest FINITE target is the setpoint flown every tick.
+            Reaching it ends nothing: arrival does not fire the
+            mission-complete RTL. The host ends Mission itself, with
+            request-rtl, request-land or request-loiter.
+        (2) A target with any non-finite component is REJECTED: it is not
+            flown and does not refresh the stream. (This is also how a host
+            says "no target this frame"; the frame has no absent flag.)
+        (3) If no fresh target has been accepted for 1.0 s
+            (FOLLOW_TARGET_TIMEOUT_US, on the supervisor clock advanced by the
+            backend dt), the vehicle shall HOLD: Loiter where the vehicle is
+            (the moving-entry rule of [[SWREQ-FALCON-LOITER-P01]] applies),
+            with failsafe cause bit 8 TARGET_STALE raised. This is
+            relay_fsafe's action for a stale offboard stream, enforced by the
+            relay_offboard receiver of [[SWREQ-FALCON-OFFB-P01]].
+        (4) A stream that resumes after the HOLD shall NOT re-enter Mission by
+            itself; re-entering Mission is a host command.
+
+      The native FlightSupervisor keeps the stored-waypoint sequencer of
+      [[SWREQ-FALCON-MISSION-P01]] as its default source
+      (MissionSource::Waypoints, arrival -> RTL unchanged); the follow source
+      is selected explicitly, and SupervisorHost::build selects it for every
+      supervisor the published seam builds (fused or split).
+
+      Not detectable from inside the component: a host that stops calling
+      `step` at all.
+
+      SOURCE: #632 (#609 finding 4), maintainer decision A, 2026-10-28, "Live
+      setpoint, no RTL". Until #632 the component fed the frame target to
+      set_mission, which reset a one-leg mission every tick, so arrival fired
+      the mission-complete RTL and the vehicle landed while the host was still
+      streaming, and a non-finite target was flown into the motors.
+    tags: [requirement, falcon, mission, follow, offboard, failsafe, supervisor, v1.141]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        falcon-core on SimBackend, each clause by a named test: (1) under the
+        follow source a constant target is reached (< 0.5 m) and Mission
+        persists, a stored waypoint is ignored, and the stored-mission source
+        still ends in RTL with bit 8 down; (2) NaN / +inf / -inf components
+        are each rejected and leave the last fresh target in force; (3) a
+        stopped stream takes Loiter + bit 8 on the first tick strictly past
+        the timeout, not one tick sooner; through the published seam's host
+        rules (fused vs split, bit-exact) a moving target keeps Mission for
+        8 s without bit 8, and a non-finite stream takes the HOLD within
+        1000..1002 ticks at 1 kHz; a binding-only host that sends
+        request-mission with no target takes the HOLD on the first Mission
+        tick and stays within 0.5 m. (4) and the host-command exits of (1)
+        are named, and measured at host level only by the cascade-sitl-wasm
+        follow tests, which no CI job runs.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020
+      - type: derives-from
+        target: SYSREQ-FALCON-012
+      - type: refines
+        target: SWREQ-FALCON-OFFB-P01

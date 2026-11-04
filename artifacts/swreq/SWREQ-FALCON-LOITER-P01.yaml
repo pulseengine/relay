@@ -1,0 +1,49 @@
+artifacts:
+  - id: SWREQ-FALCON-LOITER-P01
+    type: sw-req
+    title: "LOITER-P01 — a Loiter entered while moving BRAKES, then latches the hold point where the vehicle comes to rest"
+    status: implemented
+    description: >
+      A Loiter entered while the vehicle's estimated horizontal speed exceeds
+      0.3 m/s (HOLD_BRAKE_ENTRY_MS) — Mission -> Loiter mid-leg, or the
+      stale-follow HOLD of [[SWREQ-FALCON-FOLLOW-P01]] — shall not latch its
+      hold point on entry. It shall BRAKE first, and latch the hold point
+      where the vehicle comes to REST: once the estimated horizontal speed
+      has stayed under HOLD_REST_MS = 0.1 m/s for HOLD_REST_S = 3.0 s, or,
+      at the latest, after HOLD_BRAKE_MAX_S = 30 s of braking, wherever the
+      vehicle then is. The position integral is left untouched. The latched
+      point is then held to the bars of [[SWREQ-FALCON-HOLD-P01]] (1.0 m
+      horizontally, 0.5 m vertically, 60 s).
+
+      As implemented (falcon-core, #632): while braking the horizontal
+      setpoint is p - v * HOLD_BRAKE_LEAD_S (8 s), a point behind the vehicle
+      along its own velocity; the brake law is implementation, not part of
+      this requirement.
+
+      SOURCE: #632 (#609 finding 4), maintainer decision B as re-decided
+      2026-10-28, "Brake, then latch", after an integral reset was measured
+      and refuted. #616 latched the point the vehicle was passing when the
+      command arrived; the leg-charged integral then carried the vehicle past
+      it (overshoot of metres, outside HOLD-P01's window).
+    tags: [requirement, falcon, hold, loiter, supervisor, control, v1.141]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        falcon-core on SimBackend, #616's (3c) scenario (launch 8 m north of
+        home, crosswind, a settled Loiter, a 5 s Mission leg, RequestLoiter):
+        entered at transit speed no hold point exists on the first Loiter tick;
+        the point is latched while still in Loiter, at < 0.1 m/s, within 31 s;
+        from it the vehicle stays inside HOLD-P01's 1.0 m (braking-window peak
+        and settled peak). At 2 m/s and at 5 m/s wind, the hold point taken
+        from where the vehicle ends up is a real hold (last 10 s within 0.1 m
+        of its mean) and the HOLD-P01 window passes. Falsified by the #616
+        rule, latching on entry (#632 measured it: 11.6 m overshoot and
+        1.59 m in the window at 2 m/s wind).
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-004
+      - type: derives-from
+        target: SYSREQ-FALCON-017
+      - type: refines
+        target: SWREQ-FALCON-HOLD-P01

@@ -1,0 +1,63 @@
+artifacts:
+  - id: FV-FALCON-OFFB-002
+    type: sw-verification
+    title: "OFFB-P01 in the flight stack — a stale or non-finite follow-target stream in Mission HOLDS (Loiter, failsafe bit 8), on the supervisor clock (#609 f4)"
+    status: implemented
+    description: >
+      Verifies the FLIGHT-STACK half of SWREQ-FALCON-OFFB-P01: "if no fresh
+      ... setpoint arrives within the timeout, the offboard stream shall be
+      reported STALE — the trigger for the flight stack to fall back to a
+      failsafe action (Hold/RTL)". FV-FALCON-OFFB-001 verifies only the
+      relay-offboard receiver (tests + Kani); until #632 that receiver was
+      ORPHANED, consumed by no flight path.
+
+      #632 (#609 finding 4, maintainer decision A, 2026-10-28) made the
+      Mission frame `target` a LIVE follow setpoint (MissionSource::Follow,
+      FlightSupervisor::set_follow_target) and enforces its freshness with
+      relay_offboard::OffboardReceiver on a supervisor clock advanced by the
+      backend dt, FOLLOW_TARGET_TIMEOUT_US = 1.0 s. A stale stream takes
+      relay_fsafe's stale-offboard action (Hold), flown as RequestLoiter, and
+      raises failsafe cause bit 8 TARGET_STALE.
+
+      EVIDENCE (falcon-core tests/follow_target_source.rs, native API,
+      SimBackend):
+        - non_finite_targets_are_rejected: any non-finite component is
+          rejected, does not refresh the stream, and leaves the last fresh
+          target in place; bit 8 is set before the first fresh target and
+          clears on one.
+        - a_stopped_follow_stream_holds_after_the_timeout: when the caller
+          simply stops calling, Mission becomes Loiter on the first tick
+          strictly past the timeout and not one tick sooner, with bit 8 set.
+        - the_default_source_is_the_stored_mission,
+          the_stored_mission_ignores_follow_targets_and_still_completes,
+          follow_ignores_the_stored_mission: the two sources do not leak
+          into each other (the stored-waypoint sequencer of MISSION-P01 is
+          unchanged by the follow source).
+
+      NOT EXECUTED BY ANY STEP HERE: the host-level A1-A5 tests in
+      tests/cascade-sitl-wasm/src/follow_target_tests.rs (they drive the
+      native mirror of the component's `step`). cascade-sitl-wasm is a nested
+      workspace and no CI workflow runs its `cargo test` (gazebo.yml and
+      soak.yml only build it), so those five tests are implementation
+      evidence from #632, not gate evidence.
+
+      NOT A REQUIREMENT YET: "in Mission the frame target is a live follow
+      setpoint" (decision A) is itself not stated by any rivet requirement;
+      this artifact verifies only the staleness contract OFFB-P01 already
+      states. The requirement gap is reported, not closed, here.
+
+      Status `implemented`: authored in a code-free verify PR on the
+      implementation's evidence; promotion is a separate step.
+
+      FALSIFICATION: wrong if a follow stream with no fresh finite target for
+      more than FOLLOW_TARGET_TIMEOUT_US keeps the vehicle in Mission, or a
+      non-finite target is accepted as fresh.
+    tags: [verification, falcon, offboard, follow, mission, failsafe, v1.141]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-core --test follow_target_source
+        - run: "grep -q 'pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;' crates/falcon-core/plain/src/lib.rs"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-OFFB-P01

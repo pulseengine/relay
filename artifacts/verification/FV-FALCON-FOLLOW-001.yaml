@@ -1,0 +1,72 @@
+artifacts:
+  - id: FV-FALCON-FOLLOW-001
+    type: sw-verification
+    title: "FOLLOW-P01 — the Mission step target is flown live, a non-finite one is rejected, a stale stream HOLDS with bit 8, through the native API, the seam host rules and the binding (#632)"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-FOLLOW-P01 clause by clause, each step naming its
+      test. All on SimBackend.
+
+      (1) LIVE SETPOINT, ARRIVAL ENDS NOTHING.
+        - falcon-core follow_ignores_the_stored_mission: under the follow
+          source a constant target is reached (closest < 0.5 m) and Mission
+          persists for 30 s; the stored waypoint is never approached (> 3 m).
+        - falcon-core the_stored_mission_ignores_follow_targets_and_still_completes
+          and the_default_source_is_the_stored_mission: the native default is
+          the stored mission, which still ends in RTL on arrival with bit 8
+          down (MISSION-P01 unchanged).
+        - falcon-core supervised_core_split
+          split_host_follows_goes_stale_and_re_arms_the_fdi_bit_exactly:
+          through SupervisorHost (the seam's rules, fused vs split, bit-exact
+          every tick), a MOVING target keeps Mission for >= 8000 ticks with
+          bit 8 never raised.
+      (2) NON-FINITE REJECTED: falcon-core non_finite_targets_are_rejected
+          (NaN, +inf, -inf each rejected; the last fresh target stays in
+          force; bit 8 up before the first fresh target, down after it).
+      (3) STALE -> HOLD + BIT 8:
+        - falcon-core a_stopped_follow_stream_holds_after_the_timeout: Loiter
+          with bit 8 on the first tick strictly past FOLLOW_TARGET_TIMEOUT_US,
+          and not one tick sooner.
+        - the split host test above: a non-finite stream takes Loiter + bit 8
+          after 1000..1002 ticks at 1 kHz.
+        - falcon-hitl request_mission_over_the_binding_takes_the_stale_target_hold:
+          a binding-only host that sends request-mission with no target takes
+          the HOLD on the first Mission tick and stays within 0.5 m.
+        - the constant is pinned by a grep.
+
+      NOT EXECUTED BY ANY STEP: clause (4) (a resumed stream does not
+      re-enter Mission) and the host-command exits of clause (1) (request-
+      rtl/land/loiter end a held follow), and a target moved after arrival.
+      No falcon-core or falcon-hitl test covers them. They are measured only
+      by the host-level tests A2/A5 in
+      tests/cascade-sitl-wasm/src/follow_target_tests.rs. cascade-sitl-wasm is
+      a nested workspace that no CI job tests (gazebo.yml and soak.yml only
+      build it), so A1-A5 are implementation evidence from #632, not gate
+      evidence. Clause (4) has no test at all; it holds by construction (the
+      HOLD leaves Mission, and the follow target is read only in Mission),
+      which is an argument, not a measurement.
+
+      Overlaps FV-FALCON-OFFB-002, which verifies the parent OFFB-P01's
+      staleness contract with the same follow_target_source file.
+
+      Status `implemented` (new requirement, new verifier).
+
+      FALSIFICATION: wrong if under the follow source arrival leaves Mission,
+      a non-finite target is flown or refreshes the stream, or 1.0 s without
+      a fresh target leaves the vehicle in Mission or without bit 8.
+    tags: [verification, falcon, mission, follow, offboard, failsafe, v1.141]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p falcon-core --test follow_target_source follow_ignores_the_stored_mission
+        - run: cargo test -p falcon-core --test follow_target_source the_stored_mission_ignores_follow_targets_and_still_completes
+        - run: cargo test -p falcon-core --test follow_target_source the_default_source_is_the_stored_mission
+        - run: cargo test -p falcon-core --test follow_target_source non_finite_targets_are_rejected
+        - run: cargo test -p falcon-core --test follow_target_source a_stopped_follow_stream_holds_after_the_timeout
+        - run: cargo test -p falcon-core --test supervised_core_split split_host_follows_goes_stale_and_re_arms_the_fdi_bit_exactly
+        - run: cargo test -p falcon-hitl --test binding_drives_the_supervisor request_mission_over_the_binding_takes_the_stale_target_hold
+        - run: "grep -q 'pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'sup.set_mission_source(MissionSource::Follow);' crates/falcon-core/plain/src/host.rs"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-FOLLOW-P01
