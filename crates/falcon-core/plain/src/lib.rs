@@ -1070,6 +1070,24 @@ impl CascadePartition {
                     resid[i] = (self.last_motor_cmd[i] - achieved).abs();
                     i += 1;
                 }
+                // COMMON-MODE REJECTION (#609 finding 17): subtract what all
+                // four rotors share. The command-aligned residual above assumes
+                // ONE tick of telemetry lag; a real ESC/rotor lags by a
+                // first-order time constant of tens of ms, so any abrupt
+                // COLLECTIVE step leaves all four behind their commands by the
+                // same amount. The supervised landing makes that step when
+                // the velocity law engages (hover ~0.5 -> ~0.3): at 50 ms lag
+                // every residual read 0.19, equal to 1e-6, the CUSUM crossed
+                // on tick 7 and rotor 0 was isolated only because it is
+                // checked first. A single rotor out is DIFFERENTIAL (one
+                // residual rises, three stay near zero), so removing the
+                // per-tick minimum leaves it intact: Loiter isolation stays
+                // at 3 ticks; isolation at the landing step goes 4 -> 8-12
+                // ticks (tests/fdi_common_mode.rs).
+                let common = resid[0].min(resid[1]).min(resid[2]).min(resid[3]);
+                for r in resid.iter_mut() {
+                    *r -= common;
+                }
                 dbg_resid = resid;
                 self.failed_motor = self.fdi.update(resid);
             }

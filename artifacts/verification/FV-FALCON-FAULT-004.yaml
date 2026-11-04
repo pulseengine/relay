@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FAULT-004
     type: sw-verification
     title: "Single-rotor-out FDI noise-robustness — command-aligned residual + roll/pitch gate (v1.115)"
-    status: verified
+    status: implemented
     release: falcon-v1.115.0
     description: >
       Verifies FAULT-P03. The v1.114 dispersed full-loop campaign surfaced that
@@ -26,6 +26,27 @@ artifacts:
            (Mueller & D'Andrea); gating on total rate slammed the gate shut for
            the rest of the flight once the spin built, starving re-detection.
            Roll/pitch rate is the tumble indicator the gate actually wants.
+        3. COMMON-MODE REJECTION (#609 finding 17, falcon-v1.141.0) — the
+           per-tick MINIMUM of the four aligned residuals is subtracted from
+           each before the CUSUM. The one-tick alignment above assumes the
+           telemetry lags by a tick; a real ESC/rotor lags by a first-order
+           time constant of tens of ms, so an abrupt COLLECTIVE step leaves
+           all four rotors equally behind. The supervised landing makes that
+           step when the velocity law engages: at tau >= 40 ms every healthy
+           landing isolated rotor 0 (the four residuals equal to 1e-6, rotor 0
+           only because it is checked first), flew the rest of the landing on
+           the 3-rotor law and was refused re-arm by MotorsHealthy. A single
+           rotor out is DIFFERENTIAL, so the subtraction leaves it intact.
+           Measured (falcon-core tests/fdi_common_mode.rs, 6 lags 0-80 ms x 4
+           rotors): no phantom on any healthy landing (before: 3 of 6 lags);
+           a rotor killed in Loiter isolated in 3 ticks (unchanged); killed at
+           the landing step, 8-12 ticks (was 4), always the correct rotor; a
+           rotor whose thrust decays with a 100 ms time constant, 39 ticks
+           (unchanged). Motors are byte-identical in every phantom-free run.
+
+      STATUS DEMOTED verified -> implemented by the #609 finding-17 change:
+      the residual this artifact verified is no longer the one flown. It
+      returns to verified in a separate code-free verify PR (two-commit rule).
 
       EVIDENCE:
         - falcon-sitl-gz fdi_noise_robustness_monte_carlo_campaign: 200 dispersed
@@ -58,6 +79,9 @@ artifacts:
         - run: cargo test -p falcon-sitl-gz fdi_noise_robustness_monte_carlo_campaign
         - run: cargo test -p falcon-core fdi_isolates_dead_rotor_and_reconfigures
         - run: cargo test -p falcon-core survives_single_rotor_failure_without_flipping
+        - run: cargo test -p falcon-core --test fdi_common_mode
+        - run: cargo test -p falcon-core --test fdi_second_flight
+        - run: "grep -q 'let common = resid\\[0\\].min(resid\\[1\\]).min(resid\\[2\\]).min(resid\\[3\\]);' crates/falcon-core/plain/src/lib.rs"
     links:
       - type: verifies
         target: SWREQ-FALCON-FAULT-P03

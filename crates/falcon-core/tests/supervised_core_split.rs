@@ -797,8 +797,9 @@ fn negative_control_split_host_without_tuning_diverges() {
 // only as the setpoint the supervisor derives. So this twin flies both hosts
 // through: a Mission with a MOVING streamed target; the stream going stale
 // (non-finite targets) into the offboard-stale HOLD with failsafe bit 8; a
-// landing; and a SECOND takeoff in the same process with a lagging rotor
-// response and ESC RPM telemetry, the case the re-arm exists for. Bit-exact
+// landing; and a SECOND takeoff in the same process with an ASYMMETRIC
+// spin-up (one rotor's ESC soft-starts) and ESC RPM telemetry, the case the
+// re-arm exists for. Bit-exact
 // every tick, and each negative control below must diverge.
 
 /// What the follow twin's split side is given, for its negative controls.
@@ -884,9 +885,23 @@ struct FollowSeen {
     touchdowns: u32,
 }
 
-/// The first-order rotor lag flown during each takeoff: the spin-up
-/// transient the FDI's guard exists for (as in tests/fdi_second_flight.rs).
-const SPINUP_LAG_S: f32 = 0.05;
+/// ASYMMETRIC SPIN-UP (#609 finding 17). Since the residual rejects what all
+/// four rotors share, a uniform spin-up lag no longer produces a residual at
+/// all, so a dropped re-arm stopped diverging. One rotor that spins up LATER
+/// than the rest does: rotor `ASYM_ROTOR`'s ESC ramps its output linearly over
+/// `ASYM_SOFTSTART_S` from the takeoff command (a soft-start the other three
+/// ESCs do not have). Its residual is differential, which is what a rotor-out
+/// looks like, and ONLY the spin-up guard keeps it from being isolated: the
+/// ramp is over well inside the guard's 0.2 s. Both plants are fed alike.
+///
+/// Until finding 17 this twin flew each takeoff with a UNIFORM 50 ms rotor
+/// lag instead; that transient is common-mode and now produces no residual,
+/// so it no longer discriminates. The plant here has NO rotor lag: combined
+/// with a 50 ms lag, the same soft-start is isolated ~0.23 s into the FIRST
+/// takeoff, past the guard, with or without the common-mode rejection (a
+/// separate, pre-existing FDI sensitivity, reported on #609).
+const ASYM_ROTOR: usize = 2;
+const ASYM_SOFTSTART_S: f32 = 0.1;
 const HOLD_TARGET: [f32; 3] = [0.0, 0.0, -CRUISE];
 
 fn run_hosts_follow<P: PartitionSeam + Default>(mutation: FollowMut) -> Result<FollowSeen, String> {
@@ -988,8 +1003,14 @@ fn run_hosts_follow<P: PartitionSeam + Default>(mutation: FollowMut) -> Result<F
         if fnav != snav {
             return Err(format!("nav-state differs at tick {tick} (phase {phase})"));
         }
-        pf.write_motors(&bf.motors);
-        ps.write_motors(&bs.motors);
+        let (mut mf, mut ms) = (bf.motors, bs.motors);
+        if matches!(phase, 1 | 8) {
+            let ramp = (phase_ticks as f32 * DT / ASYM_SOFTSTART_S).min(1.0);
+            mf[ASYM_ROTOR] *= ramp;
+            ms[ASYM_ROTOR] *= ramp;
+        }
+        pf.write_motors(&mf);
+        ps.write_motors(&ms);
         seen.ticks += 1;
         phase_ticks += 1;
         if fr.is_some() {
@@ -1007,8 +1028,6 @@ fn run_hosts_follow<P: PartitionSeam + Default>(mutation: FollowMut) -> Result<F
         match phase {
             0 | 7 if fm == Mode::Armed => {
                 both(&mut fused, &mut split, Event::RequestTakeoff);
-                pf.motor_tau = SPINUP_LAG_S;
-                ps.motor_tau = SPINUP_LAG_S;
                 seen.flights += 1;
                 go!(if phase == 0 { 1 } else { 8 });
             }
@@ -1016,8 +1035,6 @@ fn run_hosts_follow<P: PartitionSeam + Default>(mutation: FollowMut) -> Result<F
                 both(&mut fused, &mut split, Event::Arm)
             }
             1 | 8 if fm == Mode::Loiter => {
-                pf.motor_tau = 0.0;
-                ps.motor_tau = 0.0;
                 go!(if phase == 1 { 2 } else { 9 });
             }
             1 | 8 if fm != Mode::Takeoff => {
