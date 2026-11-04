@@ -1,0 +1,19 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P10
+    type: sw-req
+    title: "BP-P10 — The store holds at most MAX_BUNDLES entries and MAX_BYTES bytes and insertion never allocates"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      The bundle store is fixed-capacity. Neither bound is ever exceeded, and no
+      operation allocates.
+    tags: [falcon, relay, relay-bp, dtn, store, bounded, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Verus invariant (verified source, stripped to plain) and Kani
+        harnesses in a plain kani_proofs.rs sibling, in relay-cfdp style.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

@@ -1,0 +1,18 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P15
+    type: sw-req
+    title: "BP-P15 — Status reports (generation disabled by default; deletion, forwarded and delivered reports per RFC 9171 6.1.1)"
+    status: draft
+    description: >
+      DEFERRED by maintainer decision 2026-11-03. Generation is off by default
+      (RFC 9171 5.1) and optional in the CCSDS 734.20 PICS. When enabled, reports
+      encode per 6.1.1 and administrative bundles never trigger reports.
+    tags: [falcon, relay, relay-bp, dtn, later, status-reports, issue-626]
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Method: vectors and unit tests.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

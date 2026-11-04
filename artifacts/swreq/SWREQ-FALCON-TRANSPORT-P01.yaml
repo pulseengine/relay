@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "TRANSPORT-P01 — the cascade seam shall have ONE supported transport binding, so an integrator does not invent a fifth"
     status: implemented
-    release: falcon-v1.141.0
+    release: falcon-v1.142.0
     description: >
       *** STILL `implemented` ON 2026-11-04, AND NOW FOR ITS FALSIFICATION
       CLAUSE, NOT FOR #611. *** #611 merged (34819cf), and FV-FALCON-TRANSPORT-
@@ -386,7 +386,7 @@ artifacts:
       MEASURED: cargo test -p falcon-hitl --all-targets = 19 passed / 0 failed
       (debug, all targets, as CI runs it), --doc = 0, fmt clean, clippy clean.
 
-    tags: [requirement, falcon, transport, seam, hitl, v1.141]
+    tags: [requirement, falcon, transport, seam, hitl, v1.142]
     links:
       - type: derives-from
         target: SYSREQ-FALCON-010

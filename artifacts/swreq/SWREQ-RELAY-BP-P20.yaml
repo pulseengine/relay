@@ -1,0 +1,19 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P20
+    type: sw-req
+    title: "BP-P20 — Static next-hop route table: destination node to neighbour"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      A fixed-capacity static route table maps a destination node to a neighbour.
+      No contact plan is consulted. Contact-plan earliest-arrival routing is
+      explicitly later (SWREQ-RELAY-BP-P21).
+    tags: [falcon, relay, relay-bp, dtn, routing, issue-626]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: unit tests and Kani bounds.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

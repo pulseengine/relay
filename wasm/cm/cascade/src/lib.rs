@@ -71,8 +71,9 @@ unsafe impl<T> Sync for SingleThreaded<T> {}
 /// stored vehicle tuning, supervisor configuration and calibration.
 ///
 /// SUPERVISOR-P01 clause 1: a `FlightSupervisor`, not a bare `FlightCore`, so
-/// the mode machine, the failsafe arbiter and the 20 pre-arm rows execute
-/// INSIDE the published artifact. Before that the shipped component was, in
+/// the mode machine, the failsafe arbiter and every pre-arm row (all
+/// `relay_preflight::CHECK_COUNT` of them) execute INSIDE the published
+/// artifact. Before that the shipped component was, in
 /// #414's words, "a stabiliser with no supervisor".
 ///
 /// THIS FILE NO LONGER IMPLEMENTS THE SEAM'S RULES (#609, single-source
@@ -439,7 +440,7 @@ impl ObserverGuest for Component {
 /// THE COMMAND DIRECTION (SUPERVISOR-P01 clause 1 + 4).
 ///
 /// Before this the `cascade` world exported `step` and `configure` and nothing
-/// else, so the mode machine, the failsafe arbiter and all 20 pre-arm rows were
+/// else, so the mode machine, the failsafe arbiter and the pre-arm rows were
 /// implemented, tested, Kani-proven in places — and UNREACHABLE from the shipped
 /// seam. That is ORPHAN-P01's fourth state (implemented, verified, advertised,
 /// unreachable) occurring at the seam rather than inside a crate.

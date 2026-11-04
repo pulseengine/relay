@@ -1,0 +1,19 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P50
+    type: sw-req
+    title: "BP-P50 — Fragmentation and reassembly"
+    status: draft
+    description: >
+      UNSLOTTED. Lifts the no-fragmentation decision (SWREQ-RELAY-BP-P07).
+      Reassembly is mandatory at a destination that delivers fragments. RFC 9171
+      errata 8376 and 8377 (fragmentation extension-block rules) are open and must
+      be read before design.
+    tags: [falcon, relay, relay-bp, dtn, later, fragmentation, issue-626]
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Method: to be defined with the slice.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

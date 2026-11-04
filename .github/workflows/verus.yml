@@ -1,25 +1,29 @@
 name: Verus
 
-# Kernel-checks the Lean 4 proofs under proofs/lean/ against Mathlib via
-# rules_lean (Bazel). These proofs (WCET bounds, backpressure safety,
-# compositional WCET, and the geometric/position/strict Lyapunov stability
-# certificates) were authored + locally kernel-verified but never gated in
-# CI — the same orphaned-proof gap that left the Kani control/estimator
-# harnesses unenforced until v1.104. This workflow makes `bazel test
-# //proofs/lean:all` a required check so a Mathlib/toolchain bump or an
-# edit that breaks a proof cannot land silently.
+# Runs every `verus_test` target declared in the ROOT BUILD.bazel through
+# rules_verus (Bazel). The targets are DISCOVERED with `bazel query`, not
+# listed (see the run step), and the step asserts that Verus reported verified
+# functions, so an empty or silently-skipped run fails. The targets had been
+# defined and never executed (#364).
 #
-# Separate workflow (not the cascade Bazel job): the first run fetches the
-# Lean 4.29.1 toolchain + builds/fetches Mathlib v4.29.1 oleans (several GB,
-# minutes) — heavier than the component-model cascade build, and it should
-# gate on its own verdict.
+# NOT A REQUIRED CHECK. Branch protection on main requires 10 contexts and
+# "Verus proofs" is not one of them (measured 2026-11-04 with
+# `gh api repos/pulseengine/relay/branches/main/protection`). The reason is in
+# the trigger below: PR runs are path-filtered and there is no `merge_group`
+# trigger. A required context that never reports would hold a PR, and the merge
+# queue, forever. push:main runs unfiltered, so a break shows up red on main;
+# it does not block the merge that caused it. The verification gate reports a
+# Verus step as `enforced-by-verus-gate` after checking only that the cited
+# target exists in BUILD.bazel (scripts/run-falcon-verification.py), not that
+# this workflow passed. (This header used to be a verbatim copy of lean.yml's,
+# which described Lean and called it required.)
 
 on:
   push:
     branches: [main]
-  # PR runs are path-filtered (CI diet): the Lean proofs (Lyapunov/WCET) are
-  # self-contained under proofs/lean. NON-REQUIRED check; skip never blocks a
-  # merge. push:main stays UNFILTERED (backstop).
+  # PR runs are path-filtered (CI diet; the paths are below). NON-REQUIRED
+  # check, so a skip never blocks a merge. push:main stays UNFILTERED
+  # (backstop).
   pull_request:
     branches: [main]
     # THESE WERE LEAN'S PATHS (#418). This workflow is a copy of lean.yml and
@@ -41,7 +45,8 @@ on:
 
 concurrency:
   # PRs and non-main branch pushes: cancel superseded runs.
-  # Main pushes: never cancel — required check, evidence preservation.
+  # Main pushes: never cancel, to keep the evidence. (Not a required check;
+  # see the header.)
   group: verus-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 

@@ -19,8 +19,12 @@ a meta-registry that indexes OCI registries rather than hosting packages itself.
 ## What the release does automatically
 
 `.github/workflows/release.yml` (flight-component job) publishes **each cascade
-stage as its own cosign-signed OCI entity** (jess#167 decision 5). Per stage, what
-it is — the same text is the package's OCI description, checked by
+stage as its own cosign-signed OCI entity** (jess#167 decision 5). The set is
+`SLUGS` in that step (`release.yml:652`), pushed to the NESTED path
+`ghcr.io/<owner>/falcon/<slug>` (`release.yml:677`, since v1.133; the flat
+`falcon-<stage>` packages stopped at 1.131.1 and are not updated). It is a
+subset of what the bundle carries (`BUNDLE_DIRS`, `scripts/build-components.sh:55`,
+which also has `cascade`). Per stage, what it is — the same text is the package's OCI description, checked by
 `scripts/check-component-claims.rs`:
 
 ```
@@ -34,7 +38,7 @@ ghcr.io/pulseengine/falcon/mixer:<full-version>      # quadrotor control allocat
 ```
 
 Whether the legacy stages keep being published, and whether `falcon-cascade`
-joins OCI, is SWREQ-FALCON-ORPHAN-P01 (v1.141) — announced to consumers before
+joins OCI, is SWREQ-FALCON-ORPHAN-P01 (`release: falcon-v1.142.0` in rivet) — announced to consumers before
 anything they pull changes.
 
 Each is built **WASI-free** (`--no-default-features`, so it lowers to bare metal
@@ -49,8 +53,8 @@ embedded metadata contract (below) so its wasm.directory listing is real.
 Pull + verify:
 
 ```sh
-wkg oci pull ghcr.io/pulseengine/falcon/flight:1.127.0 -o falcon-flight.wasm
-cosign verify ghcr.io/pulseengine/falcon/flight:1.127.0 \
+wkg oci pull ghcr.io/pulseengine/falcon/flight:1.140.0 -o falcon-flight.wasm
+cosign verify ghcr.io/pulseengine/falcon/flight:1.140.0 \
   --certificate-identity-regexp \
     'https://github.com/pulseengine/relay/.github/workflows/release.yml@.*' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
@@ -60,9 +64,11 @@ cosign verify ghcr.io/pulseengine/falcon/flight:1.127.0 \
 
 1. **Make the ghcr package public.** ghcr packages are created *private* by
    default; wasm.directory can only index a public package. After the first
-   tagged release populates it, in the org's package settings set
-   `pulseengine/falcon-flight` visibility to **public** and link it to the
-   `relay` repo. (One-time; subsequent pushes inherit the setting.)
+   tagged release populates it, in the org's package settings set each
+   `pulseengine/falcon/<stage>` package's visibility to **public** and link it
+   to the `relay` repo. (One-time per package; subsequent pushes inherit the
+   setting. A NEW path is a new package, so the v1.133 move to nested paths
+   needed this again for every stage.)
 2. **Register the namespace with wasm.directory.** Publishing the bytes (the
    `wkg oci push` above) and *indexing* in the meta-registry are two separate
    steps — the push does not list the package in the searchable index. Indexing
@@ -78,8 +84,8 @@ cosign verify ghcr.io/pulseengine/falcon/flight:1.127.0 \
 
      - **kind**: `component`
      - **namespace**: `pulseengine`
-     - **package name**: `falcon-flight`
-     - **repository**: `falcon-flight`
+     - **package name**: `falcon-flight` (the display name stays flat)
+     - **repository**: `falcon/flight` (the nested OCI path)
      - **OCI registry** (new namespaces only): `ghcr.io/pulseengine`
 
    Submitting it auto-opens a PR adding `registry/pulseengine.toml`:
@@ -91,18 +97,17 @@ cosign verify ghcr.io/pulseengine/falcon/flight:1.127.0 \
 
    [[component]]
    name = "falcon-flight"
-   repository = "falcon-flight"
+   repository = "falcon/flight"
    ```
 
    A **new namespace** is flagged for maintainer review, so the ghcr package must
    already exist and be **public** (step 1) before submitting — an unpullable
    entry is rejected. Do this only after a real release has populated the package.
 
-   > **Entries need UPDATING for the nested paths (v1.133).** The registered
-   > entries point at the flat repositories (`repository = "falcon-rate"`), but
-   > releases now publish to the nested path (`ghcr.io/pulseengine/falcon/rate`).
-   > Until the entries are updated the listings keep resolving to the OLD
-   > repositories, which stop receiving new versions. The target shape mirrors
+   > **Entries were moved to the nested paths (v1.133).** As of 2026-11-04,
+   > `registry/pulseengine.toml` in `yoshuawuyts/wasm.directory` lists all six
+   > published stages (`falcon-{flight,iekf,position,attitude,rate,mixer}`), each with
+   > `repository = "falcon/<stage>"` (plus `gale-nano`). The shape mirrors
    > wasi's (display name flat, repository nested):
    >
    > ```toml
@@ -116,11 +121,15 @@ cosign verify ghcr.io/pulseengine/falcon/flight:1.127.0 \
    > ```
    >
    > A `registry-entry` issue ADDS an entry; changing an existing one needs a PR
-   > against `registry/pulseengine.toml`. Do it after the first release that
-   > publishes to the nested paths, so the entries never point at nothing.
+   > against `registry/pulseengine.toml`. Change an entry only after a release
+   > has published to its new path, so the entry never points at nothing. The
+   > `[[interface]]` entry above is the target shape for when `falcon-cascade`
+   > joins OCI. It is not registered and not published today.
 
    Adding a component to an **existing** namespace auto-merges (no maintainer
-   review) — only a brand-new namespace is held for review. Registered so far:
+   review) — only a brand-new namespace is held for review. Registration history
+   (the issue/PR numbers are on `yoshuawuyts/wasm.directory`; current state is
+   the toml above):
 
    | component | wasm.directory | note |
    |---|---|---|
@@ -129,7 +138,7 @@ cosign verify ghcr.io/pulseengine/falcon/flight:1.127.0 \
    | `falcon-position` | filed #475 → PR #479 | |
    | `falcon-attitude` | filed #476 → PR #480 | |
    | `falcon-mixer` | filed #477 → PR #481 | |
-   | `falcon-rate` | **HELD — do not register yet** | published 1.129.0 is a CORE MODULE, not a component; register after v1.130 republishes it |
+   | `falcon-rate` | registered (listed in `registry/pulseengine.toml`, 2026-11-04) | was HELD at 1.129.0, which was a CORE MODULE, not a component (see below) |
 
    **Verify the payload before registering.** The OCI `config.mediaType` reads
    `application/vnd.wasm.config.v0+json` whether or not the bytes are actually a

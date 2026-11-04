@@ -1,0 +1,21 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P30
+    type: sw-req
+    title: "BP-P30 — The engine emits Forward actions; a full MessageTransport leaves the bundle in the store without loss or duplication"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      The convergence-layer seam is one MessageTransport<BundleFrame> per
+      neighbour. The engine emits Forward{neighbour, frame} actions. If the
+      transport refuses the push (full), the bundle stays in the store: not lost,
+      not duplicated. No transport implementation lives in the verified core; UDP,
+      QUIC and on-board adapters live outside it, in the consumer or in host/.
+    tags: [falcon, relay, relay-bp, dtn, cla, seam, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Kani with a bounded SpscRing as the transport.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

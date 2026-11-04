@@ -106,7 +106,8 @@ jobs:
   gz-endurance:
     name: gz endurance watch (the real ceiling)
     # PINNED, NOT ubuntu-latest (2026-10-21). `ubuntu-latest` was re-pointed to
-    # ubuntu-26.04 "resolute" under this REQUIRED gate, and OSRF publishes only
+    # ubuntu-26.04 "resolute" under the REQUIRED gz gate (gazebo.yml; this soak
+    # job is scheduled and not required), and OSRF publishes only
     # gz-jetty for resolute — `apt-get install gz-harmonic` then fails with
     # "E: Unable to locate package gz-harmonic", exit 100, before a single tick
     # flies. Measured from the run logs: the last green run reports
@@ -401,7 +402,8 @@ jobs:
   wasm-endurance:
     name: wasm endurance watch (BOTH PATHS)
     # PINNED, NOT ubuntu-latest (2026-10-21). `ubuntu-latest` was re-pointed to
-    # ubuntu-26.04 "resolute" under this REQUIRED gate, and OSRF publishes only
+    # ubuntu-26.04 "resolute" under the REQUIRED gz gate (gazebo.yml; this soak
+    # job is scheduled and not required), and OSRF publishes only
     # gz-jetty for resolute — `apt-get install gz-harmonic` then fails with
     # "E: Unable to locate package gz-harmonic", exit 100, before a single tick
     # flies. Measured from the run logs: the last green run reports

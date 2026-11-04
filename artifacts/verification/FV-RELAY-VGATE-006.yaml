@@ -123,7 +123,7 @@ artifacts:
       appended command never ran. It now reads `$GITHUB_OUTPUT` as a file from
       outside the shell, the way Actions does. A step that exits early is the
       normal case, not the odd one.
-    tags: [verification, relay, verification-gate, kani, scope, ci, v1.141]
+    tags: [verification, relay, falcon, verification-gate, kani, scope, ci, v1.141]
     fields:
       method: automated-test
       steps:

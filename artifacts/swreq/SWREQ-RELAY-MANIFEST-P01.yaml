@@ -1,0 +1,100 @@
+artifacts:
+  - id: SWREQ-RELAY-MANIFEST-P01
+    type: sw-req
+    title: "MANIFEST-P01 — every thing relay ships or promises shall be listed once, as rivet artifacts, and a mechanical check shall fail when the repo and the list disagree"
+    status: draft
+    release: falcon-v1.142.0
+    description: >
+      WHY. The 2026-11-04 inventory (read-only, origin/main 6a0fa86) found
+      relay's shipped and promised surface stated by hand in several places,
+      with nothing comparing them. The published component set is listed in
+      five places (BUNDLE_DIRS in scripts/build-components.sh, SLUGS in
+      release.yml, docs/OCI-DISTRIBUTION.md, the wasm.directory entry,
+      bazel.yml's waived/must-build lists). The pre-arm row count is 21 in
+      code and 19/20 in prose. Required-check claims in verus/lean/rocq.yml
+      contradict branch protection. A verified v1.141 artifact
+      (FV-RELAY-VGATE-006) carries no `falcon` tag, so the required gate never
+      re-runs it. Past drift of the same class: Kani crates orphaned from
+      the kani.yml matrix, the v1.133 OCI path move announced to no
+      integrator, the gz pins split between two Cargo.tomls.
+
+      MAINTAINER DECISIONS 2026-11-04:
+        - The manifest is a NEW RIVET ARTIFACT TYPE (not a root TOML), so it
+          lives in the one traceability graph. Each entry cites the
+          requirements and verifications that guard it.
+        - Slice 1 is in falcon-v1.142.0 and is REPORT-ONLY at rollout. Each
+          check starts failing the build once it has been green on one tag.
+          The two checks that only guard against NEW drift (enumerate and
+          lock diff) fail from day one.
+        - Cross-repo: warte PULLS each repo's manifest (the exported release
+          asset) from its latest release and runs the pin-vs-latest-release
+          checks. The schema lives IN RIVET (pulseengine/rivet#1159); the
+          plugin keeps only a thin skill that points at it. The jess#167
+          seam block becomes a view derived from relay's `provides` and
+          jess's `consumes`, which jess#167 still has to agree.
+
+      SLICE 1 SHALL deliver:
+        (1) The artifact types come from rivet's EMBEDDED `manifest` schema,
+            pulseengine/rivet#1159 (the owner decided 2026-11-04, on
+            pulseengine.eu): `provides` and `consumes` types, a pin
+            {kind: tag|rev|sha256|path+ref|oci, value} on every relation,
+            gate links, and `rivet manifest export --format json` producing
+            `pulseengine.manifest.json`, which validates against
+            `pulseengine.manifest/1`. relay is the first real instance, and
+            its definition is posted to #1159 so the embedded schema follows
+            it. The manifest covers only what CROSSES THE REPO BOUNDARY.
+            #1159's `provides.kind` values, posted 2026-11-04 from relay's
+            list:
+              crate (workspace); component (oci, index, world);
+              wit-package (version); release-asset (asset); proof-target
+              (backend kani|verus|rocq|lean); bazel-target (must-build |
+              waived + issue); required-check (context); contract
+              (seam | wire-binding | table, + version; the pre-arm rows and
+              failsafe bits are tables).
+            Kept OUT of the manifest in v1:
+              - named assumption constants (e.g. the FDI lag and stall
+                thresholds) stay ordinary relay requirements with status
+                and evidence, because nothing outside relay consumes them;
+              - cross-file version pins (e.g. gz-transport in two
+                Cargo.tomls) are checked by relay's own tools/manifest-check,
+                because rivet does not parse Cargo.toml.
+            A `constraint` kind can be revisited once a second repo needs
+            one. Where
+            relay needs something #1159 lacks, say so on #1159 rather than
+            forking a local type. DEPENDENCY: a rivet release carrying #1159,
+            pinned in relay's gate. Until then, slice 1 can author the
+            entries but not export them.
+        (2) A generator that derives what is ON DISK (crates, components,
+            WIT packages, harness crates, workflow contexts, release.yml
+            assets, pinned versions) into a committed lock, diffed in CI
+            like the spar->WIT drift gate.
+        (3) Three checks, each with a negative control that proves it can
+            fail:
+              ENUMERATE — anything on disk that has no manifest entry fails;
+              PUBLISH-LISTS — the lists the release consumes agree with the
+                manifest, or better, read it instead of restating it;
+              LOCK-DIFF — the committed lock equals a fresh generation.
+        (4) The lock as a release asset, and the lock diff between the
+            previous tag and the candidate as an input to the review gate
+            (FV-RELAY-REVIEW-1xx).
+      New relay tooling is a small Rust tool under tools/<name>/ with its own
+      [workspace].
+
+      OUT OF SLICE 1 (later slices): the remaining checks from the inventory
+      report (tag coverage vs the gate filter, Kani crates vs matrix,
+      required contexts vs protection, reproducibility pins), the shared
+      schema, warte ingest.
+    tags: [requirement, relay, manifest, inventory, drift, process, v1.142]
+    fields:
+      priority: should
+      req-type: process
+      verification-criteria: >
+        On the v1.142 candidate: the generator's lock is committed and equals
+        a fresh generation; each of ENUMERATE, PUBLISH-LISTS and LOCK-DIFF
+        goes red under its negative control (add an unlisted component;
+        drift one publish list; edit the lock by hand) and green on main;
+        the release carries the lock as an asset; the v1.142 review cites
+        the lock diff against falcon-v1.141.0.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-022

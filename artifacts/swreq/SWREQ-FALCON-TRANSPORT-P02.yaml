@@ -1,0 +1,43 @@
+artifacts:
+  - id: SWREQ-FALCON-TRANSPORT-P02
+    type: sw-req
+    title: "TRANSPORT-P02 — the transport binding shall return the vehicle state, so a binding-only host sees the mode and why an arm was refused"
+    status: draft
+    release: falcon-v1.142.0
+    description: >
+      Binding v2 (#614) has no frame for `observer.read-state`. A host that
+      speaks only the binding cannot see the mode, the failsafe flags
+      (including ARM_BLOCKED and bit 8 TARGET_STALE) or the estimate. It
+      learns that an arm was refused only because the motors stay at zero,
+      and the Ack deliberately says "received", not "accepted"
+      (docs/TRANSPORT-BINDING.md, "What this binding does not yet give you").
+      That is SWREQ-FALCON-TRANSPORT-P01's own falsification clause, so P01
+      cannot be verified until this requirement lands.
+
+      Maintainer decision 2026-11-04: SWREQ-FALCON-TRANSPORT-P01 moves to
+      falcon-v1.142.0 together with this requirement, as ONE further wire
+      revision. The frame layout is announced to integrators BEFORE it lands
+      (integrator-neutral; jess#167 is one channel, not the contract).
+      falcon-v1.141.0 ships binding v2 as it stands, with
+      FV-FALCON-TRANSPORT-002 and -004 verified (#630).
+
+      Acceptance:
+        - a State reply frame carrying at least the mode, the failsafe-flags
+          word and the estimate;
+        - the reply echoes the seq of the frame it answers (the binding v2
+          echo rule, #619);
+        - its offsets are tested against the encoder, not typed;
+        - the Kani dispatch harnesses cover the new frame, mutation-tested;
+        - FV-FALCON-TRANSPORT-004's binding-only host observes a refused arm
+          through State, with the deciding row named.
+
+      Falsified if a binding-only host still cannot tell an armed vehicle
+      from a refused arm without reading the motor outputs.
+
+      Related gap, NOT in scope unless decided: the binding has no
+      mission-target frame, so Mission mode's live setpoint (#609 finding 4)
+      cannot be driven by a binding-only host.
+    tags: [requirement, falcon, transport, seam, hitl, v1.142]
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-010

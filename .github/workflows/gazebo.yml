@@ -52,6 +52,11 @@ permissions:
   contents: read
 
 jobs:
+  # NOW REQUIRED. "Gazebo SITL (real gz bridge)" is one of the 10 contexts
+  # branch protection on main requires (measured 2026-11-04 with
+  # `gh api repos/pulseengine/relay/branches/main/protection`). The rest of this
+  # paragraph records why it was NOT required when it was added (#386):
+  #
   # NOT a required status check yet, deliberately, and this is a decision with a
   # deadline rather than an omission. Nobody has ever flown the published wasm
   # components through a physics engine, so whether the last step passes is

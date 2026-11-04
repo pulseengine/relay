@@ -1,0 +1,19 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P32
+    type: sw-req
+    title: "BP-P32 — Contact up and down events drive forwarding and the core performs no I/O"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      ContactUp and ContactDown events are inputs to the engine. Forwarding to a
+      neighbour is attempted only while its contact is up; the engine performs no
+      I/O and reads no clock except through its inputs.
+    tags: [falcon, relay, relay-bp, dtn, cla, seam, issue-626]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: unit tests and Kani.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

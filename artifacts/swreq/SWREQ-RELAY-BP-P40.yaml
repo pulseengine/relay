@@ -1,0 +1,23 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P40
+    type: sw-req
+    title: "BP-P40 — Payloads are sealed end to end with relay-sec and the sealed plaintext binds the primary-block identity"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      Maintainer decision 2026-11-03. The payload is sealed with relay-sec. The
+      source EID, creation timestamp and sequence number (and the destination) are
+      bound INSIDE the sealed payload. The receiver rejects a bundle whose primary
+      block does not match the bound values, so a forwarder that edits the source,
+      destination, creation timestamp or sequence is detected. Hop count, lifetime
+      and Previous Node remain mutable by design and are not claimed as protected.
+    tags: [falcon, relay, relay-bp, dtn, security, sealing, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Kani plus negative tests in which a forwarder edits destination,
+        source, creation timestamp or sequence and the receiver rejects.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

@@ -1,0 +1,20 @@
+artifacts:
+  - id: SWREQ-RELAY-BP-P14
+    type: sw-req
+    title: "BP-P14 — Duplicate suppression by bundle ID within a bounded seen-set"
+    status: proposed
+    release: falcon-v1.143.0
+    description: >
+      A bundle with the same (source, creation timestamp, sequence) as one already
+      seen is dropped. The seen-set is bounded by MAX_SEEN and retires entries by
+      bundle lifetime. Behaviour at saturation is defined and tested, not
+      implicit.
+    tags: [falcon, relay, relay-bp, dtn, store, duplicates, issue-626]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Method: Kani, including the saturated case.
+    links:
+      - type: derives-from
+        target: SYSREQ-RELAY-BP-001

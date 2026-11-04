@@ -50,9 +50,11 @@ artifacts:
         falcon-hitl      the HITL link backend
 
       And within reachable code: `FlightSupervisor` (every failsafe, the mode
-      machine, all 19 pre-arm rows) is not exported by the published component
-      (#414); 7 of the 19 pre-arm rows are never fed, so their reason strings
-      are unreachable; the blackbox recorder records no flight; the in-flight
+      machine, every pre-arm row) is not exported by the published component
+      (#414); 7 of the 19 pre-arm rows the table had when this was written were
+      never fed, so their reason strings are unreachable (the row count is
+      `CHECK_COUNT` in crates/relay-preflight/plain/src/lib.rs; the 7 is not
+      re-measured against it); the blackbox recorder records no flight; the in-flight
       tuning link is test-only; and 5 of the 12 FlightBackend channels have no
       driver trait at all, so they cannot be implemented on real hardware even
       in principle.
