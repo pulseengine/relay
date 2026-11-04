@@ -430,7 +430,11 @@ impl Physics for GazeboPhysics {
 #[cfg(feature = "gazebo")]
 mod gz_real {
     use super::{ImuSample, Physics};
-    use crossbeam_channel::Receiver;
+    // gz-transport 0.11 hands out `async_channel` receivers (0.10 handed out
+    // crossbeam ones). Both are bounded and drop the OLDEST message when
+    // full, so the queue behaviour this bridge was tuned against is the same;
+    // only the receive methods differ — see `recv_timeout` / `drain` below.
+    use async_channel::{Receiver, TryRecvError};
     use gz_msgs::actuators::Actuators;
     use gz_msgs::imu::IMU;
     use gz_msgs::magnetometer::Magnetometer;
@@ -440,6 +444,35 @@ mod gz_real {
     use gz_transport::{Node, Publisher};
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+
+    /// Blocking receive with a timeout, on the sync half of an
+    /// `async_channel::Receiver` (gz-transport 0.11 dropped crossbeam, which had
+    /// `recv_timeout` built in). Same contract as crossbeam's: `Ok` as soon as
+    /// a message is queued, `Err` once `timeout` has elapsed with none, and
+    /// `Err` IMMEDIATELY if the channel is closed rather than sleeping out the
+    /// timeout. Polls at 1 ms — the only caller waits for a 5 Hz NavSat fix
+    /// inside a 15 s datum window, so 1 ms of latency is immaterial. No async
+    /// runtime: `try_recv` is synchronous.
+    fn recv_timeout<T>(rx: &Receiver<T>, timeout: std::time::Duration) -> Result<T, ()> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => return Ok(msg),
+                Err(TryRecvError::Closed) => return Err(()),
+                Err(TryRecvError::Empty) => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    /// Every message queued right now, without blocking — what crossbeam's
+    /// `try_iter` was. Stops on Empty and on Closed alike, as `try_iter` did.
+    fn drain<T>(rx: &Receiver<T>) -> impl Iterator<Item = T> + '_ {
+        std::iter::from_fn(move || rx.try_recv().ok())
+    }
 
     // The gz.msgs types (Actuators / IMU / NavSat / Pose_V / Magnetometer /
     // Odometry) now come from the `gz-msgs` crate (protobuf), imported above —
@@ -637,7 +670,7 @@ mod gz_real {
                 let mut last_alt: Option<f64> = None;
                 let mut stable = 0u32;
                 while start.elapsed().as_secs_f32() < 15.0 {
-                    let Ok(fix) = navsat_rx.recv_timeout(std::time::Duration::from_millis(100))
+                    let Ok(fix) = recv_timeout(&navsat_rx, std::time::Duration::from_millis(100))
                     else {
                         continue;
                     };
@@ -706,7 +739,7 @@ mod gz_real {
             // IMU: ENU body → NED body (accel + gyro).
             let mut got_imu = 0u64;
             let mut last_imu = None;
-            for msg in self.imu_rx.try_iter() {
+            for msg in drain(&self.imu_rx) {
                 got_imu += 1;
                 let accel = msg
                     .linear_acceleration
@@ -734,7 +767,7 @@ mod gz_real {
             // NavSat: lat/lon/alt → local NED via Home.
             let mut got_nav = 0u64;
             let mut last_pos = None;
-            for msg in self.navsat_rx.try_iter() {
+            for msg in drain(&self.navsat_rx) {
                 got_nav += 1;
                 last_pos = Some(self.home.project_to_ned_m(
                     msg.latitude_deg,
@@ -748,7 +781,7 @@ mod gz_real {
             }
             // Odometry twist: TRUE body velocity ENU → NED.
             let mut last_vel = None;
-            for msg in self.odom_rx.try_iter() {
+            for msg in drain(&self.odom_rx) {
                 if let Some(tw) = msg.twist.as_ref() {
                     if let Some(lin) = tw.linear.as_ref() {
                         last_vel = Some(enu_to_ned([lin.x as f32, lin.y as f32, lin.z as f32]));
@@ -760,7 +793,7 @@ mod gz_real {
             }
             // Pose_V: model-root orientation → NED yaw (heading "compass").
             let mut last_yaw = None;
-            for msg in self.pose_rx.try_iter() {
+            for msg in drain(&self.pose_rx) {
                 for p in &msg.pose {
                     if let Some(o) = p.orientation.as_ref() {
                         let n2 = o.w * o.w + o.x * o.x + o.y * o.y + o.z * o.z;
@@ -789,7 +822,7 @@ mod gz_real {
             // Magnetometer (optional): gz NED-native field → our NED body via Rz(−90°).
             if let Some(rx) = &self.mag_rx {
                 let mut last_mag = None;
-                for msg in rx.try_iter() {
+                for msg in drain(rx) {
                     if let Some(f) = msg.field_tesla.as_ref() {
                         let (x, y, z) = (f.x as f32, f.y as f32, f.z as f32);
                         let v = [y, -x, z];
