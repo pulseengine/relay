@@ -370,6 +370,16 @@ jobs:
             echo "::error::gz never published $IMU within 60 s -- the ring was NOT measured"
             exit 1
           fi
+          # ADVERTISED IS NOT PUBLISHING (#609 finding 14). A topic can be
+          # listed with nothing ever sent on it, and the gz adapter zero-fills
+          # a silent IMU, which would measure as the quietest hover there is.
+          # Block on one live sample, as gazebo.yml's gate does.
+          timeout 20 gz topic -e -t "$IMU" -n 1 > /tmp/gz-ring-imu-sample.txt || true
+          if [ ! -s /tmp/gz-ring-imu-sample.txt ]; then
+            pkill -f 'gz sim' 2>/dev/null || true
+            echo "::error::gz advertised $IMU but produced no sample in 20 s -- the ring was NOT measured"
+            exit 1
+          fi
           OUT=/tmp/ring-rotorout.txt
           # `-e` would end the step on a FAIL verdict (exit 1) BEFORE the parse
           # below -- the same trap #460 fixed in the analytic tier. The scenario
@@ -380,28 +390,12 @@ jobs:
             2>&1 | tee "$OUT" || RC=$?
           pkill -f 'gz sim' 2>/dev/null || true
           echo "harness exit=$RC (not this check's verdict -- the pre-kill window is)"
-          # Parse the summary line the harness now prints on every run.
-          LINE=$(grep -m1 '^  ring: ' "$OUT" || true)
-          if [ -z "$LINE" ]; then
-            echo "::error::no 'ring:' summary line — the harness did not report the pre-kill window, so this check verified NOTHING"
-            exit 1
-          fi
-          echo "::notice::$LINE"
-          RMS=$(printf '%s' "$LINE" | sed -E 's/.*prekill_rp_rate_rms=([0-9.]+)rad\/s.*/\1/')
-          SAT=$(printf '%s' "$LINE" | sed -E 's/.*prekill_saturated_frac=([0-9.]+).*/\1/')
-          TICKS=$(printf '%s' "$LINE" | sed -E 's/.*prekill_ticks=([0-9]+).*/\1/')
-          # EMPTY SCOPE MUST NOT EQUAL PASS: zero pre-kill ticks means the window
-          # never existed, which would make any bar below vacuously true.
-          if [ "${TICKS:-0}" -lt 100 ]; then
-            echo "::error::only ${TICKS:-0} pre-kill ticks — too few to judge the hover; the bar below would pass vacuously"
-            exit 1
-          fi
-          echo "pre-kill: ticks=$TICKS  rp_rate_rms=$RMS rad/s  saturated_frac=$SAT"
-          if awk -v r="$RMS" 'BEGIN { exit !(r >= 0.5) }'; then
-            echo "::error::THE RING IS PRESENT: pre-kill roll/pitch RMS ${RMS} rad/s >= 0.5 (quiet is ~0.0014, ringing ~2). Saturated fraction ${SAT}. #270"
-            exit 1
-          fi
-          echo "::notice::ring quiet — pre-kill roll/pitch RMS ${RMS} rad/s < 0.5, saturated fraction ${SAT} (#270)"
+          # Judge the summary line the harness prints on every run. The
+          # parse-and-bar lives in a script so the logic CI runs is the logic
+          # exercised against captured good and bad lines (#609 finding 14):
+          # inline, it read NaN/inf RMS, a non-numeric tick count and a
+          # zero-filled dead IMU as "ring quiet".
+          bash scripts/soak-ring-check.sh "$OUT"
 
 
   wasm-endurance:
