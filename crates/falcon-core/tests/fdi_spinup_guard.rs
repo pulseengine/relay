@@ -14,17 +14,24 @@
 //! (`FDI_SPINUP_GUARD_S`, fixed TIME at the resynced rate) and the residual is
 //! computed against a first-order 50 ms lag model of the command
 //! (`FDI_ROTOR_LAG_TAU_S`, an ASSUMPTION pending real ESC data), keeping
-//! finding 17's per-tick common-mode subtraction.
+//! finding 17's per-tick common-mode subtraction. Inside the guard a
+//! SPIN-UP STALL CHECK (decision "(c)", `FDI_STALL_RPM_FRAC`,
+//! `FDI_STALL_CMD_MIN`, `FDI_STALL_WINDOW_S`: RPM below 5 % of full scale
+//! while commanded above 20 %, for 0.1 s unbroken, all assumptions pending
+//! BOM ESC startup data) isolates a FULLY stalled rotor without waiting for
+//! the guard.
 //!
 //! Every pre-existing FDI suite starts AFTER the guard has released (a
 //! settled Loiter, or a second flight), so none of them exercised it. These
 //! fly the SUPERVISED spin-up from the ground, as a vehicle does.
 //!
 //! WHAT THIS DOES NOT COVER. SimBackend only. Its ground contact holds the
-//! airframe while a dead rotor spins up; that is what keeps the dead-at-
-//! spin-up tilt bounded for 0.3 s, and it has not been checked on gz or on
-//! hardware. An AIRBORNE start is a different case: see the lib test
-//! `the_fdi_engages_after_a_fixed_time_at_250_hz_and_1_khz`.
+//! airframe while a WEAK (not stalled) rotor spins up until the guard
+//! releases; that has not been checked on gz or on hardware. The AIRBORNE
+//! stalled-rotor start is the lib test
+//! `an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check`.
+//! A sensorless ESC that reads zero RPM for longer than the window while it
+//! starts commutating would be isolated as dead: not modelled here.
 
 use falcon_core::relay_fsm::{Event, Mode};
 use falcon_core::{FlightBackend, FlightSupervisor, ImuSample, SimBackend};
@@ -35,11 +42,25 @@ const LEVEL: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 /// The production guard, restated so a change to it is a visible change
 /// here too.
 const GUARD_S: f32 = 0.3;
+/// The production stall window (`FDI_STALL_WINDOW_S`), restated likewise.
+const STALL_S: f32 = 0.1;
+
+/// How the rig delivers ESC RPM telemetry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RpmFeed {
+    /// Every tick (the default).
+    Always,
+    /// Never: `read_motor_rpm` is `None` (the seam's `motor-rpm: none`).
+    Never,
+    /// Only on even spin-up ticks; `None` in between (a lossy link).
+    EveryOther,
+}
 
 /// SimBackend with one ASYMMETRIC ESC: from spin-up on, rotor `rotor`
 /// receives its command scaled by `min(1, t / ramp_s)` (a soft-start the other
 /// three ESCs do not have). Optionally a rotor is failed at spin-up tick
-/// `kill_at`.
+/// `kill_at`, or is WEAK from spin-up (its command scaled by a constant
+/// gain: it spins, so it is not stalled), and the RPM feed can be lossy.
 struct Asym {
     b: SimBackend,
     rotor: usize,
@@ -47,6 +68,8 @@ struct Asym {
     /// Ticks since spin-up (0 = the first flying tick); None on the ground.
     k: Option<u32>,
     kill_at: Option<(u32, usize)>,
+    weak: Option<(usize, f32)>,
+    rpm: RpmFeed,
     dt: f32,
 }
 
@@ -75,6 +98,9 @@ impl FlightBackend for Asym {
             if self.ramp_s > 0.0 {
                 m[self.rotor] *= (k as f32 * self.dt / self.ramp_s).min(1.0);
             }
+            if let Some((r, g)) = self.weak {
+                m[r] *= g;
+            }
         }
         self.b.write_motors(&m);
     }
@@ -94,7 +120,14 @@ impl FlightBackend for Asym {
         self.b.read_baro()
     }
     fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
-        self.b.read_motor_rpm()
+        match self.rpm {
+            RpmFeed::Always => self.b.read_motor_rpm(),
+            RpmFeed::Never => None,
+            RpmFeed::EveryOther => match self.k {
+                Some(k) if k % 2 == 1 => None,
+                _ => self.b.read_motor_rpm(),
+            },
+        }
     }
 }
 
@@ -123,6 +156,31 @@ fn fly(
     dead: Option<usize>,
     after_loiter_s: f32,
 ) -> Flight {
+    fly_rig(
+        hz,
+        ramp_ms,
+        tau_ms,
+        rotor,
+        dead,
+        None,
+        RpmFeed::Always,
+        after_loiter_s,
+    )
+}
+
+/// [`fly`] with a weak rotor and a chosen RPM feed.
+#[allow(clippy::too_many_arguments)]
+fn fly_rig(
+    hz: u32,
+    ramp_ms: u32,
+    tau_ms: u32,
+    rotor: usize,
+    dead: Option<usize>,
+    weak: Option<(usize, f32)>,
+    rpm: RpmFeed,
+    after_loiter_s: f32,
+) -> Flight {
+    let faulted = dead.is_some() || weak.is_some();
     let dt = 1.0 / hz as f32;
     let mut b = SimBackend::new(LEVEL, dt);
     b.ground_contact = true;
@@ -135,6 +193,8 @@ fn fly(
         ramp_s: ramp_ms as f32 / 1000.0,
         k: None,
         kill_at: dead.map(|r| (0, r)),
+        weak,
+        rpm,
         dt,
     };
     let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
@@ -157,12 +217,12 @@ fn fly(
         let tilt = a.b.tilt();
         f.peak_tilt = f.peak_tilt.max(tilt);
         if f.iso.is_none() {
-            if dead.is_some() {
+            if faulted {
                 f.tilt_before_iso = f.tilt_before_iso.max(tilt);
             }
             if let Some(r) = sup.core().failed_motor() {
                 f.iso = Some((k + 1, r, sup.mode()));
-                if dead.is_some() {
+                if faulted {
                     stop = stop.min(k + s(0.5));
                 }
             }
@@ -204,15 +264,15 @@ fn an_asymmetric_esc_spin_up_isolates_no_rotor() {
 }
 
 /// The other side of the guard. A rotor dead from the FIRST flying tick
-/// can only be caught when the guard releases, so the guard is its
-/// detection latency. Every rotor, rotor lag 0 and 50 ms, at 250 Hz and
+/// must not wait out a long guard. Every rotor, rotor lag 0 and 50 ms, at 250 Hz and
 /// 1 kHz: the correct rotor is isolated within 0.3 s of spin-up, with the
 /// true tilt below 0.5 rad until then (the bound
 /// `survives_single_rotor_failure_without_flipping` uses).
 ///
-/// Measured: isolated on the guard's own tick (75 at 250 Hz, 300 at 1 kHz),
-/// tilt <= 0.33 rad. A 0.4 s guard flips the vehicle first (measured in the
-/// finding-18 sweep), so this is the test that holds the guard down.
+/// Since the stall check this is the OUTER bound (the stall window test
+/// below is the tight one): measured 0.104 s / 0.101 s, tilt <= 0.046 rad.
+/// Guard alone it was the guard's own tick (0.3 s), tilt <= 0.33 rad, and a
+/// 0.4 s guard flipped the vehicle first.
 #[test]
 fn a_rotor_dead_from_the_first_tick_is_isolated_within_the_guard() {
     for hz in [250u32, 1000] {
@@ -240,6 +300,124 @@ fn a_rotor_dead_from_the_first_tick_is_isolated_within_the_guard() {
                     f.tilt_before_iso
                 );
             }
+        }
+    }
+}
+
+/// THE STALL CHECK (#609 finding 18, decision "(c)"), on the ground: a rotor
+/// dead from the first flying tick is isolated by the spin-up stall check
+/// once its 0.1 s window has elapsed, not before and within 2 ticks of it,
+/// every rotor, rotor lag 0 and 50 ms, at 250 Hz and 1 kHz, with the true
+/// tilt below 0.1 rad. FAILS on the guard-only design (isolated at 0.3 s,
+/// tilt up to 0.33 rad). The airborne case is the lib test
+/// `an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check`.
+#[test]
+fn a_stalled_rotor_is_isolated_within_the_stall_window() {
+    for hz in [250u32, 1000] {
+        let window = (STALL_S * hz as f32 + 0.5) as u32;
+        for tau in [0u32, 50] {
+            for r in 0..4 {
+                let f = fly(hz, 0, tau, 0, Some(r), 0.0);
+                eprintln!(
+                    "{hz} Hz lag {tau} ms rotor {r} stalled at spin-up: iso {:?}, tilt before iso {:.3} rad",
+                    f.iso, f.tilt_before_iso
+                );
+                let (ticks, got, _) = f.iso.unwrap_or_else(|| {
+                    panic!("{hz} Hz lag {tau}: stalled rotor {r} never isolated")
+                });
+                assert_eq!(got, r, "{hz} Hz lag {tau}: isolated the WRONG rotor");
+                assert!(
+                    ticks >= window && ticks <= window + 2,
+                    "{hz} Hz lag {tau} rotor {r}: isolated at tick {ticks}, window {window}"
+                );
+                assert!(
+                    f.tilt_before_iso < 0.1,
+                    "{hz} Hz lag {tau} rotor {r}: tilt {:.3}",
+                    f.tilt_before_iso
+                );
+            }
+        }
+    }
+}
+
+/// The stall check must NEVER fire on a healthy 300 ms ESC soft-start (the
+/// slowest ramp measured; its longest near-zero run was 68 ms against the
+/// 100 ms window), at any lag, at 250/500/1000 Hz. The stall check acts only
+/// inside the guard, so "never fired" is: no isolation before the guard's
+/// tick. (These cells may still be isolated AFTER the guard, by the
+/// residual: that is the separate known limit below.)
+#[test]
+fn a_300_ms_soft_start_never_trips_the_stall_check() {
+    let mut bad = Vec::new();
+    for hz in [250u32, 500, 1000] {
+        let guard = (GUARD_S * hz as f32 + 0.5) as u32;
+        for tau in [0u32, 20, 30, 40, 50, 80] {
+            for rotor in [0usize, 2] {
+                let f = fly(hz, 300, tau, rotor, None, 0.5);
+                if let Some((t, r, _)) = f.iso {
+                    if t < guard {
+                        bad.push((hz, tau, rotor, t, r));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "the stall check fired on a healthy soft-start: {bad:?}"
+    );
+}
+
+/// Only a FULLY stalled rotor is caught early. A rotor that spins with 40 %
+/// effectiveness from spin-up is not stalled; the residual catches it, and
+/// only once the 0.3 s guard has released (the guard timing the old lib
+/// test asserted for a dead rotor). Both rates, lag 0 and 50 ms.
+#[test]
+fn a_weak_rotor_is_left_to_the_guard() {
+    for hz in [250u32, 1000] {
+        let guard = (GUARD_S * hz as f32 + 0.5) as u32;
+        for tau in [0u32, 50] {
+            let f = fly_rig(hz, 0, tau, 0, None, Some((3, 0.4)), RpmFeed::Always, 0.0);
+            eprintln!(
+                "{hz} Hz lag {tau} ms rotor 3 at 40 %: iso {:?}, tilt before iso {:.3}",
+                f.iso, f.tilt_before_iso
+            );
+            let (ticks, got, _) = f
+                .iso
+                .unwrap_or_else(|| panic!("{hz} Hz lag {tau}: weak rotor never isolated"));
+            assert_eq!(got, 3, "{hz} Hz lag {tau}: wrong rotor");
+            assert!(
+                ticks >= guard && ticks <= guard + (0.02 * hz as f32) as u32,
+                "{hz} Hz lag {tau}: isolated at tick {ticks}, the guard releases at {guard}"
+            );
+        }
+    }
+}
+
+/// MISSING RPM is not evidence of a stall. (1) No RPM at all
+/// (`motor-rpm: none` every tick) with a rotor dead from spin-up: nothing
+/// is isolated (the FDI is inert without telemetry, as before). (2) A lossy
+/// feed, RPM present only every other tick: each missing tick resets the
+/// stall runs, so the stall check never completes its window and the dead
+/// rotor is isolated by the residual at the guard instead, never before it.
+#[test]
+fn missing_rpm_never_trips_the_stall_check() {
+    for hz in [250u32, 1000] {
+        let guard = (GUARD_S * hz as f32 + 0.5) as u32;
+        let none = fly_rig(hz, 0, 0, 0, Some(2), None, RpmFeed::Never, 0.0);
+        eprintln!("{hz} Hz no RPM, rotor 2 dead: iso {:?}", none.iso);
+        assert_eq!(none.iso, None, "{hz} Hz: isolated with NO RPM telemetry");
+        let lossy = fly_rig(hz, 0, 0, 0, Some(2), None, RpmFeed::EveryOther, 0.0);
+        eprintln!(
+            "{hz} Hz RPM every other tick, rotor 2 dead: iso {:?}",
+            lossy.iso
+        );
+        if let Some((t, r, _)) = lossy.iso {
+            assert!(
+                t >= guard,
+                "{hz} Hz: lossy RPM isolated at tick {t} < guard {guard}: the stall check fired on gaps"
+            );
+            assert_eq!(r, 2, "{hz} Hz: wrong rotor");
         }
     }
 }

@@ -1,7 +1,7 @@
 artifacts:
   - id: FV-FALCON-FAULT-004
     type: sw-verification
-    title: "Single-rotor-out FDI noise-robustness — lag-modelled, command-aligned residual + roll/pitch gate + 0.3 s spin-up guard (v1.115, #609 f17/f18)"
+    title: "Single-rotor-out FDI noise-robustness — lag-modelled, command-aligned residual + roll/pitch gate + 0.3 s spin-up guard + spin-up stall check (v1.115, #609 f17/f18)"
     status: implemented
     release: falcon-v1.115.0
     description: >
@@ -71,7 +71,8 @@ artifacts:
            4/8/12 at 250/500/1000 Hz, the production code reproducing the
            prototype's 576 cells exactly; a rotor dead from the first
            flying tick isolated on the guard's own tick (0.300 s), correct
-           rotor, tilt <= 0.327 rad (was caught at 0.2 s); Loiter isolation
+           rotor, tilt <= 0.327 rad (was caught at 0.2 s; with the guard alone,
+           superseded by item 5); Loiter isolation
            3 ticks (unchanged); land-entry isolation at 20-80 ms lag 8-12 ->
            3 ticks; 100 ms gradual decay 39 -> 43 ticks; the noise campaign
            still 0 false / 0 missed, worst latency 2 steps (as on the base).
@@ -80,17 +81,40 @@ artifacts:
            KNOWN LIMITS: (a) a 300 ms ESC soft-start is STILL isolated as a
            rotor-out and flips (the 4/8/12 cells, all ramp 300 ms; named
            test known_limit_a_300_ms_esc_soft_start_is_still_isolated);
-           (b) the guard IS the dead-at-spin-up detection latency and its
-           ceiling is close: a 0.4 s guard is never isolated and flips
-           (mutation measured). The ground contact of SimBackend is what
-           holds the airframe for those 0.3 s; not checked on gz/hardware.
-           (c) AN AIRBORNE START REGRESSED: a core constructed hovering at
-           2 m with a rotor dead from tick 1 (lib test
-           the_fdi_engages_after_a_fixed_time_at_250_hz_and_1_khz) is never
-           isolated with 0.3 s, because the 2 rad/s roll/pitch rate gate
-           shuts at 0.264 s (250 Hz) / 0.261 s (1 kHz), before the guard
-           releases; the 0.2 s guard caught it. Supervised flight spins up
-           on the ground only; this is open with the maintainer (#609 f18).
+           (b) for a rotor that is WEAK but not stalled, the guard is still
+           the detection latency, and its ceiling is close: with the guard
+           alone a 0.4 s guard was never isolated and flipped (mutation
+           measured); SimBackend's ground contact holds the airframe for
+           those 0.3 s, not checked on gz or hardware. (c) the airborne
+           regression the 0.3 s guard introduced (rate gate shut at 0.264 s
+           / 0.261 s, rotor never isolated, tumble) is closed for a FULLY
+           stalled rotor by item 5; for a weak rotor from an airborne start
+           it is not.
+        5. SPIN-UP STALL CHECK (#609 finding 18, maintainer decision
+           2026-11-04 "(c)", falcon-v1.141.0). Inside the guard only, and not
+           behind the attitude/rate gate: a rotor whose achieved
+           effectiveness (RPM / ESC_RPM_FULL) is below FDI_STALL_RPM_FRAC =
+           0.05 while its previous command is above FDI_STALL_CMD_MIN = 0.20,
+           for FDI_STALL_WINDOW_S = 0.1 s unbroken (rounded at the resynced
+           rate: 25 ticks at 250 Hz, 100 at 1 kHz), is isolated at once. A
+           tick with NO RPM telemetry (motor-rpm: none) resets every run: it
+           is not evidence of a stall, so a backend without RPM never trips
+           it and a lossy feed falls back to the residual at the guard.
+           Chosen from the sweep: the longest run any healthy rotor spent
+           below 5 % with its command above 20 % was 68 ms (300 ms soft-start
+           behind 80 ms lag). Measured (SimBackend): production reproduces
+           the prototype's 576 cells and kill rows exactly; the sweep is
+           unchanged (4/8/12, the stall check never fires on a healthy
+           cell); a rotor dead from the first flying tick is isolated at
+           0.104 s (250 Hz) / 0.101 s (1 kHz), tilt <= 0.046 rad on the
+           ground (was 0.300 s, 0.327 rad), and AIRBORNE at tick 26 / 101,
+           tilt ~0.04 rad (was never). Kills at 0.1 s after spin-up: 100 ms
+           (was 196-199). Mutations killed: threshold 0, window 0, check
+           removed. ASSUMPTIONS pending BOM ESC startup data, and THE RISK:
+           a sensorless ESC can read zero RPM, or none, while it aligns and
+           starts commutating; one doing so for > 100 ms with its command
+           above 20 % would be isolated as dead on a healthy spin-up. Only a
+           FULLY stalled rotor is caught early.
 
       STATUS DEMOTED verified -> implemented by the #609 finding-17 change:
       the residual this artifact verified is no longer the one flown. It
@@ -131,6 +155,11 @@ artifacts:
         - run: cargo test -p falcon-core --test fdi_second_flight
         - run: cargo test -p falcon-core --test fdi_spinup_guard
         - run: cargo test -p falcon-core --lib the_fdi_guard_is_0_3_s_at_the_resynced_rate
+        - run: cargo test -p falcon-core --lib the_stall_window_is_0_1_s_at_the_resynced_rate
+        - run: cargo test -p falcon-core --lib an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check
+        - run: "grep -q 'pub const FDI_STALL_RPM_FRAC: f32 = 0.05;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const FDI_STALL_CMD_MIN: f32 = 0.20;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const FDI_STALL_WINDOW_S: f32 = 0.1;' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'pub const FDI_SPINUP_GUARD_S: f32 = 0.3;' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'pub const FDI_ROTOR_LAG_TAU_S: f32 = 0.05;' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'resid\\[i\\] = (self.fdi_lag_model\\[i\\] - achieved).abs();' crates/falcon-core/plain/src/lib.rs"

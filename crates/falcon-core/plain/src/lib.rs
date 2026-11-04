@@ -542,6 +542,12 @@ pub struct CascadePartition {
     /// rotor lagging [`FDI_ROTOR_LAG_TAU_S`] behind `last_motor_cmd` would
     /// report now. The FDI residual's reference. Zeroed by `rearm_fdi`.
     fdi_lag_model: [f32; 4],
+    /// The stall check's window in ticks ([`FDI_STALL_WINDOW_S`] at the
+    /// resynced rate, #609 finding 18).
+    fdi_stall_steps: u32,
+    /// Consecutive ticks each rotor has read stalled during this spin-up's
+    /// guard. Zeroed by `rearm_fdi` and by any tick without RPM telemetry.
+    fdi_stall_run: [u32; 4],
     /// The cascade's own copy of the sensor calibration (the M7 sees the
     /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
@@ -597,6 +603,8 @@ impl CascadePartition {
             fdi_guard_steps: FlightCore::fdi_guard_steps(loop_hz),
             fdi_lag_alpha: FlightCore::fdi_lag_alpha(loop_hz),
             fdi_lag_model: [0.0; 4],
+            fdi_stall_steps: FlightCore::fdi_stall_steps(loop_hz),
+            fdi_stall_run: [0; 4],
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -772,6 +780,7 @@ impl CascadePartition {
             self.fdi_spinup = 0;
             self.last_motor_cmd = [0.0; 4];
             self.fdi_lag_model = [0.0; 4];
+            self.fdi_stall_run = [0; 4];
             self.fdi = RotorFaultDetector::new(FDI_CUSUM_THRESHOLD, FDI_CUSUM_DRIFT);
         }
     }
@@ -842,6 +851,7 @@ impl CascadePartition {
             self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
             self.fdi_guard_steps = FlightCore::fdi_guard_steps(actual);
             self.fdi_lag_alpha = FlightCore::fdi_lag_alpha(actual);
+            self.fdi_stall_steps = FlightCore::fdi_stall_steps(actual);
             self.designed_hz = actual;
         }
     }
@@ -1125,6 +1135,36 @@ impl CascadePartition {
         // command-ALIGNED residual, not this gate.
         let fdi_steady = tilt_cos > 0.90 && rp_rate2 < 4.0; // ≲26° tilt, ≲2 rad/s roll+pitch
         let mut dbg_resid = [0.0f32; 4];
+        // ── SPIN-UP STALL CHECK (#609 finding 18) ── inside the guard only,
+        // and deliberately NOT behind `fdi_steady`: an airborne start shuts
+        // that gate before the guard releases. A rotor reading near-zero RPM
+        // with its (previous, aligned) command above FDI_STALL_CMD_MIN for
+        // FDI_STALL_WINDOW_S unbroken is isolated now. A tick WITHOUT RPM is
+        // not evidence: it resets every run (see FDI_STALL_RPM_FRAC).
+        if self.failed_motor.is_none() && self.fdi_spinup < self.fdi_guard_steps {
+            match rpm_now {
+                Some(rpm) => {
+                    let mut i = 0;
+                    while i < 4 {
+                        let achieved = (rpm[i] as f32 / ESC_RPM_FULL).clamp(0.0, 2.0);
+                        if achieved < FDI_STALL_RPM_FRAC
+                            && self.last_motor_cmd[i] > FDI_STALL_CMD_MIN
+                        {
+                            self.fdi_stall_run[i] = self.fdi_stall_run[i].saturating_add(1);
+                            if self.fdi_stall_run[i] >= self.fdi_stall_steps
+                                && self.failed_motor.is_none()
+                            {
+                                self.failed_motor = Some(i);
+                            }
+                        } else {
+                            self.fdi_stall_run[i] = 0;
+                        }
+                        i += 1;
+                    }
+                }
+                None => self.fdi_stall_run = [0; 4],
+            }
+        }
         if self.failed_motor.is_none() && self.fdi_spinup >= self.fdi_guard_steps && fdi_steady {
             if let Some(rpm) = rpm_now {
                 let mut resid = [0.0f32; 4];
@@ -1220,6 +1260,13 @@ impl FlightCore {
     /// for the fused core and both halves of a split.
     pub fn fdi_guard_steps(loop_hz: f32) -> u32 {
         ((loop_hz * FDI_SPINUP_GUARD_S + 0.5) as u32).max(10)
+    }
+
+    /// The stall check's window at `loop_hz`: [`FDI_STALL_WINDOW_S`] of
+    /// ticks, ROUNDED, at least 1 (#609 finding 18). One definition for the
+    /// fused core and both halves of a split.
+    pub fn fdi_stall_steps(loop_hz: f32) -> u32 {
+        ((loop_hz * FDI_STALL_WINDOW_S + 0.5) as u32).max(1)
     }
 
     /// The rotor lag model's per-tick gain at `loop_hz`:
@@ -1617,8 +1664,11 @@ const FDI_CUSUM_DRIFT: f32 = 0.1;
 /// hardware); do not lengthen this without re-measuring the dead-at-spin-up
 /// case. AIRBORNE the margin is NEGATIVE: a core started hovering with a
 /// rotor dead from tick 1 shuts the 2 rad/s roll/pitch rate gate at
-/// ~0.26 s, before 0.3 s releases the guard, and is never isolated (the
-/// 0.2 s guard caught it). Open on #609 finding 18.
+/// ~0.26 s, before 0.3 s releases the guard. For a FULLY stalled rotor
+/// that is covered by the spin-up stall check ([`FDI_STALL_RPM_FRAC`]),
+/// which isolates it in ~0.1 s inside the guard; a rotor that spins with
+/// reduced effectiveness from an airborne start is not, and still waits
+/// for this guard.
 pub const FDI_SPINUP_GUARD_S: f32 = 0.3;
 
 /// First-order time constant (s) of the ROTOR LAG MODEL the FDI residual is
@@ -1638,6 +1688,43 @@ pub const FDI_SPINUP_GUARD_S: f32 = 0.3;
 /// leaves the model behind instead. Not a configuration field on purpose:
 /// it would be another integrator-facing seam change.
 pub const FDI_ROTOR_LAG_TAU_S: f32 = 0.05;
+
+/// SPIN-UP STALL CHECK (#609 finding 18, maintainer decision 2026-11-04
+/// "(c)"): DURING the spin-up guard only, a rotor whose achieved
+/// effectiveness (ESC RPM / [`ESC_RPM_FULL`]) stays below this fraction
+/// while its command is above [`FDI_STALL_CMD_MIN`] for
+/// [`FDI_STALL_WINDOW_S`] of consecutive ticks is isolated at once, without
+/// waiting for the guard. A rotor dead from the first tick is then caught
+/// in ~0.1 s (tilt ~0.05 rad) instead of 0.3 s, and an AIRBORNE start, whose
+/// roll/pitch rate gate shuts at ~0.26 s, is caught before that (it never
+/// was with the 0.3 s guard alone).
+///
+/// ASSUMPTION, NOT A MEASUREMENT, like [`FDI_ROTOR_LAG_TAU_S`]. 5 % / 20 % /
+/// 100 ms were chosen from the SimBackend sweep: the longest run any
+/// HEALTHY rotor spent below 5 % with its command above 20 % was 68 ms (a
+/// 300 ms ESC soft-start behind an 80 ms lag), so 100 ms leaves 32 ms.
+/// Replace them from BOM ESC startup data. THE RISK: a SENSORLESS ESC can
+/// report zero RPM, or no RPM at all, while it aligns and starts
+/// commutating, and that phase can outlast 100 ms at low throttle; a real
+/// ESC doing so would be isolated as dead on a healthy spin-up.
+///
+/// WHAT IT CATCHES: only a FULLY stalled rotor (RPM ~ 0). A rotor that
+/// spins with reduced effectiveness at spin-up is left to the residual and
+/// still waits for the guard ([`FDI_SPINUP_GUARD_S`]).
+///
+/// MISSING RPM DOES NOT COUNT: a tick with no RPM telemetry (the seam's
+/// `motor-rpm: none`) is not evidence of a stall. It RESETS every rotor's run
+/// to zero, so only an unbroken window of present, near-zero readings can
+/// isolate; a backend without RPM never trips this.
+pub const FDI_STALL_RPM_FRAC: f32 = 0.05;
+/// The command a rotor must be above for its near-zero RPM to count as a
+/// stall (#609 finding 18; see [`FDI_STALL_RPM_FRAC`]). Below it, a low RPM
+/// is just a low command. Assumption pending BOM ESC startup data.
+pub const FDI_STALL_CMD_MIN: f32 = 0.20;
+/// The unbroken time a rotor must read stalled to be isolated (#609 finding
+/// 18; see [`FDI_STALL_RPM_FRAC`]), rounded to ticks of the resynced rate.
+/// Assumption pending BOM ESC startup data.
+pub const FDI_STALL_WINDOW_S: f32 = 0.1;
 
 /// Thrust floor for the reconfigured (single-rotor-out) allocator. With the
 /// rank-3 allocation (v1.114) the diagonal-opposite of the failed rotor
@@ -7582,32 +7669,59 @@ mod warmup_time_tests {
         assert_eq!(FlightCore::fdi_guard_steps(1.0 / (1.0f32 / 250.0)), 75);
     }
 
-    /// The FDI ENGAGES 0.3 s (#609 finding 18; 0.2 s before it) after
-    /// spin-up at 250 Hz and at 1 kHz: a rotor
-    /// dead from the first tick is not isolated before the guard's last tick
-    /// (the check runs once the spin-up count reaches it), and is isolated
-    /// within a few ticks of it.
+    /// An AIRBORNE start with a rotor dead from the first tick (#609 finding
+    /// 18), at 250 Hz and at 1 kHz: the spin-up STALL CHECK isolates the
+    /// correct rotor once the stall window has elapsed (not before it, and
+    /// within 2 ticks of it: the first tick has no previous command above
+    /// FDI_STALL_CMD_MIN yet), with the vehicle still near level.
+    ///
+    /// This test used to be `the_fdi_engages_after_a_fixed_time_at_250_hz_
+    /// and_1_khz`, asserting isolation in [guard, guard + 5] ticks. Under the
+    /// 0.3 s guard that expectation was unreachable: the roll/pitch rate gate
+    /// shuts at ~0.26 s, the rotor was NEVER isolated and the vehicle
+    /// tumbled (left red on 3c7bbd8). The new design catches a FULLY stalled
+    /// rotor inside the guard, so the invariant is now tighter, not looser:
+    /// isolated at the stall window (0.1 s) instead of 0.2-0.3 s, AND bounded
+    /// tilt, which the old test never checked. The guard's own timing (the
+    /// residual path for a rotor that is weak but not stalled) moved to
+    /// tests/fdi_spinup_guard.rs `a_weak_rotor_is_left_to_the_guard`.
     #[test]
-    fn the_fdi_engages_after_a_fixed_time_at_250_hz_and_1_khz() {
+    fn an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check() {
         for hz in [250.0f32, 1000.0] {
-            let guard = (0.3 * hz + 0.5) as u32;
+            let window = (0.1 * hz + 0.5) as u32;
             let (mut b, mut core) = hovering(hz);
             b.fail_rotor(1);
             let mut isolated = None;
+            let mut tilt = 0.0f32;
             for i in 1..=(2.0 * hz) as u32 {
                 core.step(&mut b);
+                tilt = tilt.max(b.tilt());
                 if core.failed_motor().is_some() {
                     isolated = Some(i);
                     break;
                 }
             }
-            std::eprintln!("{hz} Hz: guard {guard} ticks, rotor isolated at tick {isolated:?}");
+            std::eprintln!(
+                "{hz} Hz: stall window {window} ticks, isolated at tick {isolated:?}, tilt {tilt:.3} rad"
+            );
             let i = isolated.unwrap_or_else(|| panic!("{hz} Hz: never isolated"));
             assert_eq!(core.failed_motor(), Some(1), "{hz} Hz: wrong rotor");
             assert!(
-                i >= guard && i <= guard + 5,
-                "{hz} Hz: isolated at tick {i}, the FDI engages at tick {guard}"
+                i >= window && i <= window + 2,
+                "{hz} Hz: isolated at tick {i}, the stall window is {window} ticks"
             );
+            assert!(tilt < 0.1, "{hz} Hz: tilted {tilt:.3} rad before isolation");
         }
+    }
+
+    /// The stall window is 0.1 s ROUNDED at the resynced rate (#609 finding 18).
+    #[test]
+    fn the_stall_window_is_0_1_s_at_the_resynced_rate() {
+        for (hz, want) in [(250.0f32, 25u32), (400.0, 40), (500.0, 50), (1000.0, 100)] {
+            let (mut b, mut core) = hovering(hz);
+            core.step(&mut b);
+            assert_eq!(core.casc.fdi_stall_steps, want, "at {hz} Hz");
+        }
+        assert_eq!(FlightCore::fdi_stall_steps(1.0 / (1.0f32 / 1000.0)), 100);
     }
 }
