@@ -1019,6 +1019,21 @@ rust_library(
     edition = "2024",
 )
 
+# #609 finding 4: falcon-core's follow-target path uses the verified offboard
+# freshness receiver (OFFB-P01) and the failsafe arbiter's policy (FSAFE-P01).
+# No [dependencies] in either manifest.
+rust_library(
+    name = "relay-offboard",
+    srcs = glob(["crates/relay-offboard/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
+rust_library(
+    name = "relay-fsafe",
+    srcs = glob(["crates/relay-fsafe/plain/src/**/*.rs"]),
+    edition = "2024",
+)
+
 rust_library(
     name = "falcon-gnss-ubx",
     srcs = glob(["crates/falcon-gnss-ubx/src/**/*.rs"]),
@@ -1039,6 +1054,7 @@ rust_library(
         ":relay-batt",
         ":relay-calib",
         ":relay-flowrange",
+        ":relay-fsafe",
         ":relay-fsm",
         ":relay-geo",
         ":relay-iekf",
@@ -1046,6 +1062,7 @@ rust_library(
         ":relay-math",
         ":relay-mix-quad",
         ":relay-notch",
+        ":relay-offboard",
         ":relay-param",
         ":relay-preflight",
     ],

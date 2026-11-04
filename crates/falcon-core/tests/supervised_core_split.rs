@@ -110,6 +110,9 @@ impl PartitionSeam for InProcess {
     fn control_set_landing(&mut self, on: bool) {
         self.casc.set_landing(on);
     }
+    fn control_rearm_fdi(&mut self) {
+        split::control_rearm_fdi(&mut self.casc);
+    }
     fn control_status(&self) -> ControlStatus {
         split::control_status(&self.casc)
     }
@@ -188,6 +191,9 @@ impl PartitionSeam for Mutant {
     }
     fn control_set_landing(&mut self, on: bool) {
         self.inner.control_set_landing(on);
+    }
+    fn control_rearm_fdi(&mut self) {
+        self.inner.control_rearm_fdi();
     }
     fn control_status(&self) -> ControlStatus {
         self.inner.control_status()
@@ -542,6 +548,9 @@ impl<const TUNE: bool> PartitionSeam for HostSeam<TUNE> {
     fn control_set_landing(&mut self, on: bool) {
         self.0.control_set_landing(on)
     }
+    fn control_rearm_fdi(&mut self) {
+        self.0.control_rearm_fdi()
+    }
     fn control_status(&self) -> ControlStatus {
         self.0.control_status()
     }
@@ -769,4 +778,327 @@ fn negative_control_split_host_without_tuning_diverges() {
         Err(e) if e.contains("differ") => eprintln!("NoTuning: {e}"),
         other => panic!("dropping the tuning did NOT diverge: {other:?}"),
     }
+}
+
+// ── the host over each core in MISSION (live follow) and a SECOND SPIN-UP ────
+//
+// #609 findings 4 and 16, after the single-source refactor. Both live in code
+// the fused and the split host SHARE (`SupervisorHost::step` delivers the
+// follow target; `FlightSupervisor` re-arms the FDI on a spin-up), but the
+// FDI itself is in the CONTROL HALF, so the split reaches it only through the
+// seam's `control_rearm_fdi`, and the follow target reaches the control half
+// only as the setpoint the supervisor derives. So this twin flies both hosts
+// through: a Mission with a MOVING streamed target; the stream going stale
+// (non-finite targets) into the offboard-stale HOLD with failsafe bit 8; a
+// landing; and a SECOND takeoff in the same process with a lagging rotor
+// response and ESC RPM telemetry, the case the re-arm exists for. Bit-exact
+// every tick, and each negative control below must diverge.
+
+/// What the follow twin's split side is given, for its negative controls.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum FollowMut {
+    None,
+    /// The split host gets the PREVIOUS tick's target (a one-frame lag).
+    TargetLag,
+    /// The split host keeps getting the last finite target when the stream
+    /// goes non-finite, so it never goes stale.
+    NeverStale,
+}
+
+/// The split seam for the follow twin: `REARM = false` drops the spin-up hook.
+#[derive(Default)]
+struct FollowSeam<const REARM: bool>(InProcess);
+
+impl<const REARM: bool> PartitionSeam for FollowSeam<REARM> {
+    fn reset_partitions(&mut self, tuning: Option<&VehicleTuning>) {
+        self.0.reset_partitions(tuning);
+    }
+    fn estimator_tick(&mut self, f: &SeamFrame, in_flight: Option<bool>) -> NavState {
+        self.0.estimator_tick(f, in_flight)
+    }
+    fn estimator_nav(&self) -> NavState {
+        self.0.estimator_nav()
+    }
+    fn estimator_health(&self) -> EstimatorHealth {
+        self.0.estimator_health()
+    }
+    fn control_tick(&mut self, nav: &NavState, f: &SeamFrame) -> [f32; 4] {
+        self.0.control_tick(nav, f)
+    }
+    fn control_keep_warm(&mut self, imu: ImuSample) {
+        self.0.control_keep_warm(imu)
+    }
+    fn control_set_position(&mut self, ned: [f32; 3]) {
+        self.0.control_set_position(ned)
+    }
+    fn control_set_landing(&mut self, on: bool) {
+        self.0.control_set_landing(on)
+    }
+    fn control_rearm_fdi(&mut self) {
+        if REARM {
+            self.0.control_rearm_fdi()
+        }
+    }
+    fn control_status(&self) -> ControlStatus {
+        self.0.control_status()
+    }
+    fn estimator_set_calibration(&mut self, c: CalParams) {
+        self.0.estimator_set_calibration(c)
+    }
+    fn estimator_calibration(&self) -> CalParams {
+        self.0.estimator_calibration()
+    }
+    fn control_set_calibration(&mut self, c: CalParams) {
+        self.0.control_set_calibration(c)
+    }
+}
+
+/// A plant that lands (ground contact) and reports ESC RPM (the FDI's input),
+/// with rotor drag so the FDI's residual is meaningful.
+fn landing_plant() -> SimBackend {
+    let mut p = plant();
+    p.ground_contact = true;
+    p.rot_drag = 0.02;
+    p.rpm_telemetry = true;
+    p
+}
+
+/// What the follow twin covered.
+#[derive(Default, Debug)]
+struct FollowSeen {
+    ticks: u32,
+    mission_ticks: u32,
+    /// Largest horizontal distance of the streamed target from the hold
+    /// point Mission began at.
+    target_travel: f32,
+    /// Ticks from the first non-finite target to the HOLD (Loiter + bit 8).
+    stale_after: Option<u32>,
+    flights: u32,
+    touchdowns: u32,
+}
+
+/// The first-order rotor lag flown during each takeoff: the spin-up
+/// transient the FDI's guard exists for (as in tests/fdi_second_flight.rs).
+const SPINUP_LAG_S: f32 = 0.05;
+const HOLD_TARGET: [f32; 3] = [0.0, 0.0, -CRUISE];
+
+fn run_hosts_follow<P: PartitionSeam + Default>(mutation: FollowMut) -> Result<FollowSeen, String> {
+    let mut pf = landing_plant();
+    let mut ps = landing_plant();
+    let mut fused: SupervisorHost = SupervisorHost::new();
+    let mut split: SupervisorHost<SplitCore<P>> = SupervisorHost::new();
+    let mut seen = FollowSeen::default();
+    for (a, b) in [
+        (
+            fused.configure_vehicle(VEHICLE),
+            split.configure_vehicle(VEHICLE),
+        ),
+        (
+            fused.configure_supervisor(SUPCFG),
+            split.configure_supervisor(SUPCFG),
+        ),
+        (
+            fused.configure_calibration(CAL),
+            split.configure_calibration(CAL),
+        ),
+    ] {
+        if a != b || a != Configured::Accepted {
+            return Err(format!(
+                "configure verdicts differ or refused: {a:?} vs {b:?}"
+            ));
+        }
+    }
+    let both = |f: &mut SupervisorHost, s: &mut SupervisorHost<SplitCore<P>>, ev: Event| {
+        f.command(ev, true, true);
+        s.command(ev, true, true);
+    };
+
+    let nan = [f32::NAN; 3];
+    // 0 ground, 1 takeoff, 2 loiter, 3 mission (moving target), 4 stale ->
+    // HOLD, 5 held, 6 land, 7 ground, 8 flight-2 takeoff, 9 flight-2 loiter
+    let mut phase = 0u32;
+    let mut phase_ticks = 0u32;
+    let mut prev_target = HOLD_TARGET;
+    let mut last_finite = HOLD_TARGET;
+    for tick in 0..200_000u32 {
+        // THE STREAM. In Mission a moving target (a 3 m step north, then a
+        // slow ellipse around it); from the stale phase on the non-finite
+        // "no target this frame"; otherwise the hold point.
+        let target = match phase {
+            3 => {
+                let t = phase_ticks as f32 * DT;
+                let w = 0.6;
+                [3.0 + 1.5 * (w * t).sin(), 1.0 - (w * t).cos(), -CRUISE]
+            }
+            4 | 5 => nan,
+            _ => HOLD_TARGET,
+        };
+        if target.iter().all(|x| x.is_finite()) {
+            last_finite = target;
+        }
+        let split_target = match mutation {
+            FollowMut::None => target,
+            FollowMut::TargetLag => prev_target,
+            FollowMut::NeverStale => {
+                if target[0].is_finite() {
+                    target
+                } else {
+                    last_finite
+                }
+            }
+        };
+        prev_target = target;
+
+        let mut bf = FrameBackend::new(SeamFrame::read(&mut pf));
+        let mut bs = FrameBackend::new(SeamFrame::read(&mut ps));
+        let (fm, ff, fnav, fr) = {
+            let s = fused.step(target, &mut bf);
+            (
+                s.mode(),
+                s.failsafe_flags(),
+                nav_bits(&s.state()),
+                s.core().failed_motor(),
+            )
+        };
+        let (sm, sf, snav, sr) = {
+            let s = split.step(split_target, &mut bs);
+            (
+                s.mode(),
+                s.failsafe_flags(),
+                nav_bits(&s.state()),
+                s.core().failed_motor(),
+            )
+        };
+        if bits(&bf.motors) != bits(&bs.motors) {
+            return Err(format!("motors differ at tick {tick} (phase {phase})"));
+        }
+        if (fm, ff, fr) != (sm, sf, sr) {
+            return Err(format!(
+                "mode/failsafe/rotor differ at tick {tick} (phase {phase}): \
+                 {fm:?}/{ff:#x}/{fr:?} vs {sm:?}/{sf:#x}/{sr:?}"
+            ));
+        }
+        if fnav != snav {
+            return Err(format!("nav-state differs at tick {tick} (phase {phase})"));
+        }
+        pf.write_motors(&bf.motors);
+        ps.write_motors(&bs.motors);
+        seen.ticks += 1;
+        phase_ticks += 1;
+        if fr.is_some() {
+            return Err(format!(
+                "a healthy rotor was isolated at tick {tick} (phase {phase}) on both"
+            ));
+        }
+        let stale = ff & falcon_core::failsafe_flags::TARGET_STALE != 0;
+        macro_rules! go {
+            ($p:expr) => {{
+                phase = $p;
+                phase_ticks = 0;
+            }};
+        }
+        match phase {
+            0 | 7 if fm == Mode::Armed => {
+                both(&mut fused, &mut split, Event::RequestTakeoff);
+                pf.motor_tau = SPINUP_LAG_S;
+                ps.motor_tau = SPINUP_LAG_S;
+                seen.flights += 1;
+                go!(if phase == 0 { 1 } else { 8 });
+            }
+            0 | 7 if phase_ticks >= 2000 && fm == Mode::Disarmed => {
+                both(&mut fused, &mut split, Event::Arm)
+            }
+            1 | 8 if fm == Mode::Loiter => {
+                pf.motor_tau = 0.0;
+                ps.motor_tau = 0.0;
+                go!(if phase == 1 { 2 } else { 9 });
+            }
+            1 | 8 if fm != Mode::Takeoff => {
+                return Err(format!("left Takeoff for {fm:?} at tick {tick}"));
+            }
+            2 if phase_ticks >= 1000 => {
+                both(&mut fused, &mut split, Event::RequestMission);
+                go!(3);
+            }
+            3 => {
+                if fm != Mode::Mission {
+                    return Err(format!(
+                        "left Mission for {fm:?} at tick {tick} while streaming"
+                    ));
+                }
+                if stale {
+                    return Err(format!("target-stale raised while streaming, tick {tick}"));
+                }
+                seen.mission_ticks += 1;
+                let d = (target[0] - HOLD_TARGET[0]).hypot(target[1] - HOLD_TARGET[1]);
+                seen.target_travel = seen.target_travel.max(d);
+                if phase_ticks >= 8000 {
+                    go!(4);
+                }
+            }
+            4 if fm == Mode::Loiter && stale => {
+                seen.stale_after = Some(phase_ticks);
+                go!(5);
+            }
+            4 if fm != Mode::Mission || phase_ticks > 2000 => {
+                return Err(format!(
+                    "the stale stream did not take the HOLD: {fm:?}/{ff:#x} after {phase_ticks} ticks"
+                ));
+            }
+            5 if phase_ticks >= 6000 => {
+                both(&mut fused, &mut split, Event::RequestLand);
+                go!(6);
+            }
+            6 if fm == Mode::Disarmed => {
+                seen.touchdowns += 1;
+                go!(7);
+            }
+            6 if fm != Mode::Land => both(&mut fused, &mut split, Event::RequestLand),
+            9 if phase_ticks >= 2000 => return Ok(seen),
+            _ => {}
+        }
+    }
+    Err(format!("follow scenario did not complete (phase {phase})"))
+}
+
+#[test]
+fn split_host_follows_goes_stale_and_re_arms_the_fdi_bit_exactly() {
+    let seen = run_hosts_follow::<FollowSeam<true>>(FollowMut::None)
+        .unwrap_or_else(|e| panic!("MISMATCH: {e}"));
+    assert_eq!(seen.flights, 2, "{seen:?}");
+    assert_eq!(seen.touchdowns, 1, "{seen:?}");
+    assert!(seen.mission_ticks >= 8000, "{seen:?}");
+    assert!(
+        seen.target_travel > 3.0,
+        "the target did not move: {seen:?}"
+    );
+    // FOLLOW_TARGET_TIMEOUT_US = 1.0 s = 1000 ticks at 1 kHz.
+    let after = seen.stale_after.expect("never went stale");
+    assert!(
+        (1000..=1002).contains(&after),
+        "stale HOLD after {after} ticks: {seen:?}"
+    );
+    eprintln!("follow twin: {seen:?}");
+}
+
+fn follow_must_diverge<P: PartitionSeam + Default>(m: FollowMut, what: &str) {
+    match run_hosts_follow::<P>(m) {
+        Err(e) if e.contains("differ") => eprintln!("{what}: {e}"),
+        other => panic!("{what} did NOT diverge: {other:?}"),
+    }
+}
+
+#[test]
+fn negative_control_split_target_lag_diverges_in_mission() {
+    follow_must_diverge::<FollowSeam<true>>(FollowMut::TargetLag, "one-frame target lag");
+}
+
+#[test]
+fn negative_control_split_never_stale_diverges() {
+    follow_must_diverge::<FollowSeam<true>>(FollowMut::NeverStale, "never-stale split");
+}
+
+#[test]
+fn negative_control_split_without_fdi_rearm_diverges() {
+    follow_must_diverge::<FollowSeam<false>>(FollowMut::None, "dropped control_rearm_fdi");
 }

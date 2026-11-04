@@ -135,6 +135,14 @@ impl Guest for Component {
         ensure(&mut slot).set_landing(on);
     }
 
+    /// The supervisor's spin-up hook (#609 finding 16); see the WIT.
+    fn rearm_fdi() {
+        #[cfg(not(feature = "std"))]
+        let _call = falcon_cm_rt::CallScope::enter();
+        let mut slot = CASC.0.borrow_mut();
+        split::control_rearm_fdi(ensure(&mut slot));
+    }
+
     fn tick(nav: WitNav, sensors: SensorFrame) -> ControlOutput {
         #[cfg(not(feature = "std"))]
         let _call = falcon_cm_rt::CallScope::enter();

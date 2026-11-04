@@ -26,6 +26,12 @@ relay-notch = { path = "../relay-notch" }
 falcon-gnss-ubx = { path = "../falcon-gnss-ubx" }
 relay-log = { path = "../relay-log" }
 relay-param = { path = "../relay-param" }
+# #609 finding 4: the published component's frame target is a LIVE follow
+# setpoint, and a stale follow stream must not keep flying the vehicle. These
+# two were verified (OFFB-P01 freshness/timeout, FSAFE-P01 policy) and ORPHANED:
+# nothing in the flight path called them. The follow path now uses both.
+relay-offboard = { path = "../relay-offboard" }
+relay-fsafe = { path = "../relay-fsafe" }
 
 [lints]
 workspace = true

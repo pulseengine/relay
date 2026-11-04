@@ -243,6 +243,9 @@ impl PartitionSeam for WitSeam {
     fn control_set_landing(&mut self, on: bool) {
         flight_control::set_landing(on);
     }
+    fn control_rearm_fdi(&mut self) {
+        flight_control::rearm_fdi();
+    }
     fn control_status(&self) -> ControlStatus {
         let s = flight_control::read_status();
         ControlStatus {
@@ -374,7 +377,9 @@ impl Guest for Component {
 
         {
             let mut host = HOST.0.borrow_mut();
-            // `target` is a MISSION LEG at @0.12.0 — see `cascade`.
+            // `target` is the Mission-mode setpoint at @0.12.0 (a live follow
+            // setpoint, #609 finding 4) — see `cascade`; the rule is
+            // `SupervisorHost::step`'s, shared, so it is forwarded as is.
             let sup = host.step([target.north, target.east, target.down], &mut backend);
 
             let ns = sup.state();

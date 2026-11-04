@@ -139,7 +139,7 @@ pub struct ControlStatus {
     pub failed_rotor: Option<usize>,
 }
 
-/// The twelve calls that cross the estimator/control seam.
+/// The thirteen calls that cross the estimator/control seam.
 pub trait PartitionSeam {
     /// REBUILD BOTH PARTITIONS from scratch, each with its share of `tuning`
     /// (`None` = the built-in defaults) — what constructing a fresh fused core
@@ -155,6 +155,9 @@ pub trait PartitionSeam {
     fn control_keep_warm(&mut self, imu: ImuSample);
     fn control_set_position(&mut self, ned: Vec3);
     fn control_set_landing(&mut self, on: bool);
+    /// See [`control_rearm_fdi`]: the supervisor's spin-up hook (#609
+    /// finding 16), forwarded to the control half, which owns the FDI.
+    fn control_rearm_fdi(&mut self);
     fn control_status(&self) -> ControlStatus;
     /// THE CALIBRATION (#586). Installed on BOTH halves — the fused core's
     /// `set_calibration` writes `est.calib` and `casc.calib`, and the control
@@ -206,6 +209,9 @@ impl<P: PartitionSeam> SupervisedCore for SplitCore<P> {
     }
     fn set_position(&mut self, ned: Vec3) {
         self.0.control_set_position(ned);
+    }
+    fn rearm_fdi(&mut self) {
+        self.0.control_rearm_fdi();
     }
 
     /// `FlightCore::step`, across the seam.
@@ -360,6 +366,12 @@ pub fn estimator_set_calibration(est: &mut EstimatorPartition, c: relay_calib::C
 /// What the estimator applies to raw samples — `FlightCore::calibration`.
 pub fn estimator_calibration(est: &EstimatorPartition) -> relay_calib::CalParams {
     est.calib
+}
+
+/// `FlightCore::rearm_fdi` — the FDI lives in the control half (#609 finding
+/// 16). The supervisor calls it on its first flying tick after motors-off.
+pub fn control_rearm_fdi(casc: &mut CascadePartition) {
+    casc.rearm_fdi();
 }
 
 /// The control half of `FlightCore::set_calibration`.

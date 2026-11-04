@@ -264,9 +264,17 @@ impl NativeCascade {
             dt,
             motors: [0.0; 4],
         };
-        // `target` is a MISSION LEG at @0.12.0, not a position command — the
-        // supervisor owns the setpoint (see the component).
+        // `target` is the MISSION-MODE setpoint at @0.12.0 (a live follow
+        // setpoint in Mission, #609 finding 4), not a position command — the
+        // supervisor owns the setpoint; `SupervisorHost::step` holds the rule.
         self.host.step(target, &mut b);
         b.motors
     }
 }
+
+// #609 finding 4 (Decision A): the follow-target contract, driven through this
+// mirror so the tests see exactly what a host sees. A child module so the tests
+// can read the supervisor's mode without widening the mirror's API.
+#[cfg(test)]
+#[path = "follow_target_tests.rs"]
+mod follow_target_tests;

@@ -79,6 +79,7 @@ fn failsafe_bits_are_the_published_wire_values() {
     );
     assert_eq!(ff::WIND_ARMING, 1 << 6, "failsafe bit 6 is wind-arming");
     assert_eq!(ff::ARM_BLOCKED, 1 << 7, "failsafe bit 7 is arm-blocked");
+    assert_eq!(ff::TARGET_STALE, 1 << 8, "failsafe bit 8 is target-stale");
 }
 
 /// The bits must be DISJOINT, which is the property that makes a bitmask the
@@ -95,6 +96,7 @@ fn failsafe_bits_are_disjoint() {
         ff::RUNAWAY_ARMING,
         ff::WIND_ARMING,
         ff::ARM_BLOCKED,
+        ff::TARGET_STALE,
     ];
     let mut seen: u32 = 0;
     for (i, bit) in all.iter().enumerate() {
@@ -102,9 +104,10 @@ fn failsafe_bits_are_disjoint() {
         assert_eq!(seen & bit, 0, "flag {i} collides with an earlier flag");
         seen |= bit;
     }
-    // All eight present and none above bit 7 — a ninth cause must extend the
-    // WIT doc and this test together, not arrive silently.
-    assert_eq!(seen, 0x00FF, "exactly bits 0..=7 are allocated");
+    // All nine present and none above bit 8 — a tenth cause must extend the
+    // WIT doc and this test together, not arrive silently. Bit 8, target-stale,
+    // arrived that way (#609 finding 4).
+    assert_eq!(seen, 0x01FF, "exactly bits 0..=8 are allocated");
 }
 
 /// The lever the published component uses to refuse arming while nobody has

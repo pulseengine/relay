@@ -47,8 +47,10 @@
 //!      arm; `configure-supervisor` and `configure` rebuilds on the ground, each
 //!      followed by an `arm` before the first step that must be refused; an
 //!      ARMED hold with a noisy gyro and a takeoff with no reset (`keep_warm`);
-//!      takeoff, loiter, a mission leg, the mission-complete RTL, the landing
-//!      and the touchdown disarm; estimate-only ticks after touchdown (the
+//!      takeoff, loiter, a Mission flown on a MOVING live target (#609 finding
+//!      4: the frame target is a live follow setpoint), the stream going
+//!      non-finite into the stale-target HOLD (Loiter, failsafe bit 8), a
+//!      commanded RTL, its landing and the touchdown disarm; estimate-only ticks after touchdown (the
 //!      estimator's in-flight flag deliberately left stale, #452); a
 //!      low-battery failsafe; a refused re-arm; a silent pack; and a
 //!      `configure-supervisor` the battery latch must REJECT.
@@ -92,10 +94,16 @@ const FS_BATT_LOW: u32 = 1 << 1;
 const FS_BATT_CRITICAL: u32 = 1 << 2;
 const FS_BATT_SILENT: u32 = 1 << 3;
 const FS_ARM_BLOCKED: u32 = 1 << 7;
+const FS_TARGET_STALE: u32 = 1 << 8;
 
 /// Ticks flight 1 is held ARMED before takeoff, and the gyro noise (rad/s)
 /// during the hold — see `Stage::F1ArmedHold`.
 const ARMED_HOLD_TICKS: u32 = 400;
+/// How long flight 1 follows the moving target in Mission.
+const MISSION_S: f32 = 8.0;
+/// The stale-target HOLD must follow the first non-finite target within this
+/// (`FOLLOW_TARGET_TIMEOUT_US` = 1.0 s, plus margin for the frame period).
+const STALE_DEADLINE_S: f32 = 1.1;
 const ARMED_HOLD_GYRO_NOISE: f32 = 0.02;
 
 /// A KNOWN gyro zero-rate bias (rad/s) added to every gyro sample both sides
@@ -280,14 +288,26 @@ enum Stage {
     F1ArmedHold,
     /// Flight 1 airborne, waiting for a settled loiter.
     F1Climb,
-    /// Flight 1 on its mission leg; ends in mission-complete RTL, land, disarm.
+    /// Flight 1 in Mission, streaming a MOVING target every frame (a 3 m step
+    /// north, then a slow ellipse around it) for `MISSION_S`. A live follow
+    /// setpoint: reaching it ends nothing, so the vehicle must stay in Mission
+    /// throughout, with `target-stale` down.
     F1Mission,
+    /// The stream goes NON-FINITE ("no target this frame"): after 1.0 s
+    /// (`FOLLOW_TARGET_TIMEOUT_US`) the supervisor must take the stale-target
+    /// HOLD, Loiter with failsafe bit 8. Bounded by `STALE_DEADLINE_S`.
+    F1Stale,
+    /// Held in that Loiter (brake, then latch), then a commanded RTL, its
+    /// landing at home and the touchdown disarm.
+    F1Hold,
     /// On the ground after flight 1: estimate-only ticks, in-flight flag stale;
     /// then a `controller.configure` rebuild.
     F1Ground,
     /// Flight 2, waiting for loiter.
     F2Climb,
-    /// Flight 2 with the pack sagged below LOW: failsafe RTL, land, disarm.
+    /// Flight 2 with the pack sagged below LOW: the battery failsafe. At
+    /// `SAG_V` LOW and CRITICAL latch together, so it LANDS in place (measured:
+    /// Loiter -> Land, failsafe 0x7), then disarms.
     F2Sag,
     /// On the ground: a refused re-arm, a silent pack, then a
     /// `configure-supervisor` the battery latch must reject.
@@ -323,6 +343,10 @@ struct Coverage {
     other_refusals: u32,
     /// `arm`s refused while the accelerometer read zero.
     dead_accel_refusals: u32,
+    /// Ticks from the first non-finite target to the stale-target HOLD.
+    stale_hold_after: Option<u32>,
+    /// Ticks flown in Mission on the moving target.
+    follow_ticks: u32,
     /// Configures that #609 says must be REJECTED, and were.
     rejected_configures: Vec<&'static str>,
     /// Ticks from each rebuild to the accepted `arm` (the estimator-health
@@ -389,6 +413,10 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
         cov.arm_ticks
     );
     println!("rejected configures : {:?}", cov.rejected_configures);
+    println!(
+        "live follow         : {} ticks in Mission on a moving target; stale HOLD {:?} ticks after the stream went non-finite",
+        cov.follow_ticks, cov.stale_hold_after
+    );
     // `resync_loop_rate` rebuilds the gyro filter past 2% off the 1000 Hz
     // design rate, which erases what `keep_warm` kept during the hold.
     let keep_warm_decisive = ((1.0 / dt) - 1000.0).abs() <= 0.02 * 1000.0;
@@ -423,6 +451,7 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
         (FS_BATT_CRITICAL, "batt-critical"),
         (FS_RTL_LATCHED, "rtl-latched"),
         (FS_BATT_SILENT, "batt-silent"),
+        (FS_TARGET_STALE, "target-stale"),
     ] {
         if cov.failsafe_seen & bit == 0 {
             missing.push(format!("failsafe bit {name} never raised"));
@@ -456,6 +485,16 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
             cov.dead_accel_refusals,
             DEAD_ACCEL_TICKS - 1
         ));
+    }
+    if cov.follow_ticks < (MISSION_S / dt) as u32 {
+        missing.push(format!(
+            "{} ticks in Mission on the moving target, expected {}",
+            cov.follow_ticks,
+            (MISSION_S / dt) as u32
+        ));
+    }
+    if cov.stale_hold_after.is_none() {
+        missing.push("the stale-target HOLD was never taken".into());
     }
     if cov.rejected_configures.len() != 3 {
         missing.push(format!(
@@ -570,6 +609,32 @@ fn segment(
         yaw: 0.0,
     };
     let mut target = home_target;
+    // The non-finite "no target this frame" (the frame has no absent flag).
+    let no_target = Waypoint {
+        north: f32::NAN,
+        east: f32::NAN,
+        down: f32::NAN,
+        yaw: f32::NAN,
+    };
+    // TWIN_MUTATE_TARGET=lag (NEGATIVE CONTROL, never set by CI): side B gets
+    // the PREVIOUS tick's target. Must MISMATCH in F1Mission, which proves the
+    // comparison can see the follow target reaching the control half.
+    let lag_b = std::env::var("TWIN_MUTATE_TARGET").is_ok_and(|v| v == "lag");
+    let mut prev_target = target;
+    let mission_ticks = (MISSION_S / dt) as u32;
+    // The moving Mission target, `k` ticks into Mission: a 3 m step north,
+    // then a slow ellipse around it.
+    let follow_target = |k: u32| {
+        let t = k as f32 * dt;
+        let w = 0.6;
+        Waypoint {
+            north: 3.0 + 1.5 * (w * t).sin(),
+            east: 1.0 - (w * t).cos(),
+            down: -CRUISE_M,
+            yaw: 0.0,
+        }
+    };
+    let stale_deadline = (STALE_DEADLINE_S / dt) as u32;
     let mut battery: Option<f32> = Some(PACK_V);
     let mut stage_ticks: u32 = 0;
     let mut loiter_ticks: u32 = 0;
@@ -657,14 +722,27 @@ fn segment(
                 both!(command(PilotCommand::RequestTakeoff));
             }
             Stage::F1Climb if loiter_ticks >= 400 => {
-                target = Waypoint {
-                    north: 3.0,
-                    east: 0.0,
-                    down: -CRUISE_M,
-                    yaw: 0.0,
-                };
+                // The first Mission tick already carries the moving target.
+                target = follow_target(0);
                 both!(command(PilotCommand::RequestMission));
                 advance!(Stage::F1Mission);
+            }
+            Stage::F1Mission if stage_ticks == mission_ticks => {
+                target = no_target;
+                advance!(Stage::F1Stale);
+            }
+            Stage::F1Mission => target = follow_target(stage_ticks),
+            Stage::F1Stale if stage_ticks > stale_deadline => {
+                bail!(
+                    "{seg:?}: the non-finite stream did not take the stale-target HOLD within \
+                     {STALE_DEADLINE_S} s (mode {prev_mode})"
+                );
+            }
+            // The host ends the held follow with an explicit RTL. This is also
+            // the scenario's only RTL: the sagged pack in flight 2 trips LOW and
+            // CRITICAL together, which lands in place.
+            Stage::F1Hold if stage_ticks >= (2.0 / dt) as u32 && prev_mode == LOITER => {
+                both!(command(PilotCommand::RequestRtl));
             }
             Stage::F1Ground if stage_ticks == 400 => {
                 // REBUILD PATH 2: `controller.configure`, on the ground with
@@ -757,8 +835,10 @@ fn segment(
             }),
             battery_v: battery,
         };
+        let target_b = if lag_b { prev_target } else { target };
+        prev_target = target;
         let ma = a.step(frame, target)?;
-        let mb = b.step(frame, target)?;
+        let mb = b.step(frame, target_b)?;
         if let Some(d) = diff_motors(&ma, &mb) {
             bail!("{seg:?}: MISMATCH at tick {tick} ({stage:?}), motor command: {d}");
         }
@@ -829,7 +909,21 @@ fn segment(
                 cov.arm_ticks.push(stage_ticks);
                 advance!(after_arm);
             }
-            Stage::F1Mission if touched_down => advance!(Stage::F1Ground),
+            Stage::F1Mission => {
+                if mode != MISSION || sa.failsafe & FS_TARGET_STALE != 0 {
+                    bail!(
+                        "{seg:?}: left Mission (mode {mode}, failsafe {:#x}) at +{stage_ticks} \
+                         while a fresh target was streamed",
+                        sa.failsafe
+                    );
+                }
+                cov.follow_ticks += 1;
+            }
+            Stage::F1Stale if mode == LOITER && sa.failsafe & FS_TARGET_STALE != 0 => {
+                cov.stale_hold_after = Some(stage_ticks);
+                advance!(Stage::F1Hold);
+            }
+            Stage::F1Hold if touched_down => advance!(Stage::F1Ground),
             Stage::F2Sag if touched_down => advance!(Stage::F2Ground),
             Stage::RotorOut if touched_down => advance!(Stage::RotorGround),
             _ => {}

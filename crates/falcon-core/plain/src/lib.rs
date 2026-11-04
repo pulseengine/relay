@@ -490,6 +490,13 @@ pub struct CascadePartition {
     /// production core against the gz plant, where achieved starts at 0).
     step_count: u32,
     fdi_warmup_steps: u32,
+    /// Control steps since the FDI was last (re-)armed: the spin-up guard's
+    /// OWN counter (#609 finding 16). `step_count` above counted from
+    /// construction only, so a second flight in the same process spun up with
+    /// no guard at all. This one restarts at every spin-up
+    /// ([`Self::rearm_fdi`]); `step_count` keeps its other job (the one-time
+    /// launch-heading capture) unchanged.
+    fdi_spinup: u32,
     /// The cascade's own copy of the sensor calibration (the M7 sees the
     /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
@@ -531,7 +538,7 @@ impl CascadePartition {
             range_agl: None,
             notch: relay_notch::HarmonicNotchBank::new(loop_hz),
             // CUSUM thresholds matching the SITL-verified fault-tolerance chain.
-            fdi: RotorFaultDetector::new(0.5, 0.1),
+            fdi: RotorFaultDetector::new(FDI_CUSUM_THRESHOLD, FDI_CUSUM_DRIFT),
             failed_motor: None,
             yaw_setpoint: 0.0,
             yaw_captured: false,
@@ -541,6 +548,7 @@ impl CascadePartition {
             dbg_fdi: (0.0, 1.0, false, [0.0; 4]),
             step_count: 0,
             fdi_warmup_steps: warmup,
+            fdi_spinup: 0,
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -701,6 +709,21 @@ impl CascadePartition {
     pub fn set_altitude_integral_gain(&mut self, ki: f32) {
         self.ki_alt = ki.clamp(0.0, 0.2);
         self.alt_int = 0.0;
+    }
+    /// RE-ARM the rotor-out FDI for a new spin-up (#609 finding 16): restart the
+    /// spin-up guard, forget the previous flight's last motor command (the
+    /// residual's reference, which nothing else resets on the ground) and clear
+    /// the CUSUM accumulators. ONLY while no rotor is isolated: a rotor the FDI
+    /// HAS isolated stays isolated, so the `MotorsHealthy` pre-arm row keeps
+    /// refusing to arm a vehicle with a dead motor (#565) and the degraded law
+    /// stays engaged. Called by the supervisor on every motors-off -> flying
+    /// edge.
+    pub fn rearm_fdi(&mut self) {
+        if self.failed_motor.is_none() {
+            self.fdi_spinup = 0;
+            self.last_motor_cmd = [0.0; 4];
+            self.fdi = RotorFaultDetector::new(FDI_CUSUM_THRESHOLD, FDI_CUSUM_DRIFT);
+        }
     }
     /// Set the altitude P and D gains (v1.113). The defaults (0.05, 0.30) are
     /// gentle, tuned for the analytic plant; a stiffer plant (real gz) wants a
@@ -1006,6 +1029,7 @@ impl CascadePartition {
         // isolation, latch the failed rotor (next step runs the degraded path).
         // Held off for `fdi_warmup_steps` (spin-up guard) — see the field docs.
         self.step_count = self.step_count.saturating_add(1);
+        self.fdi_spinup = self.fdi_spinup.saturating_add(1);
         // ATTITUDE/RATE GATE: a rotor-out residual is only DISTINGUISHABLE in
         // near-level, low-rate flight. During an attitude transient the
         // controller commands large asymmetric motors, so |commanded − achieved|
@@ -1034,7 +1058,7 @@ impl CascadePartition {
         // command-ALIGNED residual, not this gate.
         let fdi_steady = tilt_cos > 0.90 && rp_rate2 < 4.0; // ≲26° tilt, ≲2 rad/s roll+pitch
         let mut dbg_resid = [0.0f32; 4];
-        if self.failed_motor.is_none() && self.step_count >= self.fdi_warmup_steps && fdi_steady {
+        if self.failed_motor.is_none() && self.fdi_spinup >= self.fdi_warmup_steps && fdi_steady {
             if let Some(rpm) = rpm_now {
                 let mut resid = [0.0f32; 4];
                 let mut i = 0;
@@ -1231,6 +1255,11 @@ impl FlightCore {
         self.casc.set_position_integral_gain(ki)
     }
 
+    /// Forwards `CascadePartition::rearm_fdi` (#609 finding 16).
+    pub fn rearm_fdi(&mut self) {
+        self.casc.rearm_fdi()
+    }
+
     pub fn set_altitude_integral_gain(&mut self, ki: f32) {
         self.casc.set_altitude_integral_gain(ki)
     }
@@ -1342,10 +1371,100 @@ pub const MAX_WAYPOINTS: usize = 16;
 /// fully settle on each leg.
 const WAYPOINT_RADIUS: f32 = 1.2;
 
+/// How long a FOLLOW target (see [`MissionSource::Follow`]) stays in force
+/// without a fresh one before the stream is STALE (#609 finding 4, maintainer
+/// decision 2026-10-28: the published component's frame target is a live
+/// setpoint). 1.0 s: ten times the longest frame period the component accepts
+/// (its dt clamp tops out at 100 ms), so at least ten consecutive frames must
+/// all carry an unusable target; and short enough that a dead stream is not
+/// flown on. The last good target is a fixed POINT, so in the worst case the
+/// vehicle spends one more second closing on where the host last asked.
+/// Enforced by the verified `relay_offboard::OffboardReceiver` (OFFB-P01,
+/// Kani OFFB-K02: strictly past the timeout the stream is ALWAYS stale).
+pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;
+
+/// BRAKE, THEN LATCH (#609 finding 4, Decision B as re-decided by the maintainer
+/// 2026-10-28; the position integral is left untouched).
+///
+/// A Loiter entered while the vehicle is moving faster than
+/// [`HOLD_BRAKE_ENTRY_MS`] (Mission -> Loiter mid-leg, or the stale-follow HOLD)
+/// does not latch on its first tick. It BRAKES: the horizontal setpoint each
+/// tick is `p - v * HOLD_BRAKE_LEAD_S`, a point behind the vehicle along its own
+/// velocity, so the position term adds `kp * LEAD * v` of braking to the
+/// damping term (0.08 * 8 = 0.64 on top of kd 0.6: roughly double), and the
+/// NEGATIVE error that point presents unwinds, through the loop's own integral
+/// law, the integral the leg charged toward its waypoint. The hold point is
+/// latched only once the estimated horizontal speed has stayed under
+/// [`HOLD_REST_MS`] for [`HOLD_REST_S`]: at sustained rest there is neither
+/// error nor damping force, so whatever integral remains is the steady-wind
+/// compensation (WIND-P01), and latching there leaves nothing to overshoot with.
+/// [`HOLD_BRAKE_MAX_S`] bounds the braking phase: past it the point is latched
+/// wherever the vehicle is.
+///
+/// WHY THIS AND NOT A PREDICTED STOPPING POINT, measured on `SimBackend`
+/// (#616's (3c) leg, 3.4 m/s at the command, 2 and 5 m/s wind): latching at
+/// the kinematic stop `p + v|v| / (2 a_cmd_max)` still overshot 11.6-11.9 m and
+/// left 2.5-2.7 m in HOLD-P01's window, because the leg-charged integral (up to
+/// ~1.4 m/s^2 of push against a 1.0 m/s^2 command limit) keeps driving the
+/// vehicle on past ANY point latched while it is charged. A pure-damping brake
+/// (setpoint = the current estimate) never stops for the same reason, and
+/// drifted into the 50 m fence in 17 s. The rest criterion is what makes this
+/// robust: a lead of 6-16 s all passed HOLD-P01 with it, while a 0.5 s rest
+/// window latched at oscillation turning points and failed at some leads.
+pub const HOLD_BRAKE_LEAD_S: f32 = 8.0;
+/// Entering Loiter faster than this (m/s, estimated, horizontal) brakes first.
+pub const HOLD_BRAKE_ENTRY_MS: f32 = 0.3;
+/// "At rest" for the brake-then-latch rule (m/s, estimated, horizontal).
+pub const HOLD_REST_MS: f32 = 0.1;
+/// How long the vehicle must stay at rest before the hold point is latched (s).
+pub const HOLD_REST_S: f32 = 3.0;
+/// Longest braking phase before the hold point is latched regardless (s).
+pub const HOLD_BRAKE_MAX_S: f32 = 30.0;
+
+/// Where Mission mode takes its setpoint from (#609 finding 4).
+///
+/// The two are DIFFERENT CONTRACTS and deliberately do not share a code path:
+///
+///   * `Waypoints` (the default, every native user): the stored mission
+///     (`set_mission` / `set_mission_waypoints`, MISSION-P01). Arriving at a leg
+///     advances to the next; arriving at the LAST leg ends the sortie with an
+///     autonomous RTL + land. Unchanged.
+///   * `Follow` (the published component): an offboard-style LIVE setpoint
+///     ([`FlightSupervisor::set_follow_target`]). The latest fresh target is
+///     the setpoint every tick; REACHING IT ENDS NOTHING (the vehicle holds it,
+///     in Mission, for as long as the host keeps sending it). The host ends
+///     Mission explicitly with RequestRtl / RequestLand / RequestLoiter. A
+///     stream with no fresh target for [`FOLLOW_TARGET_TIMEOUT_US`] (never
+///     started, stopped, or only non-finite targets) is STALE, and the
+///     supervisor takes `relay_fsafe`'s policy action for a stale offboard
+///     stream, HOLD, which it flies as RequestLoiter: a Loiter at the point the
+///     vehicle had reached, latched on entry like every Loiter. A stream that
+///     resumes does NOT re-enter Mission by itself; the host sends
+///     RequestMission again.
+///
+/// Why not one path with a flag: the component used to feed its target
+/// through `set_mission`, which RESET a one-leg mission every tick, so arrival
+/// fired the mission-complete RTL and the vehicle landed while the host was
+/// still streaming the target. Bending the waypoint sequencer into a "never
+/// finish" mode would leave the follow path with no freshness contract at all;
+/// a separate source gets the verified timeout instead, and MISSION-P01's
+/// sequencer stays exactly as it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissionSource {
+    Waypoints,
+    Follow,
+}
+
 /// Nominal ESC RPM at full throttle — normalises reported RPM to a per-rotor
 /// EFFECTIVENESS (≈ commanded throttle when healthy) for the single-rotor-out FDI
 /// residual (v1.103). Only the ratio matters; a per-airframe value scales it.
 const ESC_RPM_FULL: f32 = 8000.0;
+
+/// Rotor-out FDI CUSUM level and per-step drift, matching the SITL-verified
+/// fault-tolerance chain. Named so a re-armed detector is built identically
+/// to the original (#609 finding 16).
+const FDI_CUSUM_THRESHOLD: f32 = 0.5;
+const FDI_CUSUM_DRIFT: f32 = 0.1;
 
 /// Thrust floor for the reconfigured (single-rotor-out) allocator. With the
 /// rank-3 allocation (v1.114) the diagonal-opposite of the failed rotor
@@ -1430,8 +1549,12 @@ pub struct KeepoutZone {
 ///     so the climb is flown over it. Takeoff -> Loiter is the SAME regime and
 ///     keeps that point: re-latching at the top of the climb would bake in
 ///     whatever the wind did during it. Mission -> Loiter (RequestLoiter, or
-///     ReachedHome) enters the regime afresh and captures where the vehicle is
-///     ("pause here"), not the waypoint and not the takeoff point.
+///     ReachedHome) enters the regime afresh: BRAKE, THEN LATCH (maintainer
+///     re-decision 2026-10-28) -- see [`HOLD_BRAKE_LEAD_S`]. A vehicle entering
+///     Loiter while moving brakes first and latches where it actually comes to
+///     rest ("stop here"), not the point it was passing when the command
+///     arrived, not the waypoint and not the takeoff point. One already at rest
+///     latches at once.
 ///     Rtl -> Loiter and Land -> Loiter do not exist in `relay_fsm`; every
 ///     failsafe goes to Rtl / Land / Terminated, which leave only through
 ///     Touchdown -> Disarmed, so Loiter after a failsafe is always reached
@@ -1452,8 +1575,8 @@ pub struct KeepoutZone {
 /// and land further away. So rotor-out Land stays "level up and come down
 /// here", and the latch is confined to the healthy hold modes.
 ///
-/// The frame's `target` in the published component is a Mission leg only; it
-/// never moves this point.
+/// The frame's `target` in the published component is read only in Mission
+/// (a live follow setpoint, #609 finding 4); it never moves this point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HoldRegime {
     None,
@@ -1505,6 +1628,10 @@ pub trait SupervisedCore {
     fn set_landing(&mut self, on: bool);
     /// See [`CascadePartition::set_position`].
     fn set_position(&mut self, ned: Vec3);
+    /// See [`CascadePartition::rearm_fdi`] (#609 finding 16). No default body
+    /// on purpose: a core that silently did not re-arm would fly its second
+    /// spin-up with no FDI guard, the defect this hook fixes.
+    fn rearm_fdi(&mut self);
     /// One control tick — the semantics of [`FlightCore::step`].
     fn step<B: FlightBackend>(&mut self, b: &mut B);
     /// One estimate-only tick, motors commanded zero — the semantics of
@@ -1544,6 +1671,9 @@ impl SupervisedCore for FlightCore {
     }
     fn set_position(&mut self, ned: Vec3) {
         FlightCore::set_position(self, ned)
+    }
+    fn rearm_fdi(&mut self) {
+        FlightCore::rearm_fdi(self)
     }
     fn step<B: FlightBackend>(&mut self, b: &mut B) {
         FlightCore::step(self, b)
@@ -1615,6 +1745,26 @@ pub struct FlightSupervisor<C = FlightCore> {
     /// mode changed by (a `command` between ticks, or a failsafe / milestone
     /// inside `step`).
     hold_regime: HoldRegime,
+    /// BRAKE, THEN LATCH: true while a moving Loiter entry is still braking and
+    /// `hold_xy` is the brake point, not yet the latched hold point.
+    hold_braking: bool,
+    /// The previous tick commanded motors OFF (Disarmed / Armed / Terminated).
+    /// The next flying tick is a spin-up and re-arms the FDI (#609 finding 16).
+    motors_were_off: bool,
+    /// Time spent braking, and time continuously at rest within it (s).
+    brake_s: f32,
+    brake_rest_s: f32,
+    /// Where Mission takes its setpoint from. See [`MissionSource`].
+    mission_source: MissionSource,
+    /// Freshness of the FOLLOW target stream (OFFB-P01's verified receiver).
+    follow: relay_offboard::OffboardReceiver,
+    /// Monotonic counter handed to `follow` with each accepted target. The
+    /// receiver rejects a non-increasing counter (replay); here every accepted
+    /// call is a new sample, so it simply increments.
+    follow_counter: u64,
+    /// Supervisor time (µs), advanced by the backend's `dt` at the top of every
+    /// `step`. The follow-stream timeout is measured on it.
+    clock_us: u64,
     /// Consecutive cycles the estimated tilt has exceeded TILT_RUNAWAY_LIMIT
     /// while airborne — the attitude-runaway detector (v1.99 expanded failsafe).
     /// On reaching TILT_RUNAWAY_CYCLES it fires Event::Terminate (motor cut).
@@ -1683,6 +1833,11 @@ pub mod failsafe_flags {
     pub const WIND_ARMING: u32 = 1 << 6;
     /// A pre-arm row is failing, so arming is refused.
     pub const ARM_BLOCKED: u32 = 1 << 7;
+    /// Mission takes a FOLLOW target ([`super::MissionSource::Follow`], the
+    /// published component) and no fresh one is in force: never started, or
+    /// none accepted for [`super::FOLLOW_TARGET_TIMEOUT_US`]. In Mission this is
+    /// the cause of the HOLD (Loiter) the supervisor takes (#609 finding 4).
+    pub const TARGET_STALE: u32 = 1 << 8;
 }
 
 impl FlightSupervisor<FlightCore> {
@@ -1780,6 +1935,14 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             rtl_latched: false,
             hold_xy: [home[0], home[1]],
             hold_regime: HoldRegime::None,
+            hold_braking: false,
+            motors_were_off: true,
+            brake_s: 0.0,
+            brake_rest_s: 0.0,
+            mission_source: MissionSource::Waypoints,
+            follow: relay_offboard::OffboardReceiver::new(FOLLOW_TARGET_TIMEOUT_US),
+            follow_counter: 0,
+            clock_us: 0,
             runaway_count: 0,
             wind_count: 0,
             check_table: {
@@ -1873,6 +2036,9 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // table verdict is still available via `arm_blocked_check()`.
         if self.fsm.mode() == relay_fsm::Mode::Disarmed && self.arm_blocked_check().is_some() {
             bits |= f::ARM_BLOCKED;
+        }
+        if self.mission_source == MissionSource::Follow && self.follow_target().is_none() {
+            bits |= f::TARGET_STALE;
         }
         bits
     }
@@ -2088,6 +2254,79 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         self.wp_index = 0;
     }
 
+    /// Choose where Mission takes its setpoint from (#609 finding 4). The
+    /// default is [`MissionSource::Waypoints`]; [`host::SupervisorHost`] (the
+    /// published seam, its mirror, the HITL endpoint and the split) selects
+    /// [`MissionSource::Follow`] on every supervisor it builds. The
+    /// selector is explicit rather than inferred from which setter was called
+    /// last, so a stray `set_mission` cannot silently turn a live follow into a
+    /// mission that RTLs on arrival, nor the reverse.
+    pub fn set_mission_source(&mut self, src: MissionSource) {
+        self.mission_source = src;
+    }
+
+    /// The latched Takeoff/Loiter hold point (NED north, east), or `None` when
+    /// not in Takeoff/Loiter or while a moving Loiter entry is still braking
+    /// (see [`HOLD_BRAKE_LEAD_S`]). Telemetry / tests.
+    pub fn hold_point(&self) -> Option<[f32; 2]> {
+        let holding = matches!(
+            self.fsm.mode(),
+            relay_fsm::Mode::Takeoff | relay_fsm::Mode::Loiter
+        );
+        if holding && self.hold_regime == HoldRegime::Hold && !self.hold_braking {
+            Some(self.hold_xy)
+        } else {
+            None
+        }
+    }
+
+    /// The active [`MissionSource`].
+    pub fn mission_source(&self) -> MissionSource {
+        self.mission_source
+    }
+
+    /// Deliver one FOLLOW target (NED metres; z negative = up), the live
+    /// Mission setpoint under [`MissionSource::Follow`]. Returns whether it was
+    /// accepted.
+    ///
+    /// FRESHNESS. A call that delivers a target with all three components
+    /// FINITE is one fresh sample, time-stamped on the supervisor clock; the
+    /// published component makes one call per `step` frame, so per-tick delivery
+    /// is what keeps the stream alive. A target with ANY non-finite component
+    /// is REJECTED: it is not followed, it does not refresh the stream, and the
+    /// last accepted target stays in force until [`FOLLOW_TARGET_TIMEOUT_US`]
+    /// expires, after which the stream is stale (see [`MissionSource`]). The
+    /// WIT frame has no "absent" flag, so a non-finite target is also how a host
+    /// says "no target this frame".
+    ///
+    /// What this CANNOT see: a host that stops calling `step` altogether. No
+    /// code inside the component runs then, so no timeout can fire; that
+    /// failure belongs to the host's own watchdog. And a host whose transport
+    /// re-sends a stale target every frame is, to this receiver, a fresh one.
+    ///
+    /// Accepted in every mode (it is only CONSUMED in Mission), so a host that
+    /// streams before RequestMission enters Mission with a fresh target.
+    pub fn set_follow_target(&mut self, ned: Vec3) -> bool {
+        if !(ned[0].is_finite() && ned[1].is_finite() && ned[2].is_finite()) {
+            return false;
+        }
+        self.follow_counter = self.follow_counter.saturating_add(1);
+        self.follow.accept(
+            relay_offboard::OffboardSetpoint::position(ned),
+            self.follow_counter,
+            self.clock_us,
+        )
+    }
+
+    /// The follow target in force now, or `None` when the stream is stale
+    /// (never started, timed out). Telemetry / tests.
+    pub fn follow_target(&self) -> Option<Vec3> {
+        match self.follow.status(self.clock_us) {
+            relay_offboard::OffboardStatus::Active(sp) => Some(sp.position_ned),
+            relay_offboard::OffboardStatus::Stale => None,
+        }
+    }
+
     /// The waypoint currently being flown to (home if the mission is empty).
     fn current_waypoint(&self) -> Vec3 {
         if self.wp_count == 0 {
@@ -2185,6 +2424,16 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         if self.fsm.mode() == Mode::Disarmed {
             self.rtl_latched = false;
         }
+        // Supervisor clock for the follow-stream timeout. A backend dt that is
+        // not a positive finite number still advances it (by 1 ms), so a broken
+        // clock cannot freeze a stale stream into a fresh one.
+        let dt_s = b.dt();
+        let dt_us = if dt_s.is_finite() && dt_s > 0.0 {
+            ((dt_s * 1.0e6 + 0.5) as u64).max(1)
+        } else {
+            1_000
+        };
+        self.clock_us = self.clock_us.saturating_add(dt_us);
         // v1.99 — refresh the pre-arm checks from real vehicle state each cycle,
         // so a later command(Arm) gates on live signals, not all-pass defaults.
         self.update_preflight(b);
@@ -2308,6 +2557,34 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             // ── v1.30: multi-waypoint mission sequencing. Fly the stored legs
             // in order; on arriving at the active leg advance to the next, and
             // on finishing the last leg autonomously return home and land. ──
+            // ── #609 finding 4: a FOLLOW target is a live setpoint. Reaching it
+            // ends nothing; only a STALE stream does, and then with the
+            // verified arbiter's policy for a stale offboard stream (HOLD,
+            // flown as Loiter). Otherwise the host ends Mission itself. ──
+            Mode::Mission if self.mission_source == MissionSource::Follow => {
+                if self.follow_target().is_none() {
+                    let policy = relay_fsafe::Triggers {
+                        offboard_stale: true,
+                        ..relay_fsafe::Triggers::default()
+                    }
+                    .policy_action();
+                    match policy {
+                        relay_fsafe::FailsafeAction::None => {}
+                        relay_fsafe::FailsafeAction::Hold => {
+                            self.fsm.on(Event::RequestLoiter, g);
+                        }
+                        relay_fsafe::FailsafeAction::Rtl => {
+                            self.fsm.on(Event::RequestRtl, g);
+                        }
+                        relay_fsafe::FailsafeAction::Land => {
+                            self.fsm.on(Event::RequestLand, g);
+                        }
+                        relay_fsafe::FailsafeAction::Terminate => {
+                            self.fsm.on(Event::Terminate, g);
+                        }
+                    }
+                }
+            }
             Mode::Mission => {
                 let wp = self.current_waypoint();
                 let wdx = est.p[0] - wp[0];
@@ -2360,6 +2637,35 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         };
         if regime == HoldRegime::Hold && self.hold_regime != HoldRegime::Hold {
             self.hold_xy = [est.p[0], est.p[1]];
+            // BRAKE, THEN LATCH: a Loiter entered while moving brakes first.
+            // Takeoff is entered only from Armed, on the ground and at rest, so
+            // it always latches here, exactly as #616 defines it.
+            self.hold_braking =
+                self.fsm.mode() == Mode::Loiter && horiz_speed > HOLD_BRAKE_ENTRY_MS;
+            self.brake_s = 0.0;
+            self.brake_rest_s = 0.0;
+        }
+        if regime != HoldRegime::Hold {
+            self.hold_braking = false;
+        }
+        if self.hold_braking {
+            self.brake_s += dt_s;
+            if horiz_speed < HOLD_REST_MS {
+                self.brake_rest_s += dt_s;
+            } else {
+                self.brake_rest_s = 0.0;
+            }
+            if self.brake_rest_s >= HOLD_REST_S || self.brake_s >= HOLD_BRAKE_MAX_S {
+                // At rest (or out of time): latch where it is.
+                self.hold_braking = false;
+                self.hold_xy = [est.p[0], est.p[1]];
+            } else {
+                // The brake point: behind the vehicle along its own velocity.
+                self.hold_xy = [
+                    est.p[0] - est.v[0] * HOLD_BRAKE_LEAD_S,
+                    est.p[1] - est.v[1] * HOLD_BRAKE_LEAD_S,
+                ];
+            }
         }
         self.hold_regime = regime;
 
@@ -2370,7 +2676,16 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             // Latched on entry, NOT the current estimate: that had zero
             // horizontal error by construction and drifted with the wind.
             Mode::Takeoff | Mode::Loiter => [self.hold_xy[0], self.hold_xy[1], -self.cruise_alt],
-            Mode::Mission => self.current_waypoint(), // fly the active leg (its own altitude)
+            Mode::Mission => match self.mission_source {
+                MissionSource::Waypoints => self.current_waypoint(), // the active leg (its own altitude)
+                // The LATEST fresh follow target. Stale is unreachable here in
+                // practice (the milestone above already left Mission this
+                // tick); if it ever is, command zero demand where the vehicle
+                // is rather than any stale target.
+                MissionSource::Follow => self
+                    .follow_target()
+                    .unwrap_or([est.p[0], est.p[1], est.p[2]]),
+            },
             Mode::Rtl => [self.home[0], self.home[1], -self.cruise_alt],
             // Land holds HOME (rate-descend once settled) — except rotor-out,
             // which holds the CURRENT position: land-where-you-are (v1.117).
@@ -2404,7 +2719,16 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
             Mode::Disarmed | Mode::Armed | Mode::Terminated
         ) {
             self.core.step_estimate_only(b); // estimator warm, motors OFF
+            self.motors_were_off = true;
             return;
+        }
+        // SPIN-UP (#609 finding 16): the first flying tick after motors-off
+        // re-arms the rotor-out FDI, so every flight gets its spin-up guard
+        // and a residual reference from THIS flight. A rotor already isolated
+        // stays isolated (see `CascadePartition::rearm_fdi`).
+        if self.motors_were_off {
+            self.core.rearm_fdi();
+            self.motors_were_off = false;
         }
         self.core.set_position(sp);
         self.core.step(b);

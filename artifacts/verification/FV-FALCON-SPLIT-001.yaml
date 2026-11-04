@@ -114,7 +114,8 @@ artifacts:
       never moves and is never NULL).
 
       ARENA SOAK OF THE SPLIT (#574). Every export of the three split crates
-      opens a `falcon_cm_rt::CallScope` first (19 exports; the deprecated
+      opens a `falcon_cm_rt::CallScope` first (20 exports, flight-control's
+      `rearm-fdi` (#609 finding 16) included; the deprecated
       reset is gone). Besides the calibration soaks above,
       `split_partition_ticks_core_area_is_pinned` drives `estimator#tick`
       (100 B) and `flight-control#tick` (160 B) — spilled on every control tick
@@ -228,7 +229,7 @@ artifacts:
         - run: "test \"$(grep -c '^    split_' tests/cascade-sitl-wasm/src/seam_tests.rs)\" -eq \"$(grep -c '^    wasm_' tests/cascade-sitl-wasm/src/seam_tests.rs)\""
         - run: "grep -q 'fn split_partition_ticks_core_area_is_pinned' tests/cascade-sitl-wasm/src/seam_tests.rs"
         # Every split export opens a CallScope (#574).
-        - run: "test \"$(cat wasm/cm/cascade-estimator/src/lib.rs wasm/cm/cascade-control/src/lib.rs wasm/cm/cascade-split/src/lib.rs | grep -c 'let _call = falcon_cm_rt::CallScope::enter();')\" -eq 19"
+        - run: "test \"$(cat wasm/cm/cascade-estimator/src/lib.rs wasm/cm/cascade-control/src/lib.rs wasm/cm/cascade-split/src/lib.rs | grep -c 'let _call = falcon_cm_rt::CallScope::enter();')\" -eq 20"
         # The orchestrator's core IS the tested SplitCore.
         - run: "grep -q 'type RemoteCore = SplitCore<WitSeam>;' wasm/cm/cascade-split/src/lib.rs"
         # The trait the split depends on, and the partition equivalence it

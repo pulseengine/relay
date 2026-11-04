@@ -484,6 +484,20 @@ fn main() -> Result<()> {
     //
     // The native bench never had this: it paces on `counters().is_some()`. The
     // wasm harness simply never got the same treatment.
+    // FOLLOW SCHEDULE (#609 finding 4, Decision A) — OPT-IN, defaults unchanged.
+    // The default flight is Takeoff -> Loiter only, so a BIT-IDENTICAL result
+    // says nothing about the Mission follow path. With FOLLOW_MISSION_AT=<tick>
+    // both sides get RequestMission at that tick and the streamed target moves
+    // 3 m north / 2 m east of the hold; with FOLLOW_NAN_AT=<tick> every later
+    // frame carries a NaN target, so the stream goes stale and the supervisor
+    // takes the 1.0 s HOLD (Loiter, failsafe bit 8). The hold verdict below
+    // still judges the ORIGINAL target, so expect it to fail on such a run; the
+    // differential verdict is the point.
+    let env_tick = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<u32>().ok());
+    let follow_mission_at = env_tick("FOLLOW_MISSION_AT");
+    let follow_nan_at = env_tick("FOLLOW_NAN_AT");
+    let mut follow_first_mission: Option<u32> = None;
+    let mut follow_first_stale_hold: Option<u32> = None;
     let tick_period = std::time::Duration::from_secs_f32(dt);
     let pace_real_time = plant.counters().is_some();
     let sim_lock = pace_real_time && std::env::var("NO_SIM_LOCK").is_err();
@@ -636,7 +650,32 @@ fn main() -> Result<()> {
             // @0.12.0. Without this the component cannot arm — see SITL_PACK_V.
             battery_v: Some(SITL_PACK_V),
         };
-        let m = controller.call_step(&mut store, frame, target)?;
+        // FOLLOW SCHEDULE: commands land before this tick's step on BOTH sides,
+        // exactly as a host's would.
+        if Some(tick) == follow_mission_at {
+            pilot.call_command(&mut store, PilotCommand::RequestMission, true, true)?;
+            if let Some((nat, _, _)) = differential.as_mut() {
+                nat.command(falcon_core::relay_fsm::Event::RequestMission, true, true);
+            }
+        }
+        let tick_target = if follow_nan_at.is_some_and(|t| tick >= t) {
+            Waypoint {
+                north: f32::NAN,
+                east: f32::NAN,
+                down: f32::NAN,
+                yaw: 0.0,
+            }
+        } else if follow_mission_at.is_some_and(|t| tick >= t) {
+            Waypoint {
+                north: target.north + 3.0,
+                east: target.east + 2.0,
+                down: target.down,
+                yaw: 0.0,
+            }
+        } else {
+            Waypoint { ..target }
+        };
+        let m = controller.call_step(&mut store, frame, tick_target)?;
 
         // READ THE PUBLISHED STATE, every tick, and hold it to its contract.
         // Three properties, each of which has a real failure mode:
@@ -666,6 +705,17 @@ fn main() -> Result<()> {
             anyhow::bail!("published state at tick {tick} marks NOTHING valid");
         }
         last_tick = st.tick_head;
+        if st.mode == falcon_core::relay_fsm::Mode::Mission as u8 && follow_first_mission.is_none()
+        {
+            follow_first_mission = Some(tick);
+        }
+        if follow_nan_at.is_some_and(|t| tick >= t)
+            && st.mode == falcon_core::relay_fsm::Mode::Loiter as u8
+            && st.failsafe & (1 << 8) != 0
+            && follow_first_stale_hold.is_none()
+        {
+            follow_first_stale_hold = Some(tick);
+        }
 
         // Fed the IDENTICAL frame — both sides must see one input sequence or
         // they diverge for reasons that say nothing about the boundary. The
@@ -675,7 +725,7 @@ fn main() -> Result<()> {
             let n = nat.step(
                 s.accel_body,
                 gyro_meas,
-                [target.north, target.east, target.down],
+                [tick_target.north, tick_target.east, tick_target.down],
                 position_ned.map(|p| [p.x, p.y, p.z]),
                 mag_body.map(|m| [m.x, m.y, m.z]),
                 heading_rad,
@@ -949,6 +999,13 @@ fn main() -> Result<()> {
         );
     }
     println!("LOOP CLOSES: {ticks} ticks executed through the Component Model seam.");
+    if follow_mission_at.is_some() || follow_nan_at.is_some() {
+        println!(
+            "FOLLOW SCHEDULE: request-mission at {follow_mission_at:?}, NaN target from \
+             {follow_nan_at:?}; published Mission first at {follow_first_mission:?}, \
+             stale HOLD (Loiter + bit 8) first at {follow_first_stale_hold:?}"
+        );
+    }
     println!(
         "STATE RETURN: {state_reads} read-state calls, seqlock coherent every tick, \
          final published tick {last_tick}, valid mask 0x{:x}.",

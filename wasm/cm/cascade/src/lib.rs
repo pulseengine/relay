@@ -282,15 +282,18 @@ impl Guest for Component {
 
         {
             let mut host = HOST.0.borrow_mut();
-            // `target` IS NOW A MISSION LEG, NOT A POSITION COMMAND — the one
-            // semantic change at @0.12.0 a host must be told about. The
+            // `target` IS THE MISSION-MODE SETPOINT, NOT A POSITION COMMAND —
+            // the semantic change at @0.12.0 a host must be told about. The
             // supervisor OWNS the position setpoint: it derives one per mode
             // (Takeoff/Loiter hold a horizontal point latched on entry, RTL
-            // flies home at `cruise-alt`, Land descends, Mission flies the
-            // active leg). OUTSIDE MISSION THE TARGET IS IGNORED (#609 finding
-            // 4). THAT IS THE POINT of SUPERVISOR-P01: a supervised vehicle
-            // sometimes declines to go where it is sent. `SupervisorHost::step`
-            // builds the supervisor if absent, installs the leg and ticks.
+            // flies home at `cruise-alt`, Land descends, Mission FOLLOWS the
+            // target). OUTSIDE MISSION THE TARGET IS IGNORED. THAT IS THE POINT
+            // of SUPERVISOR-P01: a supervised vehicle sometimes declines to go
+            // where it is sent. IN MISSION IT IS A LIVE FOLLOW SETPOINT (#609
+            // finding 4): reaching it ends nothing, a non-finite one is
+            // rejected, and no fresh one for 1.0 s takes the stale-target HOLD
+            // (failsafe bit 8). `SupervisorHost::step` builds the supervisor if
+            // absent, delivers the sample and ticks; the rule lives there.
             let sup = host.step([target.north, target.east, target.down], &mut backend);
 
             // LATCH FOR OBSERVERS, after the tick so the state corresponds to

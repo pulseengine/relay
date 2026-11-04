@@ -102,10 +102,22 @@ fn event(c: WirePilotCommand) -> Event {
 
 /// The binding has NO mission target (docs/TRANSPORT-BINDING.md, "What this
 /// binding does not yet give you"): the `sensor` frame carries no waypoint.
-/// `SupervisorHost::step` takes the frame's mission leg, which the supervisor
-/// ignores outside Mission mode (#609 finding 4); nothing here requests
-/// Mission, so this is the home point the tests configure.
-const NO_MISSION_LEG: [f32; 3] = [0.0, 0.0, 0.0];
+/// `SupervisorHost::step` takes the frame's target, which the supervisor
+/// ignores outside Mission and, in Mission, FOLLOWS as a live setpoint (#609
+/// finding 4). So the endpoint delivers the seam's own "no target this frame"
+/// encoding, a NON-FINITE target, rather than inventing a point: a binding
+/// host that sends `request-mission` gets the stale-target HOLD (Loiter where
+/// the vehicle is, failsafe bit 8), not a flight to a point nobody sent.
+///
+/// Until #609's live-follow fix this was `[0, 0, 0]` — home at GROUND LEVEL
+/// (`down = 0`) — which under live follow is a FRESH target every frame: Mission
+/// would fly the vehicle down to the ground at home and hold it there, never
+/// going stale. `request_mission_with_the_old_constant_descends_toward_the_ground`
+/// pins that hazard as the negative control.
+const NO_TARGET: [f32; 3] = [f32::NAN; 3];
+
+/// The pre-#609-follow endpoint constant, kept only for the negative control.
+const OLD_HOME_GROUND_TARGET: [f32; 3] = [0.0, 0.0, 0.0];
 
 /// One tick's sensors from a decoded frame; the motors the supervisor wrote.
 struct FrameBackend {
@@ -151,6 +163,9 @@ impl FlightBackend for FrameBackend {
 struct Endpoint {
     seam: SupervisorHost,
     inbound: SeqTracker,
+    /// What every `step` delivers as the frame target: [`NO_TARGET`], except
+    /// in the negative control.
+    target: [f32; 3],
     // No outbound counter: every reply echoes the seq of the frame it
     // answers (docs/TRANSPORT-BINDING.md §3, the echo rule).
 }
@@ -160,6 +175,7 @@ impl Endpoint {
         Endpoint {
             seam: SupervisorHost::new(),
             inbound: SeqTracker::new(),
+            target: NO_TARGET,
         }
     }
 
@@ -257,7 +273,7 @@ impl Endpoint {
                     f,
                     motors: [0.0; 4],
                 };
-                self.seam.step(NO_MISSION_LEG, &mut b);
+                self.seam.step(self.target, &mut b);
                 // THE ECHO RULE: the reply carries the seq of the sensor
                 // frame it answers, never a counter of the endpoint's own.
                 let mut out = [0u8; falcon_hitl::MOTORS_FRAME_LEN];
@@ -322,12 +338,16 @@ fn control(host: &mut BindingHost, ep: &mut Endpoint, frame: &[u8]) {
 }
 
 /// One tick: plant -> sensor frame -> endpoint -> motors frame -> plant.
-fn tick(host: &mut BindingHost, ep: &mut Endpoint, plant: &mut Plant) {
+/// Returns the motors the plant was given.
+fn tick(host: &mut BindingHost, ep: &mut Endpoint, plant: &mut Plant) -> [f32; 4] {
     let f = sample_sensor_frame(plant);
     let bytes = host.sensor(&f).expect("no control frame outstanding");
     let reply = ep.handle(&bytes).expect("a sensor frame is answered");
     match host.on_reply(&reply) {
-        Ok(HostReply::Motors { motors, .. }) => plant.write_motors(&motors),
+        Ok(HostReply::Motors { motors, .. }) => {
+            plant.write_motors(&motors);
+            motors
+        }
         other => panic!("expected motors, got {other:?}"),
     }
 }
@@ -658,4 +678,195 @@ fn every_reply_echoes_the_seq_of_the_frame_it_answers_across_a_dropped_sensor_fr
     }
     assert_eq!(dropped_seen, 1, "exactly one drop reported");
     assert_eq!(answered, 19, "every delivered sensor frame was answered");
+}
+
+// ── the frame target over a binding that carries none (#609 finding 4) ──────
+
+/// Send `cmd` over the binding.
+fn pilot(host: &mut BindingHost, ep: &mut Endpoint, cmd: WirePilotCommand) {
+    let f = host
+        .command(&WireCommand {
+            cmd,
+            level: true,
+            throttle_low: true,
+        })
+        .unwrap();
+    control(host, ep, &f);
+}
+
+/// Configure, calibrate, warm, arm and take off over the binding, with the
+/// endpoint delivering `target` every frame, then fly until the supervisor
+/// settles into Loiter. Returns the rig and the motors of every tick.
+fn to_loiter(target: [f32; 3]) -> (BindingHost, Endpoint, Plant, Vec<[u32; 4]>) {
+    let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut plant = Plant {
+        sim: SimBackend::new(level, DT),
+        battery_v: Some(16.4),
+        on_ground: true,
+    };
+    let mut host = BindingHost::new();
+    let mut ep = Endpoint::new();
+    ep.target = target;
+    let f = host
+        .configure(&WireVehicleConfig {
+            hover_thrust: 0.5,
+            loop_rate_hz: 1.0 / DT,
+            pos_var: 0.01,
+            process_floor_vel: 0.0,
+            process_floor_pos: 0.0,
+            altitude_kp: 0.05,
+            altitude_kd: 0.30,
+            altitude_ki: 0.0,
+            position_ki: 0.02,
+        })
+        .unwrap();
+    control(&mut host, &mut ep, &f);
+    let f = host
+        .configure_supervisor(&WireSupervisorConfig {
+            home: [0.0, 0.0, 0.0],
+            fence_radius: 50.0,
+            cruise_alt: 2.0,
+            low_batt_v: 14.0,
+        })
+        .unwrap();
+    control(&mut host, &mut ep, &f);
+    let f = host
+        .configure_calibration(&WireCalibration {
+            gyro_bias: [0.001, 0.0, 0.0],
+            accel_bias: [0.0; 3],
+            accel_scale: [1.0; 3],
+            mag_offset: [0.0; 3],
+            mag_scale: [1.0; 3],
+            mag_offdiag: [0.0; 3],
+        })
+        .unwrap();
+    control(&mut host, &mut ep, &f);
+    let mut log = Vec::new();
+    let mut step = |host: &mut BindingHost, ep: &mut Endpoint, plant: &mut Plant| {
+        let m = tick(host, ep, plant);
+        log.push(m.map(f32::to_bits));
+    };
+    for _ in 0..WARM_TICKS {
+        step(&mut host, &mut ep, &mut plant);
+    }
+    pilot(&mut host, &mut ep, WirePilotCommand::Arm);
+    assert_eq!(
+        ep.supervisor().mode(),
+        Mode::Armed,
+        "{:?}",
+        ep.supervisor().arm_blocked_check()
+    );
+    pilot(&mut host, &mut ep, WirePilotCommand::RequestTakeoff);
+    for _ in 0..FLY_TICKS {
+        step(&mut host, &mut ep, &mut plant);
+        if ep.supervisor().mode() == Mode::Loiter {
+            break;
+        }
+    }
+    assert_eq!(
+        ep.supervisor().mode(),
+        Mode::Loiter,
+        "never settled into Loiter"
+    );
+    // A settled hover before anything else is asked.
+    for _ in 0..1000 {
+        step(&mut host, &mut ep, &mut plant);
+    }
+    (host, ep, plant, log)
+}
+
+/// OUTSIDE MISSION THE FRAME TARGET IS IGNORED, so the endpoint's switch to
+/// the non-finite "no target" changes nothing a binding host flies today:
+/// warm-up, arm, takeoff and a settled Loiter command the SAME motors, bit
+/// for bit, as with the old `[0, 0, 0]`. What it does change is the live
+/// failsafe bit 8, which is now up for the whole run, because no target IS
+/// in force (the binding has no state frame, so no binding host sees it).
+#[test]
+fn outside_mission_the_non_finite_target_flies_bit_identically_to_the_old_constant() {
+    let (_, ep_new, plant_new, new) = to_loiter(NO_TARGET);
+    let (_, ep_old, plant_old, old) = to_loiter(OLD_HOME_GROUND_TARGET);
+    assert_eq!(
+        new.len(),
+        old.len(),
+        "the two runs reached Loiter at different ticks"
+    );
+    if let Some(i) = (0..new.len()).find(|&i| new[i] != old[i]) {
+        panic!("motors differ at tick {i}: {:?} vs {:?}", new[i], old[i]);
+    }
+    assert_eq!(
+        plant_new.sim.pos.map(f32::to_bits),
+        plant_old.sim.pos.map(f32::to_bits)
+    );
+    let stale = falcon_core::failsafe_flags::TARGET_STALE;
+    assert_ne!(
+        ep_new.supervisor().failsafe_flags() & stale,
+        0,
+        "no target is in force"
+    );
+    assert_eq!(ep_old.supervisor().failsafe_flags() & stale, 0);
+    // And nothing else in the published cause differs.
+    assert_eq!(
+        ep_new.supervisor().failsafe_flags() & !stale,
+        ep_old.supervisor().failsafe_flags() & !stale
+    );
+}
+
+/// THE DECISION: a binding host that sends `request-mission` has given no
+/// target, so the supervisor takes the stale-target HOLD on the first Mission
+/// tick — Loiter, latched where the vehicle is — and the vehicle stays at its
+/// 2 m hover.
+#[test]
+fn request_mission_over_the_binding_takes_the_stale_target_hold() {
+    let (mut host, mut ep, mut plant, _) = to_loiter(NO_TARGET);
+    let at = plant.sim.pos;
+    pilot(&mut host, &mut ep, WirePilotCommand::RequestMission);
+    // The command is accepted (Mission), and the first step takes the HOLD.
+    assert_eq!(ep.supervisor().mode(), Mode::Mission);
+    tick(&mut host, &mut ep, &mut plant);
+    assert_eq!(
+        ep.supervisor().mode(),
+        Mode::Loiter,
+        "the HOLD on the first Mission tick"
+    );
+    let stale = falcon_core::failsafe_flags::TARGET_STALE;
+    assert_ne!(
+        ep.supervisor().failsafe_flags() & stale,
+        0,
+        "with its cause, bit 8"
+    );
+    let mut worst = 0.0f32;
+    for _ in 0..(20.0 / DT) as usize {
+        tick(&mut host, &mut ep, &mut plant);
+        assert_eq!(ep.supervisor().mode(), Mode::Loiter);
+        let p = plant.sim.pos;
+        worst = worst
+            .max((p[0] - at[0]).hypot(p[1] - at[1]))
+            .max((p[2] - at[2]).abs());
+    }
+    eprintln!("binding request-mission HOLD: worst deviation {worst:.3} m over 20 s");
+    assert!(worst < 0.5, "the HOLD stays where it was asked: {worst} m");
+}
+
+/// NEGATIVE CONTROL: with the old `[0, 0, 0]` (home at GROUND level) the
+/// same `request-mission` is a FRESH live target every frame. The vehicle
+/// stays in Mission, never goes stale, and descends toward the ground.
+#[test]
+fn request_mission_with_the_old_constant_descends_toward_the_ground() {
+    let (mut host, mut ep, mut plant, _) = to_loiter(OLD_HOME_GROUND_TARGET);
+    let start_d = plant.sim.pos[2];
+    pilot(&mut host, &mut ep, WirePilotCommand::RequestMission);
+    for _ in 0..(20.0 / DT) as usize {
+        tick(&mut host, &mut ep, &mut plant);
+        assert_eq!(
+            ep.supervisor().mode(),
+            Mode::Mission,
+            "the old constant never goes stale"
+        );
+    }
+    let end_d = plant.sim.pos[2];
+    eprintln!("old constant in Mission: pos-d {start_d:.3} -> {end_d:.3} m in 20 s");
+    assert!(
+        end_d > start_d + 1.0,
+        "the old constant must be seen descending (pos-d {start_d} -> {end_d})"
+    );
 }
