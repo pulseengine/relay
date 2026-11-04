@@ -199,15 +199,20 @@ pub struct EstimatorPartition {
     /// production core against the gz plant, where achieved starts at 0).
     step_count: u32,
     fdi_warmup_steps: u32,
+    /// The loop rate `fdi_warmup_steps` is counted at. Re-synced from the
+    /// backend's own `dt` exactly as the cascade's (see [`resynced_rate`]),
+    /// so the innovation-gate warm-up is a fixed TIME (#609 finding 7).
+    designed_hz: f32,
 }
 
 impl EstimatorPartition {
     /// `pub` for the split deployment (#575): a `cascade-estimator` component
-    /// builds this half on its own. `warmup` must be
-    /// [`FlightCore::warmup_steps`] of the loop rate the fused core would have
-    /// been built with, or the split diverges from the fused core at the
-    /// innovation-gate engagement tick.
-    pub fn new(warmup: u32) -> Self {
+    /// builds this half on its own. `loop_hz` is the NOMINAL rate the fused
+    /// core would have been built with; both halves re-derive their warm-up
+    /// from the rate the backend is actually stepped at, by the same rule
+    /// ([`resynced_rate`], [`FlightCore::warmup_steps`]), so they engage
+    /// their gates on the same tick as the fused core.
+    pub fn new(loop_hz: f32) -> Self {
         EstimatorPartition {
             iekf: Iekf::level(),
             grav_var: 0.5,
@@ -225,8 +230,19 @@ impl EstimatorPartition {
             ticks_since_aiding: u32::MAX,
             in_flight: false,
             step_count: 0,
-            fdi_warmup_steps: warmup,
+            fdi_warmup_steps: FlightCore::warmup_steps(loop_hz),
+            designed_hz: loop_hz,
             calib: relay_calib::CalParams::identity(),
+        }
+    }
+
+    /// Re-count the warm-up at the rate the backend really steps at (#609
+    /// finding 7). The same tolerance and the same count as the cascade's
+    /// `resync_loop_rate`, through the same two functions.
+    fn resync_loop_rate(&mut self, dt: f32) {
+        if let Some(actual) = resynced_rate(self.designed_hz, dt) {
+            self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
+            self.designed_hz = actual;
         }
     }
 
@@ -329,6 +345,7 @@ impl EstimatorPartition {
         // ── Calibrate (relay-calib): de-bias/scale the raw sample before the
         // estimator. Identity by default (a no-op) until set_calibration installs
         // solved offsets. ──
+        self.resync_loop_rate(dt);
         let gyro = self.calib.apply_gyro(raw.gyro);
         let accel = self.calib.apply_accel(raw.accel);
 
@@ -394,6 +411,20 @@ impl EstimatorPartition {
         self.step_count = self.step_count.saturating_add(1);
         self.iekf.state()
     }
+}
+
+/// The rate a partition should RE-DERIVE its rate-dependent state for, if
+/// the backend's `dt` says it is being stepped more than 2% away from
+/// `designed_hz` (jitter must not rebuild filters every tick); `None` to keep
+/// it, or for a `dt` that is not a positive finite number. ONE rule for both
+/// partitions (#609 finding 7), so a split's halves resync on the same tick.
+fn resynced_rate(designed_hz: f32, dt: f32) -> Option<f32> {
+    if !(dt.is_finite() && dt > 0.0) {
+        return None;
+    }
+    let actual = 1.0 / dt;
+    let drift = relay_math::fabsf(actual - designed_hz);
+    (drift > 0.02 * designed_hz).then_some(actual)
 }
 
 /// The CASCADE partition (PART-P01, v1.124): geometric attitude, ADRC,
@@ -507,9 +538,9 @@ pub struct CascadePartition {
 
 impl CascadePartition {
     /// `pub` for the split deployment (#575): a `cascade-control` component
-    /// builds this half on its own. Same `warmup` contract as
+    /// builds this half on its own. Same `loop_hz` contract as
     /// [`EstimatorPartition::new`].
-    pub fn new(hover_thrust: f32, loop_hz: f32, warmup: u32) -> Self {
+    pub fn new(hover_thrust: f32, loop_hz: f32) -> Self {
         CascadePartition {
             designed_hz: loop_hz,
             geo: GeoAtt::new(GeoGains::FALCON_QUAD),
@@ -547,7 +578,7 @@ impl CascadePartition {
             last_motor_cmd: [0.0; 4],
             dbg_fdi: (0.0, 1.0, false, [0.0; 4]),
             step_count: 0,
-            fdi_warmup_steps: warmup,
+            fdi_warmup_steps: FlightCore::warmup_steps(loop_hz),
             fdi_spinup: 0,
             calib: relay_calib::CalParams::identity(),
         }
@@ -776,16 +807,18 @@ impl CascadePartition {
     /// A setter would have been forgettable in exactly the way the hardcoded
     /// constructor already was, so this takes the rate from the backend and
     /// costs one comparison per tick.
+    ///
+    /// THE WARM-UP TOO (#609 finding 7, #587 maintainer decision 2026-10-21):
+    /// the FDI spin-up guard (and the yaw-capture freeze at 5x it) is a fixed
+    /// TIME, 0.2 s, counted at the resynced rate. It used to stay at the
+    /// count the nominal 1 kHz gave (200 ticks), so the 250 Hz gz bench held
+    /// the FDI off for 0.8 s and the yaw capture for 4 s, and a 2 kHz frame
+    /// shrank the guard to 0.1 s.
     fn resync_loop_rate(&mut self, dt: f32) {
-        if !(dt.is_finite() && dt > 0.0) {
-            return;
-        }
-        let actual = 1.0 / dt;
-        // 2% tolerance: jitter must not rebuild filters every tick.
-        let drift = relay_math::fabsf(actual - self.designed_hz);
-        if drift > 0.02 * self.designed_hz {
+        if let Some(actual) = resynced_rate(self.designed_hz, dt) {
             self.gyro_lpf = GyroLpf::new(60.0, actual);
             self.notch = relay_notch::HarmonicNotchBank::new(actual);
+            self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
             self.designed_hz = actual;
         }
     }
@@ -1113,14 +1146,13 @@ pub struct FlightCore {
 
 impl FlightCore {
     pub fn new(hover_thrust: f32, loop_hz: f32) -> Self {
-        let warmup = Self::warmup_steps(loop_hz);
         FlightCore {
-            est: EstimatorPartition::new(warmup),
-            casc: CascadePartition::new(hover_thrust, loop_hz, warmup),
+            est: EstimatorPartition::new(loop_hz),
+            casc: CascadePartition::new(hover_thrust, loop_hz),
         }
     }
 
-    /// The warm-up step count both partitions are built with at `loop_hz`.
+    /// The warm-up step count at `loop_hz`: 0.2 s of ticks, ROUNDED.
     ///
     /// Hold the FDI off for ~0.2 s of spin-up (≥10 steps floor); the
     /// achieved rotor state has caught the command by then. The same
@@ -1129,9 +1161,14 @@ impl FlightCore {
     /// ONE definition, `pub` (#575): the fused core, the partitioned core and
     /// a split deployment that builds each half in its own component must all
     /// derive it identically, or the halves engage their gates on different
-    /// ticks than the fused core does.
+    /// ticks than the fused core does. Both halves call it at construction
+    /// AND on every rate resync ([`resynced_rate`], #609 finding 7).
+    ///
+    /// ROUNDED, NOT TRUNCATED: the rate a resync derives is `1/dt` in f32,
+    /// and 1/(1/1000) is 999.99994, whose 0.2 s truncates to 199 ticks. A
+    /// 1 kHz frame must count the 200 the nominal construction counts.
     pub fn warmup_steps(loop_hz: f32) -> u32 {
-        ((loop_hz * 0.2) as u32).max(10)
+        ((loop_hz * 0.2 + 0.5) as u32).max(10)
     }
 
     /// Install solved sensor offsets — synced to BOTH partitions (each
@@ -1333,10 +1370,9 @@ impl PartitionedCore {
         jitter: bool,
         seed: u32,
     ) -> Self {
-        let warmup = FlightCore::warmup_steps(loop_hz);
         PartitionedCore {
-            est: EstimatorPartition::new(warmup),
-            casc: CascadePartition::new(hover_thrust, loop_hz, warmup),
+            est: EstimatorPartition::new(loop_hz),
+            casc: CascadePartition::new(hover_thrust, loop_hz),
             buf: [NavState::identity(); 8],
             buf_len: 0,
             delay_ticks: delay_ticks.min(6),
@@ -1723,10 +1759,10 @@ impl SupervisedCore for FlightCore {
 ///
 /// `pub` so a split deployment (#575) builds its two halves from the SAME
 /// numbers rather than a copy of them. The loop rate is a nominal design rate:
-/// `CascadePartition::resync_loop_rate` re-derives the filters from the
-/// backend's real `dt` on the first tick, but the warm-up count derived from it
-/// is NOT resynced, so a split that guessed a different rate here would engage
-/// its FDI and innovation gates on different ticks than the fused core does.
+/// both partitions' `resync_loop_rate` re-derive the filters AND the warm-up
+/// counts from the backend's real `dt` on the first tick (#609 finding 7), by
+/// one shared rule, so the halves engage their FDI and innovation gates on the
+/// same tick as the fused core whatever rate the frames run at.
 pub const SUPERVISOR_CORE_HOVER_THRUST: f32 = 0.5;
 /// See [`SUPERVISOR_CORE_HOVER_THRUST`].
 pub const SUPERVISOR_CORE_LOOP_HZ: f32 = 1000.0;
@@ -7326,5 +7362,72 @@ mod failsafe_campaign {
             rtl_fires > 40 && no_false_rtl > 40,
             "both regimes must be well-sampled ({rtl_fires}/{no_false_rtl})"
         );
+    }
+}
+
+/// #609 finding 7 / #587 (maintainer decision 2026-10-21): the FDI spin-up
+/// guard and the estimator's innovation-gate warm-up are a fixed TIME
+/// (0.2 s, and 5x it), counted in ticks of the rate the core RESYNCS to from
+/// the backend's own `dt`, not of the nominal 1 kHz it was constructed at.
+#[cfg(test)]
+mod warmup_time_tests {
+    extern crate std;
+    use super::*;
+
+    const LEVEL: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+    /// The supervisor's core: built at the nominal 1 kHz, stepped at `hz`.
+    fn hovering(hz: f32) -> (SimBackend, FlightCore) {
+        let mut b = SimBackend::new(LEVEL, 1.0 / hz);
+        b.rpm_telemetry = true;
+        b.pos = [0.0, 0.0, -2.0];
+        let mut core = FlightCore::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ);
+        core.set_position([0.0, 0.0, -2.0]);
+        (b, core)
+    }
+
+    /// Both halves derive the SAME count, ROUNDED: in f32, 1/(1/1000) is
+    /// 999.99994, and truncating 0.2 x that gives 199, not 200.
+    #[test]
+    fn the_warm_up_is_a_fixed_time_at_the_resynced_rate() {
+        for (hz, want) in [(250.0f32, 50u32), (400.0, 80), (500.0, 100), (1000.0, 200)] {
+            let (mut b, mut core) = hovering(hz);
+            core.step(&mut b);
+            assert_eq!(
+                (core.est.fdi_warmup_steps, core.casc.fdi_warmup_steps),
+                (want, want),
+                "at {hz} Hz the warm-up must be 0.2 s = {want} ticks"
+            );
+        }
+        assert_eq!(FlightCore::warmup_steps(1.0 / (1.0f32 / 1000.0)), 200);
+        assert_eq!(FlightCore::warmup_steps(1.0 / (1.0f32 / 250.0)), 50);
+    }
+
+    /// The FDI ENGAGES 0.2 s after spin-up at 250 Hz and at 1 kHz: a rotor
+    /// dead from the first tick is not isolated before the guard's last tick
+    /// (the check runs once the spin-up count reaches it), and is isolated
+    /// within a few ticks of it.
+    #[test]
+    fn the_fdi_engages_after_a_fixed_time_at_250_hz_and_1_khz() {
+        for hz in [250.0f32, 1000.0] {
+            let guard = (0.2 * hz + 0.5) as u32;
+            let (mut b, mut core) = hovering(hz);
+            b.fail_rotor(1);
+            let mut isolated = None;
+            for i in 1..=(2.0 * hz) as u32 {
+                core.step(&mut b);
+                if core.failed_motor().is_some() {
+                    isolated = Some(i);
+                    break;
+                }
+            }
+            std::eprintln!("{hz} Hz: guard {guard} ticks, rotor isolated at tick {isolated:?}");
+            let i = isolated.unwrap_or_else(|| panic!("{hz} Hz: never isolated"));
+            assert_eq!(core.failed_motor(), Some(1), "{hz} Hz: wrong rotor");
+            assert!(
+                i >= guard && i <= guard + 5,
+                "{hz} Hz: isolated at tick {i}, the FDI engages at tick {guard}"
+            );
+        }
     }
 }

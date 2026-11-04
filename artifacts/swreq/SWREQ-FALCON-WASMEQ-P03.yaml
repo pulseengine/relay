@@ -41,11 +41,10 @@ artifacts:
       previous defaults byte for byte, so this is additive.
 
       `configure` re-initialises the core rather than patching it in place.
-      `loop-rate-hz` is fixed at construction while the other eight are
-      live-settable, so an in-place late `configure` would honour eight fields
-      and silently ignore the ninth — a host flying a rate it did not ask for,
-      with no error. That is the same defect shape as the hardcoded tick period
-      this seam family exists to remove.
+      (Originally because `loop-rate-hz` was fixed at construction. Since
+      #609 finding 7 it is ADVISORY: the core re-syncs its filters and
+      warm-ups to the frames' `dt-s`, so the rate a host flies is the rate its
+      frames carry, never one it did not ask for.)
 
       SCOPE, and what this does NOT claim. The hold is verified over 8 s. It is
       NOT a claim of indefinite hold: the altitude creeps upward on a longer
