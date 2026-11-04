@@ -892,14 +892,16 @@ struct FollowSeen {
 /// `ASYM_SOFTSTART_S` from the takeoff command (a soft-start the other three
 /// ESCs do not have). Its residual is differential, which is what a rotor-out
 /// looks like, and ONLY the spin-up guard keeps it from being isolated: the
-/// ramp is over well inside the guard's 0.2 s. Both plants are fed alike.
+/// ramp is over well inside the guard's 0.3 s (0.2 s before #609 finding
+/// 18). Both plants are fed alike.
 ///
 /// Until finding 17 this twin flew each takeoff with a UNIFORM 50 ms rotor
 /// lag instead; that transient is common-mode and now produces no residual,
 /// so it no longer discriminates. The plant here has NO rotor lag: combined
 /// with a 50 ms lag, the same soft-start is isolated ~0.23 s into the FIRST
 /// takeoff, past the guard, with or without the common-mode rejection (a
-/// separate, pre-existing FDI sensitivity, reported on #609).
+/// separate, pre-existing FDI sensitivity: #609 finding 18, addressed by the
+/// 0.3 s guard and the lag-modelled residual, tests/fdi_spinup_guard.rs).
 const ASYM_ROTOR: usize = 2;
 const ASYM_SOFTSTART_S: f32 = 0.1;
 const HOLD_TARGET: [f32; 3] = [0.0, 0.0, -CRUISE];
