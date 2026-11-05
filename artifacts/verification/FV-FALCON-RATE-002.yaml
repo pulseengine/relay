@@ -164,6 +164,26 @@ artifacts:
       re-measure against the fixed baseline, correct the record. This is the
       record half; the measurement half is still owed.
 
+
+      ---- EVIDENCE SCOPE (review of v1.140 defect A, PR #644) ----
+      The frame-jitter fix (filter design rate on the median of the last 16
+      frame periods, re-designed keeping state; near-Nyquist band rebuilt
+      with zeroed state as before) is evidenced against main (725f146) by
+      ONE grid harness, zg_grid.rs (8604 cells: loop rate 10-10000 Hz x rotor
+      vibration 0 / 0.1 / 0.25 / 0.3 switched on after Loiter x pre-arm plain
+      / 3 rad/s bump / 0.5 rad/s rotation x dt fixed / strict alternation /
+      balanced random two-level, +-12.5 %; supervised takeoff, 20 s). At 250
+      Hz and above it is NO WORSE than main in every cell (0 worse). Below
+      250 Hz under rotor vibration >= 0.25 the outcome is chaotic on main
+      itself (main against main with the pre-arm hold one tick longer flips
+      601 cells) and is NOT EVIDENCED either way. At 140-200 Hz with rotor
+      vibration >= 0.25, jittered dt now behaves like main's FIXED dt
+      (failures of 363 at vib 0.25 / 0.3: alternation 38 / 99, random 84 /
+      107; main fixed dt 38 / 97; main jittered 0-2), where main's per-frame
+      zeroed rebuild happened to fly jittered dt better.
+      The harness, its runner and the analysis scripts live in the
+      falcon-v1.142 issue for this scope.
+      ---- END EVIDENCE SCOPE ----
     tags: [verification, falcon, rate-loop, adrc, limit-cycle, gazebo, v1.141]
     fields:
       method: simulation
