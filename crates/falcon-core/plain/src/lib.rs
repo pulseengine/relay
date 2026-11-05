@@ -422,8 +422,10 @@ impl EstimatorPartition {
 /// finite number. ONE rule for both partitions (#609 finding 7), so a split's
 /// halves resync on the same tick. The tick counters offer it EACH frame's
 /// `dt`; the filters offer it the MEDIAN of the last 16 frame periods
-/// (`CascadePartition::redesign_filters`, review of v1.140 defect A), so
-/// jitter no longer re-designs them every tick.
+/// (`CascadePartition::redesign_filters`, review of v1.140 defect A): a
+/// strict alternation or a minority of late frames no longer re-designs
+/// them every tick (balanced RANDOM jitter still re-designs them often; the
+/// re-design keeps their state, which is what makes that harmless).
 fn resynced_rate(designed_hz: f32, dt: f32) -> Option<f32> {
     if !(dt.is_finite() && dt > 0.0) {
         return None;
@@ -999,9 +1001,19 @@ impl CascadePartition {
     /// seeding it, so a fixed-period backend re-designs on its first tick
     /// as before. They are re-designed when `1 / median` leaves the same 2%
     /// band of `filter_hz` ([`resynced_rate`]); a non-finite rate is
-    /// rejected there. A late frame, an alternation and a periodic or random
-    /// minority of long frames do not move the median; a genuine rate change
-    /// moves it within half a window (9 frames of a step; a step can stop
+    /// rejected there. What this does and does NOT absorb (measured, tests
+    /// `jitter_hovers_on_at_most_three_filter_redesigns` and
+    /// `balanced_random_jitter_redesigns_often_and_harmlessly`): a single
+    /// late frame, a STRICT alternation (2, 3, 2, 3 ms: equal counts in any
+    /// even window) and a periodic or random MINORITY of long frames do not
+    /// move the median (at most 3 re-designs, all while the window fills). A
+    /// BALANCED random mix of two periods does: the window's balance wanders
+    /// and the median flips between the levels, so the filters are
+    /// re-designed often (400 Hz random 2/3 ms: ~940 times in 12 s; 1 kHz
+    /// random +-25 us: ~2300 in 12 s), and the flight is unaffected only
+    /// because each re-design keeps the state (hover rms 1.00-1.01x the fixed
+    /// period; zeroing it instead: 1.22-1.52x). A genuine rate change moves
+    /// the median within half a window (9 frames of a step; a step can stop
     /// once at the two-level mean on its 8th frame).
     ///
     /// AND KEEPING STATE. A re-design swaps coefficients only
@@ -1011,6 +1023,15 @@ impl CascadePartition {
     /// rate at this tick's `update_rpm`; one the new rate puts above its
     /// Nyquist clamp disengages there, as it would at any rate). Measured
     /// in relay-adrc's `a_coefficient_swap_under_kept_state_has_a_small_transient`.
+    ///
+    /// EXCEPT NEAR NYQUIST (review of PR #644). A 60 Hz cutoff at or above
+    /// 0.45 of the rate (a loop below 133.3 Hz) is PASS-THROUGH with its
+    /// state cleared (`relay_adrc::LPF_MAX_FC_FRAC`, relay-notch's
+    /// `MAX_F0_FRAC` convention). Keeping the pre-arm `keep_warm` history
+    /// into a 120-124 Hz design, whose poles sit near z = -1, rang at
+    /// Nyquist: supervised takeoff Disarmed / Terminated where the parent
+    /// (rebuilt, zeroed) flew Loiter; and in f32 the design at 120.00001 -
+    /// 120.0114 Hz was unstable (|pole| up to 1.000244).
     fn redesign_filters(&mut self, dt: f32) {
         if !(dt.is_finite() && (FILTER_DT_MIN_S..=FILTER_DT_MAX_S).contains(&dt)) {
             return;

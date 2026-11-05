@@ -276,11 +276,22 @@ pub struct Biquad {
     y2: f32,
 }
 
+/// A low-pass is only DESIGNED when its cutoff is below this fraction of the
+/// sample rate; at or above it the filter is PASS-THROUGH (relay-notch's
+/// `MAX_F0_FRAC` convention, review of PR #644). Near Nyquist the Butterworth
+/// poles approach z = -1: a 60 Hz cutoff at a 120-124 Hz loop is a barely
+/// damped Nyquist resonator, and in f32 at fs in (120.00001, 120.0114) Hz an
+/// UNSTABLE one (|pole| up to 1.000244). For the 60 Hz gyro low-pass the
+/// boundary is fs = 133.3 Hz: a loop slower than that flies its gyro
+/// unfiltered by this stage (as below 120 Hz it already did).
+pub const LPF_MAX_FC_FRAC: f32 = 0.45;
+
 impl Biquad {
     /// Butterworth LPF at cutoff `fc` (Hz), sample rate `fs` (Hz). RBJ
-    /// cookbook coefficients with Q = 1/√2. Degenerate args → pass-through.
+    /// cookbook coefficients with Q = 1/√2. Degenerate args, and a cutoff at
+    /// or above [`LPF_MAX_FC_FRAC`] of `fs`, give pass-through.
     pub fn lowpass(fc: f32, fs: f32) -> Self {
-        if !(fc > 0.0) || !(fs > 0.0) || fc >= 0.5 * fs {
+        if !(fc > 0.0) || !(fs > 0.0) || fc >= LPF_MAX_FC_FRAC * fs {
             return Self::passthrough();
         }
         let w0 = 2.0 * core::f32::consts::PI * fc / fs;
@@ -309,13 +320,28 @@ impl Biquad {
     /// continuous with the signal instead of starting again from zero
     /// (review of v1.140, defect A: rebuilding with zeroed state on every
     /// jittered frame lost rate control).
+    ///
+    /// EXCEPT into pass-through ([`LPF_MAX_FC_FRAC`]): then the state is
+    /// CLEARED, exactly as `lowpass` builds it (review of PR #644). The
+    /// pass-through output does not read the history; keeping a history
+    /// recorded under another design and re-entering a near-Nyquist design
+    /// with it is what rang (Disarmed / Terminated at 120-124 Hz).
     pub fn retune_lowpass(&mut self, fc: f32, fs: f32) {
         let d = Self::lowpass(fc, fs);
+        if d.is_passthrough() {
+            *self = d;
+            return;
+        }
         self.b0 = d.b0;
         self.b1 = d.b1;
         self.b2 = d.b2;
         self.a1 = d.a1;
         self.a2 = d.a2;
+    }
+
+    /// The design is the identity (no filtering).
+    pub fn is_passthrough(&self) -> bool {
+        self.b0 == 1.0 && self.b1 == 0.0 && self.b2 == 0.0 && self.a1 == 0.0 && self.a2 == 0.0
     }
 
     fn passthrough() -> Self {
@@ -632,6 +658,81 @@ mod tests {
         assert!(
             d_est > 0.5,
             "ESO should identify a positive disturbance, got {d_est}"
+        );
+    }
+
+    /// The larger pole magnitude of `z^2 + a1 z + a2` (f64 on the f32
+    /// coefficients actually designed).
+    fn max_pole(b: &Biquad) -> f64 {
+        let (a1, a2) = (b.a1 as f64, b.a2 as f64);
+        let d = a1 * a1 - 4.0 * a2;
+        if d < 0.0 {
+            a2.abs().sqrt()
+        } else {
+            let r = d.sqrt();
+            ((-a1 + r) / 2.0).abs().max(((-a1 - r) / 2.0).abs())
+        }
+    }
+
+    /// **Every designed (non-pass-through) low-pass is stable** (review of
+    /// PR #644). In f32 the 60 Hz Butterworth at fs in (120.00001, 120.0114)
+    /// Hz put a pole at |z| up to 1.000244: an UNSTABLE filter, reachable by
+    /// frame periods of 8.3325-8.3333 ms. Swept over fs 10-10000 Hz (0.01 Hz
+    /// steps to 1 kHz, 0.5 Hz above) plus EVERY f32 value in [119.99,
+    /// 120.05] and [133.0, 134.0] Hz (the pass-through boundary): each design
+    /// is either the exact pass-through or has every pole strictly inside
+    /// the unit circle, and pass-through is exactly the band `fc >=
+    /// LPF_MAX_FC_FRAC * fs`.
+    #[test]
+    fn every_designed_lowpass_has_its_poles_inside_the_unit_circle() {
+        extern crate std;
+        use std::vec::Vec;
+        let mut rates: Vec<f32> = Vec::new();
+        let mut k = 0u32;
+        loop {
+            let fs = 10.0 + 0.01 * k as f32;
+            if fs > 1000.0 {
+                break;
+            }
+            rates.push(fs);
+            k += 1;
+        }
+        let mut fs = 1000.0f32;
+        while fs <= 10000.0 {
+            rates.push(fs);
+            fs += 0.5;
+        }
+        for (lo, hi) in [(119.99f32, 120.05f32), (133.0, 134.0)] {
+            let mut x = lo;
+            while x <= hi {
+                rates.push(x);
+                x = f32::from_bits(x.to_bits() + 1);
+            }
+        }
+        let (mut designed, mut pass, mut worst) = (0u32, 0u32, 0.0f64);
+        for &fs in &rates {
+            let b = Biquad::lowpass(60.0, fs);
+            let is_pass = (b.b0, b.b1, b.b2, b.a1, b.a2) == (1.0, 0.0, 0.0, 0.0, 0.0);
+            assert_eq!(
+                is_pass,
+                60.0 >= LPF_MAX_FC_FRAC * fs,
+                "fs {fs}: pass-through must be exactly the band fc >= {LPF_MAX_FC_FRAC} fs"
+            );
+            if is_pass {
+                pass += 1;
+                continue;
+            }
+            designed += 1;
+            let p = max_pole(&b);
+            worst = worst.max(p);
+            assert!(
+                p < 1.0,
+                "fs {fs} Hz: designed 60 Hz low-pass has |pole| {p}"
+            );
+        }
+        std::eprintln!(
+            "{designed} designed (worst |pole| {worst:.6}), {pass} pass-through, of {} rates",
+            rates.len()
         );
     }
 

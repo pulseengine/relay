@@ -16,9 +16,14 @@
 //! only when that leaves the 2% band of the filters' current design rate,
 //! and re-designed by a coefficient update that KEEPS the filter state.
 //!
-//! What this checks: (a) the supervised takeoff at 400 Hz 2/3 ms; (b) four
-//! jitter patterns hovering with at most 3 filter re-designs; (c) early long
-//! frames still isolate no healthy rotor (the FDI path is unchanged). The
+//! What this checks: (a) the supervised takeoff at 400 Hz 2/3 ms, filters at
+//! 400 Hz; (b) four jitter patterns (alternations, a periodic and a random
+//! MINORITY of late frames) hovering with at most 3 filter re-designs; (c)
+//! early long frames still isolate no healthy rotor (the FDI path is
+//! unchanged); BALANCED random jitter, which the median does not absorb,
+//! re-designing often and flying like the fixed period because the state is
+//! kept; and near-Nyquist rates (120-124 Hz, where the low-pass is now
+//! pass-through) taking off level after a pre-arm bump (review of PR #644). The
 //! genuine rate step is a lib test
 //! (`a_genuine_rate_step_redesigns_the_filters_within_the_window`), because
 //! it changes the plant's own period; the kept state is relay-adrc's
@@ -58,6 +63,9 @@ struct Jitter {
     zero_rpm: Option<(usize, u32)>,
     /// Soft-start: `rotor`'s command scaled by min(1, t / ramp_s) from spin-up.
     ramp: Option<(usize, f32)>,
+    /// IMU reads `a..z` get `g` (rad/s) added to the gyro: a bump.
+    kick: Option<(usize, usize, Vec3)>,
+    reads: usize,
 }
 
 impl Jitter {
@@ -70,13 +78,22 @@ impl Jitter {
             spikes: vec![],
             zero_rpm: None,
             ramp: None,
+            kick: None,
+            reads: 0,
         }
     }
 }
 
 impl FlightBackend for Jitter {
     fn read_imu(&mut self) -> ImuSample {
-        self.b.read_imu()
+        let mut s = self.b.read_imu();
+        self.reads += 1;
+        if let Some((a, z, g)) = self.kick {
+            if self.reads >= a && self.reads < z {
+                s.gyro = [s.gyro[0] + g[0], s.gyro[1] + g[1], s.gyro[2] + g[2]];
+            }
+        }
+        s
     }
     fn read_position(&mut self) -> Option<Vec3> {
         self.b.read_position()
@@ -262,6 +279,88 @@ fn a_400_hz_takeoff_on_a_1_ms_tick_reaches_loiter_level() {
         "peak tilt {peak_tilt} rad (fixed 2.5 ms flies at ~0.02)"
     );
     assert!(redesigns <= 3, "{redesigns} filter re-designs");
+    let f = filter_hz(sup.core());
+    assert!(
+        (f - 400.0).abs() <= 0.02 * 400.0,
+        "the filters must be designed for the alternation's 400 Hz, not {f} Hz"
+    );
+}
+
+/// The supervised takeoff after a 5 s pre-arm hold at a fixed rate, with a
+/// gyro bump `bump` (rad/s) over the hold's last 20 ms. Returns the final
+/// mode and the peak tilt over 20 s of flight.
+fn takeoff_after_hold(pat: Vec<f32>, bump: Option<Vec3>) -> (Mode, f32) {
+    let pdt = mean(&pat);
+    let hz = 1.0 / pdt;
+    let pre = (5.0 * hz) as usize;
+    let mut b = Jitter::new(
+        SimBackend::new(LEVEL, pdt).with_pathology(Pathology {
+            gyro_white: 0.02,
+            vibration: 0.5,
+            ..Pathology::default()
+        }),
+        pat,
+    );
+    b.b.ground_contact = true;
+    b.kick = bump.map(|g| (pre - (0.02 * hz) as usize, pre, g));
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+    sup.set_calibration(falcon_core::relay_calib::CalParams {
+        gyro_bias: [0.001, 0.0, 0.0],
+        ..falcon_core::relay_calib::CalParams::identity()
+    });
+    for _ in 0..pre {
+        sup.step(&mut b);
+    }
+    sup.command(Event::Arm, true, true);
+    sup.command(Event::RequestTakeoff, true, true);
+    assert_eq!(sup.mode(), Mode::Takeoff, "{:?}", sup.arm_blocked_check());
+    let mut peak = 0.0f32;
+    for _ in 0..((20.0 * hz) as usize) {
+        sup.step(&mut b);
+        peak = peak.max(b.b.tilt());
+    }
+    (sup.mode(), peak)
+}
+
+/// **Near Nyquist, the low-pass is pass-through, not a barely-damped
+/// resonator** (review of PR #644). The 60 Hz cutoff sits just under
+/// Nyquist at a 120-124 Hz loop: the Butterworth poles are near z = -1 (and
+/// in f32 at |z| >= 1 for fs in (120.00001, 120.0114) Hz). Re-designing such
+/// a filter while KEEPING the pre-arm `keep_warm` history (designed for the
+/// nominal 1 kHz) made it ring at Nyquist: supervised takeoff Disarmed at
+/// 0.4-0.8 rad, and with a 3 rad/s bump in the last 20 ms of the hold
+/// Terminated (flipped) at 120.05 Hz and Disarmed 2.1 rad at 122 Hz, on
+/// 36550af. The parent (rebuilt with zeroed state) flew Loiter, 0.037 rad.
+/// The fix (relay-notch's MAX_F0_FRAC convention): a cutoff at or above 0.45
+/// fs is PASS-THROUGH with cleared state. Random 8.0/8.3 ms frames (the
+/// median wanders 120-125 Hz) likewise.
+#[test]
+fn near_nyquist_loop_rates_take_off_level_after_a_prearm_bump() {
+    let mut s = 11u64;
+    let rand8: Vec<f32> = (0..100000)
+        .map(|_| {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            if ((s >> 33) % 2) == 0 { 0.0083 } else { 0.0080 }
+        })
+        .collect();
+    let mut bad = Vec::new();
+    for (name, pat) in [
+        ("120.05 Hz", vec![1.0f32 / 120.05]),
+        ("122 Hz", vec![1.0f32 / 122.0]),
+        ("random 8.0/8.3 ms", rand8),
+    ] {
+        for bump in [None, Some([3.0f32, -2.0, 1.0])] {
+            let (mode, peak) = takeoff_after_hold(pat.clone(), bump);
+            eprintln!("{name} bump {bump:?}: {mode:?}, peak tilt {peak:.4} rad");
+            let level = peak < 0.1; // NaN-safe
+            if mode != Mode::Loiter || !level {
+                bad.push((name, bump, mode, peak));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
 }
 
 /// (b) **Jitter hovers on at most 3 filter re-designs.** Four patterns, 12 s
@@ -379,6 +478,58 @@ fn early_long_frames_isolate_no_healthy_rotor() {
                 }
             }
         }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+/// Two-level frame periods in a seeded random order (not alternating).
+fn random_two_level(lo: f32, hi: f32, seed: u64) -> Vec<f32> {
+    let mut s = seed;
+    (0..100000)
+        .map(|_| {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            if ((s >> 33) % 2) == 0 { hi } else { lo }
+        })
+        .collect()
+}
+
+/// **Balanced random jitter CHURNS re-designs, harmlessly, because the state
+/// is kept** (review of PR #644). With the two frame periods in random order
+/// the 16-frame window's balance wanders, its median flips between the
+/// levels, and the filters are re-designed often: measured 923-953 times in
+/// 12 s at 400 Hz random 2/3 ms (4800 frames), 2277-2375 in 12 s at 1 kHz
+/// random +-25 us. The median does NOT absorb this; keeping the state is
+/// what makes it harmless. Hover rate rms against the fixed-period hover at
+/// the same mean: kept state 1.00-1.01x (400 Hz 0.0086-0.0088 vs 0.0087;
+/// 1 kHz 0.00749 vs 0.00748); with the re-design ZEROING the state instead
+/// (mutation) 0.0106-0.0114 and 0.0104-0.0114, i.e. 1.22-1.52x. This is the
+/// integration test that sees a zeroing re-design.
+#[test]
+fn balanced_random_jitter_redesigns_often_and_harmlessly() {
+    let mut bad = Vec::new();
+    for (lo, hi) in [(0.002f32, 0.003f32), (0.000975, 0.001025)] {
+        let mean_dt = 0.5 * (lo + hi);
+        let (fixed, _) = hover(vec![mean_dt], 12.0);
+        for seed in [11u64, 12, 13] {
+            let (h, _) = hover(random_two_level(lo, hi, seed), 12.0);
+            let ratio = h.rp_rate_rms / fixed.rp_rate_rms;
+            eprintln!(
+                "random {lo}/{hi} seed {seed}: {} re-designs, rms {:.5} vs fixed {:.5} ({ratio:.2}x)",
+                h.redesigns, h.rp_rate_rms, fixed.rp_rate_rms
+            );
+            let ok = ratio < 1.1 && h.peak_h < 2.5;
+            if !ok {
+                bad.push((lo, hi, seed, h, ratio));
+            }
+        }
+        let (mode, peak) = takeoff_after_hold(random_two_level(lo, hi, 11), Some([3.0, -2.0, 1.0]));
+        eprintln!("random {lo}/{hi} supervised + bump: {mode:?}, peak tilt {peak:.4}");
+        assert!(
+            mode == Mode::Loiter && peak < 0.1,
+            "{lo}/{hi}: {mode:?} {peak}"
+        );
     }
     assert!(bad.is_empty(), "{bad:#?}");
 }

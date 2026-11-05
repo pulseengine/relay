@@ -179,14 +179,20 @@ artifacts:
         # The FDI tick counters keep their per-frame resync (every FDI timing
         # claim above is unchanged); only the gyro low-pass / notch bank design
         # rate moved to the median of the last 16 frame periods, re-designed
-        # keeping filter state. These pin that the split did not move the FDI
-        # (early long frames isolate no healthy rotor) and that jitter no
-        # longer re-designs the filters every tick.
+        # keeping filter state (pass-through, state cleared, when the 60 Hz
+        # cutoff is >= 0.45 of the rate, i.e. below 133.3 Hz). These pin that
+        # the split did not move the FDI (early long frames isolate no healthy
+        # rotor); that a strict alternation or a minority of late frames
+        # re-designs the filters at most a few times; that BALANCED random
+        # jitter still re-designs them often (hundreds to thousands of times)
+        # and flies like the fixed period because the state is kept; and that
+        # near-Nyquist rates take off level.
         - run: cargo test -p falcon-core --test filter_rate_jitter
         - run: cargo test -p falcon-core --lib a_genuine_rate_step_redesigns_the_filters_within_the_window
         - run: cargo test -p falcon-core --lib a_filter_redesign_keeps_the_cascade_filter_state
         - run: cargo test -p relay-adrc a_retuned_biquad_keeps_its_state
         - run: cargo test -p relay-adrc a_coefficient_swap_under_kept_state_has_a_small_transient
+        - run: cargo test -p relay-adrc every_designed_lowpass_has_its_poles_inside_the_unit_circle
         - run: cargo test -p relay-notch set_sample_rate_keeps_state_and_engagement
         # --- END review of v1.140, defect A ---
         - run: cargo test -p falcon-sitl-gz fdi_noise_robustness_monte_carlo_campaign

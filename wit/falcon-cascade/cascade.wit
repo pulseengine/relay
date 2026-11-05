@@ -295,9 +295,13 @@ interface types {
         /// RE-DESIGNED for `1 / median` of the last 16 frames' `dt-s` (those
         /// in [0.1 ms, 100 ms]; the first frame seeds it) when that differs
         /// by more than 2% from their design rate, KEEPING their filter
-        /// state; so frame-period jitter, an alternation (2, 3, 2, 3 ms) or a
-        /// minority of late frames does not re-design them, and a sustained
-        /// rate change does within 9 frames.
+        /// state. A strict alternation (2, 3, 2, 3 ms), a single late frame
+        /// or a minority of late frames re-designs them at most a few times;
+        /// BALANCED random jitter between two periods still re-designs them
+        /// often (each re-design keeping the state, so the flight matches
+        /// the fixed period); a sustained rate change re-designs within 9
+        /// frames. Below 133.3 Hz (60 Hz >= 0.45 of the rate) the low-pass is
+        /// pass-through.
         /// A host that sends a `loop-rate-hz` that disagrees with its frames
         /// flies at its frames' rate. Kept in the record so the record stays
         /// field-for-field what it was at @0.12.0.
