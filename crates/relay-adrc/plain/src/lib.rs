@@ -274,41 +274,90 @@ pub struct Biquad {
     x2: f32,
     y1: f32,
     y2: f32,
+    /// A re-design into or out of this design REBUILDS with zeroed state
+    /// instead of keeping it: set for pass-through and for the near-Nyquist
+    /// band `fc >= LPF_KEEP_STATE_MAX_FC_FRAC * fs` (see that constant).
+    rebuild_on_retune: bool,
 }
 
-/// A low-pass is only DESIGNED when its cutoff is below this fraction of the
-/// sample rate; at or above it the filter is PASS-THROUGH (relay-notch's
-/// `MAX_F0_FRAC` convention, review of PR #644). Near Nyquist the Butterworth
-/// poles approach z = -1: a 60 Hz cutoff at a 120-124 Hz loop is a barely
-/// damped Nyquist resonator, and in f32 at fs in (120.00001, 120.0114) Hz an
-/// UNSTABLE one (|pole| up to 1.000244). For the 60 Hz gyro low-pass the
-/// boundary is fs = 133.3 Hz: a loop slower than that flies its gyro
-/// unfiltered by this stage (as below 120 Hz it already did).
-pub const LPF_MAX_FC_FRAC: f32 = 0.45;
+/// A re-design KEEPS the filter state only when both designs have their
+/// cutoff below this fraction of the sample rate; in the near-Nyquist band
+/// `0.45 fs <= fc < 0.5 fs` (and for pass-through) it REBUILDS with zeroed
+/// state, exactly as before the review of v1.140 (reviews of PR #644).
+///
+/// The band is still DESIGNED, as it always was: its Butterworth has a zero
+/// at Nyquist, and at a 127.5-133.3 Hz loop that zero is the only thing that
+/// attenuates the hover rotor line (~66.7 Hz) aliased to just below Nyquist
+/// (the notch cannot engage there). Making the band pass-through (aca46b8)
+/// removed it and a hover with rotor vibration diverged at 130 Hz. But its
+/// poles sit near z = -1, so keeping a history recorded under another design
+/// rang at Nyquist (36550af: Disarmed / Terminated at 120-124 Hz after a
+/// pre-arm bump); rebuilding with zeroed state is what the parent flew.
+pub const LPF_KEEP_STATE_MAX_FC_FRAC: f32 = 0.45;
+
+/// The largest pole radius a designed low-pass may have. The RBJ design in
+/// f32 put a pole ON or OUTSIDE the unit circle for fs in (120.00001,
+/// 120.0114) Hz (|pole| up to 1.000244, f32 rounding of sin/cos near pi);
+/// such a design is moved to a slightly lower cutoff until its poles are
+/// inside this radius (`Biquad::lowpass`). The Nyquist zero is kept.
+pub const LPF_MAX_POLE_RADIUS: f32 = 0.9999;
+
+/// The RBJ Butterworth low-pass coefficients `(b0, b1, b2, a1, a2)`, f32,
+/// exactly as designed before the review of PR #644.
+fn rbj_lowpass(fc: f32, fs: f32) -> (f32, f32, f32, f32, f32) {
+    let w0 = 2.0 * core::f32::consts::PI * fc / fs;
+    let (sw, cw) = (relay_math::sinf(w0), relay_math::cosf(w0));
+    let q = core::f32::consts::FRAC_1_SQRT_2;
+    let alpha = sw / (2.0 * q);
+    let a0 = 1.0 + alpha;
+    (
+        ((1.0 - cw) * 0.5) / a0,
+        (1.0 - cw) / a0,
+        ((1.0 - cw) * 0.5) / a0,
+        (-2.0 * cw) / a0,
+        (1.0 - alpha) / a0,
+    )
+}
+
+/// Both poles of `z^2 + a1 z + a2` strictly inside radius `r` (Jury's test
+/// on the polynomial scaled to radius `r`; sqrt-free, evaluated in f64).
+fn poles_inside(a1: f32, a2: f32, r: f32) -> bool {
+    let r = r as f64;
+    let (a1, a2) = (a1 as f64 / r, a2 as f64 / (r * r));
+    a2.abs() < 1.0 && a1.abs() < 1.0 + a2
+}
 
 impl Biquad {
     /// Butterworth LPF at cutoff `fc` (Hz), sample rate `fs` (Hz). RBJ
-    /// cookbook coefficients with Q = 1/√2. Degenerate args, and a cutoff at
-    /// or above [`LPF_MAX_FC_FRAC`] of `fs`, give pass-through.
+    /// cookbook coefficients with Q = 1/√2. Degenerate args, or `fc >= fs/2`,
+    /// give pass-through. The coefficients are bit-identical to the design
+    /// before the review of PR #644 except where that design had a pole
+    /// outside [`LPF_MAX_POLE_RADIUS`]: there the cutoff is lowered in steps
+    /// of 1e-4 fs until it has not (b = k [1, 2, 1] in every design, so the
+    /// zero at Nyquist is kept).
     pub fn lowpass(fc: f32, fs: f32) -> Self {
-        if !(fc > 0.0) || !(fs > 0.0) || fc >= LPF_MAX_FC_FRAC * fs {
+        if !(fc > 0.0) || !(fs > 0.0) || fc >= 0.5 * fs {
             return Self::passthrough();
         }
-        let w0 = 2.0 * core::f32::consts::PI * fc / fs;
-        let (sw, cw) = (relay_math::sinf(w0), relay_math::cosf(w0));
-        let q = core::f32::consts::FRAC_1_SQRT_2;
-        let alpha = sw / (2.0 * q);
-        let a0 = 1.0 + alpha;
+        let mut design_fc = fc;
+        let mut c = rbj_lowpass(design_fc, fs);
+        let mut k = 0;
+        while !poles_inside(c.3, c.4, LPF_MAX_POLE_RADIUS) && k < 1000 {
+            design_fc -= 1.0e-4 * fs;
+            c = rbj_lowpass(design_fc, fs);
+            k += 1;
+        }
         Biquad {
-            b0: ((1.0 - cw) * 0.5) / a0,
-            b1: (1.0 - cw) / a0,
-            b2: ((1.0 - cw) * 0.5) / a0,
-            a1: (-2.0 * cw) / a0,
-            a2: (1.0 - alpha) / a0,
+            b0: c.0,
+            b1: c.1,
+            b2: c.2,
+            a1: c.3,
+            a2: c.4,
             x1: 0.0,
             x2: 0.0,
             y1: 0.0,
             y2: 0.0,
+            rebuild_on_retune: fc >= LPF_KEEP_STATE_MAX_FC_FRAC * fs,
         }
     }
 
@@ -321,14 +370,13 @@ impl Biquad {
     /// (review of v1.140, defect A: rebuilding with zeroed state on every
     /// jittered frame lost rate control).
     ///
-    /// EXCEPT into pass-through ([`LPF_MAX_FC_FRAC`]): then the state is
-    /// CLEARED, exactly as `lowpass` builds it (review of PR #644). The
-    /// pass-through output does not read the history; keeping a history
-    /// recorded under another design and re-entering a near-Nyquist design
-    /// with it is what rang (Disarmed / Terminated at 120-124 Hz).
+    /// EXCEPT into or out of the near-Nyquist band or pass-through
+    /// ([`LPF_KEEP_STATE_MAX_FC_FRAC`]): then it REBUILDS with zeroed state,
+    /// exactly as `lowpass` builds it and as every re-design did before the
+    /// review of v1.140 (reviews of PR #644).
     pub fn retune_lowpass(&mut self, fc: f32, fs: f32) {
         let d = Self::lowpass(fc, fs);
-        if d.is_passthrough() {
+        if d.rebuild_on_retune || self.rebuild_on_retune {
             *self = d;
             return;
         }
@@ -355,6 +403,7 @@ impl Biquad {
             x2: 0.0,
             y1: 0.0,
             y2: 0.0,
+            rebuild_on_retune: true,
         }
     }
 
@@ -679,10 +728,12 @@ mod tests {
     /// Hz put a pole at |z| up to 1.000244: an UNSTABLE filter, reachable by
     /// frame periods of 8.3325-8.3333 ms. Swept over fs 10-10000 Hz (0.01 Hz
     /// steps to 1 kHz, 0.5 Hz above) plus EVERY f32 value in [119.99,
-    /// 120.05] and [133.0, 134.0] Hz (the pass-through boundary): each design
-    /// is either the exact pass-through or has every pole strictly inside
-    /// the unit circle, and pass-through is exactly the band `fc >=
-    /// LPF_MAX_FC_FRAC * fs`.
+    /// 120.05] and [133.0, 134.0] Hz (the state-keeping boundary): each
+    /// design is either the exact pass-through, exactly where `fc >= fs/2`
+    /// (as it always was), or has every pole strictly inside the unit
+    /// circle; every design whose pre-review RBJ coefficients were already
+    /// inside [`LPF_MAX_POLE_RADIUS`] is BIT-IDENTICAL to them, and every
+    /// design keeps the Nyquist zero (b0 - b1 + b2 = 0, b1 = 2 b0).
     #[test]
     fn every_designed_lowpass_has_its_poles_inside_the_unit_circle() {
         extern crate std;
@@ -710,19 +761,37 @@ mod tests {
             }
         }
         let (mut designed, mut pass, mut worst) = (0u32, 0u32, 0.0f64);
+        let (mut moved, mut rbj_worst) = (0u32, 0.0f64);
         for &fs in &rates {
             let b = Biquad::lowpass(60.0, fs);
             let is_pass = (b.b0, b.b1, b.b2, b.a1, b.a2) == (1.0, 0.0, 0.0, 0.0, 0.0);
             assert_eq!(
                 is_pass,
-                60.0 >= LPF_MAX_FC_FRAC * fs,
-                "fs {fs}: pass-through must be exactly the band fc >= {LPF_MAX_FC_FRAC} fs"
+                60.0 >= 0.5 * fs,
+                "fs {fs}: pass-through must be exactly the band fc >= fs/2"
             );
             if is_pass {
                 pass += 1;
                 continue;
             }
             designed += 1;
+            assert_eq!(b.b1, 2.0 * b.b0, "fs {fs}: the Nyquist zero must be kept");
+            assert_eq!(b.b2, b.b0, "fs {fs}: the Nyquist zero must be kept");
+            let rbj = rbj_lowpass(60.0, fs);
+            if poles_inside(rbj.3, rbj.4, LPF_MAX_POLE_RADIUS) {
+                assert_eq!(
+                    (b.b0, b.b1, b.b2, b.a1, b.a2),
+                    rbj,
+                    "fs {fs}: must equal the pre-review design"
+                );
+            } else {
+                moved += 1;
+                rbj_worst = rbj_worst.max(max_pole(&Biquad {
+                    a1: rbj.3,
+                    a2: rbj.4,
+                    ..b
+                }));
+            }
             let p = max_pole(&b);
             worst = worst.max(p);
             assert!(
@@ -731,8 +800,13 @@ mod tests {
             );
         }
         std::eprintln!(
-            "{designed} designed (worst |pole| {worst:.6}), {pass} pass-through, of {} rates",
+            "{designed} designed (worst |pole| {worst:.6}), {pass} pass-through, of {} rates; \
+             {moved} moved to a lower cutoff (their pre-review worst |pole| {rbj_worst:.6})",
             rates.len()
+        );
+        assert!(
+            rbj_worst >= 1.0,
+            "control: the pre-review design WAS unstable in the band"
         );
     }
 

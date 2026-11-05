@@ -1024,14 +1024,19 @@ impl CascadePartition {
     /// Nyquist clamp disengages there, as it would at any rate). Measured
     /// in relay-adrc's `a_coefficient_swap_under_kept_state_has_a_small_transient`.
     ///
-    /// EXCEPT NEAR NYQUIST (review of PR #644). A 60 Hz cutoff at or above
-    /// 0.45 of the rate (a loop below 133.3 Hz) is PASS-THROUGH with its
-    /// state cleared (`relay_adrc::LPF_MAX_FC_FRAC`, relay-notch's
-    /// `MAX_F0_FRAC` convention). Keeping the pre-arm `keep_warm` history
-    /// into a 120-124 Hz design, whose poles sit near z = -1, rang at
-    /// Nyquist: supervised takeoff Disarmed / Terminated where the parent
-    /// (rebuilt, zeroed) flew Loiter; and in f32 the design at 120.00001 -
-    /// 120.0114 Hz was unstable (|pole| up to 1.000244).
+    /// EXCEPT NEAR NYQUIST (reviews of PR #644). When the 60 Hz cutoff is
+    /// at or above 0.45 of the old or the new rate (a loop below 133.3 Hz)
+    /// the low-pass is REBUILT with zeroed state, as every re-design was
+    /// before (`relay_adrc::LPF_KEEP_STATE_MAX_FC_FRAC`). It is still
+    /// DESIGNED there, as before: its zero at Nyquist is what attenuates the
+    /// hover rotor line aliased to just below Nyquist at 127.5-133.3 Hz.
+    /// Keeping the pre-arm `keep_warm` history into a 120-124 Hz design,
+    /// whose poles sit near z = -1, rang at Nyquist (Disarmed / Terminated
+    /// where the parent flew Loiter); making the band pass-through instead
+    /// let the aliased rotor line through (Disarmed at 130 Hz with rotor
+    /// vibration). The f32 design that was unstable at 120.00001-120.0114 Hz
+    /// (|pole| up to 1.000244) is moved to a slightly lower cutoff
+    /// (`relay_adrc::LPF_MAX_POLE_RADIUS`).
     fn redesign_filters(&mut self, dt: f32) {
         if !(dt.is_finite() && (FILTER_DT_MIN_S..=FILTER_DT_MAX_S).contains(&dt)) {
             return;

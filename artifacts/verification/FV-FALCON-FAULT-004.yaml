@@ -179,8 +179,9 @@ artifacts:
         # The FDI tick counters keep their per-frame resync (every FDI timing
         # claim above is unchanged); only the gyro low-pass / notch bank design
         # rate moved to the median of the last 16 frame periods, re-designed
-        # keeping filter state (pass-through, state cleared, when the 60 Hz
-        # cutoff is >= 0.45 of the rate, i.e. below 133.3 Hz). These pin that
+        # keeping filter state (rebuilt with zeroed state instead, as before,
+        # when the 60 Hz cutoff is >= 0.45 of the old or new rate, i.e. below
+        # 133.3 Hz; still designed there, Nyquist zero kept). These pin that
         # the split did not move the FDI (early long frames isolate no healthy
         # rotor); that a strict alternation or a minority of late frames
         # re-designs the filters at most a few times; that BALANCED random

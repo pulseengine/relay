@@ -22,8 +22,10 @@
 //! early long frames still isolate no healthy rotor (the FDI path is
 //! unchanged); BALANCED random jitter, which the median does not absorb,
 //! re-designing often and flying like the fixed period because the state is
-//! kept; and near-Nyquist rates (120-124 Hz, where the low-pass is now
-//! pass-through) taking off level after a pre-arm bump (review of PR #644). The
+//! kept; near-Nyquist rates (120-124 Hz, where a re-design now rebuilds the
+//! low-pass with zeroed state) taking off level after a pre-arm bump; and the
+//! near-Nyquist low-pass still attenuating the aliased rotor line at 128-132
+//! Hz (reviews of PR #644). The
 //! genuine rate step is a lib test
 //! (`a_genuine_rate_step_redesigns_the_filters_within_the_window`), because
 //! it changes the plant's own period; the kept state is relay-adrc's
@@ -322,8 +324,8 @@ fn takeoff_after_hold(pat: Vec<f32>, bump: Option<Vec3>) -> (Mode, f32) {
     (sup.mode(), peak)
 }
 
-/// **Near Nyquist, the low-pass is pass-through, not a barely-damped
-/// resonator** (review of PR #644). The 60 Hz cutoff sits just under
+/// **Near Nyquist, a re-design does not carry a foreign history into a
+/// barely-damped resonator** (review of PR #644). The 60 Hz cutoff sits just under
 /// Nyquist at a 120-124 Hz loop: the Butterworth poles are near z = -1 (and
 /// in f32 at |z| >= 1 for fs in (120.00001, 120.0114) Hz). Re-designing such
 /// a filter while KEEPING the pre-arm `keep_warm` history (designed for the
@@ -331,9 +333,12 @@ fn takeoff_after_hold(pat: Vec<f32>, bump: Option<Vec3>) -> (Mode, f32) {
 /// 0.4-0.8 rad, and with a 3 rad/s bump in the last 20 ms of the hold
 /// Terminated (flipped) at 120.05 Hz and Disarmed 2.1 rad at 122 Hz, on
 /// 36550af. The parent (rebuilt with zeroed state) flew Loiter, 0.037 rad.
-/// The fix (relay-notch's MAX_F0_FRAC convention): a cutoff at or above 0.45
-/// fs is PASS-THROUGH with cleared state. Random 8.0/8.3 ms frames (the
-/// median wanders 120-125 Hz) likewise.
+/// The first fix (aca46b8) made that band pass-through, which passed this
+/// test but let the aliased rotor line through (see
+/// `near_nyquist_low_pass_still_attenuates_the_aliased_rotor_line`); the
+/// fix now keeps the design and REBUILDS it with zeroed state there, as the
+/// parent did. Random 8.0/8.3 ms frames (the median wanders 120-125 Hz)
+/// likewise.
 #[test]
 fn near_nyquist_loop_rates_take_off_level_after_a_prearm_bump() {
     let mut s = 11u64;
@@ -530,6 +535,69 @@ fn balanced_random_jitter_redesigns_often_and_harmlessly() {
             mode == Mode::Loiter && peak < 0.1,
             "{lo}/{hi}: {mode:?} {peak}"
         );
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+/// **Near Nyquist the low-pass still kills the aliased rotor line** (second
+/// review of PR #644). At hover (~4000 RPM) the rotor vibration line sits at
+/// ~66.7 Hz; at a 127.5-133.3 Hz loop it aliases to just below Nyquist, where
+/// the notch cannot engage (it needs a ~148 Hz loop for that line) and the
+/// only thing attenuating it is the near-Nyquist Butterworth's zero at
+/// Nyquist (gain at the alias 0.41 at 128 Hz, 0.11 at 130, 0.012 at 132).
+/// aca46b8 made every design with 60 Hz >= 0.45 fs PASS-THROUGH and removed
+/// it: rotor vibration switched on after Loiter, 130 Hz vib 0.25, the parent
+/// 725f146 holds Loiter at 0.012 rad and aca46b8 was Disarmed with a
+/// non-finite tilt. The fix designs that band as the parent did (zero at
+/// Nyquist) and rebuilds it with zeroed state, as the parent did.
+#[test]
+fn near_nyquist_low_pass_still_attenuates_the_aliased_rotor_line() {
+    let mut bad = Vec::new();
+    for (hz, vib) in [(128.0f32, 0.3f32), (130.0, 0.25), (132.0, 0.25)] {
+        let dt = 1.0 / hz;
+        let pre = (5.0 * hz) as usize;
+        let mut b = Jitter::new(
+            SimBackend::new(LEVEL, dt).with_pathology(Pathology {
+                gyro_white: 0.02,
+                vibration: 0.5,
+                ..Pathology::default()
+            }),
+            vec![dt],
+        );
+        b.b.ground_contact = true;
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        sup.set_calibration(falcon_core::relay_calib::CalParams {
+            gyro_bias: [0.001, 0.0, 0.0],
+            ..falcon_core::relay_calib::CalParams::identity()
+        });
+        for _ in 0..pre {
+            sup.step(&mut b);
+        }
+        sup.command(Event::Arm, true, true);
+        sup.command(Event::RequestTakeoff, true, true);
+        assert_eq!(sup.mode(), Mode::Takeoff, "{:?}", sup.arm_blocked_check());
+        let (mut peak, mut vib_on) = (0.0f32, false);
+        for _ in 0..((20.0 * hz) as usize) {
+            sup.step(&mut b);
+            let t = b.b.tilt();
+            peak = if t.is_finite() && peak.is_finite() {
+                peak.max(t)
+            } else {
+                f32::INFINITY
+            };
+            if !vib_on && sup.mode() == Mode::Loiter {
+                b.b.rotor_vib = vib;
+                vib_on = true;
+            }
+        }
+        eprintln!(
+            "{hz} Hz rotor vib {vib} after Loiter: {:?}, peak tilt {peak:.4} rad",
+            sup.mode()
+        );
+        let level = peak < 0.1;
+        if !vib_on || sup.mode() != Mode::Loiter || !level {
+            bad.push((hz, vib, sup.mode(), peak));
+        }
     }
     assert!(bad.is_empty(), "{bad:#?}");
 }
