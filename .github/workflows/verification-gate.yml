@@ -30,19 +30,20 @@ on:
   # this job is ~45 min on the `rust-cpu` pool, and that pool is measured at
   # 7/7 busy with a 47-leg Kani matrix on it (a crates/** PR took 9.6 h
   # open-to-merge on 2026-10-07/08, #514). `push: main` buys the backstop at
-  # the cost of a full sweep PER MERGE. Worse, the scope fast-path below is
-  # gated on `github.event_name == 'pull_request'` and reads
-  # `pull_request.base.sha`, which does not exist outside a PR - so a push run
-  # would take the FULL sweep every time rather than the scoped one, paying the
-  # maximum price for the backstop.
+  # the cost of a full sweep PER MERGE. Worse, the scope step below has no
+  # event `if:` but reads `pull_request.base.sha || merge_group.base_sha`,
+  # neither of which exists on a push - so a push run would take the FULL
+  # sweep every time rather than the scoped one, paying the maximum price for
+  # the backstop.
   #
   # A daily run satisfies this requirement's own falsification wording - "fails
   # to execute on the LAST MAIN COMMIT of a release" - for a fraction of that,
   # and catches a gate-breaking merge within 24 h instead of at release time,
   # which is the worst moment to discover one.
   #
-  # ON A SCHEDULE EVENT the scope step is skipped (it is PR-gated), so the run
-  # takes the DEFAULT full filter. That is intentional here: a backstop should
+  # ON A SCHEDULE EVENT the scope step RUNS (it has no event `if:`) but finds
+  # no base sha, so it sets run_full=true and the run takes the DEFAULT full
+  # filter. That is intentional here: a backstop should
   # not inherit a PR's narrowing. And `github.event.pull_request.body` expands
   # to empty, which the Verify-Filter extraction below handles correctly - no
   # match means fall back to the default and exit 0, not the loud failure that
@@ -164,14 +165,14 @@ jobs:
           scripts/check-verification-independence.sh "$base"
 
       # ── Scope fast-path (2026-07-21) ─────────────────────────────────
-      # The falcon verification sweep (~370 steps, ~45m) only reflects
-      # changes to code, deps, rivet artifacts, arch/interfaces, or the
-      # gate itself. A PR touching NONE of those (docs, other workflow
-      # files, bench-evidence, a Dependabot GitHub-Action pin) has nothing
-      # for this gate to verify — running the full sweep on it only burns
-      # runner time and, on a loaded runner, false-cancels a green PR.
-      # Compute run_full from the PR diff; FAIL-SAFE to true (verify) when
-      # the base cannot be determined (e.g. workflow_dispatch).
+      # A change that touches ONLY known-irrelevant paths (prose docs,
+      # bench-evidence write-ups, release notes) has nothing for the ~370-step
+      # sweep to verify — running it only burns runner time and, on a loaded
+      # runner, false-cancels a green PR. Everything else, including other
+      # workflow files and Dependabot action pins, runs the sweep (see the
+      # denylist below). Compute run_full from the diff; FAIL-SAFE to true
+      # (verify) when the base is absent (schedule, workflow_dispatch), when
+      # the diff fails, or when it is empty.
       - name: Scope check (does this PR need the full sweep?)
         id: scope
         env:
@@ -188,25 +189,96 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         shell: bash
         run: |
+          # DENYLIST, NOT ALLOWLIST (REVIEW-140 finding G). This used to
+          # fast-pass everything OUTSIDE a list of "relevant" roots (crates/
+          # artifacts/ spar/ wit/ Cargo.* and two scripts). But the sweep's
+          # steps also build and grep examples/, tests/, host/, wasm/, other
+          # scripts/ and other workflows: 30 artifacts run
+          # `-p falcon-sitl-gz` (examples/), FV-FALCON-REL-001 greps
+          # release.yml, four artifacts grep soak.yml. A PR changing only those
+          # fast-passed this REQUIRED check (e.g. runs 35804010321,
+          # 36849048654, 38027829036, 42010229350 all logged FAST-PASS).
+          #
+          # Now the fast-path is taken ONLY when EVERY changed path is known
+          # to be irrelevant; anything unclassified runs the full sweep.
+          # Known-irrelevant (maintainer decision, read STRICTLY):
+          #   docs/**, *.md, bench-evidence/**, .github/release-notes/**
+          # EXCEPT, because the sweep does read some of them:
+          #   - any *.md inside a code/evidence tree (crates/ artifacts/ spar/
+          #     wit/ examples/ host/ tests/ benches/ tools/ scripts/ wasm/
+          #     .github/workflows/ .github/actions/) stays relevant;
+          #   - a path that an artifact or a crate NAMES stays relevant, by
+          #     its own path or by its directory (FV-FALCON-TRANSPORT-004 greps
+          #     docs/TRANSPORT-BINDING.md, which falcon-hitl include_str!s;
+          #     FV-FALCON-TQ-001 globs docs/dossier/tool-qualification/).
+          # If unsure, it is relevant.
+          #
+          # The classifier is table-tested off-line by extracting the text
+          # between the two marker lines below; keep them.
+          # >>> scope-classifier
+          # 0 = known-irrelevant (may fast-pass), 1 = relevant.
+          is_known_irrelevant() {
+            local p=$1 esc dir rc
+            case "$p" in
+              crates/*|artifacts/*|spar/*|wit/*|examples/*|host/*|tests/*|benches/*|tools/*|scripts/*|wasm/*|.github/workflows/*|.github/actions/*) return 1 ;;
+            esac
+            case "$p" in
+              docs/*|bench-evidence/*|.github/release-notes/*|*.md) ;;
+              *) return 1 ;;
+            esac
+            # Named by an artifact (a step may grep/test it) or by a crate
+            # (include_str!) -> relevant. Leading boundary: start, a non-path
+            # character, or "../"; trailing: not a further name character.
+            # grep exit 1 is "not named"; 0 is named; ANYTHING else (2: bad
+            # pattern, artifacts/ or crates/ missing) is "could not tell" and
+            # must classify as relevant, never fast-pass.
+            esc=$(printf '%s' "$p" | sed 's#[][\.*^$+?(){}|]#\\&#g')
+            rc=0; grep -rqE -- "(^|[^A-Za-z0-9_./-]|\.\./)${esc}($|[^A-Za-z0-9_/-])" artifacts crates || rc=$?
+            [ "$rc" -eq 1 ] || return 1
+            case "$p" in
+              */*)
+                dir=${p%/*}/
+                esc=$(printf '%s' "$dir" | sed 's#[][\.*^$+?(){}|]#\\&#g')
+                rc=0; grep -rqE -- "(^|[^A-Za-z0-9_./-]|\.\./)${esc}($|[^A-Za-z0-9_.-])" artifacts crates || rc=$?
+                [ "$rc" -eq 1 ] || return 1
+                ;;
+            esac
+            return 0
+          }
+          # stdin: changed paths, one per line. Exit 0 = FULL sweep needed,
+          # 1 = every path known-irrelevant. An EMPTY list is full: "nothing
+          # changed" is not something this gate can tell from "could not see".
+          needs_full_sweep() {
+            local p any=0
+            while IFS= read -r p; do
+              [ -n "$p" ] || continue
+              any=1
+              if ! is_known_irrelevant "$p"; then
+                echo "relevant: $p"
+                return 0
+              fi
+            done
+            [ "$any" -eq 1 ] || { echo "empty change list"; return 0; }
+            return 1
+          }
+          # <<< scope-classifier
+
+          # schedule / workflow_dispatch: no base -> full (unchanged).
           if [ -z "${BASE_SHA:-}" ]; then
-            echo "no base sha (manual run) — running full sweep"
+            echo "no base sha (${GITHUB_EVENT_NAME:-?} run) — running full sweep"
             echo "run_full=true" >>"$GITHUB_OUTPUT"; exit 0
           fi
-          CHANGED=$(git diff --name-only "$BASE_SHA"...HEAD || echo "__diff_failed__")
-          if [ "$CHANGED" = "__diff_failed__" ]; then
-            echo "diff failed — fail-safe to full sweep"
+          rc=0
+          CHANGED=$(git diff --name-only "$BASE_SHA"...HEAD) || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "git diff failed (rc=$rc) — fail-safe to full sweep"
             echo "run_full=true" >>"$GITHUB_OUTPUT"; exit 0
           fi
-          # Verification-relevant paths: code, workspace deps, rivet
-          # artifacts, architecture/interfaces, the gate script + this
-          # workflow file. Anything else is out of this gate's scope.
-          if printf '%s\n' "$CHANGED" | grep -qE \
-            '^(crates/|artifacts/|spar/|wit/|Cargo\.toml|Cargo\.lock|scripts/run-falcon-verification\.py|scripts/check-verification-independence\.sh|\.github/workflows/verification-gate\.yml)'; then
-            echo "verification-relevant files changed — full sweep"
-            printf '%s\n' "$CHANGED" | grep -E '^(crates/|artifacts/|spar/|wit/|Cargo\.|scripts/|\.github/workflows/verification-gate)' | head
+          if needs_full_sweep <<<"$CHANGED"; then
+            echo "verification-relevant change (above) — full sweep"
             echo "run_full=true" >>"$GITHUB_OUTPUT"
           else
-            echo "no verification-relevant files changed — FAST-PASS (nothing to verify)"
+            echo "every changed path is known-irrelevant — FAST-PASS (nothing to verify)"
             printf 'changed:\n%s\n' "$CHANGED"
             echo "run_full=false" >>"$GITHUB_OUTPUT"
           fi
@@ -330,6 +402,9 @@ jobs:
           fi
           printf 'filter=%s\n' "$OVERRIDE" >>"$GITHUB_OUTPUT"
 
+      # THIS STEP'S NAME IS READ by scripts/verification-tracks.rs: its
+      # `skipped` conclusion in the jobs API is how a release's notes tell a
+      # FAST-PASS run (nothing verified) from a sweep. Rename both together.
       - name: Run falcon verification gate
         id: verify
         if: steps.scope.outputs.run_full == 'true'
