@@ -533,8 +533,17 @@ jobs:
           # "building rate (wasm32-unknown-unknown)... ERROR: no .wasm found".
           targets: wasm32-wasip2, wasm32-unknown-unknown
 
+      # Pinned to the SAME cosign as the first job's signing step. Since
+      # cosign-installer v4 (#624) the default install is cosign v3, whose
+      # sign-blob writes the new bundle format and deprecates
+      # --output-signature/--output-certificate, which the step below
+      # still uses and uploads. Unpinned, one release would mix v2 and v3
+      # signature formats, and the .sig/.pem upload would fail (#609
+      # re-review, finding 1).
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v2.4.1'
 
       - name: Install cargo-component
         uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
