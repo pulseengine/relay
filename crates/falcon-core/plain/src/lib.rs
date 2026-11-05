@@ -203,6 +203,11 @@ pub struct EstimatorPartition {
     /// backend's own `dt` exactly as the cascade's (see [`resynced_rate`]),
     /// so the innovation-gate warm-up is a fixed TIME (#609 finding 7).
     designed_hz: f32,
+    /// The frame period the resync is judged on (review of v1.140, defect
+    /// A): the same rule as the cascade's. Fed every frame this partition
+    /// steps, including `step_estimate_only`'s, which the cascade's is not
+    /// (see [`FramePeriodMean`]).
+    frames: FramePeriodMean,
 }
 
 impl EstimatorPartition {
@@ -232,19 +237,25 @@ impl EstimatorPartition {
             step_count: 0,
             fdi_warmup_steps: FlightCore::warmup_steps(loop_hz),
             designed_hz: loop_hz,
+            frames: FramePeriodMean::new(),
             calib: relay_calib::CalParams::identity(),
         }
     }
 
     /// Re-count the warm-up at the rate the backend really steps at (#609
     /// finding 7). The same tolerance and the same count as the cascade's
-    /// `resync_loop_rate`, through the same two functions. The running
-    /// `step_count` is rescaled to the new rate with it (review of v1.141,
-    /// finding 3; see [`FlightCore::rescale_ticks`]).
+    /// `resync_loop_rate`, through the same functions, on the same averaged
+    /// frame period ([`FramePeriodMean`], review of v1.140, defect A). The
+    /// running `step_count` is rescaled to the new rate with it (review of
+    /// v1.141, finding 3; see [`FlightCore::rescale_ticks_since`]).
     fn resync_loop_rate(&mut self, dt: f32) {
-        if let Some(actual) = resynced_rate(self.designed_hz, dt) {
+        let Some((period, recent)) = self.frames.observe(dt) else {
+            return;
+        };
+        if let Some(actual) = resynced_rate(self.designed_hz, period) {
             self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
-            self.step_count = FlightCore::rescale_ticks(self.step_count, self.designed_hz, actual);
+            self.step_count =
+                FlightCore::rescale_ticks_since(self.step_count, self.designed_hz, actual, recent);
             self.designed_hz = actual;
         }
     }
@@ -417,10 +428,16 @@ impl EstimatorPartition {
 }
 
 /// The rate a partition should RE-DERIVE its rate-dependent state for, if
-/// the backend's `dt` says it is being stepped more than 2% away from
-/// `designed_hz` (jitter must not rebuild filters every tick); `None` to keep
-/// it, or for a `dt` that is not a positive finite number. ONE rule for both
-/// partitions (#609 finding 7), so a split's halves resync on the same tick.
+/// the frame PERIOD `dt` says it is being stepped more than 2% away from
+/// `designed_hz`; `None` to keep it, or for a `dt` that is not a positive
+/// finite number. ONE rule for both partitions (#609 finding 7), so a
+/// split's halves resync on the same tick.
+///
+/// `dt` is NOT each frame's own period (review of v1.140, defect A): it is
+/// the first frame's, then the trimmed mean of a block of frames
+/// ([`FramePeriodMean`]). Compared frame by frame, a period that ALTERNATES
+/// across the band (2/3 ms on a 1 ms OS tick, 1 kHz +-25 us, 4.0/4.1 ms)
+/// rebuilt, and zeroed, the gyro low-pass and notch bank on every tick.
 fn resynced_rate(designed_hz: f32, dt: f32) -> Option<f32> {
     if !(dt.is_finite() && dt > 0.0) {
         return None;
@@ -428,6 +445,128 @@ fn resynced_rate(designed_hz: f32, dt: f32) -> Option<f32> {
     let actual = 1.0 / dt;
     let drift = relay_math::fabsf(actual - designed_hz);
     (drift > 0.02 * designed_hz).then_some(actual)
+}
+
+/// Frames per block of [`FramePeriodMean`] once it has grown (the blocks
+/// after the seed are 2, 4, 8, then 16 frames): the resync compares the
+/// block's trimmed mean period, not each frame's (review of v1.140, defect
+/// A). EVEN, so a period-2 or period-4 alternation averages exactly; 16 frames is
+/// 16 ms at 1 kHz, 40 ms at 400 Hz, 64 ms at 250 Hz. Short enough that a
+/// block closes well inside the 0.1 s stall window at the rates the core
+/// flies at, and a genuine rate change is followed within one or two blocks.
+pub const RATE_WINDOW_FRAMES: u32 = 16;
+
+/// The frame period a partition's rate resync is judged on (review of
+/// v1.140, defect A). The FIRST valid frame establishes the rate on its own
+/// (a core built at the nominal 1 kHz and stepped at 250 Hz must not fly a
+/// block at the wrong design). From then on the frames are summed in blocks
+/// that GROW from 2 frames, doubling, to [`RATE_WINDOW_FRAMES`], and at each
+/// block's end its mean period (from 4 frames on with the longest and the
+/// shortest frame dropped) is offered to [`resynced_rate`]. One late frame
+/// is therefore not a rate change, an alternation converges to its mean
+/// period and stays there, and a genuine rate change resyncs at the end of
+/// the block it lands in (and once more, to the clean rate, if it landed
+/// mid-block).
+///
+/// WHY THE BLOCKS GROW: the seed is a single frame, and a LONG first frame
+/// (a host's first tick, the cascade's first flying tick: 20-50 ms) designs
+/// the stall window at 2-5 ticks. Held for a 16-frame block that isolated a
+/// healthy soft-starting rotor on every such cell
+/// (tests/fdi_spinup_guard.rs `a_long_first_frame_isolates_no_healthy_rotor`);
+/// re-judged after two frames, the seed's thresholds meet at most one
+/// counted stall tick.
+///
+/// Plain fixed fields, no allocation, no closures. Each partition owns one
+/// and feeds it every frame IT steps. In the fused `FlightCore::step` (and
+/// a split stepping both halves every frame) the halves see the same
+/// sequence and resync on the same tick; under
+/// `FlightCore::step_estimate_only` only the estimator is fed, so in
+/// supervised flight the cascade's blocks start at its first flying tick
+/// and the halves may resync up to one block apart (their warm-up counts
+/// then differ for that block).
+#[derive(Clone, Copy, Debug)]
+pub struct FramePeriodMean {
+    seeded: bool,
+    sum: f32,
+    n: u32,
+    min: f32,
+    max: f32,
+    /// Ticks stepped since the block began, valid `dt` or not: the counters
+    /// of the partition advanced on every one of them.
+    ticks: u32,
+    /// Frames in the current block: 2 after the seed, doubling to
+    /// [`RATE_WINDOW_FRAMES`].
+    len: u32,
+}
+
+impl FramePeriodMean {
+    pub const fn new() -> Self {
+        FramePeriodMean {
+            seeded: false,
+            sum: 0.0,
+            n: 0,
+            min: 0.0,
+            max: 0.0,
+            ticks: 0,
+            len: 2,
+        }
+    }
+
+    /// Feed one frame's `dt`. `Some((period, recent_ticks))` when a period
+    /// is ready to be judged: the first valid frame's own (with 0 recent
+    /// ticks), then each block's (trimmed) mean, with the number of ticks of
+    /// that block the partition has ALREADY counted (all but this frame's,
+    /// which it counts after the resync, at the new rate). Those ticks were
+    /// ticks of the block's mean period, so a resync must not rescale them
+    /// ([`FlightCore::rescale_ticks_since`]). `None` otherwise.
+    pub fn observe(&mut self, dt: f32) -> Option<(f32, u32)> {
+        if !self.seeded {
+            if !(dt.is_finite() && dt > 0.0) {
+                return None;
+            }
+            self.seeded = true;
+            return Some((dt, 0));
+        }
+        self.ticks = self.ticks.saturating_add(1);
+        if !(dt.is_finite() && dt > 0.0) {
+            return None;
+        }
+        if self.n == 0 {
+            self.min = dt;
+            self.max = dt;
+        } else {
+            if dt < self.min {
+                self.min = dt;
+            }
+            if dt > self.max {
+                self.max = dt;
+            }
+        }
+        self.sum += dt;
+        self.n += 1;
+        if self.n < self.len {
+            return None;
+        }
+        let period = if self.n >= 4 {
+            (self.sum - self.min - self.max) / (self.n - 2) as f32
+        } else {
+            self.sum / self.n as f32
+        };
+        let recent = self.ticks - 1;
+        self.sum = 0.0;
+        self.n = 0;
+        self.ticks = 0;
+        if self.len < RATE_WINDOW_FRAMES {
+            self.len = (self.len * 2).min(RATE_WINDOW_FRAMES);
+        }
+        Some((period, recent))
+    }
+}
+
+impl Default for FramePeriodMean {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// The CASCADE partition (PART-P01, v1.124): geometric attitude, ADRC,
@@ -559,12 +698,21 @@ pub struct CascadePartition {
     /// the first tick with at most one rotor stalled, by a tick without RPM
     /// and by `rearm_fdi`.
     fdi_stall_common: bool,
+    /// How many times `resync_loop_rate` has REBUILT the rate-dependent
+    /// filters (review of v1.140, defect A). Observability only: a host whose
+    /// frame period alternates across the resync band used to rebuild (and
+    /// zero) the gyro low-pass and the notch bank on every tick, and a test
+    /// that reads this count can see that where a rate reading cannot.
+    rate_resyncs: u32,
     /// The cascade's own copy of the sensor calibration (the M7 sees the
     /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
     /// The loop rate `gyro_lpf` and `notch` were DESIGNED for. Re-synced from
     /// the backend's own `dt()` on the first tick — see `resync_loop_rate`.
     designed_hz: f32,
+    /// The frame period the resync is judged on (review of v1.140, defect
+    /// A): the first frame's, then a growing block's (trimmed) mean.
+    frames: FramePeriodMean,
 }
 
 impl CascadePartition {
@@ -617,6 +765,8 @@ impl CascadePartition {
             fdi_stall_steps: FlightCore::fdi_stall_steps(loop_hz),
             fdi_stall_run: [0; 4],
             fdi_stall_common: false,
+            rate_resyncs: 0,
+            frames: FramePeriodMean::new(),
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -734,6 +884,11 @@ impl CascadePartition {
     /// written to catch (#499). A test that reads this value can.
     pub fn designed_loop_hz(&self) -> f32 {
         self.designed_hz
+    }
+    /// How many times the rate-dependent filters have been rebuilt by a
+    /// rate resync since construction (review of v1.140, defect A).
+    pub fn rate_resyncs(&self) -> u32 {
+        self.rate_resyncs
     }
 
     /// FDI observability (v1.115): `(rate2, tilt_cos, gate_open, resid[4])` from
@@ -865,19 +1020,41 @@ impl CascadePartition {
     /// window under a run already counted at the full rate, and a healthy
     /// rotor 60 ms into a 100 ms tolerance was isolated permanently; the
     /// guard could likewise release early. They are rescaled to the new
-    /// rate here ([`FlightCore::rescale_ticks`]), so every one of them stays
-    /// a measure of elapsed TIME.
+    /// rate here ([`FlightCore::rescale_ticks_since`]), so every one of them
+    /// stays a measure of elapsed TIME. (Since defect A below, one late
+    /// frame no longer resyncs; a sustained rate change still does.)
+    ///
+    /// ON THE AVERAGED PERIOD, NOT EACH FRAME'S (review of v1.140, defect A).
+    /// Judged frame by frame, a period alternating across the 2% band (a
+    /// 400 Hz loop on a 1 ms OS tick: 2, 3, 2, 3 ms; 1 kHz +-25 us; 250 Hz at
+    /// 4.0/4.1 ms) rebuilt, and zeroed, the gyro low-pass and the notch bank
+    /// on EVERY tick: the supervised 400 Hz takeoff went Takeoff -> Land ->
+    /// Terminated at 1.45-1.95 rad of tilt, and the counters, rescaled every
+    /// frame, filled the 0.1 s stall window in 75-88 ms (defect B). The first
+    /// frame still establishes the rate; after it the resync is judged on a
+    /// block's trimmed mean period ([`FramePeriodMean`]), so one late frame
+    /// no longer resyncs (it is dropped from the mean), an alternation
+    /// resyncs at most twice (its first frame, then its mean) and stays, and
+    /// a genuine rate change resyncs at the end of its block. The ticks of
+    /// that block were ticks of its mean period, so they are carried over
+    /// as they are and only the older ones are rescaled.
     fn resync_loop_rate(&mut self, dt: f32) {
-        if let Some(actual) = resynced_rate(self.designed_hz, dt) {
+        let Some((period, recent)) = self.frames.observe(dt) else {
+            return;
+        };
+        if let Some(actual) = resynced_rate(self.designed_hz, period) {
             let from = self.designed_hz;
-            self.fdi_spinup = FlightCore::rescale_ticks(self.fdi_spinup, from, actual);
-            self.step_count = FlightCore::rescale_ticks(self.step_count, from, actual);
+            self.fdi_spinup =
+                FlightCore::rescale_ticks_since(self.fdi_spinup, from, actual, recent);
+            self.step_count =
+                FlightCore::rescale_ticks_since(self.step_count, from, actual, recent);
             let mut i = 0;
             while i < 4 {
                 self.fdi_stall_run[i] =
-                    FlightCore::rescale_ticks(self.fdi_stall_run[i], from, actual);
+                    FlightCore::rescale_ticks_since(self.fdi_stall_run[i], from, actual, recent);
                 i += 1;
             }
+            self.rate_resyncs = self.rate_resyncs.saturating_add(1);
             self.gyro_lpf = GyroLpf::new(60.0, actual);
             self.notch = relay_notch::HarmonicNotchBank::new(actual);
             self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
@@ -1198,13 +1375,29 @@ impl CascadePartition {
         // A real dead rotor's healthy siblings read near zero only for the
         // first few ms of the spin-up (the rotor lag; a 100 ms soft-start
         // for longer), so its own run keeps counting through that co-stall
-        // and it is still isolated at the window
+        // and it is isolated at the window IF every sibling has left the
+        // stall band before the window fills
         // (tests/fdi_spinup_guard.rs
         // `a_stalled_rotor_beside_a_slow_healthy_rotor_is_still_isolated_in_the_window`).
         // But a window that FILLS while shared is discarded: from then on
         // every co-stalled tick resets the runs (`fdi_stall_common`), so a
         // rotor left silent when the others recover must earn a fresh
         // window on its own.
+        //
+        // KNOWN LIMIT (c), a DOUBLE fault (review of v1.140, defect C): a
+        // dead rotor whose healthy SIBLING's RPM telemetry stays at 0 past
+        // the window (an unpopulated bus slot, a dead telemetry wire) is
+        // co-stalled on every tick, so this check never isolates it. Started
+        // AIRBORNE it is never isolated at all: the residual path is shut by
+        // the rate gate once the guard releases, and the vehicle falls (every
+        // dead/silent pair, 250 Hz and 1 kHz; pinned by tests/fdi_spinup_guard.rs
+        // `known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne`).
+        // On a ground spin-up the isolation is deferred to the guard's
+        // release and the residual path (measured, SimBackend, 50 ms lag:
+        // isolated on the guard's own tick, 0.3 s, at 0.26 rad of tilt,
+        // peak 1.02 rad, the supervisor already in Land). v1.142: disambiguate co-stalled
+        // rotors by the body-rate / attitude response, which a dead rotor
+        // produces and a dead telemetry channel does not.
         if self.failed_motor.is_none() && self.fdi_spinup < self.fdi_guard_steps {
             match rpm_now {
                 Some(rpm) => {
@@ -1372,6 +1565,20 @@ impl FlightCore {
         (count as f32 * (to_hz / from_hz) + 0.5) as u32
     }
 
+    /// [`Self::rescale_ticks`] for a count whose LAST `recent` ticks were
+    /// already ticks of `to_hz` (review of v1.140, defect B): the ticks of
+    /// the frame block whose mean period `to_hz` was derived from. Those are
+    /// carried over unchanged and only the older part is rescaled, so a
+    /// counter that ran through the block stays a measure of elapsed TIME;
+    /// rescaling every frame filled the 0.1 s stall window in 75-88 ms of
+    /// alternating frames. A count shorter than `recent` started inside the
+    /// block and is carried over whole. Saturating, like
+    /// [`Self::rescale_ticks`].
+    pub fn rescale_ticks_since(count: u32, from_hz: f32, to_hz: f32, recent: u32) -> u32 {
+        let inside = if count < recent { count } else { recent };
+        Self::rescale_ticks(count - inside, from_hz, to_hz).saturating_add(inside)
+    }
+
     /// The rotor lag model's per-tick gain at `loop_hz`:
     /// `(1 / loop_hz) / FDI_ROTOR_LAG_TAU_S`, capped at 1 (#609 finding 18).
     /// Forward Euler, no libm on the flight path.
@@ -1509,6 +1716,10 @@ impl FlightCore {
     /// See [`CascadePartition::designed_loop_hz`].
     pub fn designed_loop_hz(&self) -> f32 {
         self.casc.designed_loop_hz()
+    }
+    /// See [`CascadePartition::rate_resyncs`].
+    pub fn rate_resyncs(&self) -> u32 {
+        self.casc.rate_resyncs()
     }
 
     pub fn last_omega_d(&self) -> Vec3 {
@@ -7834,19 +8045,30 @@ mod warmup_time_tests {
         }
         assert_eq!(FlightCore::fdi_stall_steps(1.0 / (1.0f32 / 1000.0)), 100);
     }
-    /// REVIEW OF v1.141, FINDING 3: `resync_loop_rate` rescales the
-    /// IN-PROGRESS counters to the new rate, so they stay a measure of
-    /// elapsed TIME against thresholds that are fixed times. 1 kHz, rotor 1
-    /// dead from the first tick, 55 ticks, then ONE 2 ms frame (the core
-    /// resyncs to 500 Hz for it), then 1 ms frames again. On the late frame
-    /// every counter must read the elapsed time at 500 Hz (+-1 tick): the
-    /// spin-up guard counter and both step counts 57 ms, the stall run 56 ms
-    /// (it starts on tick 2: the first tick has no previous command). The
-    /// stalled rotor must not be isolated early by the late frame, and must
-    /// still be isolated once 0.1 s of stall has elapsed (+2 ticks).
+    /// REVIEW OF v1.141, FINDING 3, re-premised by REVIEW OF v1.140, DEFECT
+    /// A: `resync_loop_rate` rescales the IN-PROGRESS counters on a rate
+    /// change, so they stay a measure of elapsed TIME against thresholds that
+    /// are fixed times.
     ///
-    /// FAILS ON 5020977: the counters stay in old-rate ticks against a
-    /// 50-tick window, and rotor 1 is isolated at 57 ms.
+    /// THE PREMISE CHANGED. This test used to send ONE 2 ms frame at 1 kHz
+    /// and expect the core to resync to 500 Hz for that frame. That per-frame
+    /// resync IS defect A (an alternating period rebuilt the filters every
+    /// tick), so one late frame is now jitter: it must NOT resync (asserted
+    /// first, and the counters must then still read 1 kHz ticks), and the
+    /// rescale is exercised by what it exists for, a SUSTAINED change: from
+    /// tick 56 every frame is 2 ms. 1 kHz, rotor 1 dead from the first tick.
+    /// Within two frame blocks of the change the core is at 500 Hz +-2% with
+    /// at most two resyncs, every counter reads the elapsed time at the new
+    /// rate (+-1 tick) on each resync, and rotor 1 is isolated once 0.1 s of
+    /// stall has ELAPSED (summed frame periods): 100..=108 ms. The slack is
+    /// the block that straddles the change: it resyncs to its blended mean
+    /// (1.64 ms, 608.7 Hz), and the next block's 2 ms ticks are judged
+    /// against that rate's window until it closes, 16 x (2 - 1.64) = 5.7 ms,
+    /// plus one 2 ms tick of granularity (measured: 106 ms). Never early.
+    ///
+    /// FAILS ON 5020977 (the counters stayed in old-rate ticks; rotor 1 was
+    /// isolated at 57 ms), and the first assertion FAILS ON 725f146 (one late
+    /// frame resynced the core to 500 Hz).
     #[test]
     fn a_late_frame_rescales_the_in_progress_counters() {
         let (mut b, mut core) = hovering(1000.0);
@@ -7855,36 +8077,145 @@ mod warmup_time_tests {
             core.step(&mut b);
         }
         assert_eq!(core.failed_motor(), None, "isolated before the late frame");
+        // ONE late frame: jitter, not a rate change.
         b.dt = 0.002;
         core.step(&mut b);
         b.dt = 0.001;
-        let near = |got: u32, ms: f32| (got as f32 - ms * 0.5).abs() <= 1.0;
         let c = (
             core.casc.fdi_spinup,
             core.casc.step_count,
             core.est.step_count,
             core.casc.fdi_stall_run[1],
         );
-        std::eprintln!("on the 2 ms frame: spinup/casc step/est step/stall run = {c:?}");
-        assert!(
-            near(c.0, 57.0) && near(c.1, 57.0) && near(c.2, 57.0) && near(c.3, 56.0),
-            "on the 2 ms frame (500 Hz) the counters must read 57/57/57/56 ms = ~28 ticks, got {c:?}"
+        std::eprintln!(
+            "on one 2 ms frame: designed {} Hz, counters {c:?}",
+            core.designed_loop_hz()
         );
         assert_eq!(
-            core.failed_motor(),
-            None,
-            "the late frame isolated rotor 1 at 57 ms"
+            core.rate_resyncs(),
+            0,
+            "one late frame resynced the loop rate"
         );
-        let mut elapsed_ms = 57u32;
-        while core.failed_motor().is_none() && elapsed_ms < 400 {
+        assert_eq!(core.designed_loop_hz(), 1000.0);
+        assert_eq!(c, (56, 56, 56, 55), "one late frame changed the counters");
+        // Then a SUSTAINED 2 ms period.
+        // Stalled since tick 2: 54 ms of 1 ms ticks, then the 2 ms frame.
+        let mut elapsed_ms = 56.0f32;
+        let mut resyncs = core.rate_resyncs();
+        b.dt = 0.002;
+        let mut frames = 0u32;
+        while core.failed_motor().is_none() && frames < 400 {
             core.step(&mut b);
-            elapsed_ms += 1;
+            frames += 1;
+            elapsed_ms += 2.0;
+            if core.rate_resyncs() != resyncs {
+                resyncs = core.rate_resyncs();
+                let hz = core.designed_loop_hz();
+                // After the tick: the step/guard counters have counted
+                // every tick (tick 1 too, 1 ms), the stall run every tick
+                // from tick 2, i.e. the elapsed stall time.
+                let near = |got: u32, ms: f32| (got as f32 - ms * hz / 1000.0).abs() <= 1.5;
+                let c = (
+                    core.casc.fdi_spinup,
+                    core.casc.step_count,
+                    core.est.step_count,
+                    core.casc.fdi_stall_run[1],
+                );
+                std::eprintln!(
+                    "resync #{resyncs} at {hz:.1} Hz after {elapsed_ms} ms stalled: counters {c:?}"
+                );
+                if core.failed_motor().is_none() {
+                    assert!(
+                        near(c.0, elapsed_ms + 1.0)
+                            && near(c.1, elapsed_ms + 1.0)
+                            && near(c.2, elapsed_ms + 1.0),
+                        "at {hz} Hz the step/guard counters must read ~{} ms, got {c:?}",
+                        elapsed_ms + 1.0
+                    );
+                    assert!(
+                        near(c.3, elapsed_ms),
+                        "at {hz} Hz the stall run must read ~{elapsed_ms} ms, got {c:?}"
+                    );
+                }
+            }
         }
-        std::eprintln!("rotor 1 isolated at {elapsed_ms} ms");
+        std::eprintln!("rotor 1 isolated after {elapsed_ms} ms of stall, {resyncs} resyncs");
         assert_eq!(core.failed_motor(), Some(1));
+        assert!(resyncs >= 1, "never followed the 2 ms period");
+        assert!(resyncs <= 2, "a step to 2 ms resynced {resyncs} times");
         assert!(
-            (100..=103).contains(&elapsed_ms),
-            "isolated at {elapsed_ms} ms; the stall window is 100 ms"
+            (100.0..=108.0).contains(&elapsed_ms),
+            "isolated after {elapsed_ms} ms of stall; the stall window is 100 ms"
         );
+        // And it settles at 500 Hz within two blocks of the change.
+        for _ in 0..(2 * RATE_WINDOW_FRAMES) {
+            core.step(&mut b);
+        }
+        assert!((core.designed_loop_hz() - 500.0).abs() <= 10.0);
+        assert!(core.rate_resyncs() <= 2);
+    }
+
+    /// REVIEW OF v1.140, DEFECT A, the other side: a GENUINE rate change
+    /// still resyncs. Built at the nominal 1 kHz, stepped at 250 Hz for 2 s
+    /// (the first frame resyncs it, once), then 1 kHz frames: within two
+    /// frame blocks the core is at 1 kHz +-2%, with at most two more
+    /// resyncs, and every fixed-TIME threshold is rederived: guard 300,
+    /// stall window 100, warm-up 200 ticks, both halves. The FDI spin-up
+    /// guard is still 0.3 s of TIME: re-armed after the change it releases
+    /// at 300 ms (+-1 tick); re-armed ON the change (the spin-up straddles
+    /// the block that blends 4 ms and 1 ms frames) it releases within 10 ms
+    /// of 0.3 s.
+    ///
+    /// A REGRESSION GUARD, not fail-first: the per-frame rule resynced a
+    /// genuine change too.
+    #[test]
+    fn a_genuine_rate_change_still_resyncs_and_keeps_the_guard_0_3_s() {
+        // Guard release time in ms, re-armed on or two blocks after the change.
+        fn release_ms(rearm_at_step: bool) -> (f32, u32, f32, FlightCore) {
+            let (mut b, mut core) = hovering(250.0);
+            for _ in 0..500 {
+                core.step(&mut b);
+            }
+            assert_eq!(
+                core.rate_resyncs(),
+                1,
+                "250 Hz frames: the first frame resyncs"
+            );
+            assert!((core.designed_loop_hz() - 250.0).abs() < 0.01);
+            b.dt = 0.001;
+            if !rearm_at_step {
+                for _ in 0..(2 * RATE_WINDOW_FRAMES + 2) {
+                    core.step(&mut b);
+                }
+            }
+            core.rearm_fdi();
+            let mut ms = 0.0f32;
+            let mut ticks = 0u32;
+            while core.casc.fdi_spinup < core.casc.fdi_guard_steps && ticks < 2000 {
+                core.step(&mut b);
+                ticks += 1;
+                ms += 1.0;
+            }
+            (ms, ticks, core.designed_loop_hz(), core)
+        }
+        let (settled, _, hz, core) = release_ms(false);
+        std::eprintln!("re-armed after the change: guard released at {settled} ms, {hz} Hz");
+        assert!((hz - 1000.0).abs() <= 20.0, "did not follow 1 kHz: {hz}");
+        assert!(core.rate_resyncs() <= 3, "{} resyncs", core.rate_resyncs());
+        assert_eq!(core.casc.fdi_guard_steps, 300);
+        assert_eq!(core.casc.fdi_stall_steps, 100);
+        assert_eq!(
+            (core.est.fdi_warmup_steps, core.casc.fdi_warmup_steps),
+            (200, 200)
+        );
+        assert!((299.0..=301.0).contains(&settled), "guard {settled} ms");
+        let (straddled, _, hz, core) = release_ms(true);
+        std::eprintln!(
+            "re-armed on the change: guard released at {straddled} ms, {hz} Hz, {} resyncs",
+            core.rate_resyncs()
+        );
+        assert!((hz - 1000.0).abs() <= 20.0, "did not follow 1 kHz: {hz}");
+        assert!(core.rate_resyncs() <= 3, "{} resyncs", core.rate_resyncs());
+        assert!((290.0..=310.0).contains(&straddled), "guard {straddled} ms");
     }
 }

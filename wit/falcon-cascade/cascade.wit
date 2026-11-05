@@ -285,11 +285,17 @@ interface types {
         hover-thrust: f32,
         /// Control-loop rate (Hz). ADVISORY (#609 finding 7): validated, in
         /// [10, 10000], and otherwise NOT READ. The rate the core flies at is
-        /// the frame's own: it is built at the nominal 1 kHz and RE-SYNCS to
-        /// `1 / sensor-frame.dt-s` whenever that differs by more than 2% (the
-        /// gyro low-pass, the notch bank, and since #609 the warm-ups: the
-        /// rotor-out FDI spin-up guard is a fixed 0.2 s and the estimator's
-        /// innovation-gate / yaw-capture warm-up 1 s, counted at that rate).
+        /// the frames': it is built at the nominal 1 kHz and RE-SYNCS to the
+        /// first frame's `1 / sensor-frame.dt-s`, then to 1 / the trimmed
+        /// mean frame PERIOD of each block of frames (2, 4, 8, then 16
+        /// frames; a mean of periods, not of rates), whenever that differs by
+        /// more than 2% (once the blocks have grown, one late frame does not
+        /// resync, and a period alternating across the band, e.g. 2/3 ms on
+        /// a 1 ms OS tick, resyncs to its mean and stays). That
+        /// rebuilds the gyro low-pass and the notch bank and re-times the
+        /// warm-ups: the rotor-out FDI spin-up guard is a fixed 0.3 s, its
+        /// stall window 0.1 s and the estimator's innovation-gate /
+        /// yaw-capture warm-up 0.2 s / 1 s, counted at that rate.
         /// A host that sends a `loop-rate-hz` that disagrees with its frames
         /// flies at its frames' rate. Kept in the record so the record stays
         /// field-for-field what it was at @0.12.0.

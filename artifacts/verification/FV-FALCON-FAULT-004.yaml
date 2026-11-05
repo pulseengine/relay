@@ -115,6 +115,59 @@ artifacts:
            starts commutating; one doing so for > 100 ms with its command
            above 20 % would be isolated as dead on a healthy spin-up. Only a
            FULLY stalled rotor is caught early.
+           KNOWN LIMIT (c) OF THE STALL CHECK (review of v1.140, defect C;
+           not item 4's airborne-guard "(c)"; maintainer: pin and disclose,
+           fix in v1.142). The check discards a window while two or more
+           rotors are stalled (fdi_stall_common), so a dead rotor whose
+           HEALTHY sibling's RPM telemetry reads 0 past the window (an
+           unpopulated bus slot, a dead telemetry wire: a DOUBLE fault) is
+           never isolated by it. AIRBORNE from the first tick it is never
+           isolated at all: every dead/silent ordered pair, 250 Hz and
+           1 kHz, SimBackend, peak tilt ~2.0 rad and ~9 m of fall in 2 s,
+           while the same rig with every sibling reporting isolates the dead
+           rotor at tick 26 / 101 (positive control in the same test). On a
+           ground spin-up the isolation defers to the guard's release and
+           the residual path (measured: on the guard's tick, 0.3 s, at
+           0.26 rad, peak 1.02 rad, supervisor in Land). Pinned by
+           known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne
+           in the fdi_spinup_guard step; when v1.142 disambiguates
+           co-stalled rotors by body-rate / attitude response that test
+           fails and this limit is retired.
+        6. RATE RESYNC ON THE AVERAGED FRAME PERIOD (review of v1.140,
+           defects A and B). The guard, the stall window and the warm-ups
+           above are fixed TIMES counted at the resynced rate. The resync
+           used to judge each frame's 1/dt against the 2 % band, so a period
+           alternating across it (400 Hz on a 1 ms OS tick: 2/3 ms; 1 kHz
+           +-25 us; 250 Hz 4.0/4.1 ms) rebuilt and zeroed the gyro low-pass
+           and the notch bank on every tick (4800 / 12000 / 2493 resyncs in
+           12 s; supervised 400 Hz takeoff Takeoff -> Rtl -> Land ->
+           Terminated at 1.45 rad), and the counters, rescaled every frame,
+           filled the 0.1 s stall window in 75-88 ms of elapsed time. Now
+           the first frame establishes the rate and after it the resync is
+           judged on the mean frame PERIOD of blocks growing 2, 4, 8, 16
+           frames (trimmed of the longest and shortest from 4 on;
+           FramePeriodMean, RATE_WINDOW_FRAMES); the ticks of the block are
+           carried over as ticks of its mean period
+           (FlightCore::rescale_ticks_since). Measured: 1-2 resyncs per
+           pattern, settled on the mean rate; the supervised takeoff reaches
+           Loiter at 0.021 rad (as at a fixed 2.5 ms); the stall window fills
+           at 100-101 ms of elapsed time. One late frame no longer resyncs;
+           a sustained change resyncs within two blocks (a block straddling
+           the change costs up to ~6 ms of window time, measured 106 ms).
+           The blocks GROW because the seed is one frame: a long first
+           frame (20 / 50 ms) held for a 16-frame block designed the stall
+           window at 2-5 ticks and isolated a healthy soft-starting rotor in
+           12/12 cells (250 Hz / 1 kHz x 20 / 50 ms x 3 soft-starts, tilt
+           0.8-1.6 rad); re-judged after 2 frames: 0/12, Loiter reached
+           (a_long_first_frame_isolates_no_healthy_rotor, in the
+           fdi_spinup_guard step). The halves of a split resync on the same
+           tick only when both are stepped every frame: under
+           step_estimate_only the cascade's tracker is not fed, so in
+           supervised flight they may resync up to one block apart.
+           Tests: tests/dt_jitter_resync.rs (4) and the --lib tests
+           a_late_frame_rescales_the_in_progress_counters (re-premised: one
+           late frame must NOT resync; a sustained 2 ms period must) and
+           a_genuine_rate_change_still_resyncs_and_keeps_the_guard_0_3_s.
 
       STATUS DEMOTED verified -> implemented by the #609 finding-17 change
       (#633), and its evidence changed again with finding 18 (#634).
@@ -185,6 +238,11 @@ artifacts:
         - run: cargo test -p falcon-core --lib the_fdi_guard_is_0_3_s_at_the_resynced_rate
         - run: cargo test -p falcon-core --lib the_stall_window_is_0_1_s_at_the_resynced_rate
         - run: cargo test -p falcon-core --lib an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check
+        - run: cargo test -p falcon-core --lib a_late_frame_rescales_the_in_progress_counters
+        - run: cargo test -p falcon-core --lib a_genuine_rate_change_still_resyncs_and_keeps_the_guard_0_3_s
+        - run: cargo test -p falcon-core --test fdi_spinup_guard known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne
+        - run: cargo test -p falcon-core --test fdi_spinup_guard a_long_first_frame_isolates_no_healthy_rotor
+        - run: cargo test -p falcon-core --test dt_jitter_resync
         - run: "grep -q 'pub const FDI_STALL_RPM_FRAC: f32 = 0.05;' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'pub const FDI_STALL_CMD_MIN: f32 = 0.20;' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'pub const FDI_STALL_WINDOW_S: f32 = 0.1;' crates/falcon-core/plain/src/lib.rs"
