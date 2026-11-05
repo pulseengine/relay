@@ -1,0 +1,158 @@
+artifacts:
+  # ════════════════════════════════════════════════════════════════════
+  # Upstream watch list: Component Model / WASI P3 changes that touch
+  # relay's stream architecture. Source: Bytecode Alliance Plumbers Summit,
+  # Nov 2026 (Luke Wagner's component-model update, plus the toolchain and
+  # debugging talks). status: pending = tracked, not yet adopted. Each item
+  # flips to a built SWREQ/SWDD/FV trace when relay adopts it. Like the rest
+  # of artifacts/features/, this is a human-maintained roadmap outside
+  # rivet's validation.
+  #
+  # Current baseline (2026-11-05): std components build wasm32-wasip2;
+  # wit-bindgen 0.63; wasmtime 41 (tests/) and 45 (host/witness-wasi-harness).
+  # ════════════════════════════════════════════════════════════════════
+
+  - id: FEAT-UPSTREAM-P3-TARGET
+    type: feature
+    title: "Move std components from wasm32-wasip2 to wasm32-wasip3"
+    status: pending
+    description: >
+      WASI 0.3.0 (P3) has shipped: async functions, stream/future,
+      cancellation and backpressure. wasm32-wasip3 is due on stable Rust in
+      early November 2026, and newer wasmtime enables P3 by default. relay
+      declares stream<T> in WIT (housekeeping, scheduler, falcon-cascade-stream)
+      but builds on wasip2. Adoption: add the wasip3 target to
+      scripts/build-components.sh, MODULE.bazel and the release/soak workflows;
+      bump the wasmtime pins in tests/ and host/; re-run the STREAM-P11..P16
+      composition, Meld-lowering and witness MC/DC chain on P3 binaries.
+      no_std components on wasm32-unknown-unknown are unaffected.
+    tags: [upstream, component-model, wasi-p3, toolchain, wasmtime, watch]
+    fields:
+      upstream-signal: "wasm32-wasip3 on stable Rust; wasmtime with P3 on by default"
+      release-target: "std components build and pass the stream chain on wasm32-wasip3"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+
+  - id: FEAT-UPSTREAM-STREAM-FORWARD
+    type: feature
+    title: "stream.forward / future.forward: let pass-through stages splice themselves out"
+    status: pending
+    description: >
+      New canonical built-ins (component-model spec PR 717, wasmtime
+      implementation in progress). They hand a readable end straight to a
+      writable end, propagate close in both directions, and remove both ends
+      from the caller's table, so the forwarding instance can be torn down
+      early. Relevant to relay's routing and fan-through stages in composed
+      cascades. Questions for adoption: does Meld fuse a forward at build time
+      (static wiring) or keep it as a runtime splice? What do the Gale
+      ring_buf proofs need to say about a forwarded stream? Expected in a
+      future 0.3.x.
+    tags: [upstream, component-model, streams, routing, meld, gale, watch]
+    fields:
+      upstream-signal: "stream.forward lands in spec + wasmtime (PR 717)"
+      release-target: "Decision record: Meld lowering + Verus/Rocq obligations for forwarded streams"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+
+  - id: FEAT-UPSTREAM-STREAM-SPLIT-JOIN
+    type: feature
+    title: "stream split/join (and stream<T,U>): a clean basis for stream routing algebra"
+    status: pending
+    description: >
+      A proposed pair of inverse operations that replaces the old splice idea:
+      split(n) produces a head stream of n elements plus a rest stream; join
+      concatenates two streams. An optional stream<T,U> (elements followed by
+      a final value) would split into stream<T> + future<U>. Upstream it is
+      deferred until someone needs it. Because relay is a stream-routing
+      framework with Rocq routing proofs, it may be that someone. Track it,
+      and consider proposing relay's use case upstream.
+    tags: [upstream, component-model, streams, routing, rocq, proposal, watch]
+    fields:
+      upstream-signal: "split/join reaches the front of the upstream priority queue"
+      release-target: "Use-case write-up to upstream; Rocq model of split/join as composition laws"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+
+  - id: FEAT-UPSTREAM-ABI-V2
+    type: feature
+    title: "Canonical ABI v2 (lazy lowering, multi-value): impact on stream record copies and Meld"
+    status: pending
+    description: >
+      ABI v2 is an opt-in, incremental transition. Lazy lowering hands the
+      receiver an index instead of copying through cabi_realloc, which allows
+      zero-copy forwarding and caller-chosen memory. It also adds multi-value
+      returns and caller-supplied buffers for dynamically sized results. For
+      relay: cascade records are flat f32 scalars, so the gain is mostly in
+      list/stream payloads and in removing cabi_realloc from fused binaries.
+      Meld's lowering and any proofs over lowered layouts will need revisiting.
+      Not imminent; watch the spec.
+    tags: [upstream, component-model, canonical-abi, lazy-lowering, meld, loom, watch]
+    fields:
+      upstream-signal: "ABI v2 option lands in spec + wasmtime"
+      release-target: "Impact assessment on Meld lowering + verified layouts"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+
+  - id: FEAT-UPSTREAM-CANONICAL-VERSIONS
+    type: feature
+    title: "Canonical versions: WIT names carry only the major version"
+    status: pending
+    description: >
+      Import/export names will carry only the semver-significant part (e.g.
+      @0.12 for 0.12.x; @0.3 for 0.3.1). The full version moves to an
+      attribute used for error messages, so plain string equality gives
+      forward/back compatibility. The rollout is staged: wasmtime accepts it
+      first, then wasm-tools emits it by default, then the old form is
+      deprecated. relay pins exact package versions (e.g.
+      pulseengine:falcon-cascade@0.12.0); check that Meld linking, sigil
+      attestation subjects and the transport-binding docs still match once
+      names are trimmed.
+    tags: [upstream, component-model, versioning, wit, meld, sigil, watch]
+    fields:
+      upstream-signal: "wasm-tools emits canonical versions by default"
+      release-target: "Meld + attestation tooling accept trimmed names; no relay WIT churn"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+
+  - id: FEAT-UPSTREAM-OPTIONAL-IMPORTS
+    type: feature
+    title: "Optional imports: minimal flight worlds without stubbing out std's WASI imports"
+    status: pending
+    description: >
+      Imports marked optional come with an is-present flag the code checks at
+      runtime, so standard libraries can import WASI everywhere and the world
+      stays minimal. relay currently avoids pulled-in WASI by building no_std
+      components for wasm32-unknown-unknown. Optional imports could let std
+      components target relay-minimal worlds directly. Safety note: a missing
+      import must fail closed and be proven unreachable on flight paths. Listed
+      upstream as a near-term priority.
+    tags: [upstream, component-model, optional-imports, least-authority, worlds, watch]
+    fields:
+      upstream-signal: "optional imports in spec + wit-bindgen"
+      release-target: "Assessment: can std components meet relay-minimal without no_std?"
+    links:
+      - type: implements
+        target: SYSREQ-FALCON-008
+
+  - id: FEAT-UPSTREAM-RECORD-REPLAY
+    type: feature
+    title: "Wasmtime deterministic record/replay + reverse debugging for SITL failures"
+    status: pending
+    description: >
+      Chris Fallin's branch (not yet landed, about 25 PRs) records core-Wasm
+      I/O boundary traces in a stable format, with roughly 8% overhead in an
+      earlier prototype. It replays them deterministically and supports
+      snapshots, watchpoints, reverse-continue and a DAP debugger. It works
+      for components up to P3 async. For relay: capture traces from soak and
+      SITL failures and replay them offline; this could serve as
+      reproducibility evidence. Tool qualification (docs/dossier/tool-qualification)
+      would be needed before it counts as evidence.
+    tags: [upstream, wasmtime, debugging, record-replay, sitl, soak, tool-qualification, watch]
+    fields:
+      upstream-signal: "record/replay + watchpoints merged in wasmtime"
+      release-target: "Soak/SITL harness can emit and replay a trace for a failing run"
