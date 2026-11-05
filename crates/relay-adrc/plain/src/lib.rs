@@ -256,7 +256,8 @@ fn sanitise(x: f32, fallback: f32) -> f32 {
     if x.is_finite() { x } else { fallback }
 }
 
-/// 2nd-order (Butterworth) low-pass biquad, direct-form-II transposed.
+/// 2nd-order (Butterworth) low-pass biquad, Direct Form I (the state is the
+/// last two inputs and the last two outputs, `x1 x2 y1 y2`).
 /// PX4 puts exactly this ahead of its rate loop (`IMU_GYRO_CUTOFF`): a
 /// high-gain ESO that differentiates RAW gyro chases sensor/motor noise
 /// straight into the actuators, so the inner loop needs a band-limited
@@ -300,6 +301,23 @@ impl Biquad {
         }
     }
 
+    /// Re-design for cutoff `fc` at sample rate `fs` (the coefficients
+    /// [`Biquad::lowpass`] would give, degenerate args included), KEEPING the
+    /// Direct Form I history `x1 x2 y1 y2`. A re-design is a change of
+    /// coefficients, not a restart: the last two inputs and outputs are
+    /// physical signal values whatever the rate, so the next output is
+    /// continuous with the signal instead of starting again from zero
+    /// (review of v1.140, defect A: rebuilding with zeroed state on every
+    /// jittered frame lost rate control).
+    pub fn retune_lowpass(&mut self, fc: f32, fs: f32) {
+        let d = Self::lowpass(fc, fs);
+        self.b0 = d.b0;
+        self.b1 = d.b1;
+        self.b2 = d.b2;
+        self.a1 = d.a1;
+        self.a2 = d.a2;
+    }
+
     fn passthrough() -> Self {
         Biquad {
             b0: 1.0,
@@ -339,6 +357,15 @@ impl GyroLpf {
     pub fn new(fc: f32, fs: f32) -> Self {
         let b = Biquad::lowpass(fc, fs);
         GyroLpf { axes: [b, b, b] }
+    }
+
+    /// Re-design every axis for `fc` at `fs`, keeping each axis's filter
+    /// history ([`Biquad::retune_lowpass`]). `GyroLpf::new(fc, fs)` gives the
+    /// same coefficients with the history zeroed.
+    pub fn retune(&mut self, fc: f32, fs: f32) {
+        for b in self.axes.iter_mut() {
+            b.retune_lowpass(fc, fs);
+        }
     }
 
     pub fn filter(&mut self, gyro: [f32; 3]) -> [f32; 3] {
@@ -606,6 +633,120 @@ mod tests {
             d_est > 0.5,
             "ESO should identify a positive disturbance, got {d_est}"
         );
+    }
+
+    /// **A retuned Direct Form I biquad keeps its state** (review of v1.140,
+    /// defect A). Settled on DC 1.0 at 1 kHz, then re-designed for 250 Hz:
+    /// the history words are unchanged, so the very next output is still the
+    /// DC value (both designs have unity DC gain), where a freshly built
+    /// filter restarts from zero.
+    #[test]
+    fn a_retuned_biquad_keeps_its_state() {
+        let mut b = Biquad::lowpass(60.0, 1000.0);
+        for _ in 0..1000 {
+            b.filter(1.0);
+        }
+        let (x1, x2, y1, y2) = (b.x1, b.x2, b.y1, b.y2);
+        b.retune_lowpass(60.0, 250.0);
+        assert_eq!((b.x1, b.x2, b.y1, b.y2), (x1, x2, y1, y2));
+        let fresh_design = Biquad::lowpass(60.0, 250.0);
+        assert_eq!(
+            (b.b0, b.b1, b.b2, b.a1, b.a2),
+            (
+                fresh_design.b0,
+                fresh_design.b1,
+                fresh_design.b2,
+                fresh_design.a1,
+                fresh_design.a2
+            ),
+            "retune must give exactly the coefficients lowpass() designs"
+        );
+        let kept = b.filter(1.0);
+        let mut fresh = Biquad::lowpass(60.0, 250.0);
+        let restarted = fresh.filter(1.0);
+        assert!(
+            (kept - 1.0).abs() < 1e-3,
+            "retuned output must continue the settled DC value, got {kept}"
+        );
+        assert!(
+            restarted < 0.5,
+            "control: a fresh filter restarts from zero ({restarted})"
+        );
+        // The three-axis wrapper keeps every axis's state the same way.
+        let mut g = GyroLpf::new(60.0, 1000.0);
+        for _ in 0..1000 {
+            g.filter([1.0, -2.0, 0.5]);
+        }
+        g.retune(60.0, 250.0);
+        let y = g.filter([1.0, -2.0, 0.5]);
+        assert!(
+            (y[0] - 1.0).abs() < 1e-3 && (y[1] + 2.0).abs() < 2e-3 && (y[2] - 0.5).abs() < 1e-3
+        );
+    }
+
+    /// **The transient of a coefficient swap under kept state**, measured
+    /// (review of v1.140, defect A). A body-rate signal (offset `dc` plus a
+    /// `f` Hz, 1 rad/s sinusoid) is filtered at 1 kHz; at `t_switch` the
+    /// sample rate drops to 250 Hz and the filter is re-designed mid-signal.
+    /// Reference: a filter designed for 250 Hz that sampled the same signal at
+    /// 250 Hz all along. Returns the worst deviation from the reference over
+    /// the next 0.2 s, for the kept-state retune and for a freshly built
+    /// (zeroed) filter.
+    fn swap_transient(dc: f32, f: f32, t_switch: f32, from: f32, to: f32) -> (f32, f32) {
+        let sig = |t: f32| dc + relay_math::sinf(2.0 * core::f32::consts::PI * f * t);
+        let mut kept = Biquad::lowpass(60.0, from);
+        let n_from = (t_switch * from + 0.5) as u32;
+        for k in 0..n_from {
+            kept.filter(sig(k as f32 / from));
+        }
+        let mut reference = Biquad::lowpass(60.0, to);
+        let n_to = (t_switch * to + 0.5) as u32;
+        for k in 0..n_to {
+            reference.filter(sig(k as f32 / to));
+        }
+        kept.retune_lowpass(60.0, to);
+        let mut fresh = Biquad::lowpass(60.0, to);
+        let (mut e_kept, mut e_fresh) = (0.0f32, 0.0f32);
+        for k in 0..((0.2 * to) as u32) {
+            let x = sig(t_switch + k as f32 / to);
+            let r = reference.filter(x);
+            e_kept = e_kept.max((kept.filter(x) - r).abs());
+            e_fresh = e_fresh.max((fresh.filter(x) - r).abs());
+        }
+        (e_kept, e_fresh)
+    }
+
+    #[test]
+    fn a_coefficient_swap_under_kept_state_has_a_small_transient() {
+        extern crate std;
+        for (from, to) in [(1000.0f32, 250.0f32), (250.0, 1000.0)] {
+            for (dc, f) in [(0.5f32, 0.0f32), (0.5, 2.0), (0.0, 10.0), (0.0, 30.0)] {
+                let (mut wk, mut wf) = (0.0f32, 0.0f32);
+                for ph in 0..8 {
+                    let t = 0.5 + ph as f32 / (8.0 * f.max(1.0));
+                    let (k, fr) = swap_transient(dc, f, t, from, to);
+                    wk = wk.max(k);
+                    wf = wf.max(fr);
+                }
+                std::eprintln!(
+                    "{from}->{to} Hz swap, {dc} + sin({f} Hz): worst deviation kept {wk:.4} fresh {wf:.4}"
+                );
+                // Measured (1000->250 / 250->1000): DC 0.0000/0.0000 vs
+                // 0.36/0.49 fresh; 2 Hz 0.034/0.029 vs 1.09/1.46; 10 Hz
+                // 0.17/0.13 vs 0.72/0.94; 30 Hz 0.64/0.55 vs 0.77/0.95. The
+                // kept history is samples at the OLD spacing, so the swap's
+                // transient grows with the signal's slope; a restart's is the
+                // whole signal. Never worse than a restart, and at the body
+                // rates a hover carries (near DC) it all but vanishes.
+                assert!(wk < wf, "kept {wk} must be below a restart {wf}");
+                if f <= 2.0 {
+                    assert!(
+                        wk < 0.05 * wf,
+                        "low-frequency swap: kept {wk} vs fresh {wf}"
+                    );
+                }
+            }
+        }
     }
 
     /// The gyro LPF passes DC unchanged and strongly attenuates a

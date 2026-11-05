@@ -285,11 +285,19 @@ interface types {
         hover-thrust: f32,
         /// Control-loop rate (Hz). ADVISORY (#609 finding 7): validated, in
         /// [10, 10000], and otherwise NOT READ. The rate the core flies at is
-        /// the frame's own: it is built at the nominal 1 kHz and RE-SYNCS to
-        /// `1 / sensor-frame.dt-s` whenever that differs by more than 2% (the
-        /// gyro low-pass, the notch bank, and since #609 the warm-ups: the
-        /// rotor-out FDI spin-up guard is a fixed 0.2 s and the estimator's
-        /// innovation-gate / yaw-capture warm-up 1 s, counted at that rate).
+        /// the frame's own: it is built at the nominal 1 kHz and follows the
+        /// frames, by two rules (review of v1.140, defect A). The TICK COUNTS
+        /// (since #609: the rotor-out FDI spin-up guard, a fixed 0.3 s, its
+        /// stall window 0.1 s, and the estimator's innovation-gate /
+        /// yaw-capture warm-up 1 s) RE-SYNC to `1 / sensor-frame.dt-s` of
+        /// EACH frame whose rate differs by more than 2% from the one they
+        /// are counted at. The gyro low-pass and the notch bank are
+        /// RE-DESIGNED for `1 / median` of the last 16 frames' `dt-s` (those
+        /// in [0.1 ms, 100 ms]; the first frame seeds it) when that differs
+        /// by more than 2% from their design rate, KEEPING their filter
+        /// state; so frame-period jitter, an alternation (2, 3, 2, 3 ms) or a
+        /// minority of late frames does not re-design them, and a sustained
+        /// rate change does within 9 frames.
         /// A host that sends a `loop-rate-hz` that disagrees with its frames
         /// flies at its frames' rate. Kept in the record so the record stays
         /// field-for-field what it was at @0.12.0.

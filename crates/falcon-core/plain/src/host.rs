@@ -60,9 +60,10 @@ pub struct VehicleConfig {
     pub hover_thrust: f32,
     /// ADVISORY, and NOT READ (#609 finding 7, #587): the supervisor's core
     /// is built at the nominal 1 kHz and `resync_loop_rate` re-derives the
-    /// filters AND the warm-ups (FDI spin-up guard 0.3 s, innovation gate 1 s)
-    /// from the frame's `dt`. Carried so the record stays field-for-field
-    /// with the WIT.
+    /// warm-ups (FDI spin-up guard 0.3 s, innovation gate 1 s) from the
+    /// frame's `dt`, and the cascade re-designs its filters from the median
+    /// of its last 16 frame periods (review of v1.140, defect A). Carried so
+    /// the record stays field-for-field with the WIT.
     pub loop_rate_hz: f32,
     pub pos_var: f32,
     pub process_floor_vel: f32,

@@ -281,10 +281,12 @@ enum Stage {
     Arming,
     /// Flight 1 ARMED but held on the ground: estimate-only ticks with a NOISY
     /// gyro, so the control half's `keep_warm` has something to remember, then
-    /// a takeoff with NO reset in between. DECISIVE for `keep_warm` only at the
-    /// 1000 Hz design rate — at any other rate the first control tick rebuilds
-    /// the gyro filter (`resync_loop_rate`) — so scripts/split-differential.sh
-    /// runs the twin at dt=0.001 as well.
+    /// a takeoff with NO reset in between. Was DECISIVE for `keep_warm` only at
+    /// the 1000 Hz design rate, because the first control tick at any other
+    /// rate rebuilt the gyro filter with zeroed state; since the review of
+    /// v1.140 (defect A) that re-design keeps the state, so the hold's history
+    /// reaches the motors at any rate. scripts/split-differential.sh still runs
+    /// the twin at dt=0.001 as well.
     F1ArmedHold,
     /// Flight 1 airborne, waiting for a settled loiter.
     F1Climb,
@@ -419,8 +421,10 @@ pub fn run(a_path: &str, b_path: &str, max_ticks: u32, dt: f32) -> Result<()> {
         "live follow         : {} ticks in Mission on a moving target; stale HOLD {:?} ticks after the stream went non-finite",
         cov.follow_ticks, cov.stale_hold_after
     );
-    // `resync_loop_rate` rebuilds the gyro filter past 2% off the 1000 Hz
-    // design rate, which erases what `keep_warm` kept during the hold.
+    // CONSERVATIVE since the review of v1.140 (defect A): the first control
+    // tick off the 1000 Hz design rate used to rebuild the gyro filter with
+    // zeroed state, erasing what `keep_warm` kept; the re-design now keeps it,
+    // so this under-reports. Left as is (a report line; no script parses it).
     let keep_warm_decisive = ((1.0 / dt) - 1000.0).abs() <= 0.02 * 1000.0;
     println!(
         "keep_warm           : {}",

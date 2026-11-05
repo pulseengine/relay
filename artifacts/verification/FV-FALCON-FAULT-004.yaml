@@ -175,6 +175,20 @@ artifacts:
     fields:
       method: automated-test
       steps:
+        # --- BEGIN review of v1.140, defect A (filter design rate split) ---
+        # The FDI tick counters keep their per-frame resync (every FDI timing
+        # claim above is unchanged); only the gyro low-pass / notch bank design
+        # rate moved to the median of the last 16 frame periods, re-designed
+        # keeping filter state. These pin that the split did not move the FDI
+        # (early long frames isolate no healthy rotor) and that jitter no
+        # longer re-designs the filters every tick.
+        - run: cargo test -p falcon-core --test filter_rate_jitter
+        - run: cargo test -p falcon-core --lib a_genuine_rate_step_redesigns_the_filters_within_the_window
+        - run: cargo test -p falcon-core --lib a_filter_redesign_keeps_the_cascade_filter_state
+        - run: cargo test -p relay-adrc a_retuned_biquad_keeps_its_state
+        - run: cargo test -p relay-adrc a_coefficient_swap_under_kept_state_has_a_small_transient
+        - run: cargo test -p relay-notch set_sample_rate_keeps_state_and_engagement
+        # --- END review of v1.140, defect A ---
         - run: cargo test -p falcon-sitl-gz fdi_noise_robustness_monte_carlo_campaign
         - run: cargo test -p falcon-core fdi_isolates_dead_rotor_and_reconfigures
         - run: cargo test -p falcon-core survives_single_rotor_failure_without_flipping

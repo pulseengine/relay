@@ -418,9 +418,12 @@ impl EstimatorPartition {
 
 /// The rate a partition should RE-DERIVE its rate-dependent state for, if
 /// the backend's `dt` says it is being stepped more than 2% away from
-/// `designed_hz` (jitter must not rebuild filters every tick); `None` to keep
-/// it, or for a `dt` that is not a positive finite number. ONE rule for both
-/// partitions (#609 finding 7), so a split's halves resync on the same tick.
+/// `designed_hz`; `None` to keep it, or for a `dt` that is not a positive
+/// finite number. ONE rule for both partitions (#609 finding 7), so a split's
+/// halves resync on the same tick. The tick counters offer it EACH frame's
+/// `dt`; the filters offer it the MEDIAN of the last 16 frame periods
+/// (`CascadePartition::redesign_filters`, review of v1.140 defect A), so
+/// jitter no longer re-designs them every tick.
 fn resynced_rate(designed_hz: f32, dt: f32) -> Option<f32> {
     if !(dt.is_finite() && dt > 0.0) {
         return None;
@@ -562,9 +565,69 @@ pub struct CascadePartition {
     /// The cascade's own copy of the sensor calibration (the M7 sees the
     /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
-    /// The loop rate `gyro_lpf` and `notch` were DESIGNED for. Re-synced from
-    /// the backend's own `dt()` on the first tick — see `resync_loop_rate`.
+    /// The loop rate the FDI / warm-up / guard / stall tick counts are
+    /// counted at. Re-synced from EACH frame's `dt()` (from the first tick
+    /// on) — see `resync_loop_rate`. Since the review of v1.140 (defect A) it
+    /// no longer designs the filters: see `filter_hz`.
     designed_hz: f32,
+    /// The loop rate `gyro_lpf` and `notch` are DESIGNED for: the median of
+    /// the last [`FILTER_RATE_WINDOW`] valid frame periods (see
+    /// `redesign_filters`). Separate from `designed_hz` (review of v1.140,
+    /// defect A, maintainer decision: split the consumers).
+    filter_hz: f32,
+    /// The last [`FILTER_RATE_WINDOW`] valid frame periods (s), a ring;
+    /// `filter_dt_n` of them are filled (from index 0 until it is full).
+    filter_dts: [f32; FILTER_RATE_WINDOW],
+    filter_dt_n: usize,
+    filter_dt_head: usize,
+    /// Filter re-designs since construction (observability).
+    filter_redesigns: u32,
+}
+
+/// How many recent frame periods the filter design rate is the median of
+/// (review of v1.140, defect A). EVEN on purpose: under a strict two-level
+/// alternation (2, 3, 2, 3 ms) an even window always holds equal counts and
+/// its median, the mean of the two middle periods, is the alternation's mean;
+/// an odd window holds 8:7 then 7:8 and its median flips between the two
+/// levels every frame, which is the rebuild storm again.
+pub const FILTER_RATE_WINDOW: usize = 16;
+/// The frame periods the filter design rate is estimated from: the seam's
+/// accepted per-tick `sensor-frame.dt-s` domain, [0.1 ms, 100 ms] (the
+/// reciprocal of `vehicle-config.loop-rate-hz`'s [10, 10000] Hz). A frame
+/// outside it (or non-finite) is not offered to the median.
+pub const FILTER_DT_MIN_S: f32 = 1.0e-4;
+/// See [`FILTER_DT_MIN_S`].
+pub const FILTER_DT_MAX_S: f32 = 0.1;
+
+/// The median of `v` (mean of the two middle values for an even count); 0
+/// for an empty slice. At most [`FILTER_RATE_WINDOW`] values are read.
+/// Insertion sort on a stack copy: no allocation, at most 120 comparisons.
+fn median_period(v: &[f32]) -> f32 {
+    let n = if v.len() < FILTER_RATE_WINDOW {
+        v.len()
+    } else {
+        FILTER_RATE_WINDOW
+    };
+    if n == 0 {
+        return 0.0;
+    }
+    let mut a = [0.0f32; FILTER_RATE_WINDOW];
+    let mut i = 0;
+    while i < n {
+        let x = v[i];
+        let mut j = i;
+        while j > 0 && a[j - 1] > x {
+            a[j] = a[j - 1];
+            j -= 1;
+        }
+        a[j] = x;
+        i += 1;
+    }
+    if n % 2 == 1 {
+        a[n / 2]
+    } else {
+        0.5 * (a[n / 2 - 1] + a[n / 2])
+    }
 }
 
 impl CascadePartition {
@@ -618,6 +681,11 @@ impl CascadePartition {
             fdi_stall_run: [0; 4],
             fdi_stall_common: false,
             calib: relay_calib::CalParams::identity(),
+            filter_hz: loop_hz,
+            filter_dts: [0.0; FILTER_RATE_WINDOW],
+            filter_dt_n: 0,
+            filter_dt_head: 0,
+            filter_redesigns: 0,
         }
     }
 
@@ -724,7 +792,10 @@ impl CascadePartition {
     pub fn landing_descent(&self) -> f32 {
         self.landing_descent
     }
-    /// The loop rate the rate-dependent filters are CURRENTLY designed for.
+    /// The loop rate the FDI / warm-up / guard / stall tick counts are
+    /// CURRENTLY counted at (re-synced per frame). Until the review of v1.140
+    /// (defect A) this was also the filters' design rate; that is now
+    /// [`Self::filter_design_hz`].
     ///
     /// Exposed so the resync can be OBSERVED rather than grepped. Independent
     /// review found every `steps:` entry of FV-FALCON-RATE-002 and
@@ -734,6 +805,18 @@ impl CascadePartition {
     /// written to catch (#499). A test that reads this value can.
     pub fn designed_loop_hz(&self) -> f32 {
         self.designed_hz
+    }
+
+    /// The loop rate the gyro low-pass and the notch bank are CURRENTLY
+    /// designed for: the median of the last [`FILTER_RATE_WINDOW`] valid
+    /// frame periods, re-designed only past 2% (review of v1.140, defect A).
+    pub fn filter_design_hz(&self) -> f32 {
+        self.filter_hz
+    }
+
+    /// How many times the filters have been re-designed since construction.
+    pub fn filter_redesigns(&self) -> u32 {
+        self.filter_redesigns
     }
 
     /// FDI observability (v1.115): `(rate2, tilt_cos, gate_open, resid[4])` from
@@ -807,7 +890,10 @@ impl CascadePartition {
     }
 
     /// Keep stateful filters warm while idle (estimate-only mode): the
-    /// gyro low-pass tracks so the first live tick has no filter jump.
+    /// gyro low-pass tracks so the first live tick has no filter jump. Takes
+    /// no `dt`, so it offers no frame period to the filter-rate median; since
+    /// the review of v1.140 (defect A) the first control tick's re-design
+    /// keeps the history this kept warm, at any rate.
     ///
     /// `pub` for the split deployment (#575): the control half of
     /// [`FlightCore::step_estimate_only`] runs in another component there.
@@ -822,8 +908,18 @@ impl CascadePartition {
     /// moved here from mid-fusion, a seam change active only during the
     /// ~1 s pre-freeze window on heading-equipped vehicles; the analytic
     /// plant provides no heading, so the golden replay is bit-exact).
-    /// Rebuild the rate-dependent filters if the caller's declared loop rate
-    /// disagrees with the rate the backend is ACTUALLY being stepped at.
+    /// Re-derive the rate-dependent tick counts (FDI spin-up guard, stall
+    /// window, lag-model gain, warm-up) if the frame's `dt` says the backend
+    /// is stepped more than 2% away from `designed_hz`, judged on EACH frame.
+    ///
+    /// SINCE THE REVIEW OF v1.140 (defect A) THIS NO LONGER TOUCHES THE
+    /// FILTERS. It used to rebuild `gyro_lpf` and `notch` here, with zeroed
+    /// state, on every frame past the band, so a jittering frame period
+    /// zeroed them every tick. The filters are now re-designed by
+    /// [`Self::redesign_filters`], on the median of the last 16 frame
+    /// periods and keeping their state. Everything below this paragraph that
+    /// is about the counters is unchanged; the filter history is kept for
+    /// the reasoning, which still holds for `redesign_filters`.
     ///
     /// WHY THIS EXISTS (#270/#398). `gyro_lpf` and the harmonic `notch` are
     /// DESIGNS: their coefficients are computed from a sample rate. Feed a
@@ -878,13 +974,72 @@ impl CascadePartition {
                     FlightCore::rescale_ticks(self.fdi_stall_run[i], from, actual);
                 i += 1;
             }
-            self.gyro_lpf = GyroLpf::new(60.0, actual);
-            self.notch = relay_notch::HarmonicNotchBank::new(actual);
             self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
             self.fdi_guard_steps = FlightCore::fdi_guard_steps(actual);
             self.fdi_lag_alpha = FlightCore::fdi_lag_alpha(actual);
             self.fdi_stall_steps = FlightCore::fdi_stall_steps(actual);
             self.designed_hz = actual;
+        }
+    }
+
+    /// Re-design the gyro low-pass and the notch bank for the rate the
+    /// backend is really stepped at — on a ROBUST estimate of it, keeping
+    /// their state (review of v1.140, defect A).
+    ///
+    /// THE DEFECT. These were rebuilt inside `resync_loop_rate`, i.e. on
+    /// EACH frame whose `1/dt` left the 2% band, and rebuilt with ZEROED
+    /// state. A frame period alternating across the band (400 Hz on a 1 ms
+    /// OS tick: 2, 3, 2, 3 ms; 1 kHz +-25 us; 250 Hz 4.0/4.1 ms) zeroed both
+    /// every tick: supervised, Takeoff -> Land -> Terminated.
+    ///
+    /// THE SPLIT (maintainer decision). The FDI tick counters keep their
+    /// per-frame resync, unchanged. The FILTERS are designed for the MEDIAN
+    /// of the last [`FILTER_RATE_WINDOW`] valid frame periods (finite, in
+    /// [[`FILTER_DT_MIN_S`], [`FILTER_DT_MAX_S`]]), the first valid frame
+    /// seeding it, so a fixed-period backend re-designs on its first tick
+    /// as before. They are re-designed when `1 / median` leaves the same 2%
+    /// band of `filter_hz` ([`resynced_rate`]); a non-finite rate is
+    /// rejected there. A late frame, an alternation and a periodic or random
+    /// minority of long frames do not move the median; a genuine rate change
+    /// moves it within half a window (9 frames of a step; a step can stop
+    /// once at the two-level mean on its 8th frame).
+    ///
+    /// AND KEEPING STATE. A re-design swaps coefficients only
+    /// ([`GyroLpf::retune`], `HarmonicNotchBank::set_sample_rate`): the
+    /// low-pass history, the notch histories, each notch's engagement and
+    /// the bank's bypass state carry over (the notches re-tune at the new
+    /// rate at this tick's `update_rpm`; one the new rate puts above its
+    /// Nyquist clamp disengages there, as it would at any rate). Measured
+    /// in relay-adrc's `a_coefficient_swap_under_kept_state_has_a_small_transient`.
+    fn redesign_filters(&mut self, dt: f32) {
+        if !(dt.is_finite() && (FILTER_DT_MIN_S..=FILTER_DT_MAX_S).contains(&dt)) {
+            return;
+        }
+        self.filter_dts[self.filter_dt_head] = dt;
+        self.filter_dt_head = (self.filter_dt_head + 1) % FILTER_RATE_WINDOW;
+        if self.filter_dt_n < FILTER_RATE_WINDOW {
+            self.filter_dt_n += 1;
+        }
+        // While the window fills, the median is taken over the most recent
+        // EVEN number of periods (the seed frame alone at first): an odd
+        // count of a two-level alternation flips its median between the
+        // levels every frame, and would re-design on each of the first 16.
+        let n = self.filter_dt_n;
+        let period = if n == 1 {
+            self.filter_dts[0]
+        } else if n < FILTER_RATE_WINDOW {
+            let m = n & !1;
+            median_period(&self.filter_dts[n - m..n])
+        } else {
+            median_period(&self.filter_dts)
+        };
+        if let Some(rate) = resynced_rate(self.filter_hz, period) {
+            if rate.is_finite() {
+                self.gyro_lpf.retune(60.0, rate);
+                self.notch.set_sample_rate(rate);
+                self.filter_hz = rate;
+                self.filter_redesigns = self.filter_redesigns.saturating_add(1);
+            }
         }
     }
 
@@ -897,6 +1052,7 @@ impl CascadePartition {
         dt: f32,
     ) {
         self.resync_loop_rate(dt);
+        self.redesign_filters(dt);
         let gyro = self.calib.apply_gyro(raw.gyro);
         if heading_present && !self.yaw_captured {
             // Capture the launch heading as the hold setpoint — the vehicle holds
@@ -1510,6 +1666,14 @@ impl FlightCore {
     pub fn designed_loop_hz(&self) -> f32 {
         self.casc.designed_loop_hz()
     }
+    /// See [`CascadePartition::filter_design_hz`].
+    pub fn filter_design_hz(&self) -> f32 {
+        self.casc.filter_design_hz()
+    }
+    /// See [`CascadePartition::filter_redesigns`].
+    pub fn filter_redesigns(&self) -> u32 {
+        self.casc.filter_redesigns()
+    }
 
     pub fn last_omega_d(&self) -> Vec3 {
         self.casc.last_omega_d()
@@ -2058,8 +2222,10 @@ impl SupervisedCore for FlightCore {
 ///
 /// `pub` so a split deployment (#575) builds its two halves from the SAME
 /// numbers rather than a copy of them. The loop rate is a nominal design rate:
-/// both partitions' `resync_loop_rate` re-derive the filters AND the warm-up
-/// counts from the backend's real `dt` on the first tick (#609 finding 7), by
+/// both partitions' `resync_loop_rate` re-derive the warm-up counts from the
+/// backend's real `dt` from the first tick on (#609 finding 7), and the
+/// cascade re-designs its filters from the median of its last 16 frame
+/// periods, seeded by the first (review of v1.140, defect A), by
 /// one shared rule, so the halves engage their FDI and innovation gates on the
 /// same tick as the fused core whatever rate the frames run at.
 pub const SUPERVISOR_CORE_HOVER_THRUST: f32 = 0.5;
@@ -6182,6 +6348,136 @@ mod tests {
              got {got} Hz",
             1.0 / dt
         );
+        // Since the review of v1.140 (defect A) `designed_loop_hz` is the FDI
+        // tick rate and the filters have their own design rate: both follow
+        // a fixed-period backend on its first tick.
+        let filt = core.filter_design_hz();
+        assert!(
+            (filt - 1.0 / dt).abs() < 1.0 && core.filter_redesigns() == 1,
+            "the FILTERS must be re-designed for {} Hz on the first tick; got {filt} Hz \
+             after {} re-designs",
+            1.0 / dt,
+            core.filter_redesigns()
+        );
+    }
+
+    /// **A filter re-design keeps the cascade's filter state** (review of
+    /// v1.140, defect A): the wiring, not only the leaf methods. After the
+    /// re-design the notch bank is still engaged (a rebuilt bank starts
+    /// BYPASSED) and designed for the new rate, and both filters still hold
+    /// their history: a zero input rings out of them (a rebuilt, zeroed
+    /// filter answers a zero input with exactly zero).
+    #[test]
+    fn a_filter_redesign_keeps_the_cascade_filter_state() {
+        let rpm = Some([4000, 4100, 3950, 4050]);
+        let mut c = CascadePartition::new(SUPERVISOR_CORE_HOVER_THRUST, 1000.0);
+        for k in 0..64 {
+            c.redesign_filters(0.001);
+            c.notch.update_rpm(rpm);
+            let t = k as f32 * 0.001;
+            let g = [
+                0.3 + relay_math::sinf(2.0 * core::f32::consts::PI * 70.0 * t),
+                -0.2,
+                0.1,
+            ];
+            let x = c.notch.apply(g);
+            let _ = c.gyro_lpf.filter(x);
+        }
+        assert_eq!(c.filter_redesigns(), 0, "1 kHz frames at a 1 kHz design");
+        let mut frames = 0;
+        while c.filter_redesigns() == 0 {
+            c.redesign_filters(0.004);
+            frames += 1;
+            assert!(
+                frames <= 16,
+                "a sustained 250 Hz must re-design within the window"
+            );
+        }
+        assert!(
+            !c.notch.is_bypassed(),
+            "a re-design must not drop the notch bank to bypass"
+        );
+        assert_eq!(c.notch.sample_rate(), c.filter_design_hz());
+        let lpf_ring = c.gyro_lpf.filter([0.0; 3]);
+        assert!(
+            lpf_ring.iter().any(|v| *v != 0.0),
+            "the low-pass must keep its history through the re-design: {lpf_ring:?}"
+        );
+        c.notch.update_rpm(rpm);
+        let notch_ring = c.notch.apply([0.0; 3]);
+        assert!(
+            notch_ring.iter().any(|v| *v != 0.0),
+            "the engaged notches must keep their history: {notch_ring:?}"
+        );
+        // Control: what a rebuild leaves.
+        let mut fresh = GyroLpf::new(60.0, c.filter_design_hz());
+        assert_eq!(fresh.filter([0.0; 3]), [0.0; 3]);
+    }
+
+    /// (d) **A genuine rate step re-designs the filters within the window,
+    /// and the flight stays stable** (review of v1.140, defect A). The
+    /// filters now follow the MEDIAN of the last 16 frame periods, so a real
+    /// change of the loop rate (the plant's own period changes here, not
+    /// only the reported one) reaches them within half a window: 9 frames,
+    /// with at most one stop at the two-level mean on the 8th. The FDI tick
+    /// rate still follows on the step's first frame, as before. Hovering 2 m
+    /// up with noise, 16 step phases each, 1000 -> 250 and 250 -> 1000 Hz.
+    /// On 725f146 (filters rebuilt with zeroed state on the first frame):
+    /// peak tilt 0.015 / 0.013 rad over the next second.
+    #[test]
+    fn a_genuine_rate_step_redesigns_the_filters_within_the_window() {
+        let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for (from, to) in [(1000.0f32, 250.0f32), (250.0, 1000.0)] {
+            for phase in 0..16u32 {
+                let mut b = SimBackend::new(level, 1.0 / from).with_pathology(Pathology {
+                    gyro_white: 0.02,
+                    vibration: 0.5,
+                    gps_noise: 0.3,
+                    turbulence: 1.0,
+                    ..Pathology::default()
+                });
+                b.pos = [0.0, 0.0, -2.0];
+                let mut core =
+                    FlightCore::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ);
+                core.set_position([0.0, 0.0, -2.0]);
+                let pre = (2.0 * from) as u32 + phase;
+                for _ in 0..pre {
+                    core.step(&mut b);
+                }
+                assert!((core.filter_design_hz() - from).abs() <= 0.02 * from);
+                let before = core.filter_redesigns();
+                b.dt = 1.0 / to;
+                let mut lag = None;
+                let mut peak_tilt = 0.0f32;
+                for k in 0..(to as u32) {
+                    core.step(&mut b);
+                    if k == 0 {
+                        assert!(
+                            (core.designed_loop_hz() - to).abs() <= 0.02 * to,
+                            "the FDI tick rate still follows on the first frame"
+                        );
+                    }
+                    if lag.is_none() && (core.filter_design_hz() - to).abs() <= 0.02 * to {
+                        lag = Some(k + 1);
+                    }
+                    peak_tilt = peak_tilt.max(b.tilt());
+                    assert!(b.pos[2].is_finite());
+                }
+                let redesigns = core.filter_redesigns() - before;
+                assert!(
+                    matches!(lag, Some(l) if l <= 16),
+                    "{from}->{to} Hz phase {phase}: filters at {to} Hz after {lag:?} frames"
+                );
+                assert!(
+                    redesigns <= 2,
+                    "{from}->{to} Hz phase {phase}: {redesigns} re-designs for one step"
+                );
+                assert!(
+                    peak_tilt < 0.05,
+                    "{from}->{to} Hz phase {phase}: peak tilt {peak_tilt} rad"
+                );
+            }
+        }
     }
 
     /// Position hold survives noisy + intermittently-dropping GNSS WHEN the

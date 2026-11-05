@@ -196,6 +196,25 @@ impl<const M: usize> HarmonicNotchBank<M> {
         }
     }
 
+    /// Re-design the bank for a new sample rate WITHOUT rebuilding it
+    /// (review of v1.140, defect A). Only the design rate changes: the bypass
+    /// state, each notch's engagement and every notch's Direct Form 1 history
+    /// are kept. The coefficients follow at the next [`Self::update_rpm`],
+    /// which re-tunes every notch at the new rate and keeps the history of an
+    /// engaged one ([`Notch::set`]); a notch the new rate puts outside the
+    /// engageable band (the Nyquist clamp) disengages there, as at any rate.
+    /// `HarmonicNotchBank::new(fs)` instead starts BYPASSED with zeroed state,
+    /// so rebuilding the bank on a rate change dropped the filtering for a
+    /// tick and restarted every notch from zero.
+    pub fn set_sample_rate(&mut self, fs_hz: f32) {
+        self.fs_hz = fs_hz;
+    }
+
+    /// The sample rate the bank is designed for.
+    pub fn sample_rate(&self) -> f32 {
+        self.fs_hz
+    }
+
     /// Whole-bank bypass state (RPM telemetry absent).
     pub fn is_bypassed(&self) -> bool {
         self.bypassed
@@ -323,6 +342,54 @@ mod tests {
         }
         let phase = ((acc_q).atan2(acc_i) as f32).to_degrees().abs();
         assert!(phase < 10.0, "bank phase at {fc} Hz crossover: {phase:.2}°");
+    }
+
+    /// **A sample-rate change keeps the bank's state** (review of v1.140,
+    /// defect A): engaged, not bypassed, history intact, and the next
+    /// `update_rpm` re-tunes at the new rate (bit-equal to a notch tuned there
+    /// with the same history). A bank built fresh at the new rate starts
+    /// bypassed with zeroed state instead.
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn set_sample_rate_keeps_state_and_engagement() {
+        let rpm = Some([4000, 4100, 3950, 4050]);
+        let mut bank: HarmonicNotchBank<4> = HarmonicNotchBank::new(1000.0);
+        bank.update_rpm(rpm);
+        for k in 0..500 {
+            bank.apply([relay_math::sinf(k as f32 * 0.05), 0.2, -0.1]);
+        }
+        let before = bank.notches;
+        bank.set_sample_rate(250.0);
+        assert!(!bank.is_bypassed(), "a rate change must not drop to bypass");
+        assert_eq!(bank.sample_rate(), 250.0);
+        bank.update_rpm(rpm);
+        for ax in 0..3 {
+            for m in 0..4 {
+                for h in 0..2 {
+                    let (old, new) = (before[ax][m][h], bank.notches[ax][m][h]);
+                    // 4000 RPM = 66.7 Hz: the fundamental stays in band at
+                    // 250 Hz (<= 112.5 Hz), the 2nd harmonic (133 Hz) leaves it.
+                    assert_eq!(new.is_engaged(), h == 0, "axis {ax} motor {m} h{h}");
+                    if h == 0 {
+                        assert_eq!(
+                            (new.x1, new.x2, new.y1, new.y2),
+                            (old.x1, old.x2, old.y1, old.y2),
+                            "history kept through the re-tune"
+                        );
+                        let mut tuned = old;
+                        let f0 = [4000, 4100, 3950, 4050][m] as f32 / 60.0;
+                        tuned.set(f0, 250.0);
+                        assert_eq!(
+                            (new.b0, new.b1, new.b2, new.a1, new.a2),
+                            (tuned.b0, tuned.b1, tuned.b2, tuned.a1, tuned.a2)
+                        );
+                    }
+                }
+            }
+        }
+        // Control: the rebuild this replaces.
+        let fresh: HarmonicNotchBank<4> = HarmonicNotchBank::new(250.0);
+        assert!(fresh.is_bypassed());
     }
 
     /// Absent RPM telemetry ⇒ BIT-EXACT unity passthrough.

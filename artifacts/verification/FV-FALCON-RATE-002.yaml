@@ -183,9 +183,12 @@ artifacts:
         - run: "grep -q 'fn resync_loop_rate' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'self.resync_loop_rate(dt);' crates/falcon-core/plain/src/lib.rs"
         - run: "grep -q 'designed_hz' crates/falcon-core/plain/src/lib.rs"
-        # Both rate-dependent filters are rebuilt, not just one.
-        - run: "grep -q 'self.gyro_lpf = GyroLpf::new(60.0, actual)' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'self.notch = relay_notch::HarmonicNotchBank::new(actual)' crates/falcon-core/plain/src/lib.rs"
+        # Both rate-dependent filters are re-designed, not just one. Since the
+        # review of v1.140 (defect A) they are re-designed in
+        # `redesign_filters` on the median of the last 16 frame periods,
+        # keeping their state, instead of rebuilt in `resync_loop_rate`.
+        - run: "grep -q 'self.gyro_lpf.retune(60.0, rate);' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'self.notch.set_sample_rate(rate);' crates/falcon-core/plain/src/lib.rs"
         # The instrument reports the gate's OWN filtered quantity, not raw gyro.
         - run: "grep -q 'sup.core().fdi_diag()' examples/falcon-sitl-gz/src/main.rs"
         # ...and gz-trial does not silently swallow it (it did, for FDI_TRACE).
