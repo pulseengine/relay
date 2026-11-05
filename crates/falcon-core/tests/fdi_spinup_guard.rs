@@ -71,6 +71,12 @@ struct Asym {
     weak: Option<(usize, f32)>,
     rpm: RpmFeed,
     dt: f32,
+    /// Rotor `i` reports 0 RPM on spin-up ticks `start[i]..until[i]` (an
+    /// unpopulated telemetry bus, or an ESC that has not started
+    /// commutating), while its rotor really spins. `u32::MAX` = never.
+    zero_rpm: Option<([u32; 4], [u32; 4])>,
+    /// `dt()` returns this on that one spin-up tick (a late frame).
+    dt_spike: Option<(u32, f32)>,
 }
 
 impl FlightBackend for Asym {
@@ -105,7 +111,10 @@ impl FlightBackend for Asym {
         self.b.write_motors(&m);
     }
     fn dt(&self) -> f32 {
-        self.b.dt()
+        match (self.k, self.dt_spike) {
+            (Some(k), Some((kk, d))) if k == kk => d,
+            _ => self.b.dt(),
+        }
     }
     fn read_battery_v(&mut self) -> Option<f32> {
         self.b.read_battery_v()
@@ -120,6 +129,23 @@ impl FlightBackend for Asym {
         self.b.read_baro()
     }
     fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+        let rpm = self.read_motor_rpm_feed();
+        match (rpm, self.k, self.zero_rpm) {
+            (Some(mut r), Some(k), Some((start, until))) => {
+                for i in 0..4 {
+                    if k >= start[i] && k < until[i] {
+                        r[i] = 0;
+                    }
+                }
+                Some(r)
+            }
+            _ => rpm,
+        }
+    }
+}
+
+impl Asym {
+    fn read_motor_rpm_feed(&mut self) -> Option<[i32; 4]> {
         match self.rpm {
             RpmFeed::Always => self.b.read_motor_rpm(),
             RpmFeed::Never => None,
@@ -180,6 +206,37 @@ fn fly_rig(
     rpm: RpmFeed,
     after_loiter_s: f32,
 ) -> Flight {
+    fly_full(
+        hz,
+        ramp_ms,
+        tau_ms,
+        rotor,
+        dead,
+        weak,
+        rpm,
+        after_loiter_s,
+        None,
+        None,
+    )
+    .0
+}
+
+/// [`fly_rig`] with a faked zero-RPM window (`Asym::zero_rpm`) and a late
+/// frame (`Asym::dt_spike`), returning the supervisor and the rig too so a
+/// test can land and re-arm.
+#[allow(clippy::too_many_arguments)]
+fn fly_full(
+    hz: u32,
+    ramp_ms: u32,
+    tau_ms: u32,
+    rotor: usize,
+    dead: Option<usize>,
+    weak: Option<(usize, f32)>,
+    rpm: RpmFeed,
+    after_loiter_s: f32,
+    zero_rpm: Option<([u32; 4], [u32; 4])>,
+    dt_spike: Option<(u32, f32)>,
+) -> (Flight, FlightSupervisor, Asym) {
     let faulted = dead.is_some() || weak.is_some();
     let dt = 1.0 / hz as f32;
     let mut b = SimBackend::new(LEVEL, dt);
@@ -196,6 +253,8 @@ fn fly_rig(
         weak,
         rpm,
         dt,
+        zero_rpm,
+        dt_spike,
     };
     let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
     sup.set_calibration(falcon_core::relay_calib::CalParams {
@@ -235,7 +294,7 @@ fn fly_rig(
             break;
         }
     }
-    f
+    (f, sup, a)
 }
 
 /// THE REGRESSION TEST. A healthy vehicle whose rotor 2 ESC soft-starts over
@@ -505,5 +564,228 @@ fn spinup_sweep_bench() {
     assert!(
         unexpected.is_empty(),
         "false isolations outside the known limits: {unexpected:?}"
+    );
+}
+
+/// REVIEW OF v1.141, FINDING 2: COMMON-MODE STALL. All four rotors report
+/// 0 RPM while commanded and spinning (a telemetry bus that is up but not
+/// yet populated; bidirectional DShot before the ESCs commutate), for 0.2 s
+/// of the spin-up (longer than the 0.1 s stall window, shorter than the
+/// 0.3 s guard) and for the whole flight. A stall every rotor shares is not
+/// a single-rotor fault: no rotor may be isolated, the takeoff must reach
+/// Loiter, and after Land and Disarm the vehicle must re-arm.
+///
+/// FAILS ON 5020977: the stall loop isolated rotor 0 (checked first) at the
+/// window, permanently, and `MotorsHealthy` then refused to arm.
+#[test]
+fn a_common_mode_zero_rpm_isolates_no_rotor_and_rearms() {
+    let mut bad = Vec::new();
+    for hz in [250u32, 1000] {
+        let s = |x: f32| (x * hz as f32 + 0.5) as u32;
+        for tau in [0u32, 50] {
+            for until in [s(0.2), u32::MAX] {
+                let (f, mut sup, mut a) = fly_full(
+                    hz,
+                    0,
+                    tau,
+                    0,
+                    None,
+                    None,
+                    RpmFeed::Always,
+                    1.0,
+                    Some(([0; 4], [until; 4])),
+                    None,
+                );
+                eprintln!("{hz} Hz lag {tau} ms all four 0 RPM until {until}: {f:?}");
+                if f.iso.is_some() || !f.loiter {
+                    bad.push(format!(
+                        "{hz} Hz lag {tau} until {until}: iso {:?} loiter {}",
+                        f.iso, f.loiter
+                    ));
+                    continue;
+                }
+                a.k = None;
+                sup.command(Event::RequestLand, true, false);
+                let mut disarmed = false;
+                for _ in 0..s(60.0) {
+                    sup.step(&mut a);
+                    if sup.mode() == Mode::Disarmed {
+                        disarmed = true;
+                        break;
+                    }
+                }
+                for _ in 0..s(5.0) {
+                    sup.step(&mut a);
+                }
+                let blocked = sup.arm_blocked_check();
+                let failed = sup.core().failed_motor();
+                eprintln!(
+                    "  landed: disarmed {disarmed}, failed {failed:?}, arm blocked {blocked:?}"
+                );
+                if !disarmed || failed.is_some() || blocked.is_some() {
+                    bad.push(format!(
+                        "{hz} Hz lag {tau} until {until}: after landing disarmed {disarmed} failed {failed:?} blocked {blocked:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "a stall common to all four rotors isolated a rotor or blocked re-arm: {bad:?}"
+    );
+}
+
+/// FINDING 2, STAGGERED: the common-mode stall need not start on the same
+/// tick for every rotor. Rotor 0 reads 0 RPM from spin-up, rotors 1-3 from
+/// spin-up tick 3 (lag 0, so they really spin), for 0.2 s and for the whole
+/// flight. A rule that only refuses when several rotors have FILLED the
+/// window would still isolate rotor 0 (it fills first, alone); the rule is
+/// "no other rotor is stalled NOW". FAILS ON 5020977 (rotor 0 isolated).
+#[test]
+fn a_staggered_common_mode_stall_isolates_no_rotor() {
+    let mut bad = Vec::new();
+    for hz in [250u32, 1000] {
+        let s = |x: f32| (x * hz as f32 + 0.5) as u32;
+        for until in [s(0.2), u32::MAX] {
+            let (f, _, _) = fly_full(
+                hz,
+                0,
+                0,
+                0,
+                None,
+                None,
+                RpmFeed::Always,
+                1.0,
+                Some(([0, 3, 3, 3], [until; 4])),
+                None,
+            );
+            eprintln!("{hz} Hz staggered 0 RPM until {until}: {f:?}");
+            if f.iso.is_some() || !f.loiter {
+                bad.push((hz, until, f.iso, f.loiter));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "a staggered common-mode stall isolated a rotor: {bad:?}"
+    );
+}
+
+/// FINDING 2, NEGATIVE CONTROL: the common-mode rule must not swallow a
+/// real single dead rotor whose healthy siblings are briefly near zero too.
+/// Rotor `r` dead from spin-up, rotor `r+1` a HEALTHY 100 ms ESC soft-start
+/// (it reads near zero while commanded for the first tens of ms, a
+/// co-stall), rotor lag 0 and 50 ms, 250 Hz and 1 kHz: the dead rotor is
+/// still isolated at the stall window, within 2 ticks, tilt below 0.1 rad.
+/// (The plain ground and airborne controls are
+/// `a_stalled_rotor_is_isolated_within_the_stall_window` and the lib test
+/// `an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check`,
+/// both unchanged.)
+#[test]
+fn a_stalled_rotor_beside_a_slow_healthy_rotor_is_still_isolated_in_the_window() {
+    for hz in [250u32, 1000] {
+        let window = (STALL_S * hz as f32 + 0.5) as u32;
+        for tau in [0u32, 50] {
+            for r in 0..4 {
+                let slow = (r + 1) % 4;
+                let f = fly(hz, 100, tau, slow, Some(r), 0.0);
+                eprintln!(
+                    "{hz} Hz lag {tau} ms rotor {r} dead, rotor {slow} 100 ms soft-start: iso {:?}, tilt {:.3}",
+                    f.iso, f.tilt_before_iso
+                );
+                let (ticks, got, _) = f
+                    .iso
+                    .unwrap_or_else(|| panic!("{hz} Hz lag {tau}: dead rotor {r} never isolated"));
+                assert_eq!(got, r, "{hz} Hz lag {tau}: isolated the WRONG rotor");
+                assert!(
+                    ticks >= window && ticks <= window + 2,
+                    "{hz} Hz lag {tau} rotor {r}: isolated at tick {ticks}, window {window}"
+                );
+                assert!(
+                    f.tilt_before_iso < 0.1,
+                    "{hz} Hz lag {tau} rotor {r}: tilt {:.3}",
+                    f.tilt_before_iso
+                );
+            }
+        }
+    }
+}
+
+/// REVIEW OF v1.141, FINDING 3: ONE LATE FRAME. A healthy rotor 2 reports 0
+/// RPM for its first 60 ms (inside the 0.1 s window), lag 0. One frame whose
+/// `dt` is twice the loop period, at 55 ms, makes the core resync to half
+/// the rate, which halves the window in ticks; the in-progress stall run,
+/// still counted in old-rate ticks, must not then exceed it. 1 kHz (one
+/// 2 ms frame at spin-up tick 55) and 250 Hz (one 8 ms frame at tick 14):
+/// no isolation, Loiter reached.
+///
+/// FAILS ON 5020977: rotor 2 was isolated on the late frame, permanently.
+#[test]
+fn a_late_frame_does_not_shorten_the_stall_window() {
+    let mut bad = Vec::new();
+    for (hz, zero_until, spike_k) in [(1000u32, 60u32, 55u32), (250, 15, 14)] {
+        let dt_spike = 2.0 / hz as f32;
+        let (f, _, _) = fly_full(
+            hz,
+            0,
+            0,
+            0,
+            None,
+            None,
+            RpmFeed::Always,
+            1.0,
+            Some(([u32::MAX, u32::MAX, 0, u32::MAX], [zero_until; 4])),
+            Some((spike_k, dt_spike)),
+        );
+        eprintln!(
+            "{hz} Hz rotor 2 0 RPM for {zero_until} ticks, one {:.0} ms frame at tick {spike_k}: {f:?}",
+            dt_spike * 1000.0
+        );
+        if f.iso.is_some() || !f.loiter {
+            bad.push((hz, f.iso, f.loiter));
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "one late frame isolated a healthy rotor: {bad:?}"
+    );
+}
+
+/// FINDING 2, THE SHARED WINDOW IS DISCARDED: all four rotors read 0 RPM
+/// from spin-up; rotors 1-3 recover at 0.15 s, rotor 0 at 0.2 s (one ESC
+/// slower to report). Rotor 0 then stands alone with a run already past the
+/// 0.1 s window, but that window filled while the stall was shared, so it
+/// must earn a fresh one on its own (it is alone for only 50 ms here): no
+/// isolation, Loiter reached. Lag 0 and 50 ms, 250 Hz and 1 kHz. Without
+/// the `fdi_stall_common` reset rotor 0 is isolated the tick the others
+/// recover.
+#[test]
+fn a_rotor_left_silent_after_a_shared_stall_must_earn_its_own_window() {
+    let mut bad = Vec::new();
+    for hz in [250u32, 1000] {
+        let s = |x: f32| (x * hz as f32 + 0.5) as u32;
+        for tau in [0u32, 50] {
+            let (f, _, _) = fly_full(
+                hz,
+                0,
+                tau,
+                0,
+                None,
+                None,
+                RpmFeed::Always,
+                1.0,
+                Some(([0; 4], [s(0.2), s(0.15), s(0.15), s(0.15)])),
+                None,
+            );
+            eprintln!("{hz} Hz lag {tau} ms shared stall, rotor 0 silent 50 ms longer: {f:?}");
+            if f.iso.is_some() || !f.loiter {
+                bad.push((hz, tau, f.iso, f.loiter));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "a window filled during a shared stall isolated the last rotor to recover: {bad:?}"
     );
 }
