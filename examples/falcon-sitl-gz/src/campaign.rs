@@ -787,8 +787,16 @@ pub struct SupLandReport {
     pub failures: u32,
     pub worst_approach_sink: f32, // m/s below 0.5 m AGL
     pub worst_tilt: f32,          // rad, airborne after the failure
+    /// Highest TRUE altitude (m) at the first Disarmed tick over the landed
+    /// trials (REVIEW-140 defect D: touchdown is decided from the ESTIMATED
+    /// AGL, and the plant floor hides a mid-air disarm afterwards).
+    pub worst_disarm_alt: f32,
     pub failing: Vec<(u32, String)>,
 }
+
+/// TRUE altitude at the first Disarmed tick must be below this (m) — the same
+/// bar as the `supervised-rotorout` scenario verdict (REVIEW-140 defect D).
+const SUPLAND_DISARM_MAX_ALT_M: f32 = 0.2;
 
 /// Run `n` dispersed supervised rotor-out landing trials.
 pub fn run_supervised_rotorout_landing_campaign(n: u32, campaign_seed: u64) -> SupLandReport {
@@ -820,6 +828,7 @@ pub fn run_supervised_rotorout_landing_campaign(n: u32, campaign_seed: u64) -> S
 
         b.fail_rotor(t.failed_rotor);
         let (mut landed, mut approach_sink, mut peak_tilt) = (false, 0.0f32, 0.0f32);
+        let mut disarm_alt = f32::NAN;
         for _ in 0..20000 {
             sup.step(&mut b);
             let alt = -b.pos[2];
@@ -831,10 +840,16 @@ pub fn run_supervised_rotorout_landing_campaign(n: u32, campaign_seed: u64) -> S
             }
             if sup.mode() == FsmMode::Disarmed {
                 landed = true;
+                // TRUE altitude from the plant at the disarm tick (one 2 ms
+                // plant step after the state the supervisor decided on).
+                disarm_alt = -b.pos[2];
                 break;
             }
         }
         rep.worst_approach_sink = rep.worst_approach_sink.max(approach_sink);
+        if landed {
+            rep.worst_disarm_alt = rep.worst_disarm_alt.max(disarm_alt);
+        }
         rep.worst_tilt = rep.worst_tilt.max(peak_tilt);
 
         let mut reason = String::new();
@@ -844,6 +859,8 @@ pub fn run_supervised_rotorout_landing_campaign(n: u32, campaign_seed: u64) -> S
                 sup.mode(),
                 -b.pos[2]
             );
+        } else if disarm_alt.is_nan() || disarm_alt >= SUPLAND_DISARM_MAX_ALT_M {
+            reason = format!("disarmed in the air: TRUE alt {disarm_alt:.3} m at disarm");
         } else if approach_sink >= 1.2 {
             reason = format!("hard approach: {approach_sink:.2} m/s");
         } else if peak_tilt >= 0.6 {
@@ -872,8 +889,13 @@ mod supland_tests {
     fn supervised_rotorout_landing_monte_carlo_campaign() {
         let rep = run_supervised_rotorout_landing_campaign(SL_TRIALS, SL_SEED);
         eprintln!(
-            "supervised rotor-out landing campaign: {} trials ({} unsettled-rejected), {} failures | worst approach sink {:.2} m/s, worst tilt {:.2} rad",
-            rep.trials, rep.unsettled, rep.failures, rep.worst_approach_sink, rep.worst_tilt
+            "supervised rotor-out landing campaign: {} trials ({} unsettled-rejected), {} failures | worst approach sink {:.2} m/s, worst tilt {:.2} rad, worst true alt at disarm {:.3} m",
+            rep.trials,
+            rep.unsettled,
+            rep.failures,
+            rep.worst_approach_sink,
+            rep.worst_tilt,
+            rep.worst_disarm_alt
         );
         // The rejection count must stay a small minority — if most trials
         // can't even settle a hover, the campaign is measuring the wrong thing.
