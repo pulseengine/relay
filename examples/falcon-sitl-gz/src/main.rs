@@ -262,7 +262,8 @@ fn run_scenario(
             // takeoff -> hover -> rotor 0 dies -> the motor failsafe commands
             // LAND -> land-where-you-are + deficit-compensated velocity descent
             // -> touchdown -> Disarmed. The recordable landing demo.
-            run_supervised_rotorout(physics, 2.0, duration_s, duration_s * 0.4, evidence)
+            let bias = test_gnss_z_bias_from_env();
+            run_supervised_rotorout(physics, 2.0, duration_s, duration_s * 0.4, bias, evidence).pass
         }
         other => {
             unreachable!("scenario {other} passed main's SCENARIOS check but is not dispatched")
@@ -1491,15 +1492,18 @@ fn run_alt_only_hover(
 /// flies takeoff → hover, loses rotor 0 at `fail_at_s`, and must end ON THE
 /// GROUND, upright, `Disarmed` — via the motor failsafe's LAND, the
 /// land-where-you-are engage, and the lift-deficit-compensated velocity
-/// descent. PASS = Disarmed + true altitude < 0.3 m + the injected rotor
-/// isolated. This is the scenario the release video records.
+/// descent. PASS = Disarmed, with the TRUE altitude < 0.2 m and |true vz| <
+/// 1 m/s at the first Disarmed tick, ending in the ±0.3 m ground band, the
+/// injected rotor isolated, upright, near where it failed. This is the
+/// scenario the release video records.
 fn run_supervised_rotorout(
     physics: &mut dyn Physics,
     cruise_alt_m: f32,
     duration_s: f32,
     fail_at_s: f32,
+    test_gnss_z_bias_m: f32,
     mut evidence: Option<&mut EvidenceSink>,
-) -> bool {
+) -> SupRotorOutOutcome {
     use falcon_core::FlightSupervisor;
     use relay_fsm::{Event, Mode};
 
@@ -1531,6 +1535,11 @@ fn run_supervised_rotorout(
     let started_at = Instant::now();
     let mut last_true = [0.0_f32; 3];
     let mut landed_at: Option<f32> = None;
+    // TRUTH AT THE DISARM TICK (REVIEW-140 defect D). Touchdown is decided from
+    // the ESTIMATED AGL, so these come from the plant, sampled in the same
+    // `read_imu` as the state the supervisor decided on.
+    let mut alt_at_disarm: Option<f32> = None;
+    let mut vz_at_disarm: Option<f32> = None;
     // CONTROLLED descent, not merely arrival (#398). Reaching the ground is
     // what a tumble does too: the old verdict was `landed && final_alt < 0.3`,
     // which a crash satisfies. What FAULT-P02 claims is that the vehicle stays
@@ -1563,6 +1572,13 @@ fn run_supervised_rotorout(
             if step == fail_step {
                 backend.fail_rotor(0);
                 eprintln!("  t={t:.1}s — rotor 0 KILLED");
+                if test_gnss_z_bias_m != 0.0 {
+                    backend.set_test_gnss_z_bias(test_gnss_z_bias_m);
+                    println!(
+                        "  TEST-ONLY GNSS z bias {test_gnss_z_bias_m:+.3} m ACTIVE from t={t:.1}s \
+                         (SITL_TEST_GNSS_Z_BIAS_M) — this run is a fault injection, not evidence"
+                    );
+                }
             }
             sup.step(&mut backend);
             last_true = backend.last_true_pos();
@@ -1695,7 +1711,12 @@ fn run_supervised_rotorout(
             }
             if landed_at.is_none() && sup.mode() == Mode::Disarmed {
                 landed_at = Some(t);
-                eprintln!("  t={t:.1}s — TOUCHDOWN, Disarmed");
+                alt_at_disarm = Some(-last_true[2]);
+                vz_at_disarm = backend.last_true_vel().map(|v| v[2]);
+                eprintln!(
+                    "  t={t:.1}s — TOUCHDOWN, Disarmed (true alt {:.3} m, true vz {:?})",
+                    -last_true[2], vz_at_disarm
+                );
             }
             if pace_real_time {
                 let used = tick_start.elapsed();
@@ -1719,8 +1740,22 @@ fn run_supervised_rotorout(
     // the air and falls. Measured at 9f1df80, before this fix: the mock run
     // ended at −358.70 m and the verdict said PASS. "On the ground" is a band,
     // not an upper bound.
+    //
+    // THE BAND ABOVE CANNOT SEE A MID-AIR DISARM (REVIEW-140 defect D). This
+    // scenario turns ground contact on, so whatever height the vehicle disarms
+    // at, it falls and ends at final_alt ~ 0. Touchdown is decided from the
+    // ESTIMATED AGL (< 0.15 m), so a biased estimate disarms in the air: GNSS z
+    // biased +1.0 m after the kill disarmed at a TRUE 1.170 m and this verdict
+    // said PASS. So judge the TRUTH at the first Disarmed tick: true altitude
+    // below SUPROTOROUT_DISARM_MAX_ALT_M and |true vz| below
+    // SUPROTOROUT_DISARM_MAX_ABS_VZ (see their docs for the sources). A plant
+    // that cannot report true vz fails, as with true tilt.
+    let disarm_alt_ok = alt_at_disarm.is_some_and(|a| a < SUPROTOROUT_DISARM_MAX_ALT_M);
+    let disarm_vz_ok = vz_at_disarm.is_some_and(|v| v.abs() < SUPROTOROUT_DISARM_MAX_ABS_VZ);
     let pass = landed_at.is_some()
         && (-0.3..0.3).contains(&final_alt)
+        && disarm_alt_ok
+        && disarm_vz_ok
         && isolated == Some(0)
         && saw_true_tilt
         && peak_tilt_after < 0.5
@@ -1749,11 +1784,81 @@ fn run_supervised_rotorout(
     println!(
         "  verdict: backend={name} scenario=supervised-rotorout steps={n} fail_at={fail_at_s:.1}s \
          landed_at={landed_at:?} final_alt={final_alt:.2}m mode-disarmed={} isolated={isolated:?} \
-         peak_tilt_after={peak_tilt_after:.3}rad (measured={saw_true_tilt}) peak_horiz_after={peak_horiz_after:.2}m wall={:.2}s",
+         peak_tilt_after={peak_tilt_after:.3}rad (measured={saw_true_tilt}) peak_horiz_after={peak_horiz_after:.2}m wall={:.2}s \
+         disarm_true_alt={} disarm_true_vz={} test_gnss_z_bias={test_gnss_z_bias_m:+.3}m",
         landed_at.is_some(),
-        wall.as_secs_f32()
+        wall.as_secs_f32(),
+        fmt_opt_m(alt_at_disarm, "m"),
+        fmt_opt_m(vz_at_disarm, "m/s"),
     );
-    pass
+    SupRotorOutOutcome {
+        pass,
+        landed_at,
+        alt_at_disarm,
+        vz_at_disarm,
+    }
+}
+
+/// TRUE altitude at the first `Disarmed` tick must be below this (m). The
+/// maintainer's bar for REVIEW-140 defect D. For scale: the supervisor disarms
+/// at an ESTIMATED 0.15 m AGL, and a clean mock landing measures 0.148 m true.
+const SUPROTOROUT_DISARM_MAX_ALT_M: f32 = 0.2;
+/// |TRUE vz| at the first `Disarmed` tick must be below this (m/s). Source:
+/// FV-FALCON-SUPLAND-002's falsification clause for FAULT-P04 ("exceeds 1 m/s
+/// on the final approach (below 0.5 m)") and falcon-core's
+/// `supervised_rotor_out_lands_and_disarms` (< 1 m/s below 0.5 m); the disarm
+/// tick is inside that window. NOT TOUCHDOWN-P01's |vz| < 0.3 m/s: that is the
+/// SETTLED criterion after touchdown, while the disarm fires during the
+/// commanded 0.5 m/s descent (falcon-core `landing_descent`), measured at
+/// 0.495-0.498 m/s true on clean mock landings, so 0.3 would fail every
+/// clean run.
+const SUPROTOROUT_DISARM_MAX_ABS_VZ: f32 = 1.0;
+
+/// What `run_supervised_rotorout` measured, so a test can assert on WHICH term
+/// decided the verdict rather than only on the bool. The binary reads only
+/// `pass` (the rest is printed in the verdict line); the tests read the rest.
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(test), allow(dead_code))]
+struct SupRotorOutOutcome {
+    pass: bool,
+    /// Sim time of the first `Disarmed` tick.
+    landed_at: Option<f32>,
+    /// TRUE altitude (m, up-positive, from the plant) at the first `Disarmed` tick.
+    alt_at_disarm: Option<f32>,
+    /// TRUE NED vz (m/s, +down, from the plant) at the first `Disarmed` tick;
+    /// `None` if the plant reports no velocity.
+    vz_at_disarm: Option<f32>,
+}
+
+/// `Some(x)` → `x.xxx<unit>`, `None` → `none` (an unmeasured term, which the
+/// verdict treats as a FAIL).
+fn fmt_opt_m(v: Option<f32>, unit: &str) -> String {
+    match v {
+        Some(x) => format!("{x:.3}{unit}"),
+        None => "none".to_string(),
+    }
+}
+
+/// TEST-ONLY fault injection for `--scenario=supervised-rotorout`:
+/// `SITL_TEST_GNSS_Z_BIAS_M=<metres>` adds that much to the NED z of every GNSS
+/// fix the core receives from the rotor kill onward (positive = the fix reads
+/// LOWER than the truth, so the estimator believes it is nearer the ground than
+/// it is). Unset = 0.0 = off; no other scenario reads it. It exists to show the
+/// landing verdict judges the TRUE altitude at disarm (REVIEW-140 defect D);
+/// a run with it set is a negative control, never flight evidence. A value that
+/// does not parse as a finite number exits 2 rather than silently running
+/// unbiased.
+fn test_gnss_z_bias_from_env() -> f32 {
+    match std::env::var("SITL_TEST_GNSS_Z_BIAS_M") {
+        Err(_) => 0.0,
+        Ok(s) => match s.trim().parse::<f32>() {
+            Ok(v) if v.is_finite() => v,
+            _ => {
+                eprintln!("SITL_TEST_GNSS_Z_BIAS_M={s:?} is not a finite number of metres");
+                std::process::exit(2);
+            }
+        },
+    }
 }
 
 /// v1.113 — **FlightCore-in-the-loop**. Flies the PRODUCTION
@@ -2421,6 +2526,51 @@ fn arg(args: &[String], key: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::physics::MockPhysics;
+
+    /// REVIEW-140 defect D. Touchdown is decided from the ESTIMATED AGL, and the
+    /// ground-contact plant clamps a fall to z = 0, so a verdict built on the
+    /// final altitude cannot tell a landing from a disarm in mid-air. Bias only
+    /// the GNSS z the estimator sees (+ = reads low) from the rotor kill on:
+    /// measured on the old verdict, +1.0 m @ 30 s disarmed at a TRUE 1.170 m and
+    /// +0.6 m @ 5 s at 0.547 m, both PASS. The verdict must FAIL them on the
+    /// true altitude at disarm, and still pass the unbiased landing.
+    #[test]
+    fn supervised_rotorout_verdict_judges_true_altitude_at_disarm() {
+        // Unbiased, default 5 s (fail at 2.0 s): a real landing still passes,
+        // and the truth at disarm is measured, not assumed.
+        let mut p = MockPhysics::at_rest();
+        let clean = run_supervised_rotorout(&mut p, 2.0, 5.0, 2.0, 0.0, None);
+        let alt = clean.alt_at_disarm.expect("unbiased run must disarm");
+        let vz = clean
+            .vz_at_disarm
+            .expect("mock plant reports true velocity");
+        assert!(clean.landed_at.is_some());
+        assert!(alt < SUPROTOROUT_DISARM_MAX_ALT_M, "clean disarm alt {alt}");
+        assert!(
+            vz.abs() < SUPROTOROUT_DISARM_MAX_ABS_VZ,
+            "clean disarm vz {vz}"
+        );
+        assert!(
+            clean.pass,
+            "unbiased supervised-rotorout must pass: {clean:?}"
+        );
+
+        for (bias, dur) in [(0.6_f32, 5.0_f32), (1.0, 30.0)] {
+            let mut p = MockPhysics::at_rest();
+            let o = run_supervised_rotorout(&mut p, 2.0, dur, dur * 0.4, bias, None);
+            let alt = o.alt_at_disarm.expect("biased run still disarms (early)");
+            // The injection must actually produce the mid-air disarm, or this
+            // test proves nothing about the altitude term.
+            assert!(
+                alt > 0.4,
+                "bias {bias} m @ {dur} s should disarm well above ground, got {alt}"
+            );
+            assert!(
+                !o.pass,
+                "bias {bias} m @ {dur} s disarmed at TRUE {alt:.3} m and passed: {o:?}"
+            );
+        }
+    }
 
     #[test]
     fn mock_backend_climbs_under_full_thrust() {

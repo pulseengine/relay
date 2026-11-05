@@ -48,6 +48,16 @@ pub struct SitlBackend<'a> {
     last_motors: [f32; 4],
     /// The last IMU sample handed to the core (for evidence logging).
     last_imu: CoreImu,
+    /// TRUE NED velocity sampled by the most recent `read_imu`, coherent with
+    /// `last_pos`; `None` when the plant cannot report one. For verdicts only —
+    /// the core never sees it.
+    last_vel: Option<[f32; 3]>,
+    /// TEST-ONLY fault injection: metres added to the NED z of every GNSS fix
+    /// handed to the core (positive = the fix reads LOWER than the truth).
+    /// Default 0.0 = off. Exists so a landing verdict can be shown to judge the
+    /// TRUE altitude at disarm rather than the estimate (REVIEW-140 defect D).
+    /// `last_true_pos` is never biased.
+    gnss_z_bias: f32,
 }
 
 impl<'a> SitlBackend<'a> {
@@ -66,7 +76,21 @@ impl<'a> SitlBackend<'a> {
                 accel: [0.0; 3],
                 gyro: [0.0; 3],
             },
+            last_vel: None,
+            gnss_z_bias: 0.0,
         }
+    }
+
+    /// TEST-ONLY: bias the NED z of every subsequent GNSS fix by `bias_m`
+    /// (positive = reads lower than truth). Truth accessors are unaffected.
+    pub fn set_test_gnss_z_bias(&mut self, bias_m: f32) {
+        self.gnss_z_bias = bias_m;
+    }
+
+    /// TRUE NED velocity sampled by the last `read_imu` (same instant as
+    /// `last_true_pos`), or `None` if the plant cannot report one.
+    pub fn last_true_vel(&self) -> Option<[f32; 3]> {
+        self.last_vel
     }
 
     /// The true NED position sampled by the last `read_imu` (for evidence).
@@ -109,6 +133,7 @@ impl FlightBackend for SitlBackend<'_> {
         // same tick's `read_position` is coherent with this IMU sample.
         let (s, p) = self.plant.measure(self.imu_noise);
         self.last_pos = p;
+        self.last_vel = self.plant.velocity_ned();
         let sample = CoreImu {
             accel: s.accel_body,
             gyro: s.gyro_body,
@@ -122,7 +147,9 @@ impl FlightBackend for SitlBackend<'_> {
         // on the IMU (exactly as it must against a real 5 Hz receiver).
         self.tick = self.tick.wrapping_add(1);
         if self.tick % self.gnss_div == 0 {
-            Some(self.last_pos)
+            let mut fix = self.last_pos;
+            fix[2] += self.gnss_z_bias;
+            Some(fix)
         } else {
             None
         }

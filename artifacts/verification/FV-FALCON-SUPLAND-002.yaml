@@ -40,8 +40,22 @@ artifacts:
         13.2–15.6 s, motors [0,0,0,0] after disarm; footage shipped as the
         v1.117 release video (relvids/falcon-v1.117[-narrated].mp4).
 
+      TRUE ALTITUDE AT DISARM (REVIEW-140 defect D, falcon-v1.141): touchdown
+      is decided from the ESTIMATED AGL (< 0.15 m), and both plants clamp a
+      fall to the floor, so a final-altitude band cannot tell a landing from a
+      mid-air disarm (GNSS z biased +1.0 m after the kill disarmed at a TRUE
+      1.170 m and the supervised-rotorout verdict said PASS). The scenario
+      verdict now judges the plant's TRUE altitude (< 0.2 m) and |true vz|
+      (< 1 m/s, this artifact's final-approach bound) at the first Disarmed
+      tick and prints them as disarm_true_alt / disarm_true_vz; the campaign
+      fails any trial whose TRUE altitude at disarm is >= 0.2 m.
+      supervised_rotorout_verdict_judges_true_altitude_at_disarm injects the
+      test-only GNSS z bias (SITL_TEST_GNSS_Z_BIAS_M in the binary) on the mock
+      plant and asserts the verdict FAILS on it and still passes unbiased.
+
       FALSIFICATION: wrong if a rotor-out from settled hover fails to reach
-      an upright touchdown + Disarmed, exceeds 1 m/s on the final approach
+      an upright touchdown + Disarmed, disarms with the TRUE altitude at or
+      above 0.2 m, exceeds 1 m/s on the final approach
       (below 0.5 m), or any idle-mode tick commands nonzero motors.
     tags: [verification, falcon, fault-tolerance, rotor-loss, supervisor, landing, v1.117]
     fields:
@@ -49,6 +63,7 @@ artifacts:
       steps:
         - run: cargo test -p falcon-core supervised_rotor_out_lands_and_disarms
         - run: cargo test -p falcon-sitl-gz supervised_rotorout_landing_monte_carlo_campaign
+        - run: cargo test -p falcon-sitl-gz supervised_rotorout_verdict_judges_true_altitude_at_disarm
         - run: cargo run -q -p falcon-sitl-gz --features gazebo -- --backend=gazebo --scenario=supervised-rotorout --duration=30
     links:
       - type: verifies
