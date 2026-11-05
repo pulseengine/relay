@@ -183,7 +183,7 @@ artifacts:
       Hz and above it is NO WORSE than main in every cell (0 worse). Below
       250 Hz under rotor vibration >= 0.25 the outcome is chaotic on main
       itself (main against main with the pre-arm hold one tick longer flips
-      601 cells) and is NOT EVIDENCED either way. At 140-200 Hz with rotor
+      601 cells) and is NOT EVIDENCED either way. Below 250 Hz at lower vibration, against main with the same dt pattern: vibration 0 is no worse in every cell; vibration 0.1 has 7 mode-worse and 36 tilt-worse cells (+0.01 to +0.025 rad, mostly 100-120 Hz jittered dt; mode flips Loiter->Land/Disarmed at 191.5-200 Hz random dt and 70 Hz alternation), against a +1-tick noise floor of 17 mode-worse and 17 tilt-worse - comparable, not demonstrated to be noise. Per cell, the branch is not no-worse than main's FIXED-dt cells below 250 Hz (881 worse), but main's own jittered cells fail that comparison more often (1412), so it measures dt jitter rather than this change. At 140-200 Hz with rotor
       vibration >= 0.25, jittered dt now behaves like main's FIXED dt
       (failures of 363 at vib 0.25 / 0.3: alternation 38 / 99, random 84 /
       107; main fixed dt 38 / 97; main jittered 0-2), where main's per-frame
