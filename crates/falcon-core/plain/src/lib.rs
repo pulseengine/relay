@@ -238,10 +238,13 @@ impl EstimatorPartition {
 
     /// Re-count the warm-up at the rate the backend really steps at (#609
     /// finding 7). The same tolerance and the same count as the cascade's
-    /// `resync_loop_rate`, through the same two functions.
+    /// `resync_loop_rate`, through the same two functions. The running
+    /// `step_count` is rescaled to the new rate with it (review of v1.141,
+    /// finding 3; see [`FlightCore::rescale_ticks`]).
     fn resync_loop_rate(&mut self, dt: f32) {
         if let Some(actual) = resynced_rate(self.designed_hz, dt) {
             self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
+            self.step_count = FlightCore::rescale_ticks(self.step_count, self.designed_hz, actual);
             self.designed_hz = actual;
         }
     }
@@ -546,8 +549,16 @@ pub struct CascadePartition {
     /// resynced rate, #609 finding 18).
     fdi_stall_steps: u32,
     /// Consecutive ticks each rotor has read stalled during this spin-up's
-    /// guard. Zeroed by `rearm_fdi` and by any tick without RPM telemetry.
+    /// guard. Zeroed by `rearm_fdi` and by any tick without RPM telemetry,
+    /// and on a co-stalled tick once a shared window has filled (see
+    /// `fdi_stall_common`). Rescaled to the new rate by `resync_loop_rate`.
     fdi_stall_run: [u32; 4],
+    /// A stall window filled while two or more rotors were stalled at once
+    /// (review of v1.141, finding 2): a COMMON-MODE stall, not a rotor
+    /// fault. While set, every co-stalled tick resets the runs; cleared on
+    /// the first tick with at most one rotor stalled, by a tick without RPM
+    /// and by `rearm_fdi`.
+    fdi_stall_common: bool,
     /// The cascade's own copy of the sensor calibration (the M7 sees the
     /// same IMU stream; `CalParams` is `Copy`, `set_calibration` syncs both).
     calib: relay_calib::CalParams,
@@ -605,6 +616,7 @@ impl CascadePartition {
             fdi_lag_model: [0.0; 4],
             fdi_stall_steps: FlightCore::fdi_stall_steps(loop_hz),
             fdi_stall_run: [0; 4],
+            fdi_stall_common: false,
             calib: relay_calib::CalParams::identity(),
         }
     }
@@ -781,6 +793,7 @@ impl CascadePartition {
             self.last_motor_cmd = [0.0; 4];
             self.fdi_lag_model = [0.0; 4];
             self.fdi_stall_run = [0; 4];
+            self.fdi_stall_common = false;
             self.fdi = RotorFaultDetector::new(FDI_CUSUM_THRESHOLD, FDI_CUSUM_DRIFT);
         }
     }
@@ -844,8 +857,27 @@ impl CascadePartition {
     /// 2 kHz frame shrank the guard to 0.1 s. Since #609 finding 18 the guard
     /// is its own time, [`FDI_SPINUP_GUARD_S`] (0.3 s), and the rotor lag
     /// model's per-tick gain is re-derived here too.
+    ///
+    /// THE RUNNING COUNTERS TOO (review of v1.141, finding 3): re-deriving
+    /// only the thresholds left the counters measured against them
+    /// (`fdi_spinup`, `fdi_stall_run`, `step_count`) in OLD-rate ticks, so
+    /// one late frame (dt 2 ms at 1 kHz, or 8 ms at 250 Hz) halved the stall
+    /// window under a run already counted at the full rate, and a healthy
+    /// rotor 60 ms into a 100 ms tolerance was isolated permanently; the
+    /// guard could likewise release early. They are rescaled to the new
+    /// rate here ([`FlightCore::rescale_ticks`]), so every one of them stays
+    /// a measure of elapsed TIME.
     fn resync_loop_rate(&mut self, dt: f32) {
         if let Some(actual) = resynced_rate(self.designed_hz, dt) {
+            let from = self.designed_hz;
+            self.fdi_spinup = FlightCore::rescale_ticks(self.fdi_spinup, from, actual);
+            self.step_count = FlightCore::rescale_ticks(self.step_count, from, actual);
+            let mut i = 0;
+            while i < 4 {
+                self.fdi_stall_run[i] =
+                    FlightCore::rescale_ticks(self.fdi_stall_run[i], from, actual);
+                i += 1;
+            }
             self.gyro_lpf = GyroLpf::new(60.0, actual);
             self.notch = relay_notch::HarmonicNotchBank::new(actual);
             self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
@@ -1141,9 +1173,43 @@ impl CascadePartition {
         // with its (previous, aligned) command above FDI_STALL_CMD_MIN for
         // FDI_STALL_WINDOW_S unbroken is isolated now. A tick WITHOUT RPM is
         // not evidence: it resets every run (see FDI_STALL_RPM_FRAC).
+        //
+        // COMMON-MODE REJECTION (review of v1.141, finding 2), the stall
+        // path's analogue of the residual path's min-subtraction (#609
+        // finding 17). All four runs are updated FIRST, then judged: the
+        // loop used to isolate inside the update, so when every rotor read
+        // 0 RPM (a telemetry bus up but not yet populated, bidirectional
+        // DShot before the ESCs commutate) rotor 0, checked first, was
+        // isolated at the window, permanently, and the `MotorsHealthy`
+        // pre-arm row then refused every re-arm.
+        //
+        // THE RULE: a rotor is isolated only while it is the ONLY rotor
+        // stalled on this tick. Two or more stalled at once is not a
+        // single-rotor fault, and why ">= 2" rather than "all four":
+        //  - a multirotor with two dead rotors is not recoverable by the
+        //    single-rotor reallocation this isolation engages, so refusing
+        //    to isolate one of them loses nothing, while isolating a rotor
+        //    on a telemetry fault latches a healthy vehicle as dead;
+        //  - "stalled NOW", not "has filled the window": runs start only
+        //    once a rotor's command passes FDI_STALL_CMD_MIN, so a shared
+        //    stall can be staggered by a few ticks, and the first rotor
+        //    would then fill its window alone (and three ESCs commutating
+        //    while one is still silent is the same pattern).
+        // A real dead rotor's healthy siblings read near zero only for the
+        // first few ms of the spin-up (the rotor lag; a 100 ms soft-start
+        // for longer), so its own run keeps counting through that co-stall
+        // and it is still isolated at the window
+        // (tests/fdi_spinup_guard.rs
+        // `a_stalled_rotor_beside_a_slow_healthy_rotor_is_still_isolated_in_the_window`).
+        // But a window that FILLS while shared is discarded: from then on
+        // every co-stalled tick resets the runs (`fdi_stall_common`), so a
+        // rotor left silent when the others recover must earn a fresh
+        // window on its own.
         if self.failed_motor.is_none() && self.fdi_spinup < self.fdi_guard_steps {
             match rpm_now {
                 Some(rpm) => {
+                    let mut stalled = 0u32;
+                    let mut longest = 0u32;
                     let mut i = 0;
                     while i < 4 {
                         let achieved = (rpm[i] as f32 / ESC_RPM_FULL).clamp(0.0, 2.0);
@@ -1151,18 +1217,39 @@ impl CascadePartition {
                             && self.last_motor_cmd[i] > FDI_STALL_CMD_MIN
                         {
                             self.fdi_stall_run[i] = self.fdi_stall_run[i].saturating_add(1);
-                            if self.fdi_stall_run[i] >= self.fdi_stall_steps
-                                && self.failed_motor.is_none()
-                            {
-                                self.failed_motor = Some(i);
+                            stalled += 1;
+                            if self.fdi_stall_run[i] > longest {
+                                longest = self.fdi_stall_run[i];
                             }
                         } else {
                             self.fdi_stall_run[i] = 0;
                         }
                         i += 1;
                     }
+                    if stalled >= 2 {
+                        if longest >= self.fdi_stall_steps {
+                            self.fdi_stall_common = true;
+                        }
+                        if self.fdi_stall_common {
+                            self.fdi_stall_run = [0; 4];
+                        }
+                    } else {
+                        self.fdi_stall_common = false;
+                        if stalled == 1 && longest >= self.fdi_stall_steps {
+                            let mut j = 0;
+                            while j < 4 {
+                                if self.fdi_stall_run[j] > 0 {
+                                    self.failed_motor = Some(j);
+                                }
+                                j += 1;
+                            }
+                        }
+                    }
                 }
-                None => self.fdi_stall_run = [0; 4],
+                None => {
+                    self.fdi_stall_run = [0; 4];
+                    self.fdi_stall_common = false;
+                }
             }
         }
         if self.failed_motor.is_none() && self.fdi_spinup >= self.fdi_guard_steps && fdi_steady {
@@ -1267,6 +1354,22 @@ impl FlightCore {
     /// fused core and both halves of a split.
     pub fn fdi_stall_steps(loop_hz: f32) -> u32 {
         ((loop_hz * FDI_STALL_WINDOW_S + 0.5) as u32).max(1)
+    }
+
+    /// A running tick count, counted at `from_hz`, re-expressed in ticks of
+    /// `to_hz`: the same elapsed time, ROUNDED like [`Self::warmup_steps`]
+    /// (review of v1.141, finding 3). Both partitions call it on a rate
+    /// resync for every counter compared against a rate-derived threshold,
+    /// so a fixed-TIME threshold is never met by ticks of another rate. The
+    /// f32 -> u32 cast saturates, so a saturated counter stays saturated; a
+    /// non-positive `from_hz` (never produced by [`resynced_rate`]) leaves
+    /// the count unchanged. One definition for the fused core and both
+    /// halves of a split.
+    pub fn rescale_ticks(count: u32, from_hz: f32, to_hz: f32) -> u32 {
+        if !(from_hz > 0.0 && to_hz > 0.0) {
+            return count;
+        }
+        (count as f32 * (to_hz / from_hz) + 0.5) as u32
     }
 
     /// The rotor lag model's per-tick gain at `loop_hz`:
@@ -1716,6 +1819,13 @@ pub const FDI_ROTOR_LAG_TAU_S: f32 = 0.05;
 /// `motor-rpm: none`) is not evidence of a stall. It RESETS every rotor's run
 /// to zero, so only an unbroken window of present, near-zero readings can
 /// isolate; a backend without RPM never trips this.
+///
+/// A SHARED STALL DOES NOT COUNT EITHER (review of v1.141, finding 2): a
+/// rotor is isolated only while it is the only rotor stalled on that tick.
+/// Two or more stalled at once (zero RPM on every rotor from a telemetry bus
+/// that is up but not populated, or ESCs that have not commutated yet) is
+/// not a single-rotor fault and isolates nothing; see the stall check in
+/// `CascadePartition::step` for the rule and its justification.
 pub const FDI_STALL_RPM_FRAC: f32 = 0.05;
 /// The command a rotor must be above for its near-zero RPM to count as a
 /// stall (#609 finding 18; see [`FDI_STALL_RPM_FRAC`]). Below it, a low RPM
@@ -7723,5 +7833,58 @@ mod warmup_time_tests {
             assert_eq!(core.casc.fdi_stall_steps, want, "at {hz} Hz");
         }
         assert_eq!(FlightCore::fdi_stall_steps(1.0 / (1.0f32 / 1000.0)), 100);
+    }
+    /// REVIEW OF v1.141, FINDING 3: `resync_loop_rate` rescales the
+    /// IN-PROGRESS counters to the new rate, so they stay a measure of
+    /// elapsed TIME against thresholds that are fixed times. 1 kHz, rotor 1
+    /// dead from the first tick, 55 ticks, then ONE 2 ms frame (the core
+    /// resyncs to 500 Hz for it), then 1 ms frames again. On the late frame
+    /// every counter must read the elapsed time at 500 Hz (+-1 tick): the
+    /// spin-up guard counter and both step counts 57 ms, the stall run 56 ms
+    /// (it starts on tick 2: the first tick has no previous command). The
+    /// stalled rotor must not be isolated early by the late frame, and must
+    /// still be isolated once 0.1 s of stall has elapsed (+2 ticks).
+    ///
+    /// FAILS ON 5020977: the counters stay in old-rate ticks against a
+    /// 50-tick window, and rotor 1 is isolated at 57 ms.
+    #[test]
+    fn a_late_frame_rescales_the_in_progress_counters() {
+        let (mut b, mut core) = hovering(1000.0);
+        b.fail_rotor(1);
+        for _ in 0..55 {
+            core.step(&mut b);
+        }
+        assert_eq!(core.failed_motor(), None, "isolated before the late frame");
+        b.dt = 0.002;
+        core.step(&mut b);
+        b.dt = 0.001;
+        let near = |got: u32, ms: f32| (got as f32 - ms * 0.5).abs() <= 1.0;
+        let c = (
+            core.casc.fdi_spinup,
+            core.casc.step_count,
+            core.est.step_count,
+            core.casc.fdi_stall_run[1],
+        );
+        std::eprintln!("on the 2 ms frame: spinup/casc step/est step/stall run = {c:?}");
+        assert!(
+            near(c.0, 57.0) && near(c.1, 57.0) && near(c.2, 57.0) && near(c.3, 56.0),
+            "on the 2 ms frame (500 Hz) the counters must read 57/57/57/56 ms = ~28 ticks, got {c:?}"
+        );
+        assert_eq!(
+            core.failed_motor(),
+            None,
+            "the late frame isolated rotor 1 at 57 ms"
+        );
+        let mut elapsed_ms = 57u32;
+        while core.failed_motor().is_none() && elapsed_ms < 400 {
+            core.step(&mut b);
+            elapsed_ms += 1;
+        }
+        std::eprintln!("rotor 1 isolated at {elapsed_ms} ms");
+        assert_eq!(core.failed_motor(), Some(1));
+        assert!(
+            (100..=103).contains(&elapsed_ms),
+            "isolated at {elapsed_ms} ms; the stall window is 100 ms"
+        );
     }
 }

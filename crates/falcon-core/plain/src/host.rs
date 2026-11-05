@@ -60,7 +60,7 @@ pub struct VehicleConfig {
     pub hover_thrust: f32,
     /// ADVISORY, and NOT READ (#609 finding 7, #587): the supervisor's core
     /// is built at the nominal 1 kHz and `resync_loop_rate` re-derives the
-    /// filters AND the warm-ups (FDI spin-up guard 0.2 s, innovation gate 1 s)
+    /// filters AND the warm-ups (FDI spin-up guard 0.3 s, innovation gate 1 s)
     /// from the frame's `dt`. Carried so the record stays field-for-field
     /// with the WIT.
     pub loop_rate_hz: f32,
