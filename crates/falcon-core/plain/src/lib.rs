@@ -1198,13 +1198,29 @@ impl CascadePartition {
         // A real dead rotor's healthy siblings read near zero only for the
         // first few ms of the spin-up (the rotor lag; a 100 ms soft-start
         // for longer), so its own run keeps counting through that co-stall
-        // and it is still isolated at the window
+        // and it is isolated at the window IF every sibling has left the
+        // stall band before the window fills
         // (tests/fdi_spinup_guard.rs
         // `a_stalled_rotor_beside_a_slow_healthy_rotor_is_still_isolated_in_the_window`).
         // But a window that FILLS while shared is discarded: from then on
         // every co-stalled tick resets the runs (`fdi_stall_common`), so a
         // rotor left silent when the others recover must earn a fresh
         // window on its own.
+        //
+        // KNOWN LIMIT (c), a DOUBLE fault (review of v1.140, defect C): a
+        // dead rotor whose healthy SIBLING's RPM telemetry stays at 0 past
+        // the window (an unpopulated bus slot, a dead telemetry wire) is
+        // co-stalled on every tick, so this check never isolates it. Started
+        // AIRBORNE it is never isolated at all: the residual path is shut by
+        // the rate gate once the guard releases, and the vehicle falls (every
+        // dead/silent pair, 250 Hz and 1 kHz; pinned by tests/fdi_spinup_guard.rs
+        // `known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne`).
+        // On a ground spin-up the isolation is deferred to the guard's
+        // release and the residual path (measured, SimBackend, 50 ms lag:
+        // isolated on the guard's own tick, 0.3 s, at 0.26 rad of tilt,
+        // peak 1.02 rad, the supervisor already in Land). v1.142: disambiguate co-stalled
+        // rotors by the body-rate / attitude response, which a dead rotor
+        // produces and a dead telemetry channel does not.
         if self.failed_motor.is_none() && self.fdi_spinup < self.fdi_guard_steps {
             match rpm_now {
                 Some(rpm) => {

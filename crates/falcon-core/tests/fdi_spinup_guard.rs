@@ -789,3 +789,138 @@ fn a_rotor_left_silent_after_a_shared_stall_must_earn_its_own_window() {
         "a window filled during a shared stall isolated the last rotor to recover: {bad:?}"
     );
 }
+
+/// KNOWN LIMIT (c), kept visible (review of v1.140, defect C; maintainer:
+/// pin and disclose, fix in v1.142): a rotor dead from the first tick of an
+/// AIRBORNE start, beside a HEALTHY sibling whose RPM telemetry reads 0 for
+/// the whole flight (an unpopulated bus slot, a dead telemetry wire), is
+/// NEVER isolated. Two rotors read stalled on every tick, so the stall check
+/// takes it for a common-mode stall and discards every window
+/// (`fdi_stall_common`), and once the guard releases the residual path is
+/// shut by the rate gate as the vehicle rolls off. Every (dead, silent)
+/// ordered pair, at 250 Hz and 1 kHz, built as the supervisor builds the
+/// core (nominal 1 kHz), hovering 2 m up: no isolation in 2 s, and the
+/// vehicle falls (printed, not asserted). POSITIVE CONTROL on the same rig:
+/// with every sibling reporting, the same dead rotor IS isolated at the
+/// stall window (so the pin is the silent sibling, not the rig). This is a DOUBLE fault (one rotor
+/// dead, one telemetry channel dead), outside the single-rotor isolation;
+/// v1.142 is to disambiguate co-stalled rotors by the body-rate / attitude
+/// response. When a change fixes it, this test fails and the limit is
+/// retired here and in FV-FALCON-FAULT-004.
+#[test]
+fn known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne() {
+    use falcon_core::{FlightCore, SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ};
+    let mut isolated = Vec::new();
+    let mut control_missed = Vec::new();
+    for hz in [250u32, 1000] {
+        let dt = 1.0 / hz as f32;
+        for dead in 0..4usize {
+            // silent == 4: no silent sibling (the positive control).
+            for silent in 0..5usize {
+                if silent == dead {
+                    continue;
+                }
+                let mut b = SimBackend::new(LEVEL, dt);
+                b.rpm_telemetry = true;
+                b.pos = [0.0, 0.0, -2.0];
+                let mut start = [u32::MAX; 4];
+                if silent < 4 {
+                    start[silent] = 0;
+                }
+                let mut a = Asym {
+                    b,
+                    rotor: 0,
+                    ramp_s: 0.0,
+                    k: None,
+                    kill_at: Some((0, dead)),
+                    weak: None,
+                    rpm: RpmFeed::Always,
+                    dt,
+                    zero_rpm: Some((start, [u32::MAX; 4])),
+                    dt_spike: None,
+                };
+                let mut core =
+                    FlightCore::new(SUPERVISOR_CORE_HOVER_THRUST, SUPERVISOR_CORE_LOOP_HZ);
+                core.set_position([0.0, 0.0, -2.0]);
+                let mut iso = None;
+                let mut tilt = 0.0f32;
+                for k in 0..(2 * hz) {
+                    a.k = Some(k);
+                    core.step(&mut a);
+                    tilt = tilt.max(a.b.tilt());
+                    if iso.is_none() {
+                        iso = core.failed_motor().map(|r| (k + 1, r));
+                    }
+                }
+                let sib = if silent < 4 {
+                    format!("rotor {silent} RPM 0")
+                } else {
+                    "every sibling reporting".to_string()
+                };
+                eprintln!(
+                    "{hz} Hz rotor {dead} dead, {sib}: iso {iso:?}, peak tilt {tilt:.2} rad, alt {:.1} m after 2 s",
+                    -a.b.pos[2]
+                );
+                if silent == 4 {
+                    if iso.map(|i| i.1) != Some(dead) {
+                        control_missed.push((hz, dead, iso));
+                    }
+                } else if iso.is_some() {
+                    isolated.push((hz, dead, silent, iso));
+                }
+            }
+        }
+    }
+    assert!(
+        control_missed.is_empty(),
+        "positive control: with every sibling reporting the dead rotor must be isolated: {control_missed:?}"
+    );
+    assert!(
+        isolated.is_empty(),
+        "a dead rotor beside a silent sibling WAS isolated: known limit (c) may be fixed, retire it: {isolated:?}"
+    );
+}
+
+/// A LONG FIRST FRAME (a host's first tick after start-up, or the
+/// cascade's first flying tick, 20 / 50 ms) makes the core resync every
+/// fixed-time threshold to 50 / 20 Hz on that frame. If a rate seeded by
+/// that one frame were held for many ticks, the stall window would be only
+/// 2-5 ticks long, and a healthy ESC soft-starting behind the others is
+/// alone below 5 % RPM for longer than that. Regression guard for any change
+/// to how the rate is resynced: 250 Hz and 1 kHz, the cascade's first
+/// flying frame 20 or 50 ms, healthy rotor soft-starts of 100/200/150 ms
+/// (lag 50/50/0 ms): no isolation, Loiter reached. Passes on 725f146 (the
+/// per-frame resync re-judges the rate on the next frame); not fail-first.
+#[test]
+fn a_long_first_frame_isolates_no_healthy_rotor() {
+    let mut bad = Vec::new();
+    for hz in [250u32, 1000] {
+        for d in [0.02f32, 0.05] {
+            for (ramp, tau, rotor) in [(100u32, 50u32, 2usize), (200, 50, 1), (150, 0, 3)] {
+                let (f, _, _) = fly_full(
+                    hz,
+                    ramp,
+                    tau,
+                    rotor,
+                    None,
+                    None,
+                    RpmFeed::Always,
+                    1.0,
+                    None,
+                    Some((0, d)),
+                );
+                eprintln!(
+                    "{hz} Hz first flying frame {:.0} ms, rotor {rotor} {ramp} ms soft-start, lag {tau}: {f:?}",
+                    d * 1000.0
+                );
+                if f.iso.is_some() || !f.loiter {
+                    bad.push((hz, d, ramp, rotor, f.iso, f.loiter));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "a long first frame isolated a healthy rotor: {bad:?}"
+    );
+}
