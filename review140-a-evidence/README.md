@@ -18,3 +18,4 @@ Two lessons from it:
 
 Give each tree its own `CARGO_TARGET_DIR`: cargo's mtime-based freshness check once silently reused the branch build for "main".
 Refs #638, #644.
+| `zz_probe_land_fdi_vib.rs` | pre-existing KNOWN LIMIT (d): FDI falsely isolates on entering Land under rotor vibration with an instant rotor (measured on main 95ab695) |
