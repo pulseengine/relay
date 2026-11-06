@@ -198,6 +198,16 @@ artifacts:
       tick count fixed at construction. The mutations quoted above are the
       implementation PRs' own, not re-run here.
 
+      RE-RUN AGAIN on b66fed4 (the falcon-v1.141.0 candidate, after #639,
+      #643 and #645), 2026-11-06, every declared step from a generated file:
+      19/19 rc=0. Tests executed per step: noise campaign 1,
+      fdi_isolates_dead_rotor_and_reconfigures 1,
+      survives_single_rotor_failure_without_flipping 1, fdi_common_mode 3,
+      fdi_second_flight 3, fdi_spinup_guard 14, each --lib test 1, the
+      known-limit-(c) pin 1; all seven greps match. Status UNCHANGED
+      (implemented): limit (a) below still meets the falsification clause,
+      and limits (c), (d) and A are disclosed above.
+
       NOT PROMOTED, although every step passes: the evidence MEETS this
       artifact's own FALSIFICATION clause below ("wrong if ... it isolates a
       HEALTHY rotor"). Known limit (a), pinned by the passing test

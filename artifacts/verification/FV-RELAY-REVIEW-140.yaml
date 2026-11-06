@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-REVIEW-140
     type: sw-verification
     title: "REVIEW — independent multi-agent review of the falcon-v1.140.0 diff, de-scoped from the v1.140 tag gate to v1.141"
-    status: proposed
+    status: verified
     release: falcon-v1.141.0
     description: >
       The review checkpoint for the falcon-v1.140.0 content — the HOLD release:
@@ -70,9 +70,97 @@ artifacts:
       review (FV-RELAY-REVIEW-141) is run with `/code-review ultra` over the
       full `falcon-v1.139.0..HEAD` span, that single run can discharge both
       artifacts; say so in each.
+
+      THE REVIEW RAN, 2026-11-05 — and NOT as `/code-review ultra`. The
+      evidence clause above names ultra; the maintainer replaced it twice on
+      the record: 2026-10-27 (ultra cannot run over Remote Control; a local
+      review is recorded as REVIEW-140/141 evidence and the notes must say it
+      is not the cloud ultra) and 2026-11-05 ("REVIEW-140 coverage": the
+      pinned range had never been reviewed, review it now with the same local
+      multi-agent method). METHOD: a forked local multi-agent run in the
+      release session: 6 finders (workflows, flight, hitl, claims, tail,
+      scripts), then 4 adversarial verifiers, each finding reproduced or
+      refuted against main @ 725f146. RANGE: the pinned
+      falcon-v1.139.0..falcon-v1.140.0 (62 commits, 73 files), PLUS the fix
+      tail 5020977..725f146 (#637, #639) so that the newest code was not left
+      between reviews.
+
+      FINDINGS AND DISPOSITIONS (letters as recorded in #638):
+        A. BLOCKER. A dt-s that crosses the 2% re-sync band frame to frame
+           rebuilds the gyro low-pass and notch with zeroed state every such
+           frame; 2/3 ms alternation at 400 Hz and +-25 us at 1 kHz tumble on
+           SimBackend (shipped since v1.140, c709a72). Maintainer 2026-11-05:
+           DEFER to falcon-v1.142.0 and NARROW THE CONTRACT. Two fixes, #642
+           and #644, were closed unmerged after their cold reviews each found
+           a regression; their probes are kept on fix/review140-a-filter-rate
+           (review140-a-evidence/). The steady-period host contract and the
+           limit are stated in cascade.wit sensor-frame.dt-s (#645) and in
+           FV-FALCON-FAULT-004 (KNOWN LIMIT A).
+        B. MINOR. rescale_ticks rounds half up, so a 2:1 alternating dt fills
+           the 0.1 s stall window in ~75-88 ms (not a #639 regression).
+           Deferred to v1.142 (#638 comment 6664865587).
+        C. MAJOR, double fault. A dead rotor beside a HEALTHY rotor whose RPM
+           telemetry is silent is never isolated by the stall check (it
+           discards co-stalled windows); airborne from the first tick, never
+           isolated at all. Maintainer: pin and disclose, fix v1.142. FIXED
+           AS DOCUMENTED in #643: the stall-check comment corrected, the limit
+           pinned by
+           known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne
+           (fails when v1.142 retires it), KNOWN LIMIT (c) in FAULT-004.
+        D. MAJOR. The supervised-rotorout verdict accepted a mid-air disarm
+           (1.17 m true altitude PASSED, reproduced by biasing GNSS z).
+           FIXED in #641: the verdict judges TRUE altitude < 0.2 m and
+           |true vz| < 1.0 m/s at the first Disarmed tick. gz 3x on main
+           03e407a: true altitude at disarm 0.002 / 0.000 / 0.016 m, all PASS.
+        E. MAJOR, off the flight path. LinkBackend never overrides
+           read_motor_rpm/read_heading and sample_sensor_frame hardcodes both
+           to None, so FDI and yaw aiding are inert behind the binding.
+           TRANSPORT-P01 is v1.142 scope; filed (#638 comment 6663413886).
+        F. MINOR init / MAJOR dead-link, bench only. LinkBackend's zeroed
+           initial cache and unbounded stale replay. Filed v1.142 (same).
+        G. MAJOR. The verification gate's path regex fast-passed changes the
+           sweep reads (examples/, release.yml, soak.yml; 92 artifacts
+           reference out-of-regex paths). FIXED in #640 (fail-safe denylist);
+           the rename hole the cold tail review then found is FIXED in #646.
+        H. MAJOR. verification-tracks.rs read the RUN conclusion, so "Kani
+           passed" with the matrix skipped, and a scope fast-pass rendered as
+           passed. FIXED in #640 (job- and step-level status).
+        MINORS (each confirmed by a verifier), filed to v1.142 in #638: the
+           nightly backstop cancelled 5/10 (7/12) runs; release.yml notes TAG
+           on dispatch; the keeper's mapfile swallows a gh failure; the
+           fleet-status jobs query continues on error; cascade publishes
+           innovation 0.0 with V_INNOV set; the HITL test endpoint revokes
+           calibration only on NonFinite; HOLD-P01/ENDURANCE-P01 text claims a
+           0.5 m vertical bar the verdict does not check (disclosed in the
+           notes as #609 f12); a stale HOLD-P01 "fix taken" note and stale
+           DEMOTED banners; ci-triage --gate exits 0 on empty; FAULT-003
+           campaign bounds looser than its claim; the gz NavSat is noise-free
+           and used as truth; the MC noise seeds ignore campaign_seed.
+        None dismissed.
+
+      WHAT THIS DOES NOT CLAIM. It is not the cloud multi-agent ultra the
+      2026-09-17 plan named, and its finders were briefed by the release
+      session, not by a party outside it. The range was reviewed in one pass;
+      no second, fresh review of v1.139.0..v1.140.0 was run.
     tags: [verification, relay, review, release, v1.140, v1.141, descoped]
     fields:
       method: review
+      steps:
+        # The review record is this artifact's text (in the repo, not in PR
+        # comments: see FV-RELAY-REVIEW-139). The steps check that every
+        # FIXED disposition is on the tree, so a revert turns this red.
+        # G (#640) + the rename hole (#646): fail-safe denylist, both sides of a rename.
+        - run: "grep -q 'is_known_irrelevant()' .github/workflows/verification-gate.yml"
+        - run: "grep -q -- 'git diff --no-renames --name-only' .github/workflows/verification-gate.yml"
+        # H (#640): tracks read job/step status, so a scope skip is not "passed".
+        - run: "grep -q 'skipped by scope' scripts/verification-tracks.rs"
+        # D (#641): the verdict judges TRUE altitude at disarm.
+        - run: cargo test -p falcon-sitl-gz supervised_rotorout_verdict_judges_true_altitude_at_disarm
+        # C (#643): the limit is pinned; this test fails when v1.142 retires it.
+        - run: cargo test -p falcon-core --test fdi_spinup_guard known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne
+        # A (#645): the narrowed host contract and the limit are stated on the seam.
+        - run: "grep -q 'HOST CONTRACT (falcon-v1.141.0)' wit/falcon-cascade/cascade.wit"
+        - run: "grep -q 'KNOWN LIMIT A' artifacts/verification/FV-FALCON-FAULT-004.yaml"
     links:
       - type: verifies
         target: SWREQ-RELAY-REVIEW-P01
