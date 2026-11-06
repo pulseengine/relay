@@ -213,8 +213,10 @@ jobs:
           #     FV-FALCON-TQ-001 globs docs/dossier/tool-qualification/).
           # If unsure, it is relevant.
           #
-          # The classifier is table-tested off-line by extracting the text
-          # between the two marker lines below; keep them.
+          # The classifier was table-tested off-line when written (#640) by
+          # extracting the text between the two marker lines below; that table
+          # is NOT committed yet (a committed test is filed for v1.142, #638).
+          # Keep the markers.
           # >>> scope-classifier
           # 0 = known-irrelevant (may fast-pass), 1 = relevant.
           is_known_irrelevant() {
@@ -269,7 +271,11 @@ jobs:
             echo "run_full=true" >>"$GITHUB_OUTPUT"; exit 0
           fi
           rc=0
-          CHANGED=$(git diff --name-only "$BASE_SHA"...HEAD) || rc=$?
+          # --no-renames: a rename lists BOTH paths. With rename detection on (the
+          # default) `git mv artifacts/verification/X.yaml docs/X.md` listed only
+          # the docs/ path and fast-passed the deletion of a verification artifact
+          # (cold review of the v1.141 fix tail, reproduced in a scratch repo).
+          CHANGED=$(git diff --no-renames --name-only "$BASE_SHA"...HEAD) || rc=$?
           if [ "$rc" -ne 0 ]; then
             echo "git diff failed (rc=$rc) — fail-safe to full sweep"
             echo "run_full=true" >>"$GITHUB_OUTPUT"; exit 0
