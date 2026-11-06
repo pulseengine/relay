@@ -178,6 +178,24 @@ interface types {
     /// holding 2.0 m: 1000 Hz -> 0.00 m error, 400 Hz -> 10.43 m, 250 Hz -> 27.17 m,
     /// with no error signal of any kind.
     ///
+    /// HOST CONTRACT (falcon-v1.141.0): `dt-s` must be a STEADY loop period —
+    /// either the constant nominal period on every frame, or a measured period
+    /// whose frame-to-frame change stays inside the 2% re-sync band described
+    /// under `loop-rate-hz`. A host whose clock is coarse or jittery (a
+    /// timestamp quantised to ms, a scheduler that alternates long and short
+    /// ticks) must send its NOMINAL period, not the per-frame measurement.
+    /// KNOWN LIMIT A (review of v1.140; fix scheduled for falcon-v1.142.0,
+    /// #638): a `dt-s` that crosses the 2% band from frame to frame re-syncs
+    /// the core on every such frame, and each re-sync rebuilds the gyro
+    /// low-pass and the notch bank with ZEROED state. Measured on SimBackend:
+    /// 2 ms / 3 ms alternation at a 400 Hz host, and +-25 us jitter at 1 kHz,
+    /// leave the gyro effectively unfiltered and the vehicle tumbles; the
+    /// same runs with the filter rebuild skipped fly clean. Every per-frame
+    /// smoothing tried for v1.141 regressed another case (early outlier
+    /// frames, ringing near Nyquist, aliased rotor vibration, a minority of
+    /// late frames under vibration falsely isolating a rotor), so v1.141
+    /// narrows the contract instead of changing the core.
+    ///
     /// The aiding measurements — v0.7 took the IMU alone, so position was
     /// observable only by dead reckoning. The flight core fuses GNSS, the
     /// magnetometer and an absolute heading; a seam that cannot carry them
@@ -288,10 +306,12 @@ interface types {
         /// the frame's own: it is built at the nominal 1 kHz and RE-SYNCS to
         /// `1 / sensor-frame.dt-s` whenever that differs by more than 2% (the
         /// gyro low-pass, the notch bank, and since #609 the warm-ups: the
-        /// rotor-out FDI spin-up guard is a fixed 0.2 s and the estimator's
+        /// rotor-out FDI spin-up guard is a fixed 0.3 s and the estimator's
         /// innovation-gate / yaw-capture warm-up 1 s, counted at that rate).
         /// A host that sends a `loop-rate-hz` that disagrees with its frames
-        /// flies at its frames' rate. Kept in the record so the record stays
+        /// flies at its frames' rate. Frames whose period wanders across the
+        /// 2% band re-sync every time: see the HOST CONTRACT and KNOWN LIMIT A
+        /// under `sensor-frame.dt-s`. Kept in the record so the record stays
         /// field-for-field what it was at @0.12.0.
         loop-rate-hz: f32,
         /// Position-measurement variance (m²). The default over-trusts a real
