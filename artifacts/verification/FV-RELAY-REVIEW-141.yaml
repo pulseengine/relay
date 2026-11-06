@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-REVIEW-141
     type: sw-verification
     title: "REVIEW — independent multi-agent review of falcon-v1.141.0 before tag (v1.141)"
-    status: proposed
+    status: verified
     release: falcon-v1.141.0
     description: >
       The review checkpoint for falcon-v1.141.0, the FLYING-DEMO release — showcase, wired supervisor, configuration.
@@ -16,9 +16,73 @@ artifacts:
       While this artifact is `proposed`, scripts/release-readiness.rs
       reports falcon-v1.141.0 as not ready. That is the point: the review cannot
       be forgotten, only done or explicitly de-scoped by the maintainer.
+
+      THE REVIEW RAN — NOT as `/code-review ultra`. The maintainer replaced
+      that clause on the record (2026-10-27: ultra cannot run over Remote
+      Control, a local review is the evidence and the notes must say so;
+      2026-11-05 "review141 provenance": the re-review ran as a forked LOCAL
+      multi-agent run, not the cloud ultra). The candidate range
+      falcon-v1.140.0..b66fed4 is TILED by four reviews with no gap:
+
+      1. falcon-v1.140.0..21c9472 — local single-session `/code-review max`
+         (2026-10-27), #609. 18 findings (17, and an 18th found while fixing
+         the 17th), 8 of them blockers. FIXED: f1, f2, f3 (#611; config fails
+         closed since #627); f4 (#616, #632); f5 (#633); f6 (#612, #627); f7
+         (#633); f8 (#633); f9 (#614, #619); f10 (#631); f11 (#610); f13
+         (#631); f14 (#631); f15 (#629); f16 (#632); f17 (#633); f18 (#634).
+         DISCLOSED, scheduled v1.142: f12 (the gz HOLD verdict bounds altitude
+         by the final sample and a 5 s RMS only; #546).
+      2. 21c9472..5020977 — the re-review gating this tag (2026-11-05): a
+         forked local multi-agent run, 6 finders, 4 verifiers and a sweep.
+         Blocking: finding 1, cosign v3 silently dropping .sig/.pem in the
+         second signing job, FIXED in #637 (v2.4.1 pinned at both uses, and
+         confirmed by a rehearsal: unpinned failed, pinned passed); findings 2
+         and 3, the stall check accepting a common-mode stall (BLOCKER) and
+         the rate resync not rescaling in-progress FDI counters, FIXED in
+         #639. Findings 4-15, the five lower-severity items and the cleanup
+         list: FILED to falcon-v1.142.0 as the umbrella #638, one checkbox
+         each. None dismissed.
+      3. 5020977..725f146 (#637, #639) — reviewed as the tail of the
+         REVIEW-140 run (see FV-RELAY-REVIEW-140): defect C (FIXED AS
+         DOCUMENTED, #643) and defect B (deferred v1.142).
+      4. 725f146..b66fed4 (#641, #643, #640) plus #645 — a cold,
+         single-agent read-only review (2026-11-06), briefed with the diff
+         and no conclusions. 1 MAJOR: a rename out of a code tree fast-passed
+         the required verification gate (`git diff --name-only` lists only
+         the new path); reproduced, FIXED in #646 (--no-renames), measured by
+         running the gate's own scope step on a rename (run_full false ->
+         true) and on a docs-only change (stays false). 3 MINOR: #645 said the
+         2% band is frame to frame, it is against the last re-synced rate
+         (FIXED in this verify PR's cascade.wit wording); the scope
+         classifier's table test is not committed, and a leftover
+         SITL_TEST_GNSS_Z_BIAS_M can still yield a PASS (both FILED v1.142,
+         #638 comment 6677499188). Its one UNCONFIRMED item (the margin under
+         the new 0.2 m disarm bar on real gz) was closed by measurement: 3 gz
+         runs on 03e407a read 0.002 / 0.000 / 0.016 m.
+
+      CANDIDATE EVIDENCE: the required verification gate's full falcon sweep
+      on b66fed4 (merge-queue run 42170825075): 184/184 artifacts passed, 12
+      have no steps. The 13 steps of the three requirements this tag
+      verifies (FV-FALCON-PREARM-004, FV-FALCON-SUPV-002, FV-RELAY-VGATE-006)
+      are among them.
+
+      WHAT THIS DOES NOT CLAIM. None of the four is the cloud multi-agent
+      ultra the 2026-09-17 plan named. Review 1 was a single session; review
+      4 a single agent. The verify PR that promotes this artifact is
+      code-free and was not reviewed beyond CI.
     tags: [verification, relay, review, release, v1.141]
     fields:
       method: review
+      steps:
+        # Each FIXED disposition of reviews 2 and 4 is on the tree; a revert turns this red.
+        # Re-review 1 (#637): cosign v2.4.1 at BOTH signing uses.
+        - run: "test \"$(grep -c \"cosign-release: 'v2.4.1'\" .github/workflows/release.yml)\" -eq 2"
+        # Re-review 2 (#639): a common-mode stall is not an isolation.
+        - run: cargo test -p falcon-core --test fdi_common_mode
+        # Re-review 3 (#639): a late frame rescales the in-progress counters.
+        - run: cargo test -p falcon-core --lib a_late_frame_rescales_the_in_progress_counters
+        # Tail review MAJOR (#646): both sides of a rename are classified.
+        - run: "grep -q -- 'git diff --no-renames --name-only' .github/workflows/verification-gate.yml"
     links:
       - type: verifies
         target: SWREQ-RELAY-REVIEW-P01

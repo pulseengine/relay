@@ -180,14 +180,17 @@ interface types {
     ///
     /// HOST CONTRACT (falcon-v1.141.0): `dt-s` must be a STEADY loop period —
     /// either the constant nominal period on every frame, or a measured period
-    /// whose frame-to-frame change stays inside the 2% re-sync band described
-    /// under `loop-rate-hz`. A host whose clock is coarse or jittery (a
+    /// that stays within 2% of the rate the core last re-synced to (the band
+    /// described under `loop-rate-hz`; it is measured against that rate, not
+    /// against the previous frame, so a slow drift re-syncs once per 2% of
+    /// cumulative drift). A host whose clock is coarse or jittery (a
     /// timestamp quantised to ms, a scheduler that alternates long and short
     /// ticks) must send its NOMINAL period, not the per-frame measurement.
     /// KNOWN LIMIT A (review of v1.140; fix scheduled for falcon-v1.142.0,
-    /// #638): a `dt-s` that crosses the 2% band from frame to frame re-syncs
-    /// the core on every such frame, and each re-sync rebuilds the gyro
-    /// low-pass and the notch bank with ZEROED state. Measured on SimBackend:
+    /// #638): a `dt-s` that keeps crossing that band (alternating long and
+    /// short periods) re-syncs the core on every crossing frame, and each
+    /// re-sync rebuilds the gyro low-pass and the notch bank with ZEROED
+    /// state. Measured on SimBackend:
     /// 2 ms / 3 ms alternation at a 400 Hz host, and +-25 us jitter at 1 kHz,
     /// leave the gyro effectively unfiltered and the vehicle tumbles; the
     /// same runs with the filter rebuild skipped fly clean. Every per-frame
