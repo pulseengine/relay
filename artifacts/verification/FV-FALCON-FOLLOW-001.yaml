@@ -65,7 +65,7 @@ artifacts:
         - run: cargo test -p falcon-core --test follow_target_source a_stopped_follow_stream_holds_after_the_timeout
         - run: cargo test -p falcon-core --test supervised_core_split split_host_follows_goes_stale_and_re_arms_the_fdi_bit_exactly
         - run: cargo test -p falcon-hitl --test binding_drives_the_supervisor request_mission_over_the_binding_takes_the_stale_target_hold
-        - run: "grep -q 'pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;' crates/falcon-core/plain/src/supervisor.rs"
         - run: "grep -q 'sup.set_mission_source(MissionSource::Follow);' crates/falcon-core/plain/src/host.rs"
     links:
       - type: verifies

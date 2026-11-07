@@ -57,7 +57,7 @@ artifacts:
       method: automated-test
       steps:
         - run: cargo test -p falcon-core --test follow_target_source
-        - run: "grep -q 'pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const FOLLOW_TARGET_TIMEOUT_US: u64 = 1_000_000;' crates/falcon-core/plain/src/supervisor.rs"
     links:
       - type: verifies
         target: SWREQ-FALCON-OFFB-P01
