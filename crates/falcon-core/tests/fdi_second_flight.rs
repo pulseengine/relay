@@ -12,7 +12,7 @@
 //! re-arming (#565, `MotorsHealthy`; pinned by
 //! `a_rotor_fault_isolated_during_landing_blocks_re_arming` and
 //! `a_rotor_that_failed_in_flight_still_blocks_re_arming_after_the_latch_clears`
-//! in `plain/src/lib.rs`), and a real failure in the second flight is still
+//! in `plain/src/tests.rs`), and a real failure in the second flight is still
 //! detected as fast as in the first.
 
 use falcon_core::relay_fsm::{Event, Mode};
