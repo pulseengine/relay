@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ATT-P01
     type: sw-req
     title: "ATT-P01: Quaternion-error invariant preserved"
-    status: implemented
+    status: verified
     release: falcon-v0.1.0
     description: >
       The attitude controller's quaternion error computation
@@ -25,7 +25,7 @@ artifacts:
   - id: SWREQ-FALCON-ATT-P02
     type: sw-req
     title: "ATT-P02: Cascade stability with rate loop"
-    status: approved
+    status: verified
     description: >
       The attitude controller, composed in cascade with the rate
       controller (RATE-P03), shall preserve closed-loop Lyapunov
@@ -47,7 +47,7 @@ artifacts:
   - id: SWREQ-FALCON-ATT-P03
     type: sw-req
     title: "ATT-P03: Small-angle approximation bounds"
-    status: approved
+    status: verified
     description: >
       Where the attitude controller uses small-angle
       linearization (for computational efficiency), the

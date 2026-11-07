@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ATMOS-P01
     type: sw-req
     title: "ATMOS-P01 — altitude hold under air-density thrust lapse + service ceiling"
-    status: implemented
+    status: verified
     release: falcon-v1.22.0
     description: >
       The flight stack shall account for air-density thrust lapse: thrust falls

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-TRANSPORT-P01
     type: sw-req
     title: "TRANSPORT-P01 — the cascade seam shall have ONE supported transport binding, so an integrator does not invent a fifth"
-    status: implemented
+    status: verified
     release: falcon-v1.142.0
     description: >
       *** STILL `implemented` ON 2026-11-04, AND NOW FOR ITS FALSIFICATION

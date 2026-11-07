@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-FLOWRANGE-P01
     type: sw-req
     title: "FLOWRANGE-P01: rangefinder + optical-flow preprocessing gates bad readings before they aid the estimator"
-    status: implemented
+    status: verified
     release: falcon-v1.54.0
     description: >
       Falcon shall fuse a downward rangefinder (terrain altitude) and optical

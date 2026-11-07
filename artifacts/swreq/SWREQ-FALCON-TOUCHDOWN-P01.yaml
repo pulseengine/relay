@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-TOUCHDOWN-P01
     type: sw-req
     title: "TOUCHDOWN-P01 — velocity-based touchdown lands through ground effect"
-    status: implemented
+    status: verified
     release: falcon-v1.27.0
     description: >
       A velocity-based touchdown controller shall land the vehicle cleanly

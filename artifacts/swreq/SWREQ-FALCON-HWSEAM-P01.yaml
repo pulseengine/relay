@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-HWSEAM-P01
     type: sw-req
     title: "HWSEAM-P01 — real-hardware backend seam: same verified core, swappable drivers"
-    status: implemented
+    status: verified
     release: falcon-v1.11.0
     description: >
       The flight stack shall expose a real-hardware backend seam so the SAME

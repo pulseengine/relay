@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-RC-P03
     type: sw-req
     title: "RC-P03: CRSF wire decode — CRC-checked byte-frame to bounded RcInput"
-    status: implemented
+    status: verified
     release: falcon-v1.89.0
     description: >
       Falcon shall decode the TBS Crossfire / ExpressLRS (CRSF) receiver protocol

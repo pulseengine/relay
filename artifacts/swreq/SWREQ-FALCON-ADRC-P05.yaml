@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ADRC-P05
     type: sw-req
     title: "ADRC-P05 — inner-loop cadence robustness: the ESO is well-separated and discrete-stable with large margin"
-    status: implemented
+    status: verified
     release: falcon-v0.34.0
     description: >
       The inner ADRC rate loop shall be tuned for robustness, not marginal

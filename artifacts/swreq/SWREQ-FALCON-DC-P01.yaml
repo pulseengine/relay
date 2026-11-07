@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-DC-P01
     type: sw-req
     title: "DC-P01: DroneCAN v0 verified transfer layer — id/tail/CRC + multi-frame reassembly"
-    status: implemented
+    status: verified
     release: falcon-v1.92.0
     description: >
       Falcon shall decode the DroneCAN v0 (classic CAN 2.0B) transfer layer for

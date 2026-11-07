@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MISSION-P01
     type: sw-req
     title: "MISSION-P01 — multi-waypoint mission sequencer + autonomous return"
-    status: implemented
+    status: verified
     release: falcon-v1.30.0
     description: >
       The FlightSupervisor shall fly a stored sequence of NED waypoints (a

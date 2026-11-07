@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-WCET-P01
     type: sw-req
     title: "WCET-P01 — compositional WCET + schedulability for the flight cascade"
-    status: implemented
+    status: verified
     release: falcon-v1.10.0
     description: >
       The worst-case execution time of the Falcon flight cascade

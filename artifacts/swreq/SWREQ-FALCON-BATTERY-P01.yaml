@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-BATTERY-P01
     type: sw-req
     title: "BATTERY-P01 — low-battery failsafe fires on a real draining pack"
-    status: implemented
+    status: verified
     release: falcon-v1.21.0
     description: >
       The v1.8 low-battery failsafe shall be exercised against a realistic energy

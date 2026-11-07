@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-WORLD-P01
     type: sw-req
     title: "WORLD-P01: falcon-quad world spec wires the full cascade"
-    status: implemented
+    status: verified
     release: falcon-v0.1.0
     description: >
       The pulseengine:relay-worlds/falcon-quad world shall
@@ -28,7 +28,7 @@ artifacts:
   - id: SWREQ-FALCON-WORLD-P02
     type: sw-req
     title: "WORLD-P02: Variant worlds share the same control cascade"
-    status: approved
+    status: verified
     description: >
       All falcon-* worlds (quad, hex, coax, vtol, fw) shall
       reuse the same relay-ekf, relay-rate, relay-att, relay-pos

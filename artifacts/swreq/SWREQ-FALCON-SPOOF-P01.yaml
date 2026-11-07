@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SPOOF-P01
     type: sw-req
     title: "SPOOF-P01 — position-fix fault/spoof robustness: gate outliers, detect walk-off, hold on attack"
-    status: implemented
+    status: verified
     release: falcon-v0.37.0
     description: >
       The estimator shall not be steered off course by a faulty, jammed, or
