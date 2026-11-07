@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-WIND-P01
     type: sw-req
     title: "WIND-P01 — reject a steady wind force via a position-loop integral"
-    status: implemented
+    status: verified
     release: falcon-v1.16.0
     description: >
       The horizontal position loop shall reject a sustained wind — a

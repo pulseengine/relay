@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MAVLINK-P01
     type: sw-req
     title: "MAVLINK-P01: Packet parsing bounds-checked"
-    status: implemented
+    status: verified
     release: falcon-v0.1.0
     description: >
       The MAVLink codec component shall reject malformed packets
@@ -24,7 +24,7 @@ artifacts:
   - id: SWREQ-FALCON-MAVLINK-P02
     type: sw-req
     title: "MAVLINK-P02: QGroundControl heartbeat interop"
-    status: approved
+    status: verified
     description: >
       The falcon stack shall respond to QGroundControl's
       MAVLINK_MSG_ID_HEARTBEAT with a valid heartbeat reply
@@ -45,7 +45,7 @@ artifacts:
   - id: SWREQ-FALCON-MAVLINK-P03
     type: sw-req
     title: "MAVLINK-P03: PARAM_SET routes to relay-tbl"
-    status: approved
+    status: verified
     description: >
       MAVLink PARAM_SET commands shall route to the cFS-DNA
       Table Services for parameter updates. PID gains updated

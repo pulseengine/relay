@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MISSIONUP-P01
     type: sw-req
     title: "MISSIONUP-P01 — MAVLink mission UPLOAD (a GCS defines the mission)"
-    status: implemented
+    status: verified
     release: falcon-v1.33.0
     description: >
       Falcon shall accept a mission uploaded over MAVLink, completing the

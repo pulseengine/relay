@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-IEKF-P01
     type: sw-req
     title: "IEKF-P01: full-state navigation tracks position/velocity on a SITL trajectory (RC#3 closed)"
-    status: implemented
+    status: verified
     release: falcon-v1.44.0
     description: >
       The falcon full-state Invariant EKF (relay-iekf) shall estimate NED

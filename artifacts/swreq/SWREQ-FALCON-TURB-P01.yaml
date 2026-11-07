@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-TURB-P01
     type: sw-req
     title: "TURB-P01 — bounded position hold under a Dryden-like turbulence spectrum"
-    status: implemented
+    status: verified
     release: falcon-v1.25.0
     description: >
       The flight stack shall remain BOUNDED (not diverge) under a realistic

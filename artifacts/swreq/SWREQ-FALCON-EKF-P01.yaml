@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-EKF-P01
     type: sw-req
     title: "EKF-P01: Quaternion normalization invariant"
-    status: implemented
+    status: verified
     release: falcon-v0.1.0
     description: >
       The estimator's output quaternion shall satisfy
@@ -25,7 +25,7 @@ artifacts:
   - id: SWREQ-FALCON-EKF-P02
     type: sw-req
     title: "EKF-P02: Numerical state bounds preserved"
-    status: approved
+    status: verified
     description: >
       The estimator's state vector components shall remain
       within physically plausible ranges: position |x| < 1e6 m,
@@ -46,7 +46,7 @@ artifacts:
   - id: SWREQ-FALCON-EKF-P03
     type: sw-req
     title: "EKF-P03: Innovation health metric monotonically reflects sensor disagreement"
-    status: approved
+    status: verified
     description: >
       The ekf-innovation scalar output shall increase monotonically
       with the magnitude of sensor disagreement (residual between
@@ -68,7 +68,7 @@ artifacts:
   - id: SWREQ-FALCON-EKF-P04
     type: sw-req
     title: "EKF-P04: WCET bounded by IMU sample interval"
-    status: approved
+    status: verified
     description: >
       The estimator's tick() function shall complete within the IMU
       sample interval (1 ms at 1 kHz) on the target Cortex-M7

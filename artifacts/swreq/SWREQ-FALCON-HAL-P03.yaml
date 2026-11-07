@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-HAL-P03
     type: sw-req
     title: "HAL-P03 — full 6-DoF position hold through the backend seam (complete hover stack)"
-    status: implemented
+    status: verified
     release: falcon-v1.3.0
     description: >
       The backend-agnostic flight core shall fly to and hold a full NED

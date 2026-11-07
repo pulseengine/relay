@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-DC-P02
     type: sw-req
     title: "DC-P02: DroneCAN ESC control path — NodeStatus decode + esc.RawCommand encode + single-frame TX"
-    status: implemented
+    status: verified
     release: falcon-v1.93.0
     description: >
       Falcon shall command its ESCs and observe node presence over DroneCAN v0,

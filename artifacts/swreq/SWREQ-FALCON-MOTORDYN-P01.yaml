@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MOTORDYN-P01
     type: sw-req
     title: "MOTORDYN-P01 — ADRC ESO absorbs first-order motor lag"
-    status: implemented
+    status: verified
     release: falcon-v1.23.0
     description: >
       The verified inner rate loop shall remain stable under realistic motor

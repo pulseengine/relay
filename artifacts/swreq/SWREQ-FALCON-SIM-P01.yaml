@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SIM-P01
     type: sw-req
     title: "PX4-SITL end-to-end loop — MavlinkBench against a 3D physics sim"
-    status: implemented
+    status: verified
     release: falcon-v0.14.0
     description: >
       The HITL harness shall close the verified relay-lc → relay-sc

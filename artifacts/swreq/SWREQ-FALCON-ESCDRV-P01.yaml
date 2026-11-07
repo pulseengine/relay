@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-ESCDRV-P01
     type: sw-req
     title: "ESCDRV-P01: DShot ESC frames from the verified mixer (saturating, CRC4) + battery threshold monitor"
-    status: implemented
+    status: verified
     release: falcon-v1.44.0
     description: >
       Falcon shall provide the output-side driver bodies (F7): a DShot ESC

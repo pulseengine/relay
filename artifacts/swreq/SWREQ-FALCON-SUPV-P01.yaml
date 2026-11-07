@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SUPV-P01
     type: sw-req
     title: "SUPV-P01 — autonomy supervisor: FSM-driven loop + geofence→RTL ACTUATION + battery failsafe"
-    status: implemented
+    status: verified
     release: falcon-v1.8.0
     description: >
       A flight supervisor shall wrap the verified flight core with the

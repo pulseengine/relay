@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SIM-P02
     type: sw-req
     title: "Simulator landscape analysis + Gazebo-bridge path forward"
-    status: approved
+    status: verified
     release: falcon-v0.15.0
     description: >
       The falcon dossier shall carry an explicit analysis of the

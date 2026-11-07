@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-LINK-P01
     type: sw-req
     title: "LINK-P01 — HITL link backend: same verified core over a framed wire protocol"
-    status: implemented
+    status: verified
     release: falcon-v1.14.0
     description: >
       The flight stack shall provide a hardware-in-the-loop link backend
