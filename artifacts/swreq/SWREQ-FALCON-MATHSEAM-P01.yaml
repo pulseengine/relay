@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MATHSEAM-P01
     type: sw-req
     title: "MATHSEAM-P01 — single qualification boundary for flight-path transcendental math"
-    status: implemented
+    status: verified
     release: falcon-v1.12.0
     description: >
       All transcendental math evaluated in the verified flight path

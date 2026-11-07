@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MAVBRIDGE-P01
     type: sw-req
     title: "MAVBRIDGE-P01 — MAVLink ↔ flight-supervisor bridge (commands + telemetry)"
-    status: implemented
+    status: verified
     release: falcon-v1.28.0
     description: >
       A no_std/no_alloc bridge shall translate between the MAVLink v2 wire

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MIX-P10
     type: sw-req
     title: "MIX-P10 — airframe-agnostic CLOSED LOOP: the verified cascade controls a 6-rotor hexa through the full loop"
-    status: implemented
+    status: verified
     release: falcon-v0.39.0
     description: >
       The "build into any drone" claim shall be substantiated at the

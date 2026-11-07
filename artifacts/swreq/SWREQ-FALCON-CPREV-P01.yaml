@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-CPREV-P01
     type: sw-req
     title: "CPREV-P01: collision-prevention velocity limiter + vision precision-landing controller"
-    status: implemented
+    status: verified
     release: falcon-v1.44.0
     description: >
       Falcon shall provide, on top of the position loop, (a) a collision-

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-POS-P01
     type: sw-req
     title: "POS-P01: Setpoint magnitude bounds"
-    status: implemented
+    status: verified
     release: falcon-v0.1.0
     description: >
       The position controller shall accept setpoints within
@@ -22,7 +22,7 @@ artifacts:
   - id: SWREQ-FALCON-POS-P02
     type: sw-req
     title: "POS-P02: Full cascade Lyapunov stability"
-    status: approved
+    status: verified
     description: >
       The full attitude+position cascade shall preserve
       Lyapunov stability under bounded disturbances. Composes
@@ -42,7 +42,7 @@ artifacts:
   - id: SWREQ-FALCON-POS-P03
     type: sw-req
     title: "POS-P03: Mission setpoint integration via stored-command"
-    status: approved
+    status: verified
     description: >
       Position setpoints arriving via the cFS-DNA stored-command
       stream (SC SCHEDULED_ACTION -> setpoint) shall be type-

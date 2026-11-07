@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-RUNAWAY-P01
     type: sw-req
     title: "RUNAWAY-P01: attitude-runaway flight termination — a sustained unrecoverable tilt cuts the motors"
-    status: implemented
+    status: verified
     release: falcon-v1.100.0
     description: >
       Falcon shall TERMINATE flight (cut the motors) when the estimated tilt

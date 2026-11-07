@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-WINDFS-P01
     type: sw-req
     title: "WINDFS-P01: high-wind failsafe — sustained control saturation while leaning hard commands RTL"
-    status: implemented
+    status: verified
     release: falcon-v1.101.0
     description: >
       Falcon shall command a Return-To-Launch when the control allocation is

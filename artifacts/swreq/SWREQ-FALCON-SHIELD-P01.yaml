@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-SHIELD-P01
     type: sw-req
     title: "SHIELD-P01 — verified simplex shield: an unverified agile policy never leaves the certified safe set"
-    status: implemented
+    status: verified
     release: falcon-v0.34.0
     description: >
       An unverified high-performance (learned/NMPC) attitude policy may

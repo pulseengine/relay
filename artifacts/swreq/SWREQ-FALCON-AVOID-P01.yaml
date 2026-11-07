@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-AVOID-P01
     type: sw-req
     title: "AVOID-P01 — reactive keep-out (no-fly) zone avoidance"
-    status: implemented
+    status: verified
     release: falcon-v1.31.0
     description: >
       The FlightSupervisor shall avoid circular keep-out (no-fly) zones: when a

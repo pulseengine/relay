@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-BAROMAGDRV-P01
     type: sw-req
     title: "BAROMAGDRV-P01: magnetometer (IST8310) + barometer (BMP388) driver bodies decode their register protocol, total on any contents"
-    status: implemented
+    status: verified
     release: falcon-v1.45.0
     description: >
       Falcon shall provide real magnetometer and barometer driver bodies over a

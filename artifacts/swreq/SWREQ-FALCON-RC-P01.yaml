@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-RC-P01
     type: sw-req
     title: "RC-P01: manual flight modes (Stabilized / Acro) map sticks to BOUNDED setpoints"
-    status: implemented
+    status: verified
     release: falcon-v1.54.0
     description: >
       Falcon shall provide the manual pilot flight modes (PX4 Manual/Stabilized/

@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-PATH-P01
     type: sw-req
     title: "PATH-P01 — robustness under injected sensor pathologies through the HAL"
-    status: implemented
+    status: verified
     release: falcon-v1.9.0
     description: >
       The simulation backend shall be able to inject the four sensor

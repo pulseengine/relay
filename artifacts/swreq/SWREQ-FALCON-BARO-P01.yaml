@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-BARO-P01
     type: sw-req
     title: "BARO-P01 — barometer fusion holds altitude through GPS-vertical loss"
-    status: implemented
+    status: verified
     release: falcon-v1.20.0
     description: >
       The flight stack shall fuse a barometric altitude source so altitude

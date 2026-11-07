@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-IMUDRV-P01
     type: sw-req
     title: "IMUDRV-P01 — reference ICM-42688 IMU driver against the hardware seam"
-    status: implemented
+    status: verified
     release: falcon-v1.13.0
     description: >
       A reference IMU driver shall implement the v1.11 ImuDriver seam for a real
