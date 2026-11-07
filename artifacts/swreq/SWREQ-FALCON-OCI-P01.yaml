@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OCI-P01 — publish each verified cascade stage as a signed, lowerable OCI component"
     status: implemented
-    release: falcon-v1.129.0
+    release: falcon-v1.143.0
     description: >
       The verified flight components shall be consumable by the system
       integrator (jess) as individually addressable, signed artifacts — the

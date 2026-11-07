@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "WASMEQ-P03 — a host shall be able to calibrate the published cascade for its airframe, and the calibrated component shall fly the reference plant"
     status: implemented
-    release: falcon-v1.138.0
+    release: falcon-v1.143.0
     description: >
       The published cascade component shall accept its airframe calibration
       from the host, and the calibrated component shall hold a commanded
