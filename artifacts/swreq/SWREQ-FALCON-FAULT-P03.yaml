@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "FAULT-P03 — single-rotor-out FDI robustness under sensor noise"
     status: implemented
-    release: falcon-v1.115.0
+    release: falcon-v1.143.0
     description: >
       *** DEMOTED verified -> implemented 2026-11-04 (maintainer decision,
       code-free verify PR). *** Its only verifier, FV-FALCON-FAULT-004,

@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "REL-P01 — a failed release shall leave NO published release, not a partial one"
     status: implemented
-    release: falcon-v1.133.0
+    release: falcon-v1.143.0
     description: >
       The release workflow shall not publish a GitHub Release until its
       components have been built and guarded, so that a failure leaves nothing
