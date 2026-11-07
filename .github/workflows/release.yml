@@ -350,10 +350,16 @@ jobs:
         id: notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
+          # Was TAG="${GITHUB_REF_NAME}": on a workflow_dispatch re-run that
+          # is the dispatching BRANCH ("main"), not the tag. falcon-v1.141.0
+          # shipped "Release main" with no hand-written notes and
+          # `rivet release notes main` -> UNAVAILABLE. Resolve the tag the
+          # same way every other step in this workflow does.
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           STEM="${TAG#falcon-}"
           NOTES_FILE=".github/release-notes/${STEM}.md"
           OUT="$RUNNER_TEMP/release-notes.md"
