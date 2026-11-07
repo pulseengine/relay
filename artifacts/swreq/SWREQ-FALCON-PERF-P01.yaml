@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "PERF-P01 — the flight cascade has a measured per-cycle baseline, and a regression guard on it"
     status: implemented
-    release: falcon-v1.135.0
+    release: falcon-v1.143.0
     description: >
       The falcon control cascade shall have a recorded per-cycle timing
       baseline, per stage and for the full tick, guarded against regression.

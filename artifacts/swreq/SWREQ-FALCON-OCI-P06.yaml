@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OCI-P06 — published components carry a TUNED shadow stack, not the 1 MB wasm-ld default"
     status: implemented
-    release: falcon-v1.134.0
+    release: falcon-v1.143.0
     description: >
       Every published cascade component shall reserve a shadow stack sized to
       its measured need, so a fused image's stack region fits the target's RAM.
