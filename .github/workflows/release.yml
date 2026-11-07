@@ -85,8 +85,13 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
             cross: true
+          # macos-14 was retired by GitHub ("configuration
+          # 'macos-14-arm64-us-default' is not supported"); it cancelled the
+          # falcon-v1.141.0 run. Cross-build x86_64 on the Apple Silicon
+          # image instead -- Apple's toolchain targets x86_64 natively, so
+          # this does not depend on any Intel image surviving.
           - target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-latest
             archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
