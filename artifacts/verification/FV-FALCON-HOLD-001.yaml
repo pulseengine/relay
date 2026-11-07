@@ -194,8 +194,8 @@ artifacts:
         # Assert the policy that exists, AND that the removed one has not
         # crept back.
         - run: "grep -q 'if !self.in_flight {' crates/falcon-core/plain/src/lib.rs"
-        - run: "! grep -q 'ticks_since_aiding > self.gravity_hold_ticks' crates/falcon-core/plain/src/lib.rs"
-        - run: "! grep -q 'gravity_hold_ticks:' crates/falcon-core/plain/src/lib.rs"
+        - run: "! grep -rq 'ticks_since_aiding > self.gravity_hold_ticks' crates/falcon-core/plain/src/"
+        - run: "! grep -rq 'gravity_hold_ticks:' crates/falcon-core/plain/src/"
         # The gz verdict measures the horizontal half, and the ladder keeps its number.
         - run: "grep -q 'final_horiz < 1.0 && peak_horiz < 1.0' examples/falcon-sitl-gz/src/main.rs"
         - run: "grep -qF -- '|| RC=$?' .github/workflows/soak.yml"

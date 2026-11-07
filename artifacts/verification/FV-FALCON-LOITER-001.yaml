@@ -38,10 +38,10 @@ artifacts:
         - run: cargo test -p falcon-core --test loiter_hold_latch hold_point_latch_rules_across_mode_transitions
         - run: cargo test -p falcon-core --test mission_pause_brake b1_mission_pause_brakes_then_holds_2ms
         - run: cargo test -p falcon-core --test mission_pause_brake b2_mission_pause_brakes_then_holds_5ms
-        - run: "grep -q 'pub const HOLD_BRAKE_ENTRY_MS: f32 = 0.3;' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'pub const HOLD_REST_MS: f32 = 0.1;' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'pub const HOLD_REST_S: f32 = 3.0;' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'pub const HOLD_BRAKE_MAX_S: f32 = 30.0;' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const HOLD_BRAKE_ENTRY_MS: f32 = 0.3;' crates/falcon-core/plain/src/supervisor.rs"
+        - run: "grep -q 'pub const HOLD_REST_MS: f32 = 0.1;' crates/falcon-core/plain/src/supervisor.rs"
+        - run: "grep -q 'pub const HOLD_REST_S: f32 = 3.0;' crates/falcon-core/plain/src/supervisor.rs"
+        - run: "grep -q 'pub const HOLD_BRAKE_MAX_S: f32 = 30.0;' crates/falcon-core/plain/src/supervisor.rs"
     links:
       - type: verifies
         target: SWREQ-FALCON-LOITER-P01

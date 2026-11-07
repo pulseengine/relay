@@ -75,7 +75,7 @@ artifacts:
         # ...and the hardware driver default likewise.
         - run: "grep -A1 'fn voltage(&mut self) -> Option<f32>' crates/falcon-core/plain/src/lib.rs | grep -q 'None'"
         # Absence must reach the pre-arm row, not stop at the estimator.
-        - run: "grep -q 'self.batt_present && !(self.batt_state.low' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'self.batt_present && !(self.batt_state.low' crates/falcon-core/plain/src/supervisor.rs"
     links:
       - type: verifies
         target: SWREQ-FALCON-ORPHAN-P01

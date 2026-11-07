@@ -64,7 +64,7 @@ fn horiz(b: &SimBackend, at: [f32; 2]) -> f32 {
 }
 
 /// Calibrated, so a refusal to arm cannot be CalibrationPresent (the same
-/// fixture the supervised rotor-out tests in `plain/src/lib.rs` use).
+/// fixture the supervised rotor-out tests in `plain/src/tests.rs` use).
 fn cal() -> falcon_core::relay_calib::CalParams {
     falcon_core::relay_calib::CalParams {
         gyro_bias: [0.001, 0.0, 0.0],

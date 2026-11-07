@@ -67,7 +67,9 @@ impl Tree {
     fn has_fn_containing(&self, pkg: &str, needle: &str) -> bool {
         let Some(dir) = self.packages.get(pkg) else { return false };
         // cargo's filter matches the test PATH, so a module name matches too.
-        let pat = Regex::new(&format!(r"\b(?:fn|mod)\s+\w*{}\w*\s*[<({{]", regex::escape(needle))).expect("escaped regex");
+        // `mod x;` (an out-of-line module, e.g. after a test module moves to
+        // its own file) is as valid a filter target as `mod x {`.
+        let pat = Regex::new(&format!(r"\b(?:fn\s+\w*{n}\w*\s*[<({{]|mod\s+\w*{n}\w*\s*[{{;])", n = regex::escape(needle))).expect("escaped regex");
         walkdir::WalkDir::new(dir)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -255,7 +257,9 @@ fn packages(root: &Path) -> Result<BTreeMap<String, PathBuf>> {
     let mut out = BTreeMap::new();
     for e in walkdir::WalkDir::new(root).into_iter().filter_entry(|e| {
         let n = e.file_name().to_string_lossy();
-        n != "target" && n != ".git" && n != "node_modules"
+        // `.claude` holds agent worktrees: full copies of the repo whose
+        // stale crates would otherwise overwrite the real package paths.
+        n != "target" && n != ".git" && n != "node_modules" && n != ".claude"
     }) {
         let e = e?;
         if e.file_name() != "Cargo.toml" {
@@ -431,6 +435,9 @@ mod tests {
         assert!(check_step("tool --crate <crate>", &t).iter().any(|m| m.contains("placeholder")));
         std::fs::write(t.root.join("crates/demo/src/extra.rs"), "mod flow_tests {\n}\n").unwrap();
         assert!(check_step("cargo test -p demo flow_tests", &t).is_empty(), "a module name is a valid filter");
+        std::fs::write(t.root.join("crates/demo/src/extra.rs"), "#[cfg(test)]\nmod split_tests;\n").unwrap();
+        assert!(check_step("cargo test -p demo split_tests", &t).is_empty(), "an out-of-line `mod x;` is a valid filter");
+        assert!(check_step("cargo test -p demo no_such_mod", &t).iter().any(|m| m.contains("matches no fn")), "still fails on a name that is not there");
     }
 
     #[test]

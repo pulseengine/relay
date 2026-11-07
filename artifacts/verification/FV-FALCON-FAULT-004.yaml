@@ -261,13 +261,13 @@ artifacts:
         - run: cargo test -p falcon-core --lib an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check
         - run: cargo test -p falcon-core --lib a_late_frame_rescales_the_in_progress_counters
         - run: cargo test -p falcon-core --test fdi_spinup_guard known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne
-        - run: "grep -q 'pub const FDI_STALL_RPM_FRAC: f32 = 0.05;' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'pub const FDI_STALL_CMD_MIN: f32 = 0.20;' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'pub const FDI_STALL_WINDOW_S: f32 = 0.1;' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'pub const FDI_SPINUP_GUARD_S: f32 = 0.3;' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'pub const FDI_ROTOR_LAG_TAU_S: f32 = 0.05;' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'resid\\[i\\] = (self.fdi_lag_model\\[i\\] - achieved).abs();' crates/falcon-core/plain/src/lib.rs"
-        - run: "grep -q 'let common = resid\\[0\\].min(resid\\[1\\]).min(resid\\[2\\]).min(resid\\[3\\]);' crates/falcon-core/plain/src/lib.rs"
+        - run: "grep -q 'pub const FDI_STALL_RPM_FRAC: f32 = 0.05;' crates/falcon-core/plain/src/fdi.rs"
+        - run: "grep -q 'pub const FDI_STALL_CMD_MIN: f32 = 0.20;' crates/falcon-core/plain/src/fdi.rs"
+        - run: "grep -q 'pub const FDI_STALL_WINDOW_S: f32 = 0.1;' crates/falcon-core/plain/src/fdi.rs"
+        - run: "grep -q 'pub const FDI_SPINUP_GUARD_S: f32 = 0.3;' crates/falcon-core/plain/src/fdi.rs"
+        - run: "grep -q 'pub const FDI_ROTOR_LAG_TAU_S: f32 = 0.05;' crates/falcon-core/plain/src/fdi.rs"
+        - run: "grep -q 'resid\\[i\\] = (self.fdi_lag_model\\[i\\] - achieved).abs();' crates/falcon-core/plain/src/fdi.rs"
+        - run: "grep -q 'let common = resid\\[0\\].min(resid\\[1\\]).min(resid\\[2\\]).min(resid\\[3\\]);' crates/falcon-core/plain/src/fdi.rs"
     links:
       - type: verifies
         target: SWREQ-FALCON-FAULT-P03
