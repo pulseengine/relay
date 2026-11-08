@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "detectors": [
+    {
+      "command": ["scripts/kani-scope.sh"],
+      "outputs": ["run"],
+      "controls": [
+        "crates/relay-mix-quad/plain/src/lib.rs",
+        "examples/falcon-sitl-gz/src/main.rs",
+        "Cargo.lock",
+        "rust-toolchain.toml"
+      ]
+    }
+  ]
+}

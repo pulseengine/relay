@@ -85,51 +85,11 @@ jobs:
           # point of the queue.
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         shell: bash
-        run: |
-          # QUEUE-ONLY: a pull request never runs the matrix — the merge queue
-          # does, on the commit that will land. Decided before any diffing so no
-          # base-sha corner case can turn it back into a PR-time sweep.
-          if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
-            echo "pull_request — Kani DEFERRED to the merge queue (merge_group runs the matrix)"
-            echo "run=false" >>"$GITHUB_OUTPUT"
-            echo "reason=deferred" >>"$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Three ways a base can be unusable, each of which must SWEEP rather
-          # than skip. Collapsing them into one `-z` test is what made the push
-          # case silently unconditional.
-          case "${BASE_SHA:-}" in
-            "")
-              echo "no base sha (manual dispatch) — run the full matrix (backstop)"
-              echo "run=true" >>"$GITHUB_OUTPUT"; exit 0 ;;
-            0000000000000000000000000000000000000000)
-              # Branch creation, or a push whose predecessor is unknown.
-              echo "all-zeros base (branch created / no predecessor) — full matrix (backstop)"
-              echo "run=true" >>"$GITHUB_OUTPUT"; exit 0 ;;
-          esac
-          # `fetch-depth: 0` is set above, but a force-push can leave `before`
-          # pointing at a commit no longer reachable. Never diff against it.
-          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            echo "base $BASE_SHA is not in this history (force-push?) — full matrix (backstop)"
-            echo "run=true" >>"$GITHUB_OUTPUT"; exit 0
-          fi
-          echo "scoping against base $BASE_SHA (event: ${GITHUB_EVENT_NAME:-?})"
-          CHANGED=$(git diff --name-only "$BASE_SHA"...HEAD || echo "__diff_failed__")
-          if [ "$CHANGED" = "__diff_failed__" ]; then
-            echo "diff failed — fail-safe to run"
-            echo "run=true" >>"$GITHUB_OUTPUT"; exit 0
-          fi
-          # Kani-relevant: any crate source (all 38 harnesses live under
-          # crates/<engine>/plain/), workspace deps, or this workflow.
-          if printf '%s\n' "$CHANGED" | grep -qE '^(crates/|Cargo\.toml|Cargo\.lock|\.github/workflows/kani\.yml)'; then
-            echo "Kani-relevant files changed — run the matrix"
-            echo "run=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "no Kani-relevant files changed — SKIP the matrix (kani-gate reports pass)"
-            printf 'changed:\n%s\n' "$CHANGED"
-            echo "run=false" >>"$GITHUB_OUTPUT"
-            echo "reason=out-of-scope" >>"$GITHUB_OUTPUT"
-          fi
+        # The detector lives in a script so temper's gate probe can run it with
+        # negative controls (.github/gate-probe.json, temper#86). It FAILS
+        # CLOSED: the matrix is skipped only when every changed path is known
+        # Kani-irrelevant. See the script for the classes.
+        run: scripts/kani-scope.sh
 
   kani:
     name: Kani (${{ matrix.engine }})

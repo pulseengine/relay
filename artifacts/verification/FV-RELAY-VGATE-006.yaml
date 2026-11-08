@@ -133,10 +133,17 @@ artifacts:
         # (#600) adds the deferral and the recorded skip reason; the replay below
         # asserts both, and fails 3 of 9 cases against the pre-#600 workflow.
         - run: "grep -qF '${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}' .github/workflows/kani.yml"
-        - run: "grep -q 'reason=deferred' .github/workflows/kani.yml"
-        - run: "grep -q '0000000000000000000000000000000000000000' .github/workflows/kani.yml"
-        - run: "grep -q 'git cat-file -e' .github/workflows/kani.yml"
-        - run: "grep -q 'no Kani-relevant files changed' .github/workflows/kani.yml"
+        - run: "grep -q 'reason=deferred' scripts/kani-scope.sh"
+        - run: "grep -q '0000000000000000000000000000000000000000' scripts/kani-scope.sh"
+        - run: "grep -q 'git cat-file -e' scripts/kani-scope.sh"
+        - run: "grep -q 'no Kani-relevant files changed' scripts/kani-scope.sh"
+        # Since temper#86 the detector body is scripts/kani-scope.sh (the step
+        # runs it), so the four greps above read the script; the workflow
+        # still carries the BASE_SHA expression. The replay runs the script
+        # the step names and adds the fail-closed cases (docs/*.rs,
+        # supply-chain/, a new top-level dir, a crate-named doc), 4 of which
+        # fail against the pre-#86 allowlist.
+        - run: "grep -q 'run: scripts/kani-scope.sh' .github/workflows/kani.yml"
         - run: "./scripts/kani-scope-replay.rs"
     links:
       - type: verifies
