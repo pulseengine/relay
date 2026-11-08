@@ -1076,7 +1076,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         // `rebuild_permitted` refuses a rebuild over a latched pack. A battery
         // failsafe is therefore TERMINAL until the process restarts; a fresh
         // pack does not clear it (tests/battery_failsafe_terminal.rs). An
-        // explicit pack-replaced reset is planned for v1.142, not built here.
+        // explicit pack-replaced reset is planned for v1.143 (#650), not built here.
         // High wind is deliberately NOT blocked — it is
         // the one trigger with no ground-observable signal (the detector needs
         // airborne saturation and wind_count is zeroed when !is_airborne), so a

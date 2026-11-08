@@ -186,8 +186,9 @@ interface types {
     /// cumulative drift). A host whose clock is coarse or jittery (a
     /// timestamp quantised to ms, a scheduler that alternates long and short
     /// ticks) must send its NOMINAL period, not the per-frame measurement.
-    /// KNOWN LIMIT A (review of v1.140; fix scheduled for falcon-v1.142.0,
-    /// #638): a `dt-s` that keeps crossing that band (alternating long and
+    /// KNOWN LIMIT A (review of v1.140; fix DEFERRED to falcon-v1.143.0,
+    /// #638, after three v1.142 designs were rejected on measurement; see the
+    /// end of this note): a `dt-s` that keeps crossing that band (alternating long and
     /// short periods) re-syncs the core on every crossing frame, and each
     /// re-sync rebuilds the gyro low-pass and the notch bank with ZEROED
     /// state. Measured on SimBackend:
@@ -197,7 +198,14 @@ interface types {
     /// smoothing tried for v1.141 regressed another case (early outlier
     /// frames, ringing near Nyquist, aliased rotor vibration, a minority of
     /// late frames under vibration falsely isolating a rotor), so v1.141
-    /// narrows the contract instead of changing the core.
+    /// narrows the contract instead of changing the core. v1.142 tried three
+    /// more and rejected each against main: freezing the filter design at
+    /// arm, and two guards that held it at the median of 16 frame periods
+    /// while the band kept being crossed. Each made a healthy rotor isolate
+    /// under rotor vibration where v1.141 does not (up to 48 of 48 seeds). A
+    /// filter whose design is held cannot null vibration sampled at uneven
+    /// intervals. The contract above stands for v1.142; v1.143 tries a
+    /// per-frame redesign that keeps the filter state.
     ///
     /// The aiding measurements — v0.7 took the IMU alone, so position was
     /// observable only by dead reckoning. The flight core fuses GNSS, the

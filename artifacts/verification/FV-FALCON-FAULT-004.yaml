@@ -116,8 +116,8 @@ artifacts:
            above 20 % would be isolated as dead on a healthy spin-up. Only a
            FULLY stalled rotor is caught early.
            KNOWN LIMIT (c) OF THE STALL CHECK (review of v1.140, defect C;
-           not item 4's airborne-guard "(c)"; maintainer: pin and disclose,
-           fix in v1.142). The check discards a window while two or more
+           not item 4's airborne-guard "(c)"; maintainer: pin and disclose;
+           fix moved from v1.142 to v1.143 by the 2026-11-07 re-plan). The check discards a window while two or more
            rotors are stalled (fdi_stall_common), so a dead rotor whose
            HEALTHY sibling's RPM telemetry reads 0 past the window (an
            unpopulated bus slot, a dead telemetry wire: a DOUBLE fault) is
@@ -130,7 +130,7 @@ artifacts:
            the residual path (measured: on the guard's tick, 0.3 s, at
            0.26 rad, peak 1.02 rad, supervisor in Land). Pinned by
            known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne
-           in the fdi_spinup_guard step; when v1.142 disambiguates
+           in the fdi_spinup_guard step; when a later release disambiguates
            co-stalled rotors by body-rate / attitude response that test
            fails and this limit is retired.
            KNOWN LIMIT (d) OF THE ROTOR-OUT FDI: LANDING-ENTRY FALSE
@@ -160,8 +160,8 @@ artifacts:
            50 ms (= FDI_ROTOR_LAG_TAU_S) 0/288 over the full grid.
            Bounded therefore by a rotor faster than the FDI's lag
            model; real ESC response is unmeasured (BOM ESC data is the
-           open item already named for limit (a)). Fix in
-           falcon-v1.142.0 (#638).
+           open item already named for limit (a)). Fix moved to
+           falcon-v1.143.0 (#638; 2026-11-07 re-plan).
            KNOWN LIMIT A (review of v1.140, defect A; maintainer
            2026-11-05: defer to v1.142, narrow the host contract).
            Every count in items 4 and 5 is at the RESYNCED rate, and
@@ -177,8 +177,14 @@ artifacts:
            fix/review140-a-filter-rate under review140-a-evidence/)
            regressed early outlier frames, near-Nyquist ringing,
            aliased rotor vibration, or falsely isolated a rotor under
-           a minority of late frames with vibration. Fix in
-           falcon-v1.142.0 (#638).
+           a minority of late frames with vibration. DEFERRED to
+           falcon-v1.143.0 (maintainer, 2026-11-08) after three more
+           v1.142 designs were rejected against main: freeze-at-arm (24/24
+           healthy-rotor isolations, 10% late frames + vibration, main
+           0/24), a 12-of-16 alternation guard (25/48 with 40% late frames,
+           main 1/48), and a 16-of-16 guard (48/48 with alternation around
+           4.8-6.0 ms + vibration, main 0/48). Probes and drivers: branch
+           evidence/638-limit-a-v1142, review140-a-evidence-v1142/.
 
       STATUS DEMOTED verified -> implemented by the #609 finding-17 change
       (#633), and its evidence changed again with finding 18 (#634).
