@@ -202,6 +202,7 @@ fn diff_state(a: &FlightState, b: &FlightState) -> Option<String> {
         mode,
         failsafe,
         valid,
+        prearm_failing,
         tick_tail,
     } = *a;
     let f = |name: &str, x: f32, y: f32| {
@@ -240,6 +241,7 @@ fn diff_state(a: &FlightState, b: &FlightState) -> Option<String> {
         .or(u("mode", mode as u32, b.mode as u32))
         .or(u("failsafe", failsafe, b.failsafe))
         .or(u("valid", valid, b.valid))
+        .or(u("prearm-failing", prearm_failing, b.prearm_failing))
         .or(u("tick-tail", tick_tail, b.tick_tail))
 }
 

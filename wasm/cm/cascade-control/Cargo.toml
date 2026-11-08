@@ -1,7 +1,7 @@
 # Standalone cargo-component crate — part of the cascade-split deployment (#575).
 [package]
 name = "falcon-cascade-control-cm"
-description = "The falcon-core FLIGHT-CONTROL partition (CascadePartition — geometric SE(3) attitude, ADRC, mixer, rotor-out FDI, position and altitude loops) as one WebAssembly Component, WIT pulseengine:falcon-cascade@0.12.0 flight-control-component. One half of the cascade-split deployment (#575); the supervisor lives in cascade-split, not here."
+description = "The falcon-core FLIGHT-CONTROL partition (CascadePartition — geometric SE(3) attitude, ADRC, mixer, rotor-out FDI, position and altitude loops) as one WebAssembly Component, WIT pulseengine:falcon-cascade@0.13.0 flight-control-component. One half of the cascade-split deployment (#575); the supervisor lives in cascade-split, not here."
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"

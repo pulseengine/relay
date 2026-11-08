@@ -1,4 +1,4 @@
-package pulseengine:falcon-cascade@0.12.0;
+package pulseengine:falcon-cascade@0.13.0;
 
 /// Falcon control cascade — Component Model edition.
 ///
@@ -90,9 +90,11 @@ interface types {
         /// MEASURED, NOT ASSERTED: this byte lands at offset 73, in padding that
         /// already existed between `failed-rotor` (72) and the u32s, so MODE
         /// COSTS ZERO BYTES. `failsafe` below then aligns to 76 and pushes
-        /// `valid` to 80 and `tick-tail` to 84 — the record grows 84 -> 88, all
-        /// of it `failsafe`. The offsets are asserted against the GENERATED
-        /// bindings in `wasm/cm/cascade/tests/`, not trusted from this comment.
+        /// `valid` to 80 and `tick-tail` to 84 — the record grew 84 -> 88 at
+        /// @0.12.0, all of it `failsafe`; @0.13.0's `prearm-failing` then
+        /// takes 84 and moves `tick-tail` to 88 (92 B). These are
+        /// canonical-ABI offsets; the transport binding's `state` frame is
+        /// PACKED and differs after byte 73 (docs/TRANSPORT-BINDING.md).
         ///
         /// The numbering is `relay_fsm::Mode`'s IMPLICIT discriminant order and
         /// that enum carries no `#[repr]`, so a reordering upstream would
@@ -119,9 +121,32 @@ interface types {
         failsafe: u32,
         /// Which fields above are meaningful this tick. Bit 0 attitude,
         /// 1 position, 2 velocity, 3 rates, 4 gyro bias, 5 innovation,
-        /// 6 failed-rotor, 7 mode, 8 failsafe. A clear bit means NOT MEASURED,
-        /// never "zero".
+        /// 6 failed-rotor, 7 mode, 8 failsafe, 9 prearm-failing (@0.13.0).
+        /// A clear bit means NOT MEASURED, never "zero".
         valid: u32,
+        /// THE PRE-ARM ROWS THAT CURRENTLY FAIL (@0.13.0, TRANSPORT-P02) — a
+        /// bitmask, bit = `relay_preflight::CheckId as usize` (21 rows today:
+        /// bit 2 `calibration-present`, 4 `battery-ok`, 5
+        /// `failsafe-configured`, ...; docs/TRANSPORT-BINDING.md §2a has the
+        /// table). A bit is set iff the row is REQUIRED and does not pass —
+        /// the predicate `pilot.command(arm)` is gated on, read off the same
+        /// table (`FlightSupervisor::prearm_failing_mask`), so 0 means the
+        /// table would allow an arm. The row an arm is refused ON is the
+        /// first set bit in GATE order (`CheckId::ALL`), not necessarily the
+        /// lowest bit.
+        ///
+        /// `failsafe` bit 7 `arm-blocked` says THAT an arm would be refused
+        /// (and only while disarmed); this says WHY, in every mode. Without it
+        /// a host sees the refusal and cannot tell a missing calibration from
+        /// a flat pack from an unconfigured failsafe.
+        ///
+        /// WHERE, AND WHY THERE: after `valid`, before `tick-tail` — inside
+        /// the seqlock pair (written after the head, before the tail), and
+        /// the one position that leaves every pre-existing field's offset
+        /// unchanged. Canonical ABI: `tick-tail` moves 84 -> 88 and the record
+        /// grows 88 -> 92 (`failsafe` 76, `valid` 80, this 84). Latched with
+        /// the rest at the end of `step`, so it is as of the last tick.
+        prearm-failing: u32,
         /// Seqlock tail, written last. See `tick-head`.
         tick-tail: u32,
     }

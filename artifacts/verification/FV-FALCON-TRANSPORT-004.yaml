@@ -101,7 +101,9 @@ artifacts:
       method: test
       level: integration
       steps:
-        - run: "grep -q 'pub const VERSION: u8 = 2;' crates/falcon-hitl/src/wire.rs"
+        # Binding v3 (TRANSPORT-P02) bumped VERSION once v2 had shipped in
+        # falcon-v1.141.0; every v2 payload this artifact checks is unchanged.
+        - run: "grep -q 'pub const VERSION: u8 = 3;' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'pub const SENSOR_PAYLOAD_LEN: usize = 81;' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'pub const SUPERVISOR_CONFIG_PAYLOAD_LEN: usize = 24;' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'pub const CALIBRATION_PAYLOAD_LEN: usize = 72;' crates/falcon-hitl/src/wire.rs"
@@ -112,7 +114,7 @@ artifacts:
         - run: "grep -q 'pub mag_offdiag: \\[f32; 3\\],' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'pub const COMMAND_PAYLOAD_LEN: usize = 3;' crates/falcon-hitl/src/wire.rs"
         # The doc bumped with the code.
-        - run: "grep -q 'transport binding, v2' docs/TRANSPORT-BINDING.md"
+        - run: "grep -q 'transport binding, v3' docs/TRANSPORT-BINDING.md"
         # v2 amended pre-release (#614): the doc says the version stays 2.
         - run: "grep -q 'and .version. STAYS 2' docs/TRANSPORT-BINDING.md"
         - run: "grep -q '<!-- wire-layout: sensor 81 -->' docs/TRANSPORT-BINDING.md"

@@ -14,9 +14,11 @@
 //! plus a plant (`SimBackend` with a battery). The component side is
 //! [`Endpoint`], below: a native `FlightSupervisor` behind `wire::decode_frame`.
 //! They exchange `Vec<u8>` and nothing else. The test READS the endpoint's
-//! supervisor to NAME the pre-arm row that refused — the binding has no state
-//! frame, which the binding document lists as a gap — but the host never
-//! touches it, and the primary verdict is the plant's own altitude.
+//! supervisor to NAME the pre-arm row that refused — the binding had no state
+//! frame until v3 — but the host never touches it, and the primary verdict is
+//! the plant's own altitude. Since binding v3 (TRANSPORT-P02) the host ALSO
+//! sees the refusal itself, through `state-request` -> `state`: see the
+//! `..._through_state...` tests at the end.
 //!
 //! WHAT THIS IS NOT. It is not the published wasm component, which has no byte
 //! endpoint. But it runs the SAME lifecycle rules: [`Endpoint`] is a
@@ -166,6 +168,11 @@ struct Endpoint {
     /// What every `step` delivers as the frame target: [`NO_TARGET`], except
     /// in the negative control.
     target: [f32; 3],
+    /// Binding v3 (TRANSPORT-P02): the state the last `step` latched, which a
+    /// `state-request` is answered from — what `observer.read-state` returns
+    /// in the published component (latched at the end of `step`). `None`
+    /// until the first tick.
+    published: Option<wire::WireFlightState>,
     // No outbound counter: every reply echoes the seq of the frame it
     // answers (docs/TRANSPORT-BINDING.md §3, the echo rule).
 }
@@ -192,6 +199,7 @@ impl Endpoint {
             seam: SupervisorHost::new(),
             inbound: SeqTracker::new(),
             target: NO_TARGET,
+            published: None,
         }
     }
 
@@ -291,14 +299,65 @@ impl Endpoint {
                     motors: [0.0; 4],
                 };
                 self.seam.step(self.target, &mut b);
+                let tick = self.published.map(|p| p.tick_tail.wrapping_add(1));
+                let gyro = [b.f.imu[3], b.f.imu[4], b.f.imu[5]];
+                let st = latch_state(self.supervisor(), tick.unwrap_or(0), gyro);
+                self.published = Some(st);
                 // THE ECHO RULE: the reply carries the seq of the sensor
                 // frame it answers, never a counter of the endpoint's own.
                 let mut out = [0u8; falcon_hitl::MOTORS_FRAME_LEN];
                 wire::encode_motors(&mut out, h.seq, b.motors);
                 Some(out.to_vec())
             }
-            MsgType::Ack | MsgType::Motors => None,
+            // Binding v3: answered from the latched state, header seq = the
+            // request's (the echo rule). Side-effect free, so a duplicate is
+            // simply answered again.
+            MsgType::StateRequest => {
+                wire::decode_state_request(payload).unwrap();
+                let mut out = [0u8; falcon_hitl::STATE_FRAME_LEN];
+                wire::encode_state(&mut out, h.seq, &self.state_now());
+                Some(out.to_vec())
+            }
+            MsgType::Ack | MsgType::Motors | MsgType::State => None,
         }
+    }
+
+    /// The `state` payload: the latched state, or — before any tick — the
+    /// component's "nothing measured" record (`valid` 0, `mode` 0 with its
+    /// valid bit CLEAR, `prearm-failing` 0 with bit 9 clear).
+    fn state_now(&self) -> wire::WireFlightState {
+        self.published.unwrap_or(wire::WireFlightState {
+            q: [1.0, 0.0, 0.0, 0.0],
+            failed_rotor: 0xff,
+            ..Default::default()
+        })
+    }
+}
+
+/// `valid` bits, as the published component sets them after a tick: bits
+/// 0..=8 (attitude ... failsafe) and, binding v3, bit 9 `prearm-failing`.
+const VALID_TICKED: u32 = 0x3ff;
+const V_PREARM: u32 = 1 << 9;
+
+/// What the component latches for `observer.read-state` at the end of a
+/// `step`, field for field (wasm/cm/cascade `PublishedState`), plus v3's
+/// `prearm-failing` from the supervisor's own failing-row mask.
+fn latch_state(sup: &FlightSupervisor, tick: u32, gyro: [f32; 3]) -> wire::WireFlightState {
+    let ns = sup.state();
+    wire::WireFlightState {
+        tick_head: tick,
+        q: ns.q,
+        pos: ns.p,
+        vel: ns.v,
+        w: gyro,
+        bg: ns.b_g,
+        innovation: 0.0,
+        failed_rotor: sup.core().failed_motor().map(|i| i as u8).unwrap_or(0xff),
+        mode: sup.mode() as u8,
+        failsafe: sup.failsafe_flags(),
+        valid: VALID_TICKED,
+        prearm_failing: sup.prearm_failing_mask(),
+        tick_tail: tick,
     }
 }
 
@@ -944,4 +1003,186 @@ fn request_mission_with_the_old_constant_descends_toward_the_ground() {
         end_d > start_d + 1.0,
         "the old constant must be seen descending (pos-d {start_d} -> {end_d})"
     );
+}
+
+// ── binding v3: a refused arm, seen THROUGH the binding (TRANSPORT-P02) ──────
+
+/// `state-request` -> `state`, checked for the echo rule, through the
+/// reference host. Returns what the HOST decoded — never the endpoint's
+/// supervisor.
+fn read_state(host: &mut BindingHost, ep: &mut Endpoint) -> wire::WireFlightState {
+    let rq = host.state_request().expect("nothing outstanding");
+    let (req, _) = wire::decode_frame(&rq).unwrap();
+    assert_eq!(req.msg, MsgType::StateRequest);
+    let reply = ep.handle(&rq).expect("a state-request is answered");
+    let (h, _) = wire::decode_frame(&reply).unwrap();
+    assert_eq!(h.msg, MsgType::State);
+    assert_eq!(h.seq, req.seq, "the state reply echoes the request's seq");
+    match host.on_reply(&reply) {
+        Ok(HostReply::State { seq, state }) => {
+            assert_eq!(seq, req.seq);
+            assert_eq!(state.tick_head, state.tick_tail, "coherent seqlock pair");
+            state
+        }
+        other => panic!("expected State, got {other:?}"),
+    }
+}
+
+/// The row a refused arm was refused ON, as a binding-only host derives it
+/// from `prearm-failing`: the first set bit in GATE order (`CheckId::ALL`),
+/// bit index `CheckId as usize`.
+fn deciding_row(mask: u32) -> Option<CheckId> {
+    CheckId::ALL
+        .iter()
+        .copied()
+        .find(|&id| mask & (1 << (id as usize)) != 0)
+}
+
+/// Steps 1-5 of `fly` (config, supervisor-config, calibration — each when
+/// `r` says — warm-up, arm), then ONE more tick so the published state is
+/// the post-`arm` one (`state` is as of the last tick, like `read-state`).
+fn arm_and_tick(r: Run) -> (BindingHost, Endpoint, Plant) {
+    let level = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut plant = Plant {
+        sim: SimBackend::new(level, DT),
+        battery_v: r.battery.then_some(16.4),
+        on_ground: true,
+    };
+    let mut host = BindingHost::new();
+    let mut ep = Endpoint::new();
+    // Before any tick: nothing measured — mode 0 with its valid bit CLEAR,
+    // and a 0 mask that must NOT read as "would arm" (bit 9 clear).
+    let s0 = read_state(&mut host, &mut ep);
+    assert_eq!(s0.valid, 0, "no tick has run: nothing is measured");
+    assert_eq!(s0.valid & V_PREARM, 0);
+    let f = host
+        .configure(&WireVehicleConfig {
+            hover_thrust: 0.5,
+            loop_rate_hz: 1.0 / DT,
+            pos_var: 0.01,
+            process_floor_vel: 0.0,
+            process_floor_pos: 0.0,
+            altitude_kp: 0.05,
+            altitude_kd: 0.30,
+            altitude_ki: 0.0,
+            position_ki: 0.02,
+        })
+        .unwrap();
+    control(&mut host, &mut ep, &f);
+    if r.supervisor_config {
+        let f = host
+            .configure_supervisor(&WireSupervisorConfig {
+                home: [0.0, 0.0, 0.0],
+                fence_radius: 50.0,
+                cruise_alt: 2.0,
+                low_batt_v: 14.0,
+            })
+            .unwrap();
+        control(&mut host, &mut ep, &f);
+    }
+    if r.calibration {
+        let f = host
+            .configure_calibration(&WireCalibration {
+                gyro_bias: [0.001, 0.0, 0.0],
+                accel_bias: [0.0; 3],
+                accel_scale: [1.0; 3],
+                mag_offset: [0.0; 3],
+                mag_scale: [1.0; 3],
+                mag_offdiag: [0.0; 3],
+            })
+            .unwrap();
+        control(&mut host, &mut ep, &f);
+    }
+    for _ in 0..WARM_TICKS {
+        tick(&mut host, &mut ep, &mut plant);
+    }
+    pilot(&mut host, &mut ep, WirePilotCommand::Arm);
+    tick(&mut host, &mut ep, &mut plant);
+    (host, ep, plant)
+}
+
+/// TRANSPORT-P02's acceptance, the refusal half: withhold the `calibration`
+/// frame and a binding-only host SEES the refused arm in `state` — mode
+/// `disarmed`, `failsafe` bit 7 `arm-blocked`, and `prearm-failing` naming
+/// `CalibrationPresent` as the deciding row — without reading the motors and
+/// without touching the endpoint's supervisor. (The supervisor is read
+/// AFTERWARDS only to cross-check that the frame told the truth.)
+#[test]
+fn a_refused_arm_is_seen_through_state_with_the_deciding_row_named() {
+    let (mut host, mut ep, _) = arm_and_tick(Run {
+        supervisor_config: true,
+        calibration: false,
+        battery: true,
+    });
+    let s = read_state(&mut host, &mut ep);
+    eprintln!(
+        "refused arm via state: mode {} failsafe {:#x} prearm-failing {:#x} valid {:#x}",
+        s.mode, s.failsafe, s.prearm_failing, s.valid
+    );
+    assert_eq!(
+        s.valid, VALID_TICKED,
+        "every field measured, prearm bit 9 too"
+    );
+    assert_eq!(s.mode, Mode::Disarmed as u8, "the arm was refused");
+    assert_ne!(
+        s.failsafe & falcon_core::failsafe_flags::ARM_BLOCKED,
+        0,
+        "arm-blocked (bit 7) is up"
+    );
+    assert_ne!(
+        s.prearm_failing & (1 << CheckId::CalibrationPresent as usize),
+        0,
+        "the CalibrationPresent bit is set"
+    );
+    assert_eq!(
+        deciding_row(s.prearm_failing),
+        Some(CheckId::CalibrationPresent),
+        "and it is the row the gate decided on"
+    );
+    assert_eq!(
+        s.prearm_failing,
+        1 << CheckId::CalibrationPresent as usize,
+        "and the only row failing: everything else was supplied"
+    );
+    // cross-check, endpoint side: the frame is the gate's own verdict
+    assert_eq!(s.prearm_failing, ep.supervisor().prearm_failing_mask());
+    assert_eq!(
+        ep.supervisor().arm_blocked_check(),
+        Some(CheckId::CalibrationPresent)
+    );
+}
+
+/// The same with `battery-v` ABSENT: the deciding row is `BatteryOk`.
+#[test]
+fn a_refused_arm_with_no_battery_is_named_battery_ok_through_state() {
+    let (mut host, mut ep, _) = arm_and_tick(Run {
+        supervisor_config: true,
+        calibration: true,
+        battery: false,
+    });
+    let s = read_state(&mut host, &mut ep);
+    assert_eq!(s.mode, Mode::Disarmed as u8);
+    assert_ne!(s.failsafe & falcon_core::failsafe_flags::ARM_BLOCKED, 0);
+    assert_eq!(deciding_row(s.prearm_failing), Some(CheckId::BatteryOk));
+    assert_eq!(s.prearm_failing, ep.supervisor().prearm_failing_mask());
+}
+
+/// The acceptance half: with every frame supplied, `state` reads `armed`,
+/// `arm-blocked` clear and `prearm-failing` 0 — so a binding-only host can
+/// tell an armed vehicle from a refused arm WITHOUT reading the motors
+/// (TRANSPORT-P02's falsification clause).
+#[test]
+fn an_accepted_arm_is_seen_through_state_with_no_failing_row() {
+    let (mut host, mut ep, _) = arm_and_tick(Run {
+        supervisor_config: true,
+        calibration: true,
+        battery: true,
+    });
+    let s = read_state(&mut host, &mut ep);
+    assert_eq!(s.valid, VALID_TICKED);
+    assert_eq!(s.mode, Mode::Armed as u8, "the arm was accepted");
+    assert_eq!(s.failsafe & falcon_core::failsafe_flags::ARM_BLOCKED, 0);
+    assert_eq!(s.prearm_failing, 0, "no pre-arm row fails");
+    assert_eq!(deciding_row(s.prearm_failing), None);
+    assert_eq!(ep.supervisor().mode(), Mode::Armed);
 }

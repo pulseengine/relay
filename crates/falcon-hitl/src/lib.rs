@@ -78,9 +78,13 @@ pub const SUPERVISOR_CONFIG_FRAME_LEN: usize =
 pub const CALIBRATION_FRAME_LEN: usize = wire::HEADER_LEN + wire::CALIBRATION_PAYLOAD_LEN;
 /// Bytes in a `Command` frame (binding v2).
 pub const COMMAND_FRAME_LEN: usize = wire::HEADER_LEN + wire::COMMAND_PAYLOAD_LEN;
+/// Bytes in a `StateRequest` frame (binding v3): the header alone.
+pub const STATE_REQUEST_FRAME_LEN: usize = wire::HEADER_LEN + wire::STATE_REQUEST_PAYLOAD_LEN;
+/// Bytes in a `State` frame (binding v3, TRANSPORT-P02).
+pub const STATE_FRAME_LEN: usize = wire::HEADER_LEN + wire::STATE_PAYLOAD_LEN;
 /// The longest frame the binding defines — a receive buffer of this size holds
-/// any of them.
-pub const MAX_FRAME_LEN: usize = SENSOR_WIRE_FRAME_LEN;
+/// any of them. `State` (98 B) since binding v3; `Sensor` (89 B) before.
+pub const MAX_FRAME_LEN: usize = STATE_FRAME_LEN;
 
 /// The link transport: send one `Motors` frame, receive one `Sensor` frame.
 /// Your impl wraps a UART/USB/UDP socket; the request/response shape models the
@@ -448,8 +452,18 @@ pub enum HostError {
     /// Its motor commands must not be applied, and the host's state is
     /// unchanged by it.
     StrayMotors { seq: u32, why: Stray },
-    /// A frame type the component never sends (anything but `Ack`/`Motors`).
+    /// A frame type the component never sends (anything but `Ack`/`Motors`/
+    /// `State`).
     UnexpectedType { msg: wire::MsgType },
+    /// A `StateRequest` (binding v3) with this sequence is still unanswered.
+    /// Like a control frame it is stop-and-wait: nothing else is sent until
+    /// its `State` reply arrives (or [`BindingHost::cancel_pending`]).
+    AwaitingState { seq: u32 },
+    /// A `State` reply whose header seq is not the outstanding
+    /// `StateRequest`'s (nor a repeat of the `State` accepted last) — the echo
+    /// rule, enforced for v3's reply as for `Motors` and `Ack`. Its contents
+    /// must not be believed, and the host's state is unchanged by it.
+    StrayState { seq: u32 },
 }
 
 /// Why a `Motors` reply was refused as [`HostError::StrayMotors`].
@@ -482,13 +496,26 @@ impl From<wire::WireError> for HostError {
 pub enum HostReply {
     /// The control frame with this sequence was RECEIVED. Not "applied": the
     /// component may discard a configuration it is not in a state to take
-    /// (e.g. relay#611 discards `configure-*` while armed), and the binding has
-    /// no state frame to report that — see the binding document's gaps.
+    /// (e.g. relay#611 discards `configure-*` while armed, refuses `arm` until
+    /// the pre-arm table passes). The ack does not say which; since binding
+    /// v3 a host asks with [`BindingHost::state_request`] and reads `mode`,
+    /// `failsafe` and `prearm_failing` from [`HostReply::State`].
     Acked { seq: u32 },
     /// A repeat of the ack for the control frame acknowledged last — a
     /// duplicated datagram. Nothing changed; in particular it does NOT close a
     /// later handshake.
     DuplicateAck { seq: u32 },
+    /// The published flight state (binding v3, TRANSPORT-P02), answering
+    /// the `StateRequest` with this `seq` — the echo rule, ENFORCED: any
+    /// other seq is [`HostError::StrayState`]. Mode, failsafe causes, the
+    /// estimate and `prearm_failing`, the rows a refused `arm` failed on.
+    State {
+        seq: u32,
+        state: wire::WireFlightState,
+    },
+    /// A repeat of the `State` accepted last — a duplicated datagram. Nothing
+    /// changed.
+    DuplicateState { seq: u32 },
     /// One tick's motor commands, and what the tick contract says about the
     /// reply's sequence.
     Motors {
@@ -564,6 +591,11 @@ pub struct BindingHost {
     outstanding_sensor: Option<u32>,
     /// The seq of the `Motors` reply accepted last (its duplicate is benign).
     last_motors: Option<u32>,
+    /// The `StateRequest` (binding v3) whose `State` reply this host is
+    /// waiting on — stop-and-wait, like `awaiting`.
+    awaiting_state: Option<u32>,
+    /// The seq of the `State` reply accepted last (its duplicate is benign).
+    last_state: Option<u32>,
     tracker: wire::SeqTracker,
 }
 
@@ -581,6 +613,7 @@ impl Default for BindingHost {
 enum ReplyBody {
     Ack { acked: u32 },
     Motors([f32; 4]),
+    State(wire::WireFlightState),
 }
 
 impl BindingHost {
@@ -592,6 +625,8 @@ impl BindingHost {
             last_acked: None,
             outstanding_sensor: None,
             last_motors: None,
+            awaiting_state: None,
+            last_state: None,
             tracker: wire::SeqTracker::starting_at(0),
         }
     }
@@ -621,14 +656,31 @@ impl BindingHost {
     /// Give up on the outstanding ack (a host's timeout path). The next
     /// control frame goes out with a NEW sequence; re-sending the old bytes
     /// would read as a `Duplicate` at the component.
+    ///
+    /// Also gives up on an outstanding `StateRequest` (binding v3).
     pub fn cancel_pending(&mut self) {
         self.awaiting = None;
+        self.awaiting_state = None;
     }
 
-    fn next_control(&mut self) -> Result<u32, HostError> {
+    /// The `StateRequest` whose `State` reply this host is waiting on, if any.
+    pub const fn awaiting_state(&self) -> Option<u32> {
+        self.awaiting_state
+    }
+
+    /// Stop-and-wait: nothing goes out while an ack or a `State` is awaited.
+    fn ready(&self) -> Result<(), HostError> {
         if let Some(seq) = self.awaiting {
             return Err(HostError::AwaitingAck { seq });
         }
+        if let Some(seq) = self.awaiting_state {
+            return Err(HostError::AwaitingState { seq });
+        }
+        Ok(())
+    }
+
+    fn next_control(&mut self) -> Result<u32, HostError> {
+        self.ready()?;
         let seq = self.next_seq();
         self.awaiting = Some(seq);
         Ok(seq)
@@ -637,12 +689,31 @@ impl BindingHost {
     /// Number the next `sensor` frame; it becomes the outstanding tick,
     /// superseding any earlier unanswered one.
     fn next_sensor(&mut self) -> Result<u32, HostError> {
-        if let Some(seq) = self.awaiting {
-            return Err(HostError::AwaitingAck { seq });
-        }
+        self.ready()?;
         let seq = self.next_seq();
         self.outstanding_sensor = Some(seq);
         Ok(seq)
+    }
+
+    /// Number the next `StateRequest` (binding v3); its `State` reply is then
+    /// awaited, stop-and-wait.
+    fn next_state_request(&mut self) -> Result<u32, HostError> {
+        self.ready()?;
+        let seq = self.next_seq();
+        self.awaiting_state = Some(seq);
+        Ok(seq)
+    }
+
+    /// `observer.read-state` as a `StateRequest` frame (binding v3,
+    /// TRANSPORT-P02). The component answers with a `State` frame echoing
+    /// this frame's seq; until it arrives this host sends nothing else (the
+    /// same stop-and-wait as a control frame, so the reply stream stays in
+    /// the host's own order and an answered request is never counted lost).
+    pub fn state_request(&mut self) -> Result<[u8; STATE_REQUEST_FRAME_LEN], HostError> {
+        let seq = self.next_state_request()?;
+        let mut out = [0u8; STATE_REQUEST_FRAME_LEN];
+        wire::encode_state_request(&mut out, seq);
+        Ok(out)
     }
 
     /// `controller.configure` as a `Config` frame.
@@ -715,6 +786,7 @@ impl BindingHost {
                 acked: wire::decode_ack(payload)?,
             },
             wire::MsgType::Motors => ReplyBody::Motors(wire::decode_motors(payload)?),
+            wire::MsgType::State => ReplyBody::State(wire::decode_state(payload)?),
             other => return Err(HostError::UnexpectedType { msg: other }),
         };
         self.classify(h.seq, body)
@@ -768,6 +840,21 @@ impl BindingHost {
                     Some(outstanding) => Stray::Superseded { outstanding },
                 };
                 Err(HostError::StrayMotors { seq, why })
+            }
+            ReplyBody::State(state) => {
+                // Only the awaited StateRequest is answerable (the echo rule).
+                if self.awaiting_state == Some(seq) {
+                    // Advances the same baseline an accepted Ack does, so an
+                    // answered request between two ticks is not counted lost.
+                    self.tracker.observe(seq);
+                    self.awaiting_state = None;
+                    self.last_state = Some(seq);
+                    return Ok(HostReply::State { seq, state });
+                }
+                if self.last_state == Some(seq) {
+                    return Ok(HostReply::DuplicateState { seq });
+                }
+                Err(HostError::StrayState { seq })
             }
         }
     }
@@ -1509,5 +1596,112 @@ mod tests {
             Some(wire::TickVerdict::InOrder)
         ));
         assert_eq!(backend.rejected_replies(), 0);
+    }
+
+    /// Binding v3 (TRANSPORT-P02): `state-request` -> `state` at the host.
+    /// Stop-and-wait like a control frame; the reply must echo the request's
+    /// seq or it is refused and changes nothing; a duplicate is benign; and
+    /// an answered request between two ticks is not counted as a lost tick.
+    #[test]
+    fn the_binding_host_accepts_only_the_state_reply_to_its_request() {
+        fn state_reply(seq: u32, mode: u8) -> [u8; STATE_FRAME_LEN] {
+            let mut b = [0u8; STATE_FRAME_LEN];
+            wire::encode_state(
+                &mut b,
+                seq,
+                &wire::WireFlightState {
+                    mode,
+                    ..Default::default()
+                },
+            );
+            b
+        }
+        fn motors_reply(seq: u32) -> [u8; MOTORS_FRAME_LEN] {
+            let mut b = [0u8; MOTORS_FRAME_LEN];
+            wire::encode_motors(&mut b, seq, [0.0; 4]);
+            b
+        }
+        let mut host = BindingHost::new();
+        let s1 = host.sensor(&wire::WireSensorFrame::default()).unwrap();
+        let (h1, _) = wire::decode_frame(&s1).unwrap();
+        assert!(matches!(
+            host.on_reply(&motors_reply(h1.seq)),
+            Ok(HostReply::Motors {
+                verdict: wire::TickVerdict::InOrder,
+                ..
+            })
+        ));
+
+        // the request: an 8-byte frame of type 7, its own seq
+        let rq = host.state_request().unwrap();
+        assert_eq!(rq.len(), wire::HEADER_LEN);
+        let (hr, _) = wire::decode_frame(&rq).unwrap();
+        assert_eq!(hr.msg, wire::MsgType::StateRequest);
+        assert_eq!(hr.seq, h1.seq + 1);
+        assert_eq!(host.awaiting_state(), Some(hr.seq));
+        // stop-and-wait: nothing else goes out meanwhile
+        assert_eq!(
+            host.sensor(&wire::WireSensorFrame::default()),
+            Err(HostError::AwaitingState { seq: hr.seq })
+        );
+        assert_eq!(
+            host.state_request(),
+            Err(HostError::AwaitingState { seq: hr.seq })
+        );
+        // a State that echoes the wrong seq is refused and changes nothing
+        for wrong in [hr.seq + 1, h1.seq, 0, u32::MAX] {
+            assert_eq!(
+                host.on_reply(&state_reply(wrong, 1)),
+                Err(HostError::StrayState { seq: wrong })
+            );
+            assert_eq!(host.awaiting_state(), Some(hr.seq));
+        }
+        // the echoed one is accepted, with its contents
+        match host.on_reply(&state_reply(hr.seq, 1)) {
+            Ok(HostReply::State { seq, state }) => {
+                assert_eq!(seq, hr.seq);
+                assert_eq!(state.mode, 1);
+            }
+            other => panic!("expected State, got {other:?}"),
+        }
+        assert_eq!(host.awaiting_state(), None);
+        // its duplicate is benign
+        assert_eq!(
+            host.on_reply(&state_reply(hr.seq, 1)),
+            Ok(HostReply::DuplicateState { seq: hr.seq })
+        );
+        // and the next tick is InOrder: the answered request is not a lost tick
+        let s2 = host.sensor(&wire::WireSensorFrame::default()).unwrap();
+        let (h2, _) = wire::decode_frame(&s2).unwrap();
+        assert!(matches!(
+            host.on_reply(&motors_reply(h2.seq)),
+            Ok(HostReply::Motors {
+                verdict: wire::TickVerdict::InOrder,
+                ..
+            })
+        ));
+        // a State that nobody asked for is refused
+        assert_eq!(
+            host.on_reply(&state_reply(h2.seq + 7, 0)),
+            Err(HostError::StrayState { seq: h2.seq + 7 })
+        );
+        // cancel_pending gives up on an outstanding request
+        host.state_request().unwrap();
+        host.cancel_pending();
+        assert_eq!(host.awaiting_state(), None);
+        assert!(host.sensor(&wire::WireSensorFrame::default()).is_ok());
+        // a request is refused while an ack is awaited
+        let c = host
+            .command(&wire::WireCommand {
+                cmd: wire::WirePilotCommand::Arm,
+                level: true,
+                throttle_low: true,
+            })
+            .unwrap();
+        let (hc, _) = wire::decode_frame(&c).unwrap();
+        assert_eq!(
+            host.state_request(),
+            Err(HostError::AwaitingAck { seq: hc.seq })
+        );
     }
 }

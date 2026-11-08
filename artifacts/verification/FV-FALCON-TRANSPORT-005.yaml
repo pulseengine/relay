@@ -1,0 +1,102 @@
+artifacts:
+  - id: FV-FALCON-TRANSPORT-005
+    type: sw-verification
+    title: "Binding v3 — a binding-only host reads the vehicle state, and sees a refused arm with the deciding pre-arm row named"
+    status: implemented
+    release: falcon-v1.142.0
+    description: >
+      Evidence for SWREQ-FALCON-TRANSPORT-P02 (binding v3).
+      Two frame types: `state-request` (type 7, host -> component, EMPTY
+      payload) and `state` (type 8, component -> host, 90 B: the WIT
+      `flight-state` record field for field, packed, plus `prearm-failing`,
+      a u32 bitmask of the pre-arm rows that FAIL, bit =
+      `relay_preflight::CheckId as usize`). `VERSION` 2 -> 3; every v2 payload
+      is byte-identical. The WIT record gains the same field between `valid`
+      and `tick-tail` and the seam goes @0.12.0 -> @0.13.0.
+
+      Acceptance, one bullet each:
+
+      (1) mode, failsafe word, estimate and prearm-failing are carried:
+      `the_state_layout_is_derived_from_the_encoder` derives every field's
+      offset and size by perturbing that field alone through `encode_state`
+      and diffing the bytes, and requires the doc's `wire-layout: state 90`
+      table to match row for row; `a_state_frame_matches_its_hand_computed_bytes`
+      checks a 98-byte vector written byte by byte.
+
+      (2) the reply echoes the request's seq: the native endpoint answers with
+      the request's header seq, `read_state` in
+      binding_drives_the_supervisor.rs asserts it on every exchange, and
+      `BindingHost` refuses any other seq (`StrayState`) —
+      `the_binding_host_accepts_only_the_state_reply_to_its_request`, and the
+      State arms of the Kani harness `the_host_accepts_only_replies_to_frames_it_sent`.
+
+      (3) offsets are tested against the encoder, not typed (bullet 1), and
+      the doc table is checked by `the_binding_document_offset_tables_match_the_encoder`
+      with tick-head != tick-tail so a swapped seqlock pair fails.
+
+      (4) Kani: `a_well_formed_state_frame_dispatches_without_panicking`
+      (value contract over the harness's own 17-slot table plus bit-for-bit
+      read-back of every integer field at the wire offsets), StateRequest
+      covers in the rejection-ladder harnesses, and State in the echo-rule
+      harness. Mutation-tested locally (see the PR): dropping one slot from
+      the decoder's `STATE_F32` table makes the State harness FAIL.
+
+      (5) the binding-only host test sees a REFUSED arm through `state`
+      (no calibration frame -> mode disarmed, failsafe bit 7 arm-blocked,
+      prearm-failing = exactly the CalibrationPresent bit, and
+      CalibrationPresent is the first set bit in gate order), a refused arm
+      with battery-v ABSENT named BatteryOk, and an ACCEPTED arm with mode
+      armed, arm-blocked clear and prearm-failing 0.
+
+      (6) decoder totality on untrusted bytes keeps holding: FV-FALCON-TRANSPORT-002's
+      harnesses, re-run with the two new types in the ladder.
+
+      The mask is the gate's own verdict: `prearm_failing_mask_is_the_arm_gate_verdict`
+      (falcon-core) checks over 600 pseudo-random tables that mask == 0 iff
+      `arm_blocked_check()` is None, that the named row is the first set bit
+      in `CheckId::ALL` order, and that `Arm` arms exactly when the mask is 0.
+
+      WHAT THIS DOES NOT CLAIM. The native endpoint, not the published wasm,
+      answers the bytes (the binding document's existing gap). The published
+      components fill `prearm-failing` from the same supervisor accessor; the
+      `seam_tests` scenario `*_prearm_failing_names_the_refusing_row` checks
+      it through `read-state` on the mirror always and on the built wasm
+      (`wasm_`, `split_`) when an artifact is named. `state` is as of the last
+      `step`, like `read-state`.
+    tags: [verification, falcon, transport, hitl, wire, binding-v3, kani, v1.142]
+    fields:
+      method: automated-test
+      steps:
+        - run: "grep -q 'pub const VERSION: u8 = 3;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const STATE_REQUEST_PAYLOAD_LEN: usize = 0;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'pub const STATE_PAYLOAD_LEN: usize = 90;' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q '    StateRequest = 7,' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q '    State = 8,' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q '<!-- wire-layout: state 90 -->' docs/TRANSPORT-BINDING.md"
+        - run: "grep -q '<!-- wire-layout: state-request 0 -->' docs/TRANSPORT-BINDING.md"
+        # the WIT record carries the mask inside the seqlock pair
+        - run: "awk '/record flight-state \\{/,/^    \\}/' wit/falcon-cascade/cascade.wit | grep -v '^ *///' | grep -A1 'prearm-failing: u32,' | grep -q 'tick-tail: u32,'"
+        - run: "grep -q 'prearm_failing: p.prearm_failing,' wasm/cm/cascade/src/lib.rs"
+        - run: "grep -q 'prearm_failing: p.prearm_failing,' wasm/cm/cascade-split/src/lib.rs"
+        - run: "grep -q 'pub fn prearm_failing_mask(&self) -> u32' crates/falcon-core/plain/src/supervisor.rs"
+        # named tests, one step each, so a deleted test fails this artifact
+        - run: "grep -q 'fn the_state_layout_is_derived_from_the_encoder' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'fn a_state_frame_matches_its_hand_computed_bytes' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'fn a_state_request_frame_matches_its_hand_computed_bytes' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'fn state_integer_words_are_not_float_slots' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'fn the_binding_host_accepts_only_the_state_reply_to_its_request' crates/falcon-hitl/src/lib.rs"
+        - run: "grep -q 'fn a_refused_arm_is_seen_through_state_with_the_deciding_row_named' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn a_refused_arm_with_no_battery_is_named_battery_ok_through_state' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn an_accepted_arm_is_seen_through_state_with_no_failing_row' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'wire::encode_state(&mut out, h.seq, &self.state_now());' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
+        - run: "grep -q 'fn a_well_formed_state_frame_dispatches_without_panicking' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'a State echoing no outstanding request is refused' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'fn prearm_failing_mask_is_the_arm_gate_verdict' crates/falcon-core/plain/src/tests.rs"
+        - run: "grep -q 'fn prearm_failing_names_the_refusing_row' tests/cascade-sitl-wasm/src/seam_tests.rs"
+        - run: "cargo test -p falcon-core --lib prearm_failing_mask_is_the_arm_gate_verdict"
+        - run: "cargo test -p falcon-hitl --lib"
+        - run: "cargo test -p falcon-hitl --test binding_drives_the_supervisor"
+        - run: "cargo kani -p falcon-hitl --harness a_well_formed_state_frame_dispatches_without_panicking"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRANSPORT-P02

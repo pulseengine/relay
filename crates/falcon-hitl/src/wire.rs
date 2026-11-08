@@ -74,7 +74,15 @@ pub const MAGIC: [u8; 2] = [0x1c, 0xfa];
 /// `Calibration` 60 -> 72 B with `mag-offdiag` appended. v2 has never been
 /// tagged, so these are part of v2, not a v3. From the first release that
 /// ships v2, a payload change bumps this.
-pub const VERSION: u8 = 2;
+///
+/// **v3** (SWREQ-FALCON-TRANSPORT-P02): binding v2 shipped in falcon-v1.141.0,
+/// so the next payload change is a version bump. Two frame types arrive —
+/// `StateRequest` (7, host -> component, EMPTY payload) and `State` (8,
+/// component -> host, `observer.read-state`'s `flight-state` field for field
+/// plus `prearm-failing`) — so a binding-only host can see the mode, the
+/// failsafe causes, the estimate and WHICH pre-arm rows refuse an arm. Every
+/// v2 payload layout is byte-identical at v3; only this header byte changes.
+pub const VERSION: u8 = 3;
 
 /// magic(2) + version(1) + msg type(1) + sequence(4). See the module note on
 /// why this is 8 and not the 6 the requirement says.
@@ -101,6 +109,19 @@ pub const CALIBRATION_PAYLOAD_LEN: usize = 72;
 /// `pilot.command(cmd, level, throttle-low)`: the `pilot-command` discriminant
 /// and the two RC interlocks, one byte each.
 pub const COMMAND_PAYLOAD_LEN: usize = 3;
+/// v3 (TRANSPORT-P02): `StateRequest` carries nothing. The request IS the
+/// header; its `seq` is what the `State` reply echoes.
+pub const STATE_REQUEST_PAYLOAD_LEN: usize = 0;
+/// v3 (TRANSPORT-P02): `types.flight-state`, field for field in WIT record
+/// order and PACKED (no padding, like every payload here): `tick-head` u32,
+/// seventeen `f32`s (attitude, position, velocity, rates, gyro bias,
+/// innovation), `failed-rotor` u8, `mode` u8, then `failsafe`, `valid`,
+/// `prearm-failing` and `tick-tail` as u32s — 4 + 68 + 2 + 16 = 90.
+///
+/// PACKED, so these are NOT the canonical-ABI offsets of the WIT record
+/// after byte 73: the WIT record pads `failsafe` to 76, this frame puts it at
+/// 74. A host reads the wire table, not the WIT memory layout.
+pub const STATE_PAYLOAD_LEN: usize = 90;
 
 /// Message type. Values are wire-visible and must not be renumbered; add new
 /// ones and bump [`VERSION`].
@@ -126,6 +147,14 @@ pub enum MsgType {
     Calibration = 5,
     /// Host -> component (v2): one `pilot.command`. Acked like `Config`.
     Command = 6,
+    /// Host -> component (v3, TRANSPORT-P02): "send me `observer.read-state`".
+    /// Empty payload. NOT acked: it is answered by a `State` frame whose
+    /// header seq echoes this frame's seq.
+    StateRequest = 7,
+    /// Component -> host (v3, TRANSPORT-P02): the published flight state, in
+    /// answer to the `StateRequest` whose seq its header carries (the echo
+    /// rule).
+    State = 8,
 }
 
 impl MsgType {
@@ -140,6 +169,8 @@ impl MsgType {
             MsgType::SupervisorConfig => SUPERVISOR_CONFIG_PAYLOAD_LEN,
             MsgType::Calibration => CALIBRATION_PAYLOAD_LEN,
             MsgType::Command => COMMAND_PAYLOAD_LEN,
+            MsgType::StateRequest => STATE_REQUEST_PAYLOAD_LEN,
+            MsgType::State => STATE_PAYLOAD_LEN,
         }
     }
 
@@ -163,6 +194,8 @@ impl MsgType {
             MsgType::SupervisorConfig => &SUPERVISOR_CONFIG_F32,
             MsgType::Calibration => &CALIBRATION_F32,
             MsgType::Command => &[],
+            MsgType::StateRequest => &[],
+            MsgType::State => &STATE_F32,
         }
     }
 
@@ -175,6 +208,8 @@ impl MsgType {
             4 => Some(MsgType::SupervisorConfig),
             5 => Some(MsgType::Calibration),
             6 => Some(MsgType::Command),
+            7 => Some(MsgType::StateRequest),
+            8 => Some(MsgType::State),
             _ => None,
         }
     }
@@ -185,6 +220,14 @@ const MOTORS_F32: [usize; 4] = [0, 4, 8, 12];
 const SUPERVISOR_CONFIG_F32: [usize; 6] = [0, 4, 8, 12, 16, 20];
 const CALIBRATION_F32: [usize; 18] = [
     0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
+];
+/// `State` (v3): qw qx qy qz 4..16, pos-n/e/d 20..28, vel-n/e/d 32..40,
+/// wx wy wz 44..52, bgx bgy bgz 56..64, innovation 68. `tick-head` (0),
+/// `failed-rotor` (72), `mode` (73) and the u32 words at 74/78/82/86 are not
+/// float slots — a `failsafe` word with bits 23..30 set spells NaN and is a
+/// valid word.
+const STATE_F32: [usize; 17] = [
+    4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
 ];
 /// imu 0..24, dt-s 24, position-ned 29/33/37, mag-body 42/46/50, heading-rad
 /// 55, battery-v 77. The presence bytes (28, 41, 54, 59, 76) and the motor-rpm
@@ -908,6 +951,124 @@ pub fn decode_command(payload: &[u8]) -> Result<WireCommand, WireError> {
     })
 }
 
+/// `types.flight-state` as the binding's `State` frame carries it (v3,
+/// TRANSPORT-P02): the WIT record field for field, plus `prearm_failing`.
+/// Units, signs and bit meanings are the WIT's (`wit/falcon-cascade/cascade.wit`,
+/// `record flight-state`); read them there.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WireFlightState {
+    /// Seqlock head (written first). Equal to `tick_tail` iff coherent.
+    pub tick_head: u32,
+    /// Body->NED attitude, Hamilton scalar-first: qw qx qy qz.
+    pub q: [f32; 4],
+    /// NED position (m): pos-n pos-e pos-d (`pos-d` negative up).
+    pub pos: [f32; 3],
+    /// NED velocity (m/s): vel-n vel-e vel-d.
+    pub vel: [f32; 3],
+    /// Body rates (rad/s): wx wy wz.
+    pub w: [f32; 3],
+    /// Estimated gyro bias (rad/s): bgx bgy bgz.
+    pub bg: [f32; 3],
+    /// Estimator innovation magnitude.
+    pub innovation: f32,
+    /// Isolated failed rotor 0-3; 0xFF none.
+    pub failed_rotor: u8,
+    /// `relay_fsm::Mode` discriminant: 0 disarmed 1 armed 2 takeoff 3 loiter
+    /// 4 mission 5 land 6 rtl 7 terminated. Carried RAW: the decoder does not
+    /// range-check it, so a host must treat an unknown value as unknown.
+    pub mode: u8,
+    /// `FlightSupervisor::failsafe_flags()` — bit 7 `arm-blocked`, bit 8
+    /// `target-stale`, see the WIT.
+    pub failsafe: u32,
+    /// Which fields are meaningful; bit 9 (v3) covers `prearm_failing`.
+    pub valid: u32,
+    /// The pre-arm rows that currently FAIL: bit `relay_preflight::CheckId
+    /// as usize` (21 rows today). 0 = the table would allow an arm.
+    pub prearm_failing: u32,
+    /// Seqlock tail (written last).
+    pub tick_tail: u32,
+}
+
+fn put_u32(buf: &mut [u8], at: usize, v: u32) {
+    buf[at..at + 4].copy_from_slice(&v.to_le_bytes());
+}
+fn get_u32(buf: &[u8], at: usize) -> u32 {
+    let mut b = [0u8; 4];
+    b.copy_from_slice(&buf[at..at + 4]);
+    u32::from_le_bytes(b)
+}
+
+/// Encode a whole `StateRequest` frame (v3): the header and nothing else.
+pub fn encode_state_request(out: &mut [u8; HEADER_LEN + STATE_REQUEST_PAYLOAD_LEN], seq: u32) {
+    encode_header(out, MsgType::StateRequest, seq).expect("buffer is exactly one frame");
+}
+
+/// Decode a `StateRequest` payload — which must be empty.
+pub fn decode_state_request(payload: &[u8]) -> Result<(), WireError> {
+    check_payload(MsgType::StateRequest, payload)
+}
+
+/// Encode a whole `State` frame (v3).
+///
+/// THE ECHO RULE: `seq` is the seq of the `StateRequest` this answers, never
+/// a counter of the component's own.
+pub fn encode_state(out: &mut [u8; HEADER_LEN + STATE_PAYLOAD_LEN], seq: u32, s: &WireFlightState) {
+    encode_header(out, MsgType::State, seq).expect("buffer is exactly one frame");
+    let b = HEADER_LEN;
+    // Seqlock order: head first ...
+    put_u32(out, b, s.tick_head);
+    let floats = [
+        s.q[0],
+        s.q[1],
+        s.q[2],
+        s.q[3],
+        s.pos[0],
+        s.pos[1],
+        s.pos[2],
+        s.vel[0],
+        s.vel[1],
+        s.vel[2],
+        s.w[0],
+        s.w[1],
+        s.w[2],
+        s.bg[0],
+        s.bg[1],
+        s.bg[2],
+        s.innovation,
+    ];
+    for (i, v) in floats.iter().enumerate() {
+        put_f32(out, b + 4 + i * 4, *v);
+    }
+    out[b + 72] = s.failed_rotor;
+    out[b + 73] = s.mode;
+    put_u32(out, b + 74, s.failsafe);
+    put_u32(out, b + 78, s.valid);
+    put_u32(out, b + 82, s.prearm_failing);
+    // ... tail last.
+    put_u32(out, b + 86, s.tick_tail);
+}
+
+/// Decode a `State` payload.
+pub fn decode_state(payload: &[u8]) -> Result<WireFlightState, WireError> {
+    check_payload(MsgType::State, payload)?;
+    let f = |i: usize| get_f32(payload, 4 + i * 4);
+    Ok(WireFlightState {
+        tick_head: get_u32(payload, 0),
+        q: [f(0), f(1), f(2), f(3)],
+        pos: [f(4), f(5), f(6)],
+        vel: [f(7), f(8), f(9)],
+        w: [f(10), f(11), f(12)],
+        bg: [f(13), f(14), f(15)],
+        innovation: f(16),
+        failed_rotor: payload[72],
+        mode: payload[73],
+        failsafe: get_u32(payload, 74),
+        valid: get_u32(payload, 78),
+        prearm_failing: get_u32(payload, 82),
+        tick_tail: get_u32(payload, 86),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -940,7 +1101,7 @@ mod tests {
         let mut out = [0u8; HEADER_LEN + MOTORS_PAYLOAD_LEN];
         encode_motors(&mut out, 7, [1.0, 0.5, 0.0, -1.0]);
         let mut want = [0u8; 24];
-        want[..4].copy_from_slice(&[0x1c, 0xfa, 0x02, 0x03]); // magic, v2, Motors
+        want[..4].copy_from_slice(&[0x1c, 0xfa, 0x03, 0x03]); // magic, v3, Motors
         want[4..8].copy_from_slice(&[0x07, 0x00, 0x00, 0x00]); // seq 7, LE
         want[8..12].copy_from_slice(&F1);
         want[12..16].copy_from_slice(&F05);
@@ -955,7 +1116,7 @@ mod tests {
         encode_ack(&mut out, 9, 5);
         assert_eq!(
             out,
-            [0x1c, 0xfa, 0x02, 0x01, 0x09, 0, 0, 0, 0x05, 0, 0, 0],
+            [0x1c, 0xfa, 0x03, 0x01, 0x09, 0, 0, 0, 0x05, 0, 0, 0],
             "ack frame bytes"
         );
     }
@@ -1009,8 +1170,8 @@ mod tests {
     fn an_unknown_message_type_is_rejected() {
         let mut f = [0u8; HEADER_LEN + MOTORS_PAYLOAD_LEN];
         encode_motors(&mut f, 1, [0.0; 4]);
-        f[3] = 7;
-        assert_eq!(decode_frame(&f), Err(WireError::UnknownType { got: 7 }));
+        f[3] = 9; // 7 and 8 are StateRequest / State since v3
+        assert_eq!(decode_frame(&f), Err(WireError::UnknownType { got: 9 }));
     }
 
     #[test]
@@ -1166,7 +1327,7 @@ mod tests {
     /// `SupervisorConfig` (type 4), seq 0x0102: home (1.0, -2.0, 0.0) NED m,
     /// fence-radius 50.0 m, cruise-alt 2.0 m AGL (positive), low-batt-v 14.0 V.
     const SUPCFG_VECTOR: [u8; 32] = [
-        0x1c, 0xfa, 0x02, 0x04, 0x02, 0x01, 0x00, 0x00, // magic, v2, type 4, seq 0x0102
+        0x1c, 0xfa, 0x03, 0x04, 0x02, 0x01, 0x00, 0x00, // magic, v3, type 4, seq 0x0102
         0x00, 0x00, 0x80, 0x3f, // 0  home.x (north)  1.0
         0x00, 0x00, 0x00, 0xc0, // 4  home.y (east)  -2.0
         0x00, 0x00, 0x00, 0x00, // 8  home.z (down)   0.0
@@ -1196,7 +1357,7 @@ mod tests {
     /// (1.0, 1.5, 0.75), mag-offset (4.0, 0, -1.0), mag-scale (1.0, 2.0, 0.5),
     /// mag-offdiag (0.25, -0.5, 0.125) in [xy, xz, yz] order.
     const CAL_VECTOR: [u8; 80] = [
-        0x1c, 0xfa, 0x02, 0x05, 0x03, 0x00, 0x00, 0x00, // magic, v2, type 5, seq 3
+        0x1c, 0xfa, 0x03, 0x05, 0x03, 0x00, 0x00, 0x00, // magic, v3, type 5, seq 3
         0x00, 0x00, 0x00, 0x3e, // 0  gyro-bias.x    0.125
         0x00, 0x00, 0x00, 0x00, // 4  gyro-bias.y    0.0
         0x00, 0x00, 0x00, 0xbf, // 8  gyro-bias.z   -0.5
@@ -1238,7 +1399,7 @@ mod tests {
     /// `Command` (type 6), seq 0x01020304: request-takeoff (1), level = true,
     /// throttle-low = false.
     const CMD_VECTOR: [u8; 11] = [
-        0x1c, 0xfa, 0x02, 0x06, 0x04, 0x03, 0x02, 0x01, // magic, v2, type 6, seq 0x01020304
+        0x1c, 0xfa, 0x03, 0x06, 0x04, 0x03, 0x02, 0x01, // magic, v3, type 6, seq 0x01020304
         0x01, // 0 cmd           request-takeoff
         0x01, // 1 level         true
         0x00, // 2 throttle-low  false
@@ -1264,7 +1425,7 @@ mod tests {
     /// bytes `00 00 80 ff` are the -inf pattern and must NOT trip the
     /// non-finite rule because rpm is an s32 — and battery-v PRESENT at 16.0 V.
     const SENSOR_VECTOR: [u8; 89] = [
-        0x1c, 0xfa, 0x02, 0x02, 0x02, 0x00, 0x00, 0x00, // magic, v2, type 2, seq 2
+        0x1c, 0xfa, 0x03, 0x02, 0x02, 0x00, 0x00, 0x00, // magic, v3, type 2, seq 2
         0x00, 0x00, 0x00, 0x3f, // 0  imu.ax   0.5
         0x00, 0x00, 0x00, 0x00, // 4  imu.ay   0.0
         0x00, 0x00, 0x80, 0xbf, // 8  imu.az  -1.0
@@ -1353,12 +1514,32 @@ mod tests {
         assert_eq!(MsgType::SupervisorConfig.payload_len(), 24);
         assert_eq!(MsgType::Calibration.payload_len(), 72);
         assert_eq!(MsgType::Command.payload_len(), 3);
-        assert_eq!(VERSION, 2, "binding v2");
+        assert_eq!(MsgType::StateRequest.payload_len(), 0);
+        assert_eq!(MsgType::State.payload_len(), 90);
+        assert_eq!(MsgType::StateRequest as u8, 7);
+        assert_eq!(MsgType::State as u8, 8);
+        assert_eq!(VERSION, 3, "binding v3");
+        // StateRequest is EMPTY: the bare header decodes, one byte more is
+        // BadLength (there is no one-byte-short for a zero-length payload).
+        let mut sr = [0u8; HEADER_LEN + 1];
+        encode_header(&mut sr, MsgType::StateRequest, 1).unwrap();
+        assert!(
+            decode_frame(&sr[..HEADER_LEN]).is_ok(),
+            "StateRequest exact"
+        );
+        assert_eq!(
+            decode_frame(&sr),
+            Err(WireError::BadLength {
+                msg: MsgType::StateRequest,
+                got: 1,
+                want: 0
+            })
+        );
         // ...and decode_frame enforces each one: one byte short and one byte
         // long are both BadLength.
-        for (t, n) in [(4u8, 24usize), (5, 72), (6, 3), (2, 81)] {
+        for (t, n) in [(4u8, 24usize), (5, 72), (6, 3), (2, 81), (8, 90)] {
             let msg = MsgType::from_u8(t).unwrap();
-            let mut buf = [0u8; HEADER_LEN + 82];
+            let mut buf = [0u8; HEADER_LEN + 91];
             encode_header(&mut buf, msg, 1).unwrap();
             if msg == MsgType::Command {
                 buf[HEADER_LEN] = 0; // a valid command byte; bools already 0
@@ -1487,29 +1668,29 @@ mod tests {
     struct FloatField {
         name: &'static str,
         offset: usize,
-        frame: fn(f32) -> ([u8; HEADER_LEN + SENSOR_PAYLOAD_LEN], usize),
+        frame: fn(f32) -> ([u8; HEADER_LEN + STATE_PAYLOAD_LEN], usize),
     }
 
-    fn buf<const N: usize>(b: [u8; N]) -> ([u8; HEADER_LEN + SENSOR_PAYLOAD_LEN], usize) {
-        let mut out = [0u8; HEADER_LEN + SENSOR_PAYLOAD_LEN];
+    fn buf<const N: usize>(b: [u8; N]) -> ([u8; HEADER_LEN + STATE_PAYLOAD_LEN], usize) {
+        let mut out = [0u8; HEADER_LEN + STATE_PAYLOAD_LEN];
         out[..N].copy_from_slice(&b);
         (out, N)
     }
-    fn cfg_with(i: usize, v: f32) -> ([u8; HEADER_LEN + SENSOR_PAYLOAD_LEN], usize) {
+    fn cfg_with(i: usize, v: f32) -> ([u8; HEADER_LEN + STATE_PAYLOAD_LEN], usize) {
         let mut a = [0.5f32; 9];
         a[i] = v;
         let mut b = [0u8; HEADER_LEN + CONFIG_PAYLOAD_LEN];
         encode_config(&mut b, 1, &WireVehicleConfig::from_array(a));
         buf(b)
     }
-    fn motors_with(i: usize, v: f32) -> ([u8; HEADER_LEN + SENSOR_PAYLOAD_LEN], usize) {
+    fn motors_with(i: usize, v: f32) -> ([u8; HEADER_LEN + STATE_PAYLOAD_LEN], usize) {
         let mut m = [0.5f32; 4];
         m[i] = v;
         let mut b = [0u8; HEADER_LEN + MOTORS_PAYLOAD_LEN];
         encode_motors(&mut b, 1, m);
         buf(b)
     }
-    fn sup_with(i: usize, v: f32) -> ([u8; HEADER_LEN + SENSOR_PAYLOAD_LEN], usize) {
+    fn sup_with(i: usize, v: f32) -> ([u8; HEADER_LEN + STATE_PAYLOAD_LEN], usize) {
         let mut c = WireSupervisorConfig {
             home: [1.0, 2.0, 3.0],
             fence_radius: 50.0,
@@ -1526,7 +1707,7 @@ mod tests {
         encode_supervisor_config(&mut b, 1, &c);
         buf(b)
     }
-    fn cal_with(i: usize, v: f32) -> ([u8; HEADER_LEN + SENSOR_PAYLOAD_LEN], usize) {
+    fn cal_with(i: usize, v: f32) -> ([u8; HEADER_LEN + STATE_PAYLOAD_LEN], usize) {
         let mut c = WireCalibration {
             gyro_bias: [0.0; 3],
             accel_bias: [0.0; 3],
@@ -1548,7 +1729,7 @@ mod tests {
         encode_calibration(&mut b, 1, &c);
         buf(b)
     }
-    fn sensor_with(i: usize, v: f32) -> ([u8; HEADER_LEN + SENSOR_PAYLOAD_LEN], usize) {
+    fn sensor_with(i: usize, v: f32) -> ([u8; HEADER_LEN + STATE_PAYLOAD_LEN], usize) {
         let mut f = WireSensorFrame {
             imu: [0.0, 0.0, -9.81, 0.0, 0.0, 0.0],
             dt_s: 0.004,
@@ -1568,7 +1749,38 @@ mod tests {
         }
         let mut b = [0u8; HEADER_LEN + SENSOR_PAYLOAD_LEN];
         encode_sensor_frame(&mut b, 1, &f);
-        (b, HEADER_LEN + SENSOR_PAYLOAD_LEN)
+        buf(b)
+    }
+    /// A plausible state; field `i` (WIT order over the 17 floats) set to `v`.
+    /// The u32/u8 fields carry values whose bytes are NOT float-like, plus a
+    /// `failsafe` word that SPELLS NaN, which must not trip the float rule.
+    fn state_with(i: usize, v: f32) -> ([u8; HEADER_LEN + STATE_PAYLOAD_LEN], usize) {
+        let mut s = WireFlightState {
+            tick_head: 41,
+            q: [1.0, 0.0, 0.0, 0.0],
+            pos: [1.0, 2.0, -3.0],
+            vel: [0.1, 0.2, 0.3],
+            w: [0.01, 0.02, 0.03],
+            bg: [0.001, 0.002, 0.003],
+            innovation: 0.5,
+            failed_rotor: 0xff,
+            mode: 1,
+            failsafe: 0x7fc0_0000,
+            valid: 0x3ff,
+            prearm_failing: 0xffff_ffff,
+            tick_tail: 41,
+        };
+        match i {
+            0..=3 => s.q[i] = v,
+            4..=6 => s.pos[i - 4] = v,
+            7..=9 => s.vel[i - 7] = v,
+            10..=12 => s.w[i - 10] = v,
+            13..=15 => s.bg[i - 13] = v,
+            _ => s.innovation = v,
+        }
+        let mut b = [0u8; HEADER_LEN + STATE_PAYLOAD_LEN];
+        encode_state(&mut b, 1, &s);
+        (b, HEADER_LEN + STATE_PAYLOAD_LEN)
     }
 
     macro_rules! field {
@@ -1644,17 +1856,37 @@ mod tests {
             field!("heading-rad", 55, sensor_with, 13),
             field!("battery-v", 77, sensor_with, 14),
         ];
+        const STATE: [FloatField; 17] = [
+            field!("qw", 4, state_with, 0),
+            field!("qx", 8, state_with, 1),
+            field!("qy", 12, state_with, 2),
+            field!("qz", 16, state_with, 3),
+            field!("pos-n", 20, state_with, 4),
+            field!("pos-e", 24, state_with, 5),
+            field!("pos-d", 28, state_with, 6),
+            field!("vel-n", 32, state_with, 7),
+            field!("vel-e", 36, state_with, 8),
+            field!("vel-d", 40, state_with, 9),
+            field!("wx", 44, state_with, 10),
+            field!("wy", 48, state_with, 11),
+            field!("wz", 52, state_with, 12),
+            field!("bgx", 56, state_with, 13),
+            field!("bgy", 60, state_with, 14),
+            field!("bgz", 64, state_with, 15),
+            field!("innovation", 68, state_with, 16),
+        ];
         match msg {
             MsgType::Config => &CONFIG,
             MsgType::Motors => &MOTORS,
             MsgType::SupervisorConfig => &SUP,
             MsgType::Calibration => &CAL,
             MsgType::Sensor => &SENSOR,
-            MsgType::Ack | MsgType::Command => &[],
+            MsgType::State => &STATE,
+            MsgType::Ack | MsgType::Command | MsgType::StateRequest => &[],
         }
     }
 
-    const ALL_TYPES: [MsgType; 7] = [
+    const ALL_TYPES: [MsgType; 9] = [
         MsgType::Config,
         MsgType::Ack,
         MsgType::Sensor,
@@ -1662,6 +1894,8 @@ mod tests {
         MsgType::SupervisorConfig,
         MsgType::Calibration,
         MsgType::Command,
+        MsgType::StateRequest,
+        MsgType::State,
     ];
 
     /// TABLE-DRIVEN: every float field of every frame type, every non-finite
@@ -1711,7 +1945,10 @@ mod tests {
                         MsgType::Motors => decode_motors(payload).err(),
                         MsgType::SupervisorConfig => decode_supervisor_config(payload).err(),
                         MsgType::Calibration => decode_calibration(payload).err(),
-                        MsgType::Ack | MsgType::Command => unreachable!(),
+                        MsgType::State => decode_state(payload).err(),
+                        MsgType::Ack | MsgType::Command | MsgType::StateRequest => {
+                            unreachable!()
+                        }
                     };
                     assert_eq!(
                         reader,
@@ -1726,10 +1963,10 @@ mod tests {
                 }
             }
         }
-        // 9 + 15 + 4 + 6 + 18 = 52 float fields x 6 patterns
+        // 9 + 15 + 4 + 6 + 18 + 17 (State, v3) = 69 float fields x 6 patterns
         assert_eq!(
             checked,
-            52 * 6,
+            69 * 6,
             "every float field of every frame type was exercised"
         );
     }
@@ -2155,6 +2392,61 @@ mod tests {
             &[("cmd", U8(6)), ("level", U8(1)), ("throttle-low", U8(0))],
         );
 
+        // state (v3): every field distinct, tick-head != tick-tail so a
+        // swapped seqlock pair fails, and integer words whose bytes differ.
+        let s = WireFlightState {
+            tick_head: 0x0102_0304,
+            q: [1.0, 2.0, 3.0, 4.0],
+            pos: [5.0, 6.0, 7.0],
+            vel: [8.0, 9.0, 10.0],
+            w: [11.0, 12.0, 13.0],
+            bg: [14.0, 15.0, 16.0],
+            innovation: 17.0,
+            failed_rotor: 2,
+            mode: 6,
+            failsafe: 0x0000_0180,
+            valid: 0x0000_03ff,
+            prearm_failing: 0x0010_0004,
+            tick_tail: 0x0506_0708,
+        };
+        let mut b = [0u8; HEADER_LEN + STATE_PAYLOAD_LEN];
+        encode_state(&mut b, 1, &s);
+        check_table(
+            "state",
+            &b,
+            &[
+                ("tick-head", U32(0x0102_0304)),
+                ("qw", F32(1.0)),
+                ("qx", F32(2.0)),
+                ("qy", F32(3.0)),
+                ("qz", F32(4.0)),
+                ("pos-n", F32(5.0)),
+                ("pos-e", F32(6.0)),
+                ("pos-d", F32(7.0)),
+                ("vel-n", F32(8.0)),
+                ("vel-e", F32(9.0)),
+                ("vel-d", F32(10.0)),
+                ("wx", F32(11.0)),
+                ("wy", F32(12.0)),
+                ("wz", F32(13.0)),
+                ("bgx", F32(14.0)),
+                ("bgy", F32(15.0)),
+                ("bgz", F32(16.0)),
+                ("innovation", F32(17.0)),
+                ("failed-rotor", U8(2)),
+                ("mode", U8(6)),
+                ("failsafe", U32(0x0000_0180)),
+                ("valid", U32(0x0000_03ff)),
+                ("prearm-failing", U32(0x0010_0004)),
+                ("tick-tail", U32(0x0506_0708)),
+            ],
+        );
+
+        // state-request (v3): an empty payload, and an empty table
+        let mut b = [0u8; HEADER_LEN + STATE_REQUEST_PAYLOAD_LEN];
+        encode_state_request(&mut b, 1);
+        check_table("state-request", &b, &[]);
+
         // and the header, against the header table
         let mut b = [0u8; HEADER_LEN + ACK_PAYLOAD_LEN];
         encode_ack(&mut b, 0x0403_0201, 0);
@@ -2170,6 +2462,237 @@ mod tests {
                 ("type", U8(MsgType::Ack as u8)),
                 ("seq", U32(0x0403_0201)),
             ],
+        );
+    }
+
+    // ── binding v3: the State frame (TRANSPORT-P02) ─────────────────────
+
+    /// `StateRequest` (type 7), seq 0x0b: the header and nothing else.
+    const STATE_REQUEST_VECTOR: [u8; 8] = [
+        0x1c, 0xfa, 0x03, 0x07, 0x0b, 0x00, 0x00, 0x00, // magic, v3, type 7, seq 0x0b
+    ];
+
+    /// `State` (type 8), seq 0x0a — an ARMED vehicle answering request 0x0a:
+    /// tick 0x01020304 in head and tail, level attitude, pos (1, -2, 0.5),
+    /// vel (0.25, 0, -1), rates (0, 0.125, 0), zero bias, innovation 2.0, no
+    /// failed rotor (0xff), mode 1 (armed), failsafe bits 7+8, valid bits
+    /// 0..=9, prearm-failing = bit 2 (CalibrationPresent).
+    ///
+    /// PACKED: `failsafe` at 74, not the WIT record's padded 76.
+    const STATE_VECTOR: [u8; 98] = [
+        0x1c, 0xfa, 0x03, 0x08, 0x0a, 0x00, 0x00, 0x00, // magic, v3, type 8, seq 0x0a
+        0x04, 0x03, 0x02, 0x01, // 0  tick-head  0x01020304
+        0x00, 0x00, 0x80, 0x3f, // 4  qw   1.0
+        0x00, 0x00, 0x00, 0x00, // 8  qx   0.0
+        0x00, 0x00, 0x00, 0x00, // 12 qy   0.0
+        0x00, 0x00, 0x00, 0x00, // 16 qz   0.0
+        0x00, 0x00, 0x80, 0x3f, // 20 pos-n  1.0
+        0x00, 0x00, 0x00, 0xc0, // 24 pos-e -2.0
+        0x00, 0x00, 0x00, 0x3f, // 28 pos-d  0.5
+        0x00, 0x00, 0x80, 0x3e, // 32 vel-n  0.25
+        0x00, 0x00, 0x00, 0x00, // 36 vel-e  0.0
+        0x00, 0x00, 0x80, 0xbf, // 40 vel-d -1.0
+        0x00, 0x00, 0x00, 0x00, // 44 wx  0.0
+        0x00, 0x00, 0x00, 0x3e, // 48 wy  0.125
+        0x00, 0x00, 0x00, 0x00, // 52 wz  0.0
+        0x00, 0x00, 0x00, 0x00, // 56 bgx 0.0
+        0x00, 0x00, 0x00, 0x00, // 60 bgy 0.0
+        0x00, 0x00, 0x00, 0x00, // 64 bgz 0.0
+        0x00, 0x00, 0x00, 0x40, // 68 innovation 2.0
+        0xff, // 72 failed-rotor  none
+        0x01, // 73 mode          armed
+        0x80, 0x01, 0x00, 0x00, // 74 failsafe        0x00000180 (bits 7, 8)
+        0xff, 0x03, 0x00, 0x00, // 78 valid           0x000003ff (bits 0..=9)
+        0x04, 0x00, 0x00, 0x00, // 82 prearm-failing  0x00000004 (row 2)
+        0x04, 0x03, 0x02, 0x01, // 86 tick-tail  0x01020304
+    ];
+
+    fn vector_state() -> WireFlightState {
+        WireFlightState {
+            tick_head: 0x0102_0304,
+            q: [1.0, 0.0, 0.0, 0.0],
+            pos: [1.0, -2.0, 0.5],
+            vel: [0.25, 0.0, -1.0],
+            w: [0.0, 0.125, 0.0],
+            bg: [0.0; 3],
+            innovation: 2.0,
+            failed_rotor: 0xff,
+            mode: 1,
+            failsafe: 0x180,
+            valid: 0x3ff,
+            prearm_failing: 0x4,
+            tick_tail: 0x0102_0304,
+        }
+    }
+
+    #[test]
+    fn a_state_request_frame_matches_its_hand_computed_bytes() {
+        let mut out = [0u8; HEADER_LEN + STATE_REQUEST_PAYLOAD_LEN];
+        encode_state_request(&mut out, 0x0b);
+        assert_eq!(out, STATE_REQUEST_VECTOR, "state-request frame bytes");
+        let (h, p) = decode_frame(&STATE_REQUEST_VECTOR).unwrap();
+        assert_eq!((h.msg, h.seq), (MsgType::StateRequest, 0x0b));
+        assert_eq!(decode_state_request(p), Ok(()));
+    }
+
+    #[test]
+    fn a_state_frame_matches_its_hand_computed_bytes() {
+        let mut out = [0u8; HEADER_LEN + STATE_PAYLOAD_LEN];
+        encode_state(&mut out, 0x0a, &vector_state());
+        assert_eq!(out, STATE_VECTOR, "state frame bytes");
+        let (h, p) = decode_frame(&STATE_VECTOR).unwrap();
+        assert_eq!((h.msg, h.seq), (MsgType::State, 0x0a));
+        assert_eq!(decode_state(p).unwrap(), vector_state());
+    }
+
+    /// The u32 / u8 fields of `State` are NOT float slots: a `failsafe`,
+    /// `valid`, `prearm-failing` or tick word whose bytes spell NaN or
+    /// +-infinity decodes, bit for bit — exactly like a `motor-rpm` s32.
+    #[test]
+    fn state_integer_words_are_not_float_slots() {
+        for bits in [0x7fc0_0000u32, 0xff80_0000, 0x7f80_0000, 0xffff_ffff] {
+            let s = WireFlightState {
+                tick_head: bits,
+                failsafe: bits,
+                valid: bits,
+                prearm_failing: bits,
+                tick_tail: bits,
+                failed_rotor: 0x7f,
+                mode: 0xff,
+                ..vector_state()
+            };
+            let mut b = [0u8; HEADER_LEN + STATE_PAYLOAD_LEN];
+            encode_state(&mut b, 3, &s);
+            let (_, p) = decode_frame(&b).expect("integer words are not float slots");
+            assert_eq!(decode_state(p).unwrap(), s, "{bits:#010x}");
+        }
+    }
+
+    /// THE STATE LAYOUT, DERIVED FROM THE ENCODER (TRANSPORT-P02: "its
+    /// offsets are tested against the encoder, not typed"). Each field is
+    /// perturbed alone from a baseline; the bytes that change ARE that field's
+    /// offset and size. The derived table must be contiguous from 0, cover
+    /// `STATE_PAYLOAD_LEN` exactly, be in WIT record order, and agree with the
+    /// doc's `wire-layout: state` table row for row. Run with `--nocapture`
+    /// to print it — that printout is the integrator announcement's table.
+    #[test]
+    fn the_state_layout_is_derived_from_the_encoder() {
+        extern crate std;
+        /// Finite (exponent 0x83), and every byte differs from 1.0's.
+        const PERTURB: f32 = f32::from_bits(0xc1a5_a5a5);
+        type Poke = fn(&mut WireFlightState);
+        let fields: [(&str, &str, Poke); 24] = [
+            ("tick-head", "u32", |s| s.tick_head = 0xffff_ffff),
+            ("qw", "f32", |s| s.q[0] = PERTURB),
+            ("qx", "f32", |s| s.q[1] = PERTURB),
+            ("qy", "f32", |s| s.q[2] = PERTURB),
+            ("qz", "f32", |s| s.q[3] = PERTURB),
+            ("pos-n", "f32", |s| s.pos[0] = PERTURB),
+            ("pos-e", "f32", |s| s.pos[1] = PERTURB),
+            ("pos-d", "f32", |s| s.pos[2] = PERTURB),
+            ("vel-n", "f32", |s| s.vel[0] = PERTURB),
+            ("vel-e", "f32", |s| s.vel[1] = PERTURB),
+            ("vel-d", "f32", |s| s.vel[2] = PERTURB),
+            ("wx", "f32", |s| s.w[0] = PERTURB),
+            ("wy", "f32", |s| s.w[1] = PERTURB),
+            ("wz", "f32", |s| s.w[2] = PERTURB),
+            ("bgx", "f32", |s| s.bg[0] = PERTURB),
+            ("bgy", "f32", |s| s.bg[1] = PERTURB),
+            ("bgz", "f32", |s| s.bg[2] = PERTURB),
+            ("innovation", "f32", |s| s.innovation = PERTURB),
+            ("failed-rotor", "u8", |s| s.failed_rotor = 0xa5),
+            ("mode", "u8", |s| s.mode = 0xa5),
+            ("failsafe", "u32", |s| s.failsafe = 0xffff_ffff),
+            ("valid", "u32", |s| s.valid = 0xffff_ffff),
+            ("prearm-failing", "u32", |s| s.prearm_failing = 0xffff_ffff),
+            ("tick-tail", "u32", |s| s.tick_tail = 0xffff_ffff),
+        ];
+        // A baseline whose EVERY byte differs from its perturbation, so the
+        // changed span is the whole field: floats 1.0 (00 00 80 3f) vs PERTURB
+        // (a5 a5 a5 c1), integer words 0 vs 0xffffffff, bytes 0 vs 0xa5.
+        let base = WireFlightState {
+            tick_head: 0,
+            q: [1.0; 4],
+            pos: [1.0; 3],
+            vel: [1.0; 3],
+            w: [1.0; 3],
+            bg: [1.0; 3],
+            innovation: 1.0,
+            failed_rotor: 0,
+            mode: 0,
+            failsafe: 0,
+            valid: 0,
+            prearm_failing: 0,
+            tick_tail: 0,
+        };
+        let mut b0 = [0u8; HEADER_LEN + STATE_PAYLOAD_LEN];
+        encode_state(&mut b0, 1, &base);
+        let (doc_len, doc_rows) = doc_table("state");
+        let doc_rows: [&DocRow; 24] = {
+            let mut it = doc_rows.iter().flatten();
+            core::array::from_fn(|_| it.next().expect("doc state table has 24 rows"))
+        };
+        assert!(
+            doc_table("state").1.iter().flatten().count() == 24,
+            "doc state table has exactly 24 rows"
+        );
+        let mut next = 0usize;
+        std::println!("State payload (type 8), derived from encode_state:");
+        std::println!(" off  size  type  field");
+        for (i, (name, ty, poke)) in fields.iter().enumerate() {
+            let mut s = base;
+            poke(&mut s);
+            let mut b = [0u8; HEADER_LEN + STATE_PAYLOAD_LEN];
+            encode_state(&mut b, 1, &s);
+            assert_eq!(
+                b[..HEADER_LEN],
+                b0[..HEADER_LEN],
+                "{name}: header untouched"
+            );
+            let changed: std::vec::Vec<usize> = (0..STATE_PAYLOAD_LEN)
+                .filter(|&k| b[HEADER_LEN + k] != b0[HEADER_LEN + k])
+                .collect();
+            let first = *changed
+                .first()
+                .unwrap_or_else(|| panic!("{name}: no byte moved"));
+            let last = *changed.last().unwrap();
+            let size = match *ty {
+                "u8" => 1,
+                _ => 4,
+            };
+            // The perturbation lies INSIDE one field-sized window starting at
+            // the field's offset, and nowhere else.
+            assert!(
+                last - first < size,
+                "{name}: bytes {first}..={last} span more than {size}"
+            );
+            assert_eq!(
+                first, next,
+                "{name}: fields must be contiguous, in WIT order"
+            );
+            // and the decoder reads the perturbed value back out of exactly there
+            let (_, p) = decode_frame(&b).unwrap();
+            assert_eq!(decode_state(p).unwrap(), s, "{name}: decode");
+            std::println!("{first:>4}  {size:>4}  {ty:<4}  {name}");
+            let row = doc_rows[i];
+            assert_eq!(
+                (row.off, row.size, row.ty, row.field),
+                (first, size, *ty, *name),
+                "doc row {i} vs the encoder"
+            );
+            next = first + size;
+        }
+        assert_eq!(
+            next, STATE_PAYLOAD_LEN,
+            "the fields cover the payload exactly"
+        );
+        assert_eq!(
+            doc_len, STATE_PAYLOAD_LEN,
+            "doc marker length vs the encoder"
+        );
+        std::println!(
+            "payload {STATE_PAYLOAD_LEN} B, frame {} B",
+            HEADER_LEN + STATE_PAYLOAD_LEN
         );
     }
 
