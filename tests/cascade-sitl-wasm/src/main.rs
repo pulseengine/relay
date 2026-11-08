@@ -575,6 +575,13 @@ fn main() -> Result<()> {
     // own setpoint back and the bar never fires.
     let mut peak_horiz_all: f32 = 0.0;
     let mut rpm_frames = 0u32;
+    // BIT comparison of the differential (#638 finding 8). `worst` folds the
+    // per-motor |delta| with `f32::max`, which drops a NaN (max(0, NaN) = 0),
+    // so a side that produced NaN still printed BIT-IDENTICAL. The first motor
+    // whose bits differ, and how many (tick, motor) pairs differ, are kept
+    // here and judged before the PASS line.
+    let mut bits_first: Option<(u64, usize, f32, f32)> = None;
+    let mut bits_differ: u64 = 0;
     for tick in 0..ticks {
         let tick_start = std::time::Instant::now();
         let (s, true_pos) = plant.measure(noise);
@@ -742,6 +749,15 @@ fn main() -> Result<()> {
             .iter()
             .copied()
             .fold(0.0f32, f32::max);
+            let wasm = [m.m1, m.m2, m.m3, m.m4];
+            for i in 0..4 {
+                if n[i].to_bits() != wasm[i].to_bits() {
+                    bits_differ += 1;
+                    if bits_first.is_none() {
+                        bits_first = Some((tick as u64, i, n[i], wasm[i]));
+                    }
+                }
+            }
             if dmax > *worst {
                 *worst = dmax;
                 *worst_tick = tick;
@@ -1017,6 +1033,16 @@ fn main() -> Result<()> {
         // BIT-EXACT, no tolerance: both sides run the same f32 code on the same
         // inputs under shared IEEE-754 semantics, so any delta means something
         // structural differs — a different constant, call order, or lost update.
+        if let Some((t, i, nv, wv)) = bits_first {
+            bail!(
+                "FAIL: wasm and native differ in the BITS of {bits_differ} motor value(s); \
+                   first at tick {t}, motor {}: native {nv:?} ({:#010x}), wasm {wv:?} ({:#010x}). \
+                   A NaN on either side shows here even when the |delta| fold reads 0.",
+                i + 1,
+                nv.to_bits(),
+                wv.to_bits()
+            );
+        }
         if *worst != 0.0 {
             bail!(
                 "FAIL: wasm and native disagree by {worst:.9} (tick {worst_tick}). The same \
