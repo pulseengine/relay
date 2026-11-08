@@ -137,7 +137,13 @@ artifacts:
         - run: "grep -q 'published tick did not advance by 1' tests/cascade-sitl-wasm/src/main.rs"
         - run: "grep -q 'marks NOTHING valid' tests/cascade-sitl-wasm/src/main.rs"
         # ...and CI actually runs that harness, so the assertions are executed.
-        - run: "grep -q 'cascade-sitl-wasm' .github/workflows/gazebo.yml"
+        # Matches the INVOCATION, not the name: a bare 'cascade-sitl-wasm' also
+        # matched the leg's own skip warning, so it passed with the run removed
+        # (#415 sweep). Negative-controlled: deleting the invocation line from a
+        # copy of gazebo.yml makes this fail; the old pattern still passed.
+        # The pattern avoids the literal env-var form: the runner treats any
+        # step containing it as bench-only and would skip this one.
+        - run: "grep -qF './target/release/cascade-sitl-wasm \\' .github/workflows/gazebo.yml"
     links:
       - type: verifies
         target: SWREQ-FALCON-TRANSPORT-P01
