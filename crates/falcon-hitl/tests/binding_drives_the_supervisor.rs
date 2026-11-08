@@ -170,6 +170,22 @@ struct Endpoint {
     // answers (docs/TRANSPORT-BINDING.md §3, the echo rule).
 }
 
+/// The message type a decoder rejection names, if the frame got far enough
+/// for the type byte to be read. `TooShort`, `BadMagic`, `BadVersion` and
+/// `UnknownType` name none; `BadCommand` is only ever a `Command`.
+fn rejected_type(e: &WireError) -> Option<MsgType> {
+    match *e {
+        WireError::BadLength { msg, .. }
+        | WireError::NonFinite { msg, .. }
+        | WireError::BadBool { msg, .. } => Some(msg),
+        WireError::BadCommand { .. } => Some(MsgType::Command),
+        WireError::TooShort { .. }
+        | WireError::BadMagic { .. }
+        | WireError::BadVersion { .. }
+        | WireError::UnknownType { .. } => None,
+    }
+}
+
 impl Endpoint {
     fn new() -> Self {
         Endpoint {
@@ -199,39 +215,40 @@ impl Endpoint {
     fn handle(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
         let (h, payload) = match wire::decode_frame(frame) {
             Ok(x) => x,
-            // relay#611: the latest calibration the host sent was invalid, so
-            // the vehicle must not keep flying on an older one. The rejected
-            // frame's values never reach us, so a non-finite record stands in
-            // for it and goes through the host AS AN INVALID CALIBRATION, which
-            // revokes (under the host's own rule: only while Disarmed).
-            Err(WireError::NonFinite {
-                msg: MsgType::Calibration,
-                ..
-            }) => {
-                self.seam.configure_calibration(CalParams {
-                    gyro_bias: [f32::NAN; 3],
-                    ..CalParams::identity()
-                });
+            Err(e) => {
+                // docs/TRANSPORT-BINDING.md: a rejected `calibration` or
+                // `supervisor-config` frame says the latest thing the host
+                // sent was invalid, whatever the reason the decoder gave
+                // (#638 finding 10: this used to revoke on `NonFinite` only,
+                // so a `BadLength` kept the old configuration). The rejected
+                // frame's values never reach us, so a non-finite record
+                // stands in for it and goes through the host AS AN INVALID
+                // configuration. relay#611's host rules then decide: a
+                // calibration revokes only while Disarmed, a supervisor
+                // config rebuilds only while `rebuild_permitted`.
+                match rejected_type(&e) {
+                    Some(MsgType::Calibration) => {
+                        self.seam.configure_calibration(CalParams {
+                            gyro_bias: [f32::NAN; 3],
+                            ..CalParams::identity()
+                        });
+                    }
+                    Some(MsgType::SupervisorConfig) => {
+                        self.seam.configure_supervisor(host::SupervisorConfig {
+                            home: [f32::NAN; 3],
+                            fence_radius: f32::NAN,
+                            cruise_alt: f32::NAN,
+                            low_batt_v: f32::NAN,
+                        });
+                    }
+                    // Includes a rejected vehicle config: an invalid tuning is
+                    // never installed and does not revoke, so dropping it IS
+                    // the host rule. A frame whose type cannot be read (short,
+                    // bad magic, version or type byte) names no configuration.
+                    _ => {}
+                }
                 return None;
             }
-            // relay#611: an invalid supervisor configuration counts as none,
-            // so `FailsafeConfigured` refuses arming. Same stand-in, same host
-            // rule (a rebuild only while `rebuild_permitted`).
-            Err(WireError::NonFinite {
-                msg: MsgType::SupervisorConfig,
-                ..
-            }) => {
-                self.seam.configure_supervisor(host::SupervisorConfig {
-                    home: [f32::NAN; 3],
-                    fence_radius: f32::NAN,
-                    cruise_alt: f32::NAN,
-                    low_batt_v: f32::NAN,
-                });
-                return None;
-            }
-            // Includes a non-finite vehicle config: an invalid tuning is never
-            // installed and does not revoke, so dropping it IS the host rule.
-            Err(_) => return None,
         };
         let verdict = self.inbound.observe(h.seq);
         let fresh = !matches!(verdict, TickVerdict::Duplicate | TickVerdict::Late { .. });
@@ -586,6 +603,64 @@ fn a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration() {
     assert!(
         !ep.supervisor().calibration_configured(),
         "and a supervisor built now must be uncalibrated, so CalibrationPresent refuses"
+    );
+}
+
+/// #638 finding 10: the revocation follows from the REJECTION, not from its
+/// reason. A `calibration` frame one byte short is `BadLength`, and must
+/// revoke the earlier calibration exactly as a NaN one does; the same holds
+/// for `supervisor-config`.
+#[test]
+fn a_wrong_length_calibration_or_supervisor_frame_also_revokes() {
+    let mut host = BindingHost::new();
+    let mut ep = Endpoint::new();
+    let good = WireCalibration {
+        gyro_bias: [0.001, 0.0, 0.0],
+        accel_bias: [0.0; 3],
+        accel_scale: [1.0; 3],
+        mag_offset: [0.0; 3],
+        mag_scale: [1.0; 3],
+        mag_offdiag: [0.0; 3],
+    };
+    let f = host.configure_calibration(&good).unwrap();
+    control(&mut host, &mut ep, &f);
+    assert!(ep.seam.calibration().is_some());
+
+    let f = host.configure_calibration(&good).unwrap();
+    let short = &f[..f.len() - 1];
+    assert!(matches!(
+        wire::decode_frame(short),
+        Err(WireError::BadLength {
+            msg: MsgType::Calibration,
+            ..
+        })
+    ));
+    assert_eq!(ep.handle(short), None, "a rejected frame is not acked");
+    assert_eq!(
+        ep.seam.calibration(),
+        None,
+        "a wrong-length calibration must revoke the earlier one, like a NaN one"
+    );
+
+    // supervisor-config: a valid one builds the configuration, a short one
+    // then counts as none.
+    let mut host = BindingHost::new();
+    let mut ep = Endpoint::new();
+    let sc = wire::WireSupervisorConfig {
+        home: [0.0; 3],
+        fence_radius: 50.0,
+        cruise_alt: 2.0,
+        low_batt_v: 14.0,
+    };
+    let f = host.configure_supervisor(&sc).unwrap();
+    control(&mut host, &mut ep, &f);
+    assert!(ep.seam.failsafe_configured());
+    let f = host.configure_supervisor(&sc).unwrap();
+    let short = &f[..f.len() - 1];
+    assert_eq!(ep.handle(short), None, "a rejected frame is not acked");
+    assert!(
+        !ep.seam.failsafe_configured(),
+        "a wrong-length supervisor config must count as none"
     );
 }
 
