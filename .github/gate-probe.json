@@ -6,7 +6,7 @@
       "outputs": ["run"],
       "controls": [
         "crates/relay-mix-quad/plain/src/lib.rs",
-        "examples/falcon-sitl-gz/src/main.rs",
+        "crates/falcon-core/plain/src/lib.rs",
         "Cargo.lock",
         "rust-toolchain.toml"
       ]

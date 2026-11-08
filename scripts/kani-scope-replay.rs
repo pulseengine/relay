@@ -278,6 +278,35 @@ fn main() {
             want_reason: None,
             why: "one relevant path among irrelevant ones must still run",
         },
+        // KNOWN SOURCE TREES (maintainer decision 2026-11-08): outside every
+        // engine's dependency closure, unless a crate path-depends into them.
+        Case {
+            name: "merge_group, a scripts/ source only",
+            changed: &["scripts/check-evidence.rs"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: false,
+            want_reason: Some("out-of-scope"),
+            why: "no harness can depend on scripts/: keeps today's queue cost (19 of 111 commits since 2026-10-01 were this class)",
+        },
+        Case {
+            name: "merge_group, an examples/ source only",
+            changed: &["examples/falcon-sitl-gz/src/main.rs"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: false,
+            want_reason: Some("out-of-scope"),
+            why: "examples/ is outside every engine's dependency closure",
+        },
+        Case {
+            name: "merge_group, a tree a crate path-depends into",
+            changed: &["tools/helper/src/lib.rs"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: true,
+            want_reason: None,
+            why: "the fixture's crates/dep/Cargo.toml has path = \"../../tools/helper\": the tree is in a dependency closure, so it is relevant",
+        },
         // QUEUE-ONLY (2026-10-22, #600): a pull request NEVER runs the matrix —
         // the merge queue does. Asserted from both sides: a crate change on a PR
         // must still defer (or the PR-time sweep is back), and the skip must be
@@ -321,6 +350,7 @@ git config commit.gpgsign false
 mkdir -p seed && echo seed > seed/f.txt
 mkdir -p crates/named/src
 echo 'const D: &str = include_str!("../../../docs/NAMED.md");' > crates/named/src/lib.rs
+mkdir -p crates/dep && printf '[dependencies]\nhelper = { path = "../../tools/helper" }\n' > crates/dep/Cargo.toml
 git add -A && git commit -q -m base
 "#;
         let (ok, out) = sh(&tmp, setup);

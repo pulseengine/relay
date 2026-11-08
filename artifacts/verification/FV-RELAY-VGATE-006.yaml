@@ -142,7 +142,9 @@ artifacts:
         # still carries the BASE_SHA expression. The replay runs the script
         # the step names and adds the fail-closed cases (docs/*.rs,
         # supply-chain/, a new top-level dir, a crate-named doc), 4 of which
-        # fail against the pre-#86 allowlist.
+        # fail against the pre-#86 allowlist, and the known-source-tree class
+        # (scripts/ tools/ wasm/ tests/ examples/ host/ benches/ skip unless a
+        # crate path-depends into them; maintainer decision 2026-11-08).
         - run: "grep -q 'run: scripts/kani-scope.sh' .github/workflows/kani.yml"
         - run: "./scripts/kani-scope-replay.rs"
     links:

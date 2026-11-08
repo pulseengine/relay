@@ -8,7 +8,8 @@
 # docs/, a supply-chain/ file, a new top-level directory) is gated by default.
 # The previous detector was an allowlist (run only on crates/, Cargo.*,
 # kani.yml) and failed open for exactly those inputs (temper#86,
-# detector_unprobed).
+# detector_unprobed). Two known classes skip: prose/data/model files no crate
+# names, and the source trees outside every engine's dependency closure.
 #
 # Probe contract (pulseengine/temper docs/gate-probe.md, .github/gate-probe.json):
 # when GATE_PROBE_FILES is set it names a file listing the changed paths, one
@@ -21,7 +22,24 @@ out=${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}
 is_known_irrelevant() {
   local p=$1
   case "$p" in
-    crates/*|Cargo.toml|Cargo.lock|*/Cargo.toml|rust-toolchain|rust-toolchain.toml|.cargo/*|.github/workflows/kani.yml|scripts/kani-scope.sh) return 1 ;;
+    crates/*|Cargo.toml|Cargo.lock|rust-toolchain|rust-toolchain.toml|.cargo/*|.github/workflows/kani.yml|scripts/kani-scope.sh) return 1 ;;
+  esac
+  # Source trees OUTSIDE every engine's dependency closure (maintainer
+  # decision, 2026-11-08): the harnesses live only under crates/, and
+  # `cargo kani -p <engine>` builds that engine and its dependencies. Such a
+  # tree, its own Cargo.toml included, stays irrelevant only while NO crate
+  # manifest path-depends into it; the moment one does, the whole tree is
+  # relevant again. grep exit 1 = no
+  # such dependency; anything else (0 found, 2 could not tell) = relevant.
+  case "$p" in
+    scripts/*|tools/*|wasm/*|tests/*|examples/*|host/*|benches/*)
+      local dir=${p%%/*} rc=0
+      grep -rqE --include=Cargo.toml -- "path *= *\"[./]*${dir}/" crates || rc=$?
+      [ "$rc" -eq 1 ] && return 0
+      return 1 ;;
+  esac
+  case "$p" in
+    */Cargo.toml) return 1 ;;
   esac
   case "$p" in
     *.md|*.yaml|*.yml|*.png|*.svg|*.jpg|*.jpeg|*.gif|*.mp4|*.webm|*.txt|*.csv|*.aadl|*.wit) ;;
