@@ -2,13 +2,22 @@
   "version": 1,
   "detectors": [
     {
-      "command": ["scripts/kani-scope.sh"],
-      "outputs": ["run"],
+      "command": [
+        "scripts/kani-scope.sh"
+      ],
+      "outputs": [
+        "run"
+      ],
       "controls": [
         "crates/relay-mix-quad/plain/src/lib.rs",
         "crates/falcon-core/plain/src/lib.rs",
         "Cargo.lock",
         "rust-toolchain.toml"
+      ],
+      "negative_controls": [
+        "docs/RELEASE-PLAN.md",
+        "artifacts/verification/FV-RELAY-VGATE-006.yaml",
+        "scripts/check-evidence.rs"
       ]
     }
   ]
