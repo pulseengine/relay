@@ -186,18 +186,20 @@ interface types {
     /// cumulative drift). A host whose clock is coarse or jittery (a
     /// timestamp quantised to ms, a scheduler that alternates long and short
     /// ticks) must send its NOMINAL period, not the per-frame measurement.
-    /// KNOWN LIMIT A (review of v1.140; fix scheduled for falcon-v1.142.0,
-    /// #638): a `dt-s` that keeps crossing that band (alternating long and
-    /// short periods) re-syncs the core on every crossing frame, and each
-    /// re-sync rebuilds the gyro low-pass and the notch bank with ZEROED
-    /// state. Measured on SimBackend:
-    /// 2 ms / 3 ms alternation at a 400 Hz host, and +-25 us jitter at 1 kHz,
-    /// leave the gyro effectively unfiltered and the vehicle tumbles; the
-    /// same runs with the filter rebuild skipped fly clean. Every per-frame
-    /// smoothing tried for v1.141 regressed another case (early outlier
-    /// frames, ringing near Nyquist, aliased rotor vibration, a minority of
-    /// late frames under vibration falsely isolating a rotor), so v1.141
-    /// narrows the contract instead of changing the core.
+    /// KNOWN LIMIT A (review of v1.140), NARROWED in falcon-v1.142.0 (#638).
+    /// On falcon-v1.140.0 and v1.141.0 a `dt-s` that kept crossing that band
+    /// rebuilt the gyro low-pass and the notch bank with ZEROED state on every
+    /// crossing frame, and the vehicle tumbled. Since v1.142, when EVERY one
+    /// of the last 16 frames crossed the band (strict two-level alternation:
+    /// 2 ms / 3 ms at a 400 Hz host, +-25 us at 1 kHz, any +-2.5..20% two-level
+    /// pattern), the core holds the filter design at the median of those 16
+    /// periods, and returns to per-frame redesign on the first frame that does
+    /// not cross. Every other `dt-s` sequence is handled exactly as in v1.141,
+    /// including its failures: random jitter beyond the band, alternation with
+    /// a period of 3 or 5 frames, and short bursts of alternation. Those
+    /// remain OUT OF CONTRACT; send the nominal period. A minority of late
+    /// frames is unaffected and keeps the per-frame redesign, which matches
+    /// the notch to rotor vibration sampled at a late frame's real interval.
     ///
     /// The aiding measurements — v0.7 took the IMU alone, so position was
     /// observable only by dead reckoning. The flight core fuses GNSS, the
@@ -313,8 +315,9 @@ interface types {
         /// innovation-gate / yaw-capture warm-up 1 s, counted at that rate).
         /// A host that sends a `loop-rate-hz` that disagrees with its frames
         /// flies at its frames' rate. Frames whose period wanders across the
-        /// 2% band re-sync every time: see the HOST CONTRACT and KNOWN LIMIT A
-        /// under `sensor-frame.dt-s`. Kept in the record so the record stays
+        /// 2% band re-sync every time (the filters are held at the window
+        /// median while that persists): see the HOST CONTRACT and KNOWN
+        /// LIMIT A under `sensor-frame.dt-s`. Kept in the record so the record stays
         /// field-for-field what it was at @0.12.0.
         loop-rate-hz: f32,
         /// Position-measurement variance (m²). The default over-trusts a real

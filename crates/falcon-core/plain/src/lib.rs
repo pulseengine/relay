@@ -430,6 +430,38 @@ fn resynced_rate(designed_hz: f32, dt: f32) -> Option<f32> {
     (drift > 0.02 * designed_hz).then_some(actual)
 }
 
+/// KNOWN LIMIT A's guard (#638): the window of recent frames it judges.
+const ALT_WINDOW: usize = 16;
+/// Enter the guard only when EVERY one of the last [`ALT_WINDOW`] frames
+/// crossed the 2% band: strict two-level alternation crosses on every frame.
+/// A looser entry (12 of 16, out at 4) was tried and blocked by review: with
+/// 40% of frames 1.5x late it held a notch mistuned for those frames for
+/// hundreds of ticks and isolated a healthy rotor in 25 of 48 seeds at
+/// 250 Hz (main: 1), and 1.25x late on 20% of frames entered it in every
+/// seed (#638, 2026-11-08).
+const ALT_ENTER: u32 = 16;
+/// Leave the guard on the first frame that does not cross the band.
+const ALT_EXIT: u32 = 15;
+
+/// The median of the [`ALT_WINDOW`] periods: the mean of the two middle
+/// values, because with an odd count a 2/3 ms alternation's median flips
+/// every frame. `(a + a) / 2` is exact, so a fixed period gives that period.
+fn median_period(ring: &[f32; ALT_WINDOW]) -> f32 {
+    let mut v = *ring;
+    let mut i = 1;
+    while i < ALT_WINDOW {
+        let x = v[i];
+        let mut j = i;
+        while j > 0 && v[j - 1] > x {
+            v[j] = v[j - 1];
+            j -= 1;
+        }
+        v[j] = x;
+        i += 1;
+    }
+    (v[ALT_WINDOW / 2 - 1] + v[ALT_WINDOW / 2]) * 0.5
+}
+
 /// The CASCADE partition (PART-P01, v1.124): geometric attitude, ADRC,
 /// mixer + rotor-out FDI/reconfiguration, position/altitude loops,
 /// RPM-notch gyro path and terrain-relative landing reference — the M7
@@ -565,6 +597,20 @@ pub struct CascadePartition {
     /// The loop rate `gyro_lpf` and `notch` were DESIGNED for. Re-synced from
     /// the backend's own `dt()` on the first tick — see `resync_loop_rate`.
     designed_hz: f32,
+    /// KNOWN LIMIT A's guard (#638): the rate `gyro_lpf` and `notch` are
+    /// designed for. Equal to `designed_hz` except while `alt_guard` holds.
+    filter_hz: f32,
+    /// One bit per recent frame, newest in bit 0: did that frame cross the
+    /// 2% band (`resynced_rate` fired)?
+    cross_hist: u16,
+    /// The last [`ALT_WINDOW`] valid frame periods (s), oldest overwritten.
+    period_ring: [f32; ALT_WINDOW],
+    period_len: u8,
+    period_pos: u8,
+    /// SUSTAINED ALTERNATION: the band was crossed on most recent frames, so
+    /// the filters are held at the window median instead of being rebuilt
+    /// with zeroed state on every frame.
+    alt_guard: bool,
 }
 
 impl CascadePartition {
@@ -574,6 +620,12 @@ impl CascadePartition {
     pub fn new(hover_thrust: f32, loop_hz: f32) -> Self {
         CascadePartition {
             designed_hz: loop_hz,
+            filter_hz: loop_hz,
+            cross_hist: 0,
+            period_ring: [0.0; ALT_WINDOW],
+            period_len: 0,
+            period_pos: 0,
+            alt_guard: false,
             geo: GeoAtt::new(GeoGains::FALCON_QUAD),
             adrc: AdrcRate::falcon_quad(),
             gyro_lpf: GyroLpf::new(60.0, loop_hz),
@@ -736,6 +788,19 @@ impl CascadePartition {
         self.designed_hz
     }
 
+    /// The rate `gyro_lpf` and `notch` are designed for. Equal to
+    /// [`Self::designed_loop_hz`] except while [`Self::alternation_guard`]
+    /// holds (KNOWN LIMIT A, #638).
+    pub fn filter_design_hz(&self) -> f32 {
+        self.filter_hz
+    }
+
+    /// Is the filter design held at the window median because the frame
+    /// period keeps crossing the 2% band (KNOWN LIMIT A, #638)?
+    pub fn alternation_guard(&self) -> bool {
+        self.alt_guard
+    }
+
     /// Diagnostics: last geometric desired body rate + last ADRC torque.
     pub fn last_omega_d(&self) -> Vec3 {
         self.last_omega_d
@@ -842,7 +907,9 @@ impl CascadePartition {
     /// rate here ([`FlightCore::rescale_ticks`]), so every one of them stays
     /// a measure of elapsed TIME.
     fn resync_loop_rate(&mut self, dt: f32) {
-        if let Some(actual) = resynced_rate(self.designed_hz, dt) {
+        let r = resynced_rate(self.designed_hz, dt);
+        let crossed = r.is_some();
+        if let Some(actual) = r {
             let from = self.designed_hz;
             self.fdi_spinup = FlightCore::rescale_ticks(self.fdi_spinup, from, actual);
             self.step_count = FlightCore::rescale_ticks(self.step_count, from, actual);
@@ -852,14 +919,67 @@ impl CascadePartition {
                     FlightCore::rescale_ticks(self.fdi_stall_run[i], from, actual);
                 i += 1;
             }
-            self.gyro_lpf = GyroLpf::new(60.0, actual);
-            self.notch = relay_notch::HarmonicNotchBank::new(actual);
             self.fdi_warmup_steps = FlightCore::warmup_steps(actual);
             self.fdi_guard_steps = FlightCore::fdi_guard_steps(actual);
             self.fdi_lag_alpha = FlightCore::fdi_lag_alpha(actual);
             self.fdi_stall_steps = FlightCore::fdi_stall_steps(actual);
             self.designed_hz = actual;
         }
+        self.resync_filters(dt, crossed);
+    }
+
+    /// The filter half of [`Self::resync_loop_rate`] (KNOWN LIMIT A, #638).
+    ///
+    /// OUTSIDE THE GUARD this is main's behaviour exactly: the filters are
+    /// rebuilt, with zeroed state, at the rate of every frame that crosses the
+    /// 2% band. That per-frame redesign is what keeps the notch matched to
+    /// rotor vibration when a minority of frames arrive late; holding the
+    /// design instead isolated a healthy rotor in 23-24 of 24 seeds (#638,
+    /// kill test 2026-11-08).
+    ///
+    /// INSIDE THE GUARD, entered when all [`ALT_WINDOW`] of the last
+    /// [`ALT_WINDOW`] frames crossed the band, the
+    /// filters are designed at the window's median period and rebuilt only
+    /// when that median leaves the 2% band. A host alternating 2 ms / 3 ms at
+    /// 400 Hz crosses on every frame, which on main zeroed the filters every
+    /// tick and tumbled the vehicle. The guard is left on the first frame
+    /// that does not cross, back onto main's design rate. Random jitter and
+    /// patterns that do not cross on every frame (period 3 or 5, bursts)
+    /// keep main's behaviour, including its failures (KNOWN LIMIT A, rest).
+    fn resync_filters(&mut self, dt: f32, crossed: bool) {
+        self.cross_hist = (self.cross_hist << 1) | crossed as u16;
+        if dt.is_finite() && dt > 0.0 {
+            self.period_ring[self.period_pos as usize] = dt;
+            self.period_pos = ((self.period_pos as usize + 1) % ALT_WINDOW) as u8;
+            if (self.period_len as usize) < ALT_WINDOW {
+                self.period_len += 1;
+            }
+        }
+        let crossings = self.cross_hist.count_ones();
+        let full = self.period_len as usize == ALT_WINDOW;
+        if !self.alt_guard && full && crossings >= ALT_ENTER {
+            self.alt_guard = true;
+        } else if self.alt_guard && crossings <= ALT_EXIT {
+            self.alt_guard = false;
+            if resynced_rate(self.filter_hz, 1.0 / self.designed_hz).is_some() {
+                self.rebuild_filters(self.designed_hz);
+            }
+            return;
+        }
+        if self.alt_guard {
+            let hz = 1.0 / median_period(&self.period_ring);
+            if resynced_rate(self.filter_hz, 1.0 / hz).is_some() {
+                self.rebuild_filters(hz);
+            }
+        } else if crossed {
+            self.rebuild_filters(self.designed_hz);
+        }
+    }
+
+    fn rebuild_filters(&mut self, hz: f32) {
+        self.gyro_lpf = GyroLpf::new(60.0, hz);
+        self.notch = relay_notch::HarmonicNotchBank::new(hz);
+        self.filter_hz = hz;
     }
 
     pub fn step<B: FlightBackend>(
@@ -1295,6 +1415,16 @@ impl FlightCore {
     /// See [`CascadePartition::designed_loop_hz`].
     pub fn designed_loop_hz(&self) -> f32 {
         self.casc.designed_loop_hz()
+    }
+
+    /// See [`CascadePartition::filter_design_hz`].
+    pub fn filter_design_hz(&self) -> f32 {
+        self.casc.filter_design_hz()
+    }
+
+    /// See [`CascadePartition::alternation_guard`].
+    pub fn alternation_guard(&self) -> bool {
+        self.casc.alternation_guard()
     }
 
     pub fn last_omega_d(&self) -> Vec3 {
@@ -1800,6 +1930,13 @@ impl SimBackend {
     /// Reseed the deterministic noise LCG (v1.114): lets a Monte-Carlo campaign
     /// give each trial an independent noise realisation (otherwise every fresh
     /// backend replays the same sequence). A zero seed is nudged off 0.
+    /// Set the step the NEXT `write_motors` integrates. A host whose frames
+    /// arrive late really takes a longer step; a test that only REPORTS a
+    /// late `dt` integrates the nominal one and cannot see that (#644, #638).
+    pub fn set_dt(&mut self, dt: f32) {
+        self.dt = dt;
+    }
+
     pub fn reseed(&mut self, seed: u32) {
         self.rng = if seed == 0 { 0x9E37_79B9 } else { seed };
     }

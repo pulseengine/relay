@@ -162,23 +162,31 @@ artifacts:
            model; real ESC response is unmeasured (BOM ESC data is the
            open item already named for limit (a)). Fix in
            falcon-v1.142.0 (#638).
-           KNOWN LIMIT A (review of v1.140, defect A; maintainer
-           2026-11-05: defer to v1.142, narrow the host contract).
-           Every count in items 4 and 5 is at the RESYNCED rate, and
-           the resync follows each frame's dt-s with a 2% band. A host
-           whose dt-s crosses that band from frame to frame (2 ms / 3
-           ms alternation at 400 Hz, +-25 us at 1 kHz) rebuilds the
-           gyro low-pass and notch with zeroed state on every such
-           frame; on SimBackend the vehicle tumbles. The evidence
-           above is for a FIXED or in-band period only. v1.141's
-           cascade.wit sensor-frame.dt-s states the contract: a steady
-           period, or the nominal one. Every fix attempt (#642, #644,
-           closed unmerged; probes kept on branch
-           fix/review140-a-filter-rate under review140-a-evidence/)
-           regressed early outlier frames, near-Nyquist ringing,
-           aliased rotor vibration, or falsely isolated a rotor under
-           a minority of late frames with vibration. Fix in
-           falcon-v1.142.0 (#638).
+           KNOWN LIMIT A (review of v1.140, defect A), NARROWED for
+           falcon-v1.142.0 (#638). A host whose dt-s crossed the 2% band
+           from frame to frame rebuilt the gyro low-pass and notch with
+           zeroed state on every such frame and tumbled. The cascade now
+           holds the filter design at the median of the last 16 frame
+           periods while ALL 16 crossed the band (strict two-level
+           alternation), and lets go on the first frame that does not; the
+           FDI counters and windows keep the per-frame resync of items 4
+           and 5 unchanged. Tests: tests/dt_alternation_guard.rs (5;
+           disabling the guard fails the 3 alternation tests, holding it
+           on fails the fixed-period and late-frame tests, and the rejected
+           12-of-16 guard fails the late-frame test). Two-sided oracle
+           against main 5348938, plant integrating each frame's own dt:
+           rv_grid9 (360 cells) and rv_grid8 (1296) identical; late40 and
+           late5 at 48 seeds (864) identical; near-Nyquist 110-140 Hz
+           (1280) no cell worse; alternation grids take 2/3 ms and
+           +-2.5/12.5/20% alternation from 1-12 of 12 failing to 0 at
+           250/400/1000 Hz, and rotor-out under alternation from a healthy
+           rotor isolated (8/8) to the dead one isolated at the
+           fixed-period latency. STILL OPEN under limit A, unchanged from
+           main: random jitter beyond the band, period-3/5 alternation,
+           short alternation bursts (1 kHz bursts on late frames, already
+           failing on main, tumble 7/8 vs 2/8). Rejected on the way: freeze
+           at arm (24/24 isolations with 10% late frames + vibration) and
+           a 12-of-16 guard (25/48 with 40% late frames; main 1/48).
 
       STATUS DEMOTED verified -> implemented by the #609 finding-17 change
       (#633), and its evidence changed again with finding 18 (#634).
@@ -260,6 +268,7 @@ artifacts:
         - run: cargo test -p falcon-core --lib the_stall_window_is_0_1_s_at_the_resynced_rate
         - run: cargo test -p falcon-core --lib an_airborne_rotor_dead_from_the_first_tick_is_caught_by_the_stall_check
         - run: cargo test -p falcon-core --lib a_late_frame_rescales_the_in_progress_counters
+        - run: cargo test -p falcon-core --test dt_alternation_guard
         - run: cargo test -p falcon-core --test fdi_spinup_guard known_limit_c_dead_rotor_beside_a_silent_sibling_is_not_isolated_airborne
         - run: "grep -q 'pub const FDI_STALL_RPM_FRAC: f32 = 0.05;' crates/falcon-core/plain/src/fdi.rs"
         - run: "grep -q 'pub const FDI_STALL_CMD_MIN: f32 = 0.20;' crates/falcon-core/plain/src/fdi.rs"
