@@ -386,9 +386,11 @@ and the calibration is replaced by the identity (arming refused on
 #611's API that is: forward a `configure-calibration` with the identity (or
 any invalid) calibration, or a `configure-supervisor` with an invalid
 configuration. *(This rule reconciles #527 with #611; the maintainer
-confirmed it on 2026-11-07. The native test endpoint implements it, and
-`a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration` in
-`crates/falcon-hitl/tests/binding_drives_the_supervisor.rs` checks it.)*
+confirmed it on 2026-11-07. It holds for every rejection that names the frame's
+type, not only a non-finite value. The native test endpoint implements it;
+`a_nan_calibration_frame_is_not_acked_and_revokes_the_earlier_calibration` and
+`a_wrong_length_calibration_or_supervisor_frame_also_revokes` in
+`crates/falcon-hitl/tests/binding_drives_the_supervisor.rs` check it.)*
 
 The order a host follows to fly the supervised component:
 
