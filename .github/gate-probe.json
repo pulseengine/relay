@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "detectors": [
+    {
+      "command": [
+        "scripts/kani-scope.sh"
+      ],
+      "outputs": [
+        "run"
+      ],
+      "controls": [
+        "crates/relay-mix-quad/plain/src/lib.rs",
+        "crates/falcon-core/plain/src/lib.rs",
+        "Cargo.lock",
+        "rust-toolchain.toml"
+      ],
+      "negative_controls": [
+        "docs/RELEASE-PLAN.md",
+        "artifacts/verification/FV-RELAY-VGATE-006.yaml",
+        "scripts/check-evidence.rs"
+      ],
+      "exempt_outputs": {
+        "reason": "not a boolean: names why run=false (deferred | out-of-scope); kani-gate fails closed on a skip without one, and scripts/kani-scope-replay.rs asserts it per case"
+      }
+    }
+  ]
+}

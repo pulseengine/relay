@@ -98,7 +98,18 @@ fn step_body_and_base_expr() -> (String, String) {
     for (_, job) in y["jobs"].as_mapping().expect("jobs").iter() {
         for s in job["steps"].as_sequence().into_iter().flatten() {
             if s["name"].as_str().unwrap_or("").starts_with(STEP) {
-                let body = s["run"].as_str().expect("run block").to_string();
+                let mut body = s["run"].as_str().expect("run block").to_string();
+                // Since temper#86 the detector is a script the step calls, so
+                // temper's gate probe can run it. Replay the SCRIPT the step
+                // names: its text is what the needles below check, and it is
+                // run by absolute path from the fixture repo.
+                let first = body.trim().to_string();
+                if !first.contains('\n') && first.ends_with(".sh") {
+                    let abs = std::fs::canonicalize(&first)
+                        .unwrap_or_else(|e| panic!("the step runs {first:?}, which does not resolve: {e}"));
+                    let text = std::fs::read_to_string(&abs).expect("read the detector script");
+                    body = format!("# SCRIPT {}\n{}", abs.display(), text);
+                }
                 let expr = s["env"]["BASE_SHA"]
                     .as_str()
                     .expect("the step must set BASE_SHA in env")
@@ -140,7 +151,7 @@ fn main() {
     }
     // The grep is the predicate under test; assert its alternatives are the ones
     // the cases below exercise, so a silently-narrowed grep cannot pass.
-    for needle in ["crates/", "Cargo\\.toml", "Cargo\\.lock", "kani\\.yml"] {
+    for needle in ["crates/*", "Cargo.toml", "Cargo.lock", ".github/workflows/kani.yml", "GATE_PROBE_FILES"] {
         assert!(
             body.contains(needle),
             "the scope grep no longer mentions {needle:?}; update the fixtures deliberately rather than letting coverage shrink"
@@ -211,6 +222,91 @@ fn main() {
             want_reason: None,
             why: "a manual run has neither field; it is the deliberate full-sweep escape hatch",
         },
+        // FAIL CLOSED (temper#86): the classes the old allowlist skipped. Each
+        // is a changed path outside crates/ that is not known to be irrelevant.
+        Case {
+            name: "merge_group, a .rs under docs/",
+            changed: &["docs/gate-probe-control.rs"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: true,
+            want_reason: None,
+            why: "temper's first default control: the allowlist skipped any file outside crates/, whatever it was",
+        },
+        Case {
+            name: "merge_group, a supply-chain/ file",
+            changed: &["supply-chain/gate-probe-control.toml"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: true,
+            want_reason: None,
+            why: "temper's second default control: an audit or vetting change is not known to be irrelevant",
+        },
+        Case {
+            name: "merge_group, a new top-level directory",
+            changed: &["gate-probe-new-dir/control.bin"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: true,
+            want_reason: None,
+            why: "temper's third default control: a new kind of input must be gated by default",
+        },
+        Case {
+            name: "merge_group, a doc a crate include_str!s",
+            changed: &["docs/NAMED.md"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: true,
+            want_reason: None,
+            why: "falcon-hitl include_str!s docs/TRANSPORT-BINDING.md: a .md a crate names is compiled input",
+        },
+        Case {
+            name: "merge_group, another workflow only",
+            changed: &[".github/workflows/ci.yml"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: false,
+            want_reason: Some("out-of-scope"),
+            why: "keeps the #548 saving: a workflow other than kani.yml does not change what the harnesses prove",
+        },
+        Case {
+            name: "merge_group, docs plus a crate",
+            changed: &["docs/RELEASE-PLAN.md", "crates/relay-mix-quad/plain/src/lib.rs"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: true,
+            want_reason: None,
+            why: "one relevant path among irrelevant ones must still run",
+        },
+        // KNOWN SOURCE TREES (maintainer decision 2026-11-08): outside every
+        // engine's dependency closure, unless a crate path-depends into them.
+        Case {
+            name: "merge_group, a scripts/ source only",
+            changed: &["scripts/check-evidence.rs"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: false,
+            want_reason: Some("out-of-scope"),
+            why: "no harness can depend on scripts/: keeps today's queue cost (19 of 111 commits since 2026-10-01 were this class)",
+        },
+        Case {
+            name: "merge_group, an examples/ source only",
+            changed: &["examples/falcon-sitl-gz/src/main.rs"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: false,
+            want_reason: Some("out-of-scope"),
+            why: "examples/ is outside every engine's dependency closure",
+        },
+        Case {
+            name: "merge_group, a tree a crate path-depends into",
+            changed: &["tools/helper/src/lib.rs"],
+            base: BaseKind::Parent,
+            event: "merge_group",
+            want_run: true,
+            want_reason: None,
+            why: "the fixture's crates/dep/Cargo.toml has path = \"../../tools/helper\": the tree is in a dependency closure, so it is relevant",
+        },
         // QUEUE-ONLY (2026-10-22, #600): a pull request NEVER runs the matrix —
         // the merge queue does. Asserted from both sides: a crate change on a PR
         // must still defer (or the PR-time sweep is back), and the skip must be
@@ -252,6 +348,9 @@ git config user.email r@example.com
 git config user.name 'Replay Harness'
 git config commit.gpgsign false
 mkdir -p seed && echo seed > seed/f.txt
+mkdir -p crates/named/src
+echo 'const D: &str = include_str!("../../../docs/NAMED.md");' > crates/named/src/lib.rs
+mkdir -p crates/dep && printf '[dependencies]\nhelper = { path = "../../tools/helper" }\n' > crates/dep/Cargo.toml
 git add -A && git commit -q -m base
 "#;
         let (ok, out) = sh(&tmp, setup);
@@ -284,9 +383,13 @@ git add -A && git commit -q -m base
         // did exactly that, and the three backstop cases "failed" having
         // printed the correct message — a verdict about the harness, not the
         // workflow. A step that exits early is the normal case, not the odd one.
+        let run = match body.strip_prefix("# SCRIPT ") {
+            Some(rest) => format!("bash '{}'", rest.lines().next().unwrap_or("")),
+            None => body.clone(),
+        };
         let script = format!(
             "set -u\nexport GITHUB_OUTPUT=\"$PWD/.gh_out\"\n: > \"$GITHUB_OUTPUT\"\nexport GITHUB_EVENT_NAME='{}'\nexport BASE_SHA='{}'\n{}\n",
-            c.event, base, body
+            c.event, base, run
         );
         let (exit_ok, out) = sh(&tmp, &script);
         let written = std::fs::read_to_string(tmp.join(".gh_out")).unwrap_or_default();
