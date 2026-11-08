@@ -74,7 +74,8 @@ const SENSOR_PRESENCE_BYTES: [usize; 5] = [28, 41, 54, 59, 76];
 /// order, PACKED: tick-head u32 at 0, then qw qx qy qz, pos-n/e/d, vel-n/e/d,
 /// wx wy wz, bgx bgy bgz, innovation as seventeen f32s at 4..72. NOT float
 /// slots: failed-rotor 72, mode 73, and the u32 words failsafe 74, valid 78,
-/// prearm-failing 82, tick-tail 86. Deliberately not `MsgType::f32_offsets`.
+/// prearm-failing 82, tick-tail 86. Deliberately not `wire::STATE_FLOAT_SLOTS`;
+/// these slots are PASSED THROUGH, not checked (the one #527 exception).
 const STATE_SLOTS: [usize; 17] = [
     4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
 ];
@@ -566,52 +567,82 @@ fn a_well_formed_command_frame_dispatches_without_panicking() {
 
 /// `State` (binding v3, TRANSPORT-P02) — 90 bytes, the component -> host
 /// reply a binding-only host reads mode, failsafe, the estimate and
-/// `prearm-failing` from. The value contract over the harness's OWN 17-slot
-/// table, then, on `Ok`, EVERY field bit for bit at the offset the harness
-/// assembles itself — including the seqlock pair, so an encoder/decoder that
-/// swapped head and tail, or read `failsafe` at the WIT record's padded 76
-/// instead of the wire's 74, fails here. The integer words are NOT float
-/// slots: a `failsafe` word that spells NaN must be ACCEPTED.
+/// `prearm-failing` from.
+///
+/// THE ONE EXCEPTION TO #527 (maintainer decision 2026-11-08): State PASSES
+/// NON-FINITE THROUGH. So the contract here is the opposite of the other
+/// dispatch harnesses: EVERY well-formed State decodes — over symbolic bytes,
+/// so every NaN and +-infinity pattern in every one of the harness's OWN 17
+/// float slots — and EVERY field reads back bit for bit at the offset the
+/// harness assembles itself, the seqlock pair included (a codec that swapped
+/// head and tail, or read `failsafe` at the WIT record's padded 76 instead of
+/// the wire's 74, fails). A diverged estimate must not hide `mode`,
+/// `failsafe` and `prearm-failing` behind a refusal. Every OTHER
+/// float-carrying type still REJECTS non-finite: that is `value_contract` in
+/// the Motors / Config / Sensor / SupervisorConfig / Calibration harnesses.
 #[kani::proof]
 #[kani::unwind(20)]
 fn a_well_formed_state_frame_dispatches_without_panicking() {
     const N: usize = HEADER_LEN + STATE_PAYLOAD_LEN;
     let buf: [u8; N] = well_formed(MsgType::State);
-    let ok = value_contract(&buf, MsgType::State, &STATE_SLOTS);
     let payload = &buf[HEADER_LEN..];
-    if ok {
-        let s = decode_state(payload)
-            .expect("the payload reader must accept what decode_frame accepted");
-        assert!(s.tick_head == bits_at(payload, 0));
-        assert!(s.q[0].to_bits() == bits_at(payload, 4));
-        assert!(s.q[3].to_bits() == bits_at(payload, 16));
-        assert!(s.pos[2].to_bits() == bits_at(payload, 28));
-        assert!(s.vel[0].to_bits() == bits_at(payload, 32));
-        assert!(s.w[1].to_bits() == bits_at(payload, 48));
-        assert!(s.bg[2].to_bits() == bits_at(payload, 64));
-        assert!(s.innovation.to_bits() == bits_at(payload, 68));
-        assert!(s.failed_rotor == payload[72]);
-        assert!(s.mode == payload[73]);
-        assert!(s.failsafe == bits_at(payload, 74));
-        assert!(s.valid == bits_at(payload, 78));
-        assert!(s.prearm_failing == bits_at(payload, 82));
-        assert!(s.tick_tail == bits_at(payload, 86));
-        kani::cover!(
-            !finite_bits(bits_at(payload, 74)),
-            "a failsafe word whose bytes spell NaN/inf is accepted (not a float slot)"
-        );
-        kani::cover!(
-            s.tick_head != s.tick_tail,
-            "a torn seqlock pair is delivered as-is for the host to judge"
-        );
-    } else {
-        assert!(decode_state(payload).is_err());
+    let ok = match decode_frame(&buf) {
+        Ok((h, p)) => h.msg == MsgType::State && p.len() == STATE_PAYLOAD_LEN,
+        Err(_) => false,
+    };
+    assert!(
+        ok,
+        "every well-formed State decodes: non-finite is passed through"
+    );
+    let s = decode_state(payload).expect("the payload reader accepts every well-formed State");
+    assert!(s.tick_head == bits_at(payload, 0));
+    let floats = [
+        s.q[0],
+        s.q[1],
+        s.q[2],
+        s.q[3],
+        s.pos[0],
+        s.pos[1],
+        s.pos[2],
+        s.vel[0],
+        s.vel[1],
+        s.vel[2],
+        s.w[0],
+        s.w[1],
+        s.w[2],
+        s.bg[0],
+        s.bg[1],
+        s.bg[2],
+        s.innovation,
+    ];
+    let mut i = 0;
+    while i < 17 {
+        assert!(floats[i].to_bits() == bits_at(payload, STATE_SLOTS[i]));
+        i += 1;
     }
-    kani::cover!(ok, "a finite state is accepted");
-    kani::cover!(!ok, "a state with a non-finite estimate is rejected");
+    assert!(s.failed_rotor == payload[72]);
+    assert!(s.mode == payload[73]);
+    assert!(s.failsafe == bits_at(payload, 74));
+    assert!(s.valid == bits_at(payload, 78));
+    assert!(s.prearm_failing == bits_at(payload, 82));
+    assert!(s.tick_tail == bits_at(payload, 86));
+    let first_bad = first_non_finite(payload, &STATE_SLOTS);
+    kani::cover!(first_bad.is_none(), "a finite state is accepted");
     kani::cover!(
-        first_non_finite(payload, &STATE_SLOTS) == Some(68),
-        "a non-finite innovation (the last float slot) is rejected"
+        first_bad.is_some(),
+        "a state with a non-finite estimate is ACCEPTED (passed through)"
+    );
+    kani::cover!(
+        first_bad == Some(68),
+        "a non-finite innovation (the last float slot) is passed through bit for bit"
+    );
+    kani::cover!(
+        !finite_bits(bits_at(payload, 74)),
+        "a failsafe word whose bytes spell NaN/inf is accepted (not a float slot)"
+    );
+    kani::cover!(
+        s.tick_head != s.tick_tail,
+        "a torn seqlock pair is delivered as-is for the host to judge"
     );
 }
 

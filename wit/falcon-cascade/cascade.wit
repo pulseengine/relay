@@ -122,7 +122,9 @@ interface types {
         /// Which fields above are meaningful this tick. Bit 0 attitude,
         /// 1 position, 2 velocity, 3 rates, 4 gyro bias, 5 innovation,
         /// 6 failed-rotor, 7 mode, 8 failsafe, 9 prearm-failing (@0.13.0).
-        /// A clear bit means NOT MEASURED, never "zero".
+        /// A clear bit means NOT MEASURED, never "zero". A SET bit means
+        /// measured, NOT finite: a diverged estimate publishes NaN with its
+        /// bit set, and a reader checks finiteness itself.
         valid: u32,
         /// THE PRE-ARM ROWS THAT CURRENTLY FAIL (@0.13.0, TRANSPORT-P02) — a
         /// bitmask, bit = `relay_preflight::CheckId as usize` (21 rows today:

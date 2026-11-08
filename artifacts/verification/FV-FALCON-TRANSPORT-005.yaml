@@ -35,11 +35,16 @@ artifacts:
       with tick-head != tick-tail so a swapped seqlock pair fails.
 
       (4) Kani: `a_well_formed_state_frame_dispatches_without_panicking`
-      (value contract over the harness's own 17-slot table plus bit-for-bit
-      read-back of every integer field at the wire offsets), StateRequest
-      covers in the rejection-ladder harnesses, and State in the echo-rule
-      harness. Mutation-tested locally (see the PR): dropping one slot from
-      the decoder's `STATE_F32` table makes the State harness FAIL.
+      proves EVERY well-formed State decodes — any bit pattern, NaN and
+      +-infinity included, in the harness's own 17 float slots — and reads
+      every field back bit for bit at the wire offsets; StateRequest covers in
+      the rejection-ladder harnesses, and State in the echo-rule harness.
+      NON-FINITE PASS-THROUGH (maintainer decision 2026-11-08): State is the
+      one exception to #527; every other float-carrying type keeps its
+      rejection, proven by `value_contract` in its own dispatch harness.
+      Mutation-tested both ways locally (see the PR): re-introducing
+      rejection for State makes the State harness FAIL; dropping the
+      rejection for Sensor makes the Sensor harness FAIL.
 
       (5) the binding-only host test sees a REFUSED arm through `state`
       (no calibration frame -> mode disarmed, failsafe bit 7 arm-blocked,
@@ -62,7 +67,9 @@ artifacts:
       `seam_tests` scenario `*_prearm_failing_names_the_refusing_row` checks
       it through `read-state` on the mirror always and on the built wasm
       (`wasm_`, `split_`) when an artifact is named. `state` is as of the last
-      `step`, like `read-state`.
+      `step`, like `read-state`. `valid` means MEASURED, not FINITE: the
+      components do not clear a bit for a non-finite value, and the binding
+      document says the host checks finiteness itself.
     tags: [verification, falcon, transport, hitl, wire, binding-v3, kani, v1.142]
     fields:
       method: automated-test
@@ -84,6 +91,12 @@ artifacts:
         - run: "grep -q 'fn a_state_frame_matches_its_hand_computed_bytes' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'fn a_state_request_frame_matches_its_hand_computed_bytes' crates/falcon-hitl/src/wire.rs"
         - run: "grep -q 'fn state_integer_words_are_not_float_slots' crates/falcon-hitl/src/wire.rs"
+        # the one #527 exception: State passes non-finite through
+        - run: "grep -q 'fn a_non_finite_value_in_a_state_float_is_passed_through' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'MsgType::State => &\\[\\],' crates/falcon-hitl/src/wire.rs"
+        - run: "grep -q 'a state with a non-finite estimate is ACCEPTED (passed through)' crates/falcon-hitl/src/kani_proofs.rs"
+        - run: "grep -q 'One exception: .state. (type 8, v3)' docs/TRANSPORT-BINDING.md"
+        - run: "grep -q 'means MEASURED, not FINITE' docs/TRANSPORT-BINDING.md"
         - run: "grep -q 'fn the_binding_host_accepts_only_the_state_reply_to_its_request' crates/falcon-hitl/src/lib.rs"
         - run: "grep -q 'fn a_refused_arm_is_seen_through_state_with_the_deciding_row_named' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"
         - run: "grep -q 'fn a_refused_arm_with_no_battery_is_named_battery_ok_through_state' crates/falcon-hitl/tests/binding_drives_the_supervisor.rs"

@@ -185,6 +185,13 @@ impl MsgType {
     /// four `motor-rpm` `s32`s — an rpm of -8388608 is the bytes `00 00 80 ff`,
     /// which is the -inf pattern, so a "check every 4-byte word" rule would
     /// reject a valid integer.
+    ///
+    /// ONE EXCEPTION, by maintainer decision (2026-11-08): `State` returns
+    /// NO slots. Its seventeen `f32`s ([`STATE_FLOAT_SLOTS`]) are PASSED
+    /// THROUGH, NaN and +-infinity included, because a diverged estimate must
+    /// not hide `mode`, `failsafe` and `prearm-failing` from the host behind a
+    /// `NonFinite` refusal. The host checks finiteness itself. Every
+    /// host -> component type and `Motors` keep the #527 rejection.
     pub const fn f32_offsets(self) -> &'static [usize] {
         match self {
             MsgType::Config => &CONFIG_F32,
@@ -195,7 +202,8 @@ impl MsgType {
             MsgType::Calibration => &CALIBRATION_F32,
             MsgType::Command => &[],
             MsgType::StateRequest => &[],
-            MsgType::State => &STATE_F32,
+            // The one exception to #527: State's floats pass through.
+            MsgType::State => &[],
         }
     }
 
@@ -221,12 +229,13 @@ const SUPERVISOR_CONFIG_F32: [usize; 6] = [0, 4, 8, 12, 16, 20];
 const CALIBRATION_F32: [usize; 18] = [
     0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
 ];
-/// `State` (v3): qw qx qy qz 4..16, pos-n/e/d 20..28, vel-n/e/d 32..40,
-/// wx wy wz 44..52, bgx bgy bgz 56..64, innovation 68. `tick-head` (0),
+/// `State` (v3) float slots: qw qx qy qz 4..16, pos-n/e/d 20..28, vel-n/e/d
+/// 32..40, wx wy wz 44..52, bgx bgy bgz 56..64, innovation 68. NOT subject to
+/// the non-finite rule (see [`MsgType::f32_offsets`]): any bit pattern here,
+/// NaN and +-infinity included, decodes as itself. `tick-head` (0),
 /// `failed-rotor` (72), `mode` (73) and the u32 words at 74/78/82/86 are not
-/// float slots — a `failsafe` word with bits 23..30 set spells NaN and is a
-/// valid word.
-const STATE_F32: [usize; 17] = [
+/// float slots at all.
+pub const STATE_FLOAT_SLOTS: [usize; 17] = [
     4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
 ];
 /// imu 0..24, dt-s 24, position-ned 29/33/37, mag-body 42/46/50, heading-rad
@@ -1906,6 +1915,13 @@ mod tests {
     fn a_non_finite_value_in_any_float_field_of_any_frame_is_rejected() {
         let mut checked = 0;
         for msg in ALL_TYPES {
+            if msg == MsgType::State {
+                // The one exception (maintainer decision 2026-11-08): State
+                // PASSES non-finite through, and checks NO slot — pinned by
+                // `a_non_finite_value_in_a_state_float_is_passed_through`.
+                assert!(msg.f32_offsets().is_empty(), "State checks no slot");
+                continue;
+            }
             let fields = float_fields(msg);
             // COMPLETENESS: the test's field list and the decoder's slot list
             // agree in count and position — a slot the decoder forgot, or one
@@ -1945,10 +1961,10 @@ mod tests {
                         MsgType::Motors => decode_motors(payload).err(),
                         MsgType::SupervisorConfig => decode_supervisor_config(payload).err(),
                         MsgType::Calibration => decode_calibration(payload).err(),
-                        MsgType::State => decode_state(payload).err(),
-                        MsgType::Ack | MsgType::Command | MsgType::StateRequest => {
-                            unreachable!()
-                        }
+                        MsgType::Ack
+                        | MsgType::Command
+                        | MsgType::StateRequest
+                        | MsgType::State => unreachable!(),
                     };
                     assert_eq!(
                         reader,
@@ -1963,12 +1979,45 @@ mod tests {
                 }
             }
         }
-        // 9 + 15 + 4 + 6 + 18 + 17 (State, v3) = 69 float fields x 6 patterns
+        // 9 + 15 + 4 + 6 + 18 = 52 float fields x 6 patterns (State is the
+        // pass-through exception, tested below)
         assert_eq!(
             checked,
-            69 * 6,
-            "every float field of every frame type was exercised"
+            52 * 6,
+            "every float field of every rejecting frame type was exercised"
         );
+    }
+
+    /// THE EXCEPTION (maintainer decision 2026-11-08): every float field of
+    /// `State`, every non-finite pattern, DECODES — through `decode_frame`
+    /// and the payload reader — and reads back BIT FOR BIT, so a diverged
+    /// estimate still delivers `mode`, `failsafe` and `prearm-failing`. The
+    /// field table (offsets written from the WIT order) matches the
+    /// documented `STATE_FLOAT_SLOTS`.
+    #[test]
+    fn a_non_finite_value_in_a_state_float_is_passed_through() {
+        extern crate std;
+        let fields = float_fields(MsgType::State);
+        let offs: std::vec::Vec<usize> = fields.iter().map(|f| f.offset).collect();
+        assert_eq!(offs, STATE_FLOAT_SLOTS, "State float slots");
+        let mut checked = 0;
+        for field in fields {
+            for bits in NON_FINITE {
+                let (b, n) = (field.frame)(f32::from_bits(bits));
+                let (h, p) = decode_frame(&b[..n])
+                    .unwrap_or_else(|e| panic!("State.{} = {bits:#010x}: {e}", field.name));
+                assert_eq!(h.msg, MsgType::State);
+                let s = decode_state(p).expect("the payload reader agrees");
+                let mut out = [0u8; HEADER_LEN + STATE_PAYLOAD_LEN];
+                encode_state(&mut out, 1, &s);
+                assert_eq!(&out[..], &b[..n], "State.{} bit for bit", field.name);
+                let got = u32::from_le_bytes(p[field.offset..field.offset + 4].try_into().unwrap());
+                assert_eq!(got, bits, "State.{} carries the pattern", field.name);
+                assert_eq!(s.mode, 1, "mode survives a non-finite {}", field.name);
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 17 * 6);
     }
 
     /// Finite edge values are ACCEPTED: the rule is "finite", not "normal" or

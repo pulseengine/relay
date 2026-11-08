@@ -21,7 +21,13 @@
 >    **plus `prearm-failing`** (a u32 bitmask, bit `relay_preflight::CheckId
 >    as usize`), which is also added to the WIT record (seam `@0.12.0` →
 >    `@0.13.0`).
-> 3. **Every v2 payload is byte-identical.** `motors`, `sensor`, `config`,
+> 3. **`state` is the one exception to the non-finite rule.** Its seventeen
+>    `f32`s are passed through, NaN and ±infinity included, so a diverged
+>    estimate cannot hide `mode`, `failsafe` and `prearm-failing` behind a
+>    refusal. **The host checks finiteness itself**, and `valid` means
+>    *measured*, not *finite* (§2a). Every host → component frame and `motors`
+>    still refuse non-finite with `NonFinite`, exactly as in v2.
+> 4. **Every v2 payload is byte-identical.** `motors`, `sensor`, `config`,
 >    `ack`, `supervisor-config`, `calibration` and `command` keep every offset
 >    and length; only header byte 2 changes (2 → 3). A v2 host is refused with
 >    `BadVersion { got: 2, want: 3 }`.
@@ -139,7 +145,7 @@ Every rejection is a refusal of the whole frame; nothing is salvaged.
 | version is not 3 | `BadVersion { got, want }` |
 | type is not 0–8 | `UnknownType` |
 | payload length is not the type's exact length | `BadLength` |
-| **any `f32` slot is NaN or ±infinity** | **`NonFinite { msg, offset }`** |
+| **any `f32` slot is NaN or ±infinity** — every type except `state` (v3), whose floats pass through | **`NonFinite { msg, offset }`** |
 | `command.cmd` is not 0–7 | `BadCommand` |
 | `command.level` / `command.throttle-low` is not 0 or 1 | `BadBool` |
 | **a `sensor` presence byte (payload 28, 41, 54, 59, 76) is not 0 or 1** | **`BadBool { msg, offset, got }`** |
@@ -147,6 +153,10 @@ Every rejection is a refusal of the whole frame; nothing is salvaged.
 When a frame breaks more than one rule, the error reported is the FIRST in
 this order: the non-finite rule over the `f32` slots in field order, then the
 presence bytes in offset order. (The Kani sensor harness proves that order.)
+
+**One exception: `state` (type 8, v3).** By maintainer decision
+(2026-11-08) its floats are passed through unchecked — see §2a. Everything
+below describes every OTHER frame type.
 
 **The non-finite rule applies to every `f32` SLOT, present or absent.** An
 optional field's value bytes are checked even when its presence byte is 0 (the
@@ -416,9 +426,11 @@ field keeps its offset — in this frame's derivation from the record and in
 the record's own canonical-ABI layout, where only `tick-tail` moves (84 →
 88).
 
-The non-finite rule applies to the seventeen `f32`s (offsets 4–68). It does
-**not** apply to `tick-head`, `failsafe`, `valid`, `prearm-failing` or
-`tick-tail`: a u32 word whose bytes spell NaN is a valid word. `mode` and
+**The non-finite rule does NOT apply to this frame** (§1's one exception):
+the seventeen `f32`s at offsets 4–68 are passed through, NaN and ±infinity
+included, and the host checks finiteness itself (§2a; `valid` means
+measured, not finite). The u32 words and the two bytes were never float
+slots: a word whose bytes spell NaN is a valid word. `mode` and
 `failed-rotor` are carried raw (not range-checked); treat an unknown value as
 unknown.
 
@@ -538,11 +550,18 @@ frame before asking, or the reply still shows the pre-`arm` tick.
 | 9 | `GeofenceSane` | 20 | `InsideGeofence` |
 | 10 | `ThresholdsOrdered` | 21–31 | reserved, 0 |
 
-**A non-finite estimate makes the whole `state` frame undecodable.** The
-non-finite rule (§1) applies to every `f32` slot of `state` like any other
-frame, so a component whose estimate has diverged to NaN produces a `state`
-the host refuses with `NonFinite` — `mode` and `failsafe` included. Treat a
-`NonFinite` `state` as "estimate diverged", not as a link error.
+**A `state` float may be NaN or ±infinity, and the HOST must check.**
+`state` is the one frame the non-finite rule (§1) does not apply to: its
+seventeen `f32`s are passed through bit for bit, so a component whose
+estimate has diverged still delivers `mode`, `failsafe` and
+`prearm-failing`. The receiver never refuses a `state` for a float value.
+
+**`valid` means MEASURED, not FINITE.** The published components set the
+`valid` bits whenever a tick has produced the field (`0x3ff` after the first
+tick) and do not clear them when a value is non-finite. A host must test
+each float it uses for finiteness itself; a set `valid` bit with a NaN value
+reads as "the estimator produced this, and it diverged" — never as a usable
+number.
 
 `configure` may be called again later. Doing so **re-initialises the control
 core, estimator state included**, because a partially-applied configuration
