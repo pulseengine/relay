@@ -791,7 +791,7 @@ fn a_rotor_left_silent_after_a_shared_stall_must_earn_its_own_window() {
 }
 
 /// KNOWN LIMIT (c), kept visible (review of v1.140, defect C; maintainer:
-/// pin and disclose, fix in v1.142): a rotor dead from the first tick of an
+/// pin and disclose; fix moved to v1.143, #638): a rotor dead from the first tick of an
 /// AIRBORNE start, beside a HEALTHY sibling whose RPM telemetry reads 0 for
 /// the whole flight (an unpopulated bus slot, a dead telemetry wire), is
 /// NEVER isolated. Two rotors read stalled on every tick, so the stall check
@@ -804,7 +804,7 @@ fn a_rotor_left_silent_after_a_shared_stall_must_earn_its_own_window() {
 /// with every sibling reporting, the same dead rotor IS isolated at the
 /// stall window (so the pin is the silent sibling, not the rig). This is a DOUBLE fault (one rotor
 /// dead, one telemetry channel dead), outside the single-rotor isolation;
-/// v1.142 is to disambiguate co-stalled rotors by the body-rate / attitude
+/// v1.143 is to disambiguate co-stalled rotors by the body-rate / attitude
 /// response. When a change fixes it, this test fails and the limit is
 /// retired here and in FV-FALCON-FAULT-004.
 #[test]

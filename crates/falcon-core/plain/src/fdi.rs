@@ -250,7 +250,7 @@ impl CascadePartition {
         // On a ground spin-up the isolation is deferred to the guard's
         // release and the residual path (measured, SimBackend, 50 ms lag:
         // isolated on the guard's own tick, 0.3 s, at 0.26 rad of tilt,
-        // peak 1.02 rad, the supervisor already in Land). v1.142: disambiguate co-stalled
+        // peak 1.02 rad, the supervisor already in Land). v1.143 (#638): disambiguate co-stalled
         // rotors by the body-rate / attitude response, which a dead rotor
         // produces and a dead telemetry channel does not.
         if self.failed_motor.is_none() && self.fdi_spinup < self.fdi_guard_steps {

@@ -7,7 +7,7 @@
 //! (`SupervisorHost::rebuild_permitted`). So after a battery failsafe a FRESH
 //! pack does not make the vehicle armable again in the same process. This is
 //! the behaviour the requirement now states; the test pins it so the
-//! statement cannot drift. When the v1.142 "pack replaced" reset lands, this
+//! statement cannot drift. When the "pack replaced" reset (#650) lands, this
 //! test is where its contract changes.
 
 use falcon_core::host::{Configured, SupervisorConfig, SupervisorHost};
