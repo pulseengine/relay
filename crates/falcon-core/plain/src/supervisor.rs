@@ -866,6 +866,36 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         }
     }
 
+    /// EVERY pre-arm row that currently FAILS, as a bitmask (TRANSPORT-P02):
+    /// bit `id as usize` is set iff row `id` is REQUIRED (always for the
+    /// legacy six, once declared for a breadth row) and does not pass. That is
+    /// exactly the predicate [`relay_preflight::arm_check_table`] gates on, read
+    /// off the SAME `check_table` that [`command`](Self::command) judges an
+    /// `Arm` against, so
+    ///
+    ///   `prearm_failing_mask() == 0`  <=>  `arm_blocked_check().is_none()`
+    ///
+    /// and the row `arm_blocked_check()` names is the FIRST set bit in
+    /// [`relay_preflight::CheckId::ALL`] (gate) order — NOT necessarily the
+    /// lowest bit: `InsideGeofence` is bit 20 but gate position 10.
+    ///
+    /// An undeclared breadth row is NOT failing (it is not required), so a
+    /// vehicle that never fed, say, an RC link reads 0 here and arms.
+    ///
+    /// Unlike `failsafe_flags()` bit 7 (`ARM_BLOCKED`) this is NOT scoped to
+    /// `Disarmed`: it is the table verdict in every mode, which is what a
+    /// host needs to name the row behind a refusal.
+    pub fn prearm_failing_mask(&self) -> u32 {
+        const _: () = assert!(relay_preflight::CHECK_COUNT <= 32);
+        let mut mask = 0u32;
+        for id in relay_preflight::CheckId::ALL {
+            if self.check_table.is_required(id) && !self.check_table.passed(id) {
+                mask |= 1u32 << (id as usize);
+            }
+        }
+        mask
+    }
+
     /// Inject an external command/event (Arm, RequestTakeoff, RequestMission…).
     /// An `Arm` is gated on the pre-arm / commander checks (relay-preflight): the
     /// FSM only enters `Armed` when every check passes AND the vehicle is level

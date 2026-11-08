@@ -47,9 +47,10 @@
 
 use crate::wire::{
     ACK_PAYLOAD_LEN, CALIBRATION_PAYLOAD_LEN, COMMAND_PAYLOAD_LEN, CONFIG_PAYLOAD_LEN, HEADER_LEN,
-    MAGIC, MOTORS_PAYLOAD_LEN, MsgType, SENSOR_PAYLOAD_LEN, SUPERVISOR_CONFIG_PAYLOAD_LEN, VERSION,
-    WireError, decode_ack, decode_calibration, decode_command, decode_config, decode_frame,
-    decode_motors, decode_sensor_frame, decode_supervisor_config,
+    MAGIC, MOTORS_PAYLOAD_LEN, MsgType, SENSOR_PAYLOAD_LEN, STATE_PAYLOAD_LEN,
+    SUPERVISOR_CONFIG_PAYLOAD_LEN, VERSION, WireError, decode_ack, decode_calibration,
+    decode_command, decode_config, decode_frame, decode_motors, decode_sensor_frame, decode_state,
+    decode_state_request, decode_supervisor_config,
 };
 
 /// The harnesses' OWN float-slot tables (payload offsets), from the WIT field
@@ -69,6 +70,15 @@ const SENSOR_SLOTS: [usize; 15] = [0, 4, 8, 12, 16, 20, 24, 29, 33, 37, 42, 46, 
 /// layout table: position-ned, mag-body, heading-rad, motor-rpm, battery-v.
 /// Deliberately not `wire::SENSOR_PRESENCE`.
 const SENSOR_PRESENCE_BYTES: [usize; 5] = [28, 41, 54, 59, 76];
+/// `State` (binding v3, TRANSPORT-P02), from the WIT `flight-state` record
+/// order, PACKED: tick-head u32 at 0, then qw qx qy qz, pos-n/e/d, vel-n/e/d,
+/// wx wy wz, bgx bgy bgz, innovation as seventeen f32s at 4..72. NOT float
+/// slots: failed-rotor 72, mode 73, and the u32 words failsafe 74, valid 78,
+/// prearm-failing 82, tick-tail 86. Deliberately not `wire::STATE_FLOAT_SLOTS`;
+/// these slots are PASSED THROUGH, not checked (the one #527 exception).
+const STATE_SLOTS: [usize; 17] = [
+    4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
+];
 
 /// The FIRST presence byte, in field order, that is neither 0 nor 1.
 fn first_bad_presence(payload: &[u8]) -> Option<usize> {
@@ -207,6 +217,11 @@ fn decode_frame_is_total_and_never_lies_about_length() {
             if h.msg == MsgType::Command {
                 assert!(payload[0] <= 7 && payload[1] <= 1 && payload[2] <= 1);
             }
+            // (7) v3: a StateRequest is the bare header, and its reader agrees.
+            if h.msg == MsgType::StateRequest {
+                assert!(payload.is_empty() && slice.len() == HEADER_LEN);
+                assert!(decode_state_request(payload).is_ok());
+            }
         }
         Err(_) => {
             // A rejection is always allowed; what matters is that SOME frames
@@ -245,6 +260,19 @@ fn every_branch_of_the_rejection_ladder_is_reachable() {
         matches!(r, Ok((h, _)) if h.msg == MsgType::Command),
         "a Command frame decodes"
     );
+    kani::cover!(
+        matches!(r, Ok((h, _)) if h.msg == MsgType::StateRequest),
+        "a StateRequest frame (the bare header) decodes"
+    );
+    kani::cover!(
+        len > HEADER_LEN
+            && slice[0] == MAGIC[0]
+            && slice[1] == MAGIC[1]
+            && slice[2] == VERSION
+            && slice[3] == MsgType::StateRequest as u8
+            && matches!(r, Err(WireError::BadLength { .. })),
+        "a StateRequest with a payload is rejected"
+    );
     // One cover per rejection reason. If any of these is UNSATISFIABLE the
     // corresponding guard is dead code and the error variant is a lie.
     kani::cover!(len < HEADER_LEN && r.is_err(), "a short frame is rejected");
@@ -265,7 +293,7 @@ fn every_branch_of_the_rejection_ladder_is_reachable() {
             && slice[0] == MAGIC[0]
             && slice[1] == MAGIC[1]
             && slice[2] == VERSION
-            && slice[3] > 6
+            && slice[3] > 8
             && r.is_err(),
         "an unknown message type is rejected"
     );
@@ -537,6 +565,87 @@ fn a_well_formed_command_frame_dispatches_without_panicking() {
     );
 }
 
+/// `State` (binding v3, TRANSPORT-P02) — 90 bytes, the component -> host
+/// reply a binding-only host reads mode, failsafe, the estimate and
+/// `prearm-failing` from.
+///
+/// THE ONE EXCEPTION TO #527 (maintainer decision 2026-11-08): State PASSES
+/// NON-FINITE THROUGH. So the contract here is the opposite of the other
+/// dispatch harnesses: EVERY well-formed State decodes — over symbolic bytes,
+/// so every NaN and +-infinity pattern in every one of the harness's OWN 17
+/// float slots — and EVERY field reads back bit for bit at the offset the
+/// harness assembles itself, the seqlock pair included (a codec that swapped
+/// head and tail, or read `failsafe` at the WIT record's padded 76 instead of
+/// the wire's 74, fails). A diverged estimate must not hide `mode`,
+/// `failsafe` and `prearm-failing` behind a refusal. Every OTHER
+/// float-carrying type still REJECTS non-finite: that is `value_contract` in
+/// the Motors / Config / Sensor / SupervisorConfig / Calibration harnesses.
+#[kani::proof]
+#[kani::unwind(20)]
+fn a_well_formed_state_frame_dispatches_without_panicking() {
+    const N: usize = HEADER_LEN + STATE_PAYLOAD_LEN;
+    let buf: [u8; N] = well_formed(MsgType::State);
+    let payload = &buf[HEADER_LEN..];
+    let ok = match decode_frame(&buf) {
+        Ok((h, p)) => h.msg == MsgType::State && p.len() == STATE_PAYLOAD_LEN,
+        Err(_) => false,
+    };
+    assert!(
+        ok,
+        "every well-formed State decodes: non-finite is passed through"
+    );
+    let s = decode_state(payload).expect("the payload reader accepts every well-formed State");
+    assert!(s.tick_head == bits_at(payload, 0));
+    let floats = [
+        s.q[0],
+        s.q[1],
+        s.q[2],
+        s.q[3],
+        s.pos[0],
+        s.pos[1],
+        s.pos[2],
+        s.vel[0],
+        s.vel[1],
+        s.vel[2],
+        s.w[0],
+        s.w[1],
+        s.w[2],
+        s.bg[0],
+        s.bg[1],
+        s.bg[2],
+        s.innovation,
+    ];
+    let mut i = 0;
+    while i < 17 {
+        assert!(floats[i].to_bits() == bits_at(payload, STATE_SLOTS[i]));
+        i += 1;
+    }
+    assert!(s.failed_rotor == payload[72]);
+    assert!(s.mode == payload[73]);
+    assert!(s.failsafe == bits_at(payload, 74));
+    assert!(s.valid == bits_at(payload, 78));
+    assert!(s.prearm_failing == bits_at(payload, 82));
+    assert!(s.tick_tail == bits_at(payload, 86));
+    let first_bad = first_non_finite(payload, &STATE_SLOTS);
+    kani::cover!(first_bad.is_none(), "a finite state is accepted");
+    kani::cover!(
+        first_bad.is_some(),
+        "a state with a non-finite estimate is ACCEPTED (passed through)"
+    );
+    kani::cover!(
+        first_bad == Some(68),
+        "a non-finite innovation (the last float slot) is passed through bit for bit"
+    );
+    kani::cover!(
+        !finite_bits(bits_at(payload, 74)),
+        "a failsafe word whose bytes spell NaN/inf is accepted (not a float slot)"
+    );
+    kani::cover!(
+        s.tick_head != s.tick_tail,
+        "a torn seqlock pair is delivered as-is for the host to judge"
+    );
+}
+
 // ── the echo rule at the host (#614; provenance jess#167) ────────────────
 //
 // `BindingHost::on_reply` used to feed a reply's header seq straight into its
@@ -558,6 +667,8 @@ const OPS: usize = 5;
 enum Sent {
     Sensor,
     Control,
+    /// binding v3: a `StateRequest`.
+    State,
 }
 
 /// What the host really sent: seq, kind, and whether a reply to it was
@@ -601,11 +712,14 @@ impl Ledger {
 }
 
 /// Every field of the host, for the "a refusal changes nothing" check.
+#[allow(clippy::type_complexity)]
 fn snapshot(
     h: &BindingHost,
 ) -> (
     u32,
     u32,
+    Option<u32>,
+    Option<u32>,
     Option<u32>,
     Option<u32>,
     Option<u32>,
@@ -619,6 +733,8 @@ fn snapshot(
         h.last_acked,
         h.outstanding_sensor,
         h.last_motors,
+        h.awaiting_state,
+        h.last_state,
         h.tracker.last(),
     )
 }
@@ -647,6 +763,8 @@ fn the_host_accepts_only_replies_to_frames_it_sent() {
         last_acked: None,
         outstanding_sensor: None,
         last_motors: None,
+        awaiting_state: None,
+        last_state: None,
         tracker: SeqTracker::starting_at(start),
     };
     let mut g = Ledger {
@@ -658,7 +776,7 @@ fn the_host_accepts_only_replies_to_frames_it_sent() {
     let mut step = 0;
     while step < OPS {
         let op: u8 = kani::any();
-        match op % 5 {
+        match op % 7 {
             0 => {
                 if let Ok(s) = host.next_sensor() {
                     g.push(s, Sent::Sensor);
@@ -670,6 +788,40 @@ fn the_host_accepts_only_replies_to_frames_it_sent() {
                 }
             }
             2 => host.cancel_pending(),
+            5 => {
+                if let Ok(s) = host.next_state_request() {
+                    g.push(s, Sent::State);
+                }
+            }
+            6 => {
+                // binding v3: a `State` reply with an ARBITRARY header seq.
+                let seq: u32 = kani::any();
+                let before = snapshot(&host);
+                match host.classify(seq, ReplyBody::State(Default::default())) {
+                    Ok(HostReply::State { seq: got, .. }) => {
+                        assert!(got == seq);
+                        let i = g.find(seq, Sent::State);
+                        assert!(i.is_some(), "a State answering a request never sent");
+                        let i = i.unwrap();
+                        assert!(!g.answered[i], "a State request answered twice");
+                        g.answered[i] = true;
+                        kani::cover!(true, "a State reply names the request it answers");
+                    }
+                    Ok(HostReply::DuplicateState { seq: got }) => {
+                        assert!(got == seq);
+                        let i = g.find(seq, Sent::State);
+                        assert!(i.is_some() && g.answered[i.unwrap()]);
+                        assert!(snapshot(&host) == before);
+                        kani::cover!(true, "a duplicated State is benign");
+                    }
+                    Ok(_) => assert!(false, "a State frame classified as another reply"),
+                    Err(e) => {
+                        assert!(snapshot(&host) == before, "a refusal changed state");
+                        assert!(matches!(e, HostError::StrayState { .. }));
+                        kani::cover!(true, "a State echoing no outstanding request is refused");
+                    }
+                }
+            }
             3 => {
                 let seq: u32 = kani::any();
                 let before = snapshot(&host);

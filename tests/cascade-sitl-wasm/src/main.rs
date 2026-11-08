@@ -63,9 +63,9 @@ wasmtime::component::bindgen!({
     inline: r#"
         package host:sitl;
         world composed-cascade {
-            export pulseengine:falcon-cascade/controller@0.12.0;
-            export pulseengine:falcon-cascade/observer@0.12.0;
-            export pulseengine:falcon-cascade/pilot@0.12.0;
+            export pulseengine:falcon-cascade/controller@0.13.0;
+            export pulseengine:falcon-cascade/observer@0.13.0;
+            export pulseengine:falcon-cascade/pilot@0.13.0;
         }
     "#,
     path: "../../wit/falcon-cascade",

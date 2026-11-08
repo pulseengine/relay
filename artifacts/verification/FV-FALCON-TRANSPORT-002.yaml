@@ -231,7 +231,13 @@ artifacts:
         - run: "grep -q 'fn the_host_accepts_only_replies_to_frames_it_sent' crates/falcon-hitl/src/kani_proofs.rs"
         - run: "grep -q 'a never-sent seq is refused' crates/falcon-hitl/src/kani_proofs.rs"
         - run: "grep -q 'genuine loss is reported' crates/falcon-hitl/src/kani_proofs.rs"
-        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 39"
+        # Binding v3: State (component -> host) is the ONE type that passes
+        # non-finite through (maintainer decision 2026-11-08); its harness
+        # proves acceptance, every other float-carrying type still rejects.
+        # 39 -> 49 with TRANSPORT-P02 (binding v3): the State dispatch
+        # harness (5), the StateRequest covers in the rejection ladder (2),
+        # and the State arms of the echo-rule harness (3).
+        - run: "test \"$(grep -c 'kani::cover!' crates/falcon-hitl/src/kani_proofs.rs)\" -eq 49"
         # The finding is FIXED: the decoder rejects non-finite (this step
         # inverted the old `! grep -qE 'is_finite|is_nan'`, which flipped as
         # intended when the fix landed).

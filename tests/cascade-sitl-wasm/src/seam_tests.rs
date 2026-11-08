@@ -104,6 +104,8 @@ trait Seam {
     fn mode(&mut self) -> Option<u8>;
     /// Published `failed-rotor` (0xFF = none), `None` while not measured.
     fn failed_rotor(&mut self) -> Option<u8>;
+    /// Published `prearm-failing` (@0.13.0), `None` while not measured.
+    fn prearm_failing(&mut self) -> Option<u32>;
 }
 
 impl Seam for NativeCascade {
@@ -138,6 +140,9 @@ impl Seam for NativeCascade {
     }
     fn failed_rotor(&mut self) -> Option<u8> {
         NativeCascade::failed_rotor(self)
+    }
+    fn prearm_failing(&mut self) -> Option<u32> {
+        NativeCascade::prearm_failing(self)
     }
 }
 
@@ -313,6 +318,63 @@ impl Seam for WasmSeam {
         let s = self.state();
         (s.valid & (1 << 6) != 0).then_some(s.failed_rotor)
     }
+    fn prearm_failing(&mut self) -> Option<u32> {
+        let s = self.state();
+        (s.valid & (1 << 9) != 0).then_some(s.prearm_failing)
+    }
+}
+
+// ── @0.13.0: WHICH pre-arm rows fail, through `read-state` (TRANSPORT-P02) ──
+
+/// The deciding row as a reader of `prearm-failing` derives it: the first
+/// set bit in gate order (`CheckId::ALL`), bit index `CheckId as usize`.
+fn first_failing(mask: u32) -> Option<CheckId> {
+    CheckId::ALL
+        .iter()
+        .copied()
+        .find(|&id| mask & (1 << (id as usize)) != 0)
+}
+
+/// Through `observer.read-state` alone: before any tick the mask is NOT
+/// MEASURED (valid bit 9 clear); with no calibration ever configured a
+/// refused arm reads `disarmed` with `CalibrationPresent` the deciding row;
+/// once a valid calibration is configured the vehicle arms on the measured
+/// table and the mask reads 0. The SAME scenario on the mirror, the shipped
+/// component and the composed split, so the published field is what the
+/// supervisor's own mask says.
+fn prearm_failing_names_the_refusing_row<S: Seam>(s: &mut S) {
+    assert_eq!(s.prearm_failing(), None, "nothing measured before a tick");
+    let mut rig = Rig::new();
+    s.configure(mock_calib());
+    s.configure_supervisor(good_sup());
+    rig.fly(s, 400);
+    s.command(Event::Arm);
+    rig.fly(s, 1);
+    assert_eq!(
+        s.mode(),
+        Some(DISARMED),
+        "no calibration: the arm is refused"
+    );
+    let mask = s.prearm_failing().expect("measured after a tick");
+    assert_ne!(
+        mask & (1 << CheckId::CalibrationPresent as usize),
+        0,
+        "{mask:#x}"
+    );
+    assert_eq!(
+        first_failing(mask),
+        Some(CheckId::CalibrationPresent),
+        "the deciding row, from the published mask ({mask:#x})"
+    );
+    s.configure_calibration(good_cal());
+    let armed = arm_on_measured_table(s, &mut rig, ARM_WINDOW);
+    assert!(
+        armed.is_some(),
+        "calibrated: arms; mask {:?}",
+        s.prearm_failing()
+    );
+    rig.fly(s, 1);
+    assert_eq!(s.prearm_failing(), Some(0), "armed: no row fails");
 }
 
 /// The mock plant plus the frame-building the harness does, so a scenario can
@@ -1234,7 +1296,7 @@ fn split_partition_ticks_core_area_is_pinned() {
             .exports()
             .map(|e| e.name().to_string())
             .filter(|n| {
-                n.ends_with("/estimator@0.12.0#tick") || n.ends_with("/flight-control@0.12.0#tick")
+                n.ends_with("/estimator@0.13.0#tick") || n.ends_with("/flight-control@0.13.0#tick")
             })
             .collect();
         if ticks.is_empty() {
@@ -1701,3 +1763,10 @@ fn invalid_vehicle_config_publishes_arm_blocked(load: fn() -> WasmSeam) {
     assert_eq!(st.mode, DISARMED);
     assert_ne!(st.failsafe & (1 << 7), 0, "arm-blocked bit 7 must be set");
 }
+
+both!(
+    mirror_prearm_failing_names_the_refusing_row,
+    wasm_prearm_failing_names_the_refusing_row,
+    split_prearm_failing_names_the_refusing_row,
+    |s| prearm_failing_names_the_refusing_row(s)
+);

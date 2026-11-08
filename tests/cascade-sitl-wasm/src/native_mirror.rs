@@ -220,11 +220,18 @@ impl NativeCascade {
     }
 
     /// The first pre-arm row refusing an arm right now. THAT a row refuses is
-    /// published through the seam (failsafe bit 7, while `disarmed`); WHICH row
-    /// is visible only natively, which is why the mirror tests can NAME it.
+    /// published through the seam (failsafe bit 7, while `disarmed`); WHICH
+    /// rows fail is published too since @0.13.0 (`prearm-failing`, below).
     #[cfg(test)]
     pub fn arm_blocked_check(&self) -> Option<CheckId> {
         self.host.supervisor().and_then(|s| s.arm_blocked_check())
+    }
+
+    /// The published `prearm-failing` mask (@0.13.0, TRANSPORT-P02), or
+    /// `None` before any supervisor exists.
+    #[cfg(test)]
+    pub fn prearm_failing(&self) -> Option<u32> {
+        self.host.supervisor().map(|s| s.prearm_failing_mask())
     }
 
     /// Mirrors `PilotGuest::command`.

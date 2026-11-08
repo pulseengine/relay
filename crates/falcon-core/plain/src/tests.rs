@@ -3332,3 +3332,75 @@ fn supervised_rotor_out_lands_and_disarms() {
         b.tilt()
     );
 }
+
+/// TRANSPORT-P02: the failing-row mask a binding host reads through `state` is
+/// EXACTLY the verdict `command(Arm)` is judged on. Over pseudo-random tables
+/// (each row left undeclared, declared passing, or declared failing):
+///
+/// - mask == 0 iff `arm_blocked_check()` is None;
+/// - a set bit is exactly a row that is required and not passing, at bit
+///   `id as usize` (the discriminant, not the gate position);
+/// - the row `arm_blocked_check()` names is the first set bit in
+///   `CheckId::ALL` (gate) order;
+/// - and the mask agrees with what `Arm` actually does.
+#[test]
+fn prearm_failing_mask_is_the_arm_gate_verdict() {
+    use relay_preflight::{CHECK_COUNT, CheckId};
+    let mut x: u32 = 0x9e37_79b9;
+    let mut blocked_runs = 0;
+    let mut allowed_runs = 0;
+    for run in 0..600 {
+        let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+        let mut want = 0u32;
+        for id in CheckId::ALL {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            // Bias toward passing so the Allowed side is reached often.
+            let r = (x >> 24) % 8;
+            let legacy = (id as usize) < 6;
+            match r {
+                0 => {
+                    sup.set_check(id, false);
+                    want |= 1 << (id as usize);
+                }
+                1 if !legacy => {} // breadth row left undeclared: not failing
+                _ => sup.set_check(id, true),
+            }
+        }
+        let mask = sup.prearm_failing_mask();
+        assert_eq!(mask, want, "run {run}");
+        assert_eq!(mask >> CHECK_COUNT, 0, "no bit above the table");
+        assert_eq!(mask == 0, sup.arm_blocked_check().is_none(), "run {run}");
+        let first = CheckId::ALL
+            .iter()
+            .copied()
+            .find(|&id| mask & (1 << (id as usize)) != 0);
+        assert_eq!(first, sup.arm_blocked_check(), "run {run}: deciding row");
+        sup.command(relay_fsm::Event::Arm, true, true);
+        let armed = sup.mode() == relay_fsm::Mode::Armed;
+        assert_eq!(armed, mask == 0, "run {run}: Arm agrees with the mask");
+        if armed {
+            allowed_runs += 1;
+        } else {
+            blocked_runs += 1;
+        }
+    }
+    assert!(
+        allowed_runs > 10 && blocked_runs > 10,
+        "{allowed_runs}/{blocked_runs}"
+    );
+
+    // A never-stepped `FlightSupervisor::new` starts its legacy six PASSING
+    // (the bring-up back-compat in `with_core`); the mask says so, in step
+    // with the gate. (A host that must not arm before a measured step
+    // declares those rows false itself — #609 finding 2.)
+    let fresh = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+    assert_eq!(fresh.prearm_failing_mask(), 0);
+    assert_eq!(fresh.arm_blocked_check(), None);
+    // InsideGeofence is bit 20 (its discriminant), not 10 (its gate position).
+    let mut s = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 14.0);
+    for id in CheckId::ALL {
+        s.set_check(id, id != CheckId::InsideGeofence);
+    }
+    assert_eq!(s.prearm_failing_mask(), 1 << 20);
+    assert_eq!(s.arm_blocked_check(), Some(CheckId::InsideGeofence));
+}

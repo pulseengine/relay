@@ -122,6 +122,10 @@ struct PublishedState {
     /// `FlightSupervisor::failsafe_flags()` verbatim — the CAUSE behind `mode`.
     failsafe: u32,
     valid: u32,
+    /// @0.13.0 (TRANSPORT-P02): `FlightSupervisor::prearm_failing_mask()`
+    /// verbatim — WHICH pre-arm rows fail, read off the table `command(arm)`
+    /// is gated on.
+    prearm_failing: u32,
 }
 
 /// `valid` bits. A CLEAR bit means NOT MEASURED — never "the value is zero".
@@ -142,6 +146,10 @@ const V_ROTOR: u32 = 1 << 6;
 /// reported as safe. "Not measured" must not look like "on the ground".
 const V_MODE: u32 = 1 << 7;
 const V_FAILSAFE: u32 = 1 << 8;
+/// @0.13.0 (TRANSPORT-P02): `prearm-failing` is measured. CLEAR before the
+/// first tick, where the mask reads 0 — which would otherwise look like
+/// "the table would allow an arm".
+const V_PREARM: u32 = 1 << 9;
 
 /// `vehicle-config` as falcon-core's record — field for field, no
 /// interpretation. NOT validated here and never clamped: each field's domain
@@ -309,13 +317,22 @@ impl Guest for Component {
             // `FailsafeConfigured` (#609 single-source refactor).
             let mode = sup.mode() as u8;
             let failsafe = sup.failsafe_flags();
+            let prearm_failing = sup.prearm_failing_mask();
             let mut prev = PUBLISHED.0.borrow_mut();
             let tick = prev.as_ref().map(|s| s.tick.wrapping_add(1)).unwrap_or(0);
             // Every field below is produced by the core each tick, so all are
             // valid; `failed-rotor` is valid as a READING (0xFF = no fault),
             // which is distinct from "not measured".
-            let valid =
-                V_ATT | V_POS | V_VEL | V_RATE | V_BIAS | V_INNOV | V_ROTOR | V_MODE | V_FAILSAFE;
+            let valid = V_ATT
+                | V_POS
+                | V_VEL
+                | V_RATE
+                | V_BIAS
+                | V_INNOV
+                | V_ROTOR
+                | V_MODE
+                | V_FAILSAFE
+                | V_PREARM;
             *prev = Some(PublishedState {
                 tick,
                 q: ns.q,
@@ -328,6 +345,7 @@ impl Guest for Component {
                 mode,
                 failsafe,
                 valid,
+                prearm_failing,
             });
         }
 
@@ -396,6 +414,7 @@ impl ObserverGuest for Component {
                 mode: p.mode,
                 failsafe: p.failsafe,
                 valid: p.valid,
+                prearm_failing: p.prearm_failing,
                 tick_tail: p.tick,
             },
             // NO TICK HAS RUN. Every field is zero and `valid` is 0, so a
@@ -431,6 +450,8 @@ impl ObserverGuest for Component {
                 mode: 0,
                 failsafe: 0,
                 valid: 0,
+                // 0 with `V_PREARM` clear: NOT MEASURED, never "would arm".
+                prearm_failing: 0,
                 tick_tail: 0,
             },
         }

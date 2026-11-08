@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-TRANSPORT-P02
     type: sw-req
     title: "TRANSPORT-P02 — the transport binding shall return the vehicle state, so a binding-only host sees the mode and why an arm was refused"
-    status: draft
+    status: implemented
     release: falcon-v1.142.0
     description: >
       Binding v2 (#614) has no frame for `observer.read-state`. A host that

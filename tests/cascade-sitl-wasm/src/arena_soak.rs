@@ -148,21 +148,21 @@ fn core_soak(var: &str, export_suffix: &str, n_args: usize, n_out: usize) -> Vec
 #[ignore = "needs a built falcon-position component (FALCON_POSITION_WASM)"]
 fn arena_soak_position_core_never_exhausts() {
     // vehicle-state (14) + waypoint (4) = 18 flat -> 72 B; attitude-setpoint 5 out.
-    core_soak("FALCON_POSITION_WASM", "/position@0.12.0#tick", 18, 5);
+    core_soak("FALCON_POSITION_WASM", "/position@0.13.0#tick", 18, 5);
 }
 
 #[test]
 #[ignore = "needs a built falcon-attitude component (FALCON_ATTITUDE_WASM)"]
 fn arena_soak_attitude_core_never_exhausts() {
     // vehicle-state (14) + attitude-setpoint (5) = 19 flat -> 76 B; rate-setpoint 4 out.
-    core_soak("FALCON_ATTITUDE_WASM", "/attitude@0.12.0#tick", 19, 4);
+    core_soak("FALCON_ATTITUDE_WASM", "/attitude@0.13.0#tick", 19, 4);
 }
 
 #[test]
 #[ignore = "needs a built falcon-rate component (FALCON_RATE_WASM)"]
 fn arena_soak_rate_core_never_exhausts() {
     // Regression: rate reclaimed before #574 (reset-at-entry) and must still.
-    core_soak("FALCON_RATE_WASM", "/rate@0.12.0#tick", 18, 4);
+    core_soak("FALCON_RATE_WASM", "/rate@0.13.0#tick", 18, 4);
 }
 
 mod pos {

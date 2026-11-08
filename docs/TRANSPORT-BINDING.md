@@ -1,9 +1,41 @@
-# The `pulseengine:falcon-cascade` transport binding, v2
+# The `pulseengine:falcon-cascade` transport binding, v3
 
-**Requirement:** SWREQ-FALCON-TRANSPORT-P01 · **Reference implementation:**
+**Requirements:** SWREQ-FALCON-TRANSPORT-P01, SWREQ-FALCON-TRANSPORT-P02 (the
+`State` frame) · **Reference implementation:**
 `crates/falcon-hitl/src/wire.rs` (codec) and `crates/falcon-hitl/src/lib.rs`
-(`BindingHost`, `SimServer`) · **Seam:** `pulseengine:falcon-cascade@0.12.0`
-(the `Calibration` frame carries `pilot.sensor-calibration` from relay#611)
+(`BindingHost`, `SimServer`) · **Seam:** `pulseengine:falcon-cascade@0.13.0`
+(the `Calibration` frame carries `pilot.sensor-calibration` from relay#611; the
+`State` frame carries `observer.read-state`'s `flight-state`)
+
+> **What changed from v2 (SWREQ-FALCON-TRANSPORT-P02).** v2 shipped in
+> falcon-v1.141.0, so this payload change bumps `version` to **3**:
+>
+> 1. **Two new frame types** — `state-request` (type 7, host → component,
+>    **empty** payload) and `state` (type 8, component → host, **90 B**). A
+>    `state` reply's header `seq` **echoes** the `state-request` it answers
+>    (§3, the echo rule). A binding-only host can now see the mode, the
+>    failsafe causes (`arm-blocked`, `target-stale`, ...), the estimate and
+>    **which pre-arm rows refuse an arm** — before v3 it learned a refusal only
+>    from motors that stayed at zero.
+> 2. **`state` is `types.flight-state` field for field**, in WIT record order,
+>    **plus `prearm-failing`** (a u32 bitmask, bit `relay_preflight::CheckId
+>    as usize`), which is also added to the WIT record (seam `@0.12.0` →
+>    `@0.13.0`).
+> 3. **`state` is the one exception to the non-finite rule.** Its seventeen
+>    `f32`s are passed through, NaN and ±infinity included, so a diverged
+>    estimate cannot hide `mode`, `failsafe` and `prearm-failing` behind a
+>    refusal. **The host checks finiteness itself**, and `valid` means
+>    *measured*, not *finite* (§2a). Every host → component frame and `motors`
+>    still refuse non-finite with `NonFinite`, exactly as in v2.
+> 4. **Every v2 payload is byte-identical.** `motors`, `sensor`, `config`,
+>    `ack`, `supervisor-config`, `calibration` and `command` keep every offset
+>    and length; only header byte 2 changes (2 → 3). A v2 host is refused with
+>    `BadVersion { got: 2, want: 3 }`.
+>
+> The v2 notes below are kept as history: they describe what v2 changed from
+> v1, and they remain true of every payload v3 did not add.
+
+### v2 history
 
 > **What changed from v1, in one revision so a host's decoder changes once**
 > (relay#609 finding 9, #572, #527):
@@ -76,8 +108,8 @@ Every message is an 8-byte header followed by a fixed-length payload.
  off  size  type  field
    0     1  u8    magic0    0x1c
    1     1  u8    magic1    0xfa
-   2     1  u8    version   2
-   3     1  u8    type      0=config 1=ack 2=sensor 3=motors 4=supervisor-config 5=calibration 6=command
+   2     1  u8    version   3
+   3     1  u8    type      0=config 1=ack 2=sensor 3=motors 4=supervisor-config 5=calibration 6=command 7=state-request 8=state
    4     4  u32   seq       little-endian
 ```
 <!-- /wire-layout -->
@@ -94,6 +126,8 @@ are **payload** offsets; add 8 for the frame offset.
 | `supervisor-config` | 4 | host → component | 24 B (`supervisor-config`, 6×f32) | 32 B |
 | `calibration` | 5 | host → component | 72 B (`sensor-calibration`, 18×f32) | 80 B |
 | `command` | 6 | host → component | 3 B (`pilot-command` + 2 interlocks) | 11 B |
+| `state-request` | 7 | host → component | **0 B** (v3) | 8 B |
+| `state` | 8 | component → host | 90 B (`flight-state` + `prearm-failing`, v3) | 98 B |
 
 **All integers and floats are little-endian.** Every field is byte-aligned;
 there is no bit packing anywhere in this binding, deliberately — the one wire
@@ -108,10 +142,10 @@ Every rejection is a refusal of the whole frame; nothing is salvaged.
 |---|---|
 | fewer than 8 bytes | `TooShort` |
 | magic is not `1c fa` | `BadMagic` |
-| version is not 2 | `BadVersion { got, want }` |
-| type is not 0–6 | `UnknownType` |
+| version is not 3 | `BadVersion { got, want }` |
+| type is not 0–8 | `UnknownType` |
 | payload length is not the type's exact length | `BadLength` |
-| **any `f32` slot is NaN or ±infinity** | **`NonFinite { msg, offset }`** |
+| **any `f32` slot is NaN or ±infinity** — every type except `state` (v3), whose floats pass through | **`NonFinite { msg, offset }`** |
 | `command.cmd` is not 0–7 | `BadCommand` |
 | `command.level` / `command.throttle-low` is not 0 or 1 | `BadBool` |
 | **a `sensor` presence byte (payload 28, 41, 54, 59, 76) is not 0 or 1** | **`BadBool { msg, offset, got }`** |
@@ -119,6 +153,10 @@ Every rejection is a refusal of the whole frame; nothing is salvaged.
 When a frame breaks more than one rule, the error reported is the FIRST in
 this order: the non-finite rule over the `f32` slots in field order, then the
 presence bytes in offset order. (The Kani sensor harness proves that order.)
+
+**One exception: `state` (type 8, v3).** By maintainer decision
+(2026-11-08) its floats are passed through unchecked — see §2a. Everything
+below describes every OTHER frame type.
 
 **The non-finite rule applies to every `f32` SLOT, present or absent.** An
 optional field's value bytes are checked even when its presence byte is 0 (the
@@ -332,6 +370,70 @@ non-finite rule like any other `f32`.
 > order. The native test endpoint forwards all six fields, so the off-diagonal
 > soft-iron correction is applied there too.
 
+#### `state-request` (type 7, v3) — empty
+
+<!-- wire-layout: state-request 0 -->
+```text
+ off  size  type  field
+```
+<!-- /wire-layout -->
+
+The frame is the 8-byte header alone. Its `seq` is what the `state` reply
+echoes.
+
+#### `state` (type 8, v3) — `types.flight-state` + `prearm-failing`
+
+<!-- wire-layout: state 90 -->
+```text
+ off  size  type  field
+   0     4  u32   tick-head        seqlock head; equal to tick-tail iff coherent
+   4     4  f32   qw               body→NED attitude, Hamilton scalar-first
+   8     4  f32   qx
+  12     4  f32   qy
+  16     4  f32   qz
+  20     4  f32   pos-n            NED m
+  24     4  f32   pos-e
+  28     4  f32   pos-d            negative up
+  32     4  f32   vel-n            NED m/s
+  36     4  f32   vel-e
+  40     4  f32   vel-d
+  44     4  f32   wx               body rates, rad/s
+  48     4  f32   wy
+  52     4  f32   wz
+  56     4  f32   bgx              estimated gyro bias, rad/s
+  60     4  f32   bgy
+  64     4  f32   bgz
+  68     4  f32   innovation       estimator innovation magnitude
+  72     1  u8    failed-rotor     0-3; 0xff = none
+  73     1  u8    mode             0 disarmed 1 armed 2 takeoff 3 loiter 4 mission 5 land 6 rtl 7 terminated
+  74     4  u32   failsafe         bit 0 rtl-latched 1 batt-low 2 batt-critical 3 batt-silent 4 geofence 5 runaway 6 wind 7 arm-blocked 8 target-stale
+  78     4  u32   valid            bit 0 att 1 pos 2 vel 3 rates 4 bias 5 innov 6 rotor 7 mode 8 failsafe 9 prearm-failing
+  82     4  u32   prearm-failing   v3: failing pre-arm rows, bit = CheckId as usize (§2a)
+  86     4  u32   tick-tail        seqlock tail; written last
+```
+<!-- /wire-layout -->
+
+**Packed, so not the WIT record's memory layout.** Every payload in this
+binding is packed with no padding. The WIT record's canonical-ABI layout pads
+`failsafe` to offset 76; on the wire it is at **74**, and every later field is
+2 bytes earlier than in memory. A host that `memcpy`s a canonical-ABI
+`flight-state` onto this frame is wrong after byte 73.
+
+**Order is the WIT record's.** `prearm-failing` sits between `valid` and
+`tick-tail`: inside the seqlock pair (written after `tick-head`, before
+`tick-tail`), and placed last-before-the-tail so that every pre-existing
+field keeps its offset — in this frame's derivation from the record and in
+the record's own canonical-ABI layout, where only `tick-tail` moves (84 →
+88).
+
+**The non-finite rule does NOT apply to this frame** (§1's one exception):
+the seventeen `f32`s at offsets 4–68 are passed through, NaN and ±infinity
+included, and the host checks finiteness itself (§2a; `valid` means
+measured, not finite). The u32 words and the two bytes were never float
+slots: a word whose bytes spell NaN is a valid word. `mode` and
+`failed-rotor` are carried raw (not range-checked); treat an unknown value as
+unknown.
+
 #### `command` (type 6) — `pilot.command(cmd, level, throttle-low)`
 
 <!-- wire-layout: command 3 -->
@@ -361,7 +463,8 @@ falcon-quad: a wrong `hover-thrust` alone put the altitude estimate **58.8 m**
 out, and with default tuning the vehicle **never left the ground**.
 
 The four CONTROL frames — `config`, `supervisor-config`, `calibration` and
-`command` — share one stop-and-wait handshake:
+`command` — share one stop-and-wait handshake (and `state-request`, v3, waits
+the same way for its `state` reply — §2a):
 
 1. The host sends the control frame with sequence `s`.
 2. The component replies `ack` carrying `s`.
@@ -373,8 +476,9 @@ The four CONTROL frames — `config`, `supervisor-config`, `calibration` and
 configuration it is not in a state to take — relay#611 makes `configure`,
 `configure-supervisor` and `configure-calibration` silently discarded unless
 the supervisor is `disarmed`, and makes `arm` refused until the pre-arm table
-passes. The binding has no frame that reports the outcome (see the gaps
-below); a host learns it from the motors it gets back.
+passes. The ack does not report the outcome; since v3 a host asks for it with
+`state-request` (§2a): `mode`, `failsafe` bit 7 `arm-blocked`, and
+`prearm-failing`, which names every row that refused.
 
 **A frame rejected by the decoder is not acked.** For `supervisor-config` and
 `calibration` that rejection is also a statement: the latest thing the host
@@ -400,6 +504,64 @@ The order a host follows to fly the supervised component:
 4. `sensor` frames, with `battery-v` present, until the estimator converges
 5. `command` `arm` (with `level` and `throttle-low` true) → ack
 6. `command` `request-takeoff` → ack, then keep sending `sensor` frames
+
+## 2a. Reading the state: `state-request` → `state` (v3, TRANSPORT-P02)
+
+1. The host sends `state-request` with sequence `s` (empty payload).
+2. The component replies `state` with header `seq` = `s` — the echo rule
+   (§3). It is **not** acked; the `state` frame is the answer.
+3. Stop-and-wait, like a control frame: the reference host sends nothing
+   else until that `state` arrives (`BindingHost` returns `AwaitingState`).
+   A `state` whose seq is not the outstanding request is refused
+   (`StrayState`); a repeat of the one accepted last is a duplicate.
+
+**`state` is the state as of the LAST `sensor` tick**, the same thing
+`observer.read-state` returns: the component latches it at the end of each
+`step`. So after an `arm` (or any control frame), send at least one `sensor`
+frame before asking, or the reply still shows the pre-`arm` tick.
+
+**How to read a refused arm.** After `command arm` → ack → one `sensor` tick
+→ `state-request` → `state`:
+
+- `mode` is `0` (`disarmed`) where an accepted arm reads `1` (`armed`);
+- `failsafe` bit 7 (`arm-blocked`) is set — it is scoped to `disarmed`;
+- `prearm-failing` has a bit set for **every** required row that fails, at
+  bit `relay_preflight::CheckId as usize` (table below). The row the gate
+  names — the one `arm` was refused on — is the **first set bit in gate
+  order** (`CheckId::ALL`), which is not always the lowest bit
+  (`inside-geofence` is bit 20 but gate position 10). `0` means the table
+  allows an arm. `prearm-failing` is NOT scoped to `disarmed`: it is the
+  table verdict in every mode.
+- `valid` bit 9 says `prearm-failing` is measured; before the first tick it
+  is clear and the mask is 0, which then means "not measured", never
+  "would arm".
+
+| bit | row (`relay_preflight::CheckId`) | bit | row |
+|---|---|---|---|
+| 0 | `SensorsHealthy` | 11 | `SensorsFresh` |
+| 1 | `EstimatorConverged` | 12 | `EscTelemetry` |
+| 2 | `CalibrationPresent` | 13 | `BatteryTakeoffMargin` |
+| 3 | `GeofenceLoaded` | 14 | `RangefinderPlausible` |
+| 4 | `BatteryOk` | 15 | `CalibrationFresh` |
+| 5 | `FailsafeConfigured` | 16 | `RcLink` |
+| 6 | `EstimatorInnovation` | 17 | `GcsLink` |
+| 7 | `GnssAgreement` | 18 | `NoFailsafeLatched` |
+| 8 | `ParamsFromNvm` | 19 | `MotorsHealthy` |
+| 9 | `GeofenceSane` | 20 | `InsideGeofence` |
+| 10 | `ThresholdsOrdered` | 21–31 | reserved, 0 |
+
+**A `state` float may be NaN or ±infinity, and the HOST must check.**
+`state` is the one frame the non-finite rule (§1) does not apply to: its
+seventeen `f32`s are passed through bit for bit, so a component whose
+estimate has diverged still delivers `mode`, `failsafe` and
+`prearm-failing`. The receiver never refuses a `state` for a float value.
+
+**`valid` means MEASURED, not FINITE.** The published components set the
+`valid` bits whenever a tick has produced the field (`0x3ff` after the first
+tick) and do not clear them when a value is non-finite. A host must test
+each float it uses for finiteness itself; a set `valid` bit with a NaN value
+reads as "the estimator produced this, and it diverged" — never as a usable
+number.
 
 `configure` may be called again later. Doing so **re-initialises the control
 core, estimator state included**, because a partially-applied configuration
@@ -502,6 +664,9 @@ says.)
 Each receiver classifies the frames it receives against the last it accepted —
 `SeqTracker` in the reference implementation:
 
+- A **`state`** reply (v3) carries the `seq` of the **`state-request` it
+  answers**. No counter of the component's own.
+
 | condition | verdict | what the receiver must do |
 |---|---|---|
 | first frame seen | `First` | accept |
@@ -577,10 +742,11 @@ needed by being driven. New hosts use `wire`.
 
 ## What this binding does not yet give you
 
-- **No state frame.** `observer.read-state` (mode, failsafe, the estimate) has
-  no frame here, so a binding-only host cannot see `mode` or the `arm-blocked`
-  failsafe bit: it learns that an `arm` was refused only because the motors
-  stay at zero. The `ack` deliberately says "received", not "accepted".
+- **State is as of the last tick, and only on request.** v3's `state` frame
+  (§2a) is what `observer.read-state` returns, latched at the end of each
+  `step`; there is no unsolicited state stream, and a refused `arm` shows in
+  `state` after the next `sensor` tick, not in the `ack`, which still says
+  "received", not "accepted".
 - **No mission target.** `controller.step` takes a `waypoint` beside the
   `sensor-frame`, and the `sensor` frame does not carry one, so a binding host
   cannot stream a Mission target. Takeoff, loiter, land and RTL need none (the
@@ -592,7 +758,8 @@ needed by being driven. New hosts use `wire`.
   vehicle is, `failsafe` bit 8 `target-stale`). For the same reason bit 8 is
   up for the whole run of a binding host; outside Mission it changes nothing
   the vehicle does (pinned bit for bit in
-  `crates/falcon-hitl/tests/binding_drives_the_supervisor.rs`).
+  `crates/falcon-hitl/tests/binding_drives_the_supervisor.rs`). Since v3 a
+  binding host sees it, in `state`'s `failsafe` word.
 - **The published wasm component is not yet behind a byte endpoint.** The
   end-to-end test above drives the native `FlightSupervisor` through
   `falcon_core::host::SupervisorHost`, which the component also adapts, so the
