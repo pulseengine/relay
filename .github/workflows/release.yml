@@ -315,7 +315,7 @@ jobs:
       # verifier-friendly artifact; .sig + .pem are the detached
       # signature and Fulcio certificate.
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: 'v2.4.1'
 
@@ -552,12 +552,12 @@ jobs:
       # signature formats, and the .sig/.pem upload would fail (#609
       # re-review, finding 1).
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: 'v2.4.1'
 
       - name: Install cargo-component
-        uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-component
 
@@ -566,7 +566,7 @@ jobs:
       # run-position-hold < 0.6) before it ships, not just built. (Per review:
       # install, don't skip — the skip in build-components.sh is only a fallback.)
       - name: Install wasmtime
-        uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: wasmtime
 
