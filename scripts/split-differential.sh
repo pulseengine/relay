@@ -26,8 +26,8 @@
 #   3. each component against the native mirror (DIFFERENTIAL=1), hold and
 #      rotor-out, which must be bit-identical.
 #
-# BENCH-ONLY: needs cargo-component and wac (like build-components.sh, the CI
-# gate runner has neither).
+# Needs cargo-component and wac. CI runs it in ci.yml's `cascade-split` job,
+# which installs both (#638 finding 6).
 #
 # Usage:
 #   scripts/split-differential.sh              # build, compose, compare

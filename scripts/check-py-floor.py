@@ -22,7 +22,12 @@ Usage: check-py-floor.py FILE...   |   check-py-floor.py --self-test
 Exit 0 clean, 1 findings, 2 usage error.
 """
 import ast
+import operator
 import sys
+
+# The floor every guard is judged against. A fixed value, not the running
+# interpreter, so the self-test gives the same verdict on any Python.
+FLOOR = (3, 9)
 
 NEW_MODULES = {"tomllib": "3.11"}
 NEW_NAMES = {
@@ -75,16 +80,63 @@ def _mentions_version(node):
                for n in ast.walk(node))
 
 
+_CMP = {ast.Lt: operator.lt, ast.LtE: operator.le, ast.Gt: operator.gt,
+        ast.GtE: operator.ge, ast.Eq: operator.eq, ast.NotEq: operator.ne}
+
+
+def _is_version_info(node):
+    # sys.version_info, or a slice/index of it (sys.version_info[:2]).
+    if isinstance(node, ast.Subscript):
+        node = node.value
+    return isinstance(node, ast.Attribute) and node.attr == "version_info"
+
+
+def _int_tuple(node):
+    if isinstance(node, ast.Tuple) and all(
+            isinstance(e, ast.Constant) and type(e.value) is int for e in node.elts):
+        return tuple(e.value for e in node.elts)
+    return None
+
+
+def _on_floor(test):
+    """The value of a version_info test on FLOOR, or None when it is not one
+    this checker can evaluate. None never guards anything: an unreadable guard
+    is reported, not trusted (#638 finding 12)."""
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        v = _on_floor(test.operand)
+        return None if v is None else not v
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and type(test.ops[0]) in _CMP):
+        return None
+    left, right, op = test.left, test.comparators[0], _CMP[type(test.ops[0])]
+    if _is_version_info(left) and _int_tuple(right) is not None:
+        return op(FLOOR, _int_tuple(right))
+    if _is_version_info(right) and _int_tuple(left) is not None:
+        return op(_int_tuple(left), FLOOR)
+    return None
+
+
+def _walk_scope(nodes):
+    # ast.walk over statements, not descending into a def, class or lambda:
+    # an exit inside a function body runs only when it is called.
+    todo = list(nodes)
+    while todo:
+        n = todo.pop()
+        yield n
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
+                              ast.ClassDef, ast.Lambda)):
+            todo.extend(ast.iter_child_nodes(n))
+
+
 def _exits(body):
-    for n in body:
-        for m in ast.walk(n):
-            if isinstance(m, ast.Raise):
+    for m in _walk_scope(body):
+        if isinstance(m, ast.Raise):
+            return True
+        if isinstance(m, ast.Call):
+            f = m.func
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+            if name in ("exit", "SystemExit", "_exit"):
                 return True
-            if isinstance(m, ast.Call):
-                f = m.func
-                name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
-                if name in ("exit", "SystemExit", "_exit"):
-                    return True
     return False
 
 
@@ -105,12 +157,22 @@ def check_source(src, path="<src>"):
             for a in n.names:
                 alias[a.asname or a.name] = a.name
 
-    # Imports guarded by try/except ImportError, an `if sys.version_info`
-    # branch, or a top-level version check that exits before them.
+    # Imports guarded by try/except ImportError, the branch of an
+    # `if sys.version_info` test that FLOOR does not take, or a top-level
+    # version check that FLOOR takes and that exits before them.
     guarded = set()
     for n in ast.walk(tree):
-        if _is_guard_try(n) or (isinstance(n, ast.If) and _mentions_version(n.test)):
-            for m in ast.walk(n):
+        unreached = []
+        if _is_guard_try(n):
+            unreached = [n]
+        elif isinstance(n, ast.If) and _mentions_version(n.test):
+            v = _on_floor(n.test)
+            if v is False:
+                unreached = n.body
+            elif v is True:
+                unreached = n.orelse
+        for stmt in unreached:
+            for m in ast.walk(stmt):
                 if isinstance(m, (ast.Import, ast.ImportFrom)):
                     guarded.add(id(m))
         if isinstance(n, ast.If) and "TYPE_CHECKING" in (
@@ -119,7 +181,8 @@ def check_source(src, path="<src>"):
                 guarded.add(id(m))
     exited = False
     for stmt in tree.body:
-        if isinstance(stmt, ast.If) and _mentions_version(stmt.test) and _exits(stmt.body):
+        if (isinstance(stmt, ast.If) and _on_floor(stmt.test) is True
+                and _exits(stmt.body)):
             exited = True
         elif exited and isinstance(stmt, (ast.Import, ast.ImportFrom)):
             guarded.add(id(stmt))
@@ -222,6 +285,21 @@ FIXTURES = [
     ("version-guarded tomllib", "import sys\nif sys.version_info < (3, 11):\n"
      "    sys.exit('needs 3.11')\nimport tomllib\n", False),
     ("if-branch tomllib", "import sys\nif sys.version_info >= (3, 11):\n    import tomllib\n", False),
+    ("else fallback", "import sys\nif sys.version_info >= (3, 11):\n    import tomllib\n"
+     "else:\n    import tomli as tomllib\n", False),
+    ("sliced version_info", "import sys\nif sys.version_info[:2] >= (3, 11):\n"
+     "    import tomllib\n", False),
+    ("reversed compare", "import sys\nif (3, 11) <= sys.version_info:\n    import tomllib\n", False),
+    # #638 finding 12: each of these runs `import tomllib` on 3.9.
+    ("inverted guard", "import sys\nif sys.version_info < (3, 11):\n    import tomllib\n", True),
+    ("else-branch import", "import sys\nif sys.version_info >= (3, 11):\n    pass\n"
+     "else:\n    import tomllib\n", True),
+    ("exit in the wrong direction", "import sys\nif sys.version_info >= (3, 11):\n"
+     "    sys.exit('x')\nimport tomllib\n", True),
+    ("exit only inside a def", "import sys\nif sys.version_info < (3, 11):\n"
+     "    def f():\n        sys.exit('x')\nimport tomllib\n", True),
+    ("unreadable version test", "import sys\nif sys.version.startswith('3.1'):\n"
+     "    import tomllib\n", True),
     ("future + unions", "from __future__ import annotations\n"
      "def f(x: int | None) -> str | None:\n    pass\ny: int | None = None\n", False),
     ("string annotation", "def f(x: 'int | None') -> None:\n    pass\n", False),

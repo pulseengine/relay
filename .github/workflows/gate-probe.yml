@@ -1,0 +1,38 @@
+name: gate-probe
+
+# temper's behavioural gate probe (pulseengine/temper docs/gate-probe.md,
+# temper#86/#87). It runs every change detector declared in
+# .github/gate-probe.json against its controls and negative controls, and
+# fails if a detector fails open or its classification is never exercised.
+#
+# REPORT-ONLY for now: it is not a required check. Making it required is a
+# later, per-repo step after owner approval. The check name `gate-probe` must
+# stay stable: renaming a required check silently drops the requirement.
+#
+# Held to the rule it checks: no paths/branches filter, no `if:`, no
+# continue-on-error, no pull_request_target, the action pinned to a full
+# temper commit sha. Control paths live only in .github/gate-probe.json.
+# `merge_group` is here so that, once required, the merge queue gets a report
+# too (a required check that never reports holds the queue).
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  gate-probe:
+    name: gate-probe
+    # Routes fork PRs to GitHub-hosted runners by default. This is NOT a
+    # security boundary: a fork PR can edit this file. Isolation is enforced by
+    # the org's smithy runner-group policy and fork-PR approval
+    # (pulseengine/warte#35).
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # temper#88 merged, main 308848d (2026-11-10): fork-routing check, timeout allowed.
+      - uses: pulseengine/temper/.github/actions/gate-probe@308848d151a0fdd0fc5eb8af0531addbf6f36ef4

@@ -34,6 +34,10 @@
 # job's 2700 s (45 min). The update and repair calls take seconds when nothing
 # stalls, so the realistic worst case is ~900 s + 463 s.
 #
+# Every timeout is `-k 10`: a call that ignores SIGTERM is SIGKILLed 10 s later
+# instead of running on unbounded (#638 finding 15). That adds at most
+# 7 x 10 s = 70 s, so the worst case is 2633 s, still inside 2700 s.
+#
 # Test seams (all default to the real system): APT_RETRY_MIRRORS_FILE,
 # APT_RETRY_SOURCES (space-separated), APT_RETRY_ATTEMPT_S, APT_RETRY_UPDATE_S.
 set -euo pipefail
@@ -87,7 +91,7 @@ off_azure() {
 }
 
 for n in 1 2 3; do
-  if sudo timeout "$ATTEMPT_S" apt-get -o Acquire::Retries=3 "$@"; then
+  if sudo timeout -k 10 "$ATTEMPT_S" apt-get -o Acquire::Retries=3 "$@"; then
     exit 0
   fi
   if [ "$n" = 3 ]; then
@@ -95,10 +99,10 @@ for n in 1 2 3; do
   fi
   echo "::warning::apt-get $* failed or exceeded ${ATTEMPT_S} s (attempt $n/3) — retrying off the azure mirror"
   # A timeout can kill apt-get mid-unpack.
-  sudo timeout "$UPDATE_S" dpkg --configure -a \
+  sudo timeout -k 10 "$UPDATE_S" dpkg --configure -a \
     || echo "::warning::dpkg --configure -a failed; the next attempt will show why"
   off_azure
-  sudo timeout "$UPDATE_S" apt-get update || true
+  sudo timeout -k 10 "$UPDATE_S" apt-get update || true
 done
 echo "::error::apt-get $* failed 3 times"
 exit 1

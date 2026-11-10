@@ -221,6 +221,60 @@ jobs:
           # wind→RTL) that drive the full production FlightSupervisor.
           cargo test -p falcon-core failsafe -- --nocapture
 
+  # #638 finding 6: nothing in CI built wasm/cm/cascade-split, -control or
+  # -estimator, or ran `cargo test` in tests/cascade-sitl-wasm (its own
+  # [workspace], so the root `cargo test --workspace` never sees it). The
+  # mirror_* and follow_target tests ran nowhere, and the split could drift
+  # from `cascade` unseen. This job runs both:
+  #   1. the crate's plain suite (the native mirror's seam and follow-target
+  #      tests);
+  #   2. scripts/split-differential.sh, which builds all four components as
+  #      deployed (no_std, 8 KiB stack), composes the split with `wac plug`,
+  #      and requires the twin to be bit-exact at 400 and 1000 Hz, the seam
+  #      lifecycle tests to pass against BOTH components, and each component to
+  #      be bit-identical to the native mirror (hold and rotor-out).
+  #   3. both components under SITL_CALIBRATION=invalid and none.
+  # Not covered here: arena_soak.rs, which needs the leaf components
+  # (FALCON_*_WASM) from scripts/build-components.sh.
+  cascade-split:
+    name: cascade-split twin differential + cascade-sitl-wasm tests
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: tests/cascade-sitl-wasm
+      - name: Install cargo-component + wac
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: cargo-component,wac-cli
+      - name: cascade-sitl-wasm plain suite
+        working-directory: tests/cascade-sitl-wasm
+        run: cargo test --release
+      - name: cascade vs cascade-split twin, seam tests on both, both vs the mirror
+        env:
+          OUT: ${{ runner.temp }}/split
+        run: bash scripts/split-differential.sh
+      # #638 finding 9: with no valid calibration, both components must refuse
+      # `arm` for the whole 10 s deadline, and the published prearm-failing
+      # mask must name CalibrationPresent.
+      - name: no-calibration runs refuse arm on CalibrationPresent
+        env:
+          OUT: ${{ runner.temp }}/split
+        run: |
+          set -euo pipefail
+          # The same path split-differential.sh builds the harness to.
+          H="${CARGO_TARGET_DIR:-$PWD/tests/cascade-sitl-wasm/target}/release/cascade-sitl-wasm"
+          for cal in invalid none; do
+            for w in cascade.wasm cascade-split-composed.wasm; do
+              echo "== SITL_CALIBRATION=$cal $w"
+              SITL_CALIBRATION=$cal "$H" "$OUT/$w"
+            done
+          done
+
   # Committed scripts get run on macOS, where /bin/bash is 3.2 and
   # /usr/bin/python3 is 3.9, while every other job here runs newer tools, so
   # nothing caught a script that only works on the newer ones. Both tools are
@@ -229,7 +283,9 @@ jobs:
   # path. curl, not `gh`: self-hosted runners do not have the GitHub CLI.
   script-portability:
     name: Script portability (shellcheck + Python 3.9 floor)
-    runs-on: [self-hosted, linux, x64, light]
+    # Required check: a fork PR runs it on a hosted runner, like every other
+    # job here, or the check never reports (#638 finding 13).
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

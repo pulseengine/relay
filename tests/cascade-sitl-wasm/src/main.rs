@@ -32,11 +32,11 @@ mod native_mirror;
 #[cfg(test)]
 mod arena_soak;
 // DIFF_AGAINST=<b.wasm>: two components, one input stream, bit-exact (#575).
-mod twin;
 #[path = "../../../examples/falcon-sitl-gz/src/physics.rs"]
 mod physics;
 #[cfg(test)]
 mod seam_tests;
+mod twin;
 // The SAME pacing logic the native bench uses, included by path rather than
 // copied — for the same reason physics.rs is: a copy would let the two drift,
 // and the entire point is that the wasm harness and the native bench pace the
@@ -557,6 +557,12 @@ fn main() -> Result<()> {
     let mut armed_tick: Option<u32> = None;
     let mut takeoff_sent = false;
     let arm_deadline_ticks = (ARM_DEADLINE_S / dt) as u32;
+    // #638 finding 9: under SITL_CALIBRATION=invalid|none a refusal passes
+    // only if it covered the whole arm deadline AND the published
+    // `prearm-failing` mask (@0.13.0) names CalibrationPresent. Any refusal
+    // used to pass, from any row, after any number of ticks.
+    let mut arm_attempts: u32 = 0;
+    let mut last_refusal_mask: Option<u32> = None;
     let rotor_trace = std::env::var("ROTOR_TRACE").is_ok();
     // The judged window (fault -> first touchdown) and the full-run figure.
     let mut touchdown_tick: Option<u32> = None;
@@ -781,6 +787,10 @@ fn main() -> Result<()> {
                     falcon_core::relay_fsm::Event::RequestTakeoff,
                 ))
             } else if st.mode == MODE_DISARMED && tick < arm_deadline_ticks {
+                // `valid` bit 9 marks `prearm-failing` measured (cascade.wit).
+                const V_PREARM_FAILING: u32 = 1 << 9;
+                arm_attempts += 1;
+                last_refusal_mask = (st.valid & V_PREARM_FAILING != 0).then_some(st.prearm_failing);
                 Some((PilotCommand::Arm, falcon_core::relay_fsm::Event::Arm))
             } else {
                 // Past the deadline (or in a mode no arm can leave): stop asking.
@@ -1063,11 +1073,35 @@ fn main() -> Result<()> {
                  (CalibrationPresent)."
             ),
             None => {
-                println!(
-                    "PASS: SITL_CALIBRATION={sitl_cal:?} — `arm` REFUSED for the whole run, \
-                     as required (no valid calibration configured)."
-                );
-                Ok(())
+                if arm_attempts < arm_deadline_ticks {
+                    bail!(
+                        "FAIL: SITL_CALIBRATION={sitl_cal:?} — only {arm_attempts} of \
+                         {arm_deadline_ticks} arm attempts ({ARM_DEADLINE_S} s) were made, so \
+                         the refusal was not held for the deadline. Run at least \
+                         {arm_deadline_ticks} ticks."
+                    );
+                }
+                let cal =
+                    1u32 << (falcon_core::relay_preflight::CheckId::CalibrationPresent as u32);
+                match last_refusal_mask {
+                    None => bail!(
+                        "FAIL: SITL_CALIBRATION={sitl_cal:?} — `arm` was refused, but the \
+                         published prearm-failing mask was not marked measured (valid bit 9), \
+                         so the refusing row is unknown."
+                    ),
+                    Some(m) if m & cal == 0 => bail!(
+                        "FAIL: SITL_CALIBRATION={sitl_cal:?} — `arm` was refused, but not by \
+                         CalibrationPresent: prearm-failing 0x{m:x}."
+                    ),
+                    Some(m) => {
+                        println!(
+                            "PASS: SITL_CALIBRATION={sitl_cal:?} — `arm` REFUSED on all \
+                             {arm_attempts} attempts ({ARM_DEADLINE_S} s), CalibrationPresent \
+                             failing (prearm-failing 0x{m:x}), as required."
+                        );
+                        Ok(())
+                    }
+                }
             }
         };
     }

@@ -168,14 +168,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y curl lsb-release gnupg
+          bash scripts/apt-retry.sh update
+          bash scripts/apt-retry.sh install -y curl lsb-release gnupg
           sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
             -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
             | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
-          sudo apt-get update
-          sudo apt-get install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
+          bash scripts/apt-retry.sh update
+          bash scripts/apt-retry.sh install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
 
       - name: Build the bench with the real bridge
         run: cargo build --release -p falcon-sitl-gz --features gazebo
@@ -463,7 +463,7 @@ jobs:
           targets: wasm32-wasip2, wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install cargo-component
-        uses: taiki-e/install-action@v2.90.2
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-component
 
@@ -471,14 +471,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y curl lsb-release gnupg
+          bash scripts/apt-retry.sh update
+          bash scripts/apt-retry.sh install -y curl lsb-release gnupg
           sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
             -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
             | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
-          sudo apt-get update
-          sudo apt-get install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
+          bash scripts/apt-retry.sh update
+          bash scripts/apt-retry.sh install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
 
       - name: Build the published component and the wasm harness
         shell: bash

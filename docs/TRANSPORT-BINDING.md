@@ -403,7 +403,7 @@ echoes.
   56     4  f32   bgx              estimated gyro bias, rad/s
   60     4  f32   bgy
   64     4  f32   bgz
-  68     4  f32   innovation       estimator innovation magnitude
+  68     4  f32   innovation       estimator innovation magnitude (published 0.0 with valid bit 5 clear: not computed yet)
   72     1  u8    failed-rotor     0-3; 0xff = none
   73     1  u8    mode             0 disarmed 1 armed 2 takeoff 3 loiter 4 mission 5 land 6 rtl 7 terminated
   74     4  u32   failsafe         bit 0 rtl-latched 1 batt-low 2 batt-critical 3 batt-silent 4 geofence 5 runaway 6 wind 7 arm-blocked 8 target-stale

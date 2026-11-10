@@ -308,6 +308,16 @@ impl<T: Transport> FlightBackend for LinkBackend<T> {
         // which the battery failsafe must see rather than read as "no sense".
         self.cache.battery_v
     }
+    // The v2 frame's optional aiding fields, as the host sent them. Without
+    // these overrides the trait defaults returned `None` although the cache
+    // held the values, so behind the link yaw aiding and the rotor-out FDI
+    // were inert (#638 finding 5).
+    fn read_heading(&mut self) -> Option<f32> {
+        self.cache.heading_rad
+    }
+    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+        self.cache.motor_rpm
+    }
 }
 
 /// The simulator side of the link: decode a `Motors` frame, step the backing
@@ -415,13 +425,14 @@ pub fn sample_sensor_frame<B: FlightBackend>(backend: &mut B) -> wire::WireSenso
         dt_s: backend.dt(),
         position_ned: backend.read_position(),
         mag_body: backend.read_mag(),
-        // The seam's optional aiding fields. `SimBackend` resolves neither a
-        // heading nor rotor RPM, and the binding's own aiding-rate table
-        // records what degrades when each is absent — withholding
-        // `motor-rpm` leaves the FDI inert. Sending `none` is the truthful
-        // answer for this plant; a host that has them sends them.
-        heading_rad: None,
-        motor_rpm: None,
+        // The seam's optional aiding fields, whatever the plant reports.
+        // `SimBackend` resolves neither (the trait defaults say `None`), and
+        // the binding's aiding-rate table records what degrades when each is
+        // absent: withholding `motor-rpm` leaves the FDI inert. These were
+        // hardcoded `None`, which also withheld them from a plant that HAS
+        // them (#638 finding 5).
+        heading_rad: backend.read_heading(),
+        motor_rpm: backend.read_motor_rpm(),
         // binding v2 (#572): whatever the plant reports, `None` included. A
         // plant with no battery sense says ABSENT; it is never rounded to a
         // number.
@@ -908,6 +919,59 @@ mod tests {
         fn dt(&self) -> f32 {
             0.002
         }
+    }
+
+    /// A plant that reports a heading and rotor RPM: the aiding fields must
+    /// reach the core through `sample_sensor_frame`, the wire and
+    /// `LinkBackend` (#638 finding 5). Both were `None` at the core before.
+    struct AidedBackend;
+    impl FlightBackend for AidedBackend {
+        fn read_imu(&mut self) -> ImuSample {
+            ImuSample {
+                accel: [0.0, 0.0, -9.81],
+                gyro: [0.0; 3],
+            }
+        }
+        fn read_position(&mut self) -> Option<Vec3> {
+            None
+        }
+        fn read_mag(&mut self) -> Option<Vec3> {
+            None
+        }
+        fn read_heading(&mut self) -> Option<f32> {
+            Some(0.75)
+        }
+        fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
+            Some([1000, 2000, -3000, 4000])
+        }
+        fn write_motors(&mut self, _m: &[f32]) {}
+        fn dt(&self) -> f32 {
+            0.002
+        }
+    }
+
+    #[test]
+    fn heading_and_rotor_rpm_reach_the_core_through_the_link() {
+        let mut link = LinkBackend::new(
+            Loopback {
+                server: SimServer::new(AidedBackend),
+            },
+            0.002,
+        );
+        link.write_motors(&[0.5; 4]);
+        assert_eq!(link.read_heading(), Some(0.75));
+        assert_eq!(link.read_motor_rpm(), Some([1000, 2000, -3000, 4000]));
+
+        // A plant without them still says absent, not zero.
+        let mut bare = LinkBackend::new(
+            Loopback {
+                server: SimServer::new(CountingBackend::default()),
+            },
+            0.002,
+        );
+        bare.write_motors(&[0.5; 4]);
+        assert_eq!(bare.read_heading(), None);
+        assert_eq!(bare.read_motor_rpm(), None);
     }
 
     /// One exchange crosses the PUBLISHED binding and comes back decodable.

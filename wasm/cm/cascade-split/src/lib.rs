@@ -305,6 +305,10 @@ const V_POS: u32 = 1 << 1;
 const V_VEL: u32 = 1 << 2;
 const V_RATE: u32 = 1 << 3;
 const V_BIAS: u32 = 1 << 4;
+// Bit 5 stays CLEAR: the core does not compute an innovation yet, so the
+// published 0.0 is "not measured", not "perfectly consistent" (#638
+// finding 11). Set it when a real innovation is published.
+#[allow(dead_code)]
 const V_INNOV: u32 = 1 << 5;
 const V_ROTOR: u32 = 1 << 6;
 const V_MODE: u32 = 1 << 7;
@@ -402,7 +406,6 @@ impl Guest for Component {
                 | V_VEL
                 | V_RATE
                 | V_BIAS
-                | V_INNOV
                 | V_ROTOR
                 | V_MODE
                 | V_FAILSAFE
