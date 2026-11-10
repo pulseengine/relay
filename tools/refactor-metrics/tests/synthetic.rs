@@ -493,3 +493,55 @@ fn cli_contract() {
     );
     assert_eq!(e.status.code(), Some(1));
 }
+
+/// #638 finding 14: a user's git config must not change the measurement.
+/// PINNED_CONFIG pinned only `color.ui`, which an explicit `color.diff=always`
+/// overrides: every hunk header then missed the `^@@` regex and the tool
+/// reported zero re-fixes with exit 0. An external diff driver or a textconv
+/// filter would rewrite the hunks the same silent way. The report under a
+/// hostile global config must equal the report under an isolated one.
+#[test]
+fn a_hostile_user_git_config_does_not_change_the_report() {
+    let f = fixture();
+    let (cp, ip) = lists(&f, &["curated"], &["fmt"]);
+    let args = ["--curated-fixes", cp.as_str(), "--ignore-revs", ip.as_str()];
+    let clean = json(&f.repo.dir, &args);
+
+    // A textconv driver applied to every file, and the config that turns on
+    // colour and an external diff command.
+    std::fs::write(f.repo.dir.join(".git/info/attributes"), "* diff=upper\n").unwrap();
+    let hostile = f.repo.file(
+        "hostile.gitconfig",
+        "[color]\n\tui = always\n\tdiff = always\n\tblame = always\n\
+         [diff]\n\texternal = /bin/echo\n\
+         [diff \"upper\"]\n\ttextconv = tr a-z A-Z\n",
+    );
+    let mut a = vec!["--ref", "main", "--format", "json"];
+    a.extend_from_slice(&args);
+    let out = isolate(&mut Command::new(env!("CARGO_BIN_EXE_refactor-metrics")))
+        .env("GIT_CONFIG_GLOBAL", &hostile)
+        .arg("--repo")
+        .arg(&f.repo.dir)
+        .args(&a)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let dirty: Value = serde_json::from_slice(&out.stdout).unwrap();
+    // The run's own provenance (timestamps, git version) may differ; the
+    // measured modes must not.
+    assert_eq!(
+        clean["modes"], dirty["modes"],
+        "a user's git config changed the measured re-fix pairs"
+    );
+    assert!(
+        !clean["modes"]["curated"]["pairs"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "the clean run must find pairs, or this comparison proves nothing"
+    );
+}
