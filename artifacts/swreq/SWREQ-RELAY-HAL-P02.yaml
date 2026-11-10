@@ -2,8 +2,8 @@ artifacts:
   - id: SWREQ-RELAY-HAL-P02
     type: sw-req
     title: "HAL-P02 — falcon-imu-icm42688 anchors on embedded-hal-async SpiDevice; the verified decode is shared by both transports"
-    status: implemented
-    release: falcon-v1.143.0
+    status: verified
+    release: falcon-v1.142.0
     description: >
       The reference IMU driver (falcon-imu-icm42688) shall target the standard
       embedded-hal-async SpiDevice for its hardware bus (relay#214 / jess#62

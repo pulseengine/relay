@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-HAL-005
     type: sw-verification
     title: "battery AdcIn re-target + BatteryState inter-core carrier — completes the HAL transport matrix (v1.85)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-RELAY-HAL-P05. Unit tests (crates/falcon-esc-dshot):
         - battery_adc_matches_sync_classify: BatteryAdc::read_state over a mock
@@ -14,7 +14,7 @@ artifacts:
           pushed to a relay-bus SpscRing pops byte-identical + FIFO.
         - existing sync + Kani tests unchanged.
       ORACLE: `cargo test -p falcon-esc-dshot` green; clippy clean.
-    tags: [verification, relay, relay-hal, falcon-esc-dshot, adcin, "v1.85", issue-177]
+    tags: [verification, relay, relay-hal, falcon-esc-dshot, adcin, v1.85, issue-177, falcon]
     fields:
       method: automated-test
       # Test-level evidence: each step names the SPECIFIC test that proves a
