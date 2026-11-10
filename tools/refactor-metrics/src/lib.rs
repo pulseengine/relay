@@ -24,6 +24,12 @@ pub const IGNORE_REVS_TXT: &str = include_str!("../ignore-revs.txt");
 /// git `-c` settings pinned to git's defaults, so a user/system config cannot
 /// change hunk boundaries, path quoting or blame attribution. The baseline
 /// ran with none of these set (i.e. the defaults).
+///
+/// Config alone is not enough: an explicit `color.diff=always` overrides
+/// `color.ui=never`, and `diff.external` or a textconv driver rewrites the
+/// hunks (#638 finding 14: a coloured hunk header missed the `^@@` regex
+/// and the tool reported zero re-fixes, exit 0). Every `diff` therefore
+/// also passes [`DIFF_PINNED_FLAGS`], and `blame` passes `--no-textconv`.
 const PINNED_CONFIG: &[&str] = &[
     "core.quotepath=true",
     "color.ui=never",
@@ -40,6 +46,9 @@ const PINNED_CONFIG: &[&str] = &[
     "blame.markUnblamableLines=false",
     "log.showSignature=false",
 ];
+
+/// Flags every `git diff` the method runs carries, whatever the user's config.
+const DIFF_PINNED_FLAGS: &[&str] = &["--no-color", "--no-ext-diff", "--no-textconv"];
 
 // ---------------------------------------------------------------- git runner
 
@@ -377,6 +386,9 @@ pub fn build_dataset(
         let sha = c.sha.clone();
         let ns = git.run(&[
             "diff".into(),
+            DIFF_PINNED_FLAGS[0].into(),
+            DIFF_PINNED_FLAGS[1].into(),
+            DIFF_PINNED_FLAGS[2].into(),
             "--numstat".into(),
             "-M".into(),
             format!("{sha}^1"),
@@ -404,6 +416,9 @@ pub fn build_dataset(
             // path is passed through quoted and matches nothing.
             let diff = git.run(&[
                 "diff".into(),
+                DIFF_PINNED_FLAGS[0].into(),
+                DIFF_PINNED_FLAGS[1].into(),
+                DIFF_PINNED_FLAGS[2].into(),
                 "-U0".into(),
                 "-w".into(),
                 par.clone(),
@@ -420,6 +435,7 @@ pub fn build_dataset(
                 "-w".into(),
                 "--first-parent".into(),
                 "--line-porcelain".into(),
+                "--no-textconv".into(),
             ];
             for r in ignore_revs {
                 args.push("--ignore-rev".into());
