@@ -335,8 +335,9 @@ impl Endpoint {
 }
 
 /// `valid` bits, as the published component sets them after a tick: bits
-/// 0..=8 (attitude ... failsafe) and, binding v3, bit 9 `prearm-failing`.
-const VALID_TICKED: u32 = 0x3ff;
+/// 0..=8 (attitude ... failsafe) except bit 5 `innovation`, which no core
+/// computes yet (#638 finding 11), and, binding v3, bit 9 `prearm-failing`.
+const VALID_TICKED: u32 = 0x3df;
 const V_PREARM: u32 = 1 << 9;
 
 /// What the component latches for `observer.read-state` at the end of a
