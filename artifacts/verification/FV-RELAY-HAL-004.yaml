@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-HAL-004
     type: sw-verification
     title: "GNSS embedded-io-async + ESC relay-hal PwmOut + NAV-PVT inter-core carrier (v1.84)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-RELAY-HAL-P04. Unit tests:
         - gnss_async_read_matches_sync_parse (falcon-gnss-ubx): UbxReader over a
@@ -17,7 +17,7 @@ artifacts:
         - esc_send_propagates_sink_error: a failing PwmOut yields Err.
         - existing sync + Kani tests unchanged.
       ORACLE: `cargo test -p falcon-gnss-ubx -p falcon-esc-dshot` green; clippy clean.
-    tags: [verification, relay, relay-hal, falcon-gnss-ubx, falcon-esc-dshot, embedded-io-async, "v1.84", issue-177]
+    tags: [verification, relay, relay-hal, falcon-gnss-ubx, falcon-esc-dshot, embedded-io-async, v1.84, issue-177, falcon]
     fields:
       method: automated-test
       # Test-level evidence: named tests per requirement clause (pulseengine.eu#89).

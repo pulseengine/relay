@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-HAL-002
     type: sw-verification
     title: "falcon-imu-icm42688 embedded-hal-async re-target — sync/async decode equivalence + fallibility (v1.82)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-RELAY-HAL-P02. Unit tests (crates/falcon-imu-icm42688):
         - async_spi_path_matches_sync_decode: the Icm42688Spi<SpiDevice> async
@@ -14,7 +14,7 @@ artifacts:
           transaction surfaces as Err (fallibility = the health source).
         - the 4 pre-existing sync tests still pass (no regression).
       ORACLE: `cargo test -p falcon-imu-icm42688` green (6 tests); clippy clean.
-    tags: [verification, relay, relay-hal, falcon-imu-icm42688, embedded-hal-async, "v1.82"]
+    tags: [verification, relay, relay-hal, falcon-imu-icm42688, embedded-hal-async, v1.82, falcon]
     fields:
       method: automated-test
       # Test-level evidence: named tests per requirement clause (pulseengine.eu#89).

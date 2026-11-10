@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-HAL-001
     type: sw-verification
     title: "relay-hal Presence/health enumeration — Kani totality + bounds (v1 of the HAL seam)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-RELAY-HAL-P01. Kani bounded-model-checks the relay-owned
       Presence device-set logic (the seam's only non-trivial sync logic in v1;
@@ -21,7 +21,7 @@ artifacts:
           the host enumerated present).
       ORACLE: `cargo kani -p relay-hal` reports VERIFICATION SUCCESSFUL for all
       three; `cargo test -p relay-hal` green.
-    tags: [verification, relay, relay-hal, kani, presence, "v1.81", jess-62]
+    tags: [verification, relay, relay-hal, kani, presence, v1.81, jess-62, falcon]
     fields:
       method: formal-verification
       # Test-level evidence: each step names the SPECIFIC test/harness proving a
