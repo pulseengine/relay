@@ -233,6 +233,7 @@ jobs:
   #      and requires the twin to be bit-exact at 400 and 1000 Hz, the seam
   #      lifecycle tests to pass against BOTH components, and each component to
   #      be bit-identical to the native mirror (hold and rotor-out).
+  #   3. both components under SITL_CALIBRATION=invalid and none.
   # Not covered here: arena_soak.rs, which needs the leaf components
   # (FALCON_*_WASM) from scripts/build-components.sh.
   cascade-split:
@@ -254,7 +255,25 @@ jobs:
         working-directory: tests/cascade-sitl-wasm
         run: cargo test --release
       - name: cascade vs cascade-split twin, seam tests on both, both vs the mirror
+        env:
+          OUT: ${{ runner.temp }}/split
         run: bash scripts/split-differential.sh
+      # #638 finding 9: with no valid calibration, both components must refuse
+      # `arm` for the whole 10 s deadline, and the published prearm-failing
+      # mask must name CalibrationPresent.
+      - name: no-calibration runs refuse arm on CalibrationPresent
+        env:
+          OUT: ${{ runner.temp }}/split
+        run: |
+          set -euo pipefail
+          # The same path split-differential.sh builds the harness to.
+          H="${CARGO_TARGET_DIR:-$PWD/tests/cascade-sitl-wasm/target}/release/cascade-sitl-wasm"
+          for cal in invalid none; do
+            for w in cascade.wasm cascade-split-composed.wasm; do
+              echo "== SITL_CALIBRATION=$cal $w"
+              SITL_CALIBRATION=$cal "$H" "$OUT/$w"
+            done
+          done
 
   # Committed scripts get run on macOS, where /bin/bash is 3.2 and
   # /usr/bin/python3 is 3.9, while every other job here runs newer tools, so
