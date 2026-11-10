@@ -369,6 +369,14 @@ artifacts:
         # The plant has a floor, gated on the fault exactly as native gates it.
         - run: "grep -q 'plant.set_ground_contact(true)' tests/cascade-sitl-wasm/src/main.rs"
         - run: "grep -q 'if fail_rotor.is_some() {' tests/cascade-sitl-wasm/src/main.rs"
+        # #638 finding 7: the line above is now ALSO satisfied by the
+        # unconditional pre-arm floor (#609), so it no longer shows the
+        # in-flight floor is gated. The gating is these two lines: the
+        # in-flight setting is derived from the fault, and takeoff restores it.
+        # Negative control: deleting the takeoff restore leaves both greps
+        # above passing and fails the second step below.
+        - run: "grep -q 'let floor_in_flight = fail_rotor.is_some();' tests/cascade-sitl-wasm/src/main.rs"
+        - run: "grep -q 'plant.set_ground_contact(floor_in_flight);' tests/cascade-sitl-wasm/src/main.rs"
         # The judged window is bounded by touchdown, and says so in its output.
         - run: "grep -q 'touchdown_tick = Some(tick);' tests/cascade-sitl-wasm/src/main.rs"
         - run: "grep -q 'the judged window ends here' tests/cascade-sitl-wasm/src/main.rs"
