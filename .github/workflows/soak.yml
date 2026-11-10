@@ -168,14 +168,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y curl lsb-release gnupg
+          bash scripts/apt-retry.sh update
+          bash scripts/apt-retry.sh install -y curl lsb-release gnupg
           sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
             -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
             | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
-          sudo apt-get update
-          sudo apt-get install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
+          bash scripts/apt-retry.sh update
+          bash scripts/apt-retry.sh install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
 
       - name: Build the bench with the real bridge
         run: cargo build --release -p falcon-sitl-gz --features gazebo
@@ -471,14 +471,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y curl lsb-release gnupg
+          bash scripts/apt-retry.sh update
+          bash scripts/apt-retry.sh install -y curl lsb-release gnupg
           sudo curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
             -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
             | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
-          sudo apt-get update
-          sudo apt-get install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
+          bash scripts/apt-retry.sh update
+          bash scripts/apt-retry.sh install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
 
       - name: Build the published component and the wasm harness
         shell: bash
