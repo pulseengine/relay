@@ -2193,6 +2193,8 @@ pub mod tuning;
 // The supervisor and the rotor-out FDI live in their own files; the modules
 // stay private and everything is re-exported here, so no public path changed.
 mod fdi;
+#[cfg(kani)]
+mod kani_proofs;
 mod supervisor;
 pub use fdi::*;
 pub use supervisor::*;

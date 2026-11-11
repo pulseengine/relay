@@ -274,6 +274,7 @@ artifacts:
         - run: "grep -q 'pub const FDI_ROTOR_LAG_TAU_S: f32 = 0.05;' crates/falcon-core/plain/src/fdi.rs"
         - run: "grep -q 'resid\\[i\\] = (self.fdi_lag_model\\[i\\] - achieved).abs();' crates/falcon-core/plain/src/fdi.rs"
         - run: "grep -q 'let common = resid\\[0\\].min(resid\\[1\\]).min(resid\\[2\\]).min(resid\\[3\\]);' crates/falcon-core/plain/src/fdi.rs"
+        - run: "cargo kani -p falcon-core --harness stall_check_isolates_only_a_lone_rotor_stalled_for_the_full_window"
     links:
       - type: verifies
         target: SWREQ-FALCON-FAULT-P03
