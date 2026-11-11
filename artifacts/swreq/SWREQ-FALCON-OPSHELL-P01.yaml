@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OPSHELL-P01 — the operational shell: what stands between a verified flight core and a vehicle that can actually be flown"
     status: proposed
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       The stack shall provide the operational surface a pilot needs between
       "the control loop is correct" and "this vehicle is safe to fly": a

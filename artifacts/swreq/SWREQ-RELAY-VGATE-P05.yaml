@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "VGATE-P05 — every verification track the release cites shall actually RUN, on main and on the PRs that change what it verifies"
     status: proposed
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       Every verification track cited as evidence (Verus, Kani, Rocq, Lean,
       witness coverage, the verification gate) shall execute on `main` and on

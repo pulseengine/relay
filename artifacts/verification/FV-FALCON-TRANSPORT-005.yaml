@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TRANSPORT-005
     type: sw-verification
     title: "Binding v3 — a binding-only host reads the vehicle state, and sees a refused arm with the deciding pre-arm row named"
-    status: implemented
+    status: verified
     release: falcon-v1.142.0
     description: >
       Evidence for SWREQ-FALCON-TRANSPORT-P02 (binding v3).
