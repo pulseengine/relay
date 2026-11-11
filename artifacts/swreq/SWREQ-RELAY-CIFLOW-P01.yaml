@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "CIFLOW-P01 — a green PR shall merge without a human noticing it is stuck, and required gates shall not be decided by runner luck"
     status: proposed
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       A PR whose required checks are green shall merge without manual
       intervention, and no required check's verdict shall depend on runner

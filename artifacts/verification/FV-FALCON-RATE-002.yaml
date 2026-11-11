@@ -3,7 +3,7 @@ artifacts:
     type: sw-verification
     title: "RATE-P05 — the inner rate loop tracks under load on the gz plant, once the filters are designed for the rate they run at (v1.141)"
     status: implemented
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       Verifies SWREQ-FALCON-RATE-P05 on the gz falcon-quad.
 

@@ -3,7 +3,7 @@ artifacts:
     type: sw-verification
     title: "ARCH — the sw-arch components and the RT1176 AADL name the same partitions (#261, both directions)"
     status: implemented
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       #261 decomposes the architecture layer FROM the AADL (maintainer
       decision 2026-10-22: AADL first, then allocate). Three sw-arch

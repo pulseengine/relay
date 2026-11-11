@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "ORPHAN-P01 — every capability shall be WIRED, PARKED against a named configuration axis, or RETIRED; none shall stay implemented-verified-unreachable"
     status: proposed
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       Every capability in the tree shall have exactly one recorded disposition:
 

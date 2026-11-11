@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "RATE-P05 — the inner rate loop shall track its command UNDER LOAD, not limit-cycle into the rails"
     status: implemented
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       While the vehicle is flying, the measured body rate shall track the
       commanded body rate, and the actuator commands shall not oscillate

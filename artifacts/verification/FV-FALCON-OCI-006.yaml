@@ -3,7 +3,7 @@ artifacts:
     type: sw-verification
     title: "OCI-P08 — CallScope arena reclamation: Kani P1–P4, unit tests, 10 000-call soak, bit-identity (#574)"
     status: implemented
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       Verification of SWREQ-FALCON-OCI-P08.
 

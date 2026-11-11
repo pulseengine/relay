@@ -5,7 +5,7 @@ artifacts:
     status: implemented
     # v1.141 NARROWED (maintainer, 2026-10-21): moves to v1.142 with FAULT-005
     # (#592). Implemented by #571 (090cfaf); verification follows in its own PR.
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       The component published as `pulseengine:falcon-cascade` shall run the
       FlightSupervisor, not the FlightCore alone, and shall publish its MODE and

@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OCI-P03 — bounded messaging payloads: adopt the wit-bindgen fork (fixed-length lists + arena/elision)"
     status: proposed
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       Message-carrying seams shall declare BOUNDED payloads, so the work memory
       they require can be sized and defended rather than being unbounded.

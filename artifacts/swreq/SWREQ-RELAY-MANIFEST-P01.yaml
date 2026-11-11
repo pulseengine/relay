@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "MANIFEST-P01 — every thing relay ships or promises shall be listed once, as rivet artifacts, and a mechanical check shall fail when the repo and the list disagree"
     status: draft
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       WHY. The 2026-11-04 inventory (read-only, origin/main 6a0fa86) found
       relay's shipped and promised surface stated by hand in several places,

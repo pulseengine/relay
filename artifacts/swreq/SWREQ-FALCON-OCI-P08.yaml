@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "OCI-P08 — the bounded arena is reclaimed per call without freeing a live call's arguments (#574)"
     status: implemented
-    release: falcon-v1.142.0
+    release: falcon-v1.143.0
     description: >
       Every published component's `cabi_realloc` arena (falcon-cm-rt, 8 KiB,
       no `memory.grow` per OCI-P02) shall be reclaimed once per export call, so
