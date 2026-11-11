@@ -54,8 +54,9 @@ use bindings::pulseengine::falcon_cascade::types::{
 };
 
 use core::cell::RefCell;
+use falcon_core::ImuSample as CoreImu;
 use falcon_core::host::{self, SupervisorHost};
-use falcon_core::{FlightBackend, ImuSample as CoreImu};
+use falcon_core::split::{FrameBackend, SeamFrame};
 
 /// falcon-core's `Vec3` alias is private, so it is restated here. Same shape
 /// (`[f32; 3]`, NED); if that ever diverges this stops compiling, which is the
@@ -201,65 +202,6 @@ fn cal_params(c: &SensorCalibration) -> falcon_core::relay_calib::CalParams {
     }
 }
 
-/// One tick's sensors in, motors out.
-///
-/// `FlightCore` pulls from a backend and pushes motors into it, which is the
-/// seam that lets the SAME code run against SITL, Gazebo or real hardware. A
-/// component has to answer with a value instead, so this stands in for one tick:
-/// every `read_*` returns what the frame carried, and `write_motors` is caught.
-///
-/// Returning `None` where the frame carried nothing is the point — the core
-/// then skips that fusion step rather than being handed a fabricated zero,
-/// which would be silently wrong rather than merely absent.
-struct FrameBackend {
-    imu: CoreImu,
-    position: Option<Vec3>,
-    mag: Option<Vec3>,
-    heading: Option<f32>,
-    /// v0.10: per-rotor ESC telemetry. `None` leaves the rotor-out FDI on its
-    /// RPM-free path, which is what every published component did until now.
-    motor_rpm: Option<[i32; 4]>,
-    /// SUPERVISOR-P01. The two battery reads are the ONLY backend methods the
-    /// supervisor calls that `FlightCore` did not, and both DEFAULT to `None` in
-    /// the trait — so without this field the switch to a supervisor would ship a
-    /// vehicle that can never arm. Measured: `read_battery_v` defaults `None`,
-    /// `update_preflight` writes the `BatteryOk` row as `batt_present && ..`
-    /// with `batt_present == false`, and `arm_check_table` returns
-    /// `Blocked(CheckId::BatteryOk)` forever.
-    battery_v: Option<f32>,
-    dt: f32,
-    motors: [f32; 4],
-}
-
-impl FlightBackend for FrameBackend {
-    fn read_imu(&mut self) -> CoreImu {
-        self.imu
-    }
-    fn read_position(&mut self) -> Option<Vec3> {
-        self.position
-    }
-    fn read_mag(&mut self) -> Option<Vec3> {
-        self.mag
-    }
-    fn read_heading(&mut self) -> Option<f32> {
-        self.heading
-    }
-    fn read_motor_rpm(&mut self) -> Option<[i32; 4]> {
-        self.motor_rpm
-    }
-    fn read_battery_v(&mut self) -> Option<f32> {
-        self.battery_v
-    }
-    fn write_motors(&mut self, motors: &[f32]) {
-        for (i, m) in self.motors.iter_mut().enumerate() {
-            *m = motors.get(i).copied().unwrap_or(0.0);
-        }
-    }
-    fn dt(&self) -> f32 {
-        self.dt
-    }
-}
-
 struct Component;
 
 impl Guest for Component {
@@ -279,19 +221,21 @@ impl Guest for Component {
         };
 
         let imu = sensors.imu;
-        let mut backend = FrameBackend {
+        // The same frame backend cascade-split uses (falcon-core's
+        // `split::FrameBackend`), so a new sensor field cannot reach one
+        // adapter and not the other (#638).
+        let mut backend = FrameBackend::new(SeamFrame {
             imu: CoreImu {
                 accel: [imu.ax, imu.ay, imu.az],
                 gyro: [imu.gx, imu.gy, imu.gz],
             },
+            dt,
             position: sensors.position_ned.map(|p| [p.x, p.y, p.z]),
             mag: sensors.mag_body.map(|m| [m.x, m.y, m.z]),
             heading: sensors.heading_rad,
             motor_rpm: sensors.motor_rpm.map(|r| [r.m1, r.m2, r.m3, r.m4]),
             battery_v: sensors.battery_v,
-            dt,
-            motors: [0.0; 4],
-        };
+        });
 
         {
             let mut host = HOST.0.borrow_mut();

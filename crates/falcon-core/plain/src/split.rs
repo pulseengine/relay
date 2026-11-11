@@ -78,7 +78,15 @@ impl SeamFrame {
     }
 }
 
-/// A frame served as a backend: pure reads, the motor command caught.
+/// A frame served as a backend: pure reads, the motor command caught. Both
+/// published adapters (`cascade` and `cascade-split`) tick through this one
+/// type, so a sensor field cannot reach one and not the other (#638).
+///
+/// Returning `None` where the frame carried nothing is the point: the core
+/// then skips that fusion step rather than being handed a fabricated zero.
+/// `battery_v` matters for the same reason: the trait's default is `None`,
+/// which leaves the `BatteryOk` pre-arm row false and the vehicle unable to
+/// arm (SUPERVISOR-P01).
 pub struct FrameBackend {
     pub frame: SeamFrame,
     pub motors: [f32; 4],
