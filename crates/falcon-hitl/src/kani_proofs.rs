@@ -725,6 +725,7 @@ fn snapshot(
     Option<u32>,
     Option<u32>,
     Option<u32>,
+    u32,
 ) {
     (
         h.seq,
@@ -736,6 +737,7 @@ fn snapshot(
         h.awaiting_state,
         h.last_state,
         h.tracker.last(),
+        h.carried_lost,
     )
 }
 
@@ -765,6 +767,7 @@ fn the_host_accepts_only_replies_to_frames_it_sent() {
         last_motors: None,
         awaiting_state: None,
         last_state: None,
+        carried_lost: 0,
         tracker: SeqTracker::starting_at(start),
     };
     let mut g = Ledger {

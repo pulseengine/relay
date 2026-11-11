@@ -640,7 +640,9 @@ accepted `ack` advances the same baseline, so an acknowledged control frame
 between two ticks is not counted lost. One consequence to know: if a control
 frame is sent while a tick is outstanding and its ack arrives first, the
 tick's `motors` reply is accepted but reads `Late` — the table below says
-discard it.
+discard it. If that reply never arrives, the tick is counted in the
+`Dropped { lost }` of the next accepted `motors` reply; the ack (or a `state`
+reply) that passed it does not swallow the loss.
 
 **What a component does with a frame it will not act on.** A `Duplicate` or
 `Late` `sensor` frame never steps the controller. The component may leave it
