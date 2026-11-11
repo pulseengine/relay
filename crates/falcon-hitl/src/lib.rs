@@ -577,7 +577,8 @@ pub enum HostReply {
 /// accepted reply is reported too: Sensor 1, 2, 3 out and only Motors 3 back
 /// reads `Dropped { lost: 2 }`, where an unseeded tracker said `First`. An
 /// accepted `Ack` advances the same baseline, so an acknowledged control
-/// frame between two ticks is not counted lost.
+/// frame between two ticks is not counted lost; a tick it passes unanswered is
+/// carried into the next `Motors` verdict rather than dropped (#638 finding 4).
 ///
 /// It does not own a socket: each method returns the exact bytes to send, and
 /// [`on_reply`](Self::on_reply) takes the bytes that came back.
@@ -607,6 +608,13 @@ pub struct BindingHost {
     awaiting_state: Option<u32>,
     /// The seq of the `State` reply accepted last (its duplicate is benign).
     last_state: Option<u32>,
+    /// Frames counted lost by an accepted `Ack` or `State`, not yet reported.
+    /// Those replies advance the tracker past any unanswered `sensor` tick,
+    /// and their verdict is not a tick, so the loss is carried here into the
+    /// next accepted `Motors` verdict instead of being discarded (#638
+    /// finding 4). A superseded tick whose reply turns up late after all
+    /// (`Late`) is taken back out.
+    carried_lost: u32,
     tracker: wire::SeqTracker,
 }
 
@@ -638,6 +646,7 @@ impl BindingHost {
             last_motors: None,
             awaiting_state: None,
             last_state: None,
+            carried_lost: 0,
             tracker: wire::SeqTracker::starting_at(0),
         }
     }
@@ -803,6 +812,36 @@ impl BindingHost {
         self.classify(h.seq, body)
     }
 
+    /// Advance the tracker for an accepted `Ack` or `State` reply. Any loss
+    /// it reveals is an unanswered `sensor` tick (control and state requests
+    /// are stop-and-wait), so it is carried to the next `Motors` verdict.
+    fn carry(&mut self, seq: u32) {
+        if let wire::TickVerdict::Dropped { lost } = self.tracker.observe(seq) {
+            self.carried_lost = self.carried_lost.saturating_add(lost);
+        }
+    }
+
+    /// The verdict an accepted `Motors` reply reports, with any carried loss
+    /// folded in.
+    fn report(&mut self, verdict: wire::TickVerdict) -> wire::TickVerdict {
+        match verdict {
+            // The superseded tick answered after all: it was counted lost
+            // when the Ack/State passed it, and it is not.
+            wire::TickVerdict::Late { .. } => {
+                self.carried_lost = self.carried_lost.saturating_sub(1);
+                verdict
+            }
+            wire::TickVerdict::InOrder if self.carried_lost > 0 => {
+                let lost = core::mem::take(&mut self.carried_lost);
+                wire::TickVerdict::Dropped { lost }
+            }
+            wire::TickVerdict::Dropped { lost } => wire::TickVerdict::Dropped {
+                lost: lost.saturating_add(core::mem::take(&mut self.carried_lost)),
+            },
+            other => other,
+        }
+    }
+
     /// The echo rule over a decoded reply whose header carried `seq`. Split
     /// from the byte decoding so the Kani harness can drive it directly.
     fn classify(&mut self, seq: u32, body: ReplyBody) -> Result<HostReply, HostError> {
@@ -812,7 +851,7 @@ impl BindingHost {
                     return Err(HostError::AckSeqMismatch { header: seq, acked });
                 }
                 if self.awaiting == Some(acked) {
-                    self.tracker.observe(seq);
+                    self.carry(seq);
                     self.awaiting = None;
                     self.last_acked = Some(acked);
                     return Ok(HostReply::Acked { seq: acked });
@@ -828,7 +867,8 @@ impl BindingHost {
             ReplyBody::Motors(motors) => {
                 // THE SENT-CHECK: only the outstanding tick is answerable.
                 if self.outstanding_sensor == Some(seq) {
-                    let verdict = self.tracker.observe(seq);
+                    let observed = self.tracker.observe(seq);
+                    let verdict = self.report(observed);
                     self.outstanding_sensor = None;
                     self.last_motors = Some(seq);
                     return Ok(HostReply::Motors {
@@ -857,7 +897,7 @@ impl BindingHost {
                 if self.awaiting_state == Some(seq) {
                     // Advances the same baseline an accepted Ack does, so an
                     // answered request between two ticks is not counted lost.
-                    self.tracker.observe(seq);
+                    self.carry(seq);
                     self.awaiting_state = None;
                     self.last_state = Some(seq);
                     return Ok(HostReply::State { seq, state });
@@ -1383,6 +1423,81 @@ mod tests {
         let mut ack = [0u8; ACK_FRAME_LEN];
         wire::encode_ack(&mut ack, c, c);
         assert_eq!(host.on_reply(&ack), Ok(HostReply::Acked { seq: c }));
+        let s = sensor_seq(&mut host);
+        assert!(matches!(
+            host.on_reply(&motors_frame(s)),
+            Ok(HostReply::Motors {
+                verdict: wire::TickVerdict::InOrder,
+                ..
+            })
+        ));
+    }
+
+    /// #638 finding 4: a tick whose `Motors` reply is lost, followed by an
+    /// acked control frame (or an answered `StateRequest`), must still be
+    /// reported. The Ack moves the tracker past the lost tick; before the fix
+    /// its `Dropped` verdict was discarded and the next tick read `InOrder`.
+    /// A superseded tick whose reply arrives late after all is not counted.
+    #[test]
+    fn echo_rule_a_lost_tick_behind_an_ack_or_state_is_still_reported() {
+        let mut host = BindingHost::new();
+        // Sensor 1 -> Motors lost; Config 2 -> Ack 2; Sensor 3 -> Motors 3.
+        assert_eq!(sensor_seq(&mut host), 1);
+        let c = supervisor_seq(&mut host);
+        let mut ack = [0u8; ACK_FRAME_LEN];
+        wire::encode_ack(&mut ack, c, c);
+        assert_eq!(host.on_reply(&ack), Ok(HostReply::Acked { seq: c }));
+        let s = sensor_seq(&mut host);
+        let r = host.on_reply(&motors_frame(s));
+        assert!(
+            matches!(
+                r,
+                Ok(HostReply::Motors {
+                    verdict: wire::TickVerdict::Dropped { lost: 1 },
+                    ..
+                })
+            ),
+            "the lost tick behind the Ack must be reported: {r:?}"
+        );
+        // Reported once: the next tick is in order again.
+        let s = sensor_seq(&mut host);
+        assert!(matches!(
+            host.on_reply(&motors_frame(s)),
+            Ok(HostReply::Motors {
+                verdict: wire::TickVerdict::InOrder,
+                ..
+            })
+        ));
+
+        // The same through a StateRequest.
+        let lost = sensor_seq(&mut host);
+        let rq = host.state_request().unwrap();
+        let (hr, _) = wire::decode_frame(&rq).unwrap();
+        let mut st = [0u8; STATE_FRAME_LEN];
+        wire::encode_state(&mut st, hr.seq, &wire::WireFlightState::default());
+        assert!(matches!(host.on_reply(&st), Ok(HostReply::State { .. })));
+        assert_eq!(host.outstanding_sensor(), Some(lost));
+        let s = sensor_seq(&mut host);
+        assert!(matches!(
+            host.on_reply(&motors_frame(s)),
+            Ok(HostReply::Motors {
+                verdict: wire::TickVerdict::Dropped { lost: 1 },
+                ..
+            })
+        ));
+
+        // Late, not lost: Sensor n, Config n+1 -> Ack, then Motors n arrives.
+        let late = sensor_seq(&mut host);
+        let c = supervisor_seq(&mut host);
+        wire::encode_ack(&mut ack, c, c);
+        assert_eq!(host.on_reply(&ack), Ok(HostReply::Acked { seq: c }));
+        assert!(matches!(
+            host.on_reply(&motors_frame(late)),
+            Ok(HostReply::Motors {
+                verdict: wire::TickVerdict::Late { by: 1 },
+                ..
+            })
+        ));
         let s = sensor_seq(&mut host);
         assert!(matches!(
             host.on_reply(&motors_frame(s)),
