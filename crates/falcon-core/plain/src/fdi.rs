@@ -254,50 +254,14 @@ impl CascadePartition {
         // rotors by the body-rate / attitude response, which a dead rotor
         // produces and a dead telemetry channel does not.
         if self.failed_motor.is_none() && self.fdi_spinup < self.fdi_guard_steps {
-            match rpm_now {
-                Some(rpm) => {
-                    let mut stalled = 0u32;
-                    let mut longest = 0u32;
-                    let mut i = 0;
-                    while i < 4 {
-                        let achieved = (rpm[i] as f32 / ESC_RPM_FULL).clamp(0.0, 2.0);
-                        if achieved < FDI_STALL_RPM_FRAC
-                            && self.last_motor_cmd[i] > FDI_STALL_CMD_MIN
-                        {
-                            self.fdi_stall_run[i] = self.fdi_stall_run[i].saturating_add(1);
-                            stalled += 1;
-                            if self.fdi_stall_run[i] > longest {
-                                longest = self.fdi_stall_run[i];
-                            }
-                        } else {
-                            self.fdi_stall_run[i] = 0;
-                        }
-                        i += 1;
-                    }
-                    if stalled >= 2 {
-                        if longest >= self.fdi_stall_steps {
-                            self.fdi_stall_common = true;
-                        }
-                        if self.fdi_stall_common {
-                            self.fdi_stall_run = [0; 4];
-                        }
-                    } else {
-                        self.fdi_stall_common = false;
-                        if stalled == 1 && longest >= self.fdi_stall_steps {
-                            let mut j = 0;
-                            while j < 4 {
-                                if self.fdi_stall_run[j] > 0 {
-                                    self.failed_motor = Some(j);
-                                }
-                                j += 1;
-                            }
-                        }
-                    }
-                }
-                None => {
-                    self.fdi_stall_run = [0; 4];
-                    self.fdi_stall_common = false;
-                }
+            if let Some(j) = stall_check(
+                &mut self.fdi_stall_run,
+                &mut self.fdi_stall_common,
+                rpm_now,
+                self.last_motor_cmd,
+                self.fdi_stall_steps,
+            ) {
+                self.failed_motor = Some(j);
             }
         }
         if self.failed_motor.is_none() && self.fdi_spinup >= self.fdi_guard_steps && fdi_steady {
@@ -344,4 +308,68 @@ impl CascadePartition {
         }
         self.dbg_fdi = (rp_rate2, tilt_cos, fdi_steady, dbg_resid);
     }
+}
+
+/// The spin-up STALL CHECK of [`CascadePartition::step_fdi`], one tick, as a
+/// free function over the two pieces of state it owns so Kani can reach it
+/// (#638; the harnesses are in `kani_proofs.rs`). Called only inside the
+/// spin-up guard and only while no rotor is isolated.
+///
+/// A rotor is stalled this tick when it spins below [`FDI_STALL_RPM_FRAC`] of
+/// full while commanded above [`FDI_STALL_CMD_MIN`]; `run[i]` counts its
+/// consecutive stalled ticks and resets on any other tick. ONE rotor stalled
+/// for `stall_steps` is isolated (returned). Two or more stalled together is
+/// common mode (a slow spin-up, not a dead rotor): once any of them has
+/// stalled for `stall_steps`, `common` latches and every run is cleared, and
+/// `common` clears again on the first tick with fewer than two stalled. No
+/// RPM telemetry clears both and isolates nothing.
+pub(crate) fn stall_check(
+    run: &mut [u32; 4],
+    common: &mut bool,
+    rpm_now: Option<[i32; 4]>,
+    last_cmd: [f32; 4],
+    stall_steps: u32,
+) -> Option<usize> {
+    let Some(rpm) = rpm_now else {
+        *run = [0; 4];
+        *common = false;
+        return None;
+    };
+    let mut stalled = 0u32;
+    let mut longest = 0u32;
+    let mut i = 0;
+    while i < 4 {
+        let achieved = (rpm[i] as f32 / ESC_RPM_FULL).clamp(0.0, 2.0);
+        if achieved < FDI_STALL_RPM_FRAC && last_cmd[i] > FDI_STALL_CMD_MIN {
+            run[i] = run[i].saturating_add(1);
+            stalled += 1;
+            if run[i] > longest {
+                longest = run[i];
+            }
+        } else {
+            run[i] = 0;
+        }
+        i += 1;
+    }
+    let mut isolated = None;
+    if stalled >= 2 {
+        if longest >= stall_steps {
+            *common = true;
+        }
+        if *common {
+            *run = [0; 4];
+        }
+    } else {
+        *common = false;
+        if stalled == 1 && longest >= stall_steps {
+            let mut j = 0;
+            while j < 4 {
+                if run[j] > 0 {
+                    isolated = Some(j);
+                }
+                j += 1;
+            }
+        }
+    }
+    isolated
 }

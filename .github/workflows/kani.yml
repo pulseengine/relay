@@ -203,6 +203,15 @@ jobs:
           # call (P1), exhaustion is None and the cursor never wraps (P2),
           # enter reclaims iff the previous call returned (P3), alignment (P4).
           - falcon-cm-rt
+          # falcon-core (#638): the rotor-out FDI's spin-up stall check, moved
+          # out of step_fdi into fdi::stall_check so a harness reaches it. One
+          # harness over fully symbolic state (any run counters, RPM or none,
+          # any commands incl. NaN): at most one rotor isolated, only a lone
+          # stall at the full window, common mode never isolates, a lone
+          # full-window stall is never missed. 146 checks, 3 covers, ~2 s
+          # locally on 0.67.0; three mutants (isolate in common mode, run not
+          # broken, window off by one) each FAIL it.
+          - falcon-core
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # KANI VERSION IS PINNED. The action's `kani-version` input defaults to
