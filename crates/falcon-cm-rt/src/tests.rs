@@ -201,6 +201,24 @@ fn static_path() {
         8
     );
 
+    // A host alignment that is not a power of two traps on every path: the
+    // zero-size path would return null for 0, and the resize path used to
+    // build an unchecked Layout from it (#638).
+    for (old_len, align, new_len) in [(0, 0, 0), (0, 3, 0), (0, 3, 8), (8, 3, 16), (8, 0, 16)] {
+        let r = std::panic::catch_unwind(|| unsafe {
+            cabi_realloc_impl(
+                core::ptr::NonNull::<u64>::dangling().as_ptr().cast(),
+                old_len,
+                align,
+                new_len,
+            )
+        });
+        assert!(
+            r.is_err(),
+            "align {align} (old_len {old_len}, new_len {new_len}) did not trap"
+        );
+    }
+
     // Exhaustion at the ABI boundary traps (a panic natively) instead of
     // handing the host a null it would write through.
     let r = std::panic::catch_unwind(|| {

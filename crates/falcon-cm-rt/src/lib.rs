@@ -316,7 +316,8 @@ fn arena_exhausted() -> ! {
 ///
 /// A fresh allocation (`old_len == 0`) is a HOST allocation and may reclaim
 /// the arena (see the crate docs); a resize never does. Exhaustion traps rather
-/// than returning null, because the host would accept address 0.
+/// than returning null, because the host would accept address 0. So does an
+/// alignment that is not a power of two, on every path.
 ///
 /// Exported by each component via [`export_cm_rt!`] rather than from here, so
 /// the symbol lands in the component's own module.
@@ -329,6 +330,12 @@ pub unsafe fn cabi_realloc_impl(
     align: usize,
     new_len: usize,
 ) -> *mut u8 {
+    // The alignment comes from the host. A host that breaks the ABI with a
+    // non-power-of-two alignment traps here instead of reaching a dangling
+    // pointer of 0 or an unchecked `Layout` (#638).
+    if !align.is_power_of_two() {
+        arena_exhausted();
+    }
     let p = if old_len == 0 {
         // Canonical ABI: a zero-size allocation returns the alignment as a
         // non-null, suitably-aligned dangling pointer.
@@ -337,13 +344,10 @@ pub unsafe fn cabi_realloc_impl(
         }
         offset_to_ptr(with_state(|s| s.host_alloc(new_len, align)))
     } else {
-        unsafe {
-            BumpArena.realloc(
-                old_ptr,
-                Layout::from_size_align_unchecked(old_len, align),
-                new_len,
-            )
-        }
+        let Ok(layout) = Layout::from_size_align(old_len, align) else {
+            arena_exhausted();
+        };
+        unsafe { BumpArena.realloc(old_ptr, layout, new_len) }
     };
     if p.is_null() {
         arena_exhausted();
