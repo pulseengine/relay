@@ -52,15 +52,22 @@ pub fn read_uint(payload: &[u8], o: usize, w: usize) -> u64 {
 
 /// Read a `w`-bit signed DSDL primitive (two's complement), sign-extended to i64.
 pub fn read_int(payload: &[u8], o: usize, w: usize) -> i64 {
-    let v = read_uint(payload, o, w);
-    if w == 0 || w >= 64 {
+    sign_extend(read_uint(payload, o, w), w)
+}
+
+/// Sign-extend the low `w` bits of `v` (two's complement) to i64. Total for every
+/// `w`: 0 gives 0, 64 and above reinterpret `v`. Bits of `v` above `w` are
+/// ignored. Shifting the field to the top and arithmetic-shifting it back cannot
+/// overflow; the earlier `v - (1 << w)` form overflowed i64 at `w == 63`.
+pub fn sign_extend(v: u64, w: usize) -> i64 {
+    if w == 0 {
+        return 0;
+    }
+    if w >= 64 {
         return v as i64;
     }
-    if v & (1 << (w - 1)) != 0 {
-        (v as i64) - (1i64 << w)
-    } else {
-        v as i64
-    }
+    let s = 64 - w as u32;
+    ((v << s) as i64) >> s
 }
 
 /// Write a `w`-bit unsigned value at bit offset `o` (`le_from_be_bits`, the
@@ -124,6 +131,18 @@ mod tests {
         assert_eq!(read_int(&p, 14, 14), 0);
         assert_eq!(read_int(&p, 28, 14), -8192);
         assert_eq!(read_int(&p, 42, 14), 4096);
+    }
+
+    #[test]
+    fn read_int_63_bit_field_does_not_overflow() {
+        // All ones over 63 bits is -1; before the fix this overflowed i64.
+        assert_eq!(read_int(&[0xFF; 8], 0, 63), -1);
+        assert_eq!(sign_extend(1u64 << 62, 63), -(1i64 << 62));
+        assert_eq!(sign_extend((1u64 << 62) - 1, 63), (1i64 << 62) - 1);
+        assert_eq!(sign_extend(u64::MAX, 64), -1);
+        assert_eq!(sign_extend(u64::MAX, 0), 0);
+        // Bits above the field are ignored.
+        assert_eq!(sign_extend(0xFFFF_0001, 14), 1);
     }
 
     #[test]

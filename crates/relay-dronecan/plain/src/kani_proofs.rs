@@ -195,3 +195,27 @@ fn verify_node_status_round_trip() {
     };
     assert!(decode_node_status(&encode_node_status(&s)) == Some(s));
 }
+
+/// DC-K10 — signed DSDL fields sign-extend without overflow: for ANY `v` and ANY
+/// width `w` in 1..=63, `dsdl::sign_extend(v, w)` does not panic, lies in
+/// `[-2^(w-1), 2^(w-1) - 1]`, and equals the two's-complement value of the low
+/// `w` bits (computed in i128, so the specification itself cannot overflow).
+/// `read_int` is `sign_extend(read_uint(..), w)`, and DC-K08 covers `read_uint`.
+/// Width is symbolic here because `sign_extend` has no loop and no indexing; the
+/// earlier `v - (1 << w)` form fails this harness at `w == 63`.
+#[kani::proof]
+fn verify_dsdl_sign_extend_total() {
+    let v: u64 = kani::any();
+    let w: usize = kani::any();
+    kani::assume(w >= 1 && w <= 63);
+    let r = dsdl::sign_extend(v, w);
+    let low = (v & ((1u64 << w) - 1)) as i128;
+    let expect = if (low >> (w - 1)) & 1 == 1 {
+        low - (1i128 << w)
+    } else {
+        low
+    };
+    assert!(r as i128 == expect);
+    assert!(r >= -(1i64 << (w - 1)) && r <= (1i64 << (w - 1)) - 1);
+    kani::cover!(w == 63 && r < 0);
+}
