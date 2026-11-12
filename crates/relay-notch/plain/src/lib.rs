@@ -213,9 +213,9 @@ impl<const M: usize> HarmonicNotchBank<M> {
             // own the path, and a non-finite gyro sample must not ride
             // through disengaged (Nyquist-clamped) notches untouched.
             let mut v = sane(*o);
-            for m in 0..M {
-                v = self.notches[ax][m][0].apply(v);
-                v = self.notches[ax][m][1].apply(v);
+            for pair in self.notches[ax].iter_mut() {
+                v = pair[0].apply(v);
+                v = pair[1].apply(v);
             }
             *o = v;
         }
