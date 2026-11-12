@@ -25,7 +25,6 @@ fn verify_violation_count_bounded() {
     };
     let threshold: i64 = kani::any();
     let persistence: u32 = kani::any();
-    kani::assume(persistence >= 1);
 
     table.add_watchpoint(Watchpoint {
         sensor_id,
@@ -65,7 +64,6 @@ fn verify_compare_total() {
 fn verify_disabled_no_violations() {
     let mut table = WatchpointTable::new();
     let sensor_id: u32 = kani::any();
-    kani::assume(sensor_id < 100);
     table.add_watchpoint(Watchpoint {
         sensor_id,
         op: ComparisonOp::GreaterThan,
@@ -180,9 +178,6 @@ fn geofence_inside_never_trips() {
 fn geofence_outside_always_trips() {
     let mut g = arb_fence();
     // Constrain ranges so "outside" exists on every axis without overflow.
-    kani::assume(g.min_n > i32::MIN && g.max_n < i32::MAX);
-    kani::assume(g.min_e > i32::MIN && g.max_e < i32::MAX);
-    kani::assume(g.min_d > i32::MIN && g.max_d < i32::MAX);
     let n: i32 = kani::any();
     let e: i32 = kani::any();
     let d: i32 = kani::any();

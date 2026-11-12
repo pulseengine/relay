@@ -13,7 +13,6 @@ use crate::engine::*;
 fn verify_alert_bounded() {
     let mut table = HealthTable::new();
     let app_id: u32 = kani::any();
-    kani::assume(app_id < 100);
     let max_miss: u32 = kani::any();
     kani::assume(max_miss >= 1);
     let action_val: u8 = kani::any();
@@ -45,7 +44,6 @@ fn verify_disabled_no_alert() {
 fn verify_no_panic() {
     let mut table = HealthTable::new();
     let app_id: u32 = kani::any();
-    kani::assume(app_id < 100);
     let max_miss: u32 = kani::any();
     kani::assume(max_miss >= 1);
     table.register_app(app_id, max_miss, HsAction::Event);

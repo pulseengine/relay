@@ -56,7 +56,6 @@ fn verify_normals_never_exceed_budget() {
     let slots = [any_slot(), any_slot(), any_slot(), any_slot()];
     let mut sched = TelemetryScheduler::new(slots);
     let budget: usize = kani::any();
-    kani::assume(budget <= 1 << 20);
     let mask = sched.tick(budget);
     let mut normal_bytes = 0usize;
     for i in 0..4 {
