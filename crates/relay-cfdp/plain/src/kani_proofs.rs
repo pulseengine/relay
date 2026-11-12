@@ -24,9 +24,7 @@ fn verify_transaction_bounded() {
 fn verify_state_valid() {
     let mut table = TransactionTable::new();
     let file_size: u32 = kani::any();
-    kani::assume(file_size <= 4096);
     let max_retransmit: u32 = kani::any();
-    kani::assume(max_retransmit <= 10);
     let id = table.begin_send(file_size, max_retransmit).unwrap();
 
     // Drive one ACK transition
@@ -49,9 +47,7 @@ fn verify_state_valid() {
 fn verify_no_panic() {
     let mut table = TransactionTable::new();
     let file_size: u32 = kani::any();
-    kani::assume(file_size <= 4096);
     let max_retransmit: u32 = kani::any();
-    kani::assume(max_retransmit <= 10);
     if let Some(id) = table.begin_send(file_size, max_retransmit) {
         let _ = table.process_ack(id);
         let _ = table.tick(id);

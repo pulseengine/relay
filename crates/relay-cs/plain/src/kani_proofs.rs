@@ -24,7 +24,6 @@ fn verify_crc_deterministic() {
 fn verify_check_bounded() {
     let mut table = ChecksumTable::new();
     let region_id: u32 = kani::any();
-    kani::assume(region_id < 100);
     let baseline: u32 = kani::any();
     table.register_region(region_id, baseline);
     let data: [u8; 2] = [kani::any(), kani::any()];
@@ -43,7 +42,6 @@ fn verify_no_panic() {
     let _ = crc32_compute(&data);
     let mut table = ChecksumTable::new();
     let region_id: u32 = kani::any();
-    kani::assume(region_id < 100);
     table.register_region(region_id, kani::any());
     let time: u64 = kani::any();
     let _ = table.check_region(region_id, &data, time);

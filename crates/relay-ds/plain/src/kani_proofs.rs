@@ -15,7 +15,6 @@ fn verify_decision_bounded() {
     let data_id: u32 = kani::any();
     let dest: u32 = kani::any();
     let ft_val: u8 = kani::any();
-    kani::assume(ft_val <= 2);
     let file_type = match ft_val {
         0 => FileType::Sequence,
         1 => FileType::Time,

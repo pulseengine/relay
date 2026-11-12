@@ -16,11 +16,9 @@ fn verify_valid_header_accepted() {
     config.valid_stream_ids[0] = stream_id;
     config.stream_id_count = 1;
     let max_code: u8 = kani::any();
-    kani::assume(max_code >= 1);
     config.max_cmd_code = max_code;
     config.min_length = 0;
     let max_len: u16 = kani::any();
-    kani::assume(max_len >= 1);
     config.max_length = max_len;
 
     let func_code: u8 = kani::any();

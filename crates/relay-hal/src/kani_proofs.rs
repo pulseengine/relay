@@ -72,7 +72,6 @@ fn get_in_range_only() {
         k += 1;
     }
     let i: usize = kani::any();
-    kani::assume(i < 16);
     let g = p.get(i);
     if i < p.count() {
         assert!(g.is_some());
@@ -84,14 +83,16 @@ fn get_in_range_only() {
 /// HAL-K03 — the healthy voter set never exceeds what the host enumerated
 /// present: `count_healthy(kind) <= count` for any kind and any device set.
 #[kani::proof]
-#[kani::unwind(5)]
+#[kani::unwind(7)]
 fn healthy_set_bounded() {
     let mut p: Presence<N> = Presence::new();
-    let pushes: usize = kani::any();
-    kani::assume(pushes <= N);
+    // Up to N + 2 push attempts, each one taken or not: the set is driven
+    // past its capacity, so a refused push is covered too.
     let mut k = 0;
-    while k < pushes {
-        let _ = p.push(any_device());
+    while k < N + 2 {
+        if kani::any::<bool>() {
+            let _ = p.push(any_device());
+        }
         k += 1;
     }
     let kind = any_kind();

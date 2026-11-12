@@ -26,7 +26,6 @@ fn verify_no_panic() {
     let mut reg = TableRegistry::new();
     let name_hash: u32 = kani::any();
     let size: u32 = kani::any();
-    kani::assume(size <= MAX_TABLE_SIZE as u32);
     let _ = reg.register(name_hash, size);
     let _ = reg.get_active(name_hash);
     let _ = reg.activate(name_hash);

@@ -55,9 +55,8 @@ fn verify_no_panic() {
 #[kani::unwind(18)]
 fn verify_rts_state_transition() {
     let mut store = CommandStore::new();
-    // A small RTS (1..=2 commands), each with a symbolic delay.
-    let n: u32 = kani::any();
-    kani::assume(n >= 1 && n <= 2);
+    // An RTS of 1..=16 commands, each with a symbolic delay.
+    let n: u32 = kani::any::<u32>() % 16 + 1;
     let mut i = 0u32;
     while i < n {
         let _ = store.load_rts_command(

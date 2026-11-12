@@ -27,7 +27,6 @@ fn verify_no_double_accept() {
 fn verify_frontier_monotone() {
     let mut w = ReplayWindow::new();
     let a: u64 = kani::any();
-    kani::assume(a > 0);
     w.accept(a);
     let before = w.highest();
     let b: u64 = kani::any();
@@ -42,7 +41,6 @@ fn verify_frontier_monotone() {
 fn verify_accept_total() {
     let mut w = ReplayWindow::new();
     let a: u64 = kani::any();
-    kani::assume(a > 0);
     w.accept(a);
     let b: u64 = kani::any();
     let _ = w.accept(b); // Kani proves this cannot panic for any b

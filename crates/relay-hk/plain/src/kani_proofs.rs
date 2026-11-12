@@ -17,9 +17,6 @@ fn verify_collect_bounded() {
     let source_offset: u32 = kani::any();
     let length: u32 = kani::any();
     let output_offset: u32 = kani::any();
-    kani::assume(length <= SOURCE_DATA_SIZE as u32);
-    kani::assume(source_offset <= SOURCE_DATA_SIZE as u32 - length);
-    kani::assume(output_offset <= MAX_OUTPUT_SIZE as u32 - length);
     table.add_entry(CopyEntry {
         source_id,
         source_offset,
@@ -45,9 +42,6 @@ fn verify_no_panic() {
     let source_offset: u32 = kani::any();
     let length: u32 = kani::any();
     let output_offset: u32 = kani::any();
-    kani::assume(length <= SOURCE_DATA_SIZE as u32);
-    kani::assume(source_offset <= SOURCE_DATA_SIZE as u32);
-    kani::assume(output_offset <= MAX_OUTPUT_SIZE as u32);
     table.add_entry(CopyEntry {
         source_id,
         source_offset,

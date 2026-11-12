@@ -31,9 +31,7 @@ fn verify_no_panic() {
         _ => FmCommand::Concat,
     };
     let src_len: u32 = kani::any();
-    kani::assume(src_len <= MAX_PATH_LEN as u32 + 2);
     let dest_len: u32 = kani::any();
-    kani::assume(dest_len <= MAX_PATH_LEN as u32 + 2);
     let mut source = FilePath::empty();
     source.len = src_len;
     // Fill first byte to avoid null-byte rejection on valid-length paths
