@@ -1,7 +1,7 @@
 artifacts:
   - id: FV-FALCON-CMDLONG-001
     type: sw-verification
-    title: "MAVLink COMMAND_LONG codec + RTL builder — round-trip, CRC_EXTRA, length-rejection (v0.14.2 carrier)"
+    title: "MAVLink COMMAND_LONG codec + RTL builder — round-trip, CRC_EXTRA, length handling (v0.14.2 carrier)"
     status: verified
     description: >
       Verifies SWREQ-FALCON-MAVLINK-P05 (the COMMAND_LONG message + RTL builder,
@@ -18,8 +18,11 @@ artifacts:
           also round-trip) — encode->decode preserves every field bit-for-bit.
         - round_trip_with_params / round_trip_rtl: deterministic round-trips for
           a parameterised command and the RTL builder.
-        - decode_rejects_short_payload / decode_rejects_long_payload: a
-          length-mismatched payload is rejected without panic.
+        - decode_zero_extends_truncated_payload: pymavlink 2.4.50's 32-byte
+          ARM (confirmation 0, the trailing zero truncated) decodes to the
+          right fields, and a 1-byte payload equals the zero 33-byte one
+          (#675). decode_rejects_long_payload / decode_rejects_empty: an
+          over-long or empty payload is rejected without panic.
         - rtl_command_id_is_20 / rtl_builder_has_zero_params: CommandLong::rtl
           emits MAV_CMD_NAV_RETURN_TO_LAUNCH (20) with all seven param slots
           zero per the spec — the canonical "fly home and land" message falcon
@@ -43,8 +46,9 @@ artifacts:
         - run: "cargo test -p relay-mavlink command_long::tests::round_trip_arbitrary"
         - run: "cargo test -p relay-mavlink command_long::tests::round_trip_with_params"
         - run: "cargo test -p relay-mavlink command_long::tests::round_trip_rtl"
-        # clause: length-mismatched payloads rejected without panic
-        - run: "cargo test -p relay-mavlink command_long::tests::decode_rejects_short_payload"
+        # clause: truncated payloads zero-extended; empty or over-long rejected (#675)
+        - run: "cargo test -p relay-mavlink command_long::tests::decode_zero_extends_truncated_payload"
+        - run: "cargo test -p relay-mavlink command_long::tests::decode_rejects_empty"
         - run: "cargo test -p relay-mavlink command_long::tests::decode_rejects_long_payload"
         # clause: RTL builder shape (MAV_CMD 20, all seven params zero)
         - run: "cargo test -p relay-mavlink command_long::tests::rtl_command_id_is_20"

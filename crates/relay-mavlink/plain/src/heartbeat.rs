@@ -182,9 +182,10 @@ impl Heartbeat {
     /// is wrong (the caller has already validated message-id and
     /// frame integrity at this point).
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() != HEARTBEAT_PAYLOAD_LEN {
+        if payload.len() > HEARTBEAT_PAYLOAD_LEN {
             return None;
         }
+        let payload = &crate::frame::zero_extend::<{ HEARTBEAT_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             custom_mode: u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]),
             mav_type: payload[4],
@@ -260,8 +261,13 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_short_payload() {
-        assert!(Heartbeat::decode_payload(&[0u8; 8]).is_none());
+    fn decode_zero_extends_truncated_payload() {
+        // pymavlink 2.4.50: type 6, autopilot 8, everything after zero packs
+        // into 6 bytes (#675).
+        let h = Heartbeat::decode_payload(&[0, 0, 0, 0, 0x06, 0x08]).expect("truncated HEARTBEAT");
+        assert_eq!((h.mav_type, h.autopilot), (6, 8));
+        assert_eq!((h.base_mode, h.system_status, h.mavlink_version), (0, 0, 0));
+        assert_eq!(h.custom_mode, 0);
     }
 
     #[test]

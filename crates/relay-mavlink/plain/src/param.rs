@@ -55,9 +55,10 @@ impl ParamRequestList {
 
     /// Decode from a 2-byte payload. `None` on length mismatch.
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() != PARAM_REQUEST_LIST_PAYLOAD_LEN {
+        if payload.len() > PARAM_REQUEST_LIST_PAYLOAD_LEN {
             return None;
         }
+        let payload = &crate::frame::zero_extend::<{ PARAM_REQUEST_LIST_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             target_system: payload[0],
             target_component: payload[1],
@@ -98,9 +99,10 @@ impl ParamRequestRead {
 
     /// Decode from a 20-byte payload. `None` on length mismatch.
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() != PARAM_REQUEST_READ_PAYLOAD_LEN {
+        if payload.len() > PARAM_REQUEST_READ_PAYLOAD_LEN {
             return None;
         }
+        let payload = &crate::frame::zero_extend::<{ PARAM_REQUEST_READ_PAYLOAD_LEN }>(payload)?;
         let mut param_id = [0u8; 16];
         param_id.copy_from_slice(&payload[4..20]);
         Some(Self {
@@ -146,9 +148,10 @@ impl ParamSet {
 
     /// Decode from a 23-byte payload. `None` on length mismatch.
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() != PARAM_SET_PAYLOAD_LEN {
+        if payload.len() > PARAM_SET_PAYLOAD_LEN {
             return None;
         }
+        let payload = &crate::frame::zero_extend::<{ PARAM_SET_PAYLOAD_LEN }>(payload)?;
         let mut param_id = [0u8; 16];
         param_id.copy_from_slice(&payload[6..22]);
         Some(Self {
@@ -197,9 +200,10 @@ impl ParamValue {
 
     /// Decode from a 25-byte payload. `None` on length mismatch.
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() != PARAM_VALUE_PAYLOAD_LEN {
+        if payload.len() > PARAM_VALUE_PAYLOAD_LEN {
             return None;
         }
+        let payload = &crate::frame::zero_extend::<{ PARAM_VALUE_PAYLOAD_LEN }>(payload)?;
         let mut param_id = [0u8; 16];
         param_id.copy_from_slice(&payload[8..24]);
         Some(Self {
@@ -318,12 +322,49 @@ mod tests {
 
     #[test]
     fn decode_rejects_wrong_lengths() {
-        assert!(ParamRequestList::decode_payload(&[0u8; 1]).is_none());
+        // Empty, and longer than the message (none of these has extensions).
+        assert!(ParamRequestList::decode_payload(&[]).is_none());
         assert!(ParamRequestList::decode_payload(&[0u8; 3]).is_none());
-        assert!(ParamRequestRead::decode_payload(&[0u8; 19]).is_none());
-        assert!(ParamSet::decode_payload(&[0u8; 22]).is_none());
+        assert!(ParamRequestRead::decode_payload(&[]).is_none());
+        assert!(ParamRequestRead::decode_payload(&[0u8; 21]).is_none());
         assert!(ParamSet::decode_payload(&[0u8; 24]).is_none());
-        assert!(ParamValue::decode_payload(&[0u8; 24]).is_none());
+        assert!(ParamValue::decode_payload(&[0u8; 26]).is_none());
+    }
+
+    #[test]
+    fn decode_zero_extends_truncated_payloads() {
+        // pymavlink 2.4.50 bytes: a short param name's NUL padding is
+        // truncated, so these are the usual on-wire sizes (#675).
+        let mut rate_p = [0u8; 16];
+        rate_p[..6].copy_from_slice(b"RATE_P");
+        // PARAM_REQUEST_LIST to MAV_COMP_ID_ALL (0): 1 byte.
+        let l = ParamRequestList::decode_payload(&[0x01]).expect("PARAM_REQUEST_LIST");
+        assert_eq!((l.target_system, l.target_component), (1, 0));
+        // PARAM_REQUEST_READ by name (index -1): 10 bytes.
+        let r = ParamRequestRead::decode_payload(&[
+            0xff, 0xff, 0x01, 0x01, 0x52, 0x41, 0x54, 0x45, 0x5f, 0x50,
+        ])
+        .expect("PARAM_REQUEST_READ");
+        assert_eq!(r.param_index, -1);
+        assert_eq!(r.param_id, rate_p);
+        // PARAM_SET RATE_P = 0.5, param_type 0: 12 bytes.
+        let s = ParamSet::decode_payload(&[
+            0x00, 0x00, 0x00, 0x3f, 0x01, 0x01, 0x52, 0x41, 0x54, 0x45, 0x5f, 0x50,
+        ])
+        .expect("PARAM_SET");
+        assert_eq!(s.param_value, 0.5);
+        assert_eq!(
+            (s.target_system, s.target_component, s.param_type),
+            (1, 1, 0)
+        );
+        assert_eq!(s.param_id, rate_p);
+        // PARAM_VALUE RATE_P = 0.5, count 3, index 0: 14 bytes.
+        let v = ParamValue::decode_payload(&[
+            0x00, 0x00, 0x00, 0x3f, 0x03, 0x00, 0x00, 0x00, 0x52, 0x41, 0x54, 0x45, 0x5f, 0x50,
+        ])
+        .expect("PARAM_VALUE");
+        assert_eq!((v.param_value, v.param_count, v.param_index), (0.5, 3, 0));
+        assert_eq!(v.param_id, rate_p);
     }
 
     use proptest::prelude::*;
