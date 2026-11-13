@@ -5,7 +5,9 @@ artifacts:
     status: approved
     description: >
       Verus SMT/Z3 formal verification of relay-ccsds engine properties
-      CCSDS-P01 through CCSDS-P04. All 4 properties proven. Run via:
+      CCSDS-P01 through CCSDS-P04. CCSDS-P02 and P03 are `ensures` on
+      `#[verifier::external_body]` functions, so Verus TRUSTS them rather than
+      proving them (codebase review 2026-11-13). Run via:
       bazel test //:relay_ccsds_verus_test
     tags: [verification, formal, verus, ccsds]
     fields:

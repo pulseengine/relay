@@ -133,7 +133,8 @@ theorem sch_utilization_small :
   unfold wcetUtilization sch_wcet EngineWcet.total_wcet
   norm_num
 
-/-! ## Schedulability (builds on Gale's Scheduling.lean RMA bound) -/
+/-! ## Schedulability (RMA bound stated informally below; NOT imported from gale,
+    and `engine_fits_in_period` restates its hypothesis) -/
 
 -- Rate Monotonic Analysis: if Sum(Ci/Ti) <= n(2^(1/n) - 1), schedulable.
 -- For n=5 engines: bound ~ 0.743

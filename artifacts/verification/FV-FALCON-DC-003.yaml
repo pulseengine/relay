@@ -23,7 +23,7 @@ artifacts:
           BatteryMonitor inputs (temp/voltage/current) over CAN.
         - sensors::proptests::sensor_decoders_never_panic: ALL decoders over
           arbitrary bytes never panic; esc.Status fields within width.
-        - Kani DC-K08 verify_read_bits_bounded: the bit-reader is total and every
+        - Kani DC-K08 verify_dsdl_read_bounded: the bit-reader is total and every
           result < 2^nbits (the integer floor under esc.Status).
       Architecture: spar analyze --root Falcon_DroneCAN::DroneCanNode.Fmu reports
       0 errors with the Decode thread RTA 18us <= 2ms telemetry deadline;
@@ -46,7 +46,7 @@ artifacts:
         - run: "cargo test -p relay-dronecan sensors::tests::short_payloads_reject_not_panic"
         - run: "cargo test -p relay-dronecan sensors::proptests::sensor_decoders_never_panic"
         # Kani DC-K08 — gated by the kani.yml matrix (relay-dronecan entry)
-        - run: "cargo kani -p relay-dronecan --harness verify_read_bits_bounded"
+        - run: "cargo kani -p relay-dronecan --harness verify_dsdl_read_bounded"
     links:
       - type: verifies
         target: SWREQ-FALCON-DC-P03

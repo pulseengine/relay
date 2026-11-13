@@ -29,7 +29,8 @@ artifacts:
       Both VERIFICATION: SUCCESSFUL locally and green in CI.
 
       Scope: relay provides the seam + std backend + the no_alloc reference ring.
-      The verified embedded Gale ring_buf backend is Gale/jess (gale#63),
+      The embedded Gale ring_buf backend is Gale/jess (gale src/ring_buf.rs:
+      Verus RB1-RB8 on the index model, not the payload; status in gale#509),
       co-designed — out of scope here. 5 relay-bus tests + 12 relay-sb tests.
     tags: [verification, relay, software-bus, relay-bus, no_std, seam, kani, "v1.60"]
     fields:
