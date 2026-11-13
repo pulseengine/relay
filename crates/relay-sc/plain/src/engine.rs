@@ -187,9 +187,15 @@ impl CommandStore {
                 break;
             }
             let seq = self.rts_sequences[r as usize];
-            if seq.running && seq.current_index < seq.command_count {
+            // Skip a sequence whose start lies in the future (the clock stepped
+            // backwards), as the Verus copy does; before, wrapping_sub made the
+            // elapsed time huge and dispatched the command at once.
+            if seq.running
+                && seq.current_index < seq.command_count
+                && current_time_sec >= seq.start_time_sec
+            {
                 let cmd = seq.commands[seq.current_index as usize];
-                let elapsed = current_time_sec.wrapping_sub(seq.start_time_sec);
+                let elapsed = current_time_sec - seq.start_time_sec;
                 if elapsed >= cmd.delay_sec as u64 {
                     let idx = result.dispatch_count as usize;
                     result.dispatched[idx] = DispatchedCommand {
@@ -215,6 +221,28 @@ impl CommandStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shipped copy matches the Verus copy: a running sequence whose start
+    /// time is after the current time (the clock stepped backwards) is
+    /// skipped, not dispatched at once; it runs once time catches up.
+    #[test]
+    fn test_rts_not_dispatched_when_clock_steps_back() {
+        let mut store = CommandStore::new();
+        assert!(store.load_rts_command(
+            0,
+            RtsCommand {
+                delay_sec: 0,
+                command_code: 0x07,
+                payload_offset: 0,
+                payload_len: 0
+            }
+        ));
+        assert!(store.start_rts(0, 100));
+        assert_eq!(store.process_tick(50).dispatch_count, 0);
+        let r = store.process_tick(100);
+        assert_eq!(r.dispatch_count, 1);
+        assert_eq!(r.dispatched[0].command_code, 0x07);
+    }
 
     #[test]
     fn test_empty_store_no_dispatches() {

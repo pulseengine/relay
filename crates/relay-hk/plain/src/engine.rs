@@ -88,9 +88,24 @@ impl CopyTable {
         while i < count {
             let entry = self.entries[i as usize];
 
+            // Guard against usize overflow on output offset + length (a 32-bit
+            // target wraps the sum); same guard as the Verus copy (src/engine.rs).
+            if entry.output_offset as usize > MAX_OUTPUT_SIZE
+                || entry.length as usize > MAX_OUTPUT_SIZE
+            {
+                return false;
+            }
+
             // Bounds check: output region must fit in packet
             let out_end = entry.output_offset as usize + entry.length as usize;
             if out_end > MAX_OUTPUT_SIZE {
+                return false;
+            }
+
+            // Guard against usize overflow on source offset + length.
+            if entry.source_offset as usize > SOURCE_DATA_SIZE
+                || entry.length as usize > SOURCE_DATA_SIZE
+            {
                 return false;
             }
 
@@ -129,7 +144,10 @@ impl CopyTable {
 
             i = i + 1;
         }
-        packet.sequence = packet.sequence + 1;
+        // Saturate, as the Verus copy does: never wrap (release) or panic (debug).
+        if packet.sequence < u32::MAX {
+            packet.sequence = packet.sequence + 1;
+        }
         true
     }
 }
@@ -137,6 +155,58 @@ impl CopyTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shipped copy matches the Verus copy: the sequence counter
+    /// saturates at u32::MAX instead of wrapping (release) or panicking (debug).
+    #[test]
+    fn test_sequence_saturates_at_max() {
+        let table = CopyTable::new();
+        let sources: [SourceData; 0] = [];
+        let mut packet = HkPacket::new();
+        packet.sequence = u32::MAX;
+        assert!(table.collect(&sources, &mut packet));
+        assert_eq!(packet.sequence, u32::MAX);
+    }
+
+    /// Offsets past the buffers are refused before the offset + length sum is
+    /// formed, so the check also holds where usize is 32 bits.
+    #[test]
+    fn test_huge_offsets_are_refused() {
+        let mut src = SourceData::empty();
+        src.source_id = 1;
+        let sources = [src];
+        for e in [
+            CopyEntry {
+                source_id: 1,
+                source_offset: 0,
+                length: 4,
+                output_offset: u32::MAX - 1,
+            },
+            CopyEntry {
+                source_id: 1,
+                source_offset: u32::MAX - 1,
+                length: 4,
+                output_offset: 0,
+            },
+            CopyEntry {
+                source_id: 1,
+                source_offset: 0,
+                length: u32::MAX,
+                output_offset: 0,
+            },
+        ] {
+            let mut table = CopyTable::new();
+            assert!(table.add_entry(e));
+            let mut packet = HkPacket::new();
+            assert!(
+                !table.collect(&sources, &mut packet),
+                "{} {} {}",
+                e.source_offset,
+                e.length,
+                e.output_offset
+            );
+        }
+    }
 
     #[test]
     fn test_empty_table_collect_succeeds() {
