@@ -15,7 +15,8 @@ artifacts:
       buffer-exhausted/backpressure/stream-closed) shall admit at least: the
       std backend (today's relay-sb) and an embedded shared-memory ring backend
       (a Gale ring_buf: gale RB1-RB8 are Verus-verified on the head/tail/size
-      index model, not the byte payload — gale#63; or a Zephyr
+      index model, not the byte payload — gale src/ring_buf.rs, status tracked
+      in gale#509; or a Zephyr
       ipc_service/ICMsg). This is the "thin agreed interface" between the
       relay-owned stream seam and the Gale-owned ring (relay#177): relay owns
       the seam, Gale owns the ring.
