@@ -40,13 +40,16 @@ use relay_mavlink::{
     FrameHeader, GLOBAL_POSITION_INT_CRC_EXTRA, GLOBAL_POSITION_INT_MSG_ID, GlobalPositionInt,
     HEARTBEAT_CRC_EXTRA, HEARTBEAT_MSG_ID, Heartbeat, MAGIC_V2, MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_FLIGHTTERMINATION, MAV_CMD_MISSION_START, MAV_CMD_NAV_LAND,
-    MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_TAKEOFF, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-    MAV_MISSION_ACCEPTED, MISSION_ACK_CRC_EXTRA, MISSION_ACK_MSG_ID, MISSION_COUNT_CRC_EXTRA,
-    MISSION_COUNT_MSG_ID, MISSION_ITEM_INT_CRC_EXTRA, MISSION_ITEM_INT_MSG_ID,
-    MISSION_ITEM_INT_PAYLOAD_LEN, MISSION_REQUEST_INT_CRC_EXTRA, MISSION_REQUEST_INT_MSG_ID,
-    MISSION_REQUEST_LIST_CRC_EXTRA, MISSION_REQUEST_LIST_MSG_ID, MavModeFlag, MavState, MavType,
-    MissionAck, MissionCount, MissionItemInt, MissionRequestInt, MissionRequestList, encode_frame,
-    parse_frame, peek_message_id,
+    MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_TAKEOFF, MAV_CMD_NAV_WAYPOINT,
+    MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, MAV_MISSION_ACCEPTED, MAV_MISSION_INVALID_PARAM5_X,
+    MAV_MISSION_INVALID_PARAM6_Y, MAV_MISSION_INVALID_PARAM7, MAV_MISSION_NO_SPACE,
+    MAV_MISSION_UNSUPPORTED, MAV_MISSION_UNSUPPORTED_FRAME, MISSION_ACK_CRC_EXTRA,
+    MISSION_ACK_MSG_ID, MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID, MISSION_COUNT_PAYLOAD_LEN,
+    MISSION_ITEM_INT_CRC_EXTRA, MISSION_ITEM_INT_MSG_ID, MISSION_ITEM_INT_PAYLOAD_LEN,
+    MISSION_REQUEST_INT_CRC_EXTRA, MISSION_REQUEST_INT_MSG_ID, MISSION_REQUEST_LIST_CRC_EXTRA,
+    MISSION_REQUEST_LIST_MSG_ID, MavModeFlag, MavState, MavType, MissionAck, MissionCount,
+    MissionItemInt, MissionRequestInt, MissionRequestList, encode_frame, mission_type, parse_frame,
+    peek_message_id,
 };
 
 /// Metres per degree of latitude (WGS-84 mean). Latitude scale is very
@@ -221,6 +224,32 @@ pub fn ned_to_global_position(
     }
 }
 
+/// Check one uploaded MISSION_ITEM_INT before it may enter the staged
+/// mission (SWREQ-FALCON-MISSIONUP-P02). Returns the MAV_MISSION_RESULT the
+/// vehicle ACKs with on refusal.
+fn validate_item(item: &MissionItemInt, payload: &[u8]) -> Result<(), u8> {
+    if mission_type(payload, MISSION_ITEM_INT_PAYLOAD_LEN) != 0 {
+        return Err(MAV_MISSION_UNSUPPORTED);
+    }
+    if item.frame != MAV_FRAME_GLOBAL_RELATIVE_ALT_INT {
+        return Err(MAV_MISSION_UNSUPPORTED_FRAME);
+    }
+    if item.command != MAV_CMD_NAV_WAYPOINT {
+        return Err(MAV_MISSION_UNSUPPORTED);
+    }
+    if !(-900_000_000..=900_000_000).contains(&item.x) {
+        return Err(MAV_MISSION_INVALID_PARAM5_X);
+    }
+    if !(-1_800_000_000..=1_800_000_000).contains(&item.y) {
+        return Err(MAV_MISSION_INVALID_PARAM6_Y);
+    }
+    // `contains` is false for NaN, so a NaN altitude is refused here too.
+    if !(MISSION_MIN_ALT_M..=MISSION_MAX_ALT_M).contains(&item.z) {
+        return Err(MAV_MISSION_INVALID_PARAM7);
+    }
+    Ok(())
+}
+
 // ----------------------------------------------------------------------
 // The bridge object
 // ----------------------------------------------------------------------
@@ -228,6 +257,14 @@ pub fn ned_to_global_position(
 /// Maximum mission items the uploader accumulates (no_std fixed capacity;
 /// matches the FlightSupervisor's MAX_WAYPOINTS).
 pub const MAX_MISSION_ITEMS: usize = 16;
+
+/// Lowest uploaded waypoint altitude accepted, m above home
+/// (MAV_FRAME_GLOBAL_RELATIVE_ALT_INT). A waypoint at or below home flies the
+/// vehicle into the ground. SWREQ-FALCON-MISSIONUP-P02.
+pub const MISSION_MIN_ALT_M: f32 = 1.0;
+/// Highest uploaded waypoint altitude accepted, m above home: the 120 m
+/// open-category ceiling (EU 2019/947). SWREQ-FALCON-MISSIONUP-P02.
+pub const MISSION_MAX_ALT_M: f32 = 120.0;
 
 /// Result of feeding one frame to [`MavBridge::ingest_mission`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,7 +316,15 @@ pub struct MavBridge {
     up_active: bool,
     up_gcs_sys: u8,
     up_gcs_comp: u8,
+    /// The committed mission: written only when an upload completes (or by
+    /// `set_downloadable_mission`), never while an upload is in progress.
     up_wps: [[f32; 3]; MAX_MISSION_ITEMS],
+    /// The upload in progress, committed to `up_wps` on its last item.
+    st_wps: [[f32; 3]; MAX_MISSION_ITEMS],
+    st_count: usize,
+    /// The GCS a download is being served to (separate from the uploader).
+    dl_gcs_sys: u8,
+    dl_gcs_comp: u8,
 }
 
 impl MavBridge {
@@ -315,6 +360,10 @@ impl MavBridge {
             up_gcs_sys: 0,
             up_gcs_comp: 0,
             up_wps: [[0.0; 3]; MAX_MISSION_ITEMS],
+            st_wps: [[0.0; 3]; MAX_MISSION_ITEMS],
+            st_count: 0,
+            dl_gcs_sys: 0,
+            dl_gcs_comp: 0,
         }
     }
 
@@ -373,17 +422,29 @@ impl MavBridge {
                 if mc.target_system != 0 && mc.target_system != self.system_id {
                     return MissionUpload::Ignored;
                 }
-                // Start a fresh upload; remember who to reply to.
+                // A new MISSION_COUNT starts a fresh upload into the STAGING
+                // buffer; the committed mission is untouched until the last
+                // item arrives (SWREQ-FALCON-MISSIONUP-P02).
                 self.up_gcs_sys = frame.header.system_id;
                 self.up_gcs_comp = frame.header.component_id;
-                self.up_expected = mc.count.min(MAX_MISSION_ITEMS as u16);
+                self.up_active = false;
+                if mission_type(frame.payload, MISSION_COUNT_PAYLOAD_LEN) != 0 {
+                    // Fence / rally uploads are not supported; never let one
+                    // replace the flight mission.
+                    return self.send_ack(MAV_MISSION_UNSUPPORTED, out);
+                }
+                if mc.count as usize > MAX_MISSION_ITEMS {
+                    return self.send_ack(MAV_MISSION_NO_SPACE, out);
+                }
+                self.up_expected = mc.count;
                 self.up_next = 0;
-                self.up_count = 0;
-                self.up_active = true;
+                self.st_count = 0;
                 if self.up_expected == 0 {
-                    self.up_active = false;
+                    // An empty upload clears the mission (MAVLink mission protocol).
+                    self.up_count = 0;
                     return self.send_ack(MAV_MISSION_ACCEPTED, out);
                 }
+                self.up_active = true;
                 self.send_request(0, out)
             }
             MISSION_ITEM_INT_MSG_ID => {
@@ -394,25 +455,49 @@ impl MavBridge {
                     Ok((f, _)) => f,
                     Err(_) => return MissionUpload::Ignored,
                 };
+                // Only the GCS that started this upload may feed it.
+                if frame.header.system_id != self.up_gcs_sys
+                    || frame.header.component_id != self.up_gcs_comp
+                {
+                    return MissionUpload::Ignored;
+                }
                 let item = match MissionItemInt::decode_payload(frame.payload) {
                     Some(i) => i,
                     None => return MissionUpload::Ignored,
                 };
+                if item.target_system != 0 && item.target_system != self.system_id {
+                    return MissionUpload::Ignored;
+                }
                 // Out-of-sequence: re-request the one we still need (idempotent).
                 if item.seq != self.up_next {
                     return self.send_request(self.up_next, out);
                 }
+                if let Err(code) = validate_item(&item, frame.payload) {
+                    self.up_active = false;
+                    return self.send_ack(code, out);
+                }
                 // Geodetic → NED, relative to home (the inverse of the outbound
-                // GLOBAL_POSITION_INT projection). z is altitude-up; NED is down.
-                let north = (item.x - self.home_lat_e7) as f64 / 1.0e7 * M_PER_DEG_LAT;
-                let east = (item.y - self.home_lon_e7) as f64 / 1.0e7 * self.m_per_deg_lon;
-                self.up_wps[self.up_count] = [north as f32, east as f32, -item.z];
-                self.up_count += 1;
+                // GLOBAL_POSITION_INT projection), in i64 so no difference of
+                // two i32 coordinates can overflow. z is altitude-up; NED is down.
+                let north =
+                    (item.x as i64 - self.home_lat_e7 as i64) as f64 / 1.0e7 * M_PER_DEG_LAT;
+                let east =
+                    (item.y as i64 - self.home_lon_e7 as i64) as f64 / 1.0e7 * self.m_per_deg_lon;
+                if self.st_count >= MAX_MISSION_ITEMS {
+                    self.up_active = false;
+                    return self.send_ack(MAV_MISSION_NO_SPACE, out);
+                }
+                self.st_wps[self.st_count] = [north as f32, east as f32, -item.z];
+                self.st_count += 1;
                 self.up_next += 1;
                 if self.up_next < self.up_expected {
                     self.send_request(self.up_next, out)
                 } else {
+                    // Commit the whole mission at once.
                     self.up_active = false;
+                    let n = self.st_count;
+                    self.up_wps[..n].copy_from_slice(&self.st_wps[..n]);
+                    self.up_count = n;
                     self.send_ack(MAV_MISSION_ACCEPTED, out)
                 }
             }
@@ -459,12 +544,12 @@ impl MavBridge {
                 if req.target_system != 0 && req.target_system != self.system_id {
                     return MissionDownload::Ignored;
                 }
-                self.up_gcs_sys = frame.header.system_id;
-                self.up_gcs_comp = frame.header.component_id;
+                self.dl_gcs_sys = frame.header.system_id;
+                self.dl_gcs_comp = frame.header.component_id;
                 let count = MissionCount {
                     count: self.up_count as u16,
-                    target_system: self.up_gcs_sys,
-                    target_component: self.up_gcs_comp,
+                    target_system: self.dl_gcs_sys,
+                    target_component: self.dl_gcs_comp,
                 };
                 match self.frame_out(
                     MISSION_COUNT_MSG_ID,
@@ -485,14 +570,23 @@ impl MavBridge {
                     Some(r) => r,
                     None => return MissionDownload::Ignored,
                 };
+                if req.target_system != 0 && req.target_system != self.system_id {
+                    return MissionDownload::Ignored;
+                }
                 let seq = req.seq as usize;
                 if seq >= self.up_count {
                     return MissionDownload::Ignored;
                 }
                 let wp = self.up_wps[seq];
                 // NED → geodetic (the inverse of the inbound upload projection).
-                let lat_e7 = self.home_lat_e7 + (wp[0] as f64 / M_PER_DEG_LAT * 1.0e7) as i32;
-                let lon_e7 = self.home_lon_e7 + (wp[1] as f64 / self.m_per_deg_lon * 1.0e7) as i32;
+                // The float→int cast saturates and the add saturates, so a
+                // host-supplied waypoint can never overflow here.
+                let lat_e7 = self
+                    .home_lat_e7
+                    .saturating_add((wp[0] as f64 / M_PER_DEG_LAT * 1.0e7) as i32);
+                let lon_e7 = self
+                    .home_lon_e7
+                    .saturating_add((wp[1] as f64 / self.m_per_deg_lon * 1.0e7) as i32);
                 let item = MissionItemInt {
                     param1: 0.0,
                     param2: 0.0,
@@ -502,9 +596,9 @@ impl MavBridge {
                     y: lon_e7,
                     z: -wp[2], // NED down → altitude-up
                     seq: req.seq,
-                    command: 16, // MAV_CMD_NAV_WAYPOINT
-                    target_system: self.up_gcs_sys,
-                    target_component: self.up_gcs_comp,
+                    command: MAV_CMD_NAV_WAYPOINT,
+                    target_system: self.dl_gcs_sys,
+                    target_component: self.dl_gcs_comp,
                     frame: MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
                     current: 0,
                     autocontinue: 1,
@@ -621,5 +715,7 @@ impl MavBridge {
     }
 }
 
+#[cfg(test)]
+mod mission_validation_tests;
 #[cfg(test)]
 mod tests;

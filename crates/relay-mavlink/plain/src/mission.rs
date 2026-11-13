@@ -198,6 +198,36 @@ pub const MISSION_ACK_CRC_EXTRA: u8 = 153;
 pub const MAV_MISSION_ACCEPTED: u8 = 0;
 /// MAV_MISSION_ERROR — a generic upload failure.
 pub const MAV_MISSION_ERROR: u8 = 1;
+/// MAV_MISSION_UNSUPPORTED_FRAME — the item's coordinate frame is not supported.
+pub const MAV_MISSION_UNSUPPORTED_FRAME: u8 = 2;
+/// MAV_MISSION_UNSUPPORTED — the command (or mission type) is not supported.
+pub const MAV_MISSION_UNSUPPORTED: u8 = 3;
+/// MAV_MISSION_NO_SPACE — the mission has more items than the vehicle stores.
+pub const MAV_MISSION_NO_SPACE: u8 = 4;
+/// MAV_MISSION_INVALID_PARAM5_X — x (latitude) is out of range.
+pub const MAV_MISSION_INVALID_PARAM5_X: u8 = 10;
+/// MAV_MISSION_INVALID_PARAM6_Y — y (longitude) is out of range.
+pub const MAV_MISSION_INVALID_PARAM6_Y: u8 = 11;
+/// MAV_MISSION_INVALID_PARAM7 — z (altitude) is out of range or not finite.
+pub const MAV_MISSION_INVALID_PARAM7: u8 = 12;
+/// MAV_MISSION_DENIED — the vehicle refuses the mission (e.g. outside the fence).
+pub const MAV_MISSION_DENIED: u8 = 14;
+
+/// MAV_CMD_NAV_WAYPOINT — the only mission command falcon flies.
+pub const MAV_CMD_NAV_WAYPOINT: u16 = 16;
+
+/// The `mission_type` extension byte of a mission-protocol payload whose base
+/// (non-extension) length is `base_len`. MAVLink2 truncates trailing zero
+/// bytes, so an absent byte reads as 0 = MAV_MISSION_TYPE_MISSION. The byte
+/// sits right after the base fields in MISSION_COUNT (base 4),
+/// MISSION_REQUEST_INT (base 4), MISSION_ITEM_INT (base 37) and MISSION_ACK
+/// (base 3).
+pub fn mission_type(payload: &[u8], base_len: usize) -> u8 {
+    payload
+        .get(base_len)
+        .copied()
+        .unwrap_or(MAV_MISSION_TYPE_MISSION)
+}
 
 /// MISSION_ACK — the vehicle confirms the upload result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
