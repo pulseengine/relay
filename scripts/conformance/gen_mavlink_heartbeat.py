@@ -1,0 +1,209 @@
+import json
+import random
+import sys
+from pymavlink.dialects.v20 import common as m
+
+SEED = 20240611
+rng = random.Random(SEED)
+NL = chr(10)
+QT = chr(39)
+
+U8_FIXED = sorted(set([0, 1, 2, 3, 7, 15, 31, 63, 64, 127, 128, 129, 254, 255] + [1 << k for k in range(8)]))
+U32_FIXED = sorted(set([0, 1, 2, 0x12345678, 0xFFFFFFFE, 0xFFFFFFFF] + [(1 << k) - 1 for k in range(1, 33)] + [1 << k for k in range(32)]))
+ID_FIXED = [0, 1, 2, 127, 128, 254, 255]
+NOMINAL = (0, 2, 8, 0, 4, 2)
+NAMES = ['custom_mode', 'mav_type', 'autopilot', 'base_mode', 'system_status', 'mavlink_version']
+MAXES = [0xFFFFFFFF, 255, 255, 255, 255, 255]
+stats = {'skipped': 0}
+CRC = {}
+
+
+def make(f, seq, sysid, comp):
+    msg = m.MAVLink_heartbeat_message(type=f[1], autopilot=f[2], base_mode=f[3], custom_mode=f[0], system_status=f[4], mavlink_version=f[5])
+    mav = m.MAVLink(None, srcSystem=sysid, srcComponent=comp)
+    mav.seq = seq
+    raw = bytes(msg.pack(mav))
+    assert raw[0] == 0xFD and len(raw) == 12 + raw[1]
+    assert raw[4] == seq and raw[5] == sysid and raw[6] == comp
+    size = msg.unpacker.size
+    payload = raw[10:10 + raw[1]]
+    payload = payload + bytes(size - len(payload))
+    got = (msg.custom_mode, getattr(msg, 'type'), msg.autopilot, msg.base_mode, msg.system_status, msg.mavlink_version)
+    assert got == tuple(f)
+    CRC.setdefault('v', msg.crc_extra)
+    return raw, payload, got, msg.id
+
+
+def rnd_u8():
+    r = rng.random()
+    if r < 0.2:
+        return 0
+    if r < 0.4:
+        return rng.choice(U8_FIXED)
+    return rng.randrange(256)
+
+
+def rnd_u32():
+    r = rng.random()
+    if r < 0.1:
+        return 0
+    if r < 0.2:
+        return 0xFFFFFFFF
+    if r < 0.4:
+        return rng.randrange(1 << rng.randrange(1, 33))
+    return rng.getrandbits(32)
+
+
+def rnd_id():
+    if rng.random() < 0.25:
+        return rng.choice(ID_FIXED)
+    return rng.randrange(256)
+
+
+def uniq(items):
+    seen = set()
+    res = []
+    for x in items:
+        if x not in seen:
+            seen.add(x)
+            res.append(x)
+    return res
+
+
+def bl(b):
+    return '&[' + ', '.join('0x%02X' % x for x in b) + ']'
+
+
+pay_cands = [(0xFFFFFFFF, 255, 255, 255, 255, 255)]
+for base in [(0, 0, 0, 0, 0, 0), NOMINAL]:
+    for v in U32_FIXED:
+        pay_cands.append((v,) + base[1:])
+    for i in range(1, 6):
+        for v in U8_FIXED:
+            c = list(base)
+            c[i] = v
+            pay_cands.append(tuple(c))
+for _ in range(80):
+    pay_cands.append((rnd_u32(), rnd_u8(), rnd_u8(), rnd_u8(), rnd_u8(), rnd_u8()))
+
+TRUNC = [
+    (0, 0, 0, 0, 0, 0), (0, 0, 0, 0, 0, 2), (1, 0, 0, 0, 0, 0), (0x100, 0, 0, 0, 0, 0),
+    (0x1000000, 0, 0, 0, 0, 0), (0, 2, 0, 0, 0, 0), (0, 2, 8, 0, 0, 0), (0, 2, 8, 0, 4, 0),
+    (0, 2, 8, 1, 0, 0), (0xFFFFFFFF, 255, 255, 255, 255, 255), (0xFFFFFFFF, 0, 0, 0, 0, 0),
+    (0, 0, 0, 0, 0, 1), (0, 0, 0, 0, 1, 0), (0, 0, 0, 1, 0, 0), (0, 0, 1, 0, 0, 0),
+]
+fc = []
+for s in ID_FIXED:
+    fc.append((NOMINAL, s, 1, 1))
+for s in ID_FIXED:
+    fc.append((NOMINAL, 7, s, 1))
+for s in ID_FIXED:
+    fc.append((NOMINAL, 7, 1, s))
+for k in range(12):
+    fc.append((NOMINAL, (250 + k) % 256, 1, 1))
+for s in (0, 255):
+    for a in (0, 255):
+        for b in (0, 255):
+            fc.append((NOMINAL, s, a, b))
+for i, t in enumerate(TRUNC):
+    fc.append((t, (i * 17) % 256, 1 + i, 1))
+for v in U32_FIXED:
+    fc.append(((v, 0, 0, 0, 0, 0), 3, 1, 1))
+    fc.append(((v,) + NOMINAL[1:], 3, 1, 1))
+for _ in range(150):
+    f = (rnd_u32(), rnd_u8(), rnd_u8(), rnd_u8(), rnd_u8(), rnd_u8())
+    fc.append((f, rnd_id(), rnd_id(), rnd_id()))
+
+pay_rows = []
+for f in uniq(pay_cands):
+    try:
+        raw, payload, got, mid = make(f, 0, 1, 1)
+        pay_rows.append((payload, got))
+    except Exception:
+        stats['skipped'] += 1
+
+frame_rows = []
+for (f, s, a, b) in uniq(fc):
+    try:
+        raw, payload, got, mid = make(f, s, a, b)
+        frame_rows.append((raw, mid, got, s, a, b))
+    except Exception:
+        stats['skipped'] += 1
+
+neg_frames = [(b'', 0)]
+if frame_rows:
+    for idx in rng.sample(range(len(frame_rows)), min(24, len(frame_rows))):
+        raw = frame_rows[idx][0]
+        neg_frames.append((raw[:-1], 0))
+        neg_frames.append((raw[:9], 0))
+        neg_frames.append((raw[:5], 0))
+        r = bytearray(raw)
+        r[-1] ^= 0xFF
+        neg_frames.append((bytes(r), 1))
+        r = bytearray(raw)
+        r[-2] ^= 0x01
+        neg_frames.append((bytes(r), 1))
+        if raw[1] > 0:
+            r = bytearray(raw)
+            r[10] ^= 0x55
+            neg_frames.append((bytes(r), 1))
+        for mg in (0xFE, 0x00):
+            r = bytearray(raw)
+            r[0] = mg
+            neg_frames.append((bytes(r), 2))
+
+neg_pay = []
+if pay_rows:
+    for idx in rng.sample(range(len(pay_rows)), min(12, len(pay_rows))):
+        p = pay_rows[idx][0]
+        for n in range(9):
+            neg_pay.append(p[:n])
+        neg_pay.append(p + bytes([0]))
+        neg_pay.append(p + bytes(7))
+
+HEADER = [
+    '// Generated by scripts/conformance/gen_mavlink_heartbeat.py from pymavlink; do not edit',
+    '#[allow(dead_code)]',
+    'pub struct PayloadVec { pub payload: &~static [u8], pub custom_mode: u32, pub mav_type: u8, pub autopilot: u8, pub base_mode: u8, pub system_status: u8, pub mavlink_version: u8 }',
+    '#[allow(dead_code)]',
+    'pub struct FrameVec { pub raw: &~static [u8], pub payload_len: u8, pub incompat_flags: u8, pub compat_flags: u8, pub sequence: u8, pub system_id: u8, pub component_id: u8, pub message_id: u32, pub custom_mode: u32, pub mav_type: u8, pub autopilot: u8, pub base_mode: u8, pub system_status: u8, pub mavlink_version: u8 }',
+    '#[allow(dead_code)]',
+    'pub struct NegFrameVec { pub raw: &~static [u8], pub kind: u8 }',
+    '#[allow(dead_code)]',
+    'pub struct NegPayloadVec { pub bytes: &~static [u8] }',
+]
+out = [h.replace('~', QT) for h in HEADER]
+out.append('pub static CRC_EXTRA_REF: u8 = %d;' % CRC.get('v', 0))
+out.append('pub static HB_PAYLOAD_VECTORS: &[PayloadVec] = &[')
+for payload, g in pay_rows:
+    out.append('    PayloadVec { payload: %s, custom_mode: %d, mav_type: %d, autopilot: %d, base_mode: %d, system_status: %d, mavlink_version: %d },' % ((bl(payload),) + tuple(g)))
+out.append('];')
+out.append('pub static HB_FRAME_VECTORS: &[FrameVec] = &[')
+for raw, mid, g, s, a, b in frame_rows:
+    out.append('    FrameVec { raw: %s, payload_len: %d, incompat_flags: %d, compat_flags: %d, sequence: %d, system_id: %d, component_id: %d, message_id: %d, custom_mode: %d, mav_type: %d, autopilot: %d, base_mode: %d, system_status: %d, mavlink_version: %d },' % ((bl(raw), raw[1], raw[2], raw[3], s, a, b, mid) + tuple(g)))
+out.append('];')
+out.append('pub static HB_NEG_FRAME_VECTORS: &[NegFrameVec] = &[')
+for raw, kind in neg_frames:
+    out.append('    NegFrameVec { raw: %s, kind: %d },' % (bl(raw), kind))
+out.append('];')
+out.append('pub static HB_NEG_PAYLOAD_VECTORS: &[NegPayloadVec] = &[')
+for p in neg_pay:
+    out.append('    NegPayloadVec { bytes: %s },' % bl(p))
+out.append('];')
+sys.stdout.write(NL.join(out) + NL)
+
+cov = {}
+
+
+def add(name, vals, mx):
+    cov[name] = {'n': len(vals), 'zero': sum(1 for v in vals if v == 0), 'max': sum(1 for v in vals if v == mx)}
+
+
+for i, nm in enumerate(NAMES):
+    add('payload.' + nm, [r[1][i] for r in pay_rows], MAXES[i])
+    add('frame.' + nm, [r[2][i] for r in frame_rows], MAXES[i])
+add('frame.sequence', [r[3] for r in frame_rows], 255)
+add('frame.system_id', [r[4] for r in frame_rows], 255)
+add('frame.component_id', [r[5] for r in frame_rows], 255)
+cov['skipped'] = stats['skipped']
+print(json.dumps(cov), file=sys.stderr)
