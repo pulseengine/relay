@@ -38,6 +38,9 @@ artifacts:
         - sensors::tests::baro_decodes_pressure_f32 / battery_prefix_decodes_voltage_current.
         - dsdl::tests::raw_command_int14_against_reference / write_reproduces_reference_bytes.
         - Kani DC-K08 verify_dsdl_read_bounded (the codec is total + result < 2^w).
+        - dsdl::tests::read_int_63_bit_field_does_not_overflow and Kani DC-K10
+          verify_dsdl_sign_extend_total (read_int sign-extends every width 1..=63,
+          including 63, without overflow; #674).
       ORACLE: `cargo test -p relay-dronecan` green (42 tests); the pydronecan
       vectors decode to their canonical field values.
     tags: [verification, falcon, dronecan, conformance, pydronecan, reference-vectors, relay-dronecan, kani, fix]
@@ -53,6 +56,8 @@ artifacts:
         - run: "cargo test -p relay-dronecan sensors::tests::baro_decodes_pressure_f32"
         - run: "cargo test -p relay-dronecan sensors::tests::battery_prefix_decodes_voltage_current"
         - run: "cargo kani -p relay-dronecan --harness verify_dsdl_read_bounded"
+        - run: "cargo test -p relay-dronecan dsdl::tests::read_int_63_bit_field_does_not_overflow"
+        - run: "cargo kani -p relay-dronecan --harness verify_dsdl_sign_extend_total"
     links:
       - type: verifies
         target: SWREQ-FALCON-DC-P02
