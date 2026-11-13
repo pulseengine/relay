@@ -1,0 +1,3 @@
+dronecan==1.0.27
+pymavlink==2.4.50
+pyubx2==1.4.1
