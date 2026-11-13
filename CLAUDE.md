@@ -18,7 +18,7 @@ Part of the [PulseEngine](https://github.com/pulseengine) toolchain.
 2. **Formally verified at every layer** — Verus (SMT/Z3), Rocq (theorem proving), Lean (scheduling theory). Write to the intersection.
 3. **Domain-agnostic core** — The framework works for spacecraft, drones, automotive, industrial. Domain types are separate WIT packages.
 4. **P3-native** — Designed for WASM Component Model Preview 3 async. Callback lifting mode for embedded.
-5. **Gale-backed** — On embedded targets, every stream is a Gale ring_buf (verified), every wait is a Gale poll (verified).
+5. **Gale-backed** — On embedded targets, every stream is a Gale ring_buf (gale RB1-RB8 Verus-verified on the index model, not the payload) and every wait is a Gale poll. gale's scheduler is not yet verified.
 
 ### Architecture
 

@@ -15,10 +15,13 @@ artifacts:
 
         (a) RTOS task scheduling — "which task gets the CPU":
             preemption, priorities, real-time task dispatch. Lives in
-            gale (the verified embedded RTOS; Rocq-proven). gale is a
-            SEPARATE repository, not vendored here — see the honest
-            boundary below. On the embedded target the path is
-            synth -> gale, and gale's proven scheduler runs everything.
+            gale (the embedded RTOS). gale's scheduler is NOT verified on
+            any track: gale reports 4 external_body in src/sched.rs and
+            23 Admitted / 0 Qed in proofs/sched_proofs.v (gale main
+            131cb0c, 2026-11-13). gale is a SEPARATE repository, not
+            vendored here — see the honest boundary below. On the
+            embedded target the path is synth -> gale, and gale's
+            scheduler runs everything.
 
         (b) Component-runtime execution — "drive the WASM components":
             async poll, P3 stream pump, fuel budgeting. Lives in kiln
@@ -76,7 +79,7 @@ artifacts:
         (meld static fusion, no runtime topic lookup). It runs ABOVE
         the runtime/RTOS scheduler, not as part of it.
       layers:
-        rtos-task-scheduling: "gale (Rocq-proven RTOS; separate repo; embedded target)"
+        rtos-task-scheduling: "gale (RTOS; scheduler not yet verified; separate repo; embedded target)"
         component-runtime: "kiln (fuel-async executor; unverified; dev/std target)"
         application-activity: "relay-sch (cFS SCH; Verus+Kani+Lean; WASM component)"
       interfaces:
@@ -87,7 +90,7 @@ artifacts:
       concurrency: >
         relay-sch is a stateless per-frame transformer; it carries no
         threads of its own and runs UNDER the host scheduler — gale's
-        proven RTOS task scheduler on the embedded target, or kiln's
+        RTOS task scheduler (not yet verified) on the embedded target, or kiln's
         (unverified) fuel-async executor on the dev/std target.
       resource-budgets:
         sch-wcet: "3850 cycles (256 slots x 15 + 10); proven < 1 ms @ 480 MHz (Lean sch_wcet_under_deadline)"
@@ -95,13 +98,14 @@ artifacts:
         actions-per-tick-max: "16 (MAX_ACTIONS_PER_TICK)"
       verification-by-layer:
         application-activity: "Verus SCH-P01..P08 + Kani harnesses + Lean sch_wcet"
-        rtos-task-scheduling: "gale Rocq proofs (external; not cross-read in this repo)"
+        rtos-task-scheduling: "none yet: gale scheduler proofs are Admitted (Rocq) / external_body (Verus); referenced, not verified here"
         component-runtime: "kiln runtime scheduler currently unverified"
       decision: >
         relay-sch remains a WASM component at the application-activity
-        layer. Do not fold it into kiln. Proven end-to-end scheduling
-        on a target is achieved by running under gale, not by
-        migrating relay-sch into the runtime.
+        layer. Do not fold it into kiln. End-to-end scheduling on a
+        target comes from running under gale, not from migrating
+        relay-sch into the runtime; it is not proven until gale's
+        scheduler is.
     links:
       - type: allocated-from
         target: SWREQ-SCH-P01
