@@ -1,0 +1,21 @@
+# Ceiling on #[verifier::external_body] per crate (Verus TRUSTS these bodies,
+# it does not prove them). Checked EXACTLY by scripts/check-verus-trust.rs in
+# CI: raise only in a reviewed change that says why; lower when you prove one.
+# Baseline 2026-11-13 (codebase review); proofs planned under relay#253.
+relay-ccsds 7
+relay-cfdp 2
+relay-ci 1
+relay-cs 3
+relay-ds 2
+relay-hk 2
+relay-hs 4
+relay-lc 3
+relay-mavlink 20
+relay-md 2
+relay-nid 9
+relay-primitives 3
+relay-sc 2
+relay-sca 4
+relay-sch 2
+relay-tbl 2
+relay-to 1
