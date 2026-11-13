@@ -6,24 +6,26 @@ name: Verus
 # functions, so an empty or silently-skipped run fails. The targets had been
 # defined and never executed (#364).
 #
-# NOT A REQUIRED CHECK. Branch protection on main requires 10 contexts and
-# "Verus proofs" is not one of them (measured 2026-11-04 with
-# `gh api repos/pulseengine/relay/branches/main/protection`). The reason is in
-# the trigger below: PR runs are path-filtered and there is no `merge_group`
-# trigger. A required context that never reports would hold a PR, and the merge
-# queue, forever. push:main runs unfiltered, so a break shows up red on main;
-# it does not block the merge that caused it. The verification gate reports a
-# Verus step as `enforced-by-verus-gate` after checking only that the cited
-# target exists in BUILD.bazel (scripts/run-falcon-verification.py), not that
-# this workflow passed. (This header used to be a verbatim copy of lean.yml's,
-# which described Lean and called it required.)
+# REQUIRED VIA `Verus gate` (maintainer decision 2026-11-13). Before, this
+# workflow was not required and had no merge_group trigger, while the required
+# verification gate credited every cited Verus step as `enforced-by-verus-gate`
+# after checking only that the target existed (pulseengine.eu gate audit,
+# finding 1): a PR could merge with Verus red. Now:
+#   - `changes` decides whether any Verus-relevant path changed (crates/**,
+#     the bazel files, this workflow); it FAILS CLOSED to run=true;
+#   - `verus` runs when it did, on PRs (early feedback), in the MERGE QUEUE
+#     (the evidence the required check rests on) and on every push to main;
+#   - `Verus gate` ALWAYS reports, so the required context never holds a PR:
+#     green when `verus` passed or was skipped as out-of-scope, red otherwise.
+# The required context is `Verus gate`, not `Verus proofs`.
 
 on:
   push:
     branches: [main]
-  # PR runs are path-filtered (CI diet; the paths are below). NON-REQUIRED
-  # check, so a skip never blocks a merge. push:main stays UNFILTERED
-  # (backstop).
+  merge_group:
+  workflow_dispatch:
+  # No trigger-level path filter: a required context must always report. The
+  # path scope moved into the `changes` job below.
   pull_request:
     branches: [main]
     # THESE WERE LEAN'S PATHS (#418). This workflow is a copy of lean.yml and
@@ -36,24 +38,58 @@ on:
     # declared in the ROOT package and they verify the engines, so the paths
     # that can change a Verus outcome are the crates and the bazel files that
     # declare the targets.
-    paths:
-      - 'crates/**'
-      - 'BUILD.bazel'
-      - 'MODULE.bazel'
-      - 'MODULE.bazel.lock'
-      - '.github/workflows/verus.yml'
 
 concurrency:
   # PRs and non-main branch pushes: cancel superseded runs.
-  # Main pushes: never cancel, to keep the evidence. (Not a required check;
-  # see the header.)
+  # Main pushes: never cancel, to keep the evidence.
   group: verus-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    name: Detect Verus-relevant changes
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+      reason: ${{ steps.scope.outputs.reason }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Scope check (does a Verus-relevant path change?)
+        id: scope
+        env:
+          # PR: the PR base. Merge queue: the tip the queued change is tested
+          # against. Push: the ref's previous tip. Dispatch: none (runs).
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The paths that can change a Verus outcome: the crates (Verus trees
+          # live in crates/*/src), the root bazel files that declare the
+          # verus_test targets, and this workflow. Every other path is skipped
+          # as out-of-scope; anything unexpected FAILS CLOSED to run=true.
+          if [ -z "${BASE_SHA:-}" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] \
+             || ! FILES=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null); then
+            echo "no usable base sha or diff failed: running (fail closed)"
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "reason=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if printf '%s\n' "$FILES" | grep -qE '^(crates/|BUILD\.bazel$|MODULE\.bazel|\.github/workflows/verus\.yml$)'; then
+            echo "Verus-relevant paths changed: running"
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "reason=" >> "$GITHUB_OUTPUT"
+          else
+            echo "no Verus-relevant path changed: skipping as out-of-scope"
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "reason=out-of-scope" >> "$GITHUB_OUTPUT"
+          fi
+
   verus:
     name: Verus proofs
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # A cap, not a budget: measured runs took 2-25 min. A timed-out run is
+    # `cancelled`, which the gate below fails closed on.
+    timeout-minutes: 90
     steps:
       - name: Checkout relay
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -208,3 +244,28 @@ jobs:
             echo "::error::Verus verified only ${TOTAL} functions; the floor is 200 (measured 270 on 2026-10-08)"
             exit 1
           fi
+
+  verus-gate:
+    name: Verus gate
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    needs: [changes, verus]
+    if: always()
+    steps:
+      - name: Verus green (or correctly skipped)?
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          VERUS_RESULT: ${{ needs.verus.result }}
+          SKIP_REASON: ${{ needs.changes.outputs.reason }}
+        run: |
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "scope (changes) job did not succeed: $CHANGES_RESULT"; exit 1
+          fi
+          case "$VERUS_RESULT" in
+            success) echo "Verus: every verus_test target verified" ;;
+            skipped)
+              case "$SKIP_REASON" in
+                out-of-scope) echo "Verus: skipped (no Verus-relevant path changed) - OK" ;;
+                *) echo "Verus skipped with no recorded reason ('$SKIP_REASON') - failing closed"; exit 1 ;;
+              esac ;;
+            *) echo "Verus proofs: $VERUS_RESULT"; exit 1 ;;
+          esac
