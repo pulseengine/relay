@@ -107,6 +107,14 @@ pub enum MissionSource {
     Follow,
 }
 
+/// Lowest mission waypoint altitude the supervisor flies, m above home
+/// (SWREQ-FALCON-MISSIONUP-P02). Matches falcon-mavlink's MISSION_MIN_ALT_M.
+pub const MISSION_MIN_ALT_AGL_M: f32 = 1.0;
+/// Highest mission waypoint altitude the supervisor flies, m above home: the
+/// 120 m open-category ceiling (EU 2019/947). Matches falcon-mavlink's
+/// MISSION_MAX_ALT_M.
+pub const MISSION_MAX_ALT_AGL_M: f32 = 120.0;
+
 /// Pre-arm estimator-convergence ceiling (v1.99): the IEKF tilt-uncertainty
 /// (roll²+pitch², rad²) must be at/below this for `estimator_converged` to pass.
 /// The filter starts well above it and settles below as gravity updates arrive,
@@ -928,11 +936,40 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
     /// (up to `MAX_WAYPOINTS`) while in Mission mode. On reaching the last leg
     /// the supervisor autonomously returns home and lands. Waypoints beyond
     /// capacity are dropped.
-    pub fn set_mission_waypoints(&mut self, wps: &[Vec3]) {
+    ///
+    /// Returns whether the mission was loaded. The WHOLE mission is refused,
+    /// and the previous one stays in force, if any loaded waypoint is not
+    /// finite, lies outside [`MISSION_MIN_ALT_AGL_M`, `MISSION_MAX_ALT_AGL_M`]
+    /// above home, or lies horizontally outside the geofence radius
+    /// (SWREQ-FALCON-MISSIONUP-P02). Before this check a NaN or below-home
+    /// waypoint cut the motors in flight and a 5000 m one climbed without
+    /// bound (codebase review 2026-11-13, F2).
+    pub fn set_mission_waypoints(&mut self, wps: &[Vec3]) -> bool {
         let n = wps.len().min(MAX_WAYPOINTS);
+        if !wps[..n].iter().all(|wp| self.waypoint_admissible(*wp)) {
+            return false;
+        }
         self.waypoints[..n].copy_from_slice(&wps[..n]);
         self.wp_count = n;
         self.wp_index = 0;
+        true
+    }
+
+    /// One mission waypoint inside the flight envelope: finite, between the
+    /// altitude floor and ceiling above home (NED z is down, so AGL is
+    /// `home.z - wp.z`), and within the geofence radius of home.
+    fn waypoint_admissible(&self, wp: Vec3) -> bool {
+        if !(wp[0].is_finite() && wp[1].is_finite() && wp[2].is_finite()) {
+            return false;
+        }
+        let agl = self.home[2] - wp[2];
+        if !(MISSION_MIN_ALT_AGL_M..=MISSION_MAX_ALT_AGL_M).contains(&agl) {
+            return false;
+        }
+        let dx = wp[0] - self.home[0];
+        let dy = wp[1] - self.home[1];
+        // `<=` is false for a NaN radius, so a NaN fence admits nothing.
+        relay_math::sqrtf(dx * dx + dy * dy) <= self.fence_radius
     }
 
     /// Choose where Mission takes its setpoint from (#609 finding 4). The
