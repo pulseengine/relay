@@ -41,6 +41,7 @@ pub enum CodecError {
     UnsupportedMessage,
     BadPayloadLength,
     OutputTooSmall,
+    UnsupportedIncompatFlags,
 }
 
 impl FrameHeader {
@@ -121,6 +122,9 @@ pub fn parse_frame<'a>(
     let got_crc = u16::from_le_bytes([buf[HEADER_LEN + payload_len], buf[HEADER_LEN + payload_len + 1]]);
     if want_crc != got_crc {
         return Err(CodecError::BadCrc);
+    }
+    if header.incompat_flags != 0 {
+        return Err(CodecError::UnsupportedIncompatFlags);
     }
     Ok((Frame { header, payload }, total))
 }

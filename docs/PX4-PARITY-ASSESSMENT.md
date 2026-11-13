@@ -60,7 +60,8 @@ STPA-Sec security analysis.
 - **Capability surface (features that exist and pass their tests in SITL):**
   broadly at parity — estimator, cascade control, all flight modes, three
   airframe classes, params, logging, failsafes, pre-flight checks, sensor
-  voting, flow/range fusion, authenticated C2. Call it ~95% of the *flyable
+  voting, flow/range fusion, an authenticated link layer (relay-sec, not yet
+  on the MAVLink command path). Call it ~95% of the *flyable
   feature set*.
 - **Flight-proven maturity:** ~0%. PX4's real mass is ~15 years × thousands of
   airframes × millions of flight-hours of field-hardening, a driver ecosystem
@@ -81,9 +82,12 @@ Not "more features" — a different correctness basis:
   invariants, a compositional WCET proof. PX4's EKF2 and controllers are neither
   verified nor proof-carrying — **and neither are the commercial derivatives**
   (Auterion/Skynode, ModalAI/VOXL inherit PX4's unverified core).
-- **Built-in authenticated C2** (`relay-sec`): anti-replay + Ascon-AEAD + X25519
-  session keys with forward secrecy + rekey-on-reboot. PX4 has **no native
-  authenticated command link** (MAVLink signing is optional and weak). Most
+- **An authenticated link layer** (`relay-sec`): anti-replay + Ascon-AEAD + X25519
+  session keys with forward secrecy + rekey-on-reboot. It is **not yet wired to
+  the MAVLink command path**: falcon's MAVLink bridge accepts unauthenticated
+  commands today, rejects frames with any incompat flag (SWREQ-FALCON-MAVLINK-P07),
+  and MAVLink2 signing is planned. PX4 has **no native authenticated command
+  link** either (MAVLink signing is optional and weak). Most
   commercial stacks add security at the radio/link layer, not in the flight stack.
 - **Traceable MBSE as infrastructure** (spar→rivet→witness→sigil): every
   requirement traced to architecture → code → MC/DC truth-table → signed
@@ -98,7 +102,7 @@ The thesis: **"PX4's capability, made provable and secure."**
 |---|---|---|---|---|
 | Control sophistication | frontier (IEKF/SE(3)/ADRC) | solid, conventional | excellent (closed) | conservative, proven |
 | Formal verification | **machine-checked proofs** | none | none | testing/process (DO-333 formal methods rarely applied) |
-| Built-in C2 security | **yes, verified** | minimal | proprietary | mission-specific |
+| Built-in C2 security | link layer verified, not yet on the MAVLink path | minimal | proprietary | mission-specific |
 | Flight-proven maturity | **none** | enormous | enormous | enormous, certified |
 | Hardware/driver ecosystem | minimal | huge | vertically integrated | per-platform |
 | Actually certified | dossier *scaffold* only | no | no | **yes — the bar** |

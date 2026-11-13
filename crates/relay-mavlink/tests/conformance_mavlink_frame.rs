@@ -5,6 +5,18 @@ use relay_mavlink::{
 include!("vectors/mavlink_frame.rs");
 
 fn check_parse(i: usize, buf: &[u8], v: &FrameVec) {
+    // SWREQ-FALCON-MAVLINK-P07: any incompat flag (including 0x01 signed)
+    // is not implemented, so a CRC-valid frame that sets one is rejected.
+    if v.incompat != 0 {
+        assert_eq!(
+            parse_frame(buf, v.crc_extra).map(|(_, n)| n),
+            Err(CodecError::UnsupportedIncompatFlags),
+            "vector {} incompat {:#04x} must be rejected",
+            i,
+            v.incompat
+        );
+        return;
+    }
     let (f, n) = parse_frame(buf, v.crc_extra)
         .unwrap_or_else(|e| panic!("vector {} parse failed: {:?}", i, e));
     assert_eq!(n, v.wire_len, "vector {} consumed", i);

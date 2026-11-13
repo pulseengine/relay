@@ -14,9 +14,12 @@
 //!   offset 10+payload_len..+2   crc16            (little-endian)
 //!   offset 10+payload_len+2..   signature (13 bytes, if incompat_flags & 1)
 //!
-//! For v0.1 we do unsigned packets only — signed-packet support
-//! lands when we wire up sigil-style attestation for ground link.
-//! That's a v1.0 feature per the falcon roadmap.
+//! Unsigned packets only. `parse_frame` rejects a frame with ANY
+//! incompat flag set (SWREQ-FALCON-MAVLINK-P07): the MAVLink spec requires
+//! dropping a frame whose incompat flags the receiver does not understand,
+//! and the only flag defined today, 0x01 (signed), is not implemented here,
+//! so accepting it would act on the frame while ignoring its signature.
+//! MAVLink2 signing is planned as a separate requirement.
 
 use crate::crc::Crc16X25;
 
@@ -70,6 +73,9 @@ pub enum CodecError {
     BadPayloadLength,
     /// Output buffer too small for encoded frame.
     OutputTooSmall,
+    /// The frame sets an incompat flag this codec does not implement
+    /// (any non-zero `incompat_flags`, including 0x01 signed).
+    UnsupportedIncompatFlags,
 }
 
 impl FrameHeader {
@@ -171,6 +177,10 @@ pub fn parse_frame<'a>(buf: &'a [u8], crc_extra: u8) -> Result<(Frame<'a>, usize
     if actual != expected {
         return Err(CodecError::BadCrc);
     }
+    // After the CRC, so a corrupted byte 2 still reads as BadCrc.
+    if header.incompat_flags != 0 {
+        return Err(CodecError::UnsupportedIncompatFlags);
+    }
 
     Ok((Frame { header, payload }, total))
 }
@@ -233,6 +243,40 @@ mod tests {
         let n = encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut out).expect("encode");
         assert_eq!(n, out.len());
         out
+    }
+
+    /// SWREQ-FALCON-MAVLINK-P07: a CRC-valid frame with any incompat flag
+    /// set is rejected; flag 0 is accepted; a corrupted flag byte is BadCrc.
+    #[test]
+    fn parse_rejects_any_incompat_flag() {
+        let hb = Heartbeat::falcon_quad_standby();
+        let payload = hb.encode_payload();
+        for flags in [0x01u8, 0x02, 0x04, 0x80, 0xFE, 0xFF] {
+            let header = FrameHeader {
+                magic: MAGIC_V2,
+                payload_len: HEARTBEAT_PAYLOAD_LEN as u8,
+                incompat_flags: flags,
+                compat_flags: 0,
+                sequence: 0,
+                system_id: 1,
+                component_id: 1,
+                message_id: HEARTBEAT_MSG_ID,
+            };
+            let mut out = [0u8; HEADER_LEN + HEARTBEAT_PAYLOAD_LEN + 2];
+            encode_frame(&header, &payload, HEARTBEAT_CRC_EXTRA, &mut out).expect("encode");
+            assert_eq!(
+                parse_frame(&out, HEARTBEAT_CRC_EXTRA).map(|(_, n)| n),
+                Err(CodecError::UnsupportedIncompatFlags),
+                "flags {flags:#04x}"
+            );
+        }
+        let mut ok = build_heartbeat_frame(0, &hb);
+        assert!(parse_frame(&ok, HEARTBEAT_CRC_EXTRA).is_ok());
+        ok[2] = 0x01; // flag set without recomputing the CRC
+        assert_eq!(
+            parse_frame(&ok, HEARTBEAT_CRC_EXTRA).map(|(_, n)| n),
+            Err(CodecError::BadCrc)
+        );
     }
 
     #[test]
