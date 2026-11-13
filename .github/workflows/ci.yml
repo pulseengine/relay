@@ -130,6 +130,17 @@ jobs:
       # are out of v0.1 scope.
       - name: Float discipline (f32 flight core; f64 only at annotated boundaries)
         run: ./scripts/check-float-discipline.sh
+      # Verus trusts (does not prove) each #[verifier::external_body]; the
+      # per-crate count must equal scripts/verus-trust-ceiling.txt, so trusted
+      # code cannot grow unnoticed and the ledger ratchets down as bodies are
+      # proven (relay#253; maintainer decision 2026-11-13). Unit tests first,
+      # so a broken checker cannot pass vacuously.
+      - name: Verus trust ceiling (external_body per crate)
+        run: |
+          rustc --edition 2021 --test scripts/check-verus-trust.rs -o "$RUNNER_TEMP/cvt-test"
+          "$RUNNER_TEMP/cvt-test"
+          rustc --edition 2021 -O scripts/check-verus-trust.rs -o "$RUNNER_TEMP/cvt"
+          "$RUNNER_TEMP/cvt"
       - name: Clippy on v0.1 falcon crates
         run: |
           cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
