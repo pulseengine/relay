@@ -21,8 +21,10 @@
 //!   - **MAVLINK-V02**: `GlobalPositionInt::encode_payload` writes
 //!     exactly `GLOBAL_POSITION_INT_PAYLOAD_LEN` bytes; same.
 //!   - **MAVLINK-V03**: `decode_payload` on each message returns
-//!     `None` on length mismatch (ensures contract: result is
-//!     `Some` only when `payload.len() == EXPECTED`).
+//!     `None` for an empty payload or one longer than `EXPECTED`, and
+//!     zero-extends a 1..=`EXPECTED` byte payload (MAVLink2 truncates
+//!     trailing zero bytes, #675). The bodies are `external_body`; the
+//!     plain tests pin this against pymavlink bytes.
 //!
 //! Same pattern relay-nid landed at v0.11; relay-mavlink was the
 //! last plain-only crate in the workspace.

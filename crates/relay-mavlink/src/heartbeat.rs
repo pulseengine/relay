@@ -128,12 +128,16 @@ impl Heartbeat {
         out
     }
 
-    /// **MAVLINK-V03**: decoder returns `None` on length mismatch.
+    /// **MAVLINK-V03**: `None` when empty or too long; a truncated payload is zero-extended.
     #[verifier::external_body]
     pub fn decode_payload(payload: &[u8]) -> Option<Heartbeat> {
-        if payload.len() != HEARTBEAT_PAYLOAD_LEN {
+        // MAVLink2 truncation: zero-extend 1..=HEARTBEAT_PAYLOAD_LEN bytes (#675).
+        if payload.len() == 0 || payload.len() > HEARTBEAT_PAYLOAD_LEN {
             return None;
         }
+        let mut buf = [0u8; HEARTBEAT_PAYLOAD_LEN];
+        buf[..payload.len()].copy_from_slice(payload);
+        let payload = &buf;
         Some(Heartbeat {
             custom_mode: u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]),
             mav_type: payload[4],

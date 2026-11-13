@@ -77,9 +77,10 @@ impl GlobalPositionInt {
     /// length is wrong (the caller validates the message-id at the
     /// frame layer).
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() != GLOBAL_POSITION_INT_PAYLOAD_LEN {
+        if payload.len() > GLOBAL_POSITION_INT_PAYLOAD_LEN {
             return None;
         }
+        let payload = &crate::frame::zero_extend::<{ GLOBAL_POSITION_INT_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             time_boot_ms: u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]),
             lat_e7: i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]),
@@ -178,8 +179,18 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_short_payload() {
-        assert!(GlobalPositionInt::decode_payload(&[0u8; 27]).is_none());
+    fn decode_zero_extends_truncated_payload() {
+        // pymavlink 2.4.50: a fix at rest (vx = vy = vz = hdg = 0) packs into
+        // 18 bytes, not 28 (#675).
+        let p: [u8; 18] = [
+            0xe8, 0x03, 0x00, 0x00, 0x4a, 0x52, 0x40, 0x1c, 0x43, 0xf4, 0x17, 0x05, 0x20, 0xa1,
+            0x07, 0x00, 0x20, 0x4e,
+        ];
+        let g = GlobalPositionInt::decode_payload(&p).expect("truncated GLOBAL_POSITION_INT");
+        assert_eq!(g.time_boot_ms, 1000);
+        assert_eq!((g.lat_e7, g.lon_e7), (473977418, 85455939));
+        assert_eq!((g.alt_mm, g.relative_alt_mm), (500000, 20000));
+        assert_eq!((g.vx_cms, g.vy_cms, g.vz_cms, g.hdg_cdeg), (0, 0, 0, 0));
     }
     #[test]
     fn decode_rejects_long_payload() {

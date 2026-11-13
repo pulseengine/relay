@@ -188,6 +188,25 @@ pub fn peek_message_id(buf: &[u8]) -> Result<u32, CodecError> {
     Ok(u32::from_le_bytes([buf[7], buf[8], buf[9], 0]))
 }
 
+/// MAVLink2 empty-byte payload truncation, receiver side.
+///
+/// A MAVLink2 sender drops the payload's trailing zero bytes, and the receiver
+/// must zero-fill them back to the message's length before decoding: pymavlink
+/// 2.4.50 packs COMMAND_LONG with `confirmation = 0` into 32 bytes, not 33.
+/// Returns the first `N` bytes of `payload`, zero-extended. `None` only for an
+/// empty payload, because the first byte is never truncated. A payload longer
+/// than `N` keeps its first `N` bytes. A decoder whose message has no extension
+/// fields rejects that case itself before calling this (#675).
+pub fn zero_extend<const N: usize>(payload: &[u8]) -> Option<[u8; N]> {
+    if payload.is_empty() {
+        return None;
+    }
+    let mut out = [0u8; N];
+    let n = if payload.len() < N { payload.len() } else { N };
+    out[..n].copy_from_slice(&payload[..n]);
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

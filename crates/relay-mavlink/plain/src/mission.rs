@@ -47,9 +47,7 @@ impl MissionCount {
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
         // Accept ≥ the base length: later MAVLink adds a mission_type extension
         // byte; falcon ignores it (treats every mission as the main mission).
-        if payload.len() < MISSION_COUNT_PAYLOAD_LEN {
-            return None;
-        }
+        let payload = &crate::frame::zero_extend::<{ MISSION_COUNT_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             count: u16::from_le_bytes([payload[0], payload[1]]),
             target_system: payload[2],
@@ -78,9 +76,7 @@ impl MissionRequestList {
     }
 
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() < MISSION_REQUEST_LIST_PAYLOAD_LEN {
-            return None;
-        }
+        let payload = &crate::frame::zero_extend::<{ MISSION_REQUEST_LIST_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             target_system: payload[0],
             target_component: payload[1],
@@ -112,9 +108,7 @@ impl MissionRequestInt {
     }
 
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() < MISSION_REQUEST_INT_PAYLOAD_LEN {
-            return None;
-        }
+        let payload = &crate::frame::zero_extend::<{ MISSION_REQUEST_INT_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             seq: u16::from_le_bytes([payload[0], payload[1]]),
             target_system: payload[2],
@@ -174,9 +168,7 @@ impl MissionItemInt {
     }
 
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() < MISSION_ITEM_INT_PAYLOAD_LEN {
-            return None;
-        }
+        let payload = &crate::frame::zero_extend::<{ MISSION_ITEM_INT_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             param1: f32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]),
             param2: f32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]),
@@ -221,9 +213,7 @@ impl MissionAck {
     }
 
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() < MISSION_ACK_PAYLOAD_LEN {
-            return None;
-        }
+        let payload = &crate::frame::zero_extend::<{ MISSION_ACK_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             target_system: payload[0],
             target_component: payload[1],
@@ -235,6 +225,18 @@ impl MissionAck {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_zero_extends_truncated_payloads() {
+        // pymavlink 2.4.50: MISSION_COUNT (count 5, to system 1, component 0)
+        // packs into 3 bytes, MISSION_ACK (1, 0, ACCEPTED) into 1 (#675).
+        let c = MissionCount::decode_payload(&[0x05, 0x00, 0x01]).expect("MISSION_COUNT");
+        assert_eq!((c.count, c.target_system, c.target_component), (5, 1, 0));
+        let a = MissionAck::decode_payload(&[0x01]).expect("MISSION_ACK");
+        assert_eq!((a.target_system, a.target_component, a.mav_type), (1, 0, 0));
+        assert!(MissionCount::decode_payload(&[]).is_none());
+        assert!(MissionItemInt::decode_payload(&[]).is_none());
+    }
 
     #[test]
     fn ids_and_crc_extras() {

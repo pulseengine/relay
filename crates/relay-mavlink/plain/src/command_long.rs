@@ -186,9 +186,10 @@ impl CommandLong {
 
     /// Decode from a 33-byte payload. Returns `None` on length mismatch.
     pub fn decode_payload(payload: &[u8]) -> Option<Self> {
-        if payload.len() != COMMAND_LONG_PAYLOAD_LEN {
+        if payload.len() > COMMAND_LONG_PAYLOAD_LEN {
             return None;
         }
+        let payload = &crate::frame::zero_extend::<{ COMMAND_LONG_PAYLOAD_LEN }>(payload)?;
         Some(Self {
             param1: f32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]),
             param2: f32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]),
@@ -267,8 +268,30 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_short_payload() {
-        assert!(CommandLong::decode_payload(&[0u8; 32]).is_none());
+    fn decode_zero_extends_truncated_payload() {
+        // pymavlink 2.4.50 packs ARM (400, param1 = 1) with confirmation 0 into
+        // 32 bytes: MAVLink2 drops the trailing zero (#675).
+        let p: [u8; 32] = [
+            0x00, 0x00, 0x80, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0x90, 0x01, 0x01, 0x01,
+        ];
+        let c = CommandLong::decode_payload(&p).expect("truncated COMMAND_LONG decodes");
+        assert_eq!(c.command, 400);
+        assert_eq!(c.param1, 1.0);
+        assert_eq!(
+            (c.target_system, c.target_component, c.confirmation),
+            (1, 1, 0)
+        );
+        // A one-byte payload is the shortest legal truncation.
+        assert_eq!(
+            CommandLong::decode_payload(&[0u8; 1]),
+            CommandLong::decode_payload(&[0u8; 33])
+        );
+    }
+
+    #[test]
+    fn decode_rejects_empty() {
+        assert!(CommandLong::decode_payload(&[]).is_none());
     }
 
     #[test]
