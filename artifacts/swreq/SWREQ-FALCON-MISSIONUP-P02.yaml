@@ -1,0 +1,55 @@
+artifacts:
+  - id: SWREQ-FALCON-MISSIONUP-P02
+    type: sw-req
+    title: "MISSIONUP-P02 — an uploaded mission is validated item by item, staged, and committed whole"
+    status: implemented
+    release: falcon-v1.143.0
+    description: >
+      Before this requirement an uploaded MISSION_ITEM_INT was stored unchecked,
+      and MAVLink carries no authentication on this path (codebase review
+      2026-11-13, F2-F5). A NaN, below-home or 5000 m altitude was accepted and,
+      in the analytic simulator, cut the motors in flight or climbed without
+      bound; an extreme latitude overflowed i32; a stray MISSION_COUNT from any
+      sender emptied the mission; a fence upload replaced it; more than 16
+      items were silently truncated and ACKed; and refreshing the download
+      mission during an upload indexed out of bounds.
+
+      The falcon-mavlink bridge shall (a) refuse a MISSION_COUNT whose
+      mission_type is not MAV_MISSION_TYPE_MISSION (ACK UNSUPPORTED) or whose
+      count exceeds MAX_MISSION_ITEMS (ACK NO_SPACE); (b) accept items only from
+      the system/component that started the upload and addressed to this
+      vehicle (or broadcast); (c) refuse an item, aborting the upload, whose
+      mission_type is not MISSION (UNSUPPORTED), frame is not
+      GLOBAL_RELATIVE_ALT_INT (UNSUPPORTED_FRAME), command is not NAV_WAYPOINT
+      (UNSUPPORTED), latitude is outside ±90° (INVALID_PARAM5_X), longitude
+      outside ±180° (INVALID_PARAM6_Y), or altitude is not finite or outside
+      [MISSION_MIN_ALT_M = 1 m, MISSION_MAX_ALT_M = 120 m] above home
+      (INVALID_PARAM7); (d) convert coordinates without integer overflow;
+      (e) stage items separately and replace the stored mission only when the
+      last item is accepted, so no refused or unfinished upload changes it;
+      (f) answer a MISSION_REQUEST_INT only when addressed to this vehicle, and
+      project stored waypoints back to geodetic without overflow.
+
+      FlightSupervisor::set_mission_waypoints shall independently refuse the
+      whole mission, keep the previous one, and return false if any waypoint is
+      non-finite, outside [MISSION_MIN_ALT_AGL_M, MISSION_MAX_ALT_AGL_M] above
+      home, or horizontally outside the geofence radius.
+
+      Not covered: authentication of the uploader (MAVLink2 signing is planned)
+      and an upload timeout (the bridge has no clock).
+    tags: [falcon, mavlink, mission, upload, validation, safety, security]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        falcon-mavlink mission_validation_tests (14): each hostile upload from
+        the review is refused with the MAVLink result code the requirement
+        names, the stored mission is unchanged, and nothing panics in a debug
+        build; the band edges 1 m and 120 m are accepted; the bridge and
+        supervisor altitude bands are the same numbers; the supervisor refuses
+        each out-of-envelope waypoint and keeps the previous mission.
+        Negative control: with the item checks, the count check and the
+        supervisor check disabled, 5 of the 14 fail.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-012

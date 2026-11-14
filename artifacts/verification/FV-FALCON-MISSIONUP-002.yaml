@@ -1,0 +1,35 @@
+artifacts:
+  - id: FV-FALCON-MISSIONUP-002
+    type: sw-verification
+    title: "Mission upload validation, staging and whole-mission commit; supervisor envelope check"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-MISSIONUP-P02. Each step is one named test in
+      crates/falcon-mavlink/plain/src/mission_validation_tests.rs; together
+      they cover every hostile upload the 2026-11-13 review reproduced (F2-F5)
+      plus the accepted band edges and the shared altitude constants.
+      Negative control: with the bridge item checks, the NO_SPACE count check
+      and the supervisor envelope check disabled, 5 of the 14 tests fail; the
+      staging tests (stray count, fence upload, mid-upload refresh) fail on
+      the pre-change bridge as the review's PoC showed.
+    tags: [verification, falcon, falcon-mavlink, falcon-core, mission, safety]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::hostile_altitudes_are_refused_and_the_mission_kept"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::altitude_band_edges_are_accepted"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::extreme_coordinates_are_refused_without_overflow"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::unsupported_frame_and_command_are_refused"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::too_many_items_is_no_space"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::fence_upload_does_not_replace_the_mission"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::stray_count_does_not_wipe_the_mission"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::items_from_another_sender_are_ignored"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::refreshing_the_download_mid_upload_cannot_go_out_of_bounds"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::download_request_for_another_vehicle_is_ignored"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::download_projection_saturates"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::bridge_and_supervisor_altitude_band_agree"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::supervisor_refuses_out_of_envelope_missions"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::denied_code_is_the_mavlink_value"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MISSIONUP-P02

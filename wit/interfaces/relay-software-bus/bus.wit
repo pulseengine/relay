@@ -10,8 +10,9 @@ package pulseengine:relay-software-bus@0.1.0;
 /// Each connection is a direct typed stream between producer and consumer.
 ///
 /// On embedded (Synth → ARM → Gale):
-///   stream<T> → Gale ring_buf (RB01-RB08 verified)
-///   future<T> → Gale event (EV01-EV08 verified)
+///   stream<T> → Gale ring_buf (gale RB1-RB8, Verus: head/tail/size index
+///               model, not the byte payload)
+///   future<T> → Gale event (gale EV1-EV8, Verus)
 interface bus {
     use pulseengine:relay-common-types/types.{command-message, telemetry-message, spacecraft-time};
 

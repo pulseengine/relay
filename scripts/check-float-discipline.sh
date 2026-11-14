@@ -22,7 +22,7 @@ FLIGHT_CRATES=(
   relay-fsm relay-preflight relay-calib relay-fsafe relay-rc
   relay-param relay-batt relay-notch relay-flowrange relay-log
   relay-mavlink falcon-mavlink falcon-core falcon-gnss-ubx falcon-baromag
-  falcon-imu-icm42688 falcon-esc-dshot
+  falcon-imu-icm42688 falcon-esc-dshot relay-offboard
 )
 
 fail=0

@@ -46,6 +46,10 @@ artifacts:
       steps:
         - run: cargo test -p falcon-core partitioned
         - run: cargo test -p falcon-core --release partitioned
+        # PART-P02 relay-side evidence, named so the gate runs it (the
+        # `partitioned` filter above does not select these two).
+        - run: cargo test -p falcon-core tests::f100_passthrough_fixture_is_current
+        - run: cargo test -p falcon-core tests::terminate_reaches_motors_off_within_bound
     links:
       - type: verifies
         target: SWREQ-FALCON-PART-P01

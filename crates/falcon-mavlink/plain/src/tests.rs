@@ -55,6 +55,56 @@ fn encode_command(cmd: &CommandLong) -> ([u8; 64], usize) {
     (buf, n)
 }
 
+/// SWREQ-FALCON-MAVLINK-P07: an ARM command whose frame sets an incompat
+/// flag (0x01 = signed, or an unknown bit) is not routed, even with a valid
+/// CRC. Before, `ingest` ignored the flags and returned `Some(Arm)`.
+#[test]
+fn incompat_flagged_arm_is_not_routed() {
+    let bridge = MavBridge::new(VEH_SYS, VEH_COMP, HOME_LAT_E7, HOME_LON_E7, HOME_ALT_MM);
+    let (plain, n) = encode_command(&arm_command());
+    assert_eq!(
+        bridge.ingest(&plain[..n]),
+        Ok(Some(Event::Arm)),
+        "unflagged ARM still routes"
+    );
+    let payload = arm_command().encode_payload();
+    for flags in [0x01u8, 0x80, 0xFE] {
+        let header = FrameHeader {
+            magic: MAGIC_V2,
+            payload_len: COMMAND_LONG_PAYLOAD_LEN as u8,
+            incompat_flags: flags,
+            compat_flags: 0,
+            sequence: 7,
+            system_id: GCS_SYS,
+            component_id: 190,
+            message_id: COMMAND_LONG_MSG_ID,
+        };
+        let mut buf = [0u8; 64];
+        let n = encode_frame(&header, &payload, COMMAND_LONG_CRC_EXTRA, &mut buf).expect("encode");
+        assert_eq!(
+            bridge.ingest(&buf[..n]),
+            Err(CodecError::UnsupportedIncompatFlags),
+            "flags {flags:#04x}"
+        );
+    }
+}
+
+fn arm_command() -> CommandLong {
+    CommandLong {
+        target_system: VEH_SYS,
+        target_component: VEH_COMP,
+        command: 400, // MAV_CMD_COMPONENT_ARM_DISARM
+        confirmation: 0,
+        param1: 1.0,
+        param2: 0.0,
+        param3: 0.0,
+        param4: 0.0,
+        param5: 0.0,
+        param6: 0.0,
+        param7: 0.0,
+    }
+}
+
 /// pymavlink 2.4.50 frames, byte for byte: MAVLink2 truncates the trailing
 /// zero `confirmation`, so each COMMAND_LONG payload is 32 bytes, not 33.
 /// Before #675 every one of these returned `Err(BadPayloadLength)`.

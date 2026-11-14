@@ -23,6 +23,20 @@ artifacts:
       contributes the conformance vectors (command sequences incl. rotor-out
       asymmetric sets + the expected pass-through) and consumes gale's
       evidence in the joint trace (gale#65).
+
+      STATUS SCOPE (2026-11-13, maintainer decision: keep verified, fix the
+      evidence): `verified` covers the RELAY side only, i.e. the drift-gated
+      fixture bench-evidence/fixtures/f100-passthrough-v1.csv and the software
+      Terminate reaching motors-off within 100 ms. The F100 side is gale's
+      REQ-OS-FAILSAFE-PASSTHRU-001 and REQ-OS-FAILSAFE-SILENCE-001, both
+      status `proposed` in gale (artifacts/gust_failsafe_contract.yaml) and
+      not yet implemented. Agreed with gale for PASSTHRU-001: the oracle point
+      is the f32 command buffer on the F100 side, before PWM quantisation; the
+      f32-to-duty mapping is a separate property (monotonic, exact at 0 and
+      1); legitimate input is finite and in [0.0, 1.0] per
+      SWREQ-FALCON-MIX-P01, and anything else is a relay contract violation
+      the F100 may map to OFF. The simulated silent-M7 SITL test named in the
+      criteria below does not exist yet.
     tags: [falcon, partition, failsafe, f100, gale, actuator-path, safety, v1.123]
     fields:
       req-type: safety

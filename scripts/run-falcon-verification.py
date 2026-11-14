@@ -326,7 +326,21 @@ def cargo_test_names_a_filter(cmd: str) -> bool:
     while i < len(toks):
         t = toks[i]
         if t == "--":
-            return False  # everything after -- is harness flags, not a filter
+            # Everything after -- goes to the libtest harness. A bare token
+            # there is STILL a test-name filter (`-- --ignored some_test`), so
+            # it must run >=1 test too; only flags (and the values of flags
+            # that take one) are not filters.
+            j = i + 1
+            while j < len(toks):
+                h = toks[j]
+                if h in ("--skip", "--test-threads", "--format", "--color", "--logfile", "-Z"):
+                    j += 2
+                    continue
+                if h.startswith("-"):
+                    j += 1
+                    continue
+                return True
+            return False
         if t in ("-p", "--package", "--manifest-path", "--features"):
             i += 2
             continue
@@ -452,7 +466,11 @@ def resolve_from_batch(crate: str, filt: str | None):
 # That is the same orphaned-proof pattern the Kani cross-check was built to
 # catch after MIX-P05..08 went unenforced for ~40 releases.
 #
-# In-BUILD.bazel  => enforced-by-verus-gate.
+# In-BUILD.bazel  => enforced-by-verus-gate. That credit is sound only because
+#                    verus.yml's `Verus gate` is a REQUIRED check that runs in
+#                    the merge queue (2026-11-13); before, it was neither, and
+#                    the credit hid a red Verus run. It still does not count
+#                    toward "a step executed" below.
 # Absent          => FAIL: the cited proof does not exist under that name.
 VERUS_STEP = re.compile(r"\bbazel\s+test\b.*?//:([A-Za-z0-9_-]*verus[A-Za-z0-9_-]*)")
 
@@ -489,7 +507,8 @@ def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]
             crate = km.group(1)
             if crate in kani_matrix_crates():
                 print(f"  [enforced-by-kani-gate] {aid}: {cmd}")
-                results.append({"cmd": cmd, "pass": True, "skipped": True, "rc": 0, "duration": 0.0})
+                results.append({"cmd": cmd, "pass": True, "skipped": True, "rc": 0, "duration": 0.0,
+                                "via": "kani-gate"})
             elif crate in KANI_MATRIX_WAIVERS:
                 # Tracked debt, kept LOUD: reported every run with its issue.
                 print(
@@ -510,7 +529,8 @@ def run_steps(artifact: dict[str, Any], dry_run: bool) -> tuple[bool, list[dict]
             tgt = vm.group(1)
             if tgt in verus_targets():
                 print(f"  [enforced-by-verus-gate] {aid}: {cmd}")
-                results.append({"cmd": cmd, "pass": True, "skipped": True, "rc": 0, "duration": 0.0})
+                results.append({"cmd": cmd, "pass": True, "skipped": True, "rc": 0, "duration": 0.0,
+                                "via": "verus-gate"})
             else:
                 artifact_pass = False
                 avail = ", ".join(sorted(verus_targets())[:3]) or "none"
@@ -718,6 +738,21 @@ def main() -> int:
             "pass": ok,
             "steps": step_results,
         })
+
+    # A run that EXECUTED nothing is not evidence. Before, a selection whose
+    # every step was skipped (bench-only, Verus-credited, stepless) exited 0
+    # with "0/0 passed". A step executed here, or credited to the REQUIRED
+    # Kani gate, counts; a Verus credit does not, because verus.yml is not a
+    # required check and does not run in the merge queue.
+    all_steps = [s for r in report for s in r["steps"]]
+    executed = sum(1 for s in all_steps if not s.get("skipped"))
+    kani_credited = sum(1 for s in all_steps if s.get("via") == "kani-gate")
+    if not args.dry_run and executed + kani_credited == 0:
+        print()
+        print(f"# NO STEP EXECUTED: {len(report)} artifact(s) selected, {len(all_steps)} "
+              f"step(s), 0 run here and 0 credited to the required Kani gate. "
+              f"A run that checked nothing is not a pass.")
+        overall_pass = False
 
     # Weak-evidence census (#262). Printed even on a green run — a gate that
     # only speaks when it fails cannot show a backlog shrinking.

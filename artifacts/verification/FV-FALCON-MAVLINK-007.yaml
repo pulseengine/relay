@@ -1,0 +1,32 @@
+artifacts:
+  - id: FV-FALCON-MAVLINK-007
+    type: sw-verification
+    title: "MAVLink2 frames with any incompat flag are rejected, at the codec and at the command bridge"
+    status: implemented
+    description: >
+      Verifies SWREQ-FALCON-MAVLINK-P07. Each step names the test that proves
+      one clause:
+        - frame::tests::parse_rejects_any_incompat_flag: a CRC-valid HEARTBEAT
+          frame with flags 0x01, 0x02, 0x04, 0x80, 0xFE or 0xFF is rejected
+          with UnsupportedIncompatFlags; flag 0 parses; a flag byte changed
+          without recomputing the CRC gives BadCrc.
+        - conformance_parse_valid_with_trailing / conformance_parse_exact_slice
+          (crates/relay-mavlink/tests/conformance_mavlink_frame.rs): the 61
+          frame vectors with a non-zero flag byte are rejected and the 250
+          with flag 0 parse field-for-field.
+        - falcon-mavlink tests::incompat_flagged_arm_is_not_routed: an ARM
+          COMMAND_LONG whose frame sets 0x01, 0x80 or 0xFE returns
+          Err(UnsupportedIncompatFlags) from MavBridge::ingest, while the same
+          ARM unflagged still routes to Event::Arm.
+      Negative control: with the check removed, all four tests fail.
+    tags: [verification, falcon, relay-mavlink, falcon-mavlink, security]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-mavlink frame::tests::parse_rejects_any_incompat_flag"
+        - run: "cargo test -p relay-mavlink --test conformance_mavlink_frame conformance_parse_valid_with_trailing"
+        - run: "cargo test -p relay-mavlink --test conformance_mavlink_frame conformance_parse_exact_slice"
+        - run: "cargo test -p falcon-mavlink tests::incompat_flagged_arm_is_not_routed"
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-MAVLINK-P07

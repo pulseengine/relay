@@ -1,0 +1,33 @@
+artifacts:
+  - id: SWREQ-FALCON-MAVLINK-P07
+    type: sw-req
+    title: "MAVLINK-P07: Frames with any incompat flag are rejected until signing is implemented"
+    status: implemented
+    release: falcon-v1.143.0
+    description: >
+      The MAVLink codec shall reject a MAVLink2 frame whose incompat_flags
+      byte is non-zero, returning CodecError::UnsupportedIncompatFlags after
+      the CRC check, so no command, mission or parameter message carried by
+      such a frame reaches the flight stack. The MAVLink spec requires a
+      receiver to drop frames with incompat flags it does not understand. The
+      only flag defined today, 0x01 (signed), is not implemented, so before
+      this requirement a signed frame was acted on with its signature ignored,
+      and an unsigned frame with an unknown flag was acted on as well (codebase
+      review 2026-11-13, finding F1). A frame whose flag byte was corrupted in
+      transit still fails as BadCrc. This does not authenticate the link:
+      MAVLink2 signing is a separate, later requirement (maintainer decision
+      2026-11-13).
+    tags: [falcon, mavlink, parsing, security, safety]
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Unit test: a CRC-valid HEARTBEAT frame with incompat flags 0x01, 0x02,
+        0x04, 0x80, 0xFE and 0xFF is rejected with UnsupportedIncompatFlags;
+        flag 0 parses; a corrupted flag byte gives BadCrc. Conformance: the 61
+        pymavlink-header frame vectors with a non-zero flag are rejected and
+        the 250 with flag 0 parse. Bridge: MavBridge::ingest does not route a
+        CRC-valid ARM whose frame sets 0x01, 0x80 or 0xFE.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

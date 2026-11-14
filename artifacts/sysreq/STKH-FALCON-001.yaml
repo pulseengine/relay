@@ -14,7 +14,8 @@ artifacts:
       a control cascade, F-Prime is C++ without proofs, ArduPilot is
       GPL-v3. Falcon must combine cFS-grade mission semantics with
       PX4-grade control law, expressed as formally verified WebAssembly
-      components fused statically by meld, run on Gale (verified RTOS)
+      components fused statically by meld, run on Gale (an RTOS whose ring buffer, event and semaphore modules are
+      Verus-verified; its scheduler is not yet)
       via WASM Component Model Preview 3 streams. Triple-track
       verification (Verus + Rocq + Lean) plus the full overdo chain
       (Kani + proptest + tokio-rs/loom + sanitizers + cargo-mutants +
