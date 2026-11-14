@@ -32,7 +32,7 @@ jobs:
     # Self-hosted `light`: the org gets ~5 hosted runner slots, so hosted jobs
     # queued for hours (pulseengine.eu owner decision 2026-11-14). Schedule and
     # dispatch only, so no fork-PR routing is needed.
-    runs-on: [self-hosted, linux, x64, light]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       # Tags are load-bearing here: "the next release" is defined as the lowest

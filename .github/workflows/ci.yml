@@ -43,7 +43,7 @@ jobs:
     # Routes fork PRs to GitHub-hosted runners by default. This is NOT a security
     # boundary: a fork PR can edit this file. Isolation is enforced by the org's
     # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -65,7 +65,7 @@ jobs:
 
   workflow-lint:
     name: Workflow lint (actionlint)
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # WHY THIS GATE EXISTS — it is not style, it caught a live outage.
@@ -118,7 +118,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -141,6 +141,18 @@ jobs:
           "$RUNNER_TEMP/cvt-test"
           rustc --edition 2021 -O scripts/check-verus-trust.rs -o "$RUNNER_TEMP/cvt"
           "$RUNNER_TEMP/cvt"
+      # No fork PR reaches a self-hosted runner: every self-hosted runs-on uses
+      # the fail-closed same-repo form (a deleted fork's null head.repo falls to
+      # the hosted runner), and no self-hosted job sits under a trigger a fork
+      # can cause (pull_request_target, workflow_run, ...). Ported from
+      # pulseengine/ordeal#322 and extended to matrix runners. Tests first, so a
+      # broken checker cannot pass vacuously.
+      - name: Self-hosted fork guard (fail-closed runs-on)
+        run: |
+          rustc --edition 2021 --test scripts/check-selfhosted-fork-guard.rs -o "$RUNNER_TEMP/csfg-test"
+          "$RUNNER_TEMP/csfg-test"
+          rustc --edition 2021 -O scripts/check-selfhosted-fork-guard.rs -o "$RUNNER_TEMP/csfg"
+          "$RUNNER_TEMP/csfg"
       - name: Clippy on v0.1 falcon crates
         run: |
           cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
@@ -169,7 +181,7 @@ jobs:
     # entries only). This is NOT a security boundary: a fork PR can edit this
     # file. Isolation is enforced by the org's smithy runner-group policy and
     # fork-PR approval (pulseengine/warte#35).
-    runs-on: ${{ github.event.pull_request.head.repo.fork && contains(matrix.runner, 'self-hosted') && 'ubuntu-latest' || matrix.runner }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository || !contains(matrix.runner, 'self-hosted')) && matrix.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -179,7 +191,7 @@ jobs:
 
   falcon-hello-smoke:
     name: falcon-hello end-to-end demo
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -218,7 +230,7 @@ jobs:
   # worst-case-margin lines in the CI log for trend-watching.
   closed-loop-sim:
     name: Closed-loop simulation + Monte-Carlo campaigns
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -249,7 +261,7 @@ jobs:
   # (FALCON_*_WASM) from scripts/build-components.sh.
   cascade-split:
     name: cascade-split twin differential + cascade-sitl-wasm tests
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","rust-cpu"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -296,7 +308,7 @@ jobs:
     name: Script portability (shellcheck + Python 3.9 floor)
     # Required check: a fork PR runs it on a hosted runner, like every other
     # job here, or the check never reports (#638 finding 13).
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
