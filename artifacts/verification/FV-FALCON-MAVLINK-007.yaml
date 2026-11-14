@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MAVLINK-007
     type: sw-verification
     title: "MAVLink2 frames with any incompat flag are rejected, at the codec and at the command bridge"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-MAVLINK-P07. Each step names the test that proves
       one clause:
