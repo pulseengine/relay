@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MAVLINK-P07
     type: sw-req
     title: "MAVLINK-P07: Frames with any incompat flag are rejected until signing is implemented"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0
     description: >
       The MAVLink codec shall reject a MAVLink2 frame whose incompat_flags

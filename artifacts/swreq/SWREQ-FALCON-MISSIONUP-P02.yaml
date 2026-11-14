@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MISSIONUP-P02
     type: sw-req
     title: "MISSIONUP-P02 — an uploaded mission is validated item by item, staged, and committed whole"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0
     description: >
       Before this requirement an uploaded MISSION_ITEM_INT was stored unchecked,
