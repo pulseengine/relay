@@ -453,7 +453,6 @@ dependencies = [
  "gz-transport",
  "libm",
  "relay-adrc",
- "relay-arm",
  "relay-att",
  "relay-ekf",
  "relay-fsm",
@@ -917,13 +916,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "relay-arm"
-version = "0.1.0"
-dependencies = [
- "proptest",
-]
-
-[[package]]
 name = "relay-att"
 version = "0.1.0"
 dependencies = [
@@ -1148,14 +1140,6 @@ name = "relay-mm"
 version = "0.1.0"
 dependencies = [
  "wit-bindgen 0.63.0",
-]
-
-[[package]]
-name = "relay-modextra"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "relay-math",
 ]
 
 [[package]]

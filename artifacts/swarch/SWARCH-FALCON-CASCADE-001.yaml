@@ -80,7 +80,8 @@ artifacts:
       ATT-P01..P03 (relay-att quaternion-error controller; the partition flies
       GeoAtt), POS-P01..P03 (relay-pos; the position loop is inline in
       `CascadePartition`), ARM-P01 (relay-arm `ArmingSequencer`; arming is
-      relay-fsm + the pre-arm table), and STREAM-P05/P06/P07/P09 (the legacy
+      relay-fsm + the pre-arm table; relay-arm and ARM-P01 retired in
+      falcon-v1.143.0), and STREAM-P05/P06/P07/P09 (the legacy
       falcon-rate / -position / -attitude / -mixer P3 stream components).
       Those 15 now have no sw-arch allocation, which is the true state, not a
       gap to re-home onto an invented component. Still allocated with a
@@ -143,8 +144,6 @@ artifacts:
         target: SWREQ-FALCON-MIXMULTI-P01
       - type: allocated-from
         target: SWREQ-FALCON-MODE-P01
-      - type: allocated-from
-        target: SWREQ-FALCON-MODEXTRA-P01
       - type: allocated-from
         target: SWREQ-FALCON-MOTORDYN-P01
       - type: allocated-from

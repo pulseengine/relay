@@ -2176,7 +2176,8 @@ artifacts:
           full closed-loop cascade (which also adopts mix_thrust_floor);
           body_tilt_rad helper; `arming` / `arming-ungated` diagnostic
           scenarios.
-        - SWREQ-FALCON-ARM-P01 + FV-FALCON-ARM-001.
+        - SWREQ-FALCON-ARM-P01 + FV-FALCON-ARM-001 (both retired with
+          relay-arm in falcon-v1.143.0; see SWREQ-FALCON-ORPHAN-P01).
         - bench-evidence/gz-sim/2026-05-29-v0.19.9-*.md.
 
       Verification:
@@ -2963,17 +2964,13 @@ artifacts:
     fields:
       release-target: "SITL: guided yaw points at a POI through a leg; follow-me tracks a moving pose; land-in-place + RTL-altitude-override behave per spec"
       px4-equivalent: "PX4 Guided / Follow Me / Land / RTL options"
-      crate: crates/relay-modextra (new)
+      crate: "crates/relay-modextra (new; RETIRED in falcon-v1.143.0, no consumer; POI yaw is backlog SWREQ-FALCON-POIYAW-P01)"
       video: >
         A mission where the camera-yaw tracks a point of interest, then follow-me
         chases a moving target, then a land-in-place on command. Real SITL telemetry.
     links:
       - type: depends-on
         target: FEAT-FALCON-v1.51
-      - type: depends-on
-        target: SWREQ-FALCON-MODEXTRA-P01
-      - type: verified-by
-        target: FV-FALCON-MODEXTRA-001
 
   - id: FEAT-FALCON-v1.53
     type: feature

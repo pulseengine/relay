@@ -9,7 +9,7 @@ rust-version.workspace = true
 
 [lib]
 # Plain Rust + proptest + Kani (f32 filter; off the integer Verus track,
-# same posture as relay-mix-quad / relay-arm). See docs/IEKF-DESIGN.md.
+# same posture as relay-mix-quad). See docs/IEKF-DESIGN.md.
 path = "plain/src/lib.rs"
 crate-type = ["rlib"]
 

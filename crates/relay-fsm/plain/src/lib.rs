@@ -3,7 +3,8 @@
 //! The autonomy layer the clean-room audit found missing: a real flight-mode
 //! state machine — `Disarmed → Armed → Takeoff → Loiter ↔ Mission → Land →
 //! Disarmed`, with `Rtl` reachable from any flying state — sitting over the
-//! `relay-arm` arming gate.
+//! arming gate (falcon-core spin-up and the pre-arm table; the original
+//! `relay-arm` sequencer was retired in falcon-v1.143.0).
 //!
 //! The transitions are **safety-guarded** and the two safety invariants are
 //! Kani-proved:

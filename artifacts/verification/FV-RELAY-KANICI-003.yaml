@@ -23,6 +23,8 @@ artifacts:
         falcon-gnss-ubx   (1)  u-blox UBX GNSS parse bound
         relay-log         (2)  logging ring / record framing
         relay-modextra    (2)  mode-extension transition totality
+                               (crate RETIRED in falcon-v1.143.0: no consumer,
+                               SWREQ-FALCON-ORPHAN-P01; harnesses gone with it)
 
       ENFORCEMENT: the 11 crates were added to the kani.yml model-checking
       matrix (the roll-up "Kani gate" required check now covers them). With
@@ -50,7 +52,6 @@ artifacts:
         - run: "cargo kani -p falcon-esc-dshot"
         - run: "cargo kani -p falcon-gnss-ubx"
         - run: "cargo kani -p relay-log"
-        - run: "cargo kani -p relay-modextra"
     links:
       - type: verifies
         target: SWREQ-FALCON-CPREV-P01
@@ -72,5 +73,3 @@ artifacts:
         target: SWREQ-FALCON-DC-P04
       - type: verifies
         target: SWREQ-FALCON-LOG-P01
-      - type: verifies
-        target: SWREQ-FALCON-MODEXTRA-P01

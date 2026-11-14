@@ -7,7 +7,8 @@ artifacts:
     description: >
       The flight stack shall have a flight-mode state machine — Disarmed →
       Armed → Takeoff → Loiter ↔ Mission → Land → Disarmed, with Rtl reachable
-      from any flying state — over the relay-arm arming gate (the clean-room
+      from any flying state — over the arming gate (originally relay-arm, retired in falcon-v1.143.0;
+      arming is now falcon-core spin-up + the pre-arm table) (the clean-room
       audit found no such FSM, only fixed scenario dispatch). Transitions are
       safety-guarded and total. Two safety invariants shall hold for ANY
       (state, event, gates):
