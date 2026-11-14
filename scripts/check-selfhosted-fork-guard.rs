@@ -11,8 +11,11 @@
 //!      matrix variant of that form (MATRIX_FORM below), which also sends a
 //!      self-hosted matrix leg to the hosted runner for a foreign head.
 //!
-//! Every `runs-on:` must also be one of those forms, a plain
-//! `${{ matrix.<id> }}` reference, or a literal label: a runner taken from
+//! Every `runs-on:` is ALLOWLISTED: a hosted image (ubuntu-*, macos-*,
+//! windows-*), the fail-closed form, the matrix form, or a plain
+//! `${{ matrix.<id> }}` whose every literal value is a hosted image. GitHub
+//! matches labels, so `light` or `[linux, light]` reach the self-hosted pool
+//! without the word self-hosted. A runner taken from
 //! needs.*.outputs, inputs, vars or github.* is rejected, because a step can
 //! compute a self-hosted label into a job output and no label appears here.
 //! A block-list or map runs-on (a runner group) is rejected too.
@@ -76,12 +79,64 @@ fn strip_comment(line: &str) -> &str {
     line
 }
 
-/// `${{ matrix.<ident> }}` exactly. Its values are checked where they are
-/// written (a self-hosted `runner:` must sit in a job with the matrix form).
-fn is_plain_matrix_ref(v: &str) -> bool {
+/// The key of `${{ matrix.<ident> }}` exactly, else None.
+fn plain_matrix_key(v: &str) -> Option<&str> {
     v.strip_prefix("${{ matrix.")
         .and_then(|r| r.strip_suffix(" }}"))
-        .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+}
+
+/// A GitHub-hosted image name: ubuntu-*, macos-* or windows-*.
+fn is_hosted(v: &str) -> bool {
+    let v = v.trim().trim_matches(|c| c == '\'' || c == '"');
+    ["ubuntu-", "macos-", "windows-"].iter().any(|p| {
+        v.strip_prefix(p)
+            .is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+    })
+}
+
+/// Items of a YAML flow list `[a, "b"]`, else None.
+fn flow_items(v: &str) -> Option<Vec<String>> {
+    let inner = v.trim().strip_prefix('[')?.strip_suffix(']')?;
+    Some(
+        inner
+            .split(',')
+            .map(|i| i.trim().trim_matches(|c| c == '\'' || c == '"').to_string())
+            .filter(|i| !i.is_empty())
+            .collect(),
+    )
+}
+
+/// Every literal value written for matrix key `key` in a job's lines: inline
+/// (`key: v`, `- key: v`, `key: [a, b]`) or as a block list under `key:`.
+fn matrix_values(job_lines: &[&str], key: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let head = format!("{key}:");
+    for (i, raw) in job_lines.iter().enumerate() {
+        let t = strip_comment(raw).trim();
+        let t = t.strip_prefix("- ").unwrap_or(t);
+        let Some(rest) = t.strip_prefix(&head) else { continue };
+        let rest = rest.trim();
+        if !rest.is_empty() {
+            out.push(rest.to_string());
+            continue;
+        }
+        let ind = indent(raw);
+        for l in &job_lines[i + 1..] {
+            let lt = strip_comment(l).trim();
+            if lt.is_empty() {
+                continue;
+            }
+            if indent(l) <= ind && !lt.starts_with("- ") || indent(l) < ind {
+                break;
+            }
+            match lt.strip_prefix("- ") {
+                Some(item) if !item.contains(':') => out.push(item.trim().to_string()),
+                _ => break,
+            }
+        }
+    }
+    out
 }
 
 /// A `key: |` / `key: >-` style line, whose following deeper lines are text.
@@ -149,6 +204,7 @@ fn check_workflow(name: &str, text: &str) -> Report {
     let mut jobs_indent: Option<usize> = None;
     let mut job_indent: Option<usize> = None;
     let mut job = String::from("?");
+    let mut job_span = (0usize, 0usize); // current job's line range
     // Indent of an open block scalar (`run: |`, `body: >-`); its body is shell
     // or prose, not workflow structure, and is skipped.
     let mut block: Option<usize> = None;
@@ -177,10 +233,14 @@ fn check_workflow(name: &str, text: &str) -> Report {
             let ji = *job_indent.get_or_insert(ind);
             if ind == ji && t.ends_with(':') {
                 job = t.trim_end_matches(':').to_string();
-                // Look ahead for this job's runs-on to decide matrix trust.
-                job_matrix_ok = lines[n + 1..]
+                let len = lines[n + 1..]
                     .iter()
                     .take_while(|l| strip_comment(l).trim().is_empty() || indent(l) > ji)
+                    .count();
+                job_span = (n + 1, n + 1 + len);
+                // Look ahead for this job's runs-on to decide matrix trust.
+                job_matrix_ok = lines[job_span.0..job_span.1]
+                    .iter()
                     .any(|l| strip_comment(l).trim() == format!("runs-on: {MATRIX_FORM}"));
                 continue;
             }
@@ -191,10 +251,36 @@ fn check_workflow(name: &str, text: &str) -> Report {
         if let Some(v) = t.strip_prefix("runs-on:") {
             let v = v.trim();
             let at = format!("{name}:{} ({job})", n + 1);
-            if v.is_empty() || v.starts_with('{') {
-                bad.push(format!("{at}: runs-on as a block list or map (e.g. a runner group) is not an accepted shape"));
-            } else if v.contains("${{") && !t.contains("self-hosted") && !is_plain_matrix_ref(v) {
-                bad.push(format!("{at}: runs-on expression is neither the fail-closed form nor a plain matrix.* reference"));
+            let job_lines = &lines[job_span.0..job_span.1];
+            // ALLOWLIST. GitHub matches labels, so `light` or `[linux, light]`
+            // reach the self-hosted pool without the word self-hosted.
+            let ok = if is_runs_on_form(v) {
+                true
+            } else if v == MATRIX_FORM {
+                // Each runner is a hosted image or a self-hosted label list
+                // (which the form routes away from a foreign head). A custom
+                // label list without `self-hosted` would slip past the guard.
+                let vals = matrix_values(job_lines, "runner");
+                !vals.is_empty()
+                    && vals.iter().all(|x| {
+                        let items = flow_items(x);
+                        match items {
+                            Some(it) => it.iter().any(|i| i == "self-hosted") || it.iter().all(|i| is_hosted(i)),
+                            None => is_hosted(x),
+                        }
+                    })
+            } else if let Some(key) = plain_matrix_key(v) {
+                let vals = matrix_values(job_lines, key);
+                !vals.is_empty()
+                    && vals.iter().all(|x| match flow_items(x) {
+                        Some(it) => !it.is_empty() && it.iter().all(|i| is_hosted(i)),
+                        None => is_hosted(x),
+                    })
+            } else {
+                is_hosted(v)
+            };
+            if !ok {
+                bad.push(format!("{at}: runs-on is not a hosted image, the fail-closed form, or a matrix whose every runner is a hosted image"));
             }
         }
         if !t.contains("self-hosted") {
@@ -202,11 +288,8 @@ fn check_workflow(name: &str, text: &str) -> Report {
         }
         seen += 1;
         let at = format!("{name}:{} ({job})", n + 1);
-        if let Some(v) = t.strip_prefix("runs-on:") {
-            let v = v.trim();
-            if !(is_runs_on_form(v) || (v == MATRIX_FORM && job_matrix_ok)) {
-                bad.push(format!("{at}: runs-on is not the fail-closed same-repo form"));
-            }
+        if t.starts_with("runs-on:") {
+            // Judged by the allowlist above.
         } else if t.starts_with("runner:") || t.starts_with("- runner:") {
             if !job_matrix_ok {
                 bad.push(format!("{at}: self-hosted matrix runner in a job whose runs-on is not the fail-closed matrix form"));
@@ -378,7 +461,7 @@ mod tests {
 
     #[test]
     fn plain_matrix_and_literal_hosted_runners_pass() {
-        for v in ["${{ matrix.os }}", "ubuntu-latest", "macos-14"] {
+        for v in ["ubuntu-latest", "macos-14", "windows-2022"] {
             let r = check_workflow("t.yml", &wf("on: [pull_request]", v));
             assert_eq!(r, Report { seen: 0, bad: vec![] }, "{v}");
         }
@@ -390,6 +473,34 @@ mod tests {
         let map = "on: [push]\njobs:\n  a:\n    runs-on: { group: fleet }\n";
         assert_eq!(check_workflow("t.yml", list).bad.len(), 1);
         assert_eq!(check_workflow("t.yml", map).bad.len(), 1);
+    }
+
+    #[test]
+    fn bare_and_listed_custom_labels_are_rejected() {
+        for v in ["light", "[linux, light]", "[light]", "rust-cpu"] {
+            let r = check_workflow("t.yml", &wf("on: [schedule]", v));
+            assert_eq!(r.bad.len(), 1, "{v}: {r:?}");
+        }
+    }
+
+    #[test]
+    fn plain_matrix_ref_needs_every_value_hosted() {
+        let job = |axis: &str| format!("on: [push]\njobs:\n  a:\n    strategy:\n      matrix:\n{axis}\n    runs-on: ${{{{ matrix.os }}}}\n");
+        assert!(check_workflow("t.yml", &job("        os: [ubuntu-latest, macos-14]")).bad.is_empty());
+        assert!(check_workflow("t.yml", &job("        os:\n          - ubuntu-24.04\n          - windows-2022")).bad.is_empty());
+        assert!(check_workflow("t.yml", &job("        include:\n          - os: ubuntu-latest\n          - os: macos-14")).bad.is_empty());
+        assert_eq!(check_workflow("t.yml", &job("        os: [ubuntu-latest, light]")).bad.len(), 1);
+        assert_eq!(check_workflow("t.yml", &job("        include:\n          - os: ubuntu-latest\n          - os: light")).bad.len(), 1);
+        assert_eq!(check_workflow("t.yml", &job("        os: ${{ fromJSON(vars.OSES) }}")).bad.len(), 1);
+        // A matrix ref with no literal values for that key compared nothing.
+        assert_eq!(check_workflow("t.yml", &job("        arch: [x64]")).bad.len(), 1);
+    }
+
+    #[test]
+    fn matrix_form_rejects_a_custom_label_runner() {
+        let job = "on: [pull_request]\njobs:\n  test:\n    strategy:\n      matrix:\n        include:\n          - runner: [linux, light]\n";
+        let t = format!("{job}    runs-on: {MATRIX_FORM}\n");
+        assert_eq!(check_workflow("t.yml", &t).bad.len(), 1);
     }
 
     #[test]
