@@ -29,7 +29,10 @@ permissions:
 jobs:
   readiness:
     name: Next release readiness
-    runs-on: ubuntu-latest
+    # Self-hosted `light`: the org gets ~5 hosted runner slots, so hosted jobs
+    # queued for hours (pulseengine.eu owner decision 2026-11-14). Schedule and
+    # dispatch only, so no fork-PR routing is needed.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       # Tags are load-bearing here: "the next release" is defined as the lowest
@@ -41,6 +44,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # `light` boxes ship no gh (#436); the Report step lists issues with it.
+      - uses: ./.github/actions/setup-gh
 
       - name: Install rust-script
         # No `|| true`: a missing rust-script used to surface later as exit 127,
@@ -62,7 +68,7 @@ jobs:
           # never reached the summary and the job went red every night. The
           # first scheduled run (2026-09-16) did exactly that.
           READY=0
-          ./scripts/release-readiness.rs "${ARGS[@]}" > /tmp/readiness.md || READY=$?
+          ./scripts/release-readiness.rs "${ARGS[@]}" > "$RUNNER_TEMP/readiness.md" || READY=$?
           if [ "$READY" -gt 1 ]; then
             echo "## Release readiness: UNKNOWN — could not evaluate (exit $READY). This is not a 'not ready'; see the log." >> "$GITHUB_STEP_SUMMARY"
             echo "::error::release readiness could not be evaluated (exit $READY) — see the log; this is not a 'not ready'"
@@ -70,7 +76,7 @@ jobs:
           fi
 
           {
-            cat /tmp/readiness.md
+            cat "$RUNNER_TEMP/readiness.md"
             echo
             echo "### Open issues"
             echo
@@ -83,7 +89,7 @@ jobs:
             echo "release-time surprise."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          cat /tmp/readiness.md
+          cat "$RUNNER_TEMP/readiness.md"
 
           # Never fail the job on "not ready" — that is the normal state for most
           # of a release cycle, and a job that is red by default stops being read.
