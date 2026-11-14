@@ -13,6 +13,12 @@
 //!    produces a horizontal velocity correction toward the marker, clamped to a
 //!    max speed, plus a within-radius convergence check.
 //!
+//! **Dispositions (SWREQ-FALCON-ORPHAN-P01, maintainer decision 2026-11-13).**
+//! Collision prevention is to be WIRED into falcon-core in v1.144, fed by a
+//! forward rangefinder added to the first-vehicle BOM. Precision landing is
+//! PARKED: no downward camera or marker source exists on any planned vehicle,
+//! so it is excluded from every capability claim until one does.
+//!
 //! Verification split (the codebase pattern): the COMPARISON / clamp logic is
 //! Kani-proven (cap never exceeds the command or the allowed speed; the
 //! correction magnitude never exceeds the max and points toward the marker);

@@ -11,7 +11,10 @@ artifacts:
       them — the same gap that left relay-rc unenforced for ~40 releases and
       relay-mix-quad's MIX-P05..08 unenforced until v1.102. This artifact
       enforces the 8 flight-critical control + estimator proofs (4 crates),
-      all of which VERIFY locally with 0 failures and now run on every PR:
+      all of which VERIFY locally with 0 failures and now run on every PR.
+      relay-arm and its two harnesses were RETIRED in falcon-v1.143.0 (the
+      flight path arms through falcon-core; nothing used the sequencer, per
+      SWREQ-FALCON-ORPHAN-P01), so 6 proofs in 3 crates remain enforced here:
 
         relay-arm  (2)  verify_arming_total          — tick() is total: never
                                                         panics, output finite,
@@ -53,19 +56,15 @@ artifacts:
     fields:
       method: model-checking
       kani-properties: >
-        verify_arming_total, verify_arming_torque_gated,
         verify_command_filter_saturation, verify_from_bandwidth_separation,
         verify_shield_contract, verify_nis3_total,
         verify_spoof_monitor_no_false_alarm, verify_clamp_factor_bounded
       steps:
-        - run: "cargo kani -p relay-arm   # Kani CI workflow (CBMC; heavy)"
         - run: "cargo kani -p relay-adrc  # Kani CI workflow"
         - run: "cargo kani -p relay-geo   # Kani CI workflow"
         - run: "cargo kani -p relay-iekf  # Kani CI workflow"
-        - run: cargo clippy -p relay-arm -p relay-adrc -p relay-geo -p relay-iekf --all-targets -- -D warnings
+        - run: cargo clippy -p relay-adrc -p relay-geo -p relay-iekf --all-targets -- -D warnings
     links:
-      - type: verifies
-        target: SWREQ-FALCON-ARM-P01
       - type: verifies
         target: SWREQ-FALCON-ADRC-P05
       - type: verifies

@@ -147,12 +147,11 @@ jobs:
           # CI never ran them (the same orphaned-proof gap that bit relay-rc
           # for ~40 releases and relay-mix-quad's MIX-P05..08). A workspace
           # scan found 36/142 Kani harnesses unenforced across 16 crates; this
-          # closes the highest-value subset — the 8 control/estimator proofs:
-          #   relay-arm   verify_arming_total / verify_arming_torque_gated
+          # closes the highest-value subset — the control/estimator proofs
+          # (relay-arm's two were here until the crate was retired, v1.143):
           #   relay-adrc  verify_command_filter_saturation / _from_bandwidth_separation
           #   relay-geo   verify_shield_contract
           #   relay-iekf  verify_nis3_total / _spoof_monitor_no_false_alarm / _clamp_factor_bounded
-          - relay-arm
           - relay-adrc
           - relay-geo
           - relay-iekf
@@ -194,7 +193,6 @@ jobs:
           # ~30 s locally).
           - falcon-hitl
           - relay-log
-          - relay-modextra
           # falcon-cm-rt (#574): the bump arena behind every published
           # component's `cabi_realloc`, and the CallScope protocol that
           # reclaims it per call. Previously ZERO harnesses and no entry here.

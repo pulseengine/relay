@@ -26,14 +26,9 @@ use falcon_config::YawMode;
 use falcon_core::FlightCore;
 use flightcore::SitlBackend;
 use physics::{GazeboPhysics, MockPhysics, Physics};
-use relay_arm::{ARMED, ArmingConfig, ArmingSequencer};
-use relay_att::{AttController, Timestamp as AttTimestamp};
-use relay_ekf::{Ekf, Timestamp as EkfTimestamp};
 use relay_geo::GeoAtt;
 use relay_iekf::{Iekf, Imu as IekfImu, NavState};
 use relay_mix_quad::QuadMixer;
-use relay_pos::{PosController, PositionSetpoint, Timestamp as PosTimestamp};
-use relay_rate::{RatePid, Timestamp as RateTimestamp};
 use relay_traj::{RefGovernor, Segment3};
 use std::fs;
 use std::io::Write;
@@ -125,13 +120,10 @@ const DEFAULT_SCENARIO: &str = "flightcore";
 const SCENARIOS: &[&str] = &[
     "open-loop-climb",
     "alt-only",
-    "alt-rate",
     "frame-roll",
     "frame-pitch",
     "frame-yaw",
     "yaw-probe",
-    "arming",
-    "arming-ungated",
     "geo-hover",
     "mission",
     "flightcore",
@@ -219,13 +211,10 @@ fn run_scenario(
     match scenario {
         "open-loop-climb" => run_open_loop_climb(physics, duration_s, evidence),
         "alt-only" => run_alt_only_hover(physics, duration_s, evidence),
-        "alt-rate" => run_alt_rate_hover(physics, duration_s, evidence),
         "frame-roll" => run_frame_check(physics, 0, duration_s),
         "frame-pitch" => run_frame_check(physics, 1, duration_s),
         "frame-yaw" => run_frame_check(physics, 2, duration_s),
         "yaw-probe" => run_yaw_probe(physics, duration_s),
-        "arming" => run_arming_check(physics, duration_s, true),
-        "arming-ungated" => run_arming_check(physics, duration_s, false),
         "geo-hover" => run_geo_hover(physics, duration_s, evidence),
         "mission" => run_mission(physics, duration_s, evidence),
         "flightcore" => run_flightcore(physics, 2.0, duration_s, None, evidence),
@@ -413,153 +402,6 @@ fn run_yaw_probe(physics: &mut dyn Physics, duration_s: f32) -> bool {
     true
 }
 
-/// v0.19.9 — arming-sequencer ORACLE + position-hold DIAGNOSTIC.
-///
-/// Runs the verified `ArmingSequencer` ahead of the full cascade against
-/// gz physics. Two distinct questions, deliberately separated:
-///
-/// 1. **Does the sequencer deliver a clean handoff?** (its job, gated on)
-///    PASS = it armed (level gate cleared) and tilt stayed below the
-///    tumble threshold (30°) through the handoff window (spawn → 1.5 s
-///    past arming). Empirically the gated startup holds 0° well past
-///    arming — the sequencer does its job.
-///
-/// 2. **Does full position-hold then hover?** (diagnostic, NOT gated on)
-///    `run_peak` (whole-run peak tilt) is reported as a diagnostic. It
-///    is large (~88°): the body holds level for ~3.5 s then tips and
-///    drifts once the position loop dominates. That is the documented
-///    downstream residual — `relay-pos` thrust normalisation + RC#3
-///    (EKF attitude during accel) — NOT a startup-gating failure. The
-///    arming sequencer cannot fix a downstream cascade instability, and
-///    v0.19.9 does not claim it does. This is the falsification finding
-///    that localises the v0.19.10+ target.
-///
-/// `gated`: when false, torque authority is forced on from t=0 (the
-/// pre-v0.19.9 behaviour). The `arming-ungated` baseline confirms the
-/// startup transient itself is benign in the nominal (level) gz spawn —
-/// i.e. the tip-over is genuinely downstream, not at the spawn.
-fn run_arming_check(physics: &mut dyn Physics, duration_s: f32, gated: bool) -> bool {
-    const TUMBLE_RAD: f32 = 0.52; // ~30° — past this the body has tipped
-    // Full cascade — this is where RC#1 lives: relay-pos sees the large
-    // initial position error at spawn and commands an aggressive attitude
-    // setpoint that ATT+RATE chase before the body is stable, tumbling it.
-    let mut ekf = Ekf::new();
-    let mut rate_pid = RatePid::new();
-    let mut att = AttController::new();
-    let mut pos = PosController::new();
-    let mut mixer = QuadMixer::new();
-    let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
-    let setpoint_ned = [0.0_f32, 0.0, -2.0];
-    let setpoint = PositionSetpoint::hover_at(setpoint_ned);
-    let dt = 0.01_f32;
-    let n = (duration_s / dt) as u32;
-    let tick_period = Duration::from_secs_f32(dt);
-    let pace_real_time = physics.counters().is_some();
-
-    let mut peak_tilt = 0.0_f32;
-    let mut peak_tilt_handoff = 0.0_f32;
-    let mut armed_at: Option<f32> = None;
-    let mut last_tilt = 0.0_f32;
-    let mut last_pos_ned: Option<[f32; 3]> = None;
-
-    let started_at = Instant::now();
-    for step in 0..n {
-        let tick_start = Instant::now();
-        let t = step as f32 * dt;
-        let (mut imu_sample, pos_ned) = physics.measure(0.0);
-        imu_sample.time = ekf_ts_of(t);
-
-        let est = ekf.tick(imu_sample);
-        let v_ned = match last_pos_ned {
-            Some(p) => [
-                (pos_ned[0] - p[0]) / dt,
-                (pos_ned[1] - p[1]) / dt,
-                (pos_ned[2] - p[2]) / dt,
-            ],
-            None => [0.0; 3],
-        };
-        last_pos_ned = Some(pos_ned);
-        let att_sp = pos.tick(pos_ts_of(t), pos_ned, v_ned, est.quaternion, setpoint);
-        let rate_sp = att.tick(att_ts_of(t), est.quaternion, att_sp.quaternion);
-
-        let tilt = body_tilt_rad(imu_sample.accel_body);
-        last_tilt = tilt;
-        if tilt > peak_tilt {
-            peak_tilt = tilt;
-        }
-        let arm = seq.tick(tilt, true);
-        if arm.phase == ARMED && armed_at.is_none() {
-            armed_at = Some(t);
-        }
-        // Handoff window = spawn → 1.5 s past arming: the interval the
-        // sequencer is responsible for (get airborne + hand off level).
-        // Tilt AFTER this is the downstream position-loop residual, NOT
-        // a startup-gating failure, so it is reported but not gated on.
-        if armed_at.map(|a| t <= a + 1.5).unwrap_or(true) && tilt > peak_tilt_handoff {
-            peak_tilt_handoff = tilt;
-        }
-        // `gated`: the sequencer decides torque authority. Ungated
-        // baseline: torque from t=0 (pre-v0.19.9), thrust_scale forced 1.
-        let authority = if gated { arm.torque_authority } else { true };
-        let scale = if gated { arm.thrust_scale } else { 1.0 };
-        let torque_raw = if authority {
-            rate_pid.tick(rate_ts_of(t), imu_sample.gyro_body, rate_sp)
-        } else {
-            [0.0_f32; 3]
-        };
-        let torque = frame_correct_torque(torque_raw);
-        let motors = mixer.mix_thrust_floor(torque, att_sp.thrust * scale, 0.5 * scale);
-        physics.step(motors, dt);
-
-        if pace_real_time {
-            let used = tick_start.elapsed();
-            if used < tick_period {
-                std::thread::sleep(tick_period - used);
-            }
-        }
-    }
-    let wall = started_at.elapsed();
-    let armed = armed_at.is_some();
-    // The sequencer's responsibility is the HANDOFF: arm only after a
-    // confirmed-level window and deliver a level body to the cascade.
-    // PASS gates on the handoff window only. `peak_tilt` (whole run) is
-    // reported as a DIAGNOSTIC of the downstream position-hold residual
-    // (relay-pos thrust + RC#3 EKF-during-accel) — out of v0.19.9 scope.
-    let clean_handoff = peak_tilt_handoff < TUMBLE_RAD;
-    // Honest scope: PASS means the sequencer delivered a clean handoff.
-    // The gated and ungated handoffs are BOTH clean (the nominal level
-    // spawn is benign with or without torque gating) — so this is not a
-    // gated-vs-ungated contrast; it is the finding that the tip-over is
-    // downstream, not at startup. The label says "(handoff)" and the
-    // NOTE reports the whole-run tip so PASS is never read as "hovers".
-    let pass = armed && clean_handoff;
-    println!(
-        "  arming-check[{}]: armed_at={} handoff_peak={:.1}° run_peak={:.1}° final={:.1}° (tumble>{:.0}°)  [{}]  wall={:.2}s",
-        if gated { "gated" } else { "UNGATED-baseline" },
-        armed_at
-            .map(|t| format!("{t:.2}s"))
-            .unwrap_or_else(|| "NEVER".into()),
-        peak_tilt_handoff.to_degrees(),
-        peak_tilt.to_degrees(),
-        last_tilt.to_degrees(),
-        TUMBLE_RAD.to_degrees(),
-        if pass {
-            "PASS ✓ (handoff)"
-        } else {
-            "FAIL ✗"
-        },
-        wall.as_secs_f32(),
-    );
-    if pass && peak_tilt >= TUMBLE_RAD {
-        println!(
-            "  NOTE: clean gated handoff, but the body tips later (run_peak={:.0}°) — \
-             downstream position-hold residual (relay-pos thrust + RC#3), tracked for v0.19.10+.",
-            peak_tilt.to_degrees(),
-        );
-    }
-    pass
-}
-
 /// v0.19.5 — alt-only thrust + rate-pid attitude damping (zero rate
 /// setpoint = "stay level"). The minimal closed-loop hover: P+D
 /// altitude controller for thrust + relay-rate's verified PID for
@@ -607,6 +449,88 @@ impl Mission {
         let s = Segment3::rest_to_rest(self.waypoints[leg], self.waypoints[leg + 1], self.leg_time)
             .eval(tl);
         (s.pos, s.vel, s.acc, s.jerk)
+    }
+}
+
+/// Bench-only spin-up gate for the legacy geo cascade (`geo-hover`, `mission`).
+///
+/// This replaces `relay-arm`'s `ArmingSequencer`, retired in v1.143: the
+/// flight path arms through `falcon-core` (spin-up, keep_warm, pre-arm rows),
+/// and nothing in the flight path used the sequencer. The geo cascade is kept
+/// because it carries the A/B knobs behind the gz bench lines of
+/// FV-FALCON-EKF-002 and FV-FALCON-SPOOF-001 (NO_ADAPTIVE_Q, FDI_OFF,
+/// SPOOF_WALKOFF, REF_GOV), so this gate reproduces the sequencer's schedule
+/// tick for tick: the first tick requests arming (scale 0), thrust then ramps
+/// linearly over `spinup_ticks`, and torque authority is granted only after
+/// `level_ticks` consecutive ticks with |tilt| below `tilt_thresh_rad`
+/// (a NaN tilt resets the count). It is host bench code, not a flight
+/// capability, and carries no proof.
+struct BenchSpinUp {
+    started: bool,
+    spinning: bool,
+    armed: bool,
+    ticks: u32,
+    level: u32,
+    spinup_ticks: u32,
+    level_ticks: u32,
+    tilt_thresh_rad: f32,
+}
+
+struct BenchArm {
+    torque_authority: bool,
+    thrust_scale: f32,
+}
+
+impl BenchSpinUp {
+    fn new(spinup_ticks: u32, level_ticks: u32, tilt_thresh_rad: f32) -> Self {
+        BenchSpinUp {
+            started: false,
+            spinning: false,
+            armed: false,
+            ticks: 0,
+            level: 0,
+            spinup_ticks,
+            level_ticks,
+            tilt_thresh_rad,
+        }
+    }
+
+    /// One control tick. `_arm_request` is always true at the call site; the
+    /// parameter keeps the call shape of the retired sequencer.
+    fn tick(&mut self, tilt_rad: f32, _arm_request: bool) -> BenchArm {
+        if !self.started {
+            self.started = true;
+            self.spinning = true;
+            self.ticks = 0;
+        } else if self.spinning {
+            self.ticks = self.ticks.saturating_add(1);
+            if self.ticks >= self.spinup_ticks {
+                self.spinning = false;
+                self.level = 0;
+            }
+        } else if !self.armed {
+            if tilt_rad.abs() < self.tilt_thresh_rad {
+                self.level = self.level.saturating_add(1);
+            } else {
+                self.level = 0;
+            }
+            if self.level >= self.level_ticks {
+                self.armed = true;
+            }
+        }
+        let thrust_scale = if self.spinning {
+            if self.spinup_ticks == 0 {
+                1.0
+            } else {
+                (self.ticks as f32 / self.spinup_ticks as f32).clamp(0.0, 1.0)
+            }
+        } else {
+            1.0
+        };
+        BenchArm {
+            torque_authority: self.armed,
+            thrust_scale,
+        }
     }
 }
 
@@ -717,11 +641,7 @@ fn run_geo_cascade(
     // Arming ticks are wall-clock-derived (0.3 s spin-up, 0.1 s level) so
     // it works at any loop rate (100 Hz → 30/10, 1 kHz → 300/100).
     let arm_dt = cfg.pos.loop_dt.max(1e-4);
-    let mut seq = ArmingSequencer::new(ArmingConfig {
-        spinup_ticks: (0.3 / arm_dt) as u32,
-        level_ticks_required: (0.1 / arm_dt) as u32,
-        tilt_thresh_rad: 0.087,
-    });
+    let mut seq = BenchSpinUp::new((0.3 / arm_dt) as u32, (0.1 / arm_dt) as u32, 0.087);
     let geo = GeoAtt::new(cfg.to_geo_gains());
     let mut adrc = cfg.to_adrc();
     let use_adrc = cfg.pos.use_adrc;
@@ -1210,149 +1130,6 @@ fn run_geo_cascade(
     // over-confident estimator is unsafe even if this run's position
     // looked fine (it is the divergence precursor).
     final_dist < 0.5 && rms_steady < 1.0 && nees_ok
-}
-
-fn run_alt_rate_hover(
-    physics: &mut dyn Physics,
-    duration_s: f32,
-    mut evidence: Option<&mut EvidenceSink>,
-) -> bool {
-    let mut rate_pid = RatePid::new();
-    let mut mixer = QuadMixer::new();
-    // v0.19.9 — verified arming sequencer replaces the old `t < 0.5`
-    // spawn-hold. Torque authority engages ONLY after spin-up + a
-    // confirmed-level window (Kani-proven gating, relay-arm ARM-P01).
-    let mut seq = ArmingSequencer::new(ArmingConfig::falcon_quad_100hz());
-    let setpoint_d = -2.0_f32;
-    let hover_thrust = 0.72_f32;
-    let kp_alt = 0.05_f32;
-    // v0.19.8 — kd 0.15→0.30. With the thrust-floor mixer preserving
-    // collective, the altitude loop is decoupled from attitude; more
-    // derivative damps the climb overshoot (one run shot to 12 m).
-    let kd_alt = 0.30_f32;
-    let lp_alpha = 0.05_f32;
-    let dt = 0.01_f32;
-    let n = (duration_s / dt) as u32;
-    let tick_period = Duration::from_secs_f32(dt);
-    let pace_real_time = physics.counters().is_some();
-
-    let mut peak_dist_err = 0.0_f32;
-    let mut min_dist_seen = f32::INFINITY;
-    let mut sum_sq_steady = 0.0_f32;
-    let mut steady_count = 0_usize;
-    let steady_start_t = (duration_s - 5.0).max(0.0);
-    let mut last_pos_d: f32 = 0.0;
-    let mut v_d_filt: f32 = 0.0;
-    let mut last_pos_d_seen: f32 = 0.0;
-
-    let started_at = Instant::now();
-    for step in 0..n {
-        let tick_start = Instant::now();
-        let t = step as f32 * dt;
-
-        let (imu_sample, pos_ned) = physics.measure(0.0);
-        last_pos_d_seen = pos_ned[2];
-        let v_d_raw = (pos_ned[2] - last_pos_d) / dt;
-        v_d_filt = lp_alpha * v_d_raw + (1.0 - lp_alpha) * v_d_filt;
-        last_pos_d = pos_ned[2];
-
-        let alt_err = setpoint_d - pos_ned[2];
-        let thrust = (hover_thrust - kp_alt * alt_err + kd_alt * v_d_filt).clamp(0.0, 1.0);
-
-        // v0.19.9 — verified arming sequencer (relay-arm). Replaces the
-        // old time-only `t < 0.5` spawn-hold: torque authority engages
-        // ONLY after spin-up AND a confirmed-level window, so spawn
-        // transients (rotor imbalance + IMU noise) can never be converted
-        // into bang-bang torque before steady state establishes (RC#1).
-        // Gating is Kani-proven (ARM-P01); here it runs against gz physics.
-        let tilt = body_tilt_rad(imu_sample.accel_body);
-        let arm = seq.tick(tilt, true);
-        let torque_raw = if arm.torque_authority {
-            rate_pid.tick(rate_ts_of(t), imu_sample.gyro_body, [0.0_f32; 3])
-        } else {
-            [0.0_f32; 3]
-        };
-        // v0.19.6 — frame-correction is identity now that the SDF
-        // rotor index map is aligned to MIXER_X. The v0.19.5 negation
-        // hack is gone; the frame-check oracle confirms +torque →
-        // +rate (AGREE) on roll + pitch with no sign flip.
-        let torque = frame_correct_torque(torque_raw);
-
-        // v0.19.8 — thrust-priority mix with a 0.5 floor. Collective
-        // thrust is preserved exactly (torque columns are zero-sum),
-        // so the rate loop's attitude torque can no longer steal lift
-        // — the v0.19.7 altitude limit-cycle root cause. The 0.88
-        // thrust clamp above is now redundant but harmless.
-        // v0.19.9 — the arming sequencer ramps collective (and the floor)
-        // during spin-up so the props reach idle smoothly; thrust_scale
-        // is 1.0 once armed, recovering the v0.19.8 behaviour exactly.
-        let motors =
-            mixer.mix_thrust_floor(torque, thrust * arm.thrust_scale, 0.5 * arm.thrust_scale);
-        physics.step(motors, dt);
-
-        let dist = alt_err.abs();
-        if dist > peak_dist_err {
-            peak_dist_err = dist;
-        }
-        if dist < min_dist_seen {
-            min_dist_seen = dist;
-        }
-        if t >= steady_start_t {
-            sum_sq_steady += dist * dist;
-            steady_count += 1;
-        }
-        if let Some(ref mut e) = evidence {
-            e.write_tick(
-                step,
-                t,
-                pos_ned,
-                imu_sample.accel_body,
-                imu_sample.gyro_body,
-                motors,
-                physics.counters(),
-            );
-        }
-        if pace_real_time {
-            let used = tick_start.elapsed();
-            if used < tick_period {
-                std::thread::sleep(tick_period - used);
-            }
-        }
-    }
-    let wall = started_at.elapsed();
-    let final_dist = (setpoint_d - last_pos_d_seen).abs();
-    let rms_steady = if steady_count > 0 {
-        (sum_sq_steady / steady_count as f32).sqrt()
-    } else {
-        f32::NAN
-    };
-    let counters = physics.counters();
-    println!(
-        "  verdict: backend={} scenario=alt-rate steps={} final_dist={:.2}m peak_dist={:.2}m rms_steady={:.2}m  wall={:.2}s",
-        physics.name(),
-        n,
-        final_dist,
-        peak_dist_err,
-        rms_steady,
-        wall.as_secs_f32(),
-    );
-    if let Some((imu_recv, navsat_recv, motor_send)) = counters {
-        println!(
-            "  counters: imu_recv={imu_recv} navsat_recv={navsat_recv} motor_send={motor_send}",
-        );
-    }
-    if let Some(ref mut e) = evidence {
-        e.write_summary_hover(
-            n,
-            final_dist,
-            peak_dist_err,
-            rms_steady,
-            min_dist_seen,
-            wall.as_secs_f32(),
-            counters,
-        );
-    }
-    final_dist < 0.5 && rms_steady < 1.0
 }
 
 /// v0.19.5 diagnostic — altitude-only closed loop. Skips the full
@@ -2214,35 +1991,6 @@ err_n={:+.3} err_e={:+.3} est_vn={:+.3} est_ve={:+.3} gyro_z={:+.3} yaw={:+.4}",
         // the since-retired run_closed_loop_hover (#477), whose margins are
         // unmeasured.
         None => final_dist < 0.5 && rms_steady < 0.5 && final_horiz < 1.0 && peak_horiz < 1.0,
-    }
-}
-
-fn ekf_ts_of(secs: f32) -> EkfTimestamp {
-    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    EkfTimestamp {
-        seconds: secs as u64,
-        fraction: frac,
-    }
-}
-fn rate_ts_of(secs: f32) -> RateTimestamp {
-    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    RateTimestamp {
-        seconds: secs as u64,
-        fraction: frac,
-    }
-}
-fn att_ts_of(secs: f32) -> AttTimestamp {
-    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    AttTimestamp {
-        seconds: secs as u64,
-        fraction: frac,
-    }
-}
-fn pos_ts_of(secs: f32) -> PosTimestamp {
-    let frac = ((secs.fract() as f64) * ((1u64 << 32) as f64)) as u32;
-    PosTimestamp {
-        seconds: secs as u64,
-        fraction: frac,
     }
 }
 

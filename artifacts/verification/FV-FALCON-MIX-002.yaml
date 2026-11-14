@@ -42,7 +42,10 @@ artifacts:
           --scenario=alt-rate, 4/4 consecutive PASS at final_dist≈0.20 m,
           rms_steady≈0.21 m over 30 s — reliable controlled hover, where
           the v0.19.7 attitude-priority mixer was bistable (0.02 m one
-          run, 1.97 m the next).
+          run, 1.97 m the next). Historical: the alt-rate scenario was
+          removed from falcon-sitl-gz in falcon-v1.143.0 with relay-arm,
+          so this bench line can no longer be re-run; the Kani and unit
+          evidence above is what stands.
 
       Verification:
         - cargo kani --harness verify_mix_thrust_floor_bound → SUCCESSFUL.

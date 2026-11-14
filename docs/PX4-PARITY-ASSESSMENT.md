@@ -42,7 +42,7 @@ mechanical oracle (Kani / KAT / SITL test) before its release:
 | Airframe variants (hex / coax) | `relay-mix-multi` | v1.49 |
 | Sensor redundancy / voting / GPS-loss fallback | `relay-sensvote` | v1.50 |
 | Rangefinder + optical-flow fusion | `relay-flowrange` | v1.51 |
-| Mode completeness (follow-me, land-in-place, RTL override) | `relay-modextra` | v1.52 |
+| Mode completeness (follow-me, land-in-place, RTL override) | `relay-modextra` (retired v1.143; POI yaw is backlog SWREQ-FALCON-POIYAW-P01) | v1.52 |
 | Pre-flight built-in-test + arming-check gate | `relay-preflight` | v1.53 |
 | Component-world fusion (meld) + trace reconciliation | (v1.54 capstone) | v1.54 |
 | CI sovereignty: self-hosted runners + Kani roll-up gate | (infra) | v1.55 |

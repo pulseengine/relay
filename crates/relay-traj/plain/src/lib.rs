@@ -14,6 +14,15 @@
 //! harness): the closed-form jerk bound is **sound** — the returned value
 //! is ≥ `|j(t)|` for every `t ∈ [0, T]`, so an input-feasibility verdict
 //! built on it never under-estimates the demand.
+//!
+//! **PARKED (SWREQ-FALCON-ORPHAN-P01, maintainer decision 2026-11-13).** Not in
+//! the flight path: falcon-core flies its own waypoint legs, and the only
+//! consumer is the falcon-sitl-gz bench (`mission`'s Segment3 legs and the
+//! REF_GOV A/B). The crate stays until a smoother-mission feature is planned;
+//! it is excluded from every capability claim until then. **Waived proof:** the
+//! headline `verify_peak_jerk_sound` harness is NOT in the Kani CI matrix. It
+//! hangs CBMC (>1200 s locally; FV-RELAY-KANICI-003), so the jerk-bound
+//! soundness above is unit-tested, not model-checked.
 
 #![no_std]
 

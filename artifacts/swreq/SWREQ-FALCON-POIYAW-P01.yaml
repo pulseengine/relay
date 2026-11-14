@@ -1,0 +1,38 @@
+artifacts:
+  - id: SWREQ-FALCON-POIYAW-P01
+    type: sw-req
+    title: "POIYAW-P01 — falcon-core shall face a point of interest when commanded, with a finite yaw setpoint and a hold on top of the point"
+    status: draft
+    description: >
+      UNSLOTTED (backlog). falcon-core shall accept a point of interest (NED,
+      metres) and, while one is set, drive `yaw_setpoint` to the bearing from the
+      vehicle's estimated horizontal position to that point. Within a stated
+      horizontal radius of the point the bearing is undefined, so the setpoint
+      shall HOLD its last value instead of spinning. A non-finite point or
+      estimate shall leave the setpoint unchanged. Clearing the point returns to
+      today's behaviour: the yaw captured at startup.
+
+      WHY IT EXISTS. relay-modextra implemented POI yaw (with follow-me,
+      land-in-place and an RTL altitude override) and was verified under the
+      retired SWREQ-FALCON-MODEXTRA-P01, but nothing consumed it: falcon-core
+      flies a yaw captured at startup (crates/falcon-core/plain/src/lib.rs,
+      `yaw_captured`). The crate was RETIRED in falcon-v1.143.0 under
+      SWREQ-FALCON-ORPHAN-P01 (maintainer decision 2026-11-13). POI yaw is the
+      one mode worth keeping, and it belongs in the flight core that flies it,
+      not in a side crate. Follow-me, land-in-place and the RTL altitude
+      override are not carried forward here.
+    tags: [falcon, falcon-core, yaw, poi, later, backlog]
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Unit: the setpoint equals atan2 of the bearing to the point for points
+        outside the hold radius; it holds inside the radius; a NaN point or
+        estimate leaves it unchanged; clearing restores the captured yaw.
+        Kani: the yaw setpoint stays finite for any finite point within the
+        operational envelope (|coord| <= 1e6 m). SITL: in a flightcore run the
+        heading tracks a POI through a leg, and the yaw rate stays inside the
+        existing yaw limits.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
