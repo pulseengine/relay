@@ -225,3 +225,80 @@ mod tests {
         assert_eq!(a.action(), FailsafeAction::None);
     }
 }
+
+// kills mutant: replace FailsafeArbiter::action -> FailsafeAction with Default::default()
+#[cfg(test)]
+mod mutation_m13 {
+    use super::*;
+
+    #[test]
+    fn action_reports_latched_value() {
+        let mut a = FailsafeArbiter::new();
+        assert_eq!(a.action(), FailsafeAction::None);
+        a.evaluate(Triggers {
+            critical_battery: true,
+            ..Triggers::default()
+        });
+        assert_eq!(a.action(), FailsafeAction::Land);
+        a.evaluate(Triggers::default());
+        assert_eq!(a.action(), FailsafeAction::Land);
+        a.reset();
+        assert_eq!(a.action(), FailsafeAction::None);
+    }
+
+    #[test]
+    fn action_after_hold() {
+        let mut a = FailsafeArbiter::new();
+        a.evaluate(Triggers {
+            offboard_stale: true,
+            ..Triggers::default()
+        });
+        assert_eq!(a.action(), FailsafeAction::Hold);
+    }
+}
+// kills mutant: replace FailsafeAction::severity -> u8 with 0
+#[cfg(test)]
+mod mutation_m11 {
+    use super::*;
+
+    #[test]
+    fn severity_values_follow_enum_order() {
+        assert_eq!(FailsafeAction::None.severity(), 0);
+        assert_eq!(FailsafeAction::Hold.severity(), 1);
+        assert_eq!(FailsafeAction::Rtl.severity(), 2);
+        assert_eq!(FailsafeAction::Land.severity(), 3);
+        assert_eq!(FailsafeAction::Terminate.severity(), 4);
+    }
+
+    #[test]
+    fn severity_is_strictly_increasing() {
+        assert!(FailsafeAction::Land.severity() > FailsafeAction::Rtl.severity());
+        assert!(FailsafeAction::Terminate.severity() > FailsafeAction::Land.severity());
+    }
+}
+// kills mutant: replace FailsafeArbiter::reset with ()
+#[cfg(test)]
+mod mutation_m12 {
+    use super::*;
+
+    #[test]
+    fn reset_clears_latch_and_allows_quiet_evaluation() {
+        let mut a = FailsafeArbiter::new();
+        let latched = a.evaluate(Triggers {
+            critical_battery: true,
+            ..Triggers::default()
+        });
+        assert_eq!(latched, FailsafeAction::Land);
+        assert_eq!(a.action(), FailsafeAction::Land);
+        a.reset();
+        assert_eq!(a.action(), FailsafeAction::None);
+        assert_eq!(a.evaluate(Triggers::default()), FailsafeAction::None);
+        assert_eq!(
+            a.evaluate(Triggers {
+                offboard_stale: true,
+                ..Triggers::default()
+            }),
+            FailsafeAction::Hold
+        );
+    }
+}

@@ -370,3 +370,220 @@ mod tests {
         );
     }
 }
+
+// kills mutant: replace PreflightChecks::all_pass -> bool with true
+#[cfg(test)]
+mod mutation_m14 {
+    use super::*;
+
+    #[test]
+    fn all_pass_true_only_when_every_check_passes() {
+        let ok = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(ok.all_pass());
+        let mut c = ok;
+        c.battery_ok = false;
+        assert!(!c.all_pass());
+        assert!(!PreflightChecks::default().all_pass());
+    }
+}
+// kills mutant: replace PreflightChecks::all_pass -> bool with false
+#[cfg(test)]
+mod mutation_m15 {
+    use super::*;
+
+    #[test]
+    fn all_pass_true_when_every_check_passes() {
+        let c = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(c.all_pass());
+    }
+
+    #[test]
+    fn all_pass_false_when_one_fails() {
+        let mut c = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        c.failsafe_configured = false;
+        assert!(!c.all_pass());
+        assert!(!PreflightChecks::default().all_pass());
+    }
+}
+// kills mutant: replace && with || in PreflightChecks::all_pass
+#[cfg(test)]
+mod mutation_m16 {
+    use super::*;
+
+    #[test]
+    fn failsafe_alone_does_not_pass() {
+        let c = PreflightChecks {
+            failsafe_configured: true,
+            ..PreflightChecks::default()
+        };
+        assert!(!c.all_pass());
+    }
+
+    #[test]
+    fn missing_failsafe_fails_all_pass() {
+        let c = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: false,
+        };
+        assert!(!c.all_pass());
+    }
+}
+// kills mutant: replace && with || in PreflightChecks::all_pass
+#[cfg(test)]
+mod mutation_m19 {
+    use super::*;
+
+    #[test]
+    fn all_pass_false_when_sensors_unhealthy() {
+        let c = PreflightChecks {
+            sensors_healthy: false,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(!c.all_pass());
+    }
+
+    #[test]
+    fn all_pass_true_when_all_ok() {
+        let c = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(c.all_pass());
+    }
+}
+// kills mutant: replace && with || in PreflightChecks::all_pass
+#[cfg(test)]
+mod mutation_m18 {
+    use super::*;
+
+    #[test]
+    fn all_pass_false_when_sensors_fail_but_battery_and_failsafe_ok() {
+        let c = PreflightChecks {
+            sensors_healthy: false,
+            estimator_converged: false,
+            calibration_present: false,
+            geofence_loaded: false,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(!c.all_pass());
+    }
+
+    #[test]
+    fn all_pass_false_when_only_battery_fails() {
+        let c = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: false,
+            failsafe_configured: true,
+        };
+        assert!(!c.all_pass());
+    }
+}
+// kills mutant: replace && with || in PreflightChecks::all_pass
+#[cfg(test)]
+mod mutation_m20 {
+    use super::*;
+
+    #[test]
+    fn all_pass_requires_sensors_and_estimator() {
+        let c = PreflightChecks {
+            sensors_healthy: false,
+            estimator_converged: false,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(!c.all_pass());
+        let d = PreflightChecks {
+            sensors_healthy: false,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(!d.all_pass());
+        let e = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(e.all_pass());
+    }
+}
+// kills mutant: replace && with || in PreflightChecks::all_pass
+#[cfg(test)]
+mod mutation_m17 {
+    use super::*;
+
+    #[test]
+    fn all_pass_requires_every_check() {
+        let c = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: false,
+            battery_ok: false,
+            failsafe_configured: false,
+        };
+        assert!(!c.all_pass());
+        let d = PreflightChecks {
+            sensors_healthy: false,
+            estimator_converged: false,
+            calibration_present: false,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(!d.all_pass());
+        let e = PreflightChecks {
+            sensors_healthy: true,
+            estimator_converged: true,
+            calibration_present: true,
+            geofence_loaded: true,
+            battery_ok: true,
+            failsafe_configured: true,
+        };
+        assert!(e.all_pass());
+    }
+}
