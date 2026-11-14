@@ -11,6 +11,12 @@
 //!      matrix variant of that form (MATRIX_FORM below), which also sends a
 //!      self-hosted matrix leg to the hosted runner for a foreign head.
 //!
+//! Every `runs-on:` must also be one of those forms, a plain
+//! `${{ matrix.<id> }}` reference, or a literal label: a runner taken from
+//! needs.*.outputs, inputs, vars or github.* is rejected, because a step can
+//! compute a self-hosted label into a job output and no label appears here.
+//! A block-list or map runs-on (a runner group) is rejected too.
+//!
 //! Rejected: a plain self-hosted label list; the fail-open form
 //! `head.repo.fork && 'ubuntu-latest' || [...]`, which picks self-hosted whenever
 //! `.fork` is not true, including a null `head.repo`; and any self-hosted job in
@@ -68,6 +74,14 @@ fn strip_comment(line: &str) -> &str {
         }
     }
     line
+}
+
+/// `${{ matrix.<ident> }}` exactly. Its values are checked where they are
+/// written (a self-hosted `runner:` must sit in a job with the matrix form).
+fn is_plain_matrix_ref(v: &str) -> bool {
+    v.strip_prefix("${{ matrix.")
+        .and_then(|r| r.strip_suffix(" }}"))
+        .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
 }
 
 /// A `key: |` / `key: >-` style line, whose following deeper lines are text.
@@ -169,6 +183,18 @@ fn check_workflow(name: &str, text: &str) -> Report {
                     .take_while(|l| strip_comment(l).trim().is_empty() || indent(l) > ji)
                     .any(|l| strip_comment(l).trim() == format!("runs-on: {MATRIX_FORM}"));
                 continue;
+            }
+        }
+        // Every runs-on is shape-checked, not only ones that spell
+        // `self-hosted`: a runner computed into needs.*.outputs, inputs, vars
+        // or github.* names no label here, yet can resolve to self-hosted.
+        if let Some(v) = t.strip_prefix("runs-on:") {
+            let v = v.trim();
+            let at = format!("{name}:{} ({job})", n + 1);
+            if v.is_empty() || v.starts_with('{') {
+                bad.push(format!("{at}: runs-on as a block list or map (e.g. a runner group) is not an accepted shape"));
+            } else if v.contains("${{") && !t.contains("self-hosted") && !is_plain_matrix_ref(v) {
+                bad.push(format!("{at}: runs-on expression is neither the fail-closed form nor a plain matrix.* reference"));
             }
         }
         if !t.contains("self-hosted") {
@@ -334,6 +360,36 @@ mod tests {
     fn a_runs_on_after_a_run_block_is_still_checked() {
         let t = "on: [push]\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |\n          echo hi\n  b:\n    runs-on: [self-hosted, light]\n";
         assert_eq!(check_workflow("t.yml", t).bad.len(), 1);
+    }
+
+    #[test]
+    fn computed_runners_are_rejected() {
+        for v in [
+            "${{ needs.pick.outputs.runner }}",
+            "${{ inputs.runner }}",
+            "${{ vars.RUNNER }}",
+            "${{ fromJSON(needs.pick.outputs.labels) }}",
+            "${{ github.event.inputs.runner || 'ubuntu-latest' }}",
+        ] {
+            let r = check_workflow("t.yml", &wf("on: [workflow_dispatch]", v));
+            assert_eq!(r.bad.len(), 1, "{v}: {r:?}");
+        }
+    }
+
+    #[test]
+    fn plain_matrix_and_literal_hosted_runners_pass() {
+        for v in ["${{ matrix.os }}", "ubuntu-latest", "macos-14"] {
+            let r = check_workflow("t.yml", &wf("on: [pull_request]", v));
+            assert_eq!(r, Report { seen: 0, bad: vec![] }, "{v}");
+        }
+    }
+
+    #[test]
+    fn block_and_map_runs_on_are_rejected() {
+        let list = "on: [push]\njobs:\n  a:\n    runs-on:\n      - ${{ needs.x.outputs.r }}\n";
+        let map = "on: [push]\njobs:\n  a:\n    runs-on: { group: fleet }\n";
+        assert_eq!(check_workflow("t.yml", list).bad.len(), 1);
+        assert_eq!(check_workflow("t.yml", map).bad.len(), 1);
     }
 
     #[test]
