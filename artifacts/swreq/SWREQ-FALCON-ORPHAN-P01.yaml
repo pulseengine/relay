@@ -123,6 +123,22 @@ artifacts:
         to serve neither gets deleted outright, with the reason in the commit —
         not deprecated, not left compiling.
 
+      DISPOSITIONS, decided 2026-11-13 (maintainer, after the codebase review):
+        RETIRE (falcon-v1.143.0)  relay-arm (falcon-core spin-up and keep_warm
+                                  supersede it) and relay-modextra (POI yaw
+                                  moves to backlog SWREQ-FALCON-POIYAW-P01).
+                                  Their requirements and FVs are deleted.
+        PARK                      relay-traj (until a smoother-mission feature;
+                                  waived Kani proof stated on the crate) and
+                                  relay-avoid's precision landing (no marker
+                                  source on any planned vehicle).
+        WIRE (falcon-v1.144.0)    relay-rc (fix the SBUS end-byte check first),
+                                  relay-sensvote, and relay-avoid's speed
+                                  limiter with a forward rangefinder.
+        LATER                     relay-mix-multi, when a hex/octo Gazebo level
+                                  exists.
+      Each PARK reason is recorded on the crate (lib.rs header).
+
       A PARK IS NOT A FREE PASS. A parked crate still costs proof and
       maintenance time, and still appears in any naive count of "what the stack
       does". Parking requires the reason recorded ON the crate and exclusion
