@@ -1,0 +1,4 @@
+# Engines whose plain/src/engine.rs is held, by scripts/check-engine-mirrors.rs,
+# to be the verus-strip of src/engine.rs (relay#253). Add an engine once its
+# residue is resolved; never remove one to make the check pass.
+relay-ci
