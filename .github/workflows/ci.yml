@@ -116,6 +116,51 @@ jobs:
           "$HOME/.local/bin/actionlint" --version
       - run: "$HOME/.local/bin/actionlint -color .github/workflows/*.yml"
 
+  engine-mirrors:
+    name: Engine mirrors match their Verus source (relay#253)
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@stable
+      # verus-strip is the oracle. It is built from a pinned rules_verus commit
+      # so a strip-behaviour change upstream lands here as a reviewed bump.
+      - name: Build verus-strip (rules_verus b492aba)
+        run: |
+          cargo install --git https://github.com/pulseengine/rules_verus --rev b492aba \
+            verus-strip --locked --root "$RUNNER_TEMP/vs"
+      - name: Checker unit tests
+        run: |
+          rustc --edition 2021 --test scripts/check-engine-mirrors.rs -o "$RUNNER_TEMP/cem-test"
+          "$RUNNER_TEMP/cem-test"
+      - name: Held mirrors are the strip of their Verus source
+        env:
+          VERUS_STRIP: ${{ runner.temp }}/vs/bin/verus-strip
+        run: |
+          rustc --edition 2021 -O scripts/check-engine-mirrors.rs -o "$RUNNER_TEMP/cem"
+          "$RUNNER_TEMP/cem"
+      # Acceptance test, run on every change (gate-potency): a planted drift
+      # in a held mirror (one comparison flipped) must FAIL the check. If this
+      # step ever passes the planted copy, the gate is decoration.
+      - name: Planted drift is caught
+        env:
+          VERUS_STRIP: ${{ runner.temp }}/vs/bin/verus-strip
+        run: |
+          set -u
+          P="$RUNNER_TEMP/plant"
+          rm -rf "$P" && mkdir -p "$P/scripts" "$P/crates"
+          cp scripts/engine-mirror-converged.txt "$P/scripts/"
+          cp -R crates/relay-ci "$P/crates/"
+          F="$P/crates/relay-ci/plain/src/engine.rs"
+          grep -q 'if header.length < config.min_length' "$F" || { echo "::error::planted-control anchor missing; update this step"; exit 1; }
+          sed -i 's/if header.length < config.min_length/if header.length <= config.min_length/' "$F"
+          RC=0; (cd "$P" && "$RUNNER_TEMP/cem") || RC=$?
+          if [ "$RC" -ne 1 ]; then
+            echo "::error::planted drift was not caught (exit $RC, expected 1)"
+            exit 1
+          fi
+          echo "planted drift caught (exit 1)"
+
   clippy:
     name: Clippy
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-latest' }}
