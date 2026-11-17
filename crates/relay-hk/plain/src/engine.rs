@@ -348,4 +348,13 @@ mod tests {
         table.collect(&sources, &mut packet);
         assert_eq!(packet.sequence, 2);
     }
+
+    /// HK-P01: new() is `external_body` in the Verus source, so its
+    /// postcondition is trusted there; this test is the executed evidence
+    /// that the table starts empty.
+    #[test]
+    fn new_table_is_empty_hk_p01() {
+        let t = CopyTable::new();
+        assert_eq!(t.entry_count, 0);
+    }
 }

@@ -5,15 +5,24 @@ artifacts:
     status: implemented
     release: falcon-v1.143.0
     description: >
-      The validate function shall return Valid only when the address is
-      within the configured RAM range, size is greater than zero, size
-      does not exceed the maximum, and the address is properly aligned.
+      validate_request shall return Valid only when all of the following
+      hold: 0 < size <= max_operation_size; ram_start <= address < ram_end;
+      address + size <= ram_end, so the whole access lies in RAM; and, for
+      Peek and Poke only, address is a multiple of size (sizes 0 and 1 are
+      always aligned). LoadFromFile, DumpToFile and Fill have no alignment
+      check.
     tags: [memory-manager, validation, safety, verus]
     fields:
       req-type: safety
       priority: must
       verification-criteria: >
-        Verus proof: validate returns Valid iff all conditions met.
+        Unit test boundaries_pinned_by_mm_p01 (relay-mm) pins every edge:
+        ram_start in, ram_start - 4 out, ram_end out; address + size ==
+        ram_end in and one byte past out; size 1 and max in, max + 1
+        SizeTooLarge, 0 SizeZero; a misaligned Poke refused and a misaligned
+        LoadFromFile, DumpToFile and Fill accepted. Mutants `end_addr >
+        ram_end + 1` and `size >= max` each fail it. The Verus contract on
+        validate_request proves only the SizeZero case (MM-P03).
     links:
       - type: derives-from
         target: SYSREQ-MM-001

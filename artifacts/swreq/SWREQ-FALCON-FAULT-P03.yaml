@@ -24,8 +24,9 @@ artifacts:
       under heavier noise (gps σ up to 0.3 m, gyro-white up to 0.02 rad/s):
       isolation reached ~1882 steps in early trials and a few mis-isolated or
       never isolated, because the near-level/low-rate detection gate
-      (tilt_cos > 0.90 && rate2 < 1.0) is pushed shut by noise on the rate.
-      v1.114 scoped its guard to a modest envelope (gps σ ≤ 0.12, gyro ≤ 0.006)
+      (tilt_cos > 0.90 && rate2 < 1.0 at v1.114; main now uses rp_rate2 < 4.0
+      rad^2/s^2, falcon-core fdi.rs) is pushed shut by noise on the rate.
+      v1.114 scoped its guard to a modest envelope (gps σ ≤ 0.12 m, gyro white noise ≤ 0.006 rad/s)
       where detection is reliable (worst 5 steps); this requirement covers the
       heavier regime — filter the effectiveness residual, adapt the gate, or add
       hysteresis so the RECOVERY (already parasitic-free and non-flipping) is not

@@ -475,4 +475,13 @@ mod proptests {
             prop_assert_eq!(r.violation_count, 1);
         }
     }
+
+    /// LC-P01: new() is `external_body` in the Verus source, so its
+    /// postcondition is trusted there; this test is the executed evidence
+    /// that the table starts empty.
+    #[test]
+    fn new_table_is_empty_lc_p01() {
+        let t = WatchpointTable::new();
+        assert_eq!(t.entry_count, 0);
+    }
 }

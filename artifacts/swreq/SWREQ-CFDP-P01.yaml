@@ -5,15 +5,23 @@ artifacts:
     status: implemented
     release: falcon-v1.143.0
     description: >
-      CFDP transaction state transitions shall follow the valid state
-      machine graph. No state may be skipped. Transitions follow:
-      Idle -> MetadataSent -> DataSending -> EofSent -> Finished.
+      Each process_ack, tick or process_nak call shall leave a CFDP
+      transaction's state unchanged or move it exactly one step along
+      Idle -> MetadataSent -> DataSending -> EofSent -> Finished, with one
+      exception: process_nak moves a transaction in DataSending or EofSent
+      to Cancelled once its retransmit count has reached max_retransmit.
+      Finished and Cancelled are terminal.
     tags: [cfdp, state-machine, correctness, verus]
     fields:
       req-type: functional
       priority: must
       verification-criteria: >
-        Verus proof: advance_state only allows valid next-state transitions.
+        Unit test transitions_never_skip_a_state (relay-cfdp): every sequence
+        of up to six ACK / tick / NAK events, for file sizes 0, 1 and 1024
+        and retransmit limits 0, 1 and 3 (39,366 transitions), obeys the rule
+        above; a mutant whose ACK moves Idle to DataSending fails it. Kani
+        verify_state_valid only shows the state stays a declared variant and
+        is not evidence for this requirement.
     links:
       - type: derives-from
         target: SYSREQ-CFDP-001

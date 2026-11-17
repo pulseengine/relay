@@ -12,7 +12,11 @@ artifacts:
       req-type: functional
       priority: must
       verification-criteria: >
-        Verus proof: new() postcondition establishes inv() and count == 0.
+        Unit test test_empty_registry (relay-tbl) asserts the table count is 0
+        right after new(). In the Verus source new() is
+        #[verifier::external_body], so Verus trusts its postcondition (inv()
+        and a zero count) and does not prove it; the Verus contract is not
+        cited as evidence here.
     links:
       - type: derives-from
         target: SYSREQ-TBL-001

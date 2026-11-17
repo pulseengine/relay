@@ -16,24 +16,31 @@ artifacts:
 
       The falcon-mavlink bridge shall (a) refuse a MISSION_COUNT whose
       mission_type is not MAV_MISSION_TYPE_MISSION (ACK UNSUPPORTED) or whose
-      count exceeds MAX_MISSION_ITEMS (ACK NO_SPACE); (b) accept items only from
+      count is greater than MAX_MISSION_ITEMS = 16 (ACK NO_SPACE; a count of 16 is
+      accepted); (b) accept items only from
       the system/component that started the upload and addressed to this
-      vehicle (or broadcast); (c) refuse an item, aborting the upload, whose
+      vehicle (or broadcast); (c) refuse an item, aborting the upload, with the code of the first
+      check it fails in this order, whose
       mission_type is not MISSION (UNSUPPORTED), frame is not
       GLOBAL_RELATIVE_ALT_INT (UNSUPPORTED_FRAME), command is not NAV_WAYPOINT
-      (UNSUPPORTED), latitude is outside ±90° (INVALID_PARAM5_X), longitude
-      outside ±180° (INVALID_PARAM6_Y), or altitude is not finite or outside
+      (UNSUPPORTED), latitude x is outside [-900000000, 900000000] degE7, i.e.
+      ±90° with both ends accepted (INVALID_PARAM5_X), longitude y outside
+      [-1800000000, 1800000000] degE7 (INVALID_PARAM6_Y), or altitude is not finite or outside
       [MISSION_MIN_ALT_M = 1 m, MISSION_MAX_ALT_M = 120 m] above home
       (INVALID_PARAM7); (d) convert coordinates without integer overflow;
-      (e) stage items separately and replace the stored mission only when the
-      last item is accepted, so no refused or unfinished upload changes it;
+      (e) stage items separately, accept them only in sequence order (an
+      out-of-sequence item is answered by re-requesting the next expected one),
+      and replace the stored mission only when item count-1 is accepted, so no refused or unfinished upload changes it;
       (f) answer a MISSION_REQUEST_INT only when addressed to this vehicle, and
       project stored waypoints back to geodetic without overflow.
 
       FlightSupervisor::set_mission_waypoints shall independently refuse the
       whole mission, keep the previous one, and return false if any waypoint is
-      non-finite, outside [MISSION_MIN_ALT_AGL_M, MISSION_MAX_ALT_AGL_M] above
-      home, or horizontally outside the geofence radius.
+      non-finite, has a height above home (home NED z minus waypoint NED z)
+      outside [MISSION_MIN_ALT_AGL_M, MISSION_MAX_ALT_AGL_M] = [1 m, 120 m]
+      (the constants say AGL; the reference is home, not terrain), or lies
+      horizontally farther from home than the geofence radius (exactly at the
+      radius is accepted; the geofence breach fires only beyond it).
 
       Not covered: authentication of the uploader (MAVLink2 signing is planned)
       and an upload timeout (the bridge has no clock).

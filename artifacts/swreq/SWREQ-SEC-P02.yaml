@@ -21,7 +21,10 @@ artifacts:
         Official NIST genkat vectors (LWC_AEAD_KAT_128_128.txt) asserted
         byte-exact: Count 1 (empty/empty), Count 2 (MAC-floor empty PT + AD),
         Count 3, Count 34 (PT only), Count 35 (PT+AD). Kani: SEC-K05 the
-        constant-time tag compare equals structural equality; SEC-K06 the MAC
+        constant-time tag compare equals structural equality. Constant time
+        is a property of the code, not measured: ct_eq_tag (relay-sec
+        ascon.rs) ORs the XOR of all 16 byte pairs and compares once, with no
+        data-dependent branch or early exit; SEC-K06 the MAC
         is total (no panic / OOB) across all message-length cases.
     links:
       - type: derives-from

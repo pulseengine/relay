@@ -5,15 +5,21 @@ artifacts:
     status: implemented
     release: falcon-v1.143.0
     description: >
-      The validate_header function shall return Valid only when all
-      validation checks pass: valid stream_id, correct checksum, valid
-      command code, and correct message length.
+      The validate_header function shall return Valid only when all of the
+      following hold: stream_id equals one of the first stream_id_count
+      entries of valid_stream_ids; the header's checksum field is 0 (the
+      caller stores the cFS-style XOR over the whole packet there, see
+      compute_checksum, and a packet whose bytes XOR to 0 is intact);
+      function_code <= max_cmd_code; and min_length <= length <= max_length,
+      both bounds inclusive.
     tags: [command-ingest, validation, safety, verus]
     fields:
       req-type: safety
       priority: must
       verification-criteria: >
-        Verus proof: validate_header returns Valid iff all sub-checks pass.
+        Kani verify_valid_header_accepted and the relay-ci unit tests. The
+        Verus contract on validate_header is `ensures true` and proves
+        nothing about the result, so it is not cited as evidence here.
     links:
       - type: derives-from
         target: SYSREQ-CI-001

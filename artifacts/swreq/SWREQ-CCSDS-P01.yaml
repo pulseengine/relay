@@ -5,14 +5,21 @@ artifacts:
     status: implemented
     release: falcon-v1.143.0
     description: >
-      Encoding a CCSDS header and then decoding the result shall produce
-      the original header fields. The codec is lossless for all valid inputs.
+      For every valid header, encoding it and then decoding the result shall
+      produce the original header fields. A header is valid when version is
+      0, apid <= 0x07FF, sequence_flags <= 3 and sequence_count <= 0x3FFF;
+      packet_type, sec_header_flag and data_length take any value. Fields
+      outside those ranges are masked to their bit width on encode.
     tags: [ccsds, roundtrip, correctness, verus]
     fields:
       req-type: functional
       priority: must
       verification-criteria: >
-        Verus proof: decode(encode(header)) == header for all valid headers.
+        Kani verify_encode_decode_roundtrip: for symbolic packet_type,
+        sec_header_flag, apid, sequence_flags, sequence_count and data_length,
+        decode(encode(h)) returns each field masked to its width, which equals
+        the field for every valid header. The Verus contracts prove the
+        version and APID bounds (CCSDS-P02/P03), not the roundtrip.
     links:
       - type: derives-from
         target: SYSREQ-CCSDS-001
