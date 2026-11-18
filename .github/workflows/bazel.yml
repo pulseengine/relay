@@ -45,7 +45,7 @@ concurrency:
 jobs:
   cascade:
     name: Component Model cascade
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # The cascade build (wasmtime 45 + full crate universe) has outgrown
       # the hosted runner's free disk (ENOSPC at 23 MB free, 2026-07-16,
