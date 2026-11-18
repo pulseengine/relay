@@ -16,9 +16,10 @@
 #      slow mirror, so the sed on ubuntu.sources matched nothing (hidden by
 #      `2>/dev/null || true`). Run 41738372410 shows it: attempt 1 timed out
 #      at 600 s mid-download, and the retry fetched from azure again. Here the
-#      azure line is REMOVED from apt-mirrors.txt, so archive.ubuntu.com
-#      (already priority 2 in the image) becomes first, and a switch that
-#      finds nothing to switch says so.
+#      FIRST line of apt-mirrors.txt (azure then, an EC2 mirror since
+#      2026-11-17) is REMOVED, so the next entry (archive.ubuntu.com in the
+#      images seen so far) becomes first, and a switch that finds nothing to
+#      switch says so.
 #   2. A timeout can land while dpkg is unpacking, leaving "dpkg was
 #      interrupted", and every later attempt then fails on that. `dpkg
 #      --configure -a` runs before each retry.
@@ -66,27 +67,38 @@ rewrite() {
   rm -f "$tmp"
 }
 
-off_azure() {
-  local changed=0 f
-  if [ -f "$MIRRORS" ] && grep -q "^$AZURE" "$MIRRORS"; then
-    # Never leave apt with an empty mirror list: that would turn a slow retry
-    # into a certain failure.
-    if [ -n "$(grep -v "^$AZURE" "$MIRRORS" | tr -d '[:space:]')" ]; then
-      rewrite "$MIRRORS" grep -v "^$AZURE" && changed=1
-    else
-      echo "::warning::$MIRRORS lists only the azure mirror; keeping it, since an empty mirror list is worse than a slow mirror"
+# Drop the mirror apt is using now: the FIRST entry of the mirror list,
+# whatever its host. The first version of this function removed only the
+# azure entry. On 2026-11-17 the hosted image listed
+# us-east-2.ec2.archive.ubuntu.com first instead, it stalled, and the retry
+# found "no azure mirror entry left to remove" and went back to the same
+# mirror. That failed 3 of 3 Gazebo runs (main push 44186601874, merge-queue
+# runs 44196901279 and 44205967289 for #693).
+off_current_mirror() {
+  local changed=0 f first
+  if [ -f "$MIRRORS" ]; then
+    first=$(grep -m1 -E '^[[:space:]]*[a-z]+://' "$MIRRORS" || true)
+    if [ -n "$first" ]; then
+      # Never leave apt with an empty mirror list: that would turn a slow retry
+      # into a certain failure.
+      if [ -n "$(grep -vxF -- "$first" "$MIRRORS" | grep -E '^[[:space:]]*[a-z]+://' || true)" ]; then
+        rewrite "$MIRRORS" grep -vxF -- "$first" && changed=1 \
+          && echo "apt-retry: dropped mirror ${first%%[[:space:]]*}"
+      else
+        echo "::warning::$MIRRORS lists only ${first%%[[:space:]]*}; keeping it, since an empty mirror list is worse than a slow mirror"
+      fi
     fi
   fi
-  # Older images (and self-built ones) name the mirror in the sources directly.
+  # Older images (and self-built ones) name the azure mirror in the sources
+  # directly.
   for f in $SOURCES; do
     if [ -f "$f" ] && grep -q "$AZURE" "$f"; then
-      rewrite "$f" sed "s|$AZURE|http://archive.ubuntu.com/ubuntu|g" && changed=1
+      rewrite "$f" sed "s|$AZURE|http://archive.ubuntu.com/ubuntu|g" && changed=1 \
+        && echo "apt-retry: moved $f off azure.archive.ubuntu.com"
     fi
   done
-  if [ "$changed" = 1 ]; then
-    echo "apt-retry: moved off azure.archive.ubuntu.com"
-  else
-    echo "::warning::no azure mirror entry left to remove in $MIRRORS or $SOURCES (already moved, or never configured); the retry uses the current mirror list"
+  if [ "$changed" = 0 ]; then
+    echo "::warning::no mirror left to switch to in $MIRRORS or $SOURCES; the retry uses the current mirror list"
   fi
 }
 
@@ -97,11 +109,11 @@ for n in 1 2 3; do
   if [ "$n" = 3 ]; then
     break
   fi
-  echo "::warning::apt-get $* failed or exceeded ${ATTEMPT_S} s (attempt $n/3) — retrying off the azure mirror"
+  echo "::warning::apt-get $* failed or exceeded ${ATTEMPT_S} s (attempt $n/3) — retrying on the next mirror"
   # A timeout can kill apt-get mid-unpack.
   sudo timeout -k 10 "$UPDATE_S" dpkg --configure -a \
     || echo "::warning::dpkg --configure -a failed; the next attempt will show why"
-  off_azure
+  off_current_mirror
   sudo timeout -k 10 "$UPDATE_S" apt-get update || true
 done
 echo "::error::apt-get $* failed 3 times"
