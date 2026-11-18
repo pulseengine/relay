@@ -1,0 +1,11 @@
+# plant guard (pulseengine/plant, pinned in .github/workflows/ci.yml): no fork
+# pull request reaches a self-hosted runner. The checker came from relay's
+# scripts/check-selfhosted-fork-guard.rs (relay#689, #695), donated to plant on
+# 2026-11-18 (owner decision); plant owns it now. Seam: plant#14.
+#
+# fallback: the hosted image a fork PR falls back to (relay#695). Moving it is
+# a deliberate change, run advisory first.
+fallback = "ubuntu-24.04"
+# The labels relay's runner pools provide. A label outside this set fails
+# (loom#532 shipped `}.$l.q{` and every other check missed it).
+labels = ["self-hosted", "linux", "x64", "light", "rust-cpu"]
