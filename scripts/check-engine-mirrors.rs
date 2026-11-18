@@ -10,14 +10,17 @@
 //!   1. run `verus-strip` on `src/engine.rs` (the Verus source);
 //!   2. run `verus-strip` on `plain/src/engine.rs` too, so both sides go through
 //!      the same printer (prettyplease) and layout cannot differ;
-//!   3. normalise four MECHANICAL classes on both sides, and only these:
+//!   3. normalise five MECHANICAL classes on both sides, and only these:
 //!        - `//` comments, including `//!` and `///` doc comments;
 //!        - `Debug` in a derive list (the mirror adds it for test output);
 //!        - `pub` on a struct field (Verus needs it for specs);
 //!        - a trailing `#[cfg(test)] mod tests` / `#[cfg(kani)] mod kani_proofs`
 //!          (plain-only test code);
+//!        - an empty inherent `impl X {}` (left when the strip removes an
+//!          impl's spec fns, e.g. relay-mm's `impl MmConfig { spec fn inv }`);
 //!      plus vstd's `arr.set(i, v)`, rewritten to `arr[i] = v` (rules_verus#34:
-//!      verus-strip passes it through, and plain arrays have no `set`);
+//!      verus-strip passes it through, and plain arrays have no `set`), also
+//!      when the printer puts the receiver on the line before `.set(`;
 //!   4. compare. Any remaining difference fails, and the diff is printed.
 //!
 //! A listed crate that is missing either file fails. An empty list fails: the
@@ -87,9 +90,15 @@ fn set_to_index(s: &str) -> String {
     let mut from = 0;
     while let Some(rel) = s[from..].find(".set(") {
         let dot = from + rel;
-        // receiver start
+        // receiver end: the printer may break a method chain, putting the
+        // receiver on the line before `.set(` (relay-to's `self.entries`).
         let b = s.as_bytes();
-        let mut st = dot;
+        let mut end = dot;
+        while end > 0 && (b[end - 1] as char).is_ascii_whitespace() {
+            end -= 1;
+        }
+        // receiver start
+        let mut st = end;
         let mut depth = 0i32;
         while st > 0 {
             let c = b[st - 1] as char;
@@ -105,7 +114,7 @@ fn set_to_index(s: &str) -> String {
             }
             st -= 1;
         }
-        if st == dot {
+        if st == end {
             from = dot + 5;
             continue;
         }
@@ -132,7 +141,7 @@ fn set_to_index(s: &str) -> String {
             from = dot + 5;
             continue;
         };
-        let place = s[st..dot].to_string();
+        let place = s[st..end].to_string();
         let idx = s[open + 1..comma].trim().to_string();
         let val = s[comma + 1..close].trim().trim_end_matches(',').trim().to_string();
         let rep = format!("{place}[{idx}] = {val}");
@@ -142,9 +151,23 @@ fn set_to_index(s: &str) -> String {
     s
 }
 
+/// Drops an empty `impl X {}` line. verus-strip removes spec and proof fns,
+/// so an impl that held only `spec fn inv` (relay-mm's `MmConfig`) prints as
+/// an empty block the mirror has no reason to carry. It has no behaviour.
+fn drop_empty_impls(s: &str) -> String {
+    s.lines()
+        .filter(|l| {
+            let t = l.trim();
+            !(t.starts_with("impl ") && t.ends_with(" {}") && !t.contains(" for ") && !t.contains('('))
+        })
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
+
 /// The mechanical normalisation, minus the reprint (done by verus-strip).
 fn normalise(printed: &str) -> String {
     let s = drop_comment_lines(printed);
+    let s = drop_empty_impls(&s);
     let s = drop_test_modules(&s);
     let s = drop_debug_derive(&s);
     let s = drop_field_pub(&s);
@@ -334,6 +357,31 @@ mod tests {
         assert_eq!(set_to_index(s), "        self.entries[idx] = Sub { a: f(1, 2), b };\n");
         assert_eq!(set_to_index("p.data.set(o + i, s[k].data[j + i]);"), "p.data[o + i] = s[k].data[j + i];");
         assert_eq!(set_to_index("a[i].v.set(0, 1);"), "a[i].v[0] = 1;");
+    }
+
+    #[test]
+    fn set_with_the_receiver_on_the_previous_line() {
+        // relay-to as the printer lays it out.
+        let s = "        self.entries\n            .set(\n                idx,\n                Sub { a, b },\n            );\n";
+        assert_eq!(squash(&set_to_index(s)), "self.entries[idx] = Sub { a, b };");
+    }
+
+    #[test]
+    fn empty_inherent_impls_are_dropped_and_nothing_else() {
+        assert_eq!(drop_empty_impls("struct C {}\nimpl C {}\nfn f() {}\n"), "struct C {}\nfn f() {}\n");
+        // A trait impl, or an impl with a body, says something; keep it.
+        for keep in ["impl Default for C {}\n", "impl C {\n    fn f() {}\n}\n"] {
+            assert_eq!(drop_empty_impls(keep), keep);
+        }
+    }
+
+    #[test]
+    fn a_method_in_a_mirror_impl_is_not_normalised_away() {
+        // The planted bad input for the new class: the mirror grows a method
+        // in an impl the source leaves empty after the strip.
+        let src = "impl C {}\nfn f() {}\n";
+        let bad = "impl C {\n    fn g() {}\n}\nfn f() {}\n";
+        assert_ne!(squash(&normalise(src)), squash(&normalise(bad)));
     }
 
     #[test]
