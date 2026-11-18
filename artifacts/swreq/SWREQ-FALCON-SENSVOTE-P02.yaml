@@ -1,0 +1,23 @@
+artifacts:
+  - id: SWREQ-FALCON-SENSVOTE-P02
+    type: sw-req
+    title: "SENSVOTE-P02 — Redundant IMU voting wired into the flight path"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      relay-sensvote (SENSVOTE-P01, verified on the leaf crate, not reachable in
+      flight) votes the vehicle's three IMUs in the flight path, so one stuck,
+      biased or dead IMU, including one that dies mid-window (#651), does not
+      reach the estimator. Maintainer decision 2026-11-13.
+    tags: [falcon, redundancy, sensor-voting, orphan-wiring]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: Gazebo plus campaigns. Gazebo falcon-quad with three simulated
+        IMUs: 30 runs (3 fault kinds x 10), 0 hold-bar violations; re-run on the
+        X500 world once SIM-P05 lands. SimBackend (analytic): 6000 trials per
+        fault kind, 0 violations. Negative control: voting disabled must violate.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-018

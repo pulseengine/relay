@@ -1,0 +1,25 @@
+artifacts:
+  - id: SWREQ-RELAY-XTARGET-P01
+    type: sw-req
+    title: "XTARGET-P01 — Every no_std library builds for Cortex-M and RISC-V, checked in CI"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      A CI leg checks every workspace library for thumbv7em-none-eabihf and
+      riscv32imac-unknown-none-elf, enumerated from cargo metadata, minus a named
+      exclusion list of crates that need std (measured 2026-11-18: 57 of 64 pass
+      both; the 7 excluded are relay-lc-diff, falcon-config, geofence-subject-rs,
+      relay-sb, relay-es, relay-evs, relay-time). The checker is a Rust tool in
+      tools/ (native, since it spawns cargo). This is build evidence that relay is
+      not tied to one board; it is not evidence that anything runs on target.
+    tags: [falcon, relay, portability, cortex-m, risc-v, ci]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Method: CI check with negative control. Any unlisted failure fails; an
+        empty set fails. Negative control: a crate patched to use std must fail
+        the leg. Local big test: the full set on both targets on this host.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020

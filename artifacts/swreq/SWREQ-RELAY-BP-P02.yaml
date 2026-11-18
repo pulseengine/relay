@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "BP-P02 — Conformance accept/reject: RFC 9171 sections 4.1 and 4.3 conformant bundles are accepted, listed non-conformant shapes are rejected"
     status: proposed
-    release: falcon-v1.143.0
+    release: falcon-v1.145.0
     description: >
       The decoder accepts RFC 9171 conformant bundles, including inner indefinite-
       length arrays up to a bounded depth. It rejects non-shortest-form arguments,

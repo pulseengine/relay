@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "BP-P06 — Endpoint IDs: dtn (including dtn:none) and two-element ipn are handled; every other EID form yields an explicit typed verdict"
     status: proposed
-    release: falcon-v1.143.0
+    release: falcon-v1.145.0
     description: >
       dtn-scheme EIDs including the null endpoint [1,0] and two-element ipn EIDs
       [2,[node,service]] are decoded and encoded. The RFC 9758 three-element ipn

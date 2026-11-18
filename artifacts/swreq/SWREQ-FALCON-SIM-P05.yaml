@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-SIM-P05
+    type: sw-req
+    title: "SIM-P05 — Gazebo model of the X500 V2 (level 1) with the parts-list sensors"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      A Gazebo world models the real X500 V2: geometry, mass and motor constants
+      each cited to a source, with the parts-list sensors (3 IMUs, 2 GPS, downward
+      TF02 rangefinder, forward rangefinder, simulated RC input). It is the
+      reference simulation for the v1.144 RC and voting work; falcon-quad stays as
+      the regression baseline. Hex and octo are later levels. Maintainer decision
+      2026-11-13.
+    tags: [falcon, sim, gazebo, x500, airframe]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: Gazebo bench evidence. (1) X500: three 300 s holds, 3 of 3 inside
+        final <= 1.0 m and peak <= 2.0 m. (2) Broken-model control: mass +30% or
+        motor constant -30% must fail the same bars. (3) falcon-quad baseline:
+        three holds stay at final <= 0.05 m and peak <= 0.10 m. Backend named in
+        the evidence: Gazebo, not SimBackend. Kill criterion: holds over the bars
+        or rate RMS > 1 rad/s on the first three runs (the #270 limit cycle); then
+        the slice ships as model only.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-007

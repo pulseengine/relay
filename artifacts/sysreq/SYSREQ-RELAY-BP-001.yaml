@@ -3,7 +3,7 @@ artifacts:
     type: system-req
     title: Store-and-forward telemetry delivery for nodes without a direct link (Bundle Protocol v7, no fragmentation)
     status: proposed
-    release: falcon-v1.144.0
+    release: falcon-v1.146.0
     description: >
       A node that cannot reach its destination directly shall be able to hand
       its report to a reachable neighbour that stores it and forwards it when a
