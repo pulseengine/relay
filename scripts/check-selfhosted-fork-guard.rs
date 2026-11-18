@@ -3,10 +3,13 @@
 //! Every line in .github/workflows/*.yml that names `self-hosted` must be one of:
 //!
 //!   1. a `runs-on:` in exactly the fail-closed same-repo form
-//!        ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('[..."self-hosted"...]') || 'ubuntu-latest' }}
+//!        ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('[..."self-hosted"...]') || 'ubuntu-24.04' }}
 //!      so the self-hosted labels are chosen only for a non-PR event or a PR
 //!      whose head repository is this one. A fork, or a DELETED fork whose
-//!      `head.repo` is null, falls to the hosted runner;
+//!      `head.repo` is null, falls to the hosted runner. The fallback is the
+//!      PINNED image HOSTED_FALLBACK, not `ubuntu-latest`: GitHub re-points
+//!      that label to a new Ubuntu release, which changes apt packages, Python
+//!      and preinstalled tools under the job without a commit here;
 //!   2. a matrix `runner:` value inside a job whose `runs-on:` is exactly the
 //!      matrix variant of that form (MATRIX_FORM below), which also sends a
 //!      self-hosted matrix leg to the hosted runner for a foreign head.
@@ -48,7 +51,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 const GUARD: &str = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
-const MATRIX_FORM: &str = "${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository || !contains(matrix.runner, 'self-hosted')) && matrix.runner || 'ubuntu-latest' }}";
+const MATRIX_FORM: &str = "${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository || !contains(matrix.runner, 'self-hosted')) && matrix.runner || 'ubuntu-24.04' }}";
+/// The hosted image a fork PR falls back to. Moving it is a deliberate PR.
+const HOSTED_FALLBACK: &str = "ubuntu-24.04";
 const TRUSTED: &[&str] = &["push", "pull_request", "schedule", "workflow_dispatch", "merge_group"];
 
 /// True when `v` (a runs-on value) is the fail-closed single-label form.
@@ -60,7 +65,7 @@ fn is_runs_on_form(v: &str) -> bool {
     let labels = &rest[..end];
     labels.contains("\"self-hosted\"")
         && !labels.contains('\'')
-        && &rest[end..] == "]') || 'ubuntu-latest' }}"
+        && rest[end..] == format!("]') || '{HOSTED_FALLBACK}' }}}}")
 }
 
 /// Strips a trailing YAML comment that is outside quotes.
@@ -357,7 +362,7 @@ mod tests {
     use super::*;
 
     fn good(label: &str) -> String {
-        format!("${{{{ {GUARD} && fromJSON('[\"self-hosted\",\"linux\",\"x64\",\"{label}\"]') || 'ubuntu-latest' }}}}")
+        format!("${{{{ {GUARD} && fromJSON('[\"self-hosted\",\"linux\",\"x64\",\"{label}\"]') || '{HOSTED_FALLBACK}' }}}}")
     }
     fn wf(on: &str, runs_on: &str) -> String {
         format!("name: t\n{on}\njobs:\n  a:\n    runs-on: {runs_on}\n    steps:\n      - run: true\n")
@@ -374,6 +379,18 @@ mod tests {
         let v = "${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('[\"self-hosted\",\"linux\"]') }}";
         let r = check_workflow("t.yml", &wf("on: [pull_request]", v));
         assert_eq!(r.bad.len(), 1, "{r:?}");
+    }
+
+    #[test]
+    fn rejects_an_unpinned_fallback() {
+        // The fail-closed shape with the floating label: GitHub re-points
+        // ubuntu-latest to a new release without a commit here.
+        let v = format!("${{{{ {GUARD} && fromJSON('[\"self-hosted\",\"light\"]') || 'ubuntu-latest' }}}}");
+        let r = check_workflow("t.yml", &wf("on: [pull_request]", &v));
+        assert_eq!(r.bad.len(), 1, "{r:?}");
+        let m = MATRIX_FORM.replace(HOSTED_FALLBACK, "ubuntu-latest");
+        let t = format!("name: t\non: [pull_request]\njobs:\n  a:\n    strategy:\n      matrix:\n        include:\n          - runner: [self-hosted, light]\n    runs-on: {m}\n    steps:\n      - run: true\n");
+        assert!(!check_workflow("t.yml", &t).bad.is_empty());
     }
 
     #[test]

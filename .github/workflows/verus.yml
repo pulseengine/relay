@@ -48,7 +48,7 @@ concurrency:
 jobs:
   changes:
     name: Detect Verus-relevant changes
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     outputs:
       run: ${{ steps.scope.outputs.run }}
       reason: ${{ steps.scope.outputs.reason }}
@@ -86,7 +86,7 @@ jobs:
     name: Verus proofs
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A cap, not a budget: measured runs took 2-25 min. A timed-out run is
     # `cancelled`, which the gate below fails closed on.
     timeout-minutes: 90
@@ -247,7 +247,7 @@ jobs:
 
   verus-gate:
     name: Verus gate
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     needs: [changes, verus]
     if: always()
     steps:
