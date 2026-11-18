@@ -1,0 +1,31 @@
+artifacts:
+  - id: SWREQ-RELAY-CONSUMER-P01
+    type: sw-req
+    title: "CONSUMER-P01 — Each release candidate is built and tested by its consumers before the tag"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      A relay CI job builds and tests wohl's ten relay crates (lc, sc, sch, hs,
+      ds, hk, tbl, cs, to, ccsds), including wohl's Bazel relay_src build, and
+      warte's relay-ccsds telemetry decoder against the release candidate SHA.
+      Consumers depend on relay by git dependency on the falcon-v1.x tag, checked
+      by the manifest lock (maintainer decision 2026-11-18); the re-pin PRs after
+      a tag are owned in wohl and warte. Measured 2026-11-18: wohl pins relay 643
+      commits back, warte 86.
+    tags: [falcon, relay, wohl, warte, consumers, release]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: CI job. Green against the candidate SHA before the tag. Local big
+        test on the mac mini build host: wohl cargo test --workspace plus the
+        Bazel relay_src build, and warte tests, 0 failures against relay HEAD.
+        Negative control: a deliberate API break in relay-lc must turn the job
+        red.
+    links:
+      - type: derives-from
+        target: SYSREQ-LC-001
+      - type: derives-from
+        target: SYSREQ-TO-001
+      - type: derives-from
+        target: SYSREQ-CCSDS-001

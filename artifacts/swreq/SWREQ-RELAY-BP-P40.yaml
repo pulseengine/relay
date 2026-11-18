@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "BP-P40 — Payloads are sealed end to end with relay-sec and the sealed plaintext binds the primary-block identity"
     status: proposed
-    release: falcon-v1.144.0
+    release: falcon-v1.146.0
     description: >
       Maintainer decision 2026-11-03. The payload is sealed with relay-sec. The
       source EID, creation timestamp and sequence number (and the destination) are

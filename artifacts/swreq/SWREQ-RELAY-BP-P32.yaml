@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "BP-P32 — Contact up and down events drive forwarding and the core performs no I/O"
     status: proposed
-    release: falcon-v1.144.0
+    release: falcon-v1.146.0
     description: >
       ContactUp and ContactDown events are inputs to the engine. Forwarding to a
       neighbour is attempted only while its contact is up; the engine performs no

@@ -1,0 +1,22 @@
+artifacts:
+  - id: SWREQ-SEC-P08
+    type: sw-req
+    title: "SEC-P08 — relay-sec seals and opens a relay-ccsds frame at no_std for other consumers"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      relay-sec is consumable outside falcon: a documented, tested seal and open
+      of a relay-ccsds frame at no_std (Ascon-AEAD128, anti-replay window),
+      included in the CONSUMER-P01 smoke. This answers wohl#49 (sensor-to-hub
+      link) and is the primitive warte#41 (telemetry authentication) could reuse.
+    tags: [falcon, relay-sec, ccsds, wohl, warte, consumers]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Method: tests against external vectors. 1,000,000 frames round-trip;
+        replayed and tampered frames rejected 100%; external Ascon-AEAD128 vectors
+        pass; the crate passes XTARGET-P01 on both targets.
+    links:
+      - type: derives-from
+        target: SYSREQ-CCSDS-001

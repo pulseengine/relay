@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "BP-P30 — The engine emits Forward actions; a full MessageTransport leaves the bundle in the store without loss or duplication"
     status: proposed
-    release: falcon-v1.144.0
+    release: falcon-v1.146.0
     description: >
       The convergence-layer seam is one MessageTransport<BundleFrame> per
       neighbour. The engine emits Forward{neighbour, frame} actions. If the

@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "BP-P41 — Freshness on the DTN path uses a dedicated relay-sec channel with a window sized to the backlog"
     status: proposed
-    release: falcon-v1.144.0
+    release: falcon-v1.146.0
     description: >
       Maintainer decision 2026-11-03 (resolves the draft freshness decision).
       Bundled traffic uses its OWN relay-sec channel (own channel_id and security

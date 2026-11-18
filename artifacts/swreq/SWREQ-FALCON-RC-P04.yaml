@@ -1,0 +1,29 @@
+artifacts:
+  - id: SWREQ-FALCON-RC-P04
+    type: sw-req
+    title: "RC-P04 — RC input wired into the flight path: pilot modes in the mode machine and an RC-loss failsafe"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      relay-rc (RC-P01..P03, verified on the leaf crate, not reachable in flight)
+      is wired: an RC channel enters through the FlightBackend seam;
+      relay_fsm::Mode gains the pilot modes RC-P01 defines (Stabilized, and
+      Manual/Acro) with their transitions; loss of RC triggers the configured
+      failsafe. The SBUS end-byte check is fixed first. The flattened WIT
+      parameter count is measured before the seam grows (limit 16). Maintainer
+      decision 2026-11-13 (relay-rc wired for first flight; RC receiver added to
+      the BOM).
+    tags: [falcon, rc, flight-modes, failsafe, orphan-wiring]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: Kani plus campaigns plus Gazebo. Kani: the mode transitions (no
+        pilot mode entered while Disarmed, RC loss always leaves a pilot mode).
+        SimBackend (analytic): 6000 trials with RC loss injected, 0 missed
+        failsafes; the same campaign with the failsafe disabled must miss. Gazebo
+        X500: stick takeover from Loiter, 3 of 3. SBUS decoder checked against
+        external captures committed with source and hash.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

@@ -1,0 +1,28 @@
+artifacts:
+  - id: SWREQ-FALCON-REFVEC-P01
+    type: sw-req
+    title: "REFVEC-P01 — Per-tick reference vectors at the estimator/control partition seam, published with each release"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      Each release publishes, as a release asset, per-tick reference vectors at
+      the partition seam chosen in #575 (option 1): the estimator's nav-state
+      output and the cascade's control output, for at least 3 scenarios of at
+      least 2000 ticks each. An integrator replays its own build of either
+      partition against them tick for tick. The stream layout is announced on
+      jess#167 before the first tag that carries it. Refs #376 (re-scoped to the
+      partition seam, maintainer 2026-10-21); jess#313 tier 1.2.
+    tags: [falcon, seam, partition, reference-vectors, jess, issue-376]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: test plus mutation. (1) The vectors are generated from the shipped
+        component and checked against native: 0 bit differences over 6000 ticks
+        (rung 1 regression). (2) A 1-ULP mutation injected into each published
+        stream in turn is detected by the replay checker, per stream. (3) The
+        release asset is present on the tag. Local big test before CI: all three
+        scenarios on this host, both partitions.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020

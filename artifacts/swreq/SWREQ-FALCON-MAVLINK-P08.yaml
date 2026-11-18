@@ -1,0 +1,32 @@
+artifacts:
+  - id: SWREQ-FALCON-MAVLINK-P08
+    type: sw-req
+    title: "MAVLINK-P08 — MAVLink2 message signing: signed frames are authenticated, replayed and tampered frames rejected"
+    status: proposed
+    release: falcon-v1.144.0
+    description: >
+      relay-mavlink verifies MAVLink2 signatures (incompat flag 0x01): SHA-256
+      truncated to 48 bits over the secret key, header, payload, CRC and link id
+      plus 48-bit timestamp, with a per-link timestamp that only increases.
+      Tampered and replayed frames are rejected, and a link configured to require
+      signing rejects unsigned frames. Before signing, #675 is fixed: frames whose
+      payload trailing zeros were truncated decode in the four exact-length
+      decoders, the five mission decoders and the four param sites, and FV-FALCON-
+      CMDLONG-001 is re-verified with its assertion corrected. Maintainer decision
+      2026-11-13 (signing as a v1.144 requirement; MAVLINK-P07 rejects incompat
+      flags until then).
+    tags: [falcon, mavlink, security, signing, issue-675]
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Method: test against external vectors plus Kani. Vectors generated ONCE
+        with pymavlink and committed with the tool version and SHA-256 (no Python
+        in CI); a Rust test consumes them. Differential: 100,000 frames against a
+        Rust MAVLink implementation as a dev-dependency oracle, 0 verdict
+        mismatches. Kani: the signature check never panics and a frame with a
+        stale timestamp is never accepted. Negative control: with the timestamp
+        check removed, the replay vectors must fail.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006

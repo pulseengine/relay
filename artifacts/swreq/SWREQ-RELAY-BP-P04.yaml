@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "BP-P04 — The encoder never emits a bundle that violates the primary-CRC or bundle-age rules"
     status: proposed
-    release: falcon-v1.143.0
+    release: falcon-v1.145.0
     description: >
       The primary block CRC type is non-zero unless a BIB targets block 0 (RFC
       9171 4.3.1). A bundle with creation time 0 carries exactly one Bundle Age
