@@ -63,7 +63,9 @@ impl SubscriptionTable {
         while i < count {
             let idx = i as usize;
             if self.entries[idx].msg_id == msg_id {
-                self.entries[idx].enabled = false;
+                let mut updated = self.entries[idx];
+                updated.enabled = false;
+                self.entries[idx] = updated;
                 return true;
             }
             i = i + 1;
