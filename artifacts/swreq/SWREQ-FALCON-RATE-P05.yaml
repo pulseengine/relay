@@ -114,8 +114,9 @@ artifacts:
       dropped — b0 was never implicated once the filter rate matched.
 
       THE FIX IS SELF-CORRECTING. `resync_loop_rate` takes the rate from the
-      backend's own `dt()` and rebuilds both filters when the declared rate
-      drifts more than 2% from it. A setter would have been forgettable in
+      backend's own `dt()` and rebuilds both filters when the backend rate
+      1/dt differs from the declared rate by more than 2% of the declared rate
+      (falcon-core resynced_rate: |1/dt - designed_hz| > 0.02 * designed_hz). A setter would have been forgettable in
       exactly the way the hardcoded constructor already was — six shipped
       entry points hardcode their rate identically.
 
@@ -234,8 +235,14 @@ artifacts:
       req-type: functional
       verification-criteria: >
         RING_TRACE on the gz plant, unfaulted supervised hover, 3
-        pristine-server trials: roll/pitch rate RMS < 0.1 rad/s, no motor
-        within 2% of a limit, FDI steady gate open for >= 95% of ticks.
+        pristine-server trials: roll/pitch measured body-rate RMS strictly below
+        0.1 rad/s over hover t in [5, 10) s (the commanded rate is about 0 in
+        settled hover, so this bounds the tracking error); every motor command
+        in [0.02, 0.98] of its normalised 0..1 range; FDI steady gate open for
+        at least 95% of those ticks; all 3 of 3 trials. 0.1 rad/s or more, or
+        any one trial failing, is a failure. The standing CI check
+        (soak-ring-check.sh) judges a looser bar (RMS < 0.5 rad/s, saturation
+        printed only) and is not evidence for this criterion.
         Measured on a plant that CAN saturate — the analytic plant cannot
         exhibit the defect and must not be cited as evidence here.
     links:

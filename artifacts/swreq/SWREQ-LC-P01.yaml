@@ -13,8 +13,11 @@ artifacts:
       req-type: safety
       priority: must
       verification-criteria: >
-        Verus proof: new() postcondition establishes inv(), count_spec() == 0,
-        and !is_full_spec().
+        Unit test new_table_is_empty_lc_p01 (relay-lc) asserts the table count is 0
+        right after new(). In the Verus source new() is
+        #[verifier::external_body], so Verus trusts its postcondition (inv()
+        and a zero count) and does not prove it; the Verus contract is not
+        cited as evidence here.
     links:
       - type: derives-from
         target: SYSREQ-LC-001

@@ -2052,13 +2052,13 @@ fn holds_under_noisy_intermittent_gps() {
     );
 }
 
-/// FALSIFICATION: the optimistic default variance (0.01 = 1 cm²) over-trusts
+/// FALSIFICATION: the optimistic default variance (0.01 m², i.e. (0.1 m)²) over-trusts
 /// a metre-class fix — the filter injects the noise, the v1.16 integral
 /// winds up on it, and the loop DIVERGES (>10 m). The honest motivation for
 /// matching the measurement variance to the real sensor (set_pos_var).
 #[test]
 fn variance_matching_helps_and_over_trust_no_longer_diverges() {
-    let peak_optimistic = fly_noisy_gps(0.01); // default 1 cm² — over-trusting
+    let peak_optimistic = fly_noisy_gps(0.01); // default 0.01 m² — over-trusting
     let peak_matched = fly_noisy_gps(0.09); // matched to the 0.3 m fix noise
     // BEFORE #452 the over-trusting filter DIVERGED here (> 10 m, ~2400 m
     // observed at v1.19), and that divergence was the stated motivation for

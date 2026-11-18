@@ -8,7 +8,11 @@ artifacts:
       The authentication layer shall reject any frame whose monotonic
       counter has already been accepted (replay) or has fallen outside
       the replay window (too old), per (security-association, channel).
-      A counter accepted once shall never be accepted again; the accept
+      The window is WINDOW_BITS = 64 counters: with H the highest counter
+      accepted so far, a counter c <= H is too old when H - c >= 64, and
+      counter 0 is always rejected. Within one replay window (one security
+      association; a rekey starts a new window under new keys) a counter
+      accepted once shall never be accepted again; the accept
       frontier shall never move backwards; classification shall be total
       (no panic) for any input. This is the freshness oracle beneath the
       per-frame MAC, shared by falcon (drone C2 uplink) and wohl
@@ -19,7 +23,9 @@ artifacts:
       req-type: safety
       priority: must
       verification-criteria: >
-        Kani proofs SEC-K01..K04 on relay-sec ReplayWindow: no
+        Unit test window_edge_is_63_in_64_out pins the window edge (H - c =
+        63 reordered, 64 too old, counter 0 rejected); a `>= WINDOW_BITS - 1`
+        mutant fails it. Kani proofs SEC-K01..K04 on relay-sec ReplayWindow: no
         double-accept (a counter accepted once is Replay), monotone
         frontier (accept never lowers highest), total accept (no
         panic / arithmetic-overflow / shift-UB for any input), and

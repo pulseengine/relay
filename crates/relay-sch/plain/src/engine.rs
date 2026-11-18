@@ -263,4 +263,13 @@ mod proptests {
             prop_assert_eq!(result.action_count, 1);
         }
     }
+
+    /// SCH-P01: new() is `external_body` in the Verus source, so its
+    /// postcondition is trusted there; this test is the executed evidence
+    /// that the table starts empty.
+    #[test]
+    fn new_table_is_empty_sch_p01() {
+        let t = ScheduleTable::new();
+        assert_eq!(t.slot_count, 0);
+    }
 }

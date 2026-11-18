@@ -246,4 +246,13 @@ mod tests {
         assert_eq!(r3.dispatch_count, 1);
         assert_eq!(r3.dispatched[0].command_code, 0x30);
     }
+
+    /// SCA-P01: new() is `external_body` in the Verus source, so its
+    /// postcondition is trusted there; this test is the executed evidence
+    /// that the table starts empty.
+    #[test]
+    fn new_table_is_empty_sca_p01() {
+        let t = AbsTable::new();
+        assert_eq!(t.command_count, 0);
+    }
 }

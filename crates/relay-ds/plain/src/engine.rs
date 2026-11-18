@@ -237,4 +237,13 @@ mod tests {
         assert_eq!(t.filter_count(), 10);
         assert!(t.filter_count() as usize <= MAX_FILTERS);
     }
+
+    /// DS-P01: new() is `external_body` in the Verus source, so its
+    /// postcondition is trusted there; this test is the executed evidence
+    /// that the table starts empty.
+    #[test]
+    fn new_table_is_empty_ds_p01() {
+        let t = FilterTable::new();
+        assert_eq!(t.filter_count, 0);
+    }
 }

@@ -216,4 +216,44 @@ mod tests {
         assert!(is_aligned(0x1001, 1));
         assert!(is_aligned(0x0, 8));
     }
+
+    /// MM-P01..P03, every boundary pinned with the config above
+    /// (RAM [0x2000_0000, 0x2001_0000), max 4096 bytes). The WHOLE access
+    /// must lie in RAM: address + size <= ram_end. Alignment is checked for
+    /// Peek and Poke only.
+    #[test]
+    fn boundaries_pinned_by_mm_p01() {
+        let config = test_config();
+        let r = |operation, address, size| {
+            validate_request(
+                &config,
+                &MmRequest {
+                    operation,
+                    address,
+                    size,
+                    value: 0,
+                },
+            )
+        };
+        use MmOperation::*;
+        use MmValidation::*;
+        // address: ram_start is in, ram_start - 1 is out, ram_end is out.
+        assert_eq!(r(Peek, 0x2000_0000, 4), Valid);
+        assert_eq!(r(Peek, 0x1FFF_FFFC, 4), AddressOutOfRange);
+        assert_eq!(r(Peek, 0x2001_0000, 1), AddressOutOfRange);
+        // the access end: address + size == ram_end is in, one byte past is out.
+        assert_eq!(r(Fill, 0x2000_FFFC, 4), Valid);
+        assert_eq!(r(Fill, 0x2000_FFFD, 4), AddressOutOfRange);
+        // size: 1 and max are in, max + 1 is too large, 0 is SizeZero.
+        assert_eq!(r(Fill, 0x2000_0000, 1), Valid);
+        assert_eq!(r(Fill, 0x2000_0000, 4096), Valid);
+        assert_eq!(r(Fill, 0x2000_0000, 4097), SizeTooLarge);
+        assert_eq!(r(Fill, 0x2000_0000, 0), SizeZero);
+        // alignment: Peek/Poke refuse a misaligned address; the other
+        // operations accept it.
+        assert_eq!(r(Poke, 0x2000_0002, 4), AlignmentError);
+        for op in [LoadFromFile, DumpToFile, Fill] {
+            assert_eq!(r(op, 0x2000_0002, 4), Valid);
+        }
+    }
 }

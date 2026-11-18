@@ -397,3 +397,53 @@ fn denied_code_is_the_mavlink_value() {
         (2, 3, 4, 10, 11, 12, 14)
     );
 }
+
+/// SWREQ-FALCON-MAVLINK-P07 on the mission path: a CRC-valid MISSION_COUNT
+/// whose frame sets an incompat flag does not start an upload, while the same
+/// count unflagged does. The rejection is parse_frame's, shared by every
+/// ingest path; this pins it on a second message class besides ARM.
+#[test]
+fn incompat_flagged_mission_count_is_ignored() {
+    let mc = MissionCount {
+        count: 1,
+        target_system: VEH,
+        target_component: 1,
+    };
+    let payload = mc.encode_payload();
+    let mut out = [0u8; 300];
+    let (plain, n) = frame(
+        GCS,
+        GCS_COMP,
+        MISSION_COUNT_MSG_ID,
+        &payload,
+        MISSION_COUNT_CRC_EXTRA,
+    );
+    assert!(
+        !matches!(
+            bridge().ingest_mission(&plain[..n], &mut out),
+            MissionUpload::Ignored
+        ),
+        "an unflagged MISSION_COUNT starts an upload"
+    );
+    for flags in [0x01u8, 0x80, 0xFE] {
+        let header = FrameHeader {
+            magic: MAGIC_V2,
+            payload_len: payload.len() as u8,
+            incompat_flags: flags,
+            compat_flags: 0,
+            sequence: 0,
+            system_id: GCS,
+            component_id: GCS_COMP,
+            message_id: MISSION_COUNT_MSG_ID,
+        };
+        let mut buf = [0u8; 300];
+        let n = encode_frame(&header, &payload, MISSION_COUNT_CRC_EXTRA, &mut buf).expect("encode");
+        assert!(
+            matches!(
+                bridge().ingest_mission(&buf[..n], &mut out),
+                MissionUpload::Ignored
+            ),
+            "flags {flags:#04x}"
+        );
+    }
+}

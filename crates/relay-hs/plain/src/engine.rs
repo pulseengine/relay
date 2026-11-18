@@ -333,4 +333,13 @@ mod tests {
         let r = t.check_health(100);
         assert!(r.alert_count as usize <= MAX_ALERTS_PER_CHECK);
     }
+
+    /// HS-P01: new() is `external_body` in the Verus source, so its
+    /// postcondition is trusted there; this test is the executed evidence
+    /// that the table starts empty.
+    #[test]
+    fn new_table_is_empty_hs_p01() {
+        let t = HealthTable::new();
+        assert_eq!(t.app_count, 0);
+    }
 }

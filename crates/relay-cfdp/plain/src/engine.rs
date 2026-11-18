@@ -397,4 +397,55 @@ mod tests {
         let result = table.process_nak(id, 0, 100);
         assert_eq!(result.action_count, 0);
     }
+
+    /// CFDP-P01, pinned exhaustively: over every sequence of up to six
+    /// ACK / tick / NAK events, for file sizes 0, 1 and 1024 and retransmit
+    /// limits 0, 1 and 3, each event leaves the state where it was, moves it
+    /// to the NEXT state of Idle -> MetadataSent -> DataSending -> EofSent ->
+    /// Finished, or (NAK with the retransmit limit reached, from DataSending
+    /// or EofSent only) to Cancelled. Finished and Cancelled are absorbing.
+    #[test]
+    fn transitions_never_skip_a_state() {
+        fn rank(s: TransactionState) -> u8 {
+            match s {
+                TransactionState::Idle => 0,
+                TransactionState::MetadataSent => 1,
+                TransactionState::DataSending => 2,
+                TransactionState::EofSent => 3,
+                TransactionState::Finished => 4,
+                TransactionState::Cancelled => 9,
+            }
+        }
+        let mut checked = 0u32;
+        for &file_size in &[0u32, 1, 1024] {
+            for &max_rt in &[0u32, 1, 3] {
+                for seq in 0..(3u32.pow(6)) {
+                    let mut t = TransactionTable::new();
+                    let id = t.begin_send(file_size, max_rt).unwrap();
+                    let mut code = seq;
+                    for _ in 0..6 {
+                        let before = t.get_state(id).unwrap();
+                        match code % 3 {
+                            0 => {
+                                t.process_ack(id);
+                            }
+                            1 => {
+                                t.tick(id);
+                            }
+                            _ => {
+                                t.process_nak(id, 0, 1);
+                            }
+                        }
+                        code /= 3;
+                        let after = t.get_state(id).unwrap();
+                        let (b, a) = (rank(before), rank(after));
+                        let ok = a == b || (b < 4 && a == b + 1) || (a == 9 && (b == 2 || b == 3));
+                        assert!(ok, "{b} -> {a} (size {file_size}, max_rt {max_rt})");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 9 * 729 * 6);
+    }
 }

@@ -219,6 +219,17 @@ mod tests {
         // and a value just below the new frontier is fresh-reorderable.
         assert_eq!(w.accept(999), ReplayVerdict::Reordered);
     }
+
+    /// SEC-P01 window edge: with H = 100 accepted, H - c = 63 is still inside
+    /// the window (accepted as reordered), H - c = 64 is too old.
+    #[test]
+    fn window_edge_is_63_in_64_out() {
+        let mut w = ReplayWindow::new();
+        assert_eq!(w.accept(100), ReplayVerdict::Fresh);
+        assert_eq!(w.check(100 - 63), ReplayVerdict::Reordered);
+        assert_eq!(w.check(100 - 64), ReplayVerdict::TooOld);
+        assert_eq!(w.check(0), ReplayVerdict::Replay);
+    }
 }
 
 #[cfg(test)]

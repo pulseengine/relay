@@ -5,26 +5,33 @@ artifacts:
     status: implemented
     release: falcon-v1.143.0
     description: >
-      The vehicle shall hold position under realistic GNSS — continuous
-      metre-class fix noise plus recurring (intermittent) outages — and the IEKF
-      position-measurement variance shall match the actual receiver noise. An
-      optimistic variance (over-trusting a metre-class fix) injects the noise,
-      the v1.16 position integral winds up on it, and the loop DIVERGES; matching
-      the variance to the sensor restores a bounded hold. Modelled in the no_std
-      SimBackend (Pathology gps_noise + gps_dropout_period intermittent outage)
-      and in the gz Harmonic navsat via position/velocity <noise> (the base
-      world had none). Exposes set_pos_var to tune the filter to the sensor.
+      The vehicle shall hold position, with peak horizontal drift below 1.5 m,
+      under 0.3 m per-axis GNSS fix noise plus a recurring 0.6 s outage every
+      3 s, and FlightCore shall expose set_pos_var so the integrator can set the
+      IEKF position-measurement variance to the receiver's per-axis fix
+      variance (sigma squared, m^2). Modelled in the no_std SimBackend
+      (Pathology gps_noise + gps_dropout_period) and in the gz Harmonic navsat
+      via position/velocity <noise> (the base world had none).
+      History: at v1.19 an optimistic variance (0.01 m^2 against a 0.3 m fix)
+      let the v1.16 position integral wind up on the noise and the loop
+      diverged. Since #452 suppressed gravity fusion in flight it no longer
+      diverges; over-trust now costs accuracy (0.40 m against 0.18 m peak).
     tags: [falcon, gnss, gps, noise, outage, sensor-fidelity, v1.19]
     fields:
       req-type: functional
       priority: must
       verification-criteria: >
-        Through the FlightBackend seam against SimBackend with 0.3 m fix noise +
-        a recurring 0.6 s outage every 3 s: a variance-matched filter
-        (pos_var=0.09=(0.3 m)²) holds peak drift < 1.5 m; the optimistic default
-        (pos_var=0.01=1 cm²) DIVERGES (> 10 m), and matching is > 10x better —
-        the published falsification→fix. clippy clean; the gen-realism-world.py gnss
-        gz world (navsat position/velocity noise) validates.
+        Through the FlightBackend seam against SimBackend with 0.3 m per-axis
+        fix noise and a recurring 0.6 s outage every 3 s, over steps 4001 to
+        29999 at dt = 2 ms (from 8 s after start to 60 s), peak horizontal
+        drift from the origin: the variance-matched filter (pos_var 0.09 m²)
+        stays below 1.5 m (holds_under_noisy_intermittent_gps); the optimistic
+        default (pos_var 0.01 m²) stays below 1.5 m too and has a larger peak
+        than the matched filter (variance_matching_helps_and_over_trust_no_longer_diverges).
+        Before #452 the optimistic default diverged (> 10 m, about 2400 m at
+        v1.19); since gravity fusion is suppressed in flight it does not, and
+        the requirement no longer claims a divergence or a 10x ratio. clippy
+        clean; the gen-realism-world.py gnss gz world validates.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-018

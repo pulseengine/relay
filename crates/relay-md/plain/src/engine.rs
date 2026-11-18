@@ -224,4 +224,13 @@ mod tests {
             enabled: true,
         }));
     }
+
+    /// MD-P01: new() is `external_body` in the Verus source, so its
+    /// postcondition is trusted there; this test is the executed evidence
+    /// that the table starts empty.
+    #[test]
+    fn new_table_is_empty_md_p01() {
+        let t = DwellTable::new();
+        assert_eq!(t.entry_count, 0);
+    }
 }
