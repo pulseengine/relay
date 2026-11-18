@@ -79,10 +79,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
             cross: true
           # macos-14 was retired by GitHub ("configuration
@@ -183,7 +183,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [build-binaries]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # Keyless signing + provenance need an OIDC token; release-asset
       # upload needs contents: write; build provenance attestation
@@ -468,7 +468,7 @@ jobs:
   flight-component:
     name: Build + attach flight Wasm component (+ guard)
     needs: [create-release]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       id-token: write          # keyless cosign over the bundle SHA256SUMS (v1.77)
