@@ -398,6 +398,49 @@ jobs:
           # zero-filled dead IMU as "ring quiet".
           bash scripts/soak-ring-check.sh "$OUT"
 
+      - name: RATE-P05 — the unfaulted supervised hover meets the requirement's own bars
+        # Owner decision 2026-11-19 (S3): soak judges SWREQ-FALCON-RATE-P05's
+        # bars, not only the 5x looser ring bar above. The ring step's run
+        # kills rotor 0 at 4 s, before RATE-P05's settled window [5, 10) s, so
+        # this is a separate, UNFAULTED flight (`supervised-hover`) judged by
+        # scripts/soak-hover-check.rs: roll/pitch RMS < 0.1 rad/s, every motor
+        # in [0.02, 0.98], FDI steady gate open >= 95%, at least 1000 ticks.
+        # Independent of the steps above for the same reason as the ring.
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same launch and liveness checks as the ring step (#609 finding 14).
+          pkill -f 'gz sim' 2>/dev/null || true
+          sleep 3
+          nohup gz sim -s -r -v2 examples/falcon-sitl-gz/worlds/falcon-quad.sdf \
+            > /tmp/gz-hover.log 2>&1 &
+          IMU=/world/falcon/model/quad/link/base_link/sensor/imu_sensor/imu
+          for i in $(seq 1 30); do
+            gz topic -l 2>/dev/null | grep -qx "$IMU" && break
+            sleep 2
+          done
+          if ! gz topic -l 2>/dev/null | grep -qx "$IMU"; then
+            pkill -f 'gz sim' 2>/dev/null || true
+            echo "::error::gz never published $IMU within 60 s -- RATE-P05's hover was NOT measured"
+            exit 1
+          fi
+          timeout 20 gz topic -e -t "$IMU" -n 1 > /tmp/gz-hover-imu-sample.txt || true
+          if [ ! -s /tmp/gz-hover-imu-sample.txt ]; then
+            pkill -f 'gz sim' 2>/dev/null || true
+            echo "::error::gz advertised $IMU but produced no sample in 20 s -- RATE-P05's hover was NOT measured"
+            exit 1
+          fi
+          OUT=/tmp/hover-rate-p05.txt
+          RC=0
+          ./target/release/falcon-sitl-gz \
+            --backend=gazebo --scenario=supervised-hover --duration=10 \
+            2>&1 | tee "$OUT" || RC=$?
+          pkill -f 'gz sim' 2>/dev/null || true
+          echo "harness exit=$RC (it says only that the window was flown; the bars are judged below)"
+          rustc --edition 2021 -O scripts/soak-hover-check.rs -o "$RUNNER_TEMP/soak-hover-check"
+          "$RUNNER_TEMP/soak-hover-check" "$OUT"
+
 
   wasm-endurance:
     name: wasm endurance watch (BOTH PATHS)
