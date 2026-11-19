@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "BOARD-P01 — every open issue AND every requirement shall carry a disposition that matches reality, measured rather than felt"
     status: proposed
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0
     description: >
       Every open issue shall have exactly one recorded disposition — CLOSED
       with a tagged-release reference, CLOSED with a rationale, or OPEN with a

@@ -2,12 +2,14 @@ artifacts:
   - id: FV-FALCON-MISSIONUP-002
     type: sw-verification
     title: "Mission upload validation, staging and whole-mission commit; supervisor envelope check"
-    status: verified
+    status: implemented
     description: >
       Verifies SWREQ-FALCON-MISSIONUP-P02. Each step is one named test in
       crates/falcon-mavlink/plain/src/mission_validation_tests.rs; together
       they cover every hostile upload the 2026-11-13 review reproduced (F2-F5)
-      plus the accepted band edges and the shared altitude constants.
+      plus the accepted band edges and the shared altitude constants, and
+      (2026-11-19) the supervisor's whole-mission refusal above 16 waypoints
+      and its 2 m fence margin.
       Negative control: with the bridge item checks, the NO_SPACE count check
       and the supervisor envelope check disabled, 5 of the 14 tests fail; the
       staging tests (stray count, fence upload, mid-upload refresh) fail on
@@ -30,6 +32,8 @@ artifacts:
         - run: "cargo test -p falcon-mavlink mission_validation_tests::bridge_and_supervisor_altitude_band_agree"
         - run: "cargo test -p falcon-mavlink mission_validation_tests::supervisor_refuses_out_of_envelope_missions"
         - run: "cargo test -p falcon-mavlink mission_validation_tests::denied_code_is_the_mavlink_value"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::supervisor_refuses_more_than_max_waypoints_whole"
+        - run: "cargo test -p falcon-mavlink mission_validation_tests::supervisor_fence_margin_is_pinned"
     links:
       - type: verifies
         target: SWREQ-FALCON-MISSIONUP-P02

@@ -114,6 +114,15 @@ pub const MISSION_MIN_ALT_AGL_M: f32 = 1.0;
 /// 120 m open-category ceiling (EU 2019/947). Matches falcon-mavlink's
 /// MISSION_MAX_ALT_M.
 pub const MISSION_MAX_ALT_AGL_M: f32 = 120.0;
+/// Horizontal margin, m, that a mission waypoint must keep inside the
+/// geofence radius (SWREQ-FALCON-MISSIONUP-P02; owner decision 2026-11-19).
+/// A waypoint on the fence edge is reachable only by a vehicle that never
+/// overshoots, and the breach failsafe fires on any position beyond the
+/// radius (`outside_geofence` compares with `>`), so an edge waypoint turned
+/// tracking overshoot into an RTL. 2 m matches the hold's peak-excursion bar
+/// (final <= 1.0 m, peak <= 2.0 m). A fence of exactly 2 m admits only
+/// waypoints directly above home; a narrower one admits none.
+pub const MISSION_FENCE_MARGIN_M: f32 = 2.0;
 
 /// Pre-arm estimator-convergence ceiling (v1.99): the IEKF tilt-uncertainty
 /// (roll²+pitch², rad²) must be at/below this for `estimator_converged` to pass.
@@ -934,19 +943,23 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
 
     /// Load a multi-leg mission: a sequence of NED waypoints flown in order
     /// (up to `MAX_WAYPOINTS`) while in Mission mode. On reaching the last leg
-    /// the supervisor autonomously returns home and lands. Waypoints beyond
-    /// capacity are dropped.
+    /// the supervisor autonomously returns home and lands.
     ///
     /// Returns whether the mission was loaded. The WHOLE mission is refused,
-    /// and the previous one stays in force, if any loaded waypoint is not
+    /// and the previous one stays in force, if it has more than
+    /// `MAX_WAYPOINTS` waypoints (they used to be dropped silently; the
+    /// MAVLink bridge already answers NO_SPACE), or if any waypoint is not
     /// finite, lies outside [`MISSION_MIN_ALT_AGL_M`, `MISSION_MAX_ALT_AGL_M`]
-    /// above home, or lies horizontally outside the geofence radius
-    /// (SWREQ-FALCON-MISSIONUP-P02). Before this check a NaN or below-home
+    /// above home, or lies horizontally farther from home than the geofence
+    /// radius minus [`MISSION_FENCE_MARGIN_M`] (SWREQ-FALCON-MISSIONUP-P02). Before this check a NaN or below-home
     /// waypoint cut the motors in flight and a 5000 m one climbed without
     /// bound (codebase review 2026-11-13, F2).
     pub fn set_mission_waypoints(&mut self, wps: &[Vec3]) -> bool {
-        let n = wps.len().min(MAX_WAYPOINTS);
-        if !wps[..n].iter().all(|wp| self.waypoint_admissible(*wp)) {
+        if wps.len() > MAX_WAYPOINTS {
+            return false;
+        }
+        let n = wps.len();
+        if !wps.iter().all(|wp| self.waypoint_admissible(*wp)) {
             return false;
         }
         self.waypoints[..n].copy_from_slice(&wps[..n]);
@@ -957,7 +970,8 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
 
     /// One mission waypoint inside the flight envelope: finite, between the
     /// altitude floor and ceiling above home (NED z is down, so AGL is
-    /// `home.z - wp.z`), and within the geofence radius of home.
+    /// `home.z - wp.z`), and at least [`MISSION_FENCE_MARGIN_M`] inside the
+    /// geofence radius of home.
     fn waypoint_admissible(&self, wp: Vec3) -> bool {
         if !(wp[0].is_finite() && wp[1].is_finite() && wp[2].is_finite()) {
             return false;
@@ -969,7 +983,7 @@ impl<C: SupervisedCore> FlightSupervisor<C> {
         let dx = wp[0] - self.home[0];
         let dy = wp[1] - self.home[1];
         // `<=` is false for a NaN radius, so a NaN fence admits nothing.
-        relay_math::sqrtf(dx * dx + dy * dy) <= self.fence_radius
+        relay_math::sqrtf(dx * dx + dy * dy) <= self.fence_radius - MISSION_FENCE_MARGIN_M
     }
 
     /// Choose where Mission takes its setpoint from (#609 finding 4). The

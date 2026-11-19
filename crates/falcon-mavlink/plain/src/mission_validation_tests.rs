@@ -3,7 +3,10 @@
 //! 2026-11-13 codebase review (F2-F5); each failed or panicked before.
 
 use super::*;
-use falcon_core::{FlightSupervisor, MISSION_MAX_ALT_AGL_M, MISSION_MIN_ALT_AGL_M};
+use falcon_core::{
+    FlightSupervisor, MAX_WAYPOINTS, MISSION_FENCE_MARGIN_M, MISSION_MAX_ALT_AGL_M,
+    MISSION_MIN_ALT_AGL_M,
+};
 use relay_mavlink::{
     FrameHeader, MAV_MISSION_DENIED, MISSION_ACK_CRC_EXTRA, MISSION_ACK_MSG_ID,
     MISSION_COUNT_CRC_EXTRA, MISSION_COUNT_MSG_ID, MISSION_ITEM_INT_CRC_EXTRA,
@@ -379,6 +382,58 @@ fn supervisor_refuses_out_of_envelope_missions() {
         );
         assert_eq!(sup.waypoint_count(), 1, "{wp:?} replaced the mission");
     }
+}
+
+/// More than MAX_WAYPOINTS is refused whole and the previous mission stays
+/// (owner decision 2026-11-19). Before: waypoints past the 16th were dropped
+/// unchecked and the truncated mission loaded.
+#[test]
+fn supervisor_refuses_more_than_max_waypoints_whole() {
+    assert_eq!(MAX_WAYPOINTS, 16);
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 1.0);
+    assert!(sup.set_mission_waypoints(&[[10.0, 0.0, -2.0]]));
+    let mut wps = [[0.0_f32, 0.0, -3.0]; MAX_WAYPOINTS + 1];
+    for (i, wp) in wps.iter_mut().enumerate() {
+        wp[0] = i as f32;
+    }
+    assert!(!sup.set_mission_waypoints(&wps), "17 waypoints accepted");
+    assert_eq!(sup.waypoint_count(), 1, "17 waypoints replaced the mission");
+    assert!(
+        sup.set_mission_waypoints(&wps[..MAX_WAYPOINTS]),
+        "16 waypoints refused"
+    );
+    assert_eq!(sup.waypoint_count(), MAX_WAYPOINTS);
+}
+
+/// A waypoint must keep MISSION_FENCE_MARGIN_M inside the geofence radius
+/// (owner decision 2026-11-19). Before: a waypoint exactly on the edge was
+/// admitted, and any overshoot there fired the breach failsafe.
+#[test]
+fn supervisor_fence_margin_is_pinned() {
+    assert_eq!(MISSION_FENCE_MARGIN_M, 2.0);
+    let mut sup = FlightSupervisor::new([0.0, 0.0, 0.0], 50.0, 2.0, 1.0);
+    assert!(
+        sup.set_mission_waypoints(&[[48.0, 0.0, -2.0]]),
+        "48 m (radius - margin) refused"
+    );
+    assert!(
+        sup.set_mission_waypoints(&[[0.0, -48.0, -2.0]]),
+        "48 m on another axis refused"
+    );
+    for d in [48.01_f32, 49.0, 50.0] {
+        assert!(
+            !sup.set_mission_waypoints(&[[d, 0.0, -2.0]]),
+            "{d} m accepted inside the margin"
+        );
+        assert_eq!(sup.waypoint_count(), 1);
+    }
+    // A fence exactly the margin wide admits only waypoints above home; a
+    // narrower one admits none.
+    let mut edge = FlightSupervisor::new([0.0, 0.0, 0.0], MISSION_FENCE_MARGIN_M, 2.0, 1.0);
+    assert!(edge.set_mission_waypoints(&[[0.0, 0.0, -2.0]]));
+    assert!(!edge.set_mission_waypoints(&[[0.1, 0.0, -2.0]]));
+    let mut tiny = FlightSupervisor::new([0.0, 0.0, 0.0], 1.5, 2.0, 1.0);
+    assert!(!tiny.set_mission_waypoints(&[[0.0, 0.0, -2.0]]));
 }
 
 #[test]
