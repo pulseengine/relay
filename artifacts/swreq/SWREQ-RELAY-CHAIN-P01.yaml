@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-RELAY-CHAIN-P01
+    type: sw-req
+    title: "CHAIN-P01 — The shipped flight core is lowered through meld, loom and synth in CI, with per-target reach published (North Star O1)"
+    status: draft
+    release: falcon-v1.144.0
+    description: >
+      Serves North Star O1, the indicator "synth reach" only (bet B1, plan
+      2026-11-19). A CI job running under the varve layer takes the candidate's
+      falcon-cascade component, fuses it with meld (--memory shared --pack-rebase
+      --reproducible), optimises it with loom and lowers it with synth for
+      cortex-m7dp, cortex-m7 and rv32imac. It publishes the ELF, its digest and the
+      per-target function reach as release assets. Reach is measured, not gated:
+      tonight's walk measured 37/37 on cortex-m7dp, 33/37 on cortex-m7 and 5/37 on
+      rv32. The job fails only on cortex-m7dp, the acceptance target. The tool is
+      Rust in tools/chain-walk, native because it spawns the tools. It also
+      emits north-star-input.O1.json (seam pulseengine.eu#393) with execution match
+      and WCET reported as ran: false. That counts as a failure, never as 0 and
+      never omitted. No translation-validation share goes into the O1 file. An
+      emulator run is not on-target evidence. Execution match on the lowered ELF
+      against SWREQ-FALCON-REFVEC-P01 is the v1.145 half of B1, not this item.
+    tags: [falcon, relay, chain, synth, meld, loom, north-star-o1, ci]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Method: CI job with negative controls. (1) A component with one function
+        synth declines on cortex-m7dp turns the job red. (2) A missing or
+        unparseable reach line turns it red: empty is not a pass. (3) The O1 file
+        validates against the pulseengine.eu#392 schema and reports execution match
+        and WCET as ran: false. Local big test first: the full lowering on all three
+        targets on this host under the pinned layer.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020

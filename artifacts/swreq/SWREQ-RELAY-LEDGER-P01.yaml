@@ -1,0 +1,35 @@
+artifacts:
+  - id: SWREQ-RELAY-LEDGER-P01
+    type: sw-req
+    title: "LEDGER-P01 — A shrink-only assumption ledger and a kernel axiom audit as required checks, run as WASI gates (North Star O3, O5)"
+    status: draft
+    release: falcon-v1.144.0
+    description: >
+      Serves North Star O3 (the proof check with a kernel axiom audit and a
+      trust-escape ledger, shrink-only) and O5 (gates as signed WASI components
+      under kiln, wasmtime as the differential). Bet B4, plan 2026-11-19. The
+      ledger lists every Verus external_body (69 in 17 crates, ceiling-gated today
+      by check-verus-trust) and every kani::assume (125 in 32 files, unledgered).
+      It names the other input-narrowing forms it does not yet cover. The axiom
+      audit runs Print Assumptions on each Rocq top-level theorem and the
+      equivalent on each Lean one, against a committed allowlist. Relay has no axiom
+      audit today, so relay does not count under O3 until both checks are required.
+      For O5, each of the two checkers builds as a wasm32-wasip2 component and
+      counts only when (a) its equivalence test against the native build runs in
+      CI and fails on a differing verdict, (b) it runs under kiln, and (c) it is
+      signed. The denominator is all relay tools and gates, not only the Rust
+      checkers. Until kiln runs it, O5 reports 0 for relay and the gate runs
+      under wasmtime.
+    tags: [relay, verification, trust, ledger, axioms, wasi, kiln, north-star-o3, north-star-o5]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Method: required CI checks with negative controls. (1) An added kani::assume
+        or external_body with no ledger entry is red. (2) An added ledger entry is
+        red: the count may only fall. (3) A Rocq theorem that depends on a new axiom
+        is red. (4) The wasip2 and native verdicts are compared, and a planted
+        difference is red. Local big test first on this host.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-020
