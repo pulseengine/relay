@@ -188,16 +188,32 @@ jobs:
           "$RUNNER_TEMP/cvt"
       # No fork PR reaches a self-hosted runner: every self-hosted runs-on uses
       # the fail-closed same-repo form (a deleted fork's null head.repo falls to
-      # the hosted runner), and no self-hosted job sits under a trigger a fork
-      # can cause (pull_request_target, workflow_run, ...). Ported from
-      # pulseengine/ordeal#322 and extended to matrix runners. Tests first, so a
-      # broken checker cannot pass vacuously.
-      - name: Self-hosted fork guard (fail-closed runs-on)
+      # the hosted runner), every self-hosted label is one relay's pools provide
+      # (plant-guard.toml), and no self-hosted job sits under a trigger a fork
+      # can cause (pull_request_target, workflow_run, ...).
+      #
+      # `plant guard` from pulseengine/plant, which owns this check since
+      # 2026-11-18 (relay donated scripts/check-selfhosted-fork-guard.rs; plant
+      # parses the YAML structurally, so it also rejects the shapes the
+      # line-based copy let through: `runs-on : light`, a quoted key, a
+      # flow-style job, `ubuntu-gpu`, a misspelled label). Pinned by version
+      # AND sha256, same posture as actionlint above. The sha256 was checked
+      # against plant's cosign-signed SHA256SUMS.txt (identity: plant's
+      # release.yml@refs/tags/v0.2.0). Moves to the pulseengine varve layer
+      # once pulseengine-layers#64 (plant v0.2.0) is merged.
+      - name: Self-hosted fork guard (plant guard, pinned)
+        shell: bash
         run: |
-          rustc --edition 2021 --test scripts/check-selfhosted-fork-guard.rs -o "$RUNNER_TEMP/csfg-test"
-          "$RUNNER_TEMP/csfg-test"
-          rustc --edition 2021 -O scripts/check-selfhosted-fork-guard.rs -o "$RUNNER_TEMP/csfg"
-          "$RUNNER_TEMP/csfg"
+          set -euo pipefail
+          VER=0.2.0
+          SHA=cd081585591bcf99d3dfac636332ce7339d2fd294e04bcc0b83004e18cb72bec
+          TGZ="plant-v${VER}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$TGZ" \
+            "https://github.com/pulseengine/plant/releases/download/v${VER}/${TGZ}"
+          echo "${SHA}  $RUNNER_TEMP/${TGZ}" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$TGZ" -C "$RUNNER_TEMP" ./plant
+          "$RUNNER_TEMP/plant" --version
+          "$RUNNER_TEMP/plant" guard
       - name: Clippy on v0.1 falcon crates
         run: |
           cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
