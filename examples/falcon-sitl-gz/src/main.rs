@@ -129,6 +129,7 @@ const SCENARIOS: &[&str] = &[
     "flightcore",
     "flightcore-rotorout",
     "supervised-rotorout",
+    "supervised-hover",
 ];
 
 /// Runs the named scenario against the chosen physics backend.
@@ -253,6 +254,15 @@ fn run_scenario(
             // -> touchdown -> Disarmed. The recordable landing demo.
             let bias = test_gnss_z_bias_from_env();
             run_supervised_rotorout(physics, 2.0, duration_s, duration_s * 0.4, bias, evidence).pass
+        }
+        "supervised-hover" => {
+            // RATE-P05's run: the same production FlightSupervisor flight with
+            // NO rotor kill, so the settled hover window [5, 10) s exists. The
+            // `hover:` line it prints is judged by scripts/soak-hover-check.rs
+            // (owner decision 2026-11-19, S3); this exit status says only that
+            // the window was flown (at least 100 ticks), not that it passed.
+            let o = run_supervised_rotorout(physics, 2.0, duration_s, f32::INFINITY, 0.0, evidence);
+            o.hover_ticks >= 100
         }
         other => {
             unreachable!("scenario {other} passed main's SCENARIOS check but is not dispatched")
@@ -1341,6 +1351,16 @@ fn run_supervised_rotorout(
     let mut prekill_rp_sumsq = 0.0_f64;
     let mut prekill_ticks = 0_u32;
     let mut prekill_sat_ticks = 0_u32;
+    // RATE-P05's SETTLED HOVER WINDOW, t in [HOVER_WINDOW_S), unfaulted only
+    // (owner decision 2026-11-19, S3): roll/pitch body-rate RMS, the fraction
+    // of ticks with any motor outside RATE-P05's [0.02, 0.98] band, and the
+    // fraction with the FDI steady gate open. `supervised-rotorout` kills its
+    // rotor at 40% of the run, before this window, so only
+    // `supervised-hover` (no kill) fills it.
+    let mut hover_rp_sumsq = 0.0_f64;
+    let mut hover_ticks = 0_u32;
+    let mut hover_oob_ticks = 0_u32;
+    let mut hover_gate_open_ticks = 0_u32;
     {
         let mut backend = SitlBackend::new(physics, dt, 0.0, 50);
         for step in 0..n {
@@ -1382,6 +1402,18 @@ fn run_supervised_rotorout(
                 let m = backend.last_motors();
                 if m.iter().any(|&x| x >= 0.999 || x <= 0.001) {
                     prekill_sat_ticks += 1;
+                }
+                if (HOVER_WINDOW_S.0..HOVER_WINDOW_S.1).contains(&t) {
+                    hover_rp_sumsq += (g[0] as f64) * (g[0] as f64) + (g[1] as f64) * (g[1] as f64);
+                    hover_ticks += 1;
+                    if m.iter()
+                        .any(|&x| !(RATE_P05_MOTOR_BAND.0..=RATE_P05_MOTOR_BAND.1).contains(&x))
+                    {
+                        hover_oob_ticks += 1;
+                    }
+                    if sup.core().fdi_diag().2 {
+                        hover_gate_open_ticks += 1;
+                    }
                 }
             }
 
@@ -1558,6 +1590,27 @@ fn run_supervised_rotorout(
     println!(
         "  ring: prekill_ticks={prekill_ticks} prekill_rp_rate_rms={prekill_rp_rms:.4}rad/s prekill_saturated_frac={prekill_sat_frac:.4}"
     );
+    // RATE-P05's three numbers (S3). NaN when the window was not flown, which
+    // the checker refuses. A separate line: `ring:` is an API soak greps.
+    let frac = |k: u32| {
+        if hover_ticks > 0 {
+            k as f64 / hover_ticks as f64
+        } else {
+            f64::NAN
+        }
+    };
+    let hover_rp_rms = if hover_ticks > 0 {
+        (hover_rp_sumsq / hover_ticks as f64).sqrt()
+    } else {
+        f64::NAN
+    };
+    println!(
+        "  hover: window={:.0}-{:.0}s ticks={hover_ticks} rp_rate_rms={hover_rp_rms:.4}rad/s motor_out_of_band_frac={:.4} fdi_gate_open_frac={:.4}",
+        HOVER_WINDOW_S.0,
+        HOVER_WINDOW_S.1,
+        frac(hover_oob_ticks),
+        frac(hover_gate_open_ticks)
+    );
     println!(
         "  verdict: backend={name} scenario=supervised-rotorout steps={n} fail_at={fail_at_s:.1}s \
          landed_at={landed_at:?} final_alt={final_alt:.2}m mode-disarmed={} isolated={isolated:?} \
@@ -1570,6 +1623,7 @@ fn run_supervised_rotorout(
     );
     SupRotorOutOutcome {
         pass,
+        hover_ticks,
         landed_at,
         alt_at_disarm,
         vz_at_disarm,
@@ -1598,6 +1652,9 @@ const SUPROTOROUT_DISARM_MAX_ABS_VZ: f32 = 1.0;
 #[cfg_attr(not(test), allow(dead_code))]
 struct SupRotorOutOutcome {
     pass: bool,
+    /// Ticks flown inside RATE-P05's settled hover window (0 when the rotor
+    /// was killed before it).
+    hover_ticks: u32,
     /// Sim time of the first `Disarmed` tick.
     landed_at: Option<f32>,
     /// TRUE altitude (m, up-positive, from the plant) at the first `Disarmed` tick.
@@ -1606,6 +1663,11 @@ struct SupRotorOutOutcome {
     /// `None` if the plant reports no velocity.
     vz_at_disarm: Option<f32>,
 }
+
+/// RATE-P05's settled hover window, s (SWREQ-FALCON-RATE-P05 criteria).
+const HOVER_WINDOW_S: (f32, f32) = (5.0, 10.0);
+/// RATE-P05's motor band: every normalised command inside it.
+const RATE_P05_MOTOR_BAND: (f32, f32) = (0.02, 0.98);
 
 /// `Some(x)` → `x.xxx<unit>`, `None` → `none` (an unmeasured term, which the
 /// verdict treats as a FAIL).

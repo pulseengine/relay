@@ -240,9 +240,17 @@ artifacts:
         settled hover, so this bounds the tracking error); every motor command
         in [0.02, 0.98] of its normalised 0..1 range; FDI steady gate open for
         at least 95% of those ticks; all 3 of 3 trials. 0.1 rad/s or more, or
-        any one trial failing, is a failure. The standing CI check
-        (soak-ring-check.sh) judges a looser bar (RMS < 0.5 rad/s, saturation
-        printed only) and is not evidence for this criterion.
+        any one trial failing, is a failure. The nightly soak judges these
+        bars on one unfaulted trial per night (owner decision 2026-11-19, S3):
+        falcon-sitl-gz --scenario=supervised-hover prints the window's RMS,
+        motor out-of-band fraction and FDI gate-open fraction, and
+        scripts/soak-hover-check.rs fails on RMS >= 0.1, any tick out of band,
+        gate open < 95%, fewer than 1000 ticks, an exactly-zero (silent) IMU or
+        any non-finite number; its planted bad inputs run on every PR.
+        Measured 2026-11-19, three fresh-server gz trials on this Mac: 0.0020
+        rad/s, 0 out of band, gate open 100%, 1250 ticks, 3 of 3. The ring check
+        (soak-ring-check.sh, RMS < 0.5 on the faulted run's pre-kill window)
+        stays as the #270 detector and is not evidence for this criterion.
         Measured on a plant that CAN saturate — the analytic plant cannot
         exhibit the defect and must not be cited as evidence here.
     links:

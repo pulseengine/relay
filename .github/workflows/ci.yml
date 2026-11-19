@@ -186,6 +186,14 @@ jobs:
           "$RUNNER_TEMP/cvt-test"
           rustc --edition 2021 -O scripts/check-verus-trust.rs -o "$RUNNER_TEMP/cvt"
           "$RUNNER_TEMP/cvt"
+      # RATE-P05's soak oracle (S3, 2026-11-19): its planted bad inputs (the
+      # ring at 2.47 rad/s, RMS at the bar, one tick out of the motor band, a
+      # gate open 94.99%, a silent IMU, NaN, a truncated window) must each fail.
+      # The soak runs it nightly on gz; the acceptance runs on every PR.
+      - name: Soak hover check self-test (planted bad inputs)
+        run: |
+          rustc --edition 2021 --test scripts/soak-hover-check.rs -o "$RUNNER_TEMP/shc-test"
+          "$RUNNER_TEMP/shc-test"
       # No fork PR reaches a self-hosted runner: every self-hosted runs-on uses
       # the fail-closed same-repo form (a deleted fork's null head.repo falls to
       # the hosted runner), every self-hosted label is one relay's pools provide
