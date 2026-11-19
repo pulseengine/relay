@@ -3,7 +3,6 @@ artifacts:
     type: sw-req
     title: "SHOWCASE-P01 — one loopable Gazebo demo that exercises the whole stack, flown by BOTH the wasm component and the native binary"
     status: proposed
-    release: falcon-v1.143.0
     description: >
       There shall be a single runnable demo that flies a scripted sequence in
       Gazebo, exercising the stack's advertised capabilities end to end, and

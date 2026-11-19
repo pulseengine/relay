@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-MISSIONUP-P02
     type: sw-req
     title: "MISSIONUP-P02 — an uploaded mission is validated item by item, staged, and committed whole"
-    status: verified
+    status: implemented
     release: falcon-v1.143.0
     description: >
       Before this requirement an uploaded MISSION_ITEM_INT was stored unchecked,
@@ -35,12 +35,16 @@ artifacts:
       project stored waypoints back to geodetic without overflow.
 
       FlightSupervisor::set_mission_waypoints shall independently refuse the
-      whole mission, keep the previous one, and return false if any waypoint is
-      non-finite, has a height above home (home NED z minus waypoint NED z)
+      whole mission, keep the previous one, and return false if it holds more
+      than MAX_WAYPOINTS = 16 waypoints (16 is accepted; before 2026-11-19 the
+      rest were dropped unchecked), or if any waypoint is non-finite, has a height above home (home NED z minus waypoint NED z)
       outside [MISSION_MIN_ALT_AGL_M, MISSION_MAX_ALT_AGL_M] = [1 m, 120 m]
       (the constants say AGL; the reference is home, not terrain), or lies
-      horizontally farther from home than the geofence radius (exactly at the
-      radius is accepted; the geofence breach fires only beyond it).
+      horizontally farther from home than the geofence radius minus
+      MISSION_FENCE_MARGIN_M = 2 m (radius minus 2 m is accepted). The margin
+      keeps an edge waypoint from turning tracking overshoot into a geofence
+      breach, which fires on any position beyond the radius (owner decision
+      2026-11-19; it matches the hold's 2 m peak-excursion bar).
 
       Not covered: authentication of the uploader (MAVLink2 signing is planned)
       and an upload timeout (the bridge has no clock).
@@ -49,14 +53,18 @@ artifacts:
       req-type: safety
       priority: must
       verification-criteria: >
-        falcon-mavlink mission_validation_tests (14): each hostile upload from
+        falcon-mavlink mission_validation_tests (16): each hostile upload from
         the review is refused with the MAVLink result code the requirement
         names, the stored mission is unchanged, and nothing panics in a debug
         build; the band edges 1 m and 120 m are accepted; the bridge and
         supervisor altitude bands are the same numbers; the supervisor refuses
-        each out-of-envelope waypoint and keeps the previous mission.
-        Negative control: with the item checks, the count check and the
-        supervisor check disabled, 5 of the 14 fail.
+        each out-of-envelope waypoint and keeps the previous mission; it
+        refuses 17 waypoints whole and accepts 16; it accepts a waypoint at
+        radius minus 2 m and refuses 48.01, 49 and 50 m on a 50 m fence.
+        Negative controls: with the item checks, the count check and the
+        supervisor check disabled, 5 of the original 14 fail; restoring the
+        truncation fails the 17-waypoint test; removing the margin fails the
+        margin test.
     links:
       - type: derives-from
         target: SYSREQ-FALCON-012
