@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-MISSIONUP-002
     type: sw-verification
     title: "Mission upload validation, staging and whole-mission commit; supervisor envelope check"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-MISSIONUP-P02. Each step is one named test in
       crates/falcon-mavlink/plain/src/mission_validation_tests.rs; together
