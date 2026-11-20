@@ -323,16 +323,42 @@ jobs:
         # self-hosted runner's cached binary stays valid across runs, so the
         # heavy compile happens only on a deliberate bump (mirrors the spar pin).
         # Bump this tag AND re-run `rivet validate` locally when updating.
+        #
+        # PREBUILT FIRST (relay#262, 2026-11-20). The source build cost 3.5 min
+        # on every run whose runner lacked the cached binary. The release
+        # tarball is checked against a sha256 pinned HERE (not fetched from
+        # SHA256SUMS.txt at run time), then must run `--version`. The binary
+        # needs glibc >= 2.39; on an older runner, or on any mismatch, the step
+        # falls back to the pinned source build, so it fails safe, not open.
+        env:
+          RIVET_VERSION: "0.38.0"
+          RIVET_SHA256_X86_64_LINUX: 1e0bb2b3b2a9a5ba9b4ec594a6b1fd7d8fe4c0ca3325c99fb1c6a8a65a1b4783
         run: |
-          if rivet --version 2>/dev/null | grep -q "0.38.0"; then
-            echo "rivet 0.38.0 already on PATH"
+          if rivet --version 2>/dev/null | grep -q "$RIVET_VERSION"; then
+            echo "rivet $RIVET_VERSION already on PATH"
+            exit 0
+          fi
+          bindir="$HOME/.cargo/bin"; mkdir -p "$bindir"
+          tmp=$(mktemp -d)
+          asset="rivet-v${RIVET_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          if [ "$(uname -sm)" = "Linux x86_64" ] \
+             && curl -fsSL --retry 3 -o "$tmp/$asset" \
+                  "https://github.com/pulseengine/rivet/releases/download/v${RIVET_VERSION}/$asset" \
+             && echo "$RIVET_SHA256_X86_64_LINUX  $tmp/$asset" | sha256sum -c - \
+             && tar -xzf "$tmp/$asset" -C "$tmp" ./rivet \
+             && "$tmp/rivet" --version | grep -q "$RIVET_VERSION"; then
+            install -m 0755 "$tmp/rivet" "$bindir/rivet"
+            echo "rivet $RIVET_VERSION installed from the sha256-pinned release asset"
           else
+            echo "::warning::prebuilt rivet $RIVET_VERSION unusable here; falling back to the pinned source build"
             cargo install --locked \
               --git https://github.com/pulseengine/rivet \
-              --tag v0.38.0 \
+              --tag "v$RIVET_VERSION" \
               --bin rivet \
               rivet-cli
           fi
+          rm -rf "$tmp"
+          rivet --version
 
       # ARTIFACT INTEGRITY (#482). This gate installed rivet and then never
       # ran `validate` — it only used `rivet list` / `rivet get` via
@@ -366,6 +392,9 @@ jobs:
         id: pick
         if: steps.scope.outputs.run_full == 'true'
         env:
+          # Empty on merge_group (and schedule/dispatch): the filter then falls
+          # back to the DEFAULT full sweep. Deliberate fail-safe, see the
+          # merge-queue note in the scope step; never change it to skip.
           PR_BODY: ${{ github.event.pull_request.body }}
         shell: bash
         run: |
