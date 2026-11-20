@@ -122,7 +122,7 @@ jobs:
       - name: Build falcon-hello (native)
         if: ${{ !matrix.cross }}
         shell: bash
-        run: cargo build --release --target "$TARGET" -p falcon-hello
+        run: cargo build --locked --release --target "$TARGET" -p falcon-hello
 
       - name: Build falcon-hello (cross)
         if: matrix.cross
