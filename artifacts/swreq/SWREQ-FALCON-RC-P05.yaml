@@ -1,0 +1,24 @@
+artifacts:
+  - id: SWREQ-FALCON-RC-P05
+    type: sw-req
+    title: "RC-P05 — Gazebo X500: pilot stick takeover from Loiter through the wired RC path"
+    status: proposed
+    release: falcon-v1.145.0
+    description: >
+      The Gazebo half of RC-P04, split out by the owner decision
+      cut-order-and-synth (2026-11-20). With RC-P04's wiring in place, a pilot
+      stick input on the Gazebo X500 takes the vehicle out of Loiter into the
+      pilot mode RC-P01 defines.
+    tags: [falcon, rc, flight-modes, gazebo]
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Method: Gazebo X500 (real gz bridge). Stick takeover from Loiter, 3 of 3
+        runs, with a control run in which the stick input is withheld and Loiter
+        holds.
+    links:
+      - type: derives-from
+        target: SYSREQ-FALCON-006
+      - type: refines
+        target: SWREQ-FALCON-RC-P04

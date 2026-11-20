@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "SEC-P08 — relay-sec seals and opens a relay-ccsds frame at no_std for other consumers"
     status: proposed
-    release: falcon-v1.144.0
+    release: falcon-v1.145.0
     description: >
       relay-sec is consumable outside falcon: a documented, tested seal and open
       of a relay-ccsds frame at no_std (Ascon-AEAD128, anti-replay window),

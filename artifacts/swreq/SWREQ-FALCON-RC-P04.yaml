@@ -18,12 +18,13 @@ artifacts:
       req-type: functional
       priority: must
       verification-criteria: >
-        Method: Kani plus campaigns plus Gazebo. Kani: the mode transitions (no
-        pilot mode entered while Disarmed, RC loss always leaves a pilot mode).
-        SimBackend (analytic): 6000 trials with RC loss injected, 0 missed
-        failsafes; the same campaign with the failsafe disabled must miss. Gazebo
-        X500: stick takeover from Loiter, 3 of 3. SBUS decoder checked against
-        external captures committed with source and hash.
+        Method: Kani plus campaigns. Kani: the mode transitions (no pilot mode
+        entered while Disarmed, RC loss always leaves a pilot mode). SimBackend
+        (analytic): 6000 trials with RC loss injected, 0 missed failsafes; the
+        same campaign with the failsafe disabled must miss. SBUS decoder checked
+        against external captures committed with source and hash. The Gazebo
+        X500 stick takeover moved to SWREQ-FALCON-RC-P05 in v1.145 (owner
+        decision cut-order-and-synth, 2026-11-20).
     links:
       - type: derives-from
         target: SYSREQ-FALCON-006
