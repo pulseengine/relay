@@ -170,7 +170,7 @@ build_component() {
   # of a local toolchain that happened to be two minors behind CI.
   #
   # Explicit is cheap and version-proof: redundant on 1.96, load-bearing on 1.98.
-  if ! ( cd "$wasm_dir" && RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs -C link-arg=-zstack-size=$(component_stack "$dir") -C link-arg=--export=__heap_base -C link-arg=--export=__data_end" cargo component build --release --target "$target" --no-default-features 2>&1 ) \
+  if ! ( cd "$wasm_dir" && RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--emit-relocs -C link-arg=-zstack-size=$(component_stack "$dir") -C link-arg=--export=__heap_base -C link-arg=--export=__data_end" cargo component build --locked --release --target "$target" --no-default-features 2>&1 ) \
        | tee /tmp/falcon-build-$dir.log | grep -E "^error" | sed 's/^/    /' >&2; then
     : # grep found no "^error" lines — that is the success path
   fi
