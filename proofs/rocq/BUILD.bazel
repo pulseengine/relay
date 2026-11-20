@@ -10,6 +10,7 @@
 # do not depend on any translation infrastructure.
 
 load("@rules_rocq_rust//rocq:defs.bzl", "rocq_assumptions_test", "rocq_interval_proof", "rocq_library", "rocq_proof_test")
+load(":interval_trusted_base.bzl", "KERNEL_PRIMITIVES", "STDLIB_REAL_AXIOMS")
 
 # ── Limit Checker proofs ────────────────────────────────────────────────
 
@@ -132,7 +133,16 @@ rocq_proof_test(
     "sc_proofs",
     "hs_proofs",
     "cfdp_proofs",
-    # sin_approx and cos_approx (rocq_interval_proof) are NOT audited yet:
-    # rocq_assumptions_test refuses them ("registered no include path").
-    # Filed upstream; until it lands they are named as not covered.
 ]]
+
+# The Coq-Interval proofs (rocq_interval_proof) are audited since
+# rules_rocq_rust#67. They cannot have an empty allowlist: Reals rests on 4
+# classical axioms and Interval computes with primitive floats, whose
+# operations are kernel axioms. The allowlist is the measured set in
+# interval_trusted_base.bzl. Any other axiom, including an Admitted lemma
+# (reported under its own name), fails the test.
+[rocq_assumptions_test(
+    name = p + "_assumptions_test",
+    allowed_axioms = STDLIB_REAL_AXIOMS + KERNEL_PRIMITIVES,
+    deps = [":" + p],
+) for p in ["sin_approx", "cos_approx"]]
