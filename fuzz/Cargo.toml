@@ -9,6 +9,9 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+# PLANTED NEGATIVE CONTROL (controls/lockfiles/advisory): smallvec 1.6.0 is
+# RUSTSEC-2021-0003; the Lockfiles audit step must go red on this nested lock.
+smallvec = "=1.6.0"
 relay-lc = { path = "../crates/relay-lc" }
 relay-sch = { path = "../crates/relay-sch" }
 
