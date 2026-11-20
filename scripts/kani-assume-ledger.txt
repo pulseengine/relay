@@ -1,0 +1,38 @@
+# Ledger of kani::assume per file. Each one narrows a harness's input range,
+# and a bug outside that range is invisible to the proof (North Star O3).
+# Checked by scripts/check-verus-trust.rs in CI: each file's count must EQUAL
+# its entry, and the TOTAL may not exceed the base commit's (shrink-only,
+# SWREQ-RELAY-LEDGER-P01). A rename moves an entry; a new assume fails.
+# Baseline 2026-11-20: 125 in 32 files.
+crates/falcon-cm-rt/src/kani_proofs.rs 9
+crates/falcon-core/plain/src/kani_proofs.rs 1
+crates/falcon-gnss-ubx/src/kani_proofs.rs 1
+crates/falcon-hitl/src/kani_proofs.rs 2
+crates/relay-adrc/plain/src/lib.rs 9
+crates/relay-avoid/plain/src/kani_proofs.rs 2
+crates/relay-batt/plain/src/kani_proofs.rs 6
+crates/relay-calib/plain/src/kani_proofs.rs 5
+crates/relay-ci/plain/src/kani_proofs.rs 3
+crates/relay-dronecan/plain/src/kani_proofs.rs 4
+crates/relay-flowrange/plain/src/kani_proofs.rs 1
+crates/relay-fm/plain/src/kani_proofs.rs 1
+crates/relay-fsm/plain/src/lib.rs 1
+crates/relay-geo/plain/src/lib.rs 2
+crates/relay-hal/src/kani_proofs.rs 2
+crates/relay-hs/plain/src/kani_proofs.rs 4
+crates/relay-iekf/plain/src/lib.rs 5
+crates/relay-lc/plain/src/kani_proofs.rs 9
+crates/relay-log/plain/src/kani_proofs.rs 1
+crates/relay-mavlink/plain/src/kani_proofs.rs 2
+crates/relay-md/plain/src/kani_proofs.rs 2
+crates/relay-mix-quad/plain/src/lib.rs 14
+crates/relay-mm/plain/src/kani_proofs.rs 4
+crates/relay-nid/plain/src/lib.rs 2
+crates/relay-offboard/plain/src/kani_proofs.rs 3
+crates/relay-param/plain/src/kani_proofs.rs 3
+crates/relay-preflight/plain/src/kani_proofs.rs 2
+crates/relay-sch/plain/src/kani_proofs.rs 2
+crates/relay-sec/plain/src/kani_proofs.rs 11
+crates/relay-sensvote/plain/src/kani_proofs.rs 3
+crates/relay-tbl/plain/src/kani_proofs.rs 1
+crates/relay-traj/plain/src/lib.rs 8

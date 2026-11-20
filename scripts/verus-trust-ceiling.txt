@@ -1,6 +1,8 @@
 # Ceiling on #[verifier::external_body] per crate (Verus TRUSTS these bodies,
 # it does not prove them). Checked EXACTLY by scripts/check-verus-trust.rs in
-# CI: raise only in a reviewed change that says why; lower when you prove one.
+# CI; lower an entry when you prove one. The TOTAL may not exceed the base
+# commit's (North Star O3, shrink-only, SWREQ-RELAY-LEDGER-P01): moving an entry
+# between crates is fine, a new trusted body is not.
 # Baseline 2026-11-13 (codebase review); proofs planned under relay#253.
 relay-ccsds 7
 relay-cfdp 2

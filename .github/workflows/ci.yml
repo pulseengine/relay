@@ -175,17 +175,36 @@ jobs:
       # are out of v0.1 scope.
       - name: Float discipline (f32 flight core; f64 only at annotated boundaries)
         run: ./scripts/check-float-discipline.sh
-      # Verus trusts (does not prove) each #[verifier::external_body]; the
-      # per-crate count must equal scripts/verus-trust-ceiling.txt, so trusted
-      # code cannot grow unnoticed and the ledger ratchets down as bodies are
-      # proven (relay#253; maintainer decision 2026-11-13). Unit tests first,
-      # so a broken checker cannot pass vacuously.
-      - name: Verus trust ceiling (external_body per crate)
+      # Trust ledgers. Verus trusts (does not prove) each
+      # #[verifier::external_body], and each kani::assume narrows a harness's
+      # input range. Per crate / per file the count must equal
+      # scripts/verus-trust-ceiling.txt / scripts/kani-assume-ledger.txt
+      # (relay#253, maintainer decision 2026-11-13), and each ledger's TOTAL may
+      # not exceed the base commit's: North Star O3's guard, entries may only
+      # shrink (SWREQ-RELAY-LEDGER-P01). Unit tests first, so a broken checker
+      # cannot pass vacuously. The base comparison is never skipped silently:
+      # with no base commit the step passes --no-base and prints why.
+      - name: Trust ledgers (external_body per crate, kani::assume per file; totals may only shrink)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          EVENT: ${{ github.event_name }}
         run: |
           rustc --edition 2021 --test scripts/check-verus-trust.rs -o "$RUNNER_TEMP/cvt-test"
           "$RUNNER_TEMP/cvt-test"
           rustc --edition 2021 -O scripts/check-verus-trust.rs -o "$RUNNER_TEMP/cvt"
-          "$RUNNER_TEMP/cvt"
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            "$RUNNER_TEMP/cvt" --no-base "no base commit for a $EVENT event"
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          B="$RUNNER_TEMP/ledger-base"
+          rm -rf "$B" && mkdir -p "$B/scripts"
+          for f in scripts/verus-trust-ceiling.txt scripts/kani-assume-ledger.txt; do
+            if git cat-file -e "$BASE_SHA:$f" 2>/dev/null; then
+              git show "$BASE_SHA:$f" > "$B/$f"
+            fi
+          done
+          "$RUNNER_TEMP/cvt" --base "$B"
       # RATE-P05's soak oracle (S3, 2026-11-19): its planted bad inputs (the
       # ring at 2.47 rad/s, RMS at the bar, one tick out of the motor band, a
       # gate open 94.99%, a silent IMU, NaN, a truncated window) must each fail.
