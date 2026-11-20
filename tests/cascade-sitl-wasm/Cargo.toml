@@ -16,7 +16,7 @@ publish = false
 gazebo = ["falcon-plant/gazebo"]
 
 [dependencies]
-wasmtime = { version = "41", features = ["component-model"] }
+wasmtime = { version = "50.0.3", features = ["component-model"] }
 anyhow = "1"
 libm = "0.2"
 relay-ekf = { path = "../../crates/relay-ekf" }

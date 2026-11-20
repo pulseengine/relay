@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "── building falcon-cortex-m (thumbv7em-none-eabihf, release) ──"
-( cd embedded/falcon-cortex-m && cargo build --release )
+( cd embedded/falcon-cortex-m && cargo build --locked --release )
 
 SRC=embedded/falcon-cortex-m/target/thumbv7em-none-eabihf/release/falcon-cortex-m
 DST=target/falcon-pipeline/falcon-fused.elf

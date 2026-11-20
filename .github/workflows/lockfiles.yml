@@ -1,0 +1,113 @@
+# Lockfiles: every Cargo workspace in relay has a COMMITTED Cargo.lock, every
+# lock is current with its manifests, and every lock passes cargo-audit.
+#
+# Why this exists (2026-11-20 lockfile sweep): 19 of relay's 23 workspace
+# locks were gitignored, so nothing pinned or audited them. Three host test
+# harnesses (tests/cascade-sitl-wasm, tests/host-runner, tests/rate-loop-proof)
+# sat on wasmtime 41.0.4 with 24 RustSec advisories each, unseen, because no
+# audit ran and the lock was regenerated fresh on every build.
+#
+# Three checks, each fail-closed:
+#   1. coverage  - every Cargo.toml carrying [workspace] has a tracked
+#                  Cargo.lock next to it, and at least one lock exists;
+#   2. freshness - `cargo metadata --locked` per workspace, so a manifest
+#                  change without a lock update is red here even for a
+#                  workspace no other job builds;
+#   3. audit     - `cargo audit --file` on every tracked Cargo.lock. Any
+#                  vulnerability fails; unsound/unmaintained warnings are
+#                  printed, not fatal (cargo-audit's default).
+# Runs on PRs, the merge queue, main, and daily, because an advisory can be
+# published against a lock nobody changed.
+name: Lockfiles
+
+on:
+  merge_group:
+  push:
+    # controls/lockfiles/** branches carry planted negative controls (a stale
+    # lock, a vulnerable crate in a nested lock) that must turn this job red.
+    # No other workflow runs on them.
+    branches: [main, "controls/lockfiles/**"]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: lockfiles-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lockfiles:
+    name: Lockfiles (committed, current, audited)
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-15)
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
+        with:
+          tool: cargo-audit
+
+      - name: Every workspace has a committed Cargo.lock
+        run: |
+          set -euo pipefail
+          missing=0; roots=0
+          while IFS= read -r toml; do
+            grep -q '^\[workspace\]' "$toml" || continue
+            roots=$((roots + 1))
+            lock="$(dirname "$toml")/Cargo.lock"
+            if git ls-files --error-unmatch "$lock" >/dev/null 2>&1; then
+              echo "tracked  $lock"
+            else
+              echo "::error file=$toml::workspace has no committed Cargo.lock ($lock)"
+              missing=$((missing + 1))
+            fi
+          done < <(git ls-files '*Cargo.toml')
+          echo "workspace roots: $roots, missing locks: $missing"
+          [ "$roots" -ge 1 ] || { echo "::error::found no workspace root - the scan is broken, not clean"; exit 1; }
+          [ "$missing" -eq 0 ]
+
+      - name: Every Cargo.lock is current with its manifests (cargo metadata --locked)
+        run: |
+          set -uo pipefail
+          stale=0; n=0
+          while IFS= read -r lock; do
+            dir=$(dirname "$lock"); n=$((n + 1))
+            if out=$(cd "$dir" && cargo metadata --locked --format-version 1 2>&1 >/dev/null); then
+              echo "current  $lock"
+            else
+              echo "::error file=$lock::Cargo.lock is out of date with $dir/Cargo.toml (run cargo update -w in $dir and commit)"
+              echo "$out" | tail -5
+              stale=$((stale + 1))
+            fi
+          done < <(git ls-files '*Cargo.lock')
+          echo "locks checked: $n, stale: $stale"
+          [ "$n" -ge 1 ] || { echo "::error::no Cargo.lock found - the scan is broken, not clean"; exit 1; }
+          [ "$stale" -eq 0 ]
+
+      - name: cargo audit on every Cargo.lock
+        run: |
+          set -uo pipefail
+          cargo audit fetch >/dev/null 2>&1 || true
+          bad=0; n=0
+          while IFS= read -r lock; do
+            n=$((n + 1))
+            echo "::group::cargo audit $lock"
+            if cargo audit --file "$lock"; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error file=$lock::cargo audit reported a vulnerability (or failed) for $lock"
+              bad=$((bad + 1))
+            fi
+          done < <(git ls-files '*Cargo.lock')
+          echo "locks audited: $n, failing: $bad"
+          [ "$n" -ge 1 ] || { echo "::error::no Cargo.lock found - the scan is broken, not clean"; exit 1; }
+          [ "$bad" -eq 0 ]

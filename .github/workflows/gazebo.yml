@@ -140,7 +140,7 @@ jobs:
 
       - name: Build the SITL bench with the real bridge
         shell: bash
-        run: cargo build --release -p falcon-sitl-gz --features gazebo
+        run: cargo build --locked --release -p falcon-sitl-gz --features gazebo
 
       # ── The world must actually come up ──────────────────────────────────
       # A gz gate that "passes" because nothing connected is worse than no
@@ -278,7 +278,7 @@ jobs:
           # caught. The artifact a host runs is now the artifact we build.
           cp dist/falcon-components-v1.137/falcon-cascade-v1.137.wasm /tmp/composed.wasm
           cd tests/cascade-sitl-wasm
-          cargo build --release --features gazebo
+          cargo build --locked --release --features gazebo
           # TWO DIFFERENT FAILURES, treated differently on purpose.
           #
           # INFRASTRUCTURE broken (cannot build, cannot connect to gz, cannot
