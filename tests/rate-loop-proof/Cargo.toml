@@ -6,6 +6,9 @@ publish = false
 
 [dependencies]
 wasmtime = { version = "50.0.3", features = ["component-model"] }
+# PLANTED NEGATIVE CONTROL (controls/lockfiles/stale): a dependency added
+# without updating Cargo.lock. The Lockfiles freshness step must go red.
+itoa = "1"
 anyhow = "1"
 
 [workspace]
