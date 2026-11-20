@@ -10,7 +10,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: "cargo test -p falcon-sitl-gz pace"
+        - run: "cargo test -p falcon-plant pace::"  # relay#705: pace.rs moved; the old filter matched 0 tests
     links:
       - type: verifies
         target: SWDD-FALCON-PACE-001

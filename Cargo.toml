@@ -61,6 +61,7 @@ members = [
     "crates/falcon-esc-dshot",
     "crates/falcon-baromag",
     "crates/falcon-hitl",
+    "crates/falcon-plant",
     "examples/falcon-hello",
     "examples/falcon-ekf-bench",
     "examples/falcon-iekf-bench",

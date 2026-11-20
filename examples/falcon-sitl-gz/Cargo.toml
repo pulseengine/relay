@@ -21,7 +21,7 @@ default = []
 # subscription handshake with Harmonic (see the gz-transport-rs diagnosis).
 # Needs the gz-transport13 dev libs + PKG_CONFIG_PATH incl. the brew pkgconfig
 # dir. Opt-in only. gz-msgs supplies the protobuf message types.
-gazebo = ["dep:gz-transport", "dep:gz-msgs", "dep:async-channel"]
+gazebo = ["falcon-plant/gazebo"]
 
 [dependencies]
 relay-ekf = { path = "../../crates/relay-ekf" }
@@ -43,10 +43,6 @@ falcon-core = { path = "../../crates/falcon-core" }
 # FAULT-P04 campaign drives the FlightSupervisor (Arm/Takeoff events, Mode).
 relay-fsm = { path = "../../crates/relay-fsm" }
 libm = "0.2"
+# The plant (Physics, MockPhysics, the gz bridge) and the pacing decision.
+falcon-plant = { path = "../../crates/falcon-plant" }
 
-# Optional — only when feature `gazebo` is on. C++-backed gz-transport that
-# links the installed gz-transport13 (Harmonic); gz-msgs supplies the protobuf
-# message types (IMU/NavSat/Actuators/Pose_V/Magnetometer/Odometry).
-gz-transport = { version = "0.11", features = ["harmonic"], optional = true }
-gz-msgs = { version = "0.11", features = ["harmonic"], optional = true }
-async-channel = { version = "2.5", optional = true }

@@ -95,6 +95,9 @@ artifacts:
       steps:
         - run: cargo test -p falcon-sitl-gz
         - run: cargo test -p falcon-sitl-gz --features gazebo
+        # relay#705: physics.rs (the stub and gz_real) moved to crates/falcon-plant.
+        - run: cargo test -p falcon-plant
+        - run: cargo test -p falcon-plant --features gazebo
         - run: cargo run -p falcon-sitl-gz --features gazebo -- --backend=gazebo --world=falcon --model=quad  # bench-only; needs `gz sim` running
     links:
       - type: verifies

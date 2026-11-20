@@ -70,6 +70,8 @@ artifacts:
       tests: 6
       steps:
         - run: cargo test -p falcon-sitl-gz
+        # relay#705: physics.rs (and its MockPhysics tests) moved to crates/falcon-plant.
+        - run: cargo test -p falcon-plant
         # v0.19.7 — explicit mock-meaningful smoke. The default
         # scenario became closed-loop hover (v0.19.4); since the
         # PosController is now tuned for the 2 kg gz airframe

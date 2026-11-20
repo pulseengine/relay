@@ -1,0 +1,36 @@
+[package]
+name = "falcon-plant"
+description = "The falcon SITL plant as a library: the Physics trait, the deterministic MockPhysics, the gz bridge (behind `gazebo`), gyro-sync pacing, and a lockstep tick interface on the falcon-hitl wire (SWREQ-FALCON-PLANT-P01, relay#705)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# Default: stub GazeboPhysics, no gz-transport deps. `gazebo` builds the real
+# bridge on the C++-backed gz-transport crate (links the installed
+# gz-transport13; needs PKG_CONFIG_PATH incl. the brew pkgconfig dir).
+# Moved here unchanged from examples/falcon-sitl-gz, whose own `gazebo` feature
+# now forwards to this one.
+default = []
+gazebo = ["dep:gz-transport", "dep:gz-msgs", "dep:async-channel"]
+
+[dependencies]
+relay-ekf = { path = "../relay-ekf" }
+# MockPhysics applies the verified mixer's own torque allocation (#435).
+relay-mix-quad = { path = "../relay-mix-quad" }
+# The lockstep interface speaks the published binding (wire VERSION 3), so a
+# harness relays bytes and converts nothing.
+falcon-hitl = { path = "../falcon-hitl" }
+libm = "0.2"
+
+# Optional, only with `gazebo`. Versions are the ones every native SITL result
+# was produced with; tests/cascade-sitl-wasm reaches the bridge through this
+# crate, so the two can no longer differ.
+gz-transport = { version = "0.11", features = ["harmonic"], optional = true }
+gz-msgs = { version = "0.11", features = ["harmonic"], optional = true }
+async-channel = { version = "2.5", optional = true }
