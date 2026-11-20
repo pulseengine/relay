@@ -47,5 +47,5 @@ jobs:
       - name: Run engine throughput benches
         shell: bash
         run: |
-          cargo bench -p engine-throughput-bench -- \
+          cargo bench --locked -p engine-throughput-bench -- \
             --warm-up-time 1 --measurement-time 3

@@ -66,7 +66,7 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO_ROOT"
 
 echo "[falcon-hello-demo] building release binary..."
-cargo build --release -p falcon-hello >/dev/null
+cargo build --locked --release -p falcon-hello >/dev/null
 
 BIN="$REPO_ROOT/target/release/falcon-hello"
 if [[ ! -x "$BIN" ]]; then

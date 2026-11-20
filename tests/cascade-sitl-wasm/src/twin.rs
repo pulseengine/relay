@@ -135,12 +135,13 @@ struct Side {
 impl Side {
     fn load(engine: &Engine, path: &str) -> Result<Self> {
         let component =
-            Component::from_file(engine, path).with_context(|| format!("loading {path}"))?;
+            Component::from_file(engine, path).map_err(anyhow::Error::from).with_context(|| format!("loading {path}"))?;
         // Empty linker, as in the main harness: neither side may need WASI or
         // any host function. Both import only the records-only `types`.
         let linker: Linker<()> = Linker::new(engine);
         let mut store = Store::new(engine, ());
         let b = ComposedCascade::instantiate(&mut store, &component, &linker)
+            .map_err(anyhow::Error::from)
             .with_context(|| format!("instantiating {path} (empty linker, no WASI)"))?;
         Ok(Side { store, b })
     }
@@ -148,31 +149,37 @@ impl Side {
         self.b
             .pulseengine_falcon_cascade_controller()
             .call_configure(&mut self.store, c)
+            .map_err(anyhow::Error::from)
     }
     fn configure_supervisor(&mut self, c: SupervisorConfig) -> Result<()> {
         self.b
             .pulseengine_falcon_cascade_pilot()
             .call_configure_supervisor(&mut self.store, c)
+            .map_err(anyhow::Error::from)
     }
     fn configure_calibration(&mut self, c: SensorCalibration) -> Result<()> {
         self.b
             .pulseengine_falcon_cascade_pilot()
             .call_configure_calibration(&mut self.store, c)
+            .map_err(anyhow::Error::from)
     }
     fn command(&mut self, c: PilotCommand) -> Result<()> {
         self.b
             .pulseengine_falcon_cascade_pilot()
             .call_command(&mut self.store, c, true, true)
+            .map_err(anyhow::Error::from)
     }
     fn step(&mut self, f: SensorFrame, t: Waypoint) -> Result<MotorPwm> {
         self.b
             .pulseengine_falcon_cascade_controller()
             .call_step(&mut self.store, f, t)
+            .map_err(anyhow::Error::from)
     }
     fn read_state(&mut self) -> Result<FlightState> {
         self.b
             .pulseengine_falcon_cascade_observer()
             .call_read_state(&mut self.store)
+            .map_err(anyhow::Error::from)
     }
 }
 
