@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-PLANT-P01
     type: sw-req
     title: "PLANT-P01 — The SITL plant is a library an external lockstep harness can step tick by tick (input to North Star O1)"
-    status: draft
+    status: implemented
     release: falcon-v1.144.0
     description: >
       An input to North Star O1, not a score (bet B3, relay#705, jess#317 B4). It
@@ -22,7 +22,7 @@ artifacts:
         supervised-hover mock trace is byte-identical before and after the move.
         (2) Two runs with the same seed and the same motor stream give identical
         sensor bytes over 2000 ticks x 3 seeds. (3) A mutated plant parameter
-        (mass +1 ULP) and a mutated dt each change the bytes. The control must go
+        (thrust_scale +1 ULP) and a mutated dt each change the bytes. The control must go
         red, proving the comparison sees the plant. Counted as met only when jess's
         harness steps it (jess#317), not relay's own test crate.
     links:

@@ -28,7 +28,7 @@ artifacts:
       At RTF ≈ 1 stage 2 is a no-op ⇒ identical to wall-clock pacing.
     tags: [falcon, scheduling, gyro-sync, sitl, detailed-design, v0.32]
     fields:
-      unit: examples/falcon-sitl-gz/src/pace.rs
+      unit: crates/falcon-plant/src/pace.rs
       function: "pace::pace_decision"
       algorithm: "Two-stage: anti-burst steady period, then bounded anti-stale IMU wait."
     links:

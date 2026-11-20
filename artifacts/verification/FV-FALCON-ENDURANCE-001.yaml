@@ -101,7 +101,7 @@ artifacts:
         - run: "grep -q 'backend=mock --scenario=flightcore' .github/workflows/soak.yml"
         - run: "grep -q '43200' .github/workflows/soak.yml"
         # The plant applies the verified mixer's torque, and the knob exists.
-        - run: "grep -q 'relay_mix_quad::motors_to_torque_signs(achieved)' examples/falcon-sitl-gz/src/physics.rs"
+        - run: "grep -q 'relay_mix_quad::motors_to_torque_signs(achieved)' crates/falcon-plant/src/physics.rs"
         - run: "grep -q 'IMU_NOISE' examples/falcon-sitl-gz/src/main.rs"
         # The nightly job runs the tier with that noise, not at 0.0.
         - run: "grep -q \"IMU_NOISE: '0.01'\" .github/workflows/soak.yml"

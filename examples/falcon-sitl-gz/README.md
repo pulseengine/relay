@@ -9,7 +9,7 @@ drop in without touching the verified cascade or its assertions.
 
 | File             | What it is                                              |
 |------------------|---------------------------------------------------------|
-| `src/physics.rs` | `Physics` trait + `MockPhysics` reference impl + `GazeboPhysics` stub |
+| `../../crates/falcon-plant/src/physics.rs` | `Physics` trait + `MockPhysics` reference impl + `GazeboPhysics` (moved to the `falcon-plant` library, relay#705) |
 | `src/main.rs`    | CLI runner; default scenario `flightcore` (see `SCENARIOS`) |
 | `Cargo.toml`     | Reuses the verified cascade crates (relay-ekf, relay-pos, relay-att, relay-rate, relay-mix-quad, relay-lc, relay-sc) |
 
@@ -132,7 +132,7 @@ The minimum the bundled world covers (and the bridge requires):
 * four **MulticopterMotorModel plugins** on the rotor joints,
   subscribing to `/world/falcon/model/quad/joint/rotor_{0..3}_joint/cmd_vel`.
 
-### 3. Replace the stub bodies in `src/physics.rs`
+### 3. Replace the stub bodies in `crates/falcon-plant/src/physics.rs`
 
 `GazeboPhysics::step()` and `GazeboPhysics::measure()` both have
 `TODO(bench):` comments naming the topics + the conversion. The

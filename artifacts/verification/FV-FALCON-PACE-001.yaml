@@ -37,7 +37,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: "cargo test -p falcon-sitl-gz --bin falcon-sitl-gz pace::"
+        - run: "cargo test -p falcon-plant pace::"  # relay#705: pace.rs moved; the old filter matched 0 tests
         - run: "gz sim -s -r worlds/falcon-quad.sdf ; then mission A/B/C/D with and without NO_SIM_LOCK under CPU load"
     links:
       - type: verifies

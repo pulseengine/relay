@@ -25,24 +25,19 @@
 //!   cascade-sitl-wasm <composed.wasm> [ticks] [dt]
 //!   DIFF_AGAINST=<b.wasm> cascade-sitl-wasm <a.wasm> [budget] [dt]   (twin.rs)
 
-// The SITL plant itself. `gz_real` inside it is `#[cfg(feature = "gazebo")]`,
-// so without that feature this pulls exactly `Physics` + `MockPhysics`.
 mod native_mirror;
 // Arena soak tests for the leaf components (#574); `#[ignore]`, need built wasm.
 #[cfg(test)]
 mod arena_soak;
 // DIFF_AGAINST=<b.wasm>: two components, one input stream, bit-exact (#575).
-#[path = "../../../examples/falcon-sitl-gz/src/physics.rs"]
-mod physics;
 #[cfg(test)]
 mod seam_tests;
 mod twin;
-// The SAME pacing logic the native bench uses, included by path rather than
-// copied — for the same reason physics.rs is: a copy would let the two drift,
-// and the entire point is that the wasm harness and the native bench pace the
-// plant identically.
-#[path = "../../../examples/falcon-sitl-gz/src/pace.rs"]
-mod pace;
+// The SAME plant and pacing logic the native bench flies, from the one crate
+// both depend on (crates/falcon-plant, relay#705). They used to be #[path]
+// includes of examples/falcon-sitl-gz/src/*.rs, for the same reason: a copy
+// would let the wasm harness and the native bench drift apart.
+use falcon_plant::{pace, physics};
 
 use anyhow::{bail, Context, Result};
 #[cfg(feature = "gazebo")]

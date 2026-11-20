@@ -335,6 +335,9 @@ jobs:
           # falcon-sitl-gz: integration safety tests + the nominal-recovery
           # Monte-Carlo campaigns (motor-out / attitude / hexa).
           cargo test -p falcon-sitl-gz -- --nocapture
+          # falcon-plant: the plant itself, and lockstep determinism with its
+          # negative controls (SWREQ-FALCON-PLANT-P01, relay#705).
+          cargo test -p falcon-plant -- --nocapture
           # falcon-core: the THREE-WAY fail-safe campaigns (runaway→terminate,
           # wind→RTL) that drive the full production FlightSupervisor.
           cargo test -p falcon-core failsafe -- --nocapture

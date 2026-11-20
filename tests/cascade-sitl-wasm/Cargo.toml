@@ -9,12 +9,11 @@ publish = false
 [workspace]
 
 [features]
-# Real gz bridge, same shape as examples/falcon-sitl-gz: the included physics.rs
-# gates its `gz_real` module on this, so enabling it brings in the same
+# Real gz bridge: forwards to crates/falcon-plant's `gazebo`, the same
 # GazeboPhysics the native bench flies. Needs the gz-transport13 dev libs on
 # PKG_CONFIG_PATH and a running `gz sim`. Off by default so the mock path stays
 # dependency-free.
-gazebo = ["dep:gz-transport", "dep:gz-msgs", "dep:async-channel"]
+gazebo = ["falcon-plant/gazebo"]
 
 [dependencies]
 wasmtime = { version = "41", features = ["component-model"] }
@@ -22,20 +21,11 @@ anyhow = "1"
 libm = "0.2"
 relay-ekf = { path = "../../crates/relay-ekf" }
 
-# The included physics.rs applies the VERIFIED mixer's own torque allocation
-# (#435), so this crate needs the mixer for the same reason the example does.
-# The file is included rather than copied precisely so the two cannot drift —
-# which means its dependencies have to match on both sides.
-relay-mix-quad = { path = "../../crates/relay-mix-quad" }
+# The plant (Physics, MockPhysics, the gz bridge behind `gazebo`) and the
+# pacing decision, from the crate examples/falcon-sitl-gz also depends on
+# (relay#705). One crate, so the two harnesses cannot drift.
+falcon-plant = { path = "../../crates/falcon-plant" }
 
 # The NATIVE half of the equivalence test: the SAME flight core the cascade
 # component wraps. Both sides call falcon-core; only the route differs.
 falcon-core = { path = "../../crates/falcon-core" }
-
-# Optional — only with feature `gazebo`. Versions match examples/falcon-sitl-gz
-# EXACTLY; a different gz-transport here would be a different bridge than the
-# one every native SITL result was produced with, and the comparison would stop
-# meaning anything.
-gz-transport = { version = "0.11", features = ["harmonic"], optional = true }
-gz-msgs = { version = "0.11", features = ["harmonic"], optional = true }
-async-channel = { version = "2.5", optional = true }

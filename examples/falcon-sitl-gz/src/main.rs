@@ -19,8 +19,9 @@
 
 mod campaign;
 mod flightcore;
-mod pace;
-mod physics;
+// The plant and the pacing decision live in crates/falcon-plant (relay#705),
+// so an external lockstep harness can depend on the same code this bench flies.
+use falcon_plant::{pace, physics};
 
 use falcon_config::YawMode;
 use falcon_core::FlightCore;

@@ -443,14 +443,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "falcon-sitl-gz"
+name = "falcon-plant"
 version = "0.1.0"
 dependencies = [
  "async-channel",
- "falcon-config",
- "falcon-core",
+ "falcon-hitl",
  "gz-msgs",
  "gz-transport",
+ "libm",
+ "relay-ekf",
+ "relay-mix-quad",
+]
+
+[[package]]
+name = "falcon-sitl-gz"
+version = "0.1.0"
+dependencies = [
+ "falcon-config",
+ "falcon-core",
+ "falcon-plant",
  "libm",
  "relay-adrc",
  "relay-att",

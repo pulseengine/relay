@@ -148,6 +148,11 @@ pub struct MockPhysics {
     pub achieved_motors: [f32; 4],
     /// xorshift state for the IMU noise generator.
     pub rng: u64,
+    /// Thrust at full PWM (N). [`THRUST_SCALE`] at rest; a field rather than
+    /// the constant so a lockstep negative control can move it by one ULP and
+    /// show the byte comparison sees the plant (SWREQ-FALCON-PLANT-P01). The
+    /// airframe's mass enters the dynamics only through this ratio (1 kg).
+    pub thrust_scale: f32,
 }
 
 impl MockPhysics {
@@ -162,6 +167,7 @@ impl MockPhysics {
             failed_rotor: None,
             achieved_motors: [0.0; 4],
             rng: 0xCAFE_BABE_DEAD_BEEF,
+            thrust_scale: THRUST_SCALE,
         }
     }
 
@@ -254,7 +260,7 @@ impl Physics for MockPhysics {
         }
 
         // Translational — thrust body up rotated into NED, plus gravity, minus drag.
-        let t = thrust_normalised * THRUST_SCALE;
+        let t = thrust_normalised * self.thrust_scale;
         let thrust_body = [0.0, 0.0, -t];
         let qv = [0.0, thrust_body[0], thrust_body[1], thrust_body[2]];
         let qc = [self.q[0], -self.q[1], -self.q[2], -self.q[3]];
