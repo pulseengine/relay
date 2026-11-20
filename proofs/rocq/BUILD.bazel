@@ -9,7 +9,7 @@
 # these are PURE ABSTRACT proofs — they use only Stdlib.ZArith and
 # do not depend on any translation infrastructure.
 
-load("@rules_rocq_rust//rocq:defs.bzl", "rocq_interval_proof", "rocq_library", "rocq_proof_test")
+load("@rules_rocq_rust//rocq:defs.bzl", "rocq_assumptions_test", "rocq_interval_proof", "rocq_library", "rocq_proof_test")
 
 # ── Limit Checker proofs ────────────────────────────────────────────────
 
@@ -114,3 +114,25 @@ rocq_proof_test(
     srcs = [],
     deps = [":cos_approx"],
 )
+
+# ── Kernel axiom audit (SWREQ-RELAY-LEDGER-P01, North Star O3) ────────────
+# rocq_proof_test proves the kernel accepted each script; it does not prove the
+# script is free of Admitted obligations or Axioms. Each test below runs Print
+# Assumptions on every declaration of its library and fails on anything not in
+# its allowed_axioms list, so a new axiom or an Admitted proof is red. The
+# allowlist is the measured state on 2026-11-20 and may only shrink.
+
+[rocq_assumptions_test(
+    name = lib + "_assumptions_test",
+    allowed_axioms = [],
+    deps = [":" + lib],
+) for lib in [
+    "lc_proofs",
+    "sch_proofs",
+    "sc_proofs",
+    "hs_proofs",
+    "cfdp_proofs",
+    # sin_approx and cos_approx (rocq_interval_proof) are NOT audited yet:
+    # rocq_assumptions_test refuses them ("registered no include path").
+    # Filed upstream; until it lands they are named as not covered.
+]]
