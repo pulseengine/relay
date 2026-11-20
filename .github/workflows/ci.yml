@@ -194,6 +194,13 @@ jobs:
         run: |
           rustc --edition 2021 --test scripts/soak-hover-check.rs -o "$RUNNER_TEMP/shc-test"
           "$RUNNER_TEMP/shc-test"
+      # CHAIN-P01's reach parser and gate (North Star O1): a declined function,
+      # a missing `Found` line, 0 functions, a non-zero exit and a missing ELF
+      # must each fail. The lowering itself runs in chain.yml.
+      - name: Chain walk self-test (planted synth logs)
+        run: |
+          rustc --edition 2021 --test scripts/chain-walk.rs -o "$RUNNER_TEMP/cw-test"
+          "$RUNNER_TEMP/cw-test"
       # No fork PR reaches a self-hosted runner: every self-hosted runs-on uses
       # the fail-closed same-repo form (a deleted fork's null head.repo falls to
       # the hosted runner), every self-hosted label is one relay's pools provide

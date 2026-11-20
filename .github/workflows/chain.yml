@@ -1,0 +1,128 @@
+name: Chain walk
+
+# SWREQ-RELAY-CHAIN-P01 (North Star O1, synth reach). Lowers the PR's
+# falcon-cascade component through meld, loom and synth under the varve layer
+# pinned in varve.toml, and publishes per-target reach plus
+# north-star-input.O1.json as a workflow artifact. Gated on cortex-m7dp only:
+# a declined function there fails the job. cortex-m7 and rv32imac are reported.
+# A planted v128 control must fail the same gate on every run
+# (scripts/chain-walk.rs).
+#
+# Not a required check. It measures the chain and is filtered to the paths that
+# change what is lowered or how. Attaching the outputs to a release is a
+# release.yml change (signing path) and is not done here.
+
+on:
+  pull_request:
+    paths:
+      - "wasm/cm/**"
+      - "crates/falcon-core/**"
+      - "wit/falcon-cascade/**"
+      - "scripts/build-components.sh"
+      - "scripts/chain-walk.rs"
+      - "varve.toml"
+      - "varve-realms.toml"
+      - ".github/workflows/chain.yml"
+  push:
+    branches: [main]
+    paths:
+      - "wasm/cm/**"
+      - "crates/falcon-core/**"
+      - "wit/falcon-cascade/**"
+      - "scripts/build-components.sh"
+      - "scripts/chain-walk.rs"
+      - "varve.toml"
+      - "varve-realms.toml"
+      - ".github/workflows/chain.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chain-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  VARVE_VERSION: v0.47.0
+  # sha256 of varve-v0.47.0-x86_64-unknown-linux-musl.tar.gz, from the
+  # release's cosign-signed SHA256SUMS.txt. varve then verifies every tool in
+  # the layer against the realm's signed manifest (varve-realms.toml).
+  VARVE_SHA256: 90a028433842ce08a0933030a01c5c3ea9d48ee94b71d96993cbab27d0ea7d64
+
+jobs:
+  chain-walk:
+    name: Chain walk (meld, loom, synth reach)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Install cargo-component + wac
+        uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
+        with:
+          tool: cargo-component,wac-cli
+
+      - name: Install the varve layer (verified)
+        shell: bash
+        run: |
+          set -euo pipefail
+          t="varve-${VARVE_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$t" \
+            "https://github.com/pulseengine/varve/releases/download/${VARVE_VERSION}/$t"
+          echo "${VARVE_SHA256}  $RUNNER_TEMP/$t" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/varve" && tar -xzf "$RUNNER_TEMP/$t" -C "$RUNNER_TEMP/varve"
+          v=$(find "$RUNNER_TEMP/varve" -type f -name varve -perm -u+x | head -1)
+          test -n "$v"
+          mkdir -p "$HOME/.varve/bin" && cp "$v" "$HOME/.varve/bin/varve"
+          echo "$HOME/.varve/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.varve/shims" >> "$GITHUB_PATH"
+          "$HOME/.varve/bin/varve" install
+          "$HOME/.varve/bin/varve" shim install
+
+      - name: Name the toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in meld loom synth; do varve which "$t"; done
+
+      - name: Build the candidate component
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build-components.sh ci
+          ls -l dist/falcon-components-vci/falcon-cascade-vci.wasm
+
+      - name: chain-walk self-test (planted logs)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --edition 2021 --test scripts/chain-walk.rs -o "$RUNNER_TEMP/cw-test"
+          "$RUNNER_TEMP/cw-test"
+
+      - name: Lower and report reach
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --edition 2021 -O scripts/chain-walk.rs -o "$RUNNER_TEMP/cw"
+          # A PR or main build is not a release: its O1 input carries a
+          # pre-release version. A release passes its own tag's version.
+          ver="0.0.0-ci.${GITHUB_RUN_ID}"
+          "$RUNNER_TEMP/cw" \
+            --component dist/falcon-components-vci/falcon-cascade-vci.wasm \
+            --out chain-out \
+            --version "$ver" \
+            --evidence "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+      - name: Upload reach, ELFs and the O1 input
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: chain-walk
+          path: chain-out/
+          if-no-files-found: warn
