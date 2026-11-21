@@ -111,3 +111,34 @@ jobs:
           echo "locks audited: $n, failing: $bad"
           [ "$n" -ge 1 ] || { echo "::error::no Cargo.lock found - the scan is broken, not clean"; exit 1; }
           [ "$bad" -eq 0 ]
+
+  # relay#717: MODULE.bazel.lock is committed and enforced. .bazelrc sets
+  # `common --lockfile_mode=error`, so any bazel command fails on a stale lock;
+  # this job is the cheap, named place where that shows, independent of the
+  # heavier Bazel workflows (one of which is red for an unrelated reason, #715).
+  # `bazel mod deps` resolves the whole module graph (registry deps, the four
+  # git_override'd rules_* repos, extension usages) without building anything.
+  bazel-lockfile:
+    name: Bazel MODULE.bazel.lock is current (lockfile_mode=error)
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@f34d6a05eae3c24acab7fa54587492daeaeffdab # v0.19.2 (tag object e1614ab8 -> commit f34d6a05)
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Resolve the module graph against the committed lock
+        run: |
+          set -euo pipefail
+          grep -qx 'common --lockfile_mode=error' .bazelrc \
+            || { echo "::error file=.bazelrc::common --lockfile_mode=error is missing - the lock is not enforced"; exit 1; }
+          echo "bazel $(cat .bazelversion) (from .bazelversion)"
+          if ! bazel mod deps --lockfile_mode=error; then
+            echo "::error file=MODULE.bazel.lock::MODULE.bazel.lock does not match the module graph. Run 'bazel mod deps --lockfile_mode=update' and commit MODULE.bazel.lock."
+            exit 1
+          fi
+          git diff --exit-code -- MODULE.bazel.lock

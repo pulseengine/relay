@@ -51,39 +51,10 @@ jobs:
         with:
           path: relay
 
-      - name: Checkout rules_lean
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_lean
-          path: rules_lean
-
-      # MODULE.bazel local_path_overrides the four rules_* PulseEngine repos
-      # as siblings; the Lean proofs only need rules_lean, but crate_universe
-      # / the wider graph may reference the others. Check out the ones the
-      # MODULE graph resolves to keep `bazel test //proofs/lean:all` from
-      # failing on a missing sibling.
-      - name: Checkout rules_wasm_component
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_wasm_component
-          path: rules_wasm_component
-
-      - name: Checkout rules_verus
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_verus
-          path: rules_verus
-
-      - name: Checkout rules_rocq_rust
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_rocq_rust
-          path: rules_rocq_rust
-
       # ubuntu-latest ships ~14 GB free, but the Lean 4.29.1 toolchain +
       # Mathlib v4.29.1 oleans + the transitive rules_* toolchain graph
-      # (wac/wkg/meld/loom/spar/witness/synth/rocq, pulled in by the sibling
-      # checkouts above) overran it ("No space left on device" extracting the
+      # (wac/wkg/meld/loom/spar/witness/synth/rocq, pulled in by the git_override'd
+      # rules_* repos) overran it ("No space left on device" extracting the
       # Lean toolchain). Reclaim the ~25 GB of preinstalled SDKs this job does
       # not use. Plain rm (no third-party action) to keep the CI dependency
       # surface minimal.

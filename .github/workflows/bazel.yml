@@ -2,11 +2,11 @@ name: Bazel
 
 # Builds the v0.7 Component Model cascade under Bazel.
 #
-# relay's MODULE.bazel uses local_path_override for the four
-# PulseEngine rules_* repos, so they are checked out as siblings of
-# relay under $GITHUB_WORKSPACE (relay/, rules_wasm_component/, ...).
-# The siblings track their default branch — pin them with
-# git_override in MODULE.bazel if reproducibility across drift matters.
+# relay's MODULE.bazel pins the four PulseEngine rules_* repos with
+# git_override at exact commits, and .bazelrc sets
+# `common --lockfile_mode=error`, so every bazel command below fails if the
+# committed MODULE.bazel.lock does not match the module graph (relay#717).
+# relay is still checked out under relay/ so the step paths stay unchanged.
 #
 # The build resolves the Nix-backed Rocq toolchain, so Nix is
 # installed; the first run fetches Coq from cache.nixos.org.
@@ -60,30 +60,6 @@ jobs:
         with:
           path: relay
 
-      - name: Checkout rules_wasm_component
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_wasm_component
-          path: rules_wasm_component
-
-      - name: Checkout rules_verus
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_verus
-          path: rules_verus
-
-      - name: Checkout rules_rocq_rust
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_rocq_rust
-          path: rules_rocq_rust
-
-      - name: Checkout rules_lean
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_lean
-          path: rules_lean
-
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # pinned (was @main) — supply-chain
 
@@ -94,13 +70,12 @@ jobs:
           disk-cache: bazel
           repository-cache: true
 
-      # CARGO_BAZEL_REPIN lets crate_universe resolve the relay_crates
-      # graph on a clean checkout. All run: steps are static — no
-      # interpolation of event-controlled input.
+      # crate_universe resolves from the committed Cargo.lock files (relay#718);
+      # CARGO_BAZEL_REPIN is dropped so CI builds the pinned graph instead of
+      # re-resolving it on every run (relay#717).
+      # All run: steps are static — no interpolation of event-controlled input.
       - name: Build the composed cascade
         working-directory: relay
-        env:
-          CARGO_BAZEL_REPIN: "1"
         # Also builds the P3 (Component-Model Preview 3) async STREAM components:
         # the full cFS set //:relay-lc-stream + //:relay-sch-stream +
         # //:relay-hk-stream + //:relay-sc-stream (#STREAM-P01..P04), plus the
@@ -223,6 +198,4 @@ jobs:
         # harness build unverified.
         if: ${{ !cancelled() }}
         working-directory: relay
-        env:
-          CARGO_BAZEL_REPIN: "1"
         run: bazel build //host/witness-wasi-harness
