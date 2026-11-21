@@ -216,6 +216,12 @@ jobs:
       # cascade stays manual — bundled witness can't parse the component-format
       # export section; see BUILD.bazel + #145.)
       - name: Build the harness + real-component MC/DC coverage
+        # Independent of the composed-cascade step above (it builds only the
+        # host harness), so it runs even when that step fails: a red cascade
+        # (#715) must not hide whether the harness builds. On #716 the cascade
+        # failure skipped this step, leaving the rustc 1.97 / wasmtime 50.0.3
+        # harness build unverified.
+        if: ${{ !cancelled() }}
         working-directory: relay
         env:
           CARGO_BAZEL_REPIN: "1"

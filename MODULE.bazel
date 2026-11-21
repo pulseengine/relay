@@ -101,6 +101,56 @@ register_toolchains("@rocq_toolchains//:all")
 # rules_rust 0.70.0 — the old git_override (commit 6281d27, now an
 # ancestor of 0.70.0) is no longer needed.
 
+# Rust toolchain: 1.97.0, fleet-wide (owner decision 2026-11-20, so that
+# wasmtime 50.0.3 builds; its cranelift 0.137.3 needs rustc >= 1.97, and
+# wasmtime 50.0.3 is the RUSTSEC-2026-0587 fix for host/witness-wasi-harness).
+# rules_rust reads rust.toolchain ONLY from the root module, so relay must
+# set it itself: without this block relay builds on rules_rust 0.70.0's
+# default 1.95.0, whatever rules_wasm_component registers. edition and
+# extra_target_triples are left at rules_rust's defaults (2021; the four
+# linux/darwin hosts plus wasm32-unknown-unknown, -wasip1, -wasip2), as
+# before. rules_rust 0.70.0 ships sha256s only up to 1.95.0; these are
+# copied from rules_wasm_component#744 and checked against
+# static.rust-lang.org/dist/*.sha256.
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2021",
+    sha256s = {
+        "cargo-1.97.0-aarch64-apple-darwin.tar.xz": "ca46bbef082ff751c06807b29872b59c05296c3acd4da1a98fac6367bb8bb2c5",
+        "cargo-1.97.0-aarch64-unknown-linux-gnu.tar.xz": "71f0457abe8fdf9fc048009f867acc27b21e25c8e06a1a3e9a12c637833b6aab",
+        "cargo-1.97.0-x86_64-apple-darwin.tar.xz": "36bb6ad46346198ba26999de079e77ec6bef50899fdb23461290e5e53fae0e95",
+        "cargo-1.97.0-x86_64-pc-windows-msvc.tar.xz": "c20eac3f96be787b0a3d5be6204a37b921307b2573e0c1d8162a3d992fd186f6",
+        "cargo-1.97.0-x86_64-unknown-linux-gnu.tar.xz": "5c5bc94af02797b699bb7d4e85b356192eab9fb50376053a1e6edf509fcf7129",
+        "clippy-1.97.0-aarch64-apple-darwin.tar.xz": "4c74f4390fb9381d28e0ccb06439c9dda9d5b293b3c25d4465e879eb42d70094",
+        "clippy-1.97.0-aarch64-unknown-linux-gnu.tar.xz": "5c0be7373a456b684d7dcc34d8cc6a037f7149caf1668c527a59831f27ba1d6c",
+        "clippy-1.97.0-x86_64-apple-darwin.tar.xz": "712234b2b6116f68b24bc6720be1c168f2a3196a5ae47adde21bcfcb649329c9",
+        "clippy-1.97.0-x86_64-pc-windows-msvc.tar.xz": "d5a89f8449764d397077f2cde9db2cb569b629ed28a7e08eca2b04695ff2ad7e",
+        "clippy-1.97.0-x86_64-unknown-linux-gnu.tar.xz": "1f7bd64e545de3c1921dc68b4d1e6ceae034b0d8c40d66b795c04e946d4262c0",
+        "llvm-tools-1.97.0-aarch64-apple-darwin.tar.xz": "70abd5460151294f959de6f0bf4767a12827c710b8e8b0568706be60d1e0e7e5",
+        "llvm-tools-1.97.0-aarch64-unknown-linux-gnu.tar.xz": "0e620b0cf1c4e1c48282782273393dc4a01f7823a4a6cc08e4cace755211b245",
+        "llvm-tools-1.97.0-x86_64-apple-darwin.tar.xz": "e8f7814a322d4e9ac748351a6d02c102667bd7894fcc075a4bde010717a71b64",
+        "llvm-tools-1.97.0-x86_64-pc-windows-msvc.tar.xz": "671b509ec2c9220916d25d8fd546e71efb552439f8e7ae75ce53208d9395dfb4",
+        "llvm-tools-1.97.0-x86_64-unknown-linux-gnu.tar.xz": "a847ff42fffb4cd8919c63238a7981d89789bb732e2b784c346347ed3d55bd95",
+        "rust-std-1.97.0-aarch64-apple-darwin.tar.xz": "df26b872f1bbcc5cd700eacb76231d6ba97aeda76ccd44f5b7de3db3757a38ee",
+        "rust-std-1.97.0-aarch64-unknown-linux-gnu.tar.xz": "b6a90dab26527f17e7e395e24b2d79976e30432c41feb073fe920d3b26b709a0",
+        "rust-std-1.97.0-wasm32-unknown-unknown.tar.xz": "474f926f2ffb0ed5ff895db92b7d0b2d9c3acb75b6df3229b132db0822594509",
+        "rust-std-1.97.0-wasm32-wasip1.tar.xz": "7ea59c6531d6086bb8f260456025de5f097a7603ccd2d80210008654165ae393",
+        "rust-std-1.97.0-wasm32-wasip2.tar.xz": "df28a4107d95309beb79e8e5d31210f912d2f289f2627180c63854af4f9f4bde",
+        "rust-std-1.97.0-x86_64-apple-darwin.tar.xz": "ce81039d2bd2fea90517b5f20264eff0ec46f89829bb5c9fb776f1762f5f2338",
+        "rust-std-1.97.0-x86_64-pc-windows-msvc.tar.xz": "da2c160b962b98b1603eda2120e608bd74e0baf56962fc32a7b5ea56b6fd6211",
+        "rust-std-1.97.0-x86_64-unknown-linux-gnu.tar.xz": "0c43618128a7a6b96b0b04c04cf7b28dd52fb0991a74c9615fbd1a684ff88712",
+        "rustc-1.97.0-aarch64-apple-darwin.tar.xz": "53e339f16382bb348566f648d01775797e038fdd6bfc6ddd8859c5a0eac09f68",
+        "rustc-1.97.0-aarch64-unknown-linux-gnu.tar.xz": "06a71688ee297515ebc6a815e42c779735c09423b0bed056e0896c80c7295399",
+        "rustc-1.97.0-x86_64-apple-darwin.tar.xz": "c3c6f6cd95e4546306dfa4beb3cec23dedf10dd02e6e7d99b053bf418d453014",
+        "rustc-1.97.0-x86_64-pc-windows-msvc.tar.xz": "32f62b4162c729c080d0f5fddc8386ae6d160bd493016e850c1dba26aa20a196",
+        "rustc-1.97.0-x86_64-unknown-linux-gnu.tar.xz": "0a8787303c88b018af61b5c53a0c7024d516d175e623eeab35a35eab11dbcad0",
+    },
+    versions = ["1.97.0"],
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
 # Rust crate dependencies. NOTE: this stays on `extension.bzl` (not the
 # newer `extensions.bzl`) deliberately — Bazel identifies an extension
 # by its .bzl path, so this keeps relay's `crate` extension distinct

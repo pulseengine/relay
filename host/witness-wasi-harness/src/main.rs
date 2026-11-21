@@ -56,8 +56,7 @@ fn main() -> Result<()> {
 
     eprintln!("witness-wasi-harness: module={}", module_path.display());
 
-    let mut config = Config::new();
-    config.async_support(false);
+    let config = Config::new();
     let engine = Engine::new(&config)?;
 
     let module_bytes = fs::read(&module_path)
