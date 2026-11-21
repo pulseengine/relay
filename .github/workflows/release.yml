@@ -572,7 +572,10 @@ jobs:
           # inside run: (untrusted-input safety, per the rest of this file).
           INPUT_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_BAZEL_REPIN: "1"   # crate_universe resolution on a clean checkout
+          # No CARGO_BAZEL_REPIN: crate_universe resolves from the committed
+          # Cargo.lock files (#718). Under `common --lockfile_mode=error`
+          # (relay#717) a repin changes the crate extension's environment input
+          # and the build fails ("MODULE.bazel.lock is no longer up-to-date").
         shell: bash
         run: |
           set -euo pipefail
