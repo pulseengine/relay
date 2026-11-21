@@ -203,7 +203,7 @@ fn main() -> Result<()> {
     cfg.wasm_component_model(true);
     let engine = Engine::new(&cfg)?;
     let component =
-        Component::from_file(&engine, &wasm).with_context(|| format!("loading {wasm}"))?;
+        Component::from_file(&engine, &wasm).map_err(anyhow::Error::from).with_context(|| format!("loading {wasm}"))?;
 
     // Empty linker: the composed component imports only `types`, which is
     // records-only — no functions for a host to supply, and no WASI. If this
@@ -212,6 +212,7 @@ fn main() -> Result<()> {
     let linker: Linker<()> = Linker::new(&engine);
     let mut store = Store::new(&engine, ());
     let bindings = ComposedCascade::instantiate(&mut store, &component, &linker)
+        .map_err(anyhow::Error::from)
         .context("instantiating the composed cascade (empty linker, no WASI)")?;
     let controller = bindings.pulseengine_falcon_cascade_controller();
     // THE RETURN DIRECTION (SWREQ-FALCON-TRANSPORT-P01, seam @0.11.0). Exercised

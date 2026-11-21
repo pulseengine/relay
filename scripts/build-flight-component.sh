@@ -25,7 +25,7 @@ OUT="$HERE/dist"
 mkdir -p "$OUT"
 
 echo "== building falcon flight component (wasm32-wasip2) =="
-( cd "$HERE/wasm/cm/flight" && cargo component build --release >/dev/null )
+( cd "$HERE/wasm/cm/flight" && cargo component build --locked --release >/dev/null )
 SRC=$(ls "$HERE"/wasm/cm/flight/target/wasm32-wasip*/release/falcon_flight_component.wasm | head -1)
 
 echo "== verifying it runs in wasmtime (the release gate) =="

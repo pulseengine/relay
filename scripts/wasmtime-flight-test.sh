@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../wasm/cm/flight"
 echo "== building falcon flight component (wasm32-wasip2) =="
-cargo component build --release >/dev/null 2>&1
+cargo component build --locked --release >/dev/null 2>&1
 W=$(ls target/wasm32-wasip*/release/falcon_flight_component.wasm | head -1)
 echo "   component: $W ($(wc -c < "$W") bytes)"
 echo "== running the verified core in wasmtime =="

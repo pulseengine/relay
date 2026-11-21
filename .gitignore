@@ -14,15 +14,10 @@ bazel-*
 # OS
 .DS_Store
 Thumbs.db
-Cargo.lock
-# ...except the workspace-root lockfile (v1.54 / F8): tracked + built with
-# --locked so a dependency cannot silently drift the build (the recurring
-# proptest-pin drift). Nested crate lockfiles stay ignored.
-!/Cargo.lock
-# ...and the crate_universe manifest lockfiles, which must be committed so the
-# Bazel build (and Bazel CI) is reproducible.
-!crates/relay-sch/wasm/Cargo.lock
-!host/witness-wasi-harness/Cargo.lock
+# Cargo.lock is NOT ignored anywhere: every workspace's lock is committed,
+# built with --locked, and audited (.github/workflows/lockfiles.yml). Until
+# 2026-11-20 nested locks were ignored, and three host harnesses sat on a
+# wasmtime with 24 advisories each because nothing pinned or audited them.
 
 # Claude Code session-local settings
 .claude/

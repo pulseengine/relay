@@ -250,7 +250,7 @@ jobs:
           "$RUNNER_TEMP/plant" guard
       - name: Clippy on v0.1 falcon crates
         run: |
-          cargo clippy -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
+          cargo clippy --locked -p relay-mavlink -p relay-ekf-stub -p falcon-hello \
             -p falcon-param -p relay-fsm -p relay-preflight -p relay-calib \
             -p falcon-core -p relay-mix-quad \
             -p relay-adrc -p relay-geo -p relay-iekf \
@@ -282,7 +282,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-15)
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: cargo test
-        run: cargo test --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets
 
   falcon-hello-smoke:
     name: falcon-hello end-to-end demo
@@ -334,13 +334,13 @@ jobs:
         run: |
           # falcon-sitl-gz: integration safety tests + the nominal-recovery
           # Monte-Carlo campaigns (motor-out / attitude / hexa).
-          cargo test -p falcon-sitl-gz -- --nocapture
+          cargo test --locked -p falcon-sitl-gz -- --nocapture
           # falcon-plant: the plant itself, and lockstep determinism with its
           # negative controls (SWREQ-FALCON-PLANT-P01, relay#705).
-          cargo test -p falcon-plant -- --nocapture
+          cargo test --locked -p falcon-plant -- --nocapture
           # falcon-core: the THREE-WAY fail-safe campaigns (runaway→terminate,
           # wind→RTL) that drive the full production FlightSupervisor.
-          cargo test -p falcon-core failsafe -- --nocapture
+          cargo test --locked -p falcon-core failsafe -- --nocapture
 
   # #638 finding 6: nothing in CI built wasm/cm/cascade-split, -control or
   # -estimator, or ran `cargo test` in tests/cascade-sitl-wasm (its own
@@ -374,7 +374,7 @@ jobs:
           tool: cargo-component,wac-cli
       - name: cascade-sitl-wasm plain suite
         working-directory: tests/cascade-sitl-wasm
-        run: cargo test --release
+        run: cargo test --locked --release
       - name: cascade vs cascade-split twin, seam tests on both, both vs the mirror
         env:
           OUT: ${{ runner.temp }}/split

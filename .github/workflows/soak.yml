@@ -51,7 +51,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Build the bench
-        run: cargo build --release -p falcon-sitl-gz
+        run: cargo build --locked --release -p falcon-sitl-gz
 
       - name: Hold for 1 h, 4 h and 12 h
         shell: bash
@@ -178,7 +178,7 @@ jobs:
           bash scripts/apt-retry.sh install -y gz-harmonic libgz-transport13-dev libgz-msgs10-dev pkg-config
 
       - name: Build the bench with the real bridge
-        run: cargo build --release -p falcon-sitl-gz --features gazebo
+        run: cargo build --locked --release -p falcon-sitl-gz --features gazebo
 
       - name: Climb the ladder until the hold breaks
         shell: bash
@@ -533,7 +533,7 @@ jobs:
           # cargo-component ones are what compose into the cascade.
           bash scripts/build-components.sh 1.141
           cp dist/falcon-components-v1.141/falcon-cascade-v1.141.wasm /tmp/composed.wasm
-          cd tests/cascade-sitl-wasm && cargo build --release --features gazebo
+          cd tests/cascade-sitl-wasm && cargo build --locked --release --features gazebo
 
       - name: Climb the wasm ladder until the hold breaks
         shell: bash

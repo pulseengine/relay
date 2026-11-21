@@ -62,7 +62,7 @@ for c in cascade cascade-estimator cascade-control cascade-split; do
   echo "== $c (no_std, 8 KiB stack, relocations)"
   ( cd "$HERE/wasm/cm/$c" && \
     RUSTFLAGS="${RUSTFLAGS:-} $DEPLOY_FLAGS" \
-    cargo component build --release --target "$TARGET" --no-default-features )
+    cargo component build --locked --release --target "$TARGET" --no-default-features )
   cp "$(artifact "$HERE/wasm/cm/$c")" "$OUT/$c.wasm"
 done
 
@@ -73,7 +73,7 @@ wac plug "$OUT/cascade-split.wasm" \
   -o "$OUT/cascade-split-composed.wasm"
 
 echo "== harness"
-( cd "$HERE/tests/cascade-sitl-wasm" && cargo build --release )
+( cd "$HERE/tests/cascade-sitl-wasm" && cargo build --locked --release )
 HARNESS="${CARGO_TARGET_DIR:-$HERE/tests/cascade-sitl-wasm/target}/release/cascade-sitl-wasm"
 
 # TWO RATES. 400 Hz is the rate the rest of the wasm evidence flies at. 1000 Hz
@@ -88,7 +88,7 @@ done
 echo "== seam lifecycle tests (#609, #586) against cascade AND cascade-split"
 ( cd "$HERE/tests/cascade-sitl-wasm" && \
   CASCADE_WASM="$OUT/cascade.wasm" CASCADE_SPLIT_WASM="$OUT/cascade-split-composed.wasm" \
-  cargo test --release -- --include-ignored seam_tests )
+  cargo test --locked --release -- --include-ignored seam_tests )
 
 for W in cascade.wasm cascade-split-composed.wasm; do
   echo "== $W vs the native mirror (DIFFERENTIAL=1): hold, then rotor-out"
