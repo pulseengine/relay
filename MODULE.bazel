@@ -8,27 +8,41 @@ bazel_dep(name = "rules_wasm_component", version = "1.0.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "platforms", version = "1.0.0")
 
-local_path_override(
+# The four sibling PulseEngine rules repos are pinned by git_override at an
+# exact commit (relay#717). They were local_path_overrides of ../rules_*,
+# which CI checked out at each repo's default-branch head, so the module graph
+# moved without any change in relay and MODULE.bazel.lock could not be
+# enforced. With the pins, `common --lockfile_mode=error` in .bazelrc holds:
+# a graph change must come with a committed MODULE.bazel.lock.
+# Bump a pin: edit `commit`, run `bazel mod deps --lockfile_mode=update`,
+# commit both files. Develop against a local checkout without editing this file:
+#   bazel build --override_module=rules_wasm_component=../rules_wasm_component ...
+
+git_override(
     module_name = "rules_wasm_component",
-    path = "../rules_wasm_component",
+    remote = "https://github.com/pulseengine/rules_wasm_component.git",
+    commit = "6f29d83df873942d583223777f9b52b6df7f5442",  # origin/main 2026-11-21
 )
 
 bazel_dep(name = "rules_verus", version = "0.1.0")
-local_path_override(
+git_override(
     module_name = "rules_verus",
-    path = "../rules_verus",
+    remote = "https://github.com/pulseengine/rules_verus.git",
+    commit = "b492aba7fa02952c7dc478f6a1e48dce1d4cf3b0",  # origin/main 2026-11-21
 )
 
 bazel_dep(name = "rules_rocq_rust", version = "0.1.0")
-local_path_override(
+git_override(
     module_name = "rules_rocq_rust",
-    path = "../rules_rocq_rust",
+    remote = "https://github.com/pulseengine/rules_rocq_rust.git",
+    commit = "b4a9d1cf50024d349febeb374ef4ea3d8f538c6c",  # origin/main 2026-11-21
 )
 
 bazel_dep(name = "rules_lean", version = "0.1.0")
-local_path_override(
+git_override(
     module_name = "rules_lean",
-    path = "../rules_lean",
+    remote = "https://github.com/pulseengine/rules_lean.git",
+    commit = "4f1d283311b6d72d3f25d0b4aaabad4424b2b506",  # origin/main 2026-11-21
 )
 
 # Lean 4 toolchain + Mathlib. Version MUST match rules_lean's own
@@ -42,9 +56,9 @@ lean = use_extension("@rules_lean//lean:extensions.bzl", "lean")
 lean.toolchain(
     version = "4.29.1",
     # 4.29.1 is newer than the registry rules_lean 0.1.0's baked-in hash
-    # table (which ships only 4.27.0), so CI — which uses the *registry*
-    # rules_lean, not the local_path_override — must be given the verified
-    # per-platform hashes explicitly or it fails `require_hashes`. Values
+    # table (which ships only 4.27.0), so any rules_lean without 4.29.1 in
+    # its table must be given the verified per-platform hashes explicitly
+    # or it fails `require_hashes`. Values
     # copied verbatim from rules_lean's own _KNOWN_VERSIONS["4.29.1"].
     sha256 = {
         "darwin_aarch64": "73bccb392ca7d8ab3d62a1e328bb7d057815f088dbdbfb6574f194ae505797af",

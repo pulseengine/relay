@@ -17,3 +17,10 @@ build --disk_cache=~/.cache/relay-bazel/disk
 # The vendor dir is gitignored (multi-GB Mathlib oleans); it is
 # regeneratable from the pinned versions, so "redo if needed" = re-run
 # the vendor command. See proofs/lean/README.md.
+
+# ── Enforced module lockfile (relay#717) ──────────────────────────────
+# MODULE.bazel.lock is committed and must match the module graph. Any
+# invocation that would change it fails instead of rewriting it, so a dep
+# or pin change has to land together with its lock. Update deliberately:
+#   bazel mod deps --lockfile_mode=update
+common --lockfile_mode=error

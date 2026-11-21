@@ -51,34 +51,6 @@ jobs:
         with:
           path: relay
 
-      - name: Checkout rules_rocq_rust
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_rocq_rust
-          path: rules_rocq_rust
-
-      # MODULE.bazel local_path_overrides the sibling PulseEngine rules repos;
-      # the wider MODULE graph (crate_universe et al.) may reference them, so
-      # check out the ones it resolves to keep the bazel test from failing on
-      # a missing sibling (same pattern as lean.yml).
-      - name: Checkout rules_wasm_component
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_wasm_component
-          path: rules_wasm_component
-
-      - name: Checkout rules_verus
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_verus
-          path: rules_verus
-
-      - name: Checkout rules_lean
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: pulseengine/rules_lean
-          path: rules_lean
-
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
