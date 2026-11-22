@@ -9,3 +9,6 @@ fallback = "ubuntu-24.04"
 # The labels relay's runner pools provide. A label outside this set fails
 # (loom#532 shipped `}.$l.q{` and every other check missed it).
 labels = ["self-hosted", "linux", "x64", "light", "rust-cpu"]
+# jig's reusable workflows (baseline.yml, required.yml) carry their own fork
+# guard and are pinned by full SHA in ci.yml (jig shadow pilot, phase 1).
+trusted_workflows = ["pulseengine/jig/.github/workflows/*.yml"]

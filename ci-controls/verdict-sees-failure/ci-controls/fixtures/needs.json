@@ -1,0 +1,54 @@
+{
+ "baseline": {
+  "result": "success",
+  "outputs": {}
+ },
+ "classify": {
+  "result": "success",
+  "outputs": {
+   "run_all": "false",
+   "rust": "true",
+   "mirrors": "true",
+   "cascade": "true",
+   "hello": "true",
+   "scripts": "true",
+   "workflows": "true"
+  }
+ },
+ "fmt": {
+  "result": "success",
+  "outputs": {}
+ },
+ "workflow-lint": {
+  "result": "success",
+  "outputs": {}
+ },
+ "engine-mirrors": {
+  "result": "success",
+  "outputs": {}
+ },
+ "clippy": {
+  "result": "failure",
+  "outputs": {}
+ },
+ "test": {
+  "result": "success",
+  "outputs": {}
+ },
+ "falcon-hello-smoke": {
+  "result": "success",
+  "outputs": {}
+ },
+ "closed-loop-sim": {
+  "result": "success",
+  "outputs": {}
+ },
+ "cascade-split": {
+  "result": "success",
+  "outputs": {}
+ },
+ "script-portability": {
+  "result": "success",
+  "outputs": {}
+ }
+}

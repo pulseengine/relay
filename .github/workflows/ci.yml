@@ -15,8 +15,9 @@ on:
   merge_group:
   push:
     branches: [main]
+  # No branches or paths filter on pull_request (jig caller rule): a required
+  # aggregator must report on every PR, or a PR it never ran on waits forever.
   pull_request:
-    branches: [main]
 
 concurrency:
   # PRs and non-main branch pushes: cancel superseded runs so runners
@@ -36,6 +37,12 @@ env:
   # is a separate cleanup (one per cFS crate); for v0.1 we accept the
   # warning. Clippy on the falcon-scoped crates still uses
   # `-- -D warnings` to keep falcon code itself warning-free.
+
+# jig caller REQ-022: one read-only permissions block for the whole workflow.
+# No job writes: caches and artifacts use the runner's runtime token, and the
+# jig reusable workflows declare `contents: read` themselves.
+permissions:
+  contents: read
 
 jobs:
   fmt:
@@ -469,3 +476,80 @@ jobs:
           "$PY39" -c 'import sys; assert sys.version_info[:2] == (3, 9), sys.version'
           "$PY39" scripts/check-py-floor.py --self-test
           git ls-files -z '*.py' | xargs -0 -r "$PY39" scripts/check-py-floor.py
+
+  # ---------------------------------------------------------------------
+  # jig shadow pilot, phase 1 (relay is pilot 2; same shape as warte#194).
+  # Nothing here changes a required context or what runs: `required / verdict`
+  # reports without being required, sieve's verdict is only recorded, and
+  # enforce-skips is unset. Both jig calls pin the same RECORD commit (jig
+  # v0.1.3 record, #14), never a tag commit: a tag commit carries no binary
+  # checksum. kani.yml and verus.yml get their own verdicts (required-kani,
+  # required-verus) once jig v0.1.4 adds self-job/baseline-job.
+  baseline:
+    uses: pulseengine/jig/.github/workflows/baseline.yml@f3322d4820208c5c62352ada16c8fd2967efabb4
+    with:
+      audit: cargo-audit
+      bazel: true
+      guard-config: plant-guard.toml
+      controls-only: "lock-stale toolchain-floating guard-unguarded verdict-sees-failure"
+
+  # sieve's path classifier. Shadow mode: no job reads these outputs yet, so
+  # everything still runs; each run's verdict lands in the jig record so the
+  # skips sieve would make can be compared with what ran. sieve v0.3.0 by
+  # version and sha256 (from its cosign-verified SHA256SUMS.txt, signed by
+  # release.yml@refs/tags/v0.4.0, checked 2026-11-22). --record keeps the
+  # sieve.classify.v1 verdict as an artifact for `sieve observe`.
+  # fetch-depth 0 and no blob filter: scope_leaf_edits must read workflows at
+  # base and head, or sieve falls back to run_all.
+  classify:
+    name: classify
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    env:
+      SIEVE_VERSION: v0.4.0
+      SIEVE_SHA256: f0e2a31163cf1fa8658a495434352574f81754342708f1ca588c7dcf27fb53fb
+    outputs:
+      run_all: ${{ steps.classify.outputs.run_all }}
+      rust: ${{ steps.classify.outputs.rust }}
+      mirrors: ${{ steps.classify.outputs.mirrors }}
+      cascade: ${{ steps.classify.outputs.cascade }}
+      hello: ${{ steps.classify.outputs.hello }}
+      scripts: ${{ steps.classify.outputs.scripts }}
+      workflows: ${{ steps.classify.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch pinned sieve
+        run: |
+          d="$RUNNER_TEMP/sieve"; mkdir -p "$d"; cd "$d"
+          a="sieve-$SIEVE_VERSION-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$a" "https://github.com/pulseengine/sieve/releases/download/$SIEVE_VERSION/$a"
+          echo "$SIEVE_SHA256  $a" | sha256sum -c -
+          tar -xzf "$a"
+          echo "$d" >> "$GITHUB_PATH"
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: sieve classify --config sieve.toml --event "$EVENT" --base "$BASE_SHA" --format github-output --explain --record "$RUNNER_TEMP/sieve-verdict.json"
+      - name: Keep the sieve verdict
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sieve-verdict-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sieve-verdict.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # The one context that will replace the list: red on any failure,
+  # cancellation, skip of a selected class, or a job missing from needs.
+  # Shadow: reported, not required.
+  required:
+    needs: [baseline, classify, fmt, workflow-lint, engine-mirrors, clippy, test, falcon-hello-smoke, closed-loop-sim, cascade-split, script-portability]
+    if: always()
+    uses: pulseengine/jig/.github/workflows/required.yml@f3322d4820208c5c62352ada16c8fd2967efabb4
+    with:
+      needs-json: ${{ toJSON(needs) }}
+      never-skip: "fmt workflow-lint engine-mirrors clippy test falcon-hello-smoke closed-loop-sim cascade-split script-portability"

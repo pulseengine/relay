@@ -1,0 +1,98 @@
+# sieve: which relay CI jobs a pull request touches (jig shadow pilot,
+# phase 1). Shadow mode: no job reads these outputs yet; each run's verdict is
+# recorded so the skips sieve WOULD make can be compared with what ran
+# (relay's criterion: 0 misses in >= 200 compared skips). Phase 1 judges only
+# ci.yml; the other job_outputs are recorded for phase 2.
+#
+# Base: jig's offline-replay draft for relay (2026-11-22; check-graph
+# 6345/6345, replay over 80 merged PRs: 33 run_all, 47 with a skip), reviewed
+# against each job's real commands. Kept deliberately broad where a job reads
+# files at runtime that sieve cannot see. sieve itself already selects
+# everything on Bazel/Nix files and on anything it cannot resolve.
+schema = "sieve.config.v1"
+
+# CLAUDE.md: only a comment in a script names it; no job reads it.
+[inert]
+files = ["CLAUDE.md"]
+prefixes = []
+
+# Root workspace: fmt/clippy/test/smoke/sim, coverage, bench, the gate.
+[class.rust]
+cargo = ["Cargo.toml"]
+# runtime reads sieve cannot see (CARGO_MANIFEST_DIR + "/../../bench-evidence/fixtures")
+hand = ["bench-evidence/"]
+
+# Nested workspaces (own Cargo.lock): wasm components, tests, fuzz, embedded.
+[class.nested]
+cargo_glob = ["wasm/cm/*/Cargo.toml", "tests/*/Cargo.toml", "fuzz/Cargo.toml",
+              "embedded/*/Cargo.toml", "tools/*/Cargo.toml", "host/witness-wasi-harness/Cargo.toml",
+              "crates/*/wasm/Cargo.toml"]
+hand = ["wit/", "wasm/"]
+
+# Everything under scripts/ (jobs call many; kept whole, not narrowed).
+[class.scripts]
+hand = ["scripts/", "plant-guard.toml", "tools/"]
+
+# cascade-sitl-wasm #[path]-includes examples/falcon-sitl-gz's physics.rs.
+[class.cascade]
+cargo_glob = ["wasm/cm/*/Cargo.toml", "tests/cascade-sitl-wasm/Cargo.toml"]
+hand = ["wit/", "wasm/", "scripts/", "examples/falcon-sitl-gz/"]
+
+# Verus sources vs their stripped plain mirrors (relay#253).
+[class.mirrors]
+hand = ["crates/", "scripts/check-engine-mirrors.rs", "scripts/engine-mirror-converged.txt"]
+
+# BUILD.bazel srcs are not literal lists, so Bazel uses hand prefixes.
+[class.bazel]
+hand = ["crates/", "wasm/", "embedded/", "proofs/", "wit/", "bazel/", "host/witness-wasi-harness/", ".bazelversion", ".bazelignore"]
+
+[class.rocq]
+hand = ["proofs/rocq/", "proofs/gappa/", "crates/relay-math/", "bazel/"]
+
+[class.lean]
+hand = ["proofs/lean/", "bazel/"]
+
+[class.spar]
+hand = ["spar/", "wit/"]
+
+# The verification gate: rivet reads artifacts/, and its steps reach into
+# most of the tree. docs/ kept in on purpose (to be confirmed).
+[class.verify]
+cargo = ["Cargo.toml"]
+hand = ["artifacts/", "spar/", "wit/", "examples/", "host/", "tests/", "benches/", "tools/", "scripts/", "wasm/", "crates/", "rivet.yaml", "bench-evidence/", "docs/"]
+
+[class.lockfiles]
+cargo = ["Cargo.toml"]
+cargo_glob = ["wasm/cm/*/Cargo.toml", "tests/*/Cargo.toml", "fuzz/Cargo.toml",
+              "embedded/*/Cargo.toml", "tools/*/Cargo.toml", "host/witness-wasi-harness/Cargo.toml",
+              "crates/*/wasm/Cargo.toml"]
+
+[workflows]
+required_contexts = ".github/required-contexts.txt"
+# A workflow edit selects only the jobs it touches (needs fetch-depth 0 in classify).
+scope_leaf_edits = true
+
+[workflows.job_outputs]     # HAND-MAINTAINED: job -> the classes it reads
+# ci.yml (judged in phase 1). workflow-lint and script-portability are
+# unmapped on purpose: unmapped = always run.
+fmt = ["rust"]
+engine-mirrors = ["mirrors"]
+clippy = ["rust", "scripts", "mirrors"]
+test = ["rust", "nested"]
+falcon-hello-smoke = ["rust", "scripts"]
+closed-loop-sim = ["rust", "scripts"]
+cascade-split = ["cascade", "rust"]
+# recorded for phase 2 (other workflows)
+gazebo = ["rust", "cascade", "scripts"]
+gate = ["verify"]
+lockfiles = ["lockfiles"]
+bazel-lockfile = ["bazel"]
+cascade = ["bazel"]
+chain-walk = ["cascade", "rust"]
+rocq = ["rocq"]
+lean = ["lean"]
+spar = ["spar"]
+throughput = ["rust"]
+coverage = ["rust"]
+verus = ["bazel", "mirrors"]
+kani = ["rust"]
