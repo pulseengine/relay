@@ -104,6 +104,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-15)
         with:
+          toolchain: "1.100.0"
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -215,6 +216,8 @@ jobs:
       # rivet artifact graph at the released commit. Must run BEFORE
       # SHA256SUMS so the snapshot's digest enters the sums file.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.100.0"
 
       - name: Install rivet v0.38.0 (pinned; skip if cached)
         shell: bash
@@ -531,6 +534,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: "1.100.0"
           # BOTH targets (v1.131): std components build wasm32-wasip2; no_std
           # components build wasm32-unknown-unknown (see NOSTD_COMPONENTS in
           # scripts/build-components.sh — the wasip2 target links wasi-libc,
