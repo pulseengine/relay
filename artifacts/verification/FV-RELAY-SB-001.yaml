@@ -36,7 +36,13 @@ artifacts:
     fields:
       method: formal-verification
       steps:
-        - run: "cargo test -p relay-bus -p relay-sb"
+        - run: "cargo test -p relay-bus ring::tests::backpressure_when_full"
+        - run: "cargo test -p relay-bus ring::tests::empty_pop_is_none"
+        - run: "cargo test -p relay-bus ring::tests::fifo_order"
+        - run: "cargo test -p relay-bus ring::tests::wraparound_reuses_slots"
+        - run: "cargo test -p relay-bus ring::tests::zero_capacity_is_total"
+        - run: "cargo test -p relay-sb core::tests::test_transport_seam_is_backend_agnostic"
+        - run: "cargo test -p relay-sb core::tests::test_queue_full_drops_message"
         - run: "cargo kani -p relay-bus"
     links:
       - type: verifies

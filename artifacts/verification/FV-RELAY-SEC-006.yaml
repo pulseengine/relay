@@ -30,7 +30,8 @@ artifacts:
     fields:
       method: formal-verification
       steps:
-        - run: "cargo test -p relay-sec"
+        - run: "cargo test -p relay-sec frame::tests::inter_core_ipc_roundtrip_and_isolation"
+        - run: "test -f crates/relay-sec/Cargo.toml && ! grep -q relay-ccsds crates/relay-sec/Cargo.toml"
         - run: "cargo kani -p relay-sec --harness cross_channel_isolation"
     links:
       - type: verifies

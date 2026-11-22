@@ -44,7 +44,19 @@ artifacts:
     fields:
       method: formal-verification
       steps:
-        - run: "cargo test -p relay-sec"
+        - run: "cargo test -p relay-sec session::tests::handshake_roundtrip_agrees_on_keys"
+        - run: "cargo test -p relay-sec session::tests::distinct_ephemerals_distinct_keys"
+        - run: "cargo test -p relay-sec session::tests::low_order_share_rejected"
+        - run: "cargo test -p relay-sec session::tests::rekey_on_reboot_changes_keys_even_if_rng_repeats"
+        - run: "cargo test -p relay-sec session::tests::replayed_hello_rejected_by_epoch"
+        - run: "cargo test -p relay-sec session::tests::self_share_rejected"
+        - run: "cargo test -p relay-sec session::tests::tampered_confirm_rejected"
+        - run: "cargo test -p relay-sec session::tests::tampered_response_rejected"
+        - run: "cargo test -p relay-sec session::tests::wrong_kid_rejected"
+        - run: "cargo test -p relay-sec x25519::tests::rfc7748_vector_1"
+        - run: "cargo test -p relay-sec x25519::tests::rfc7748_vector_2"
+        - run: "cargo test -p relay-sec x25519::tests::rfc7748_diffie_hellman"
+        - run: "cargo test -p relay-sec x25519::tests::low_order_point_rejected"
         - run: "cargo kani -p relay-sec"
     links:
       - type: verifies
