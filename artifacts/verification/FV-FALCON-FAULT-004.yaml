@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FAULT-004
     type: sw-verification
     title: "Single-rotor-out FDI noise-robustness — lag-modelled, command-aligned residual + roll/pitch gate + 0.3 s spin-up guard + spin-up stall check (v1.115, #609 f17/f18)"
-    status: implemented
+    status: verified
     release: falcon-v1.115.0
     description: >
       Verifies FAULT-P03. The v1.114 dispersed full-loop campaign surfaced that

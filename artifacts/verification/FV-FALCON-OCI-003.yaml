@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-OCI-003
     type: sw-verification
     title: "OCI-P04 — the WIT package namespace is pulseengine:falcon-*, with no falcon:* remnants (v1.133)"
-    status: implemented
+    status: verified
     release: falcon-v1.133.0
     description: >
       Verification of SWREQ-FALCON-OCI-P04. The requirement is that the WIT

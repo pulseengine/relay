@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-REL-001
     type: sw-verification
     title: "REL-P01 — the release is created as a DRAFT and published only after every artifact is present (v1.133)"
-    status: implemented
+    status: verified
     release: falcon-v1.133.0
     description: >
       Verification of SWREQ-FALCON-REL-P01. The requirement is an ORDERING
