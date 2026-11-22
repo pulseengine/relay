@@ -450,7 +450,7 @@ mod tests {
             workflow: "Kani".into(),
             job: name.into(),
             started,
-            runner: "pulseengine-ci-01-7".into(),
+            runner: "rust-cpu".into(), // a pool label, never a host name
             url: format!("https://example.invalid/{name}"),
         }
     }
