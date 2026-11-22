@@ -61,6 +61,14 @@ hand = ["spar/", "wit/"]
 cargo = ["Cargo.toml"]
 hand = ["artifacts/", "spar/", "wit/", "examples/", "host/", "tests/", "benches/", "tools/", "scripts/", "wasm/", "crates/", "rivet.yaml", "bench-evidence/", "docs/"]
 
+# Workflows read at runtime by a check's script: the verification gate's
+# steps read workflows (61 artifacts cite .github/), and kani-scope.sh reads
+# kani.yml. Under scope_leaf_edits a workflow edit selects every class that
+# claims its path (sieve 0.4.2). No ci.yml job reads .github/ at runtime;
+# workflow-lint and script-portability stay unmapped and always run.
+[class.github]
+hand = [".github/"]
+
 [class.lockfiles]
 cargo = ["Cargo.toml"]
 cargo_glob = ["wasm/cm/*/Cargo.toml", "tests/*/Cargo.toml", "fuzz/Cargo.toml",
@@ -84,7 +92,7 @@ closed-loop-sim = ["rust", "scripts"]
 cascade-split = ["cascade", "rust"]
 # recorded for phase 2 (other workflows)
 gazebo = ["rust", "cascade", "scripts"]
-gate = ["verify"]
+gate = ["verify", "github"]
 lockfiles = ["lockfiles"]
 bazel-lockfile = ["bazel"]
 cascade = ["bazel"]
@@ -95,4 +103,4 @@ spar = ["spar"]
 throughput = ["rust"]
 coverage = ["rust"]
 verus = ["bazel", "mirrors"]
-kani = ["rust"]
+kani = ["rust", "github"]

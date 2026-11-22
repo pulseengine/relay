@@ -497,7 +497,7 @@ jobs:
   # everything still runs; each run's verdict lands in the jig record so the
   # skips sieve would make can be compared with what ran. sieve v0.3.0 by
   # version and sha256 (from its cosign-verified SHA256SUMS.txt, signed by
-  # release.yml@refs/tags/v0.4.1, checked 2026-11-22). --record keeps the
+  # release.yml@refs/tags/v0.4.2, checked 2026-11-22). --record keeps the
   # sieve.classify.v1 verdict as an artifact for `sieve observe`.
   # fetch-depth 0 and no blob filter: scope_leaf_edits must read workflows at
   # base and head, or sieve falls back to run_all.
@@ -506,8 +506,8 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
-      SIEVE_VERSION: v0.4.1
-      SIEVE_SHA256: a159af4b958fc6038e01a98e1f88f93653df329414b0e572a0faff17debed622
+      SIEVE_VERSION: v0.4.2
+      SIEVE_SHA256: 51ef59f5cf8b542d142c073446d5773147a5806c84be56c5c4e30783e6cd6647
     outputs:
       run_all: ${{ steps.classify.outputs.run_all }}
       rust: ${{ steps.classify.outputs.rust }}
@@ -520,6 +520,7 @@ jobs:
       lean: ${{ steps.classify.outputs.lean }}
       spar: ${{ steps.classify.outputs.spar }}
       verify: ${{ steps.classify.outputs.verify }}
+      github: ${{ steps.classify.outputs.github }}
       lockfiles: ${{ steps.classify.outputs.lockfiles }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
