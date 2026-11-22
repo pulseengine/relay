@@ -8,11 +8,17 @@
   "outputs": {
    "run_all": "false",
    "rust": "true",
-   "mirrors": "true",
-   "cascade": "true",
-   "hello": "true",
+   "nested": "true",
    "scripts": "true",
-   "workflows": "true"
+   "cascade": "true",
+   "mirrors": "true",
+   "bazel": "true",
+   "rocq": "true",
+   "lean": "true",
+   "spar": "true",
+   "verify": "true",
+   "github": "true",
+   "lockfiles": "true"
   }
  },
  "fmt": {
