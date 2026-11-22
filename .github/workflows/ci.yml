@@ -497,7 +497,7 @@ jobs:
   # everything still runs; each run's verdict lands in the jig record so the
   # skips sieve would make can be compared with what ran. sieve v0.3.0 by
   # version and sha256 (from its cosign-verified SHA256SUMS.txt, signed by
-  # release.yml@refs/tags/v0.4.0, checked 2026-11-22). --record keeps the
+  # release.yml@refs/tags/v0.4.1, checked 2026-11-22). --record keeps the
   # sieve.classify.v1 verdict as an artifact for `sieve observe`.
   # fetch-depth 0 and no blob filter: scope_leaf_edits must read workflows at
   # base and head, or sieve falls back to run_all.
@@ -506,16 +506,21 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
-      SIEVE_VERSION: v0.4.0
-      SIEVE_SHA256: f0e2a31163cf1fa8658a495434352574f81754342708f1ca588c7dcf27fb53fb
+      SIEVE_VERSION: v0.4.1
+      SIEVE_SHA256: a159af4b958fc6038e01a98e1f88f93653df329414b0e572a0faff17debed622
     outputs:
       run_all: ${{ steps.classify.outputs.run_all }}
       rust: ${{ steps.classify.outputs.rust }}
-      mirrors: ${{ steps.classify.outputs.mirrors }}
-      cascade: ${{ steps.classify.outputs.cascade }}
-      hello: ${{ steps.classify.outputs.hello }}
+      nested: ${{ steps.classify.outputs.nested }}
       scripts: ${{ steps.classify.outputs.scripts }}
-      workflows: ${{ steps.classify.outputs.workflows }}
+      cascade: ${{ steps.classify.outputs.cascade }}
+      mirrors: ${{ steps.classify.outputs.mirrors }}
+      bazel: ${{ steps.classify.outputs.bazel }}
+      rocq: ${{ steps.classify.outputs.rocq }}
+      lean: ${{ steps.classify.outputs.lean }}
+      spar: ${{ steps.classify.outputs.spar }}
+      verify: ${{ steps.classify.outputs.verify }}
+      lockfiles: ${{ steps.classify.outputs.lockfiles }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
