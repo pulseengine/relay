@@ -244,14 +244,16 @@ jobs:
       # flow-style job, `ubuntu-gpu`, a misspelled label). Pinned by version
       # AND sha256, same posture as actionlint above. The sha256 was checked
       # against plant's cosign-signed SHA256SUMS.txt (identity: plant's
-      # release.yml@refs/tags/v0.2.0). Moves to the pulseengine varve layer
-      # once pulseengine-layers#64 (plant v0.2.0) is merged.
+      # release.yml@refs/tags/v0.4.0). v0.4.0 is the plant the jig baseline
+      # pins, and the first that reads plant-guard.toml's `trusted_workflows`
+      # (v0.2.0 fails to parse it). Moves to the pulseengine varve layer once
+      # plant is in a layer.
       - name: Self-hosted fork guard (plant guard, pinned)
         shell: bash
         run: |
           set -euo pipefail
-          VER=0.2.0
-          SHA=cd081585591bcf99d3dfac636332ce7339d2fd294e04bcc0b83004e18cb72bec
+          VER=0.4.0
+          SHA=30bfd8b63bf95f4a4c3bd6ff890b551f550d75dc4a7b2bd3098224d76a99761f
           TGZ="plant-v${VER}-x86_64-unknown-linux-musl.tar.gz"
           curl -fsSL -o "$RUNNER_TEMP/$TGZ" \
             "https://github.com/pulseengine/plant/releases/download/v${VER}/${TGZ}"
