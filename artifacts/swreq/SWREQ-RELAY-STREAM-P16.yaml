@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P16 (v1.80) — composed cascade MC/DC: harness-drivable sync entry point + WIT-name invoke fix (#202)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-24): its step reads a bazel-bin witness report that needs the Bazel coverage build
     description: >
       Closes the #202 invoke gap: witness MC/DC on the composed flight-control
       stream pipeline instrumented 2713 branches but EXERCISED ZERO of them

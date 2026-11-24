@@ -3,6 +3,7 @@ artifacts:
     type: system-req
     title: "THESIS — best-in-class drone software, running on gale, with every flight capability a WebAssembly component"
     status: approved
+    release: falcon-v1.143.0  # retargeted to v1.143 (owner 2026-11-22, #605): promote or move with the 63
     description: >
       The flight stack shall be composed entirely of WebAssembly components,
       fused and lowered onto gale on the target silicon, and shall fly at least

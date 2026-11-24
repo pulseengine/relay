@@ -3,7 +3,7 @@ artifacts:
     type: sw-verification
     title: "FAULT-P02 on the REAL plant — a single rotor loss is recovered on the gz falcon-quad, not only in the campaign plant (v1.141)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-24): its own text says the wasm half is unjudgeable until cascade-sitl-wasm has a rotor-out verdict (#398)
     description: >
       DEMOTED verified -> implemented 2026-10-01 (#499). ITS OWN "EVIDENCE
       REQUIRED" SAYS NATIVE **AND** WASM, three times each. The promotion

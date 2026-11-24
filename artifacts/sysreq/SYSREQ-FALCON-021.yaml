@@ -3,6 +3,7 @@ artifacts:
     type: system-req
     title: "Field-operable flight infrastructure — configuration persistence, flight logging/replay, and operator telemetry"
     status: approved
+    release: falcon-v1.143.0  # retargeted to v1.143 (owner 2026-11-22, #605): promote or move with the 63
     description: >
       The flight system shall be operable as a REAL fielded vehicle, not only
       as a simulation target: configuration (parameters, calibration) shall
