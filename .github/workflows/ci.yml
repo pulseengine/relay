@@ -15,8 +15,9 @@ on:
   merge_group:
   push:
     branches: [main]
+  # No branches or paths filter on pull_request (jig caller rule): a required
+  # aggregator must report on every PR, or a PR it never ran on waits forever.
   pull_request:
-    branches: [main]
 
 concurrency:
   # PRs and non-main branch pushes: cancel superseded runs so runners
@@ -36,6 +37,12 @@ env:
   # is a separate cleanup (one per cFS crate); for v0.1 we accept the
   # warning. Clippy on the falcon-scoped crates still uses
   # `-- -D warnings` to keep falcon code itself warning-free.
+
+# jig caller REQ-022: one read-only permissions block for the whole workflow.
+# No job writes: caches and artifacts use the runner's runtime token, and the
+# jig reusable workflows declare `contents: read` themselves.
+permissions:
+  contents: read
 
 jobs:
   fmt:
@@ -237,14 +244,16 @@ jobs:
       # flow-style job, `ubuntu-gpu`, a misspelled label). Pinned by version
       # AND sha256, same posture as actionlint above. The sha256 was checked
       # against plant's cosign-signed SHA256SUMS.txt (identity: plant's
-      # release.yml@refs/tags/v0.2.0). Moves to the pulseengine varve layer
-      # once pulseengine-layers#64 (plant v0.2.0) is merged.
+      # release.yml@refs/tags/v0.4.0). v0.4.0 is the plant the jig baseline
+      # pins, and the first that reads plant-guard.toml's `trusted_workflows`
+      # (v0.2.0 fails to parse it). Moves to the pulseengine varve layer once
+      # plant is in a layer.
       - name: Self-hosted fork guard (plant guard, pinned)
         shell: bash
         run: |
           set -euo pipefail
-          VER=0.2.0
-          SHA=cd081585591bcf99d3dfac636332ce7339d2fd294e04bcc0b83004e18cb72bec
+          VER=0.4.0
+          SHA=30bfd8b63bf95f4a4c3bd6ff890b551f550d75dc4a7b2bd3098224d76a99761f
           TGZ="plant-v${VER}-x86_64-unknown-linux-musl.tar.gz"
           curl -fsSL -o "$RUNNER_TEMP/$TGZ" \
             "https://github.com/pulseengine/plant/releases/download/v${VER}/${TGZ}"
@@ -469,3 +478,87 @@ jobs:
           "$PY39" -c 'import sys; assert sys.version_info[:2] == (3, 9), sys.version'
           "$PY39" scripts/check-py-floor.py --self-test
           git ls-files -z '*.py' | xargs -0 -r "$PY39" scripts/check-py-floor.py
+
+  # ---------------------------------------------------------------------
+  # jig shadow pilot, phase 1 (relay is pilot 2; same shape as warte#194).
+  # Nothing here changes a required context or what runs: `required / verdict`
+  # reports without being required, sieve's verdict is only recorded, and
+  # enforce-skips is unset. Both jig calls pin the same RECORD commit (jig
+  # v0.1.4 record, #16; its defaults self-job=required, baseline-job=baseline
+  # match v0.1.3), never a tag commit: a tag commit carries no binary
+  # checksum. kani.yml and verus.yml get their own verdicts (required-kani,
+  # required-verus) once jig v0.1.4 adds self-job/baseline-job.
+  baseline:
+    uses: pulseengine/jig/.github/workflows/baseline.yml@0f3d82c1dec9e4d5ce1adee1c4e0bbbd84508849
+    with:
+      audit: cargo-audit
+      bazel: true
+      guard-config: plant-guard.toml
+      controls-only: "lock-stale toolchain-floating guard-unguarded verdict-sees-failure"
+
+  # sieve's path classifier. Shadow mode: no job reads these outputs yet, so
+  # everything still runs; each run's verdict lands in the jig record so the
+  # skips sieve would make can be compared with what ran. sieve v0.3.0 by
+  # version and sha256 (from its cosign-verified SHA256SUMS.txt, signed by
+  # release.yml@refs/tags/v0.4.2, checked 2026-11-22). --record keeps the
+  # sieve.classify.v1 verdict as an artifact for `sieve observe`.
+  # fetch-depth 0 and no blob filter: scope_leaf_edits must read workflows at
+  # base and head, or sieve falls back to run_all.
+  classify:
+    name: classify
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    env:
+      SIEVE_VERSION: v0.4.2
+      SIEVE_SHA256: 51ef59f5cf8b542d142c073446d5773147a5806c84be56c5c4e30783e6cd6647
+    outputs:
+      run_all: ${{ steps.classify.outputs.run_all }}
+      rust: ${{ steps.classify.outputs.rust }}
+      nested: ${{ steps.classify.outputs.nested }}
+      scripts: ${{ steps.classify.outputs.scripts }}
+      cascade: ${{ steps.classify.outputs.cascade }}
+      mirrors: ${{ steps.classify.outputs.mirrors }}
+      bazel: ${{ steps.classify.outputs.bazel }}
+      rocq: ${{ steps.classify.outputs.rocq }}
+      lean: ${{ steps.classify.outputs.lean }}
+      spar: ${{ steps.classify.outputs.spar }}
+      verify: ${{ steps.classify.outputs.verify }}
+      github: ${{ steps.classify.outputs.github }}
+      lockfiles: ${{ steps.classify.outputs.lockfiles }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch pinned sieve
+        run: |
+          d="$RUNNER_TEMP/sieve"; mkdir -p "$d"; cd "$d"
+          a="sieve-$SIEVE_VERSION-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$a" "https://github.com/pulseengine/sieve/releases/download/$SIEVE_VERSION/$a"
+          echo "$SIEVE_SHA256  $a" | sha256sum -c -
+          tar -xzf "$a"
+          echo "$d" >> "$GITHUB_PATH"
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: sieve classify --config sieve.toml --event "$EVENT" --base "$BASE_SHA" --format github-output --explain --record "$RUNNER_TEMP/sieve-verdict.json"
+      - name: Keep the sieve verdict
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sieve-verdict-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sieve-verdict.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # The one context that will replace the list: red on any failure,
+  # cancellation, skip of a selected class, or a job missing from needs.
+  # Shadow: reported, not required.
+  required:
+    needs: [baseline, classify, fmt, workflow-lint, engine-mirrors, clippy, test, falcon-hello-smoke, closed-loop-sim, cascade-split, script-portability]
+    if: always()
+    uses: pulseengine/jig/.github/workflows/required.yml@0f3d82c1dec9e4d5ce1adee1c4e0bbbd84508849
+    with:
+      needs-json: ${{ toJSON(needs) }}
+      never-skip: "fmt workflow-lint engine-mirrors clippy test falcon-hello-smoke closed-loop-sim cascade-split script-portability"

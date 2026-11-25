@@ -1,0 +1,33 @@
+# relay's planted controls for the jig baseline (shadow mode, pilot 2). Each
+# plants one bad input and needs its check to go red; the unplanted copy must
+# stay green. `check` carries the class as "<class>: <job name>". The
+# baseline's controls job runs the ids ci.yml lists in controls-only, with
+# plant and cargo on PATH. Locally: JIG=<a jig binary> plant ci-controls.toml
+
+[[control]]
+id = "lock-stale"
+check = "supply: baseline / supply"
+run = 'cargo metadata --locked --format-version 1 > /dev/null'
+plant = "ci-controls/lock-stale"
+stderr_or_stdout_matches = '--locked'
+
+[[control]]
+id = "toolchain-floating"
+check = "pins: baseline / pins"
+run = 'sh ci-controls/jig.sh pins .'
+plant = "ci-controls/toolchain-floating"
+stderr_or_stdout_matches = 'toolchain .stable. is not a version'
+
+[[control]]
+id = "guard-unguarded"
+check = "fork guard: baseline / guard"
+run = 'plant guard'
+plant = "ci-controls/guard-unguarded"
+stderr_or_stdout_matches = 'zz-planted\.yml'
+
+[[control]]
+id = "verdict-sees-failure"
+check = "aggregator: required / verdict"
+run = 'sh ci-controls/jig.sh verdict --needs ci-controls/fixtures/needs.json --workflow .github/workflows/ci.yml --never-skip "fmt workflow-lint engine-mirrors clippy test falcon-hello-smoke closed-loop-sim cascade-split script-portability"'
+plant = "ci-controls/verdict-sees-failure"
+stderr_or_stdout_matches = 'job .clippy. result is failure'

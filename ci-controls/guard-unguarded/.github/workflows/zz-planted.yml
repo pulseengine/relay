@@ -1,0 +1,8 @@
+# planted: a self-hosted runner a fork pull request could reach
+name: planted
+on: pull_request
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, light]
+    steps:
+      - run: echo planted

@@ -1,0 +1,11 @@
+Clippy
+Format
+Verification gate (rivet-driven)
+Test (linux)
+Test (macos)
+Test (windows)
+Kani gate
+Gazebo SITL (real gz bridge)
+Closed-loop simulation + Monte-Carlo campaigns
+Script portability (shellcheck + Python 3.9 floor)
+Verus gate
