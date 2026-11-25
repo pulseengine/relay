@@ -25,6 +25,7 @@ artifacts:
     type: sw-req
     title: "MAVLINK-P02: QGroundControl heartbeat interop"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The falcon stack shall respond to QGroundControl's
       MAVLINK_MSG_ID_HEARTBEAT with a valid heartbeat reply
@@ -46,6 +47,7 @@ artifacts:
     type: sw-req
     title: "MAVLINK-P03: PARAM_SET routes to relay-tbl"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       MAVLink PARAM_SET commands shall route to the cFS-DNA
       Table Services for parameter updates. PID gains updated

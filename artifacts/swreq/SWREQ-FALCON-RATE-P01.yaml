@@ -24,6 +24,7 @@ artifacts:
     type: sw-req
     title: "RATE-P02: Coefficient bounds preserve numerical stability"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The rate controller's PID coefficients shall be bounded
       such that the resulting transfer function has poles
@@ -44,6 +45,7 @@ artifacts:
     type: sw-req
     title: "RATE-P03: Lyapunov stability of rate loop"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The closed-loop body-rate response shall be Lyapunov-stable
       under any bounded disturbance, for the rate setpoint range
@@ -64,6 +66,7 @@ artifacts:
     type: sw-req
     title: "RATE-P04: WCET bounded by 1 ms control period"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The rate controller's run function shall complete within
       1 ms (1 kHz update rate) on the target Cortex-M7.

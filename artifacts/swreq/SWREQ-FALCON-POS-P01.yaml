@@ -23,6 +23,7 @@ artifacts:
     type: sw-req
     title: "POS-P02: Full cascade Lyapunov stability"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The full attitude+position cascade shall preserve
       Lyapunov stability under bounded disturbances. Composes
@@ -43,6 +44,7 @@ artifacts:
     type: sw-req
     title: "POS-P03: Mission setpoint integration via stored-command"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       Position setpoints arriving via the cFS-DNA stored-command
       stream (SC SCHEDULED_ACTION -> setpoint) shall be type-

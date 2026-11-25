@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-TRACE-P01
     type: sw-req
     title: "TRACE-P01 — make the release plan queryable: backfill the per-artifact release assignment"
-    status: proposed
+    status: implemented
     release: falcon-v1.143.0  # retargeted to v1.143 (owner 2026-11-22, #605): promote or move with the 63
     description: >
       The rivet trace shall reflect what actually shipped, so that release
@@ -41,12 +41,33 @@ artifacts:
       release tag containing each artifact's creating commit. Status promotion
       moves to SWREQ-FALCON-TRACE-P02, which has a real oracle (the verification
       gate's own per-artifact result) rather than an assumption.
+
+      EXECUTED 2026-11-25 (v1.143, #605). Measured: 94 of 322 sw-reqs carried no
+      `release:`. Each one's creating commit is the first commit that adds its
+      `id:` line (pickaxe), not the file's first commit, because 77 of the 94 sit
+      in multi-artifact files. 19 of the 94 are `verified` (16) or `implemented`
+      (3), and each now carries the first `falcon-v*` tag containing that commit,
+      with the commit named inline.
+
+      THE CRITERION IS WRONG FOR THE OTHER 75, and they were deliberately left
+      unassigned. They are `approved` (61), `draft` (8) or `proposed` (6); no
+      release shipped them. In rivet, `release:` on an unshipped artifact is a
+      TARGET, so stamping them with the first tag containing their commit (76 of
+      the 94 derive to falcon-v0.1.0) would put unverified work in the scope of an
+      already-shipped release, which is the false readiness signal this
+      requirement exists to remove. An unassigned requirement is backlog, not a
+      commitment. The restated criterion below needs owner sign-off before this
+      is promoted. One artifact, SWREQ-FALCON-POIYAW-P01 (draft), is in no tag at
+      all.
     tags: [falcon, rivet, traceability, release-planning, hygiene, v1.132]
     fields:
       req-type: constraint
       priority: should
       verification-criteria: >
-        Every sw-req carries a `release:` field naming the release that shipped
+        PROPOSED RESTATEMENT (2026-11-25, pending owner): every SHIPPED sw-req
+        (status implemented or verified) carries a `release:` field derived as
+        below, and unshipped ones carry none unless planned. ORIGINAL: Every
+        sw-req carries a `release:` field naming the release that shipped
         it, derived MECHANICALLY (the first `falcon-v*` tag containing the
         artifact's creating commit) rather than assigned by judgement; zero
         artifacts remain unassigned; `rivet validate` PASS. Status promotion is

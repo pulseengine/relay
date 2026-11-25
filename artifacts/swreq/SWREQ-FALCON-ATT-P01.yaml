@@ -26,6 +26,7 @@ artifacts:
     type: sw-req
     title: "ATT-P02: Cascade stability with rate loop"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The attitude controller, composed in cascade with the rate
       controller (RATE-P03), shall preserve closed-loop Lyapunov
@@ -48,6 +49,7 @@ artifacts:
     type: sw-req
     title: "ATT-P03: Small-angle approximation bounds"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       Where the attitude controller uses small-angle
       linearization (for computational efficiency), the

@@ -26,6 +26,7 @@ artifacts:
     type: sw-req
     title: "EKF-P02: Numerical state bounds preserved"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The estimator's state vector components shall remain
       within physically plausible ranges: position |x| < 1e6 m,
@@ -47,6 +48,7 @@ artifacts:
     type: sw-req
     title: "EKF-P03: Innovation health metric monotonically reflects sensor disagreement"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The ekf-innovation scalar output shall increase monotonically
       with the magnitude of sensor disagreement (residual between
@@ -69,6 +71,7 @@ artifacts:
     type: sw-req
     title: "EKF-P04: WCET bounded by IMU sample interval"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The estimator's tick() function shall complete within the IMU
       sample interval (1 ms at 1 kHz) on the target Cortex-M7
