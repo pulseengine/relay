@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-SEC-005
     type: sw-verification
     title: "Session establishment — X25519 ECDH + PFS + rekey-on-reboot (relay-sec, F4 / v1.37)"
-    status: approved
+    status: verified
     description: >
       Verification of the relay-sec session-establishment handshake (feature F4;
       falcon v1.37; satisfies SWREQ-SEC-P06).

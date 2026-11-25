@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-SB-001
     type: sw-verification
     title: "Software Bus transport seam — no_std MessageTransport trait + verified SpscRing backend (relay-bus, #177)"
-    status: implemented
+    status: verified
     description: >
       Verification of SWREQ-SB-P01: the relay Software Bus exposes a no_std
       pluggable backend seam so an inter-core carrier (relay#177) can swap the

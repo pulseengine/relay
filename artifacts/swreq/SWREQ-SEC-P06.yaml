@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-SEC-P06
     type: sw-req
     title: "SEC-P06: Session establishment — ephemeral X25519 key agreement (PFS) + rekey-on-reboot"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0
     description: >
       relay-sec shall establish per-session keys by an authenticated ephemeral

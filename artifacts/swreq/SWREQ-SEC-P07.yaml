@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-SEC-P07
     type: sw-req
     title: "SEC-P07: transport-agnostic end-to-end channel (CCSDS is one binding, inter-core IPC another)"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0
     description: >
       relay-sec's authenticated channel (SecurityChannel wrap/verify) shall be a

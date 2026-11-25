@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-SEC-006
     type: sw-verification
     title: "Transport-agnostic E2E channel — cross-channel isolation + non-CCSDS round-trip (relay-sec, #176)"
-    status: implemented
+    status: verified
     description: >
       Verification of SWREQ-SEC-P07: relay-sec's SecurityChannel is a
       transport-agnostic end-to-end layer, sound to reuse across CCSDS framing

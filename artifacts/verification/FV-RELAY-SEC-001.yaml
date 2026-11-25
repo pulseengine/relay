@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-SEC-001
     type: sw-verification
     title: "Anti-replay window — Kani proofs + unit/proptest (relay-sec v0.1)"
-    status: approved
+    status: verified
     description: >
       Verification of the relay-sec anti-replay sliding window (RFC 6479 /
       IPsec-ESP style) — the freshness oracle built BEFORE any crypto,

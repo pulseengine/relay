@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-SEC-002
     type: sw-verification
     title: "Ascon-AEAD128 — NIST KAT + Kani totality (relay-sec)"
-    status: approved
+    status: verified
     description: >
       Verification of the relay-sec Ascon-AEAD128 primitive (NIST SP 800-232) —
       the single core providing both the MAC-only floor (empty plaintext) and
