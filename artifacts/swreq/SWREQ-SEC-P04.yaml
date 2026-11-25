@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-SEC-P04
     type: sw-req
     title: "SEC-P04: Authenticated frame wrap/verify (authenticate before parse)"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0
     description: >
       The frame layer shall protect a CCSDS payload as

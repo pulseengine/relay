@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-SEC-003
     type: sw-verification
     title: "Protected-frame path — header parser + authenticated wrap/verify (relay-sec)"
-    status: approved
+    status: verified
     description: >
       Verification of the relay-sec protected-frame path: F1 the total pre-auth
       Security-Header parser, F2 the per-channel authenticated frame
