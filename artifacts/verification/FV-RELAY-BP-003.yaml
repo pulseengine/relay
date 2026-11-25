@@ -1,0 +1,40 @@
+artifacts:
+  - id: FV-RELAY-BP-003
+    type: sw-verification
+    title: "relay-bp CRC-16/X-25 and CRC-32C — published check values, RFC 3720 B.4, erratum 8043 zeroing, Kani table equivalence (BP-P03)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-BP-P03. The algorithms are pinned by published
+      values: CRC-16/X-25("123456789") = 0x906e and CRC-32C("123456789") =
+      0xe3069283 (reveng), and the five RFC 3720 Appendix B.4 CRC-32C examples.
+      Erratum 8043: block_crc zeroes ONLY the value bytes and keeps the 0x42 /
+      0x44 byte-string header; the test also shows that zeroing the header gives
+      a different value, so the misreading would fail. Values are big-endian on
+      the wire. A corrupted block fails with CrcMismatch carrying its block
+      number (0 = primary). Kani proves the table-driven step equals the bitwise
+      reference step for every state and byte (both CRCs), and that block_crc
+      equals the CRC of a copy with exactly the value bytes zeroed over every
+      8-byte block and offset.
+
+      Not yet done: CRC-bearing bundles from independent encoders (Wireshark
+      bpv7 captures, to be downloaded in CI) and the hardy-bpv7 / bp7
+      differential. Neither oracle crate is in this checkout's offline cargo
+      cache, so no oracle dev-dependency was added.
+    tags: [verification, falcon, relay-bp, dtn, codec, crc, kani, issue-626]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-bp crc::tests::crc16_x25_check_value"
+        - run: "cargo test -p relay-bp crc::tests::crc32c_check_value"
+        - run: "cargo test -p relay-bp crc::tests::crc32c_rfc3720_b4_vectors"
+        - run: "cargo test -p relay-bp crc::tests::crc_zeroes_only_value_bytes_erratum_8043"
+        - run: "cargo test -p relay-bp encode::tests::crc_value_is_big_endian_on_wire"
+        - run: "cargo test -p relay-bp decode::tests::rejects_crc_mismatch"
+        - run: "cargo test -p relay-bp encode::tests::round_trip_crc16_and_crc32c_bundles"
+        # Kani BP-K04..K06, gated by the kani.yml matrix (relay-bp entry).
+        - run: "cargo kani -p relay-bp --harness verify_crc16_table_matches_bitwise"
+        - run: "cargo kani -p relay-bp --harness verify_crc32c_table_matches_bitwise"
+        - run: "cargo kani -p relay-bp --harness verify_block_crc_zeroes_only_value"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-BP-P03

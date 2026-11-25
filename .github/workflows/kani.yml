@@ -117,6 +117,14 @@ jobs:
           - relay-hs
           - relay-sch
           - relay-cfdp
+          # relay-bp (S1, Refs #626): the BPv7 codec decodes UNTRUSTED bytes
+          # off a DTN link. Harnesses in crates/relay-bp/plain/src/kani_proofs.rs
+          # (BP-K01..K07, K09..K12: per-item reader totality, CRC table ==
+          # bitwise, erratum-8043 zeroing, encoder strict gate, fragment
+          # refusal). Slowest harness locally (Kani 0.67, loaded host):
+          # verify_encoder_never_violates_strict, 397 s; `cargo kani -p
+          # relay-bp` (all 11) took 686 s wall.
+          - relay-bp
           - relay-sca
           - relay-ci
           - relay-cs

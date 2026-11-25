@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-BP-P05
     type: sw-req
     title: "BP-P05 — Canonical encoding round-trips: encode(decode(x)) == x on the canonical subset"
-    status: proposed
+    status: implemented
     release: falcon-v1.145.0
     description: >
       For every input in the canonical CBOR subset used by BPv7 (outer array

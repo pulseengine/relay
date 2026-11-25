@@ -1,0 +1,39 @@
+artifacts:
+  - id: FV-RELAY-BP-006
+    type: sw-verification
+    title: "relay-bp endpoint IDs — dtn, dtn:none, two-element ipn; PROVISIONAL typed reject for RFC 9758 ipn and unknown schemes (BP-P06)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-BP-P06. dtn-scheme EIDs (text SSP `//node/demux`,
+      ASCII, and the null endpoint [1, 0]) and two-element ipn EIDs
+      [2, [node, service]] decode and encode, including u64::MAX node numbers.
+      Text "none", a missing `//` or name delimiter, non-ASCII text and a uint
+      SSP other than 0 are InvalidDtnSsp, never mis-parsed. Malformed ipn SSPs
+      are InvalidIpnSsp; EIDs that are not two-item arrays are InvalidEid.
+
+      PROVISIONAL verdict, pending the owner's decision on issue 626: the RFC
+      9758 three-element ipn form and unknown scheme codes are REJECTED with the
+      typed error DecodeError::OpenEidForm(IpnThreeElement | UnknownScheme(code)),
+      selected by the single constant relay_bp::PROVISIONAL_OPEN_EID_VERDICT =
+      OpenEidVerdict::Reject. The tests assert the constant as well as the
+      verdict, so changing it fails them visibly.
+
+      Not yet done: the Wireshark ipn_3comp and eid_schemes captures (to be
+      downloaded in CI).
+    tags: [verification, falcon, relay-bp, dtn, codec, eid, issue-626]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-bp eid::tests::dtn_none_decodes_and_encodes"
+        - run: "cargo test -p relay-bp eid::tests::dtn_text_ssp_round_trips"
+        - run: "cargo test -p relay-bp eid::tests::rejects_dtn_text_not_hier_part"
+        - run: "cargo test -p relay-bp eid::tests::ipn_two_element_round_trips"
+        - run: "cargo test -p relay-bp eid::tests::ipn_three_element_rejected_provisional"
+        - run: "cargo test -p relay-bp eid::tests::unknown_scheme_rejected_provisional"
+        - run: "cargo test -p relay-bp eid::tests::rejects_malformed_ipn_ssp"
+        - run: "cargo test -p relay-bp eid::tests::rejects_eid_not_two_items"
+        - run: "cargo test -p relay-bp eid::tests::eid_indefinite_nesting_is_bounded"
+        - run: "cargo test -p relay-bp decode::tests::rfc9173_a1_original_decodes_fields"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-BP-P06

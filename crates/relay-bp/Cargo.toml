@@ -1,0 +1,27 @@
+[package]
+name = "relay-bp"
+description = "Relay BP — fixed-capacity no_std Bundle Protocol v7 (RFC 9171) codec, no fragmentation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# S1 is PLAIN-ONLY: there is no Verus `src/` tree yet. Cargo and Kani both use
+# plain/src. A Verus source (stripped back to plain/, relay-cfdp style) is a
+# later slice.
+path = "plain/src/lib.rs"
+crate-type = ["rlib"]
+
+# No runtime dependencies on purpose. hardy-bpv7, bp7, minicbor and crc may
+# appear ONLY as [dev-dependencies] differential oracles (RELEASE-PLAN, relay-bp
+# decisions 2026-11-03). None of them is in this checkout's offline cargo
+# cache, so S1 carries no oracle dev-dependency yet.
+[dependencies]
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true
