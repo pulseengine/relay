@@ -13,7 +13,7 @@
 //! * Structural: all six decode (RFC 9171 4.1 / 4.3 shape, canonical CBOR).
 //! * Strict (RFC 9171 4.3.1 primary-CRC rule and 4.4.2 Bundle Age rule): the
 //!   plan records RFC 9173 A.1-A.4 as expected-strict-verdict REJECT
-//!   (docs/RELEASE-PLAN.md, relay-bp decisions). A.1, A.2 and A.4 are rejected
+//!   (the release plan, relay-bp decisions). A.1, A.2 and A.4 are rejected
 //!   here. **A.3 is DISPUTED** (errata on RFC 9173 A.3); it is recorded as
 //!   disputed and NOT used as a conformance vector. Its BIB lists block 0 as a
 //!   target and it carries one Bundle Age block, so this crate's strict rules

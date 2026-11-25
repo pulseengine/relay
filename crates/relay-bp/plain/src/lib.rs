@@ -3,7 +3,7 @@
 //! Stage S1 of relay-bp (Refs #626): the BPv7 wire codec only. There is no
 //! store, no routing and no convergence layer here.
 //!
-//! ## Profile (maintainer decisions, 2026-11-03, docs/RELEASE-PLAN.md)
+//! ## Profile (maintainer decisions, 2026-11-03, recorded in the release plan)
 //!
 //! * RFC 9171 BPv7 with **no fragmentation**. A bundle whose fragment flag is
 //!   set is rejected with [`DecodeError::FragmentRejected`]; the encoder refuses

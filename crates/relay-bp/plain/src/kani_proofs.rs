@@ -48,8 +48,9 @@ use crate::{
 #[kani::unwind(10)]
 fn verify_cbor_head_total() {
     let buf: [u8; 9] = kani::any();
-    let len: usize = kani::any();
-    kani::assume(len <= buf.len());
+    // Every length 0..=buf.len() is reachable; bounded by construction, not
+    // by an assumption (the assume ledger is shrink-only, North Star O3).
+    let len = kani::any::<u8>() as usize % (buf.len() + 1);
     let mut r = Reader::new(&buf[..len]);
     let res = r.head();
     assert!(r.pos() <= len);
@@ -64,10 +65,10 @@ fn verify_cbor_head_total() {
 #[kani::unwind(13)]
 fn verify_eid_read_total() {
     let buf: [u8; 12] = kani::any();
-    let len: usize = kani::any();
-    kani::assume(len <= buf.len());
-    let depth: usize = kani::any();
-    kani::assume(depth <= crate::MAX_INNER_INDEF_DEPTH);
+    // Every length 0..=buf.len() is reachable; bounded by construction, not
+    // by an assumption (the assume ledger is shrink-only, North Star O3).
+    let len = kani::any::<u8>() as usize % (buf.len() + 1);
+    let depth = kani::any::<u8>() as usize % (crate::MAX_INNER_INDEF_DEPTH + 1);
     let mut r = Reader::new(&buf[..len]);
     let _ = eid::read(&mut r, depth);
     assert!(r.pos() <= len);
@@ -80,8 +81,9 @@ fn verify_eid_read_total() {
 #[kani::unwind(10)]
 fn verify_canonical_block_read_total() {
     let buf: [u8; 8] = kani::any();
-    let len: usize = kani::any();
-    kani::assume(len <= buf.len());
+    // Every length 0..=buf.len() is reachable; bounded by construction, not
+    // by an assumption (the assume ledger is shrink-only, North Star O3).
+    let len = kani::any::<u8>() as usize % (buf.len() + 1);
     let mut r = Reader::new(&buf[..len]);
     let _ = read_canonical(&mut r);
     assert!(r.pos() <= len);
@@ -92,8 +94,9 @@ fn verify_canonical_block_read_total() {
 #[kani::unwind(10)]
 fn verify_bundle_age_parse_total() {
     let buf: [u8; 9] = kani::any();
-    let len: usize = kani::any();
-    kani::assume(len <= buf.len());
+    // Every length 0..=buf.len() is reachable; bounded by construction, not
+    // by an assumption (the assume ledger is shrink-only, North Star O3).
+    let len = kani::any::<u8>() as usize % (buf.len() + 1);
     let _ = parse_bundle_age(&buf[..len]);
 }
 
@@ -104,8 +107,9 @@ fn verify_bundle_age_parse_total() {
 #[kani::unwind(10)]
 fn verify_bib_target_scan_total() {
     let buf: [u8; 8] = kani::any();
-    let len: usize = kani::any();
-    kani::assume(len <= buf.len());
+    // Every length 0..=buf.len() is reachable; bounded by construction, not
+    // by an assumption (the assume ledger is shrink-only, North Star O3).
+    let len = kani::any::<u8>() as usize % (buf.len() + 1);
     let target: u64 = kani::any();
     let _ = bib_lists_target(&buf[..len], target);
 }
@@ -137,8 +141,8 @@ fn verify_crc32c_table_matches_bitwise() {
 #[kani::unwind(10)]
 fn verify_block_crc_zeroes_only_value() {
     let block: [u8; 8] = kani::any();
-    let at: usize = kani::any();
-    kani::assume(at <= block.len() - 2);
+    // Every offset 0..=block.len()-2 is reachable, by construction.
+    let at = kani::any::<u8>() as usize % (block.len() - 1);
     let mut zeroed = block;
     zeroed[at] = 0;
     zeroed[at + 1] = 0;
@@ -156,9 +160,8 @@ fn sym_crc() -> CrcType {
 
 /// A symbolic value whose CBOR head is one byte (0..=23).
 fn small() -> u64 {
-    let v: u64 = kani::any();
-    kani::assume(v < 24);
-    v
+    // Every value 0..=23 is reachable, by construction.
+    u64::from(kani::any::<u8>() % 24)
 }
 
 fn sym_primary(crc_type: CrcType) -> PrimaryBlock<'static> {
