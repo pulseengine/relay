@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P05 — falcon rate controller exposes a Component-Model Preview 3 async stream interface (first control-cascade engine)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): not gate-run: FV-RELAY-STREAM-005 is not falcon-tagged, so the gate never runs it
     description: >
       Extends the streamification template from the cFS engines (LC/SCH/HK/SC,
       P01-P04) to the CONTROL CASCADE: the falcon rate controller shall expose a

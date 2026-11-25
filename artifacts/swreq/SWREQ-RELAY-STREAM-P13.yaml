@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P13 (v1.75) — witness MC/DC on a composed stream component (verification depth)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): not gate-run: FV-RELAY-STREAM-013 is not falcon-tagged, so the gate never runs it
     description: >
       PLANNED v1.75. Across the entire streamification campaign (9 engines + the
       composition) the feature-loop's witness step (MC/DC truth table on the Wasm

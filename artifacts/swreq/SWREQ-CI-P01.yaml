@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "CI-P01: validate_header returns Valid only when all checks pass"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): cFS port: FV-RELAY-KANICI-001 is not falcon-tagged, so the gate never runs it; SV-RELAY-010 has no runnable steps
     description: >
       The validate_header function shall return Valid only when all of the
       following hold: stream_id equals one of the first stream_id_count

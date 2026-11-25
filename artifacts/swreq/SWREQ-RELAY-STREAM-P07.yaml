@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P07 — falcon attitude controller exposes a Component-Model Preview 3 async stream interface (third control-cascade engine)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): not gate-run: FV-RELAY-STREAM-007 is not falcon-tagged, so the gate never runs it
     description: >
       Continues the control-cascade streamification (after rate P05 and position
       P06): the falcon attitude controller shall expose a WASM Component-Model
