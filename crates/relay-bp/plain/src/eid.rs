@@ -4,13 +4,13 @@
 //! `dtn:none` = `[1, 0]`, and the two-element `ipn` scheme (code 2),
 //! `[2, [node, service]]`.
 //!
-//! ## PROVISIONAL: the RFC 9758 three-element ipn form and unknown schemes
+//! ## Rejected: the RFC 9758 three-element ipn form and unknown schemes
 //!
-//! Whether relay-bp accepts the RFC 9758 three-element `ipn` SSP
-//! `[2, [authority, node, service]]` and EIDs of unknown schemes is an OPEN
-//! QUESTION on issue #626; the owner has not decided. Until then both forms get
-//! the fail-safe verdict [`PROVISIONAL_OPEN_EID_VERDICT`] =
-//! [`OpenEidVerdict::Reject`], reported as
+//! Owner decision 2026-11-25 (issue #626, SWREQ-RELAY-BP-P06): the RFC 9758
+//! three-element `ipn` SSP `[2, [authority, node, service]]` and EIDs of
+//! unknown schemes are rejected with a typed error and the bundle is dropped,
+//! to be revisited when an RFC 9758 peer exists. Both forms get the verdict
+//! [`OPEN_EID_VERDICT`] = [`OpenEidVerdict::Reject`], reported as
 //! [`DecodeError::OpenEidForm`](crate::DecodeError::OpenEidForm). Neither form
 //! is ever parsed as something else. Changing the verdict means changing that
 //! one constant (and adding the accept path), nothing else.
@@ -55,12 +55,12 @@ pub enum OpenEidVerdict {
     Reject,
 }
 
-/// PROVISIONAL default pending the owner's decision on #626: open EID forms
-/// are rejected. See the module documentation.
-pub const PROVISIONAL_OPEN_EID_VERDICT: OpenEidVerdict = OpenEidVerdict::Reject;
+/// Owner decision 2026-11-25 (#626): open EID forms are rejected. See the
+/// module documentation.
+pub const OPEN_EID_VERDICT: OpenEidVerdict = OpenEidVerdict::Reject;
 
 fn open_form(form: OpenEidForm) -> DecodeError {
-    match PROVISIONAL_OPEN_EID_VERDICT {
+    match OPEN_EID_VERDICT {
         OpenEidVerdict::Reject => DecodeError::OpenEidForm(form),
     }
 }
@@ -250,9 +250,9 @@ mod tests {
     }
 
     #[test]
-    fn ipn_three_element_rejected_provisional() {
-        // PROVISIONAL (#626): the RFC 9758 form [2, [authority, node, service]].
-        assert_eq!(PROVISIONAL_OPEN_EID_VERDICT, OpenEidVerdict::Reject);
+    fn ipn_three_element_rejected() {
+        // Decided (#626): the RFC 9758 form [2, [authority, node, service]].
+        assert_eq!(OPEN_EID_VERDICT, OpenEidVerdict::Reject);
         assert_eq!(
             rd(&[0x82, 0x02, 0x83, 0x05, 0x01, 0x02]),
             Err(DecodeError::OpenEidForm(OpenEidForm::IpnThreeElement))
@@ -265,9 +265,9 @@ mod tests {
     }
 
     #[test]
-    fn unknown_scheme_rejected_provisional() {
-        // PROVISIONAL (#626): unknown schemes are rejected, never mis-parsed.
-        assert_eq!(PROVISIONAL_OPEN_EID_VERDICT, OpenEidVerdict::Reject);
+    fn unknown_scheme_rejected() {
+        // Decided (#626): unknown schemes are rejected, never mis-parsed.
+        assert_eq!(OPEN_EID_VERDICT, OpenEidVerdict::Reject);
         assert_eq!(
             rd(&[0x82, 0x03, 0x00]),
             Err(DecodeError::OpenEidForm(OpenEidForm::UnknownScheme(3)))

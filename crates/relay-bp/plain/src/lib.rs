@@ -34,8 +34,8 @@
 //! * CRC-16/X-25 and CRC-32C ([`crc`]) zero only the CRC value bytes and keep the
 //!   CBOR byte-string header (RFC 9171 erratum 8043; SWREQ-RELAY-BP-P03).
 //! * EIDs ([`eid`]): `dtn` (including `dtn:none`) and two-element `ipn`. The RFC
-//!   9758 three-element `ipn` form and unknown schemes get a PROVISIONAL typed
-//!   reject pending the owner's decision on #626 (SWREQ-RELAY-BP-P06).
+//!   9758 three-element `ipn` form and unknown schemes get a typed reject
+//!   (owner decision 2026-11-25 on #626, SWREQ-RELAY-BP-P06).
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -57,7 +57,7 @@ mod vectors;
 mod kani_proofs;
 
 pub use decode::decode;
-pub use eid::{Eid, OpenEidForm, OpenEidVerdict, PROVISIONAL_OPEN_EID_VERDICT};
+pub use eid::{Eid, OPEN_EID_VERDICT, OpenEidForm, OpenEidVerdict};
 pub use encode::encode;
 
 /// Maximum number of canonical (non-primary) blocks a [`BundleView`] holds.
@@ -218,7 +218,7 @@ pub enum DecodeError {
     InvalidDtnSsp,
     /// An ipn SSP that is not an array of two (or, see below, three) uints.
     InvalidIpnSsp,
-    /// An EID form whose verdict is open on #626; see [`PROVISIONAL_OPEN_EID_VERDICT`].
+    /// An EID form relay-bp rejects (#626); see [`OPEN_EID_VERDICT`].
     OpenEidForm(OpenEidForm),
     /// The creation timestamp is not a two-item array of uints.
     InvalidTimestamp,
