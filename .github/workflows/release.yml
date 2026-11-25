@@ -215,7 +215,7 @@ jobs:
       # v0.9+: every release carries an audit-ready snapshot of the
       # rivet artifact graph at the released commit. Must run BEFORE
       # SHA256SUMS so the snapshot's digest enters the sums file.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: "1.100.0"
 
@@ -532,7 +532,7 @@ jobs:
           disk-cache: bazel
           repository-cache: true
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: "1.100.0"
           # BOTH targets (v1.131): std components build wasm32-wasip2; no_std
