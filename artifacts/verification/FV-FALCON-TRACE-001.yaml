@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TRACE-001
     type: sw-verification
     title: "TRACE-P01 — every shipped sw-req carries a release: (rivet query, 19 -> 0)"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0
     description: >
       Verifies SWREQ-FALCON-TRACE-P01 under its restated criterion (owner

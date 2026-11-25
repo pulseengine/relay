@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-TRACE-P02
     type: sw-req
     title: "TRACE-P02 — promote the V: drive implemented→verified from the verification gate's own per-artifact result"
-    status: proposed
+    status: implemented
     release: falcon-v1.143.0  # retargeted to v1.143 (owner 2026-11-22, #605): promote or move with the 63
     description: >
       Artifact status shall reflect executed evidence, so that "verified" means
@@ -54,6 +54,36 @@ artifacts:
       22/247 verified figure is entirely UNPROMOTED verifiers, not missing
       evidence — which makes this far cheaper than it looks, except for the
       45.
+
+      EXECUTED 2026-11-25 (v1.143, #605). Census of the 56 `implemented` sw-reqs
+      on main d98818f. The promotion rule, stricter than the gate's per-artifact
+      PASS: a sw-req is promoted only when EVERY one of its verifiers executed
+      EVERY step and passed, with no step skipped as bench-only and none merely
+      credited to another gate, and every `cargo test` filter matched at least
+      one test. Owner holds from 2026-11-24 are respected.
+
+      PROMOTED, 7 (with their 7 verifiers): FALCON-FOLLOW-P01, FALCON-LOITER-P01,
+      FALCON-REL-P02, FALCON-WASMEQ-P02, RELAY-VGATE-P02, RELAY-BP-P02,
+      FALCON-TRACE-P01. scripts/run-falcon-verification.py over their seven
+      verifiers (the FOLLOW, LOITER, REL, WASMEQ, VGATE, BP-002 and TRACE-001
+      ones): 55 PASS, 0 FAIL, 0 skipped; every `cargo test` step matched at least one test (the 10
+      sweep steps exactly 1 each; the 28 BP-002 steps against the 67 tests
+      relay-bp lists). RELAY-BP-P02 arrived with relay-bp S1 after the first
+      sweep; its criterion (external reference vectors with a per-vector
+      expected verdict, plus unit tests) is what its steps execute.
+      FALCON-TRACE-P01 was implemented by #735; its two rivet-query steps
+      both execute.
+
+      RESIDUAL, 57, named per criterion (b)/(c), plus this requirement,
+      which has no verifier yet:
+      32, every verifier step is absent or needs a tool the gate does not run (bazel, spar, wasmtime, meld, cosign, gz, renode, cargo kani marked bench-only): CCSDS-P01, CI-P01, CS-P01, DS-P01, FALCON-MELD-P01, FALCON-OCI-P01, FALCON-PERF-P01, FALCON-SIM-P04, FALCON-WASMCM-P01, FALCON-WIT-P01, FM-P01, HK-P01, MD-P01, MM-P01, RELAY-STREAM-P01, RELAY-STREAM-P02, RELAY-STREAM-P03, RELAY-STREAM-P04, RELAY-STREAM-P05, RELAY-STREAM-P06, RELAY-STREAM-P07, RELAY-STREAM-P08, RELAY-STREAM-P09, RELAY-STREAM-P10, RELAY-STREAM-P11, RELAY-STREAM-P12, RELAY-STREAM-P13, RELAY-STREAM-P14, SCA-P01, TBL-P01, TO-P01, TRANSPORT-P01.
+      8, a verifier step is skipped as bench-only, so the gate never executes the substance: FALCON-OCI-P06, FALCON-OCI-P08, FALCON-SPLIT-P01, FALCON-TARGET-P01, FALCON-WASMCM-P02, FALCON-WASMEQ-P01, FALCON-WASMEQ-P03, RELAY-SUPPLY-P01.
+      5, a verifier has no runnable steps (SV-RELAY cFS verifiers): CFDP-P01, HS-P01, LC-P01, SC-P01, SCH-P01.
+      3, held by the owner on 2026-11-24 for a substantive reason (recorded on the artifact): FALCON-GNSS-P01, RELAY-STREAM-P15, RELAY-STREAM-P16.
+      2, no verifier: FALCON-PLANT-P01, FALCON-SUPERVISOR-P01.
+      1, its Verus step is credited to the Verus gate, not executed by the verification gate: RELAY-VGATE-P03.
+      4, a Kani step is credited to the Kani gate, not executed by the verification gate (relay-bp S1): RELAY-BP-P01, RELAY-BP-P03, RELAY-BP-P04, RELAY-BP-P07.
+      2, every step passes but the steps do not discharge the stated criterion (relay-bp S1): RELAY-BP-P05 (criterion names a Kani round-trip and a differential against hardy-bpv7, bp7 and minicbor; the steps are unit and property tests), RELAY-BP-P06 (criterion names Wireshark ipn_3comp and eid_schemes captures downloaded in CI; nothing fetches them).
 
     tags: [falcon, rivet, traceability, verification, hygiene, v1.136]
     fields:

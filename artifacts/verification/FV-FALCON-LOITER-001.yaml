@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-LOITER-001
     type: sw-verification
     title: "LOITER-P01 — a Loiter entered at transit speed brakes, latches at rest, and then meets HOLD-P01 at 2 and 5 m/s wind (#632)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-LOITER-P01 on SimBackend, each step naming its
       test.

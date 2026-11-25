@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-LOITER-P01
     type: sw-req
     title: "LOITER-P01 — a Loiter entered while moving BRAKES, then latches the hold point where the vehicle comes to rest"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0  # derived (TRACE-P01): first falcon-v* tag containing 7528eb06d, the commit that added this id
     description: >
       A Loiter entered while the vehicle's estimated horizontal speed exceeds

@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-FOLLOW-001
     type: sw-verification
     title: "FOLLOW-P01 — the Mission step target is flown live, a non-finite one is rejected, a stale stream HOLDS with bit 8, through the native API, the seam host rules and the binding (#632)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-FALCON-FOLLOW-P01 clause by clause, each step naming its
       test. All on SimBackend.

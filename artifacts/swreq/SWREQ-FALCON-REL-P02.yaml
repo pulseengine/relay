@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-REL-P02
     type: sw-req
     title: "REL-P02 — the signed bundle shall describe every artifact it attests"
-    status: implemented
+    status: verified
     release: falcon-v1.136.0
     description: >
       Every file covered by the cosign-signed bundle SHA256SUMS shall appear in

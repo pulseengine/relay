@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-WASMEQ-P02
     type: sw-req
     title: "WASMEQ-P02 — a published component shall not wrap a crate the flight core does not use"
-    status: implemented
+    status: verified
     release: falcon-v1.137.0
     description: >
       Every `relay-*` crate wrapped by a component under wasm/cm shall also be a

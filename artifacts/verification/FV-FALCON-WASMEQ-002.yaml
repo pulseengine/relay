@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-WASMEQ-002
     type: sw-verification
     title: "WASMEQ-P02 — component/flight-core dependency audit, 4 violations found and waived (v1.137)"
-    status: implemented
+    status: verified
     release: falcon-v1.137.0
     description: >
       Verification of SWREQ-FALCON-WASMEQ-P02 via scripts/audit-component-deps.rs.

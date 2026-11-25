@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-BP-002
     type: sw-verification
     title: "relay-bp conformance accept/reject — RFC 9173 Appendix A vector table + per-shape unit tests (BP-P02)"
-    status: implemented
+    status: verified
     description: >
       Verifies SWREQ-RELAY-BP-P02. Accept side: the six RFC 9173 Appendix A
       bundles (A.1.1.3, A.1.4, A.2.4, A.3.1.4, A.3.5, A.4.5; hex transcribed

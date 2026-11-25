@@ -2,7 +2,7 @@ artifacts:
   - id: FV-RELAY-VGATE-002
     type: sw-verification
     title: "VGATE-P02 — untraced-proof cross-check: 10 engines, 22 harnesses, cited by nothing (v1.136)"
-    status: implemented
+    status: verified
     release: falcon-v1.136.0
     description: >
       Verification of SWREQ-RELAY-VGATE-P02.

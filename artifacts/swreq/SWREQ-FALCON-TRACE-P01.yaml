@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-TRACE-P01
     type: sw-req
     title: "TRACE-P01 — make the release plan queryable: backfill the per-artifact release assignment"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0  # retargeted to v1.143 (owner 2026-11-22, #605): promote or move with the 63
     description: >
       The rivet trace shall reflect what actually shipped, so that release
