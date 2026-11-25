@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "CFDP-P01: State transitions are valid (no skipping states)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): cFS port: FV-RELAY-KANICI-001 is not falcon-tagged, so the gate never runs it; SV-RELAY-016 has no runnable steps; FV-RELAY-VCHAIN-001 is not falcon-tagged, so the gate never runs it
     description: >
       Each process_ack, tick or process_nak call shall leave a CFDP
       transaction's state unchanged or move it exactly one step along

@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "TRACE-P02 — promote the V: drive implemented→verified from the verification gate's own per-artifact result"
     status: proposed
-    release: falcon-v1.136.0
+    release: falcon-v1.143.0  # retargeted to v1.143 (owner 2026-11-22, #605): promote or move with the 63
     description: >
       Artifact status shall reflect executed evidence, so that "verified" means
       a gate ran the artifact's steps and they passed.

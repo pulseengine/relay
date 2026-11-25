@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "CCSDS-P01: Encode then decode equals identity (roundtrip)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): cFS port: FV-RELAY-KANICI-001 is not falcon-tagged, so the gate never runs it; SV-RELAY-015 has no runnable steps
     description: >
       For every valid header, encoding it and then decoding the result shall
       produce the original header fields. A header is valid when version is

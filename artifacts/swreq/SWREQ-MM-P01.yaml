@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "MM-P01: Valid only when address in range, size > 0, alignment ok"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): cFS port: FV-RELAY-KANICI-001 is not falcon-tagged, so the gate never runs it; SV-RELAY-013 has no runnable steps
     description: >
       validate_request shall return Valid only when all of the following
       hold: 0 < size <= max_operation_size; ram_start <= address < ram_end;

@@ -28,7 +28,17 @@ artifacts:
     fields:
       method: formal-verification
       steps:
-        - run: "cargo test -p relay-sec"
+        - run: "cargo test -p relay-sec tests::first_counter_is_fresh"
+        - run: "cargo test -p relay-sec tests::immediate_replay_rejected"
+        - run: "cargo test -p relay-sec tests::in_window_reorder_accepted_once"
+        - run: "cargo test -p relay-sec tests::large_jump_forgets_old_window"
+        - run: "cargo test -p relay-sec tests::monotone_sequence_all_fresh"
+        - run: "cargo test -p relay-sec tests::older_than_window_is_too_old"
+        - run: "cargo test -p relay-sec tests::window_edge_is_63_in_64_out"
+        - run: "cargo test -p relay-sec tests::zero_is_always_rejected"
+        - run: "cargo test -p relay-sec proptests::check_matches_accept"
+        - run: "cargo test -p relay-sec proptests::frontier_is_monotone"
+        - run: "cargo test -p relay-sec proptests::no_counter_accepted_twice"
         - run: "cargo kani -p relay-sec"
     links:
       - type: verifies

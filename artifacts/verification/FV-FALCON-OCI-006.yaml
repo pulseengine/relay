@@ -3,7 +3,7 @@ artifacts:
     type: sw-verification
     title: "OCI-P08 — CallScope arena reclamation: Kani P1–P4, unit tests, 10 000-call soak, bit-identity (#574)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): not gate-run: FV-FALCON-OCI-006 needs build-host tools the gate does not provide
     description: >
       Verification of SWREQ-FALCON-OCI-P08.
 

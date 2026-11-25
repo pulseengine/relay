@@ -45,7 +45,8 @@ artifacts:
     fields:
       method: test
       steps:
-        - run: "cargo test -p falcon-core"
+        - run: "cargo test -p falcon-core tests::holds_under_noisy_intermittent_gps"
+        - run: "cargo test -p falcon-core tests::variance_matching_helps_and_over_trust_no_longer_diverges"
         - run: "cargo clippy -p falcon-core"
     links:
       - type: verifies

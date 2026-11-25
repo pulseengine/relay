@@ -27,7 +27,11 @@ artifacts:
     fields:
       method: formal-verification
       steps:
-        - run: "cargo test -p relay-sec"
+        - run: "cargo test -p relay-sec ascon::tests::kat_open_count34_count35"
+        - run: "cargo test -p relay-sec ascon::tests::seal_open_roundtrip_and_reject"
+        - run: "cargo test -p relay-sec frame::tests::aead_roundtrips_and_hides_payload"
+        - run: "cargo test -p relay-sec frame::tests::aead_tamper_rejected"
+        - run: "cargo test -p relay-sec frame::tests::no_silent_downgrade_either_direction"
         - run: "cargo kani -p relay-sec"
     links:
       - type: verifies

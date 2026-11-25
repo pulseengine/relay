@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P06 — falcon position controller exposes a Component-Model Preview 3 async stream interface (second control-cascade engine)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): not gate-run: FV-RELAY-STREAM-006 is not falcon-tagged, so the gate never runs it
     description: >
       Continues the control-cascade streamification (after the rate controller,
       P05): the falcon position controller shall expose a WASM Component-Model

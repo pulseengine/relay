@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P14 (v1.76) — sigil attestation of the composed/lowered stream artifacts + streamification closure"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): not gate-run: FV-RELAY-STREAM-014 is not falcon-tagged, so the gate never runs it
     description: >
       PLANNED v1.76. The other recurring feature-loop N/A across the campaign was
       sigil (step 6): the composed P3 component (STREAM-P11) and the Meld-lowered

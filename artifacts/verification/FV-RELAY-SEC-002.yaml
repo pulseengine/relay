@@ -36,7 +36,13 @@ artifacts:
     fields:
       method: formal-verification
       steps:
-        - run: "cargo test -p relay-sec"
+        - run: "cargo test -p relay-sec ascon::tests::kat_count1_empty"
+        - run: "cargo test -p relay-sec ascon::tests::kat_count2_mac_floor"
+        - run: "cargo test -p relay-sec ascon::tests::kat_count3"
+        - run: "cargo test -p relay-sec ascon::tests::kat_count34_pt_only"
+        - run: "cargo test -p relay-sec ascon::tests::kat_count35_pt_ad"
+        - run: "cargo test -p relay-sec ascon::tests::mac_verify_accepts_genuine_rejects_forgery"
+        - run: "cargo test -p relay-sec ascon::tests::seal_multiblock_lengths"
         - run: "cargo kani -p relay-sec"
     links:
       - type: verifies

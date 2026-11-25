@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "STREAM-P10 (v1.72) — shared cascade stream-types WIT (the composition substrate)"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): not gate-run: FV-RELAY-STREAM-010 is not falcon-tagged, so the gate never runs it
     description: >
       PLANNED v1.72. The five control-cascade stream components (iekf/pos/att/
       rate/mixer, STREAM-P05..P09) were authored with SELF-CONTAINED WITs to

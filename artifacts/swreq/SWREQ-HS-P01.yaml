@@ -3,7 +3,7 @@ artifacts:
     type: sw-req
     title: "HS-P01: Invariant holds after init"
     status: implemented
-    release: falcon-v1.143.0
+    release: falcon-v1.144.0  # moved from v1.143 (owner 2026-11-25): cFS port: FV-RELAY-KANICI-001 is not falcon-tagged, so the gate never runs it; SV-RELAY-007 has no runnable steps; FV-RELAY-VCHAIN-001 is not falcon-tagged, so the gate never runs it
     description: >
       After initialization, the app table shall be empty with
       app_count at zero.

@@ -32,7 +32,21 @@ artifacts:
     fields:
       method: formal-verification
       steps:
-        - run: "cargo test -p relay-sec"
+        - run: "cargo test -p relay-sec header::tests::round_trip"
+        - run: "cargo test -p relay-sec header::tests::parse_too_short_is_none"
+        - run: "cargo test -p relay-sec header::tests::write_too_short_is_false"
+        - run: "cargo test -p relay-sec header::tests::nonce_embeds_fields"
+        - run: "cargo test -p relay-sec header::tests::distinct_headers_distinct_nonces"
+        - run: "cargo test -p relay-sec frame::tests::wrap_then_verify_roundtrips"
+        - run: "cargo test -p relay-sec frame::tests::tampered_payload_is_bad_mac"
+        - run: "cargo test -p relay-sec frame::tests::tampered_tag_is_bad_mac"
+        - run: "cargo test -p relay-sec frame::tests::wrong_spi_is_rejected"
+        - run: "cargo test -p relay-sec frame::tests::replay_is_rejected"
+        - run: "cargo test -p relay-sec frame::tests::garbage_never_panics"
+        - run: "cargo test -p relay-sec frame::tests::empty_payload_roundtrips"
+        - run: "cargo test -p relay-sec frame::tests::macfloor_verify_into_matches_in_place"
+        - run: "cargo test -p relay-sec frame::proptests::verify_is_total"
+        - run: "cargo test -p relay-sec frame::proptests::wrap_verify_roundtrip"
         - run: "cargo kani -p relay-sec"
     links:
       - type: verifies
