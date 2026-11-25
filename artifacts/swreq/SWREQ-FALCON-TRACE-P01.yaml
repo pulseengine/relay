@@ -56,17 +56,17 @@ artifacts:
       the 94 derive to falcon-v0.1.0) would put unverified work in the scope of an
       already-shipped release, which is the false readiness signal this
       requirement exists to remove. An unassigned requirement is backlog, not a
-      commitment. The restated criterion below needs owner sign-off before this
-      is promoted. One artifact, SWREQ-FALCON-POIYAW-P01 (draft), is in no tag at
+      commitment. The owner accepted the restated criterion below on 2026-11-25. One artifact, SWREQ-FALCON-POIYAW-P01 (draft), is in no tag at
       all.
     tags: [falcon, rivet, traceability, release-planning, hygiene, v1.132]
     fields:
       req-type: constraint
       priority: should
       verification-criteria: >
-        PROPOSED RESTATEMENT (2026-11-25, pending owner): every SHIPPED sw-req
+        RESTATED (owner decision 2026-11-25, shipped-only): every SHIPPED sw-req
         (status implemented or verified) carries a `release:` field derived as
-        below, and unshipped ones carry none unless planned. ORIGINAL: Every
+        below; unshipped ones stay backlog and carry none unless planned.
+        ORIGINAL: Every
         sw-req carries a `release:` field naming the release that shipped
         it, derived MECHANICALLY (the first `falcon-v*` tag containing the
         artifact's creating commit) rather than assigned by judgement; zero
