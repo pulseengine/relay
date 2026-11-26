@@ -133,14 +133,17 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
 
-      - name: Resolve the module graph against the committed lock
+      - name: The lock is enforced (.bazelrc)
         run: |
           set -euo pipefail
           grep -qx 'common --lockfile_mode=error' .bazelrc \
             || { echo "::error file=.bazelrc::common --lockfile_mode=error is missing - the lock is not enforced"; exit 1; }
           echo "bazel $(cat .bazelversion) (from .bazelversion)"
-          if ! bazel mod deps --lockfile_mode=error; then
-            echo "::error file=MODULE.bazel.lock::MODULE.bazel.lock does not match the module graph. Run 'bazel mod deps --lockfile_mode=update' and commit MODULE.bazel.lock."
-            exit 1
-          fi
-          git diff --exit-code -- MODULE.bazel.lock
+
+      # Verify-only (owner decision 2026-11-25: no App token, nothing pushes).
+      # Copied unchanged from pulseengine/synth#1795 (f6b2b3a4). On a stale lock
+      # it fails, prints the signed-commit fix in the step summary, and uploads
+      # the lock this runner writes as the `module-bazel-lock` artifact. This is
+      # what a Dependabot cargo PR hits: someone pushes that lock onto the branch.
+      - name: Resolve the module graph against the committed lock
+        uses: ./.github/actions/bazel-lock-check

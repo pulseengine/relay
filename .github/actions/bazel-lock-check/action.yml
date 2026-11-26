@@ -1,0 +1,99 @@
+# Verify-only MODULE.bazel.lock check for repositories that use Bazel with
+# crate_universe (or any module extension) and `--lockfile_mode=error`.
+#
+# Copyable as is: it has no inputs or paths specific to synth, and needs only Bazel
+# (bazelisk) on PATH and a checkout. It never pushes. A GITHUB_TOKEN push starts no
+# workflow run, so a lock it pushed would sit unchecked. A GitHub App or PAT for that
+# is an owner decision about a new credential.
+#
+# What it does:
+#   1. `bazel mod deps --lockfile_mode=error`: resolves modules and evaluates
+#      module extensions, builds nothing. Fails when the committed lock is stale.
+#   2. On failure (or when `regenerate: always`), writes the lock this runner
+#      accepts, prints its diff stat and the exact commands that fix the branch,
+#      and uploads it as the `module-bazel-lock` artifact.
+#   3. Fails the step, so the red check names the cause.
+#
+# A Dependabot cargo PR cannot regenerate the lock itself, so it goes red here until
+# someone pushes a signed commit with the regenerated lock. That person runs the
+# printed commands, or downloads the artifact (the lock a Linux runner writes,
+# which is the one CI accepts).
+#
+# REPIN variables are unset on every Bazel call: Bazel records CARGO_BAZEL_REPIN
+# in the lock (wohl#113), so a lock written with it set is refused afterwards.
+name: MODULE.bazel.lock check (verify-only)
+description: Refuse a stale MODULE.bazel.lock, print the fix, upload the regenerated lock.
+inputs:
+  working-directory:
+    description: Directory holding MODULE.bazel and MODULE.bazel.lock.
+    required: false
+    default: "."
+  check:
+    description: "'true' runs the --lockfile_mode=error check; 'false' skips it (the caller already checked) and only regenerates."
+    required: false
+    default: "true"
+  regenerate:
+    description: "'on-failure' regenerates only when the check fails; 'always' regenerates and uploads on every run."
+    required: false
+    default: "on-failure"
+runs:
+  using: composite
+  steps:
+    - name: MODULE.bazel.lock is current
+      id: check
+      if: inputs.check == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -uo pipefail
+        if env -u CARGO_BAZEL_REPIN -u CARGO_BAZEL_REPIN_ONLY -u REPIN \
+             bazel mod deps --lockfile_mode=error > /dev/null 2> bazel-lock-check.err; then
+          echo "MODULE.bazel.lock is current."
+          echo "stale=false" >> "$GITHUB_OUTPUT"
+        else
+          tail -n 20 bazel-lock-check.err
+          echo "stale=true" >> "$GITHUB_OUTPUT"
+        fi
+        rm -f bazel-lock-check.err
+    - name: Regenerate MODULE.bazel.lock on this runner
+      id: regen
+      if: steps.check.outputs.stale == 'true' || inputs.check != 'true' || inputs.regenerate == 'always'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+        LOCK_DIR: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        env -u CARGO_BAZEL_REPIN -u CARGO_BAZEL_REPIN_ONLY -u REPIN \
+          bazel mod deps --lockfile_mode=update > /dev/null
+        if git diff --quiet -- MODULE.bazel.lock; then
+          echo "regenerated lock is identical to the committed one"
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+        else
+          git diff --stat -- MODULE.bazel.lock
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "MODULE.bazel.lock is stale on branch '$BRANCH'. To fix it, push a signed commit:"
+            echo "  git fetch origin '$BRANCH' && git switch -C '$BRANCH' 'origin/$BRANCH'"
+            echo "  cd '$LOCK_DIR'"
+            echo "  env -u CARGO_BAZEL_REPIN -u CARGO_BAZEL_REPIN_ONLY -u REPIN bazel mod deps --lockfile_mode=update"
+            echo "  git commit -S -m 'Regenerate MODULE.bazel.lock' -- MODULE.bazel.lock"
+            echo "  git push origin 'HEAD:$BRANCH'"
+            echo "Or download the 'module-bazel-lock' artifact of this run (the lock a Linux runner writes) and commit it."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+        fi
+    - name: Upload the regenerated MODULE.bazel.lock
+      if: steps.regen.outcome == 'success'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      with:
+        name: module-bazel-lock
+        path: ${{ inputs.working-directory }}/MODULE.bazel.lock
+        retention-days: 7
+        if-no-files-found: error
+    - name: Fail on a stale lock
+      if: steps.check.outputs.stale == 'true'
+      shell: bash
+      run: |
+        echo "::error file=${{ inputs.working-directory }}/MODULE.bazel.lock::MODULE.bazel.lock is stale; see the step summary for the commands that fix the branch."
+        exit 1
