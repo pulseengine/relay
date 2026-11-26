@@ -3,6 +3,7 @@ artifacts:
     type: sw-req
     title: "SPLIT-P01 — the cascade shall also deploy as THREE components (estimator, flight control, supervising orchestrator) composed with wac, and that composition shall be the SAME SUPERVISED VEHICLE as the monolithic cascade, bit for bit"
     status: implemented
+    release: falcon-v1.141.0  # derived (TRACE-P01): first falcon-v* tag containing 37be2edfc, the commit that added this id
     description: >
       The falcon flight core shall be deployable as a `wac plug` composition of
       three components — `cascade-estimator` (falcon-core EstimatorPartition),

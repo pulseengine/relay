@@ -29,6 +29,7 @@ artifacts:
     type: sw-req
     title: "WORLD-P02: Variant worlds share the same control cascade"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       All falcon-* worlds (quad, hex, coax, vtol, fw) shall
       reuse the same relay-ekf, relay-rate, relay-att, relay-pos

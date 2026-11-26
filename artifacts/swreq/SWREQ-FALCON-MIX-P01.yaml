@@ -27,6 +27,7 @@ artifacts:
     type: sw-req
     title: "MIX-P02: No-negative-thrust invariant"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       The mixer's per-motor PWM output shall always be in
       [0.0, 1.0]. Negative thrust commands are saturated to
@@ -47,6 +48,7 @@ artifacts:
     type: sw-req
     title: "MIX-P03: Saturation handling preserves priority order"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       When mixer output would exceed motor limits, saturation
       handling shall preserve a configurable priority order
@@ -103,6 +105,7 @@ artifacts:
     type: sw-req
     title: "MIX-P04: Per-variant motor count exported correctly"
     status: verified
+    release: falcon-v0.1.0  # derived (TRACE-P01): first falcon-v* tag containing d30a5e3c1, the commit that added this id
     description: >
       Each falcon-* world shall export stream<motor-pwm> with
       a list length matching its airframe variant (4 for
