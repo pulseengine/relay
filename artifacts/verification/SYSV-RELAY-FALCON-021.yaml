@@ -2,7 +2,7 @@ artifacts:
   - id: SYSV-RELAY-FALCON-021
     type: sys-verification
     title: "SYSREQ-FALCON-021 verification — field-operable infrastructure, each clause to a verified sw-req"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0
     description: >
       Wires SYSREQ-FALCON-021 (field-operable flight infrastructure) to the
