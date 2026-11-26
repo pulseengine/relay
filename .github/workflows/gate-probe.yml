@@ -35,4 +35,4 @@ jobs:
         with:
           persist-credentials: false
       # temper#88 merged, main 308848d (2026-11-10): fork-routing check, timeout allowed.
-      - uses: pulseengine/temper/.github/actions/gate-probe@8b93a3eb0b420630b5be75d853027cd396a2b3a8
+      - uses: pulseengine/temper/.github/actions/gate-probe@0dee66391757115812e0606224fded8b524df51e
