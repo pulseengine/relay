@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-BP-P01
     type: sw-req
     title: "BP-P01 — Decode is total: any byte slice yields Ok(BundleView) or a typed Err, never a panic or out-of-bounds access"
-    status: proposed
+    status: implemented
     release: falcon-v1.145.0
     description: >
       The bundle decoder is a total function over arbitrary byte slices. It

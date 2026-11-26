@@ -1,0 +1,43 @@
+artifacts:
+  - id: FV-RELAY-BP-007
+    type: sw-verification
+    title: "relay-bp fragment rejection — typed decode reject, encoder refusal, Kani (BP-P07)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-BP-P07 (profile decision 2026-11-03: RFC 9171 BPv7,
+      no fragmentation, no CCSDS 734.20 claim). The decoder returns
+      DecodeError::FragmentRejected as soon as it reads a primary block whose
+      bundle processing flags have bit 0 set, before any block is kept, whatever
+      the item count (10, 11, or an inconsistent 8 / indefinite primary). A
+      10-item primary with the flag clear is PrimaryItemCount, not a fragment.
+      The encoder refuses any bundle with the flag set, so the node never
+      produces a fragment. BundleView has no fragment-offset fields, and
+      reassembly is not implemented.
+
+      Kani BP-K09 verify_fragment_never_validates: for every u64 flags value
+      with bit 0 set and any primary CRC type, the bundle-level validation
+      returns FragmentRejected in both modes. decode returns Ok(view) only after
+      validate(&view, mode) has passed on that view, so by composition no decode
+      returns a bundle with the fragment flag set. A byte-level harness
+      (symbolic flags byte inside an encoded bundle) did not finish in
+      1200-1800 s locally, so the byte level rests on the unit tests above. BP-K10: encode returns
+      Invalid(FragmentRejected) for every symbolic primary with the flag set.
+
+      Scope note: "no code path stores a bundle with the fragment flag set" is
+      proven for the codec, the only code in S1; the store arrives in a later
+      slice and must carry its own proof.
+    tags: [verification, falcon, relay-bp, dtn, codec, profile, fragmentation, kani, issue-626]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-bp decode::tests::rejects_fragment_flag_primary_10_items"
+        - run: "cargo test -p relay-bp decode::tests::rejects_fragment_flag_primary_11_items"
+        - run: "cargo test -p relay-bp decode::tests::rejects_fragment_flag_any_item_count"
+        - run: "cargo test -p relay-bp decode::tests::rejects_fragment_fields_without_flag"
+        - run: "cargo test -p relay-bp encode::tests::encoder_refuses_fragment_flag"
+        # Kani BP-K09..K10, gated by the kani.yml matrix (relay-bp entry).
+        - run: "cargo kani -p relay-bp --harness verify_fragment_never_validates"
+        - run: "cargo kani -p relay-bp --harness verify_encoder_refuses_fragment"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-BP-P07

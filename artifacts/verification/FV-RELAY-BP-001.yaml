@@ -1,0 +1,53 @@
+artifacts:
+  - id: FV-RELAY-BP-001
+    type: sw-verification
+    title: "relay-bp decode totality — unit tests, proptest and Kani per-item harnesses (BP-P01)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-BP-P01: `relay_bp::decode` is total over arbitrary
+      byte slices and returns a borrowed BundleView or a typed DecodeError,
+      never panicking, indexing out of bounds, recursing or allocating. The
+      crate is no_std, no alloc, forbid(unsafe_code); the decoder is a
+      fixed-shape non-recursive walk whose block loop is bounded by MAX_BLOCKS.
+
+      Evidence, each step a named test or harness:
+        - cbor::tests::truncated_argument_is_error: short heads and lengths
+          larger than the input return Truncated (including a 2^64-1 length).
+        - decode::tests::rejects_every_truncated_prefix: every proper prefix of
+          the RFC 9173 A.3.5 bundle is an Err.
+        - decode::tests::rejects_too_many_blocks: MAX_BLOCKS + 1 blocks -> TooManyBlocks.
+        - proptests::decode_total_on_arbitrary_bytes: 512 cases of 0..512
+          random bytes, both modes.
+        - proptests::decode_total_on_mutated_valid_bundle: byte edits and cuts
+          of the RFC 9173 A.3.5 bundle.
+        - Kani, per item: BP-K01 verify_cbor_head_total (9 B), BP-K02
+          verify_eid_read_total (12 B, any starting indefinite depth), BP-K03
+          verify_canonical_block_read_total (8 B, incl. the CRC check), BP-K11
+          verify_bundle_age_parse_total (9 B), BP-K12
+          verify_bib_target_scan_total (8 B).
+
+      Gaps, stated plainly: (1) no Kani harness covers the whole decoder or the
+      primary-block reader. A whole-decoder harness over symbolic bytes did not
+      finish locally (12 B: >1200 s; 8 B: >1500 s), so whole-decoder totality
+      rests on proptest and the unit tests; the primary reader is a fixed
+      sequence of the harnessed EID/head reads but is not itself harnessed.
+      (2) The cargo-fuzz target named in the verification criteria is not
+      written yet.
+    tags: [verification, falcon, relay-bp, dtn, codec, kani, proptest, issue-626]
+    fields:
+      method: formal-verification
+      steps:
+        - run: "cargo test -p relay-bp cbor::tests::truncated_argument_is_error"
+        - run: "cargo test -p relay-bp decode::tests::rejects_every_truncated_prefix"
+        - run: "cargo test -p relay-bp decode::tests::rejects_too_many_blocks"
+        - run: "cargo test -p relay-bp proptests::decode_total_on_arbitrary_bytes"
+        - run: "cargo test -p relay-bp proptests::decode_total_on_mutated_valid_bundle"
+        # Kani BP-K01..K03, K11, K12, gated by the kani.yml matrix (relay-bp entry).
+        - run: "cargo kani -p relay-bp --harness verify_cbor_head_total"
+        - run: "cargo kani -p relay-bp --harness verify_eid_read_total"
+        - run: "cargo kani -p relay-bp --harness verify_canonical_block_read_total"
+        - run: "cargo kani -p relay-bp --harness verify_bundle_age_parse_total"
+        - run: "cargo kani -p relay-bp --harness verify_bib_target_scan_total"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-BP-P01

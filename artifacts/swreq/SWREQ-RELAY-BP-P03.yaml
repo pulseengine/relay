@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-BP-P03
     type: sw-req
     title: "BP-P03 — CRC types 1 and 2 are computed per RFC 9171 with only the CRC value bytes zeroed"
-    status: proposed
+    status: implemented
     release: falcon-v1.145.0
     description: >
       CRC-16/X-25 (type 1) and CRC-32C (type 2) are computed over the whole block

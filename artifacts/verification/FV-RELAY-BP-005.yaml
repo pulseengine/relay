@@ -1,0 +1,50 @@
+artifacts:
+  - id: FV-RELAY-BP-005
+    type: sw-verification
+    title: "relay-bp canonical round trip encode(decode(x)) == x — external A.3.5 bytes, unit tests, proptest (BP-P05)"
+    status: implemented
+    description: >
+      Verifies SWREQ-RELAY-BP-P05. The CBOR layer (relay_bp::cbor) is this
+      crate's own fixed-capacity reader and writer; there is no runtime
+      dependency at all. The writer emits shortest-form heads, definite inner
+      arrays and an indefinite outer array.
+
+      Round trip evidence:
+        - encode::tests::round_trip_rfc9173_a3_final_bytes: the RFC 9173 A.3.5
+          bundle, written by an external encoder, passes the strict rules and
+          encode(decode(x)) == x byte for byte.
+        - encode::tests::round_trip_crc16_and_crc32c_bundles: all six
+          primary/payload CRC-type combinations.
+        - proptests::canonical_round_trip: 512 generated bundles (random EIDs,
+          flags, timestamps, up to 3 private-use extension blocks with random
+          CRC types, payloads up to 300 B): decode(encode(v)) == v and
+          encode(decode(x)) == x. Self-consistency, since the generator is this
+          crate's encoder.
+        - encode::tests::non_canonical_input_reencodes_canonically: an
+          indefinite inner block is outside the canonical subset and re-encodes
+          to the definite form (the boundary of the claim).
+
+      The claim's scope: inputs in the canonical subset that decode under
+      Mode::Strict (the encoder never writes a strict violation, BP-P04).
+
+      Not done: (1) a Kani round trip. The verification criteria name "Kani
+      round-trip at small N"; harness verify_round_trip_small did not finish
+      locally (1200-1500 s) in any form tried, down to fixed headers with four
+      symbolic payload bytes, so it was removed instead of being left to time
+      out in the Kani gate. (2) The differential against hardy-bpv7, bp7 and
+      minicbor.
+      None of them is in this checkout's offline cargo cache, so no oracle
+      dev-dependency was added.
+    tags: [verification, falcon, relay-bp, dtn, codec, cbor, proptest, issue-626]
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p relay-bp encode::tests::round_trip_rfc9173_a3_final_bytes"
+        - run: "cargo test -p relay-bp encode::tests::round_trip_crc16_and_crc32c_bundles"
+        - run: "cargo test -p relay-bp proptests::canonical_round_trip"
+        - run: "cargo test -p relay-bp encode::tests::non_canonical_input_reencodes_canonically"
+        - run: "cargo test -p relay-bp encode::tests::encoder_reports_buffer_too_small"
+        - run: "cargo test -p relay-bp cbor::tests::accepts_shortest_form_boundaries"
+    links:
+      - type: verifies
+        target: SWREQ-RELAY-BP-P05

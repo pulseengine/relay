@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-BP-P04
     type: sw-req
     title: "BP-P04 — The encoder never emits a bundle that violates the primary-CRC or bundle-age rules"
-    status: proposed
+    status: implemented
     release: falcon-v1.145.0
     description: >
       The primary block CRC type is non-zero unless a BIB targets block 0 (RFC

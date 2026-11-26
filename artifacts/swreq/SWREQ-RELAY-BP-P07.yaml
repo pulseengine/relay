@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-BP-P07
     type: sw-req
     title: "BP-P07 — Fragments are rejected: the node never fragments and explicitly drops fragment bundles"
-    status: proposed
+    status: implemented
     release: falcon-v1.145.0
     description: >
       Maintainer decision 2026-11-03: profile is RFC 9171 BPv7 with NO
