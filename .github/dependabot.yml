@@ -15,7 +15,7 @@ version: 2
 # cargo and MODULE.bazel.lock: relay builds through Bazel crate_universe and
 # CI runs lockfile_mode=error (#720), and Dependabot does not regenerate the
 # lock, so a cargo bump that moves it goes red on the verify-only
-# `.github/actions/bazel-lock-check` step (Lockfiles workflow). That step
+# `.github/actions/lock-check-bazel` step (Lockfiles workflow). That step
 # never pushes: it prints the signed-commit fix and uploads the regenerated
 # lock as the `module-bazel-lock` artifact, and someone pushes it onto the PR.
 updates:

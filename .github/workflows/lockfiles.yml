@@ -141,9 +141,10 @@ jobs:
           echo "bazel $(cat .bazelversion) (from .bazelversion)"
 
       # Verify-only (owner decision 2026-11-25: no App token, nothing pushes).
-      # Copied unchanged from pulseengine/synth#1795 (f6b2b3a4). On a stale lock
+      # Copied unchanged from pulseengine/synth#1797 (592167f3). On a stale lock
       # it fails, prints the signed-commit fix in the step summary, and uploads
-      # the lock this runner writes as the `module-bazel-lock` artifact. This is
-      # what a Dependabot cargo PR hits: someone pushes that lock onto the branch.
+      # the lock this runner writes as the `module-bazel-lock` artifact (the
+      # root directory keeps that name). This is what a Dependabot cargo PR
+      # hits: someone pushes that lock onto the branch.
       - name: Resolve the module graph against the committed lock
-        uses: ./.github/actions/bazel-lock-check
+        uses: ./.github/actions/lock-check-bazel
