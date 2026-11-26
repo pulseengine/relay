@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-TRACE-002
     type: sw-verification
     title: "TRACE-P02 — the promotion census re-derived from the tree (scripts/trace-census.rs)"
-    status: implemented
+    status: verified
     release: falcon-v1.143.0
     description: >
       Verifies SWREQ-FALCON-TRACE-P02. The census in that requirement (a
