@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-FALCON-FOLLOW-P01
     type: sw-req
     title: "FOLLOW-P01 — in Mission the step target is a LIVE follow setpoint: flown every tick, ends nothing, and a stale stream HOLDS"
-    status: implemented
+    status: verified
     release: falcon-v1.141.0  # derived (TRACE-P01): first falcon-v* tag containing 7528eb06d, the commit that added this id
     description: >
       In Mission, the target a host passes to the published component's

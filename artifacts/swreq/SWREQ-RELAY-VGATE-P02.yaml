@@ -2,7 +2,7 @@ artifacts:
   - id: SWREQ-RELAY-VGATE-P02
     type: sw-req
     title: "VGATE-P02 — verification-gate integrity, the other direction: no UNTRACED proofs"
-    status: implemented
+    status: verified
     release: falcon-v1.136.0
     description: >
       Every crate the Kani CI matrix model-checks shall be cited by at least

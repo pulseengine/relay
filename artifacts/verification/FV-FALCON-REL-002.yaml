@@ -2,7 +2,7 @@ artifacts:
   - id: FV-FALCON-REL-002
     type: sw-verification
     title: "REL-P02 — 2 of 10 bundled artifacts were signed but undescribed for 58 releases (v1.136)"
-    status: implemented
+    status: verified
     release: falcon-v1.136.0
     description: >
       Verification of SWREQ-FALCON-REL-P02.
