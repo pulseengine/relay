@@ -3,6 +3,8 @@ target/
 
 # Bazel
 bazel-*
+# bazel-* is for the output symlinks; it also matches this composite action.
+!/.github/actions/bazel-lock-check/
 *.rlib
 
 # Editor

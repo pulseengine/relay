@@ -12,12 +12,12 @@ version: 2
 # the root Cargo.toml), and every merge sends every other open PR back through
 # a full CI cycle (Kani matrix included) on a shared rust-cpu pool (#514).
 #
-# KNOWN GAP, cargo: relay builds through Bazel crate_universe and CI runs
-# lockfile_mode=error (#720), so a cargo bump that does not regenerate
-# MODULE.bazel.lock fails the lockfile check and is ejected from the queue.
-# Dependabot does not regenerate it. Until a lock-regen step exists for
-# Dependabot branches, a cargo PR needs `bazel mod deps --lockfile_mode=update`
-# pushed onto it by hand.
+# cargo and MODULE.bazel.lock: relay builds through Bazel crate_universe and
+# CI runs lockfile_mode=error (#720), and Dependabot does not regenerate the
+# lock, so a cargo bump that moves it goes red on the verify-only
+# `.github/actions/bazel-lock-check` step (Lockfiles workflow). That step
+# never pushes: it prints the signed-commit fix and uploads the regenerated
+# lock as the `module-bazel-lock` artifact, and someone pushes it onto the PR.
 updates:
   # Every dtolnay/rust-toolchain step sets `toolchain:` explicitly (#722,
   # #724), so a move to the master pin (where the input is required) is safe.
