@@ -1,0 +1,43 @@
+artifacts:
+  - id: FV-FALCON-TRACE-002
+    type: sw-verification
+    title: "TRACE-P02 — the promotion census re-derived from the tree (scripts/trace-census.rs)"
+    status: implemented
+    release: falcon-v1.143.0
+    description: >
+      Verifies SWREQ-FALCON-TRACE-P02. The census in that requirement (a
+      PROMOTED list and a RESIDUAL list with one count per reason) is prose;
+      scripts/trace-census.rs re-derives every number in it from
+      artifacts/**/*.yaml and fails when the prose and the tree disagree.
+
+      Criterion (a): every PROMOTED id is a sw-req at `verified` and at least
+      one `verified` artifact links `verifies` to it; the PROMOTED header count
+      equals the ids found. Criteria (b) and (c): every RESIDUAL id resolves to
+      an existing sw-req, each reason's leading count equals the ids it names,
+      the RESIDUAL header equals their sum, and every `implemented` sw-req
+      targeted to falcon-v1.143.0 or earlier (TRACE-P02 itself excepted) is
+      named. Criterion (d), promotions in code-free PRs, is enforced by the
+      two-commit rule in the required verification gate, not by this step.
+
+      Negative controls on a61f34c (each restored with git checkout): dropping
+      CCSDS-P01 from its reason fails (line says 32, names 31); dropping
+      SPLIT-P01 and lowering its line count fails twice (header 57 vs sum 56,
+      and SPLIT-P01 implemented at v1.141 but unnamed); renaming CCSDS-P01 to
+      CCSDS-P91 fails (no such artifact); demoting FV-FALCON-FOLLOW-001 to
+      implemented fails (FOLLOW-P01 has no verified verifier). Exit codes
+      measured: clean 0, a failed check 1, a missing section header 2, no
+      --check flag 2.
+
+      Blind spot: `implemented` sw-reqs targeted after falcon-v1.143.0 are
+      counted and printed, not required in the census (54 on a61f34c), so new
+      v1.144 work does not turn this step red. Not checked: that each
+      verifier's steps executed and passed in a gate run. That is what the
+      verification gate does each time it runs the promoted verifiers.
+    tags: [verification, falcon, rivet, traceability, release-planning]
+    fields:
+      method: automated-test
+      steps:
+        - run: ./scripts/trace-census.rs --check
+    links:
+      - type: verifies
+        target: SWREQ-FALCON-TRACE-P02

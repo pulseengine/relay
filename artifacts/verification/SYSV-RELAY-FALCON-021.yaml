@@ -1,0 +1,55 @@
+artifacts:
+  - id: SYSV-RELAY-FALCON-021
+    type: sys-verification
+    title: "SYSREQ-FALCON-021 verification — field-operable infrastructure, each clause to a verified sw-req"
+    status: implemented
+    release: falcon-v1.143.0
+    description: >
+      Wires SYSREQ-FALCON-021 (field-operable flight infrastructure) to the
+      sw-reqs that discharge each of its clauses, at the SYS.5 level. Owner
+      decision 2026-11-25 (#605): promote SYSREQ-FALCON-021 once its sw-reqs
+      verify.
+
+      Clause map:
+      configuration survives power cycles: SWREQ-FALCON-PARAM-P03 (parameter
+      persistence) and SWREQ-FALCON-CALIB-P02 (calibration results persisted).
+      Every flight produces a persistent log sufficient to diagnose a crash:
+      SWREQ-FALCON-LOG-P02 (crash-surviving blackbox, full-rate estimator
+      inputs). The log re-runs the estimator bit-exactly: SWREQ-FALCON-LOG-P03.
+      Continuous operator telemetry and in-flight tuning:
+      SWREQ-FALCON-MAVLINK-P06 (telemetry streaming and in-flight parameter
+      tuning over the SiK link). MAVLINK-P06 derives from SYSREQ-FALCON-006,
+      not 021; it is named here instead of adding a link to a verified
+      artifact.
+
+      The four sw-reqs that derive from SYSREQ-FALCON-021 (CALIB-P02, LOG-P02,
+      PARAM-P03, LOG-P03) are all `verified` with a `verified` verifier each
+      (FV-FALCON-CALIB-002, LOG-002, PARAM-003, LOG-003), as is MAVLINK-P06
+      (FV-FALCON-MAVLINK-003). Those were promoted in v1.117, v1.118 and earlier
+      under the gate's per-artifact rule, before the stricter TRACE-P02 rule
+      existed.
+
+      Step 1 requires all five sw-reqs at `verified` (5 artifacts); demoting
+      any one makes it 4 and the step fails. Step 2 requires every sw-req that
+      derives from SYSREQ-FALCON-021 to be `verified`, so a new child added at
+      `implemented` fails it; the same query for SYSREQ-FALCON-006 returns 4 on
+      a61f34c, so the predicate can fail. Step 3 keeps step 2 from passing on
+      an empty set: exactly the 4 known children (a new child changes the
+      count and this artifact must be revisited).
+
+      Not claimed: on-vehicle evidence. FEAT-FALCON-first-flight-hw, which
+      also links to this requirement, stays `approved`; the hardware
+      register is outside this requirement's verification.
+    tags: [verification, system, falcon, infrastructure, trace-topology]
+    fields:
+      method: automated-test
+      steps:
+        - run: >-
+            test "$(rivet list --filter '(and (= type "sw-req") (= status "verified") (or (= id "SWREQ-FALCON-PARAM-P03") (= id "SWREQ-FALCON-CALIB-P02") (= id "SWREQ-FALCON-LOG-P02") (= id "SWREQ-FALCON-LOG-P03") (= id "SWREQ-FALCON-MAVLINK-P06")))' | tail -1)" = "5 artifacts"
+        - run: >-
+            test "$(rivet list --filter '(and (= type "sw-req") (linked-by "derives-from" "SYSREQ-FALCON-021") (not (= status "verified")))' | tail -1)" = "0 artifacts"
+        - run: >-
+            test "$(rivet list --filter '(and (= type "sw-req") (linked-by "derives-from" "SYSREQ-FALCON-021"))' | tail -1)" = "4 artifacts"
+    links:
+      - type: verifies
+        target: SYSREQ-FALCON-021
