@@ -174,7 +174,7 @@ artifacts:
     tags: [verification, falcon, architecture, spar, aadl, emv2, v0.13]
     fields:
       method: architectural-modelling + fault-tree-analysis + schedulability-analysis
-      tool: "spar (via /Users/r/.cargo/bin/spar)"
+      tool: "spar (via ~/.cargo/bin/spar)"
       aadl-files: ["spar/falcon_types.aadl", "spar/falcon_cascade.aadl", "spar/falcon_system.aadl"]
       analysis-output: "artifacts/spar/falcon-quad-analysis.json"
       svg-output: "artifacts/spar/falcon-quad-architecture.svg"

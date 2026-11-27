@@ -1,14 +1,14 @@
 info: cargo-llvm-cov currently setting cfg(coverage); you can opt-out it by passing --no-cfg-coverage
-   Compiling relay-primitives v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-primitives)
-   Compiling relay-sc v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-sc)
-   Compiling relay-mavlink v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-mavlink)
-   Compiling relay-hs v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-hs)
-   Compiling relay-rate v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-rate)
-   Compiling relay-mix-quad v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-mix-quad)
-   Compiling relay-att v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-att)
-   Compiling relay-ekf-stub v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ekf-stub)
-   Compiling relay-ekf v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ekf)
-   Compiling relay-pos v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-pos)
+   Compiling relay-primitives v0.1.0 (./crates/relay-primitives)
+   Compiling relay-sc v0.1.0 (./crates/relay-sc)
+   Compiling relay-mavlink v0.1.0 (./crates/relay-mavlink)
+   Compiling relay-hs v0.1.0 (./crates/relay-hs)
+   Compiling relay-rate v0.1.0 (./crates/relay-rate)
+   Compiling relay-mix-quad v0.1.0 (./crates/relay-mix-quad)
+   Compiling relay-att v0.1.0 (./crates/relay-att)
+   Compiling relay-ekf-stub v0.1.0 (./crates/relay-ekf-stub)
+   Compiling relay-ekf v0.1.0 (./crates/relay-ekf)
+   Compiling relay-pos v0.1.0 (./crates/relay-pos)
 warning: unexpected `cfg` condition name: `kani`
    --> crates/relay-sc/plain/src/engine.rs:392:7
     |
@@ -40,12 +40,12 @@ warning: unexpected `cfg` condition name: `kani`
     = note: `#[warn(unexpected_cfgs)]` on by default
 
 warning: `relay-sc` (lib) generated 1 warning
-   Compiling relay-lc v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-lc)
+   Compiling relay-lc v0.1.0 (./crates/relay-lc)
 warning: `relay-hs` (lib) generated 1 warning
-   Compiling falcon-ekf-bench v0.1.0 (/Users/r/git/pulseengine/relay/examples/falcon-ekf-bench)
-   Compiling relay-nid v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-nid)
-   Compiling relay-sch v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-sch)
-   Compiling falcon-hello v0.1.0 (/Users/r/git/pulseengine/relay/examples/falcon-hello)
+   Compiling falcon-ekf-bench v0.1.0 (./examples/falcon-ekf-bench)
+   Compiling relay-nid v0.1.0 (./crates/relay-nid)
+   Compiling relay-sch v0.1.0 (./crates/relay-sch)
+   Compiling falcon-hello v0.1.0 (./examples/falcon-hello)
 warning: unexpected `cfg` condition name: `kani`
    --> crates/relay-lc/plain/src/engine.rs:266:7
     |
@@ -92,9 +92,9 @@ warning: unexpected `cfg` condition name: `kani`
     = note: `#[warn(unexpected_cfgs)]` on by default
 
 warning: `relay-lc` (lib) generated 1 warning
-   Compiling relay-lc-diff v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-lc-diff)
-   Compiling falcon-sitl-hover v0.1.0 (/Users/r/git/pulseengine/relay/examples/falcon-sitl-hover)
-   Compiling falcon-hitl-rfspoof v0.1.0 (/Users/r/git/pulseengine/relay/examples/falcon-hitl-rfspoof)
+   Compiling relay-lc-diff v0.1.0 (./crates/relay-lc-diff)
+   Compiling falcon-sitl-hover v0.1.0 (./examples/falcon-sitl-hover)
+   Compiling falcon-hitl-rfspoof v0.1.0 (./examples/falcon-hitl-rfspoof)
 warning: fields `backend`, `duration_s`, and `steps` are never read
   --> examples/falcon-hitl-rfspoof/src/harness.rs:56:9
    |
@@ -114,11 +114,11 @@ warning: fields `backend`, `duration_s`, and `steps` are never read
 
 warning: `relay-sc` (lib test) generated 1 warning (1 duplicate)
 warning: `relay-sch` (lib test) generated 1 warning
-   Compiling relay-tbl v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-tbl)
+   Compiling relay-tbl v0.1.0 (./crates/relay-tbl)
 warning: `relay-lc` (lib test) generated 1 warning (1 duplicate)
-   Compiling relay-ccsds v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ccsds)
+   Compiling relay-ccsds v0.1.0 (./crates/relay-ccsds)
 warning: `falcon-hitl-rfspoof` (bin "falcon-hitl-rfspoof" test) generated 1 warning
-   Compiling relay-fm v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-fm)
+   Compiling relay-fm v0.1.0 (./crates/relay-fm)
 warning: unexpected `cfg` condition name: `kani`
    --> crates/relay-tbl/plain/src/engine.rs:232:7
     |
@@ -149,7 +149,7 @@ warning: unexpected `cfg` condition name: `kani`
     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
     = note: `#[warn(unexpected_cfgs)]` on by default
 
-   Compiling relay-hk v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-hk)
+   Compiling relay-hk v0.1.0 (./crates/relay-hk)
 warning: unexpected `cfg` condition name: `kani`
    --> crates/relay-fm/plain/src/engine.rs:225:7
     |
@@ -181,7 +181,7 @@ warning: unexpected `cfg` condition name: `kani`
     = note: `#[warn(unexpected_cfgs)]` on by default
 
 warning: `relay-nid` (lib test) generated 1 warning
-   Compiling relay-md v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-md)
+   Compiling relay-md v0.1.0 (./crates/relay-md)
 warning: unexpected `cfg` condition name: `kani`
    --> crates/relay-md/plain/src/engine.rs:221:7
     |
@@ -198,7 +198,7 @@ warning: unexpected `cfg` condition name: `kani`
     = note: `#[warn(unexpected_cfgs)]` on by default
 
 warning: `relay-tbl` (lib test) generated 1 warning
-   Compiling relay-ci v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ci)
+   Compiling relay-ci v0.1.0 (./crates/relay-ci)
 warning: unexpected `cfg` condition name: `kani`
    --> crates/relay-ci/plain/src/engine.rs:203:7
     |
@@ -215,9 +215,9 @@ warning: unexpected `cfg` condition name: `kani`
     = note: `#[warn(unexpected_cfgs)]` on by default
 
 warning: `relay-hk` (lib test) generated 1 warning
-   Compiling relay-cs v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-cs)
+   Compiling relay-cs v0.1.0 (./crates/relay-cs)
 warning: `relay-fm` (lib test) generated 1 warning
-   Compiling relay-sca v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-sca)
+   Compiling relay-sca v0.1.0 (./crates/relay-sca)
 warning: unexpected `cfg` condition name: `kani`
    --> crates/relay-cs/plain/src/engine.rs:279:7
     |
@@ -250,12 +250,12 @@ warning: unexpected `cfg` condition name: `kani`
 
 warning: `relay-ccsds` (lib test) generated 1 warning
 warning: `relay-md` (lib test) generated 1 warning
-   Compiling relay-mm v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-mm)
-   Compiling relay-to v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-to)
+   Compiling relay-mm v0.1.0 (./crates/relay-mm)
+   Compiling relay-to v0.1.0 (./crates/relay-to)
 warning: `relay-ci` (lib test) generated 1 warning
-   Compiling relay-cfdp v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-cfdp)
-   Compiling relay-ds v0.1.0 (/Users/r/git/pulseengine/relay/crates/relay-ds)
-   Compiling relay-es v0.1.0 (/Users/r/git/pulseengine/relay/host/relay-es)
+   Compiling relay-cfdp v0.1.0 (./crates/relay-cfdp)
+   Compiling relay-ds v0.1.0 (./crates/relay-ds)
+   Compiling relay-es v0.1.0 (./host/relay-es)
 warning: unexpected `cfg` condition name: `kani`
    --> crates/relay-mm/plain/src/engine.rs:212:7
     |
@@ -317,10 +317,10 @@ warning: unexpected `cfg` condition name: `kani`
     = note: `#[warn(unexpected_cfgs)]` on by default
 
 warning: `relay-cs` (lib test) generated 1 warning
-   Compiling relay-time v0.1.0 (/Users/r/git/pulseengine/relay/host/relay-time)
-   Compiling relay-evs v0.1.0 (/Users/r/git/pulseengine/relay/host/relay-evs)
+   Compiling relay-time v0.1.0 (./host/relay-time)
+   Compiling relay-evs v0.1.0 (./host/relay-evs)
 warning: `relay-sca` (lib test) generated 1 warning
-   Compiling relay-sb v0.1.0 (/Users/r/git/pulseengine/relay/host/relay-sb)
+   Compiling relay-sb v0.1.0 (./host/relay-sb)
 warning: `relay-hs` (lib test) generated 1 warning (1 duplicate)
 warning: `relay-mm` (lib test) generated 1 warning
 warning: `relay-to` (lib test) generated 1 warning

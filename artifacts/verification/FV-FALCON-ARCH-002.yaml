@@ -78,7 +78,7 @@ artifacts:
       generated-wit: "artifacts/spar/v0.15/autopilot-from-aadl.wit"
       hand-authored-wit: "wit/falcon-cascade/cascade.wit"
       steps:
-        - run: cd /Users/r/git/pulseengine/spar && git pull --rebase && cargo install --path crates/spar-cli --locked
+        - run: cargo install --git https://github.com/pulseengine/spar --locked spar-cli
         - run: spar codegen --root Falcon_System::Falcon.Quad --format wit --output /tmp/falcon-spar-wit spar/*.aadl
         - run: diff /tmp/falcon-spar-wit/wit/autopilot.wit wit/falcon-cascade/cascade.wit  # shows abstraction divergence
     links:
