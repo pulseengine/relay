@@ -4,6 +4,11 @@ artifacts:
     title: "Witness MC/DC on the composed stream pipeline — parse gap closed, macro fixed, async-invoke gap isolated (v1.75)"
     status: implemented
     description: >
+      NOTE (2026-11-27, #715): //:falcon-cascade-stream-coverage sits on
+      //:falcon-cascade-stream-fused, which meld 0.69 refuses to fuse (stream
+      built-ins, meld ADR-10 step 6), so this step cannot build today. Status
+      left at implemented by owner decision.
+
       Verifies the witness MC/DC path for SWREQ-RELAY-STREAM-P13 against the
       composed flight-control stream pipeline, and records the HONEST result.
 

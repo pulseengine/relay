@@ -281,8 +281,12 @@ _stream_prereqs_ok() {
 }
 if _stream_prereqs_ok; then
   echo "== building P3 stream artifacts (bazel) =="
-  bazel build //:falcon-cascade-stream-composed //:falcon-cascade-stream-fused
-  for tgt in falcon-cascade-stream-composed falcon-cascade-stream-fused; do
+  # Composed only: //:falcon-cascade-stream-fused is not built or bundled
+  # until meld can fuse stream built-ins (#715; meld ADR-10 step 6). Through
+  # v1.142 the bundled fused artifact carried four unresolved stream shim
+  # imports ("" "0".."3", meld#558) and could not run. bazel.yml fails when it starts to fuse.
+  bazel build //:falcon-cascade-stream-composed
+  for tgt in falcon-cascade-stream-composed; do
     src=$(bazel cquery --output=files "//:$tgt" 2>/dev/null | grep -E '\.wasm$' | head -1)
     [ -n "$src" ] && [ -f "$src" ] || { echo " ERROR: no .wasm for //:$tgt" >&2; exit 1; }
     cp "$src" "$BUNDLE_DIR/$tgt-v$MM.wasm"
@@ -367,7 +371,7 @@ MANIFEST="$BUNDLE_DIR/manifest.json"
   # manifest did not describe is exactly the "which artifact did you actually
   # verify?" ambiguity jess raised on #202. `kind` answers it mechanically
   # rather than by reading filenames.
-  for tgt in falcon-cascade-stream-composed falcon-cascade-stream-fused; do
+  for tgt in falcon-cascade-stream-composed; do   # fused dropped, #715
     [ -f "$BUNDLE_DIR/$tgt-v$MM.wasm" ] || continue   # bazel-absent path
     emit_entry "$tgt" "$tgt-v$MM.wasm" "p3-stream-artifact" "legacy-stream-demonstrator" \
       "relay P3 async stream-composition demonstrator (SWREQ-RELAY-STREAM-P15), built from the LEGACY five-stage controllers (relay-att, relay-pos, relay-rate via wasm/cm/cascade/src/orch.rs). NOT the falcon flight core, and a different control law from falcon-cascade (#411)."

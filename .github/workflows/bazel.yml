@@ -108,7 +108,15 @@ jobs:
           # answers it.
           WAIVED="//:relay-runner //:falcon-ekf //:falcon-iekf //:falcon-position
                   //:falcon-attitude //:falcon-rate //:falcon-mixer
-                  //:relay-fused //:relay-all-fused //:falcon-cascade-fused"
+                  //:relay-fused //:relay-all-fused //:falcon-cascade-fused
+                  //:falcon-cascade-stream-fused"
+          # //:falcon-cascade-stream-fused is waived because meld cannot fuse
+          # stream built-ins yet (#715; meld#558, ADR-10 step 6). meld 0.60
+          # "fused" it with four unresolved stream shim imports ("" "0".."3"
+          # in the v1.142 bundle) no host can serve; 0.69 refuses. Unlike the ten above it is KNOWN-BROKEN, so
+          # it is not silently skipped: the step after `bazel build` builds it
+          # alone and fails if it starts to fuse (lift the waiver) or fails
+          # for any other reason.
           # falcon-ekf is the Mahony filter and falcon-{iekf,position,attitude,
           # rate,mixer} are the non-stream stage components - none was in the
           # old list. //:falcon-cascade-fused and the two relay-*-fused are
@@ -166,7 +174,7 @@ jobs:
                 //:relay-hk-stream //:relay-sc-stream //:falcon-rate-stream
                 //:falcon-position-stream //:falcon-attitude-stream
                 //:falcon-iekf-stream //:falcon-mixer-stream
-                //:falcon-cascade-stream-composed //:falcon-cascade-stream-fused
+                //:falcon-cascade-stream-composed
                 //:cascade-orch //:falcon-cascade-step
                 //:falcon-cascade-step-fused //:relay-lc //:relay-sch
                 //:relay-hk //:relay-sc"
@@ -184,6 +192,24 @@ jobs:
           printf '  build  %s\n' $TARGETS
           printf '  WAIVED %s\n' $WAIVED
           bazel build $TARGETS
+
+          # The known-broken waiver above, held to its reason (#715). The
+          # target must still be discovered, must still fail, and must fail on
+          # meld's stream refusal - anything else is a change someone has to
+          # read.
+          case " $ALL " in *" //:falcon-cascade-stream-fused "*) ;; *)
+            echo "::error:://:falcon-cascade-stream-fused is no longer discovered; drop its waiver"; exit 1 ;; esac
+          err=$(mktemp)
+          if bazel build //:falcon-cascade-stream-fused > /dev/null 2> "$err"; then
+            echo "::error:://:falcon-cascade-stream-fused now fuses: meld supports streams. Remove it from WAIVED and restore it to MUST and to scripts/build-components.sh (#715)."
+            exit 1
+          elif grep -q "meld cannot fuse yet" "$err"; then
+            echo "::notice:://:falcon-cascade-stream-fused still refused by meld (stream built-ins, meld ADR-10 step 6); waiver holds (#715)"
+          else
+            tail -n 30 "$err"
+            echo "::error:://:falcon-cascade-stream-fused failed for a reason other than meld's stream refusal (#715)"
+            exit 1
+          fi
 
       # Exercise the witness MC/DC path end-to-end (#145): forces the
       # harness_crates crate_universe (wasmtime/tokio) to resolve, builds the

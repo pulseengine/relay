@@ -4,6 +4,14 @@ artifacts:
     title: "Meld-lowered composed stream pipeline — runnable core module (v1.74)"
     status: implemented
     description: >
+      NOTE (2026-11-27, #715): this evidence does not hold today. meld 0.69
+      refuses to fuse stream built-ins ("meld cannot fuse yet", meld ADR-10
+      step 6), and the module meld 0.60 produced (v1.142 bundle) imports four
+      unresolved stream shim functions, "" "0" to "" "3" (meld#558), which no
+      host can serve. The target is
+      waived in bazel.yml (which fails once it fuses again) and is no longer
+      bundled. Status left at implemented by owner decision.
+
       Verifies SWREQ-RELAY-STREAM-P12: the composed flight-control stream
       pipeline (STREAM-P11, //:falcon-cascade-stream-composed) is lowered by Meld
       to a single CORE wasm module — the first RUNNABLE artifact of the
