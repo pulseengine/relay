@@ -284,7 +284,8 @@ if _stream_prereqs_ok; then
   # Composed only: //:falcon-cascade-stream-fused is not built or bundled
   # until meld can fuse stream built-ins (#715; meld ADR-10 step 6). Through
   # v1.142 the bundled fused artifact carried four unresolved stream shim
-  # imports ("" "0".."3", meld#558) and could not run. bazel.yml fails when it starts to fuse.
+  # imports ("" "0".."3", meld#558) and could not run. meld 0.71 fuses it, but no host
+  # runs it yet (kiln#621). bazel.yml fails when it starts to fuse.
   bazel build //:falcon-cascade-stream-composed
   tgt=falcon-cascade-stream-composed
   src=$(bazel cquery --output=files "//:$tgt" 2>/dev/null | grep -E '\.wasm$' | head -1)
