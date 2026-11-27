@@ -1,0 +1,136 @@
+name: P3 stream on wasmtime
+
+# Builds the falcon-rate-stream component (wasm/cm/rate/src/stream.rs) for
+# wasm32-wasip3, composes it with tests/p3-stream/driver and runs it on
+# wasmtime 51 with component-model async. The driver feeds 200 rate-inputs into
+# the component's `monitor` stream and prints each torque as f32 bit patterns;
+# the same driver built natively computes the lines from relay-rate, and the
+# two outputs must be identical.
+#
+# Negative control: the same source built without p3-spawn (the inline loop
+# the Bazel build still uses) must hang on its first write and be killed by
+# the timeout. Green while that holds; red if it completes or fails otherwise.
+#
+# Exit codes (fleet rule): driver 0 = all outputs produced, 1 = wrong count,
+# 2 = could not run. timeout(1) exits 124 on a hang.
+#
+# Advisory: not a required check, and no step is continue-on-error.
+# wasmtime and wac publish no checksum file; the sha256 values below were
+# taken from the release assets on 2026-11-27 and pin those bytes.
+
+on:
+  pull_request:
+    paths:
+      - "wasm/cm/*/src/stream.rs"
+      - "wit/falcon-cascade-stream/**"
+      - "crates/relay-rate/**"
+      - "tests/p3-stream/**"
+      - ".github/workflows/p3-wasmtime.yml"
+  push:
+    branches: [main]
+    paths:
+      - "wasm/cm/*/src/stream.rs"
+      - "wit/falcon-cascade-stream/**"
+      - "crates/relay-rate/**"
+      - "tests/p3-stream/**"
+      - ".github/workflows/p3-wasmtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p3-wasmtime-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  NIGHTLY: nightly-2026-11-20
+  WASMTIME_VERSION: v51.0.0
+  WASMTIME_SHA256: a18020674fac4107f329bc9ed720ea9c88e4b30a61e8a527787bcce051123d32
+  WAC_VERSION: v0.12.0
+  WAC_SHA256: 7cd490edbd452221ef89e6750fc43eacc9b71b1242095eb577cb9a3bf0d3beda
+
+jobs:
+  p3-wasmtime:
+    name: P3 stream component on wasmtime 51 (advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-15)
+        with:
+          toolchain: ${{ env.NIGHTLY }}
+          targets: wasm32-wasip3
+
+      - name: Install wasmtime and wac (sha256-pinned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/tools"; mkdir -p "$d"; cd "$d"
+          w="wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz"
+          curl -fsSL -o "$w" "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/$w"
+          echo "${WASMTIME_SHA256}  $w" | sha256sum -c -
+          tar -xJf "$w"
+          cp "wasmtime-${WASMTIME_VERSION}-x86_64-linux/wasmtime" "$d/wasmtime"
+          curl -fsSL -o wac "https://github.com/bytecodealliance/wac/releases/download/${WAC_VERSION}/wac-cli-x86_64-unknown-linux-musl"
+          echo "${WAC_SHA256}  wac" | sha256sum -c -
+          chmod +x wac
+          echo "$d" >> "$GITHUB_PATH"
+          "$d/wasmtime" --version
+          "$d/wac" --version
+
+      - name: Build the component (both forms), the driver and the native reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/p3"; mkdir -p "$out"
+          cd tests/p3-stream/rate-component
+          cargo "+$NIGHTLY" build --locked --release --target wasm32-wasip3
+          cp target/wasm32-wasip3/release/p3_rate_component.wasm "$out/spawn.wasm"
+          cargo "+$NIGHTLY" build --locked --release --target wasm32-wasip3 --no-default-features
+          cp target/wasm32-wasip3/release/p3_rate_component.wasm "$out/inline.wasm"
+          cd ../driver
+          cargo "+$NIGHTLY" build --locked --release --target wasm32-wasip3
+          cargo "+$NIGHTLY" build --locked --release
+          for v in spawn inline; do
+            wac plug target/wasm32-wasip3/release/p3-rate-driver.wasm --plug "$out/$v.wasm" -o "$out/composed-$v.wasm"
+          done
+          target/release/p3-rate-driver > "$out/native.txt"
+          sha256sum "$out"/*.wasm
+
+      - name: Spawned component matches native relay-rate bit for bit
+        shell: bash
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/p3"
+          timeout 120 wasmtime run -Wcomponent-model-async=y -Sp3=y "$out/composed-spawn.wasm" > "$out/wasm.txt"
+          rc=$?
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::the spawned component hung (timeout after 120 s)"; exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error::driver exited $rc (1 = wrong output count, 2 = could not run)"; exit "$rc"
+          fi
+          n=$(wc -l < "$out/wasm.txt")
+          if ! diff -u "$out/native.txt" "$out/wasm.txt"; then
+            echo "::error::wasmtime output differs from native relay-rate"; exit 1
+          fi
+          echo "::notice::falcon-rate-stream on wasmtime 51: $n outputs, bit-identical to native relay-rate"
+
+      - name: "Negative control: the inline loop still hangs"
+        shell: bash
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/p3"
+          timeout 30 wasmtime run -Wcomponent-model-async=y -Sp3=y "$out/composed-inline.wasm" > "$out/inline.txt"
+          rc=$?
+          n=$(wc -l < "$out/inline.txt")
+          if [ "$rc" -eq 124 ] && [ "$n" -eq 0 ]; then
+            echo "::notice::inline loop hangs with 0 outputs, as expected; the spawn fix is what makes the stream run"
+          elif [ "$rc" -eq 0 ]; then
+            echo "::error::the inline loop completed ($n outputs); the hang this job controls for is gone, revisit p3-spawn"; exit 1
+          else
+            echo "::error::inline run failed with exit $rc and $n outputs, not the expected hang"; exit 1
+          fi
