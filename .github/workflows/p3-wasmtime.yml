@@ -62,7 +62,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-15)
         with:
-          toolchain: ${{ env.NIGHTLY }}
+          toolchain: nightly-2026-11-20 # keep equal to env.NIGHTLY
           targets: wasm32-wasip3
 
       - name: Install wasmtime and wac (sha256-pinned)
@@ -104,7 +104,7 @@ jobs:
       - name: Spawned component matches native relay-rate bit for bit
         shell: bash
         run: |
-          set -uo pipefail
+          set +e -uo pipefail  # GitHub runs bash -e; the rc is read below
           out="$RUNNER_TEMP/p3"
           timeout 120 wasmtime run -Wcomponent-model-async=y -Sp3=y "$out/composed-spawn.wasm" > "$out/wasm.txt"
           rc=$?
@@ -122,7 +122,7 @@ jobs:
       - name: "Negative control: the inline loop still hangs"
         shell: bash
         run: |
-          set -uo pipefail
+          set +e -uo pipefail  # GitHub runs bash -e; the rc is read below
           out="$RUNNER_TEMP/p3"
           timeout 30 wasmtime run -Wcomponent-model-async=y -Sp3=y "$out/composed-inline.wasm" > "$out/inline.txt"
           rc=$?
