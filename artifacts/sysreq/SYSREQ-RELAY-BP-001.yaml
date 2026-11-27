@@ -20,8 +20,8 @@ artifacts:
       The first consumer is warte; the requirement is consumer-neutral and any
       integrator with intermittently connected nodes is served by it.
 
-      Slots: falcon-v1.143.0 carries the codec and the bounded store;
-      falcon-v1.144.0 carries static routing, the convergence-layer seam and
+      Slots: falcon-v1.145.0 carries the codec and the bounded store;
+      falcon-v1.146.0 carries static routing, the convergence-layer seam and
       the sealing profile. Contact-plan routing, status reports, BPSec,
       fragmentation and the CCSDS profile are later and unslotted.
     tags: [falcon, relay, relay-bp, dtn, bundle-protocol, store-and-forward, issue-626]
@@ -30,7 +30,7 @@ artifacts:
       priority: should
       verification-criteria: >
         Derived software requirements SWREQ-RELAY-BP-P01..P07 and P10..P14
-        (v1.143) and P20, P30, P32, P40, P41 (v1.144) are verified by Kani and
+        (v1.145) and P20, P30, P32, P40, P41 (v1.146) are verified by Kani and
         Verus harnesses and external reference vectors; verification artifacts
         for them must carry the falcon tag so the verification gate runs them.
     links:

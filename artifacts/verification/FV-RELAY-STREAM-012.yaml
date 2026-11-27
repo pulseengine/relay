@@ -8,7 +8,10 @@ artifacts:
       refuses to fuse stream built-ins ("meld cannot fuse yet", meld ADR-10
       step 6), and the module meld 0.60 produced (v1.142 bundle) imports four
       unresolved stream shim functions, "" "0" to "" "3" (meld#558), which no
-      host can serve. The target is
+      host can serve. meld 0.71 fuses the artifact cleanly (meld#558 closed),
+      but relay's Bazel still pins meld 0.69 through rules_wasm_component, and
+      no host runs the result: kiln 0.9.0 serves neither the stream built-ins
+      nor an async-lift driver (kiln#621; planned for kiln v0.10.0). The target is
       waived in bazel.yml (which fails once it fuses again) and is no longer
       bundled. Status left at implemented by owner decision.
 

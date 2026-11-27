@@ -9,3 +9,5 @@ Gazebo SITL (real gz bridge)
 Closed-loop simulation + Monte-Carlo campaigns
 Script portability (shellcheck + Python 3.9 floor)
 Verus gate
+required / verdict
+baseline / guard

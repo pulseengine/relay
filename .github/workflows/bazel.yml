@@ -113,7 +113,10 @@ jobs:
           # //:falcon-cascade-stream-fused is waived because meld cannot fuse
           # stream built-ins yet (#715; meld#558, ADR-10 step 6). meld 0.60
           # "fused" it with four unresolved stream shim imports ("" "0".."3"
-          # in the v1.142 bundle) no host can serve; 0.69 refuses. Unlike the ten above it is KNOWN-BROKEN, so
+          # in the v1.142 bundle) no host can serve; 0.69 refuses. meld 0.71
+          # fuses it (meld#558 closed), but Bazel pins 0.69 and no host runs the
+          # fused module (kiln#621). When the Bazel meld moves to 0.71 the check
+          # below goes red on "now fuses"; lift the waiver only once a host runs it. Unlike the ten above it is KNOWN-BROKEN, so
           # it is not silently skipped: the step after `bazel build` builds it
           # alone and fails if it starts to fuse (lift the waiver) or fails
           # for any other reason.
