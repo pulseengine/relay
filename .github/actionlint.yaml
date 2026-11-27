@@ -2,8 +2,8 @@
 #
 # Without it actionlint emits 14 `runner-label` warnings ("label rust-cpu is
 # unknown") across the workflows, which is exactly the noise that makes a lint
-# gate get ignored. The labels are the Hetzner fleet's; see
-# relay-ci-runner-fleet-and-diet.
+# gate get ignored. The labels are the self-hosted fleet's; list only labels
+# a workflow's runs-on actually uses.
 self-hosted-runner:
   labels:
     - light
@@ -11,4 +11,3 @@ self-hosted-runner:
     - netns
     - podman
     - lean-mem
-    - hetzner
