@@ -1,0 +1,20 @@
+# Drives falcon-rate-stream under wasmtime and prints each output as f32 bit
+# patterns. Built natively, the same binary computes the expected lines from
+# relay-rate directly, so the two outputs are compared with diff.
+[package]
+name = "p3-rate-driver"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+relay-rate = { path = "../../../crates/relay-rate" }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+wit-bindgen = { version = "=0.63.0", features = ["async-spawn"] }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+
+[workspace]

@@ -40,6 +40,7 @@ impl Guest for Component {
         let (mut writer, reader) =
             falcon_rate_stream_bindings::wit_stream::new::<WitTorque>();
 
+        let work = async move {
         while let Some(inp) = inputs.next().await {
             // Body rates from the estimated state; setpoint from the rate loop.
             let torque = pid().tick(
@@ -55,6 +56,17 @@ impl Guest for Component {
             };
             let _ = writer.write(vec![out]).await;
         }
+        };
+        // Spawned, `monitor` returns the reader at once. Awaited inline, the
+        // first write waits for a reader the caller only gets when `monitor`
+        // returns: under wasmtime 51 the inline form produced 0 outputs and
+        // hung (tests/p3-stream). spawn_local needs wit-bindgen's async-spawn,
+        // which the @crates hub (rules_wasm_component) does not enable, so the
+        // Bazel build keeps the inline form until it does.
+        #[cfg(feature = "p3-spawn")]
+        wit_bindgen::spawn_local(work);
+        #[cfg(not(feature = "p3-spawn"))]
+        work.await;
 
         reader
     }

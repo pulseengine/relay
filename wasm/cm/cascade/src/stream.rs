@@ -43,6 +43,7 @@ impl Guest for Component {
         let (mut writer, reader) =
             falcon_cascade_stream_composed_bindings::wit_stream::new::<WitPwm>();
 
+        let work = async move {
         while let Some(inp) = inputs.next().await {
             let o = cascade().tick(TickIn {
                 ax: inp.imu.ax,
@@ -59,6 +60,17 @@ impl Guest for Component {
             let out = WitPwm { m1: o.m1, m2: o.m2, m3: o.m3, m4: o.m4 };
             let _ = writer.write(vec![out]).await;
         }
+        };
+        // Spawned, `monitor` returns the reader at once. Awaited inline, the
+        // first write waits for a reader the caller only gets when `monitor`
+        // returns: under wasmtime 51 the inline form produced 0 outputs and
+        // hung (tests/p3-stream). spawn_local needs wit-bindgen's async-spawn,
+        // which the @crates hub (rules_wasm_component) does not enable, so the
+        // Bazel build keeps the inline form until it does.
+        #[cfg(feature = "p3-spawn")]
+        wit_bindgen::spawn_local(work);
+        #[cfg(not(feature = "p3-spawn"))]
+        work.await;
 
         reader
     }

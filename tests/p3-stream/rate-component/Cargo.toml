@@ -1,0 +1,28 @@
+# The falcon-rate-stream component (wasm/cm/rate/src/stream.rs, the same
+# source Bazel builds) built for wasm32-wasip3 with plain cargo, so wasmtime
+# can run a native 0.3 async component. Standalone: kept out of the root
+# workspace, like the other wasm crates.
+[package]
+name = "p3-rate-component"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+relay-rate = { path = "../../../crates/relay-rate" }
+wit-bindgen = { version = "=0.63.0", features = ["async-spawn"] }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+
+[features]
+# stream.rs spawns its loop (wit_bindgen::spawn_local) only with p3-spawn;
+# --no-default-features builds the inline form the Bazel build still uses.
+default = ["p3-spawn"]
+p3-spawn = []
+
+[workspace]
