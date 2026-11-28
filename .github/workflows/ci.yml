@@ -495,10 +495,9 @@ jobs:
       bazel: true
       guard-config: plant-guard.toml
       controls-only: "lock-stale toolchain-floating guard-unguarded verdict-sees-failure"
-      # jig names off for now: main still tracks private host names and a LAN
-      # address in a few files. A follow-up removes them and passes a tracked
-      # shapes file here instead of none.
-      names-patterns: none
+      # jig names: the shapes of private host names, LAN addresses and home
+      # paths that must not be committed (the file holds patterns, no values).
+      names-patterns: .github/private-name-shapes.txt
 
   # sieve's path classifier. Shadow mode: no job reads these outputs yet, so
   # everything still runs; each run's verdict lands in the jig record so the
