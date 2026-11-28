@@ -21,14 +21,14 @@
 #
 # Env:
 #   VENV         override the venv path (default: $REPO/target/video-venv)
-#   SPEACHES_URL TTS server to probe   (default: http://192.168.178.28:8000)
+#   SPEACHES_URL TTS server to probe   (default: http://localhost:8000)
 #   PIP_ARGS     extra args to pip install (e.g. --index-url ... for a mirror)
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
 VENV="${VENV:-$REPO/target/video-venv}"
-SPEACHES_URL="${SPEACHES_URL:-http://192.168.178.28:8000}"
+SPEACHES_URL="${SPEACHES_URL:-http://localhost:8000}"
 CHECK_ONLY=0
 [ "${1:-}" = "--check" ] && CHECK_ONLY=1
 

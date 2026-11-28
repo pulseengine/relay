@@ -5,13 +5,13 @@
 # upload. Reads release-narration.json.
 #
 # Usage:   narrate-release-videos.sh
-#   env:   SPEACHES_URL (default http://192.168.178.28:8000)
+#   env:   SPEACHES_URL (default http://localhost:8000)
 #          VOICE (af_nova)     TTS_MODEL (speaches-ai/Kokoro-82M-v1.0-ONNX)
 #          VIDDIR (bench-evidence/gz-sim/recordings/relvids)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
-URL="${SPEACHES_URL:-http://192.168.178.28:8000}"
+URL="${SPEACHES_URL:-http://localhost:8000}"
 VOICE="${VOICE:-af_nova}"
 MODEL="${TTS_MODEL:-speaches-ai/Kokoro-82M-v1.0-ONNX}"
 VIDDIR="${VIDDIR:-$REPO/bench-evidence/gz-sim/recordings/relvids}"
