@@ -696,6 +696,7 @@ wit_library(
 rust_wasm_component_bindgen(
     name = "falcon-iekf-stream",
     srcs = ["wasm/cm/iekf/src/stream.rs"],
+    crate_features = ["p3-spawn"],  # spawn the stream loop (needs @crates async-spawn, rwc#777)
     wit = ":falcon_iekf_stream_wit",
     wasi_version = "p3",
     deps = ["@crates//:wit-bindgen", ":relay-iekf"],
@@ -727,6 +728,7 @@ wit_library(
 rust_wasm_component_bindgen(
     name = "falcon-position-stream",
     srcs = ["wasm/cm/position/src/stream.rs"],
+    crate_features = ["p3-spawn"],  # spawn the stream loop (needs @crates async-spawn, rwc#777)
     wit = ":falcon_position_stream_wit",
     wasi_version = "p3",
     deps = ["@crates//:wit-bindgen", ":relay-pos"],
@@ -758,6 +760,7 @@ wit_library(
 rust_wasm_component_bindgen(
     name = "falcon-attitude-stream",
     srcs = ["wasm/cm/attitude/src/stream.rs"],
+    crate_features = ["p3-spawn"],  # spawn the stream loop (needs @crates async-spawn, rwc#777)
     wit = ":falcon_attitude_stream_wit",
     wasi_version = "p3",
     deps = ["@crates//:wit-bindgen", ":relay-att"],
@@ -798,6 +801,7 @@ wit_library(
 rust_wasm_component_bindgen(
     name = "falcon-rate-stream",
     srcs = ["wasm/cm/rate/src/stream.rs"],
+    crate_features = ["p3-spawn"],  # spawn the stream loop (needs @crates async-spawn, rwc#777)
     wit = ":falcon_rate_stream_wit",
     wasi_version = "p3",
     deps = ["@crates//:wit-bindgen", ":relay-rate"],
@@ -829,6 +833,7 @@ wit_library(
 rust_wasm_component_bindgen(
     name = "falcon-mixer-stream",
     srcs = ["wasm/cm/falcon-mixer/src/stream.rs"],
+    crate_features = ["p3-spawn"],  # spawn the stream loop (needs @crates async-spawn, rwc#777)
     wit = ":falcon_mixer_stream_wit",
     wasi_version = "p3",
     deps = ["@crates//:wit-bindgen", ":relay-mix-quad"],
@@ -866,6 +871,7 @@ rust_library(
 rust_wasm_component_bindgen(
     name = "falcon-cascade-stream-composed",
     srcs = ["wasm/cm/cascade/src/stream.rs"],
+    crate_features = ["p3-spawn"],  # spawn the stream loop (needs @crates async-spawn, rwc#777)
     wit = ":falcon_cascade_stream_composed_wit",
     wasi_version = "p3",
     deps = [
