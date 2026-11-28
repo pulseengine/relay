@@ -8,7 +8,7 @@ name: P3 stream on wasmtime
 # two outputs must be identical.
 #
 # Negative control: the same source built without p3-spawn (the inline loop
-# the Bazel build still uses) must hang on its first write and be killed by
+# every build used before p3-spawn) must hang on its first write and be killed by
 # the timeout. Green while that holds; red if it completes or fails otherwise.
 #
 # Exit codes (fleet rule): driver 0 = all outputs produced, 1 = wrong count,

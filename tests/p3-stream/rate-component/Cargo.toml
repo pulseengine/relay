@@ -21,7 +21,7 @@ opt-level = "s"
 
 [features]
 # stream.rs spawns its loop (wit_bindgen::spawn_local) only with p3-spawn;
-# --no-default-features builds the inline form the Bazel build still uses.
+# --no-default-features builds the inline form, the workflow's negative control.
 default = ["p3-spawn"]
 p3-spawn = []
 

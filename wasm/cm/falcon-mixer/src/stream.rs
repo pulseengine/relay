@@ -29,9 +29,9 @@ impl Guest for Component {
         // Spawned, `monitor` returns the reader at once. Awaited inline, the
         // first write waits for a reader the caller only gets when `monitor`
         // returns: under wasmtime 51 the inline form produced 0 outputs and
-        // hung (tests/p3-stream). spawn_local needs wit-bindgen's async-spawn,
-        // which the @crates hub (rules_wasm_component) does not enable, so the
-        // Bazel build keeps the inline form until it does.
+        // hung (tests/p3-stream). spawn_local needs wit-bindgen's async-spawn:
+        // the @crates hub enables it since rules_wasm_component#777, and both
+        // the Bazel targets and tests/p3-stream build with p3-spawn.
         #[cfg(feature = "p3-spawn")]
         wit_bindgen::spawn_local(work);
         #[cfg(not(feature = "p3-spawn"))]
