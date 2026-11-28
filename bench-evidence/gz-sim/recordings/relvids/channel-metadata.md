@@ -243,4 +243,4 @@ Falsifiable: this release is wrong if a host at any rate between 100 Hz and 1 kH
 
 #drone #autopilot #webassembly #componentmodel #formalverification #rust #robotics #embedded
 
-_video: falcon-v1.137-wasm-tick-rate.mp4 (macOS say fallback — Speaches host 192.168.178.28:8000 unreachable at render time; data plotted from real traces)_
+_video: falcon-v1.137-wasm-tick-rate.mp4 (macOS say fallback — Speaches host unreachable at render time; data plotted from real traces)_

@@ -63,15 +63,15 @@ artifacts:
       ssh, read-only (`lsusb` + sysfs; no probe attached, no console opened,
       because `with-device` is absent and a probe needs a claim):
 
-        fourpi.local   3643:001d  PX4 FMU v6XRT.x     1-1.2  serial=0
-                       1fc9:0143  MCU-LINK CMSIS-DAP  1-1.4  ARMCR0OKTRM5Q
-                       0403:6015  FT231X USB UART     1-1.3  D30K1YZS
-        gale.local     ST-LINK/V1 + STLINK-V3
-        wohl.local     STLINK-V3 + two ST-LINK/V2.1 (1-1.5, 1-1.6) + a Nordic
+        host A         3643:001d  PX4 FMU v6XRT.x     1-1.2  serial=0
+                       1fc9:0143  MCU-LINK CMSIS-DAP  1-1.4  <serial>
+                       0403:6015  FT231X USB UART     1-1.3  <serial>
+        host B         ST-LINK/V1 + STLINK-V3
+        host C         STLINK-V3 + two ST-LINK/V2.1 (1-1.5, 1-1.6) + a Nordic
                        board in Open DFU Bootloader mode
 
       TWO THINGS THE MEASUREMENT ADDED that jess's own corrected table did not
-      list. `fourpi.local` carries THREE relevant devices, not one, and one of
+      list. host A carries THREE relevant devices, not one, and one of
       them is an NXP MCU-LINK CMSIS-DAP probe — the SWD path onto the RT1176's
       M7. So the programmer this arc needs is already attached, uncatalogued and
       under no interlock. And the FMU's USB serial is literally `0`, so it cannot
@@ -90,14 +90,14 @@ artifacts:
 
         access          FIXED mid-pass; all three hosts reachable over ssh.
         the interlock    `with-device` was absent on every host. INSTALLED on
-                         fourpi.local from the RELEASED, COSIGN-VERIFIED binary
+                         host A from the RELEASED, COSIGN-VERIFIED binary
                          (jess v0.7.2, with-device 0.2.2, aarch64) — signature
                          verified BEFORE the checksums, as its README requires —
-                         and fourpi.local's missing per-host registry WRITTEN,
+                         and host A's missing per-host registry WRITTEN,
                          with the verified port paths and the `serial: 0` hazard.
-        THE REAL BLOCKER `with-device` cannot take a claim there as user `r`:
-                         /var/tmp/pulseengine-bench is `pi:pi drwxrwxr-x` and `r`
-                         is not in group `pi`, so every device reads CLAIMED
+        THE REAL BLOCKER `with-device` cannot take a claim there under the standard account:
+                         /var/tmp/pulseengine-bench is group-writable only by the bench account,
+                         which the standard account is not in, so every device reads CLAIMED
                          forever and --self-test fails 3 of 5. Filed as jess#280.
                          The tool is SOUND — same binary, same registry, a
                          writable lockdir gives --self-test PASS and correct
@@ -110,16 +110,16 @@ artifacts:
 
       AND OUR DESCRIPTION OF THAT BLOCKER WAS WRONG — corrected on jess#266. We
       reported `with-device` ABSENT on all three hosts. It is INSTALLED on
-      fourpi.local at /home/pi/bench/with-device with a registry at
-      /home/pi/.config/pulseengine/bench-devices.yaml, and `pixhawk-6xrt` is in
+      host A under the bench account with a per-host registry,
+      and `pixhawk-6xrt` is in
       jess's COMMITTED hardware-catalog.yaml. Every vehicle action jess has
-      taken ran under a claim. Our search ran as user `r` and could not see
-      /home/pi, so "absent for `r`" was reported as "absent on the host" — a
+      taken ran under a claim. Our search ran under the standard account and could not see
+      the bench account's home, so "absent for that account" was reported as "absent on the host" — a
       search's scope stated as a property of the world. The REAL gap is narrower
-      and still real: access is ACCOUNT-DEPENDENT, and under `r` (the standard
-      account on all three hosts) the tool is not on PATH and there is no
-      registry. jess#280 stands on its own evidence — the lockdir is `pi:pi` and
-      `r` cannot write it, so EACCES still reports as CLAIMED.
+      and still real: access is ACCOUNT-DEPENDENT, and under the standard account (the one on all three
+      hosts) the tool is not on PATH and there is no
+      registry. jess#280 stands on its own evidence — the lockdir belongs to the bench account and
+      the standard account cannot write it, so EACCES still reports as CLAIMED.
 
       ======================================================================
       MEASURED, AND THE PREMISE IS REFUTED AS STATED (jess#266, 2026-10-01).

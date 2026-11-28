@@ -1,7 +1,7 @@
 # spar — Tool Qualification record (falcon v0.14.3)
 
 **Tool:** spar  (AADL architecture modelling + analysis)
-**Version pinned:** `/Users/r/.cargo/bin/spar` (`cargo install --list`)
+**Version pinned:** `~/.cargo/bin/spar` (`cargo install --list`)
 **Source:** PulseEngine `spar` repository
 **Underlying analyses:** EMV2 fault tree, ARINC 653 partitioning,
 bin-packing schedulability, modal scheduling, STPA bridge.

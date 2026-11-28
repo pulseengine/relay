@@ -10,7 +10,7 @@ Run: `cargo bench -p engine-throughput-bench`
 ## Baseline (2026-06-13)
 
 Captured on an Apple-silicon dev host (release profile). **Absolute numbers are
-hardware-specific** — CI runs on smithy `rust-cpu` (Hetzner Ryzen) and will
+hardware-specific** — CI runs on smithy `rust-cpu` (a self-hosted x86_64 server) and will
 differ. Use these for *relative* regression tracking on like-for-like hardware,
 not as a cross-machine SLA.
 
