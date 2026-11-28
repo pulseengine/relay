@@ -480,21 +480,24 @@ jobs:
           git ls-files -z '*.py' | xargs -0 -r "$PY39" scripts/check-py-floor.py
 
   # ---------------------------------------------------------------------
-  # jig shadow pilot, phase 1 (relay is pilot 2; same shape as warte#194).
-  # Nothing here changes a required context or what runs: `required / verdict`
-  # reports without being required, sieve's verdict is only recorded, and
-  # enforce-skips is unset. Both jig calls pin the same RECORD commit (jig
-  # v0.1.4 record, #16; its defaults self-job=required, baseline-job=baseline
-  # match v0.1.3), never a tag commit: a tag commit carries no binary
-  # checksum. kani.yml and verus.yml get their own verdicts (required-kani,
-  # required-verus) once jig v0.1.4 adds self-job/baseline-job.
+  # jig, phase 1 (relay is pilot 2; same shape as warte#194). `required /
+  # verdict` and `baseline / guard` are required contexts (#746); sieve's
+  # verdict is only recorded and enforce-skips is unset. Both jig calls pin the
+  # same RECORD commit (jig v0.1.9 record, jig#44: jig and plant v0.5.0 sha256s,
+  # main CI success), never a tag commit: a tag commit carries no binary
+  # checksum. Job names are unchanged from v0.1.4 (guard, pins, supply,
+  # controls; verdict). kani.yml and verus.yml can get their own verdicts
+  # (required-kani, required-verus) through self-job/baseline-job.
   baseline:
-    uses: pulseengine/jig/.github/workflows/baseline.yml@0f3d82c1dec9e4d5ce1adee1c4e0bbbd84508849
+    uses: pulseengine/jig/.github/workflows/baseline.yml@2b7ac68e524c900e86193138750d024198d348a7
     with:
       audit: cargo-audit
       bazel: true
       guard-config: plant-guard.toml
       controls-only: "lock-stale toolchain-floating guard-unguarded verdict-sees-failure"
+      # jig names: the shapes of private host names, LAN addresses and home
+      # paths that must not be committed (the file holds patterns, no values).
+      names-patterns: .github/private-name-shapes.txt
 
   # sieve's path classifier. Shadow mode: no job reads these outputs yet, so
   # everything still runs; each run's verdict lands in the jig record so the
@@ -558,7 +561,7 @@ jobs:
   required:
     needs: [baseline, classify, fmt, workflow-lint, engine-mirrors, clippy, test, falcon-hello-smoke, closed-loop-sim, cascade-split, script-portability]
     if: always()
-    uses: pulseengine/jig/.github/workflows/required.yml@0f3d82c1dec9e4d5ce1adee1c4e0bbbd84508849
+    uses: pulseengine/jig/.github/workflows/required.yml@2b7ac68e524c900e86193138750d024198d348a7
     with:
       needs-json: ${{ toJSON(needs) }}
       never-skip: "fmt workflow-lint engine-mirrors clippy test falcon-hello-smoke closed-loop-sim cascade-split script-portability"
